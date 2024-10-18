@@ -8,19 +8,33 @@ class ContractInteractionClassifier:
     def __init__(self, w3: Web3):
         self.w3 = w3
         self.known_functions = {
-            # Swaps
+             # General Uniswap functions
             self.w3.keccak(text="swap(uint256,uint256,address,bytes)").hex()[:8]: "Uniswap Swap",
             '791ac947': "Uniswap V2: Router 2",
             '04e45aaf': "Uniswap V3: Router 2",
-            self.w3.keccak(text="swapExactTokensForTokens(uint256,uint256,address[],address,uint256)").hex()[:8]: "Token Swap",
-            self.w3.keccak(text="swapExactETHForTokens(uint256,address[],address,uint256)").hex()[:8]: "ETH to Token Swap",
-            self.w3.keccak(text="swapExactTokensForETH(uint256,uint256,address[],address,uint256)").hex()[:8]: "Token to ETH Swap",
-            self.w3.keccak(text="swapETHForExactTokens(uint256,address[],address,uint256)").hex()[:8]: "ETH to Token Swap",
-            # Liquidity
+
+            # Uniswap V2 Router Swap Functions
+            self.w3.keccak(text="swapExactTokensForTokens(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact Tokens For Tokens",
+            self.w3.keccak(text="swapTokensForExactTokens(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Tokens For Exact Tokens",
+            self.w3.keccak(text="swapExactETHForTokens(uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact ETH For Tokens",
+            self.w3.keccak(text="swapTokensForExactETH(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Tokens For Exact ETH",
+            self.w3.keccak(text="swapExactTokensForETH(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact Tokens For ETH",
+            self.w3.keccak(text="swapETHForExactTokens(uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap ETH For Exact Tokens",
+
+            # Fee on transfer variants
+            self.w3.keccak(text="swapExactTokensForTokensSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact Tokens For Tokens (Fee on Transfer)",
+            self.w3.keccak(text="swapExactETHForTokensSupportingFeeOnTransferTokens(uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact ETH For Tokens (Fee on Transfer)",
+            self.w3.keccak(text="swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)").hex()[:8]: "Uniswap V2: Swap Exact Tokens For ETH (Fee on Transfer)",
+
+            # Liquidity Functions
             self.w3.keccak(text="addLiquidity(address,address,uint256,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Add Liquidity",
-            self.w3.keccak(text="removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Remove Liquidity",
             self.w3.keccak(text="addLiquidityETH(address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Add Liquidity ETH",
+            self.w3.keccak(text="removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Remove Liquidity",
             self.w3.keccak(text="removeLiquidityETH(address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Remove Liquidity ETH",
+            self.w3.keccak(text="removeLiquidityWithPermit(address,address,uint256,uint256,uint256,address,uint256,bool,uint8,bytes32,bytes32)").hex()[:8]: "Remove Liquidity With Permit",
+            self.w3.keccak(text="removeLiquidityETHWithPermit(address,uint256,uint256,uint256,address,uint256,bool,uint8,bytes32,bytes32)").hex()[:8]: "Remove Liquidity ETH With Permit",
+            self.w3.keccak(text="removeLiquidityETHSupportingFeeOnTransferTokens(address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Remove Liquidity ETH (Fee on Transfer)",
+            self.w3.keccak(text="removeLiquidityETHWithPermitSupportingFeeOnTransferTokens(address,uint256,uint256,uint256,address,uint256,bool,uint8,bytes32,bytes32)").hex()[:8]: "Remove Liquidity ETH With Permit (Fee on Transfer)",
 
             # Deposits and Withdrawals
             self.w3.keccak(text="deposit()").hex()[:8]: "Deposit",
@@ -64,6 +78,7 @@ class ContractInteractionClassifier:
             
             "0162e2d0": "BananaGun",
             "088890dc": "Maestro",
+            "2f100e4a": "Maestro",
             "09c182c3": "SigmaBuy",
             "3a571299": "SigmaSell",
             
