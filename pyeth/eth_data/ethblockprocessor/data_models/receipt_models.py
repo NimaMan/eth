@@ -41,12 +41,12 @@ class ERC721Transfer:
 @dataclass
 class ERC1155Transfer:
     token_address: ChecksumAddress
+    operator: ChecksumAddress
     from_address: ChecksumAddress
     to_address: ChecksumAddress
     token_ids: List[int]
     amounts: List[int]
     log_index: int
-
 
 @dataclass
 class UniswapV2Sync:

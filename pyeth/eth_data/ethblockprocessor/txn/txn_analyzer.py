@@ -8,16 +8,18 @@ from ethblockprocessor.txn.txn_data_fetcher import TransactionDataFetcher
 from ethblockprocessor.txn.txn_log_analyzer import TransactionLogAnalyzer
 from ethblockprocessor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from ethblockprocessor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
+from ethblockprocessor.tokens.erc20_token_txn_store import ERC20TransactionDB
 
 
 class TransactionAnalyzer:
-    def __init__(self, w3: Web3):
+    def __init__(self, w3: Web3, save_erc20_txn_to_db: bool = True):
         self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_analyzer = TransactionLogAnalyzer(w3=w3)
         self.trace_analyzer = TransactionTraceAnalyzer(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
+        self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
     def analyze_transaction(self, transaction: Dict[str, Any], state_diff: bool = False) -> DetailedTransaction:
         """
@@ -63,7 +65,7 @@ class TransactionAnalyzer:
             unique_addresses,
             erc20_contracts,
             )
-        detailed_tx = DetailedTransaction(
+        detailed_txn = DetailedTransaction(
             hash=txn_hash,
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
@@ -99,8 +101,9 @@ class TransactionAnalyzer:
             state_diffs=state_diffs,
             latest_states=latest_states,
         )
-        
-        return detailed_tx
+        if self.save_erc20_txn_to_db:
+            self.store_erc20_transaction(detailed_txn)
+        return detailed_txn
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
         return txn['to'] is not None and len(txn['input']) > 2  # '0x' is 2 characters
@@ -117,3 +120,16 @@ class TransactionAnalyzer:
             unique_addresses.add(internal_txn.from_address)
             unique_addresses.add(internal_txn.to_address)
         return erc20_contracts, unique_addresses
+    
+    def store_erc20_transaction(self, detailed_txn: DetailedTransaction):
+        if detailed_txn.txn_type == 'ERC20_TRANSFER' or\
+            len(detailed_txn.erc20_contracts) > 0 or \
+            len(detailed_txn.approvals) > 0 or \
+            len(detailed_txn.uniswap_v2_syncs) > 0 or \
+            len(detailed_txn.uniswap_v2_swaps) > 0 or \
+            len(detailed_txn.mints) > 0 or \
+            len(detailed_txn.burns) > 0 or \
+            len(detailed_txn.deposits) > 0 or \
+            len(detailed_txn.withdraws) > 0:
+            with ERC20TransactionDB() as erc20_transaction_db:
+                erc20_transaction_db.add_transaction(detailed_txn)

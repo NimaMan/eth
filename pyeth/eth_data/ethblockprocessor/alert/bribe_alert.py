@@ -28,9 +28,6 @@ class BribeAlert(BaseAlert):
             from_address=txn.from_address,
             value=txn.value,
             alert_type="Bribe",
-            details={
-                "token_address": None,
-            }
         )
         return alert_data
 

@@ -5,7 +5,6 @@ from ethblockprocessor.alert.alert_manager import AlertManager
 from ethblockprocessor.data_models.txn_models import DetailedTransaction
 
 
-
 class TransactionAlertManager:
     def __init__(self, w3: Web3):
         self.w3 = w3

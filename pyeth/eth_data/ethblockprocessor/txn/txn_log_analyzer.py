@@ -58,7 +58,11 @@ class TransactionLogAnalyzer:
         }
         
         for log in logs:
-            event = self.classify_and_parse_log(log)
+            try:
+                event = self.classify_and_parse_log(log)
+            except Exception as e:
+                print(f"Error parsing log: {log}")
+                raise e
             if isinstance(event, ERC20Transfer):
                 result['erc20_transfers'].append(event)
                 result['unique_addresses'].add(event.from_address)
@@ -130,6 +134,8 @@ class TransactionLogAnalyzer:
         return result
 
     def classify_and_parse_log(self, log: Dict[str, Any]) -> Any:
+        if not log['topics']:
+            return None
         topic = log['topics'][0].hex()
         if topic == self.erc20_transfer_topic:
             return self.parse_erc20_transfer(log)
@@ -176,9 +182,9 @@ class TransactionLogAnalyzer:
     def parse_erc721_transfer(self, log: Dict[str, Any]) -> ERC721Transfer:
         return ERC721Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
-            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
-            token_id=int(log['topics'][3].hex(), 16) if log['topics'][3].hex() != '' else 0,
+            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
+            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
+            token_id=int(log['topics'][3].hex(), 16) if len(log['topics']) > 3 and log['topics'][3].hex() != '' else 0,
             log_index=log['logIndex'],
         )
 
@@ -189,8 +195,8 @@ class TransactionLogAnalyzer:
             operator=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             from_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
             to_address=self.w3.to_checksum_address(log['topics'][3].hex()[-40:]),
-            token_ids=[int(data[:66], 16) if data[:66] != '' else 0],
-            amounts=[int(data[66:], 16) if data[66:] != '' else 0],
+            token_ids=[int(data[:64], 16) if data[:64] else 0],
+            amounts=[int(data[64:128], 16) if len(data) >= 128 and data[64:128] else 0],
             log_index=log['logIndex'],
         )
 
@@ -216,8 +222,8 @@ class TransactionLogAnalyzer:
     def parse_uniswap_v2_sync(self, log: Dict[str, Any]) -> UniswapV2Sync:
         return UniswapV2Sync(
             pair_address=self.w3.to_checksum_address(log['address']),
-            reserve0=int(log['data'].hex()[:64], 16),
-            reserve1=int(log['data'].hex()[64:], 16),
+            reserve0=int(log['data'].hex()[:64], 16) if log['data'].hex()[:64] != '' else 0,
+            reserve1=int(log['data'].hex()[64:], 16) if log['data'].hex()[64:] != '' else 0,
             log_index=log['logIndex'],
         )
     
@@ -226,10 +232,10 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             to=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
-            amount0In=int(log['data'].hex()[:64], 16),
-            amount1In=int(log['data'].hex()[64:128], 16),
-            amount0Out=int(log['data'].hex()[128:192], 16),
-            amount1Out=int(log['data'].hex()[192:], 16),
+            amount0In=int(log['data'].hex()[:64], 16) if log['data'].hex()[:64] != '' else 0,
+            amount1In=int(log['data'].hex()[64:128], 16) if log['data'].hex()[64:128] != '' else 0,
+            amount0Out=int(log['data'].hex()[128:192], 16) if log['data'].hex()[128:192] != '' else 0,
+            amount1Out=int(log['data'].hex()[192:], 16) if log['data'].hex()[192:] != '' else 0,
             log_index=log['logIndex'],
         )
 
