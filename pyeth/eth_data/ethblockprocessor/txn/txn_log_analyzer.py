@@ -20,6 +20,8 @@ class TransactionLogAnalyzer:
         self.withdraw_signature = self.w3.keccak(text="Withdraw(address,uint256)").hex()
         self.pair_signature = self.w3.keccak(text="PairCreated(address,address,address,uint256)").hex()
         self.owner_signature = self.w3.keccak(text="OwnershipTransferred(address,address)").hex()
+        self.trading_enabled_signature = self.w3.keccak(text="TradingEnabled(uint256)").hex()
+        self.trading_disabled_signature = self.w3.keccak(text="TradingDisabled(uint256)").hex()
 
         # Additional events
         self.uniswap_v2_collect_topic = self.w3.keccak(text="Collect(address,address,uint256,uint256)").hex()
@@ -28,6 +30,12 @@ class TransactionLogAnalyzer:
         self.uniswap_v2_set_fee_protocol_topic = self.w3.keccak(text="SetFeeProtocol(uint8,uint8)").hex()
         self.uniswap_v2_collect_protocol_topic = self.w3.keccak(text="CollectProtocol(address,address,uint128,uint128)").hex()
 
+        self.exclude_from_fees_signature = self.w3.keccak(text="ExcludeFromFees(address,bool)").hex()
+        self.exclude_from_limits_signature = self.w3.keccak(text="ExcludeFromLimits(address,bool)").hex()
+        self.set_max_tx_amount_signature = self.w3.keccak(text="SetMaxTxAmount(uint256)").hex()
+        self.set_max_wallet_token_signature = self.w3.keccak(text="SetMaxWalletToken(uint256)").hex()
+        self.set_max_wallet_signature = self.w3.keccak(text="SetMaxWallet(uint256)").hex()
+    
     def analyze_logs(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
         result = {
             'erc20_transfers': [],
@@ -42,37 +50,80 @@ class TransactionLogAnalyzer:
             'pair_events': [],
             'approvals': [],
             'owner_events': [],
+            'trading_enabled_events': [],
+            'trading_disabled_events': [],
             'other_events': [],
+            'unique_addresses': set(),
+            'erc20_contracts': set(),
         }
         
         for log in logs:
             event = self.classify_and_parse_log(log)
             if isinstance(event, ERC20Transfer):
                 result['erc20_transfers'].append(event)
+                result['unique_addresses'].add(event.from_address)
+                result['unique_addresses'].add(event.to_address)
+                result['erc20_contracts'].add(event.token_address)
             elif isinstance(event, ERC721Transfer):
                 result['erc721_transfers'].append(event)
+                result['unique_addresses'].add(event.from_address)
+                result['unique_addresses'].add(event.to_address)
             elif isinstance(event, ERC1155Transfer):
                 result['erc1155_transfers'].append(event)
+                result['unique_addresses'].add(event.from_address)
+                result['unique_addresses'].add(event.to_address)
             elif isinstance(event, UniswapV2Sync):
                 result['uniswap_v2_syncs'].append(event)
+                result['unique_addresses'].add(event.pair_address)
             elif isinstance(event, UniswapV2Swap):
                 result['uniswap_v2_swaps'].append(event)
+                result['unique_addresses'].add(event.sender)
+                result['unique_addresses'].add(event.to)
+                result['unique_addresses'].add(event.pair_address)
             elif isinstance(event, MintAction):
                 result['mints'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.sender)
             elif isinstance(event, BurnAction):
                 result['burns'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.sender)
             elif isinstance(event, DepositAction):
                 result['deposits'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.sender)
             elif isinstance(event, WithdrawAction):
                 result['withdraws'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.sender)
             elif isinstance(event, PairAction):
                 result['pair_events'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.token0)
+                result['unique_addresses'].add(event.token1)
             elif isinstance(event, ERC20Approval):
                 result['approvals'].append(event)
+                result['unique_addresses'].add(event.token_address)
+                result['unique_addresses'].add(event.owner)
+                result['unique_addresses'].add(event.spender)
             elif isinstance(event, ERC721Approval):
                 result['approvals'].append(event)
+                result['unique_addresses'].add(event.token_address)
+                result['unique_addresses'].add(event.owner)
+                result['unique_addresses'].add(event.approved_address)
             elif isinstance(event, OwnerEvent):
                 result['owner_events'].append(event)
+                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(event.previous_owner)
+                result['unique_addresses'].add(event.new_owner)
+            elif isinstance(event, TradingEnabledEvent):
+                result['trading_enabled_events'].append(event)
+                result['unique_addresses'].add(event.token_address)
+                result['erc20_contracts'].add(event.token_address)
+            elif isinstance(event, TradingDisabledEvent):
+                result['trading_disabled_events'].append(event)
+                result['unique_addresses'].add(event.token_address)
+                result['erc20_contracts'].add(event.token_address)
             else:
                 result['other_events'].append(event)
         
@@ -106,6 +157,10 @@ class TransactionLogAnalyzer:
             return self.parse_pair(log)
         elif topic == self.owner_signature:
             return self.parse_owner(log)
+        elif topic == self.trading_enabled_signature:
+            return self.parse_trading_enabled(log)
+        elif topic == self.trading_disabled_signature:
+            return self.parse_trading_disabled(log)
         else:
             return self.parse_other_event(log)
 
@@ -242,6 +297,20 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             previous_owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             new_owner=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
+            log_index=log['logIndex'],
+        )
+    
+    def parse_trading_enabled(self, log: Dict[str, Any]) -> TradingEnabledEvent:
+        return TradingEnabledEvent(
+            token_address=self.w3.to_checksum_address(log['address']),
+            block_number=int(log['topics'][1].hex(), 16) if log['topics'][1].hex() != '' else 0,
+            log_index=log['logIndex'],
+        )
+    
+    def parse_trading_disabled(self, log: Dict[str, Any]) -> TradingDisabledEvent:  
+        return TradingDisabledEvent(
+            token_address=self.w3.to_checksum_address(log['address']),
+            block_number=int(log['topics'][1].hex(), 16) if log['topics'][1].hex() != '' else 0,
             log_index=log['logIndex'],
         )
     

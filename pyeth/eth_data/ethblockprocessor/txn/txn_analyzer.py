@@ -2,7 +2,6 @@ from web3 import Web3
 from functools import cached_property
 from typing import Dict, Any, Tuple
 from web3.types import TxData
-
 from ethblockprocessor.data_models.txn_models import DetailedTransaction, TransactionFees
 from ethblockprocessor.txn.txn_type_classifier import EthTransactionClassifier
 from ethblockprocessor.txn.txn_data_fetcher import TransactionDataFetcher
@@ -30,9 +29,11 @@ class TransactionAnalyzer:
         Returns:
             DetailedTransaction: A comprehensive representation of the transaction.
         """
-        txn_hash = transaction['hash'].hex()
+        txn_hash = transaction.hash
+        from_address = transaction['from']
+        to_address = transaction['to']
         receipt = self.data_fetcher.get_transaction_receipt(txn_hash)
-        logs = self.log_analyzer.analyze_logs(receipt['logs'])
+        logs = self.log_analyzer.analyze_logs(receipt.logs)
         
         fees = TransactionFees(
             gas_price=receipt['effectiveGasPrice'],
@@ -53,13 +54,22 @@ class TransactionAnalyzer:
             internal_transactions = []
         
         tx_type = self.transaction_classifier.classify_transaction(transaction)
+        unique_addresses = logs['unique_addresses']
+        erc20_contracts = logs['erc20_contracts']
+        erc20_contracts, unique_addresses = self.extend_unique_addresses(
+            from_address, 
+            to_address,
+            internal_transactions, 
+            unique_addresses,
+            erc20_contracts,
+            )
         detailed_tx = DetailedTransaction(
             hash=txn_hash,
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
             txn_index=receipt['transactionIndex'],
-            from_address=transaction['from'],
-            to_address=transaction['to'],
+            from_address=from_address,
+            to_address=to_address,
             value=transaction['value'],
             status=receipt['status'],
             nonce=transaction['nonce'],
@@ -76,12 +86,16 @@ class TransactionAnalyzer:
             withdraws=logs['withdraws'],
             pair_events=logs['pair_events'],
             owner_events=logs['owner_events'],
+            trading_enabled_events=logs['trading_enabled_events'],
+            trading_disabled_events=logs['trading_disabled_events'],
             other_events=logs['other_events'],
             actions=[],
             eth_transfers=[],
             contract_interactions=[],
             internal_transactions=internal_transactions,
             fees=fees,
+            unique_addresses=unique_addresses,
+            erc20_contracts=erc20_contracts,
             state_diffs=state_diffs,
             latest_states=latest_states,
         )
@@ -89,4 +103,17 @@ class TransactionAnalyzer:
         return detailed_tx
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
-        return txn.get('to') is not None and len(txn['input']) > 2  # '0x' is 2 characters
+        return txn['to'] is not None and len(txn['input']) > 2  # '0x' is 2 characters
+
+    def extend_unique_addresses(self, 
+                                from_address, 
+                                to_address, 
+                                internal_transactions, 
+                                unique_addresses, 
+                                erc20_contracts):       
+        unique_addresses.add(from_address)
+        unique_addresses.add(to_address)
+        for internal_txn in internal_transactions:
+            unique_addresses.add(internal_txn.from_address)
+            unique_addresses.add(internal_txn.to_address)
+        return erc20_contracts, unique_addresses

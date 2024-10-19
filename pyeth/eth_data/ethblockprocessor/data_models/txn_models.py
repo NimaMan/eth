@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Set
 from web3.types import ChecksumAddress, Wei, Hash32
 from ethblockprocessor.data_models.receipt_models import *
 from ethblockprocessor.data_models.trace_models import *
@@ -74,9 +74,12 @@ class DetailedTransaction:
     pair_events: List[PairAction]
     owner_events: List[OwnerEvent]
     contract_interactions: List[ContractInteraction]
+    trading_enabled_events: List[TradingEnabledEvent]
+    trading_disabled_events: List[TradingDisabledEvent]
     other_events: List[Dict[str, Any]]
 
     fees: TransactionFees
-
-    state_diffs: Dict[str, Any]
-    latest_states: Dict[str, Any]
+    unique_addresses: Set[ChecksumAddress] = field(default_factory=set)
+    erc20_contracts: Set[ChecksumAddress] = field(default_factory=set)
+    state_diffs: Dict[str, Any] = field(default_factory=dict)
+    latest_states: Dict[str, Any] = field(default_factory=dict)

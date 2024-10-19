@@ -12,9 +12,8 @@ class TransactionAlertManager:
         self.transaction_analyzer = TransactionAnalyzer(w3)
         self.alert_manager = AlertManager()
 
-    async def analyze_and_check_alerts(self, transaction: DetailedTransaction):
-        analazed_txn = await self.transaction_analyzer.analyze_transaction(transaction)
-        alerts = self.alert_manager.check_alerts(analazed_txn)
+    def analyze_and_check_alerts(self, analyzed_transaction: DetailedTransaction):
+        alerts = self.alert_manager.check_alerts(analyzed_transaction)
         return alerts
 
     def send_alerts(self, alerts):

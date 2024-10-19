@@ -1,19 +1,21 @@
 
+from ethblockprocessor.alert.base_alert_class import BaseAlert
 from ethblockprocessor.data_models.txn_models import InternalTransaction, DetailedTransaction
 from ethblockprocessor.data_models.alert_models import BribeAlertData
+from ethblockprocessor.alert.config import bribe_threshold
 
 
-class BribeAlert:
-    def __init__(self, bribe_threshold: float = 0.1):
+class BribeAlert(BaseAlert):
+    def __init__(self, bribe_threshold: float = bribe_threshold):
         self.fee_recipients_set = fee_recipients_set
         self.bribe_threshold = bribe_threshold
 
-    def get_alerts(self, txn: DetailedTransaction):
+    def get_alert(self, txn: DetailedTransaction):
         internal_txns = txn.internal_transactions
         if internal_txns:
-            for txn in internal_txns:
-                if txn.to.lower() in self.fee_recipients_set:
-                    if txn.value > self.bribe_threshold:
+            for internal_txn in internal_txns:
+                if internal_txn.to_address in self.fee_recipients_set:
+                    if internal_txn.value > self.bribe_threshold:
                         alert_data = self.create_alert(txn)
                         self.send_alert(alert_data)
                         return [alert_data]
@@ -22,19 +24,18 @@ class BribeAlert:
     def create_alert(self, txn: DetailedTransaction):
         alert_data = BribeAlertData(
             block_number=txn.block_number,
-            transaction_hash=txn.hash,
+            transaction_hash=txn.hash.hex(),
+            from_address=txn.from_address,
+            value=txn.value,
             alert_type="Bribe",
             details={
-                "from_address": txn.from_address,
-                "value": txn.value,
-                "bribe_amount": txn.value,
+                "token_address": None,
             }
         )
         return alert_data
 
     def send_alert(self, alert_data: BribeAlertData):
         print(f"Bribe alert sent: {alert_data}")
-
 
 
 fee_recipients = {
@@ -134,5 +135,7 @@ fee_recipients = {
     '0x418211EFaf54e6A9b376f6Bfd9E0AE304E064CBb': 'MEV Builder: 0x418...CBb'
     }
 
-fee_recipients_set = set(fee_recipients.keys())
+# create a set of the fee recipients in lowercase 
+fee_recipients_set = {address.lower() for address in fee_recipients}
+
 

@@ -1,4 +1,3 @@
-from typing import List, Type, Any
 from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.alert.trading_enabled_alert import TradingEnabledAlert
 from ethblockprocessor.alert.bribe_alert import BribeAlert
@@ -18,6 +17,7 @@ class AlertManager:
     def check_alerts(self, transaction: DetailedTransaction):
         triggered_alerts = []
         for alert_name, alert in self.alert_objects.items():
-            if alert.is_alert(transaction):
-                triggered_alerts.append(alert_name)
+            alerts = alert.get_alert(transaction)
+            if len(alerts) > 0:
+                triggered_alerts.extend(alerts)
         return triggered_alerts

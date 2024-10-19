@@ -153,6 +153,20 @@ class OwnerEvent:
 
 
 @dataclass
+class TradingEnabledEvent:
+    token_address: ChecksumAddress
+    block_number: int
+    log_index: int
+
+
+@dataclass
+class TradingDisabledEvent:
+    token_address: ChecksumAddress
+    block_number: int
+    log_index: int
+
+
+@dataclass
 class TransactionAction:
     action_type: str  # e.g., "Swap", "Approve", "Transfer"
     description: str
