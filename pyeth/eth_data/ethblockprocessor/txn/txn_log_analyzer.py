@@ -151,37 +151,40 @@ class TransactionLogAnalyzer:
         if not log['topics']:
             return None
         topic = log['topics'][0].hex()
-        if topic == self.erc20_transfer_topic:
-            return self.parse_erc20_transfer(log)
-        elif topic == self.erc721_transfer_topic:
-            return self.parse_erc721_transfer(log)
-        elif topic == self.erc1155_transfer_single_topic:
-            return self.parse_erc1155_single_transfer(log)
-        elif topic == self.erc1155_transfer_batch_topic:
-            return self.parse_erc1155_batch_transfer(log)
-        elif topic == self.uniswap_v2_sync_topic:
-            return self.parse_uniswap_v2_sync(log)
-        elif topic == self.uniswap_v2_swap_topic:
-            return self.parse_uniswap_v2_swap(log)
-        elif topic == self.mint_signature:
-            return self.parse_mint(log)
-        elif topic == self.approve_signature:
-            return self.parse_approve(log)
-        elif topic == self.burn_signature:
-            return self.parse_burn(log)
-        elif topic == self.deposit_signature:
-            return self.parse_deposit(log)
-        elif topic == self.withdraw_signature or topic == self.weth_withdrawal_topic:
-            return self.parse_withdraw(log)
-        elif topic == self.pair_signature:
-            return self.parse_pair(log)
-        elif topic == self.owner_signature:
-            return self.parse_owner(log)
-        elif topic == self.trading_enabled_signature:
-            return self.parse_trading_enabled(log)
-        elif topic == self.trading_disabled_signature:
-            return self.parse_trading_disabled(log)
-        else:
+        try:
+            if topic == self.erc20_transfer_topic:
+                return self.parse_erc20_transfer(log)
+            elif topic == self.erc721_transfer_topic:
+                return self.parse_erc721_transfer(log)
+            elif topic == self.erc1155_transfer_single_topic:
+                return self.parse_erc1155_single_transfer(log)
+            elif topic == self.erc1155_transfer_batch_topic:
+                return self.parse_erc1155_batch_transfer(log)
+            elif topic == self.uniswap_v2_sync_topic:
+                return self.parse_uniswap_v2_sync(log)
+            elif topic == self.uniswap_v2_swap_topic:
+                return self.parse_uniswap_v2_swap(log)
+            elif topic == self.mint_signature:
+                return self.parse_mint(log)
+            elif topic == self.approve_signature:
+                return self.parse_approve(log)
+            elif topic == self.burn_signature:
+                return self.parse_burn(log)
+            elif topic == self.deposit_signature:
+                return self.parse_deposit(log)
+            elif topic == self.withdraw_signature or topic == self.weth_withdrawal_topic:
+                return self.parse_withdraw(log)
+            elif topic == self.pair_signature:
+                return self.parse_pair(log)
+            elif topic == self.owner_signature:
+                return self.parse_owner(log)
+            elif topic == self.trading_enabled_signature:
+                return self.parse_trading_enabled(log)
+            elif topic == self.trading_disabled_signature:
+                return self.parse_trading_disabled(log)
+            else:
+                return self.parse_other_event(log)
+        except Exception as e:
             return self.parse_other_event(log)
 
     def parse_erc20_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:

@@ -25,7 +25,7 @@ async def main():
 
     # Process the last 10,000 blocks
     logger.info("Processing the last 10,000 blocks...")
-    start_block = max(0, latest_block - 9999)
+    start_block = latest_block - 19999
     processed_blocks = await block_processor.process_block_range(start_block, latest_block)
     logger.info(f"Processed {len(processed_blocks)} blocks from {start_block} to {latest_block}")
 
