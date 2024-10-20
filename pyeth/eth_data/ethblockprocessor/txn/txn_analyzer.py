@@ -42,7 +42,7 @@ class TransactionAnalyzer:
             gas_used=receipt['gasUsed'],
             total_fee=receipt['effectiveGasPrice'] * receipt['gasUsed'],
         )
-
+        contract_address = receipt.get('contractAddress', None)
         if state_diff:
             raw_state_diff = self.data_fetcher.get_state_diff(txn_hash)
             state_diffs, latest_states = self.state_diff_analyzer.parse_state_diff(raw_state_diff)
@@ -72,6 +72,7 @@ class TransactionAnalyzer:
             txn_index=receipt['transactionIndex'],
             from_address=from_address,
             to_address=to_address,
+            contract_address=contract_address,
             value=transaction['value'],
             status=receipt['status'],
             nonce=transaction['nonce'],

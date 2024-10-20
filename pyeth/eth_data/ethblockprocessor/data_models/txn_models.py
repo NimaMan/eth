@@ -51,6 +51,7 @@ class DetailedTransaction:
     txn_index: int
     from_address: ChecksumAddress
     to_address: ChecksumAddress
+    contract_address: ChecksumAddress
     value: Wei
     status: bool
     nonce: int

@@ -22,9 +22,8 @@ class AlertManager:
         for alert_name, alert in self.alert_objects.items():
             alerts = alert.get_alert(transaction)
             if len(alerts) > 0:
-                triggered_alerts.extend(alerts)
-                for triggered_alert in alerts:
-                    self.alert_db.add_alert(triggered_alert)
+                triggered_alerts.extend(alerts)        
+        self.save_alerts_to_db(triggered_alerts)
         return triggered_alerts
 
     def save_alerts_to_db(self, alerts):

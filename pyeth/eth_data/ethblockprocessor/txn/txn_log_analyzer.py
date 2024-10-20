@@ -18,6 +18,7 @@ class TransactionLogAnalyzer:
         self.burn_signature = self.w3.keccak(text="Burn(address,uint256,uint256,address)").hex()
         self.deposit_signature = self.w3.keccak(text="Deposit(address,uint256)").hex()
         self.withdraw_signature = self.w3.keccak(text="Withdraw(address,uint256)").hex()
+        self.weth_withdrawal_topic = self.w3.keccak(text="Withdrawal(address,uint256)").hex()
         self.pair_signature = self.w3.keccak(text="PairCreated(address,address,address,uint256)").hex()
         self.owner_signature = self.w3.keccak(text="OwnershipTransferred(address,address)").hex()
         self.trading_enabled_signature = self.w3.keccak(text="TradingEnabled(uint256)").hex()
@@ -35,7 +36,20 @@ class TransactionLogAnalyzer:
         self.set_max_tx_amount_signature = self.w3.keccak(text="SetMaxTxAmount(uint256)").hex()
         self.set_max_wallet_token_signature = self.w3.keccak(text="SetMaxWalletToken(uint256)").hex()
         self.set_max_wallet_signature = self.w3.keccak(text="SetMaxWallet(uint256)").hex()
-    
+        
+        # Uniswap V3 Pool events
+        self.uniswap_v3_initialize_topic = self.w3.keccak(text="Initialize(uint160,int24)").hex()
+        self.uniswap_v3_mint_topic = self.w3.keccak(text="Mint(address,address,int24,int24,uint128,uint256,uint256)").hex()
+        self.uniswap_v3_burn_topic = self.w3.keccak(text="Burn(address,int24,int24,uint128,uint256,uint256)").hex()
+        self.uniswap_v3_swap_topic = self.w3.keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex()
+
+        # Uniswap V3 Factory events
+        self.uniswap_v3_pool_created_topic = self.w3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex()
+
+        # Uniswap V3 NFT Manager events
+        self.uniswap_v3_increase_liquidity_topic = self.w3.keccak(text="IncreaseLiquidity(uint256,uint128,uint256,uint256)").hex()
+        self.uniswap_v3_decrease_liquidity_topic = self.w3.keccak(text="DecreaseLiquidity(uint256,uint128,uint256,uint256)").hex()
+
     def analyze_logs(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
         result = {
             'erc20_transfers': [],
@@ -157,7 +171,7 @@ class TransactionLogAnalyzer:
             return self.parse_burn(log)
         elif topic == self.deposit_signature:
             return self.parse_deposit(log)
-        elif topic == self.withdraw_signature:
+        elif topic == self.withdraw_signature or topic == self.weth_withdrawal_topic:
             return self.parse_withdraw(log)
         elif topic == self.pair_signature:
             return self.parse_pair(log)
@@ -173,8 +187,8 @@ class TransactionLogAnalyzer:
     def parse_erc20_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:
         return ERC20Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
-            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
+            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
+            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
             amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
             log_index=log['logIndex'],
         )
@@ -204,14 +218,15 @@ class TransactionLogAnalyzer:
         data = log['data'].hex()
         ids_offset = int(data[:66], 16) * 2
         amounts_offset = int(data[66:130], 16) * 2
-        ids_length = int(data[ids_offset:ids_offset+64], 16)
-        amounts_length = int(data[amounts_offset:amounts_offset+64], 16)
+        ids_length = int(data[ids_offset:ids_offset+64], 16) if ids_offset+64 < len(data) else 0
+        amounts_length = int(data[amounts_offset:amounts_offset+64], 16) if amounts_offset+64 < len(data) else 0
         
-        ids = [int(data[i:i+64], 16) for i in range(ids_offset+64, ids_offset+64+(ids_length*64), 64)]
-        amounts = [int(data[i:i+64], 16) for i in range(amounts_offset+64, amounts_offset+64+(amounts_length*64), 64)]
+        ids = [int(data[i:i+64], 16) for i in range(ids_offset+64, ids_offset+64+(ids_length*64), 64)] if ids_length > 0 else []
+        amounts = [int(data[i:i+64], 16) for i in range(amounts_offset+64, amounts_offset+64+(amounts_length*64), 64)] if amounts_length > 0 else []
         
         return ERC1155Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
+            operator=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             from_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
             to_address=self.w3.to_checksum_address(log['topics'][3].hex()[-40:]),
             token_ids=ids,
@@ -242,8 +257,8 @@ class TransactionLogAnalyzer:
     def parse_approve(self, log: Dict[str, Any]) -> ERC20Approval:
         return ERC20Approval(
             token_address=self.w3.to_checksum_address(log['address']),
-            owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            spender=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
+            owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
+            spender=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
             amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
             log_index=log['logIndex'],
         )
@@ -275,20 +290,41 @@ class TransactionLogAnalyzer:
         )
     
     def parse_deposit(self, log: Dict[str, Any]) -> DepositAction:
-        return DepositAction(
-            pair_address=self.w3.to_checksum_address(log['address']),
-            sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-            log_index=log['logIndex'],
-        )
+        if len(log['topics']) > 1:
+            # This is likely a WETH deposit
+            return DepositAction(
+                pair_address=self.w3.to_checksum_address(log['address']),
+                sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
+                amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
+                log_index=log['logIndex'],
+            )
+        else:
+            # This is likely the custom deposit
+            data = log['data']
+            sender = None # figure out how to get this
+            amount = int(data[66:], 16) if data[66:] else None
+            return DepositAction(
+                pair_address=self.w3.to_checksum_address(log['address']),
+                sender=sender,
+                amount=amount,
+                log_index=log['logIndex'],
+            )
     
     def parse_withdraw(self, log: Dict[str, Any]) -> WithdrawAction:
-        return WithdrawAction(
-            pair_address=self.w3.to_checksum_address(log['address']),
-            sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-            log_index=log['logIndex'],
-        )
+        if len(log['topics']) > 1:
+            return WithdrawAction(
+                pair_address=self.w3.to_checksum_address(log['address']),
+                sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
+                amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
+                log_index=log['logIndex'],
+            )
+        else:
+            return WithdrawAction(
+                pair_address=self.w3.to_checksum_address(log['address']),
+                sender=None,
+                amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
+                log_index=log['logIndex'],
+            )
     
     def parse_pair(self, log: Dict[str, Any]) -> PairAction:
         return PairAction(
@@ -323,7 +359,7 @@ class TransactionLogAnalyzer:
     def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
         return {
             'address': self.w3.to_checksum_address(log['address']),
-            'topics': [topic.hex() for topic in log['topics']],
-            'data': log['data'].hex(),
-            'log_index': log['logIndex'],
+            'topics': [topic.hex() for topic in log.get('topics', [])],
+            'data': log['data'].hex() if isinstance(log['data'], bytes) else log['data'],
+            'log_index': log.get('logIndex', None),
         }
