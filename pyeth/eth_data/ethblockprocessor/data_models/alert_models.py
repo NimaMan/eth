@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Set
 
 
 @dataclass
@@ -29,4 +29,15 @@ class ContractCreationAlertData:
     creator_address: str    
     contract_address: str
     alert_type: str = "Contract Creation"
+    details: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UserInvolvedAlertData:
+    block_number: int
+    transaction_hash: str
+    from_address: str
+    involved_addresses: Set[str]
+    txn_type: str
+    alert_type: str
     details: Dict[str, Any] = field(default_factory=dict)
