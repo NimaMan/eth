@@ -6,14 +6,13 @@ from functools import lru_cache
 
 ETH_DATA_DIR = os.environ["ETH_DATA_DIR"]
 scammers_df_dir = os.path.join(os.environ["ETH_DATA_DIR"], "scammers.parquet") 
-grey_addresses_dir = os.path.join(os.environ["ETH_DATA_DIR"], "grey_addresses.parquet")
 
 scammers_address_set = set(pd.read_parquet(scammers_df_dir)["address"].tolist())
 
 
 @lru_cache(maxsize=1)
 def load_grey_addresses() -> Set[str]:
-    return set(pd.read_parquet(grey_addresses_dir)["address"].tolist())
+    return scammers_address_set
 
 def get_grey_addresses() -> Set[str]:
     return load_grey_addresses()

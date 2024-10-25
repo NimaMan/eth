@@ -1,7 +1,75 @@
-from typing import List, Union
+from typing import List, Union, Optional
 from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.data_models.alert_models import ContractCreationAlertData
 from ethblockprocessor.data_models.txn_models import TransactionType
+from ethblockprocessor.utils.logger import get_logger
+from web3 import Web3
+from web3.exceptions import BadFunctionCallOutput
+
+
+logger = get_logger()
+
+
+erc20_abi = [
+    {"constant":True,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"totalSupply","outputs":[{"name":"","type":"uint256"}],"type":"function"},
+    {"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},
+]
+
+
+def is_erc20(contract_address: str) -> Optional[dict]:
+    web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+    contract = web3.eth.contract(address=contract_address, abi=erc20_abi)
+    
+    try:
+        symbol = contract.functions.symbol().call()
+        decimals = contract.functions.decimals().call()
+        total_supply = contract.functions.totalSupply().call()
+        
+        return {
+            'contract_address': contract_address,
+            'symbol': symbol,
+            'decimals': decimals,
+            'total_supply': total_supply,
+        }
+    except BadFunctionCallOutput:
+        return None
+    except Exception as e:
+        logger.error(f"Error checking ERC-20 compliance: {str(e)}")
+        return None
+
+
+erc721_abi = [
+    {"constant":True,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},
+    {"constant":True,"inputs":[{"name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"name":"","type":"bool"}],"type":"function"},
+]
+
+
+def is_erc721(contract_address: str) -> Optional[dict]:
+    web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+    contract = web3.eth.contract(address=contract_address, abi=erc721_abi)
+    
+    try:
+        name = contract.functions.name().call()
+        symbol = contract.functions.symbol().call()
+        supports_interface = contract.functions.supportsInterface('0x80ac58cd').call()  # ERC721 interface id
+        
+        return {
+            'contract_address': contract_address,
+            'name': name,
+            'symbol': symbol,
+            'supports_interface': supports_interface
+        }
+    except BadFunctionCallOutput:
+        return None
+    except Exception as e:
+        if 'execution reverted' in str(e):
+            return None
+        logger.error(f"Error checking ERC-721 compliance: {str(e)}")
+        return None
 
 
 class ContractCreationAlert:
@@ -15,7 +83,7 @@ class ContractCreationAlert:
     
     def create_alert(self, transaction: DetailedTransaction) -> ContractCreationAlertData:
         contract_address = transaction.contract_address
-        contract_type = self.classify_contract(transaction.input)
+        contract_type = self.classify_contract(contract_address, transaction.input)
 
         alert_data = ContractCreationAlertData(
             block_number=transaction.block_number,
@@ -29,39 +97,30 @@ class ContractCreationAlert:
         return alert_data
     
     def send_alert(self, alert_data: ContractCreationAlertData):
-        print(f"Contract creation alert sent: {alert_data}")
+        logger.info(f"Contract creation alert sent: {alert_data}")
 
-    def classify_contract(self, bytecode: Union[str, bytes]) -> str:
-        # Convert bytecode to string if it's bytes
+    def classify_contract(self, contract_address: str, bytecode: Union[str, bytes]) -> str:
+        # First, check if it's an ERC-20 token
+        erc20_info = is_erc20(contract_address)
+        if erc20_info:
+            return f"ERC-20 Token: {erc20_info['symbol']}"
+
+        # Then, check if it's an ERC-721 token
+        erc721_info = is_erc721(contract_address)
+        if erc721_info and erc721_info.get('supports_interface', False):
+            return f"ERC-721 NFT: {erc721_info['name']}"
+
+        # If it's neither ERC-20 nor ERC-721, check for other common interfaces
         if isinstance(bytecode, bytes):
             bytecode = bytecode.hex()
-
-        # Remove '0x' prefix if present
         bytecode = bytecode[2:] if bytecode.startswith('0x') else bytecode
 
-        # ERC20 function signatures (common subset)
-        erc20_signatures = [
-            "18160ddd",  # totalSupply()
-            "70a08231",  # balanceOf(address)
-            "a9059cbb",  # transfer(address,uint256)
-            "23b872dd",  # transferFrom(address,address,uint256)
-        ]
+        # Check for ERC-1155 interface
+        if '0xd9b67a26' in bytecode:  # ERC-1155 interface id
+            return "ERC-1155 Token"
 
-        # ERC721 function signatures (common subset)
-        erc721_signatures = [
-            "70a08231",  # balanceOf(address)
-            "6352211e",  # ownerOf(uint256)
-            "42842e0e",  # safeTransferFrom(address,address,uint256)
-        ]
+        # Add more checks for other interfaces as needed
 
-        # Count the number of ERC20 and ERC721 signatures present
-        erc20_count = sum(1 for sig in erc20_signatures if sig in bytecode)
-        erc721_count = sum(1 for sig in erc721_signatures if sig in bytecode)
+        return "Smart Contract"
 
-        # Classify based on the number of signatures found
-        if erc20_count >= 3:  # At least 3 out of 4 ERC20 signatures
-            return "ERC-20 Token"
-        elif erc721_count >= 2:  # At least 2 out of 3 ERC721 signatures
-            return "ERC-721 NFT"
-        else:
-            return "Smart Contract"
+    

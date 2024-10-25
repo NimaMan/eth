@@ -1,6 +1,10 @@
 import pandas as pd
 from ethblockprocessor.data_models.txn_models import DetailedTransaction, TransactionType
 from ethblockprocessor.data_models.alert_models import TradingEnabledAlertData
+from ethblockprocessor.utils.logger import get_logger
+
+
+logger = get_logger()
 
 
 class TradingEnabledAlert:
@@ -38,4 +42,4 @@ class TradingEnabledAlert:
         return []
 
     def send_alert(self, alert_data: TradingEnabledAlertData):
-        print(f"Trading enabled alert sent: {alert_data}")
+        logger.info(f"Trading enabled alert sent: {alert_data}")

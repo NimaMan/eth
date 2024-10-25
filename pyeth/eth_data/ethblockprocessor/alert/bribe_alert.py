@@ -6,7 +6,7 @@ from ethblockprocessor.alert.config import bribe_threshold
 from ethblockprocessor.utils.logger import get_logger
 
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class BribeAlert(BaseAlert):

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, Set
+from typing import Dict, Any, List
 
 
 @dataclass
@@ -38,7 +38,7 @@ class UserInvolvedAlertData:
     block_number: int
     transaction_hash: str
     from_address: str
-    involved_addresses: Set[str]
+    involved_addresses: List[str]
     txn_type: str
     alert_type: str
     details: Dict[str, Any] = field(default_factory=dict)

@@ -11,17 +11,18 @@ Objectives:
 3. Process a range of blocks for historical analysis or catching up after downtime.
 """
 
-from typing import List, Dict, Any
 from web3 import Web3
 import asyncio
 
 from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
 from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
 from ethblockprocessor.alert.alert_manager import AlertManager
+from ethblockprocessor.alert.alert_db import AlertDB
+from ethblockprocessor.utils.profiler import profile
 from ethblockprocessor.utils.logger import get_logger
 
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class BlockProcessor:
@@ -53,7 +54,8 @@ class BlockProcessor:
         self.block_fetcher = BlockFetcher(node_url)
         self.transaction_analyzer = TransactionAnalyzer(w3=self.w3, 
                                                         save_erc20_txn_to_db=save_erc20_txn_to_db)
-        self.alert_manager = AlertManager(save_alert_db=save_alert_db)
+        self.alert_manager = AlertManager()
+        self.save_alert_db = save_alert_db
 
     async def process_transaction(self, txn):
         """
@@ -97,10 +99,18 @@ class BlockProcessor:
         results = await asyncio.gather(*tasks)
 
         block_transactions = {}
+        block_alerts = []
         for txn_hash, txn_result, alerts in results:
             block_transactions[txn_hash] = txn_result
+            block_alerts.extend(alerts)
+       
+        return block['number'], block_transactions, block_alerts
 
-        return block['number'], block_transactions
+    @profile
+    def save_alerts(self, block_alerts):
+        if self.save_alert_db and len(block_alerts) > 0:
+            with AlertDB() as alert_db:
+                alert_db.add_alerts(block_alerts)
 
     async def process_latest_block(self):
         """
@@ -131,8 +141,9 @@ class BlockProcessor:
         
         for block_number in range(start_block, end_block + 1):
             try:
-                block_number, detailed_transactions = await self.process_block(block_number)
-                processed_blocks[block_number] = detailed_transactions
+                block_number, block_transactions, block_alerts = await self.process_block(block_number)
+                processed_blocks[block_number] = block_transactions
+                self.save_alerts(block_alerts)
                 print(f"Processed block {block_number}")
             except Exception as e:
                 print(f"Error processing block {block_number}: {e}")
