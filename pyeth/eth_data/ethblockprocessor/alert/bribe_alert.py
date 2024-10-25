@@ -1,8 +1,12 @@
 
 from ethblockprocessor.alert.base_alert_class import BaseAlert
-from ethblockprocessor.data_models.txn_models import InternalTransaction, DetailedTransaction
+from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.data_models.alert_models import BribeAlertData
 from ethblockprocessor.alert.config import bribe_threshold
+from ethblockprocessor.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class BribeAlert(BaseAlert):
@@ -15,7 +19,8 @@ class BribeAlert(BaseAlert):
         if internal_txns:
             for internal_txn in internal_txns:
                 if internal_txn.to_address in self.fee_recipients_set:
-                    if internal_txn.value > self.bribe_threshold:
+                    txn.bribe_amount += float(internal_txn.value)
+                    if txn.bribe_amount > self.bribe_threshold:
                         alert_data = self.create_alert(txn)
                         self.send_alert(alert_data)
                         return [alert_data]
@@ -27,11 +32,13 @@ class BribeAlert(BaseAlert):
             transaction_hash=txn.hash.hex(),
             from_address=txn.from_address,
             value=txn.value,
+            bribe_amount=txn.bribe_amount,
             alert_type="Bribe",
         )
         return alert_data
 
     def send_alert(self, alert_data: BribeAlertData):
+        logger.info(f"Bribe alert sent: {alert_data}")
         print(f"Bribe alert sent: {alert_data}")
 
 

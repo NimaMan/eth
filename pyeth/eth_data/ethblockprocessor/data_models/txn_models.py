@@ -84,3 +84,4 @@ class DetailedTransaction:
     erc20_contracts: Set[ChecksumAddress] = field(default_factory=set)
     state_diffs: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
+    bribe_amount: float = 0

@@ -13,10 +13,15 @@ Objectives:
 
 from typing import List, Dict, Any
 from web3 import Web3
+import asyncio
+
 from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
 from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
 from ethblockprocessor.alert.alert_manager import AlertManager
-import asyncio
+from ethblockprocessor.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class BlockProcessor:
@@ -58,13 +63,18 @@ class BlockProcessor:
             tx: The transaction to process.
 
         Returns:
-            Tuple[Dict[str, Any], Dict[str, Any]]: A tuple containing the processed transaction metadata and detailed transaction data.
+            detailed_txn: DetailedTransaction
+            alerts: List[AlertData]
         """
-        detailed_txn = self.transaction_analyzer.analyze_transaction(txn)
-        alerts = []
-        if detailed_txn:
-            alerts = await self.alert_manager.check_alerts_async(detailed_txn)
-        return detailed_txn, alerts
+        try:
+            detailed_txn = self.transaction_analyzer.analyze_transaction(txn)
+            alerts = []
+            if detailed_txn:
+                alerts = await self.alert_manager.check_alerts_async(detailed_txn)
+            return txn.hash.hex(), detailed_txn, alerts
+        except Exception as e:
+            logger.error(f"Error processing transaction {txn.hash.hex()}: {e}")
+            return txn.hash.hex(), None, []
 
     async def process_block(self, block_number: int):
         """
@@ -86,14 +96,11 @@ class BlockProcessor:
         tasks = [self.process_transaction(tx) for tx in block['transactions']]
         results = await asyncio.gather(*tasks)
 
-        transactions = []
-        detailed_transactions = {}
-        for tx_metadata, detailed_tx in results:
-            transactions.append(tx_metadata)
-            if detailed_tx:
-                detailed_transactions[tx_metadata.hash] = detailed_tx
+        block_transactions = {}
+        for txn_hash, txn_result, alerts in results:
+            block_transactions[txn_hash] = txn_result
 
-        return block['number']
+        return block['number'], block_transactions
 
     async def process_latest_block(self):
         """
@@ -120,14 +127,15 @@ class BlockProcessor:
             end_block = self.w3.eth.get_block_number()
             start_block = max(0, end_block - block_range + 1)
         
-        processed_blocks = []
+        processed_blocks = {}
         
         for block_number in range(start_block, end_block + 1):
             try:
-                block_data = await self.process_block(block_number)
-                processed_blocks.append(block_data)
+                block_number, detailed_transactions = await self.process_block(block_number)
+                processed_blocks[block_number] = detailed_transactions
                 print(f"Processed block {block_number}")
             except Exception as e:
                 print(f"Error processing block {block_number}: {e}")
-        
+                processed_blocks[block_number] = e
+
         return processed_blocks

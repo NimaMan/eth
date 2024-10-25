@@ -44,11 +44,14 @@ class BlockFetcher:
         """
         for attempt in range(self.max_retries):
             try:
-                return self.w3.eth.get_block('latest', full_transactions=True)
+                return self.w3.eth.get_block_number()
             except Exception as e:
                 if attempt == self.max_retries - 1:
                     raise
                 await asyncio.sleep(self.retry_delay)
+
+    async def fetch_latest_block(self):
+        return await self.fetch_block_by_number(await self.fetch_latest_block_number())
 
     async def fetch_block_by_number(self, block_number: int):
         """

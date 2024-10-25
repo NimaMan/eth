@@ -18,6 +18,7 @@ class BribeAlertData:
     transaction_hash: str
     from_address: str
     value: float
+    bribe_amount: float
     alert_type: str = "Bribe"
     details: Dict[str, Any] = field(default_factory=dict)
 
