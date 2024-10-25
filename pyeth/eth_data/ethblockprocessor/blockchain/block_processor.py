@@ -107,10 +107,10 @@ class BlockProcessor:
         return block['number'], block_transactions, block_alerts
 
     @profile
-    def save_alerts(self, block_alerts):
+    async def save_alerts(self, block_alerts):
         if self.save_alert_db and len(block_alerts) > 0:
-            with AlertDB() as alert_db:
-                alert_db.add_alerts(block_alerts)
+            async with AlertDB() as alert_db:
+                await alert_db.add_alerts(block_alerts)
 
     async def process_latest_block(self):
         """
@@ -125,13 +125,6 @@ class BlockProcessor:
     async def process_block_range(self, start_block: int = None, end_block: int = None, block_range: int = 10000):
         """
         Process a range of blocks.
-
-        Args:
-            start_block (int): The starting block number.
-            end_block (int): The ending block number (inclusive).
-
-        Returns:
-            List[Dict[str, Any]]: A list of dictionaries, each containing processed block data.
         """
         if start_block is None:
             end_block = self.w3.eth.get_block_number()
@@ -139,14 +132,19 @@ class BlockProcessor:
         
         processed_blocks = {}
         
-        for block_number in range(start_block, end_block + 1):
-            try:
-                block_number, block_transactions, block_alerts = await self.process_block(block_number)
-                processed_blocks[block_number] = block_transactions
-                self.save_alerts(block_alerts)
-                print(f"Processed block {block_number}")
-            except Exception as e:
-                print(f"Error processing block {block_number}: {e}")
-                processed_blocks[block_number] = e
+        async with AlertDB() as alert_db:
+            for block_number in range(start_block, end_block + 1):
+                try:
+                    block_number, block_transactions, block_alerts = await self.process_block(block_number)
+                    processed_blocks[block_number] = block_transactions
+                    await alert_db.add_alerts(block_alerts)
+                    if block_number % 100 == 0:  # Log every 100 blocks
+                        logger.info(f"Processed block {block_number}")
+                except Exception as e:
+                    logger.error(f"Error processing block {block_number}: {str(e)}")
+                    processed_blocks[block_number] = e
 
+            await alert_db.flush_cache()
+
+        logger.info(f"Processed blocks from {start_block} to {end_block}")
         return processed_blocks

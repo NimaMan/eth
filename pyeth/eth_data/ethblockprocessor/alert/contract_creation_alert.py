@@ -4,10 +4,10 @@ from ethblockprocessor.data_models.alert_models import ContractCreationAlertData
 from ethblockprocessor.data_models.txn_models import TransactionType
 from ethblockprocessor.utils.logger import get_logger
 from web3 import Web3
-from web3.exceptions import BadFunctionCallOutput
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
 
-logger = get_logger()
+logger = get_logger("contract_creation_alert")
 
 
 erc20_abi = [
@@ -34,10 +34,11 @@ def is_erc20(contract_address: str) -> Optional[dict]:
             'decimals': decimals,
             'total_supply': total_supply,
         }
-    except BadFunctionCallOutput:
+    except (BadFunctionCallOutput, ContractLogicError):
         return None
     except Exception as e:
-        logger.error(f"Error checking ERC-20 compliance: {str(e)}")
+        if "execution reverted" not in str(e):
+            logger.error(f"Unexpected error checking ERC-20 compliance: {str(e)}")
         return None
 
 
@@ -63,12 +64,11 @@ def is_erc721(contract_address: str) -> Optional[dict]:
             'symbol': symbol,
             'supports_interface': supports_interface
         }
-    except BadFunctionCallOutput:
+    except (BadFunctionCallOutput, ContractLogicError):
         return None
     except Exception as e:
-        if 'execution reverted' in str(e):
-            return None
-        logger.error(f"Error checking ERC-721 compliance: {str(e)}")
+        if "execution reverted" not in str(e):
+            logger.error(f"Unexpected error checking ERC-721 compliance: {str(e)}")
         return None
 
 
@@ -97,7 +97,7 @@ class ContractCreationAlert:
         return alert_data
     
     def send_alert(self, alert_data: ContractCreationAlertData):
-        logger.info(f"Contract creation alert sent: {alert_data}")
+        logger.info(f"{alert_data}")
 
     def classify_contract(self, contract_address: str, bytecode: Union[str, bytes]) -> str:
         # First, check if it's an ERC-20 token

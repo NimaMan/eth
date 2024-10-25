@@ -6,7 +6,7 @@ from ethblockprocessor.alert.config import bribe_threshold
 from ethblockprocessor.utils.logger import get_logger
 
 
-logger = get_logger()
+logger = get_logger("bribe_alert")
 
 
 class BribeAlert(BaseAlert):
@@ -38,8 +38,7 @@ class BribeAlert(BaseAlert):
         return alert_data
 
     def send_alert(self, alert_data: BribeAlertData):
-        logger.info(f"Bribe alert sent: {alert_data}")
-        print(f"Bribe alert sent: {alert_data}")
+        logger.info(f"{alert_data}")
 
 
 fee_recipients = {

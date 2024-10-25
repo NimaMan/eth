@@ -6,7 +6,7 @@ from ethblockprocessor.alert.config import get_grey_addresses
 from ethblockprocessor.utils.logger import get_logger
 
 
-logger = get_logger()
+logger = get_logger("user_involved_alert")
 
 
 class GreyAddressAlert(BaseAlert):
@@ -15,9 +15,9 @@ class GreyAddressAlert(BaseAlert):
 
     def get_alert(self, txn: DetailedTransaction):
         involved_addresses = txn.unique_addresses
-        
-        if involved_addresses - self.grey_addresses_set:
-            alert_data = self.create_alert(txn, involved_addresses)
+        scammers = involved_addresses.intersection(self.grey_addresses_set)
+        if scammers:
+            alert_data = self.create_alert(txn, scammers)
             self.send_alert(alert_data)
             return [alert_data]
         return []
@@ -34,7 +34,7 @@ class GreyAddressAlert(BaseAlert):
         return alert_data
 
     def send_alert(self, alert_data: UserInvolvedAlertData):
-        logger.info(f"Grey address alert sent: {alert_data}")
+        logger.info(f"{alert_data}")
         
     def refresh(self):
         get_grey_addresses.cache_clear()
