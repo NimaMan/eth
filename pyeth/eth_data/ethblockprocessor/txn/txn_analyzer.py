@@ -12,7 +12,9 @@ from ethblockprocessor.tokens.erc20_token_txn_store import ERC20TransactionDB
 
 
 class TransactionAnalyzer:
-    def __init__(self, w3: Web3, save_erc20_txn_to_db: bool = True):
+    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = True):
+        if w3 is None:
+            w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)

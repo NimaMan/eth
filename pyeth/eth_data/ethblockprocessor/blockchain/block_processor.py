@@ -18,8 +18,8 @@ from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
 from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
 from ethblockprocessor.alert.alert_manager import AlertManager
 from ethblockprocessor.alert.alert_db import AlertDB
-from ethblockprocessor.utils.profiler import profile
 from ethblockprocessor.utils.logger import get_logger
+from ethblockprocessor.utils.profiling.decorators import profile_async
 
 
 logger = get_logger()
@@ -56,7 +56,7 @@ class BlockProcessor:
                                                         save_erc20_txn_to_db=save_erc20_txn_to_db)
         self.alert_manager = AlertManager()
         self.save_alert_db = save_alert_db
-
+            
     async def process_transaction(self, txn):
         """
         Process a single transaction and its alerts.
@@ -77,7 +77,8 @@ class BlockProcessor:
         except Exception as e:
             logger.error(f"Error processing transaction {txn.hash.hex()}: {e}")
             return txn.hash.hex(), None, []
-
+    
+    @profile_async("profiler")
     async def process_block(self, block_number: int):
         """
         Process a single block and its transactions.
@@ -106,7 +107,7 @@ class BlockProcessor:
        
         return block['number'], block_transactions, block_alerts
 
-    @profile
+    @profile_async("profiler")
     async def save_alerts(self, block_alerts):
         if self.save_alert_db and len(block_alerts) > 0:
             async with AlertDB() as alert_db:
