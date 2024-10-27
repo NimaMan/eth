@@ -1,10 +1,14 @@
+from web3 import Web3
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 from typing import List, Union, Optional
+
 from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.data_models.alert_models import ContractCreationAlertData
 from ethblockprocessor.data_models.txn_models import TransactionType
 from ethblockprocessor.utils.logger import get_logger
-from web3 import Web3
-from web3.exceptions import BadFunctionCallOutput, ContractLogicError
+from ethblockprocessor.alert.models.hidden_mint import HiddenMintPredictor
+from ethblockprocessor.alert.config import HIDDEN_MINT_MODEL_PATH, get_grey_addresses
+
 
 
 logger = get_logger("contract_creation_alert")
@@ -73,7 +77,11 @@ def is_erc721(contract_address: str) -> Optional[dict]:
 
 
 class ContractCreationAlert:
-    
+    def __init__(self):
+        """Initialize the ContractCreationAlert with singleton HiddenMintPredictor"""
+        self.hidden_mint_predictor = HiddenMintPredictor(HIDDEN_MINT_MODEL_PATH)
+        self.grey_addresses = get_grey_addresses()
+
     def get_alert(self, transaction: DetailedTransaction) -> List[ContractCreationAlertData]:
         if transaction.txn_type == TransactionType.CONTRACT_CREATION.value:
             alert_data = self.create_alert(transaction)
@@ -84,7 +92,15 @@ class ContractCreationAlert:
     def create_alert(self, transaction: DetailedTransaction) -> ContractCreationAlertData:
         contract_address = transaction.contract_address
         contract_type = self.classify_contract(contract_address, transaction.input)
-
+        hidden_mint_probability = None
+        grey_creator = False
+        if "ERC-20" in contract_type:
+            hidden_mint_result = self.hidden_mint_predictor.predict(transaction.input)
+            hidden_mint_probability = hidden_mint_result['hidden_mint_probability']
+        
+        if transaction.from_address in self.grey_addresses:
+            grey_creator = True
+            
         alert_data = ContractCreationAlertData(
             block_number=transaction.block_number,
             transaction_hash=transaction.hash.hex(),
@@ -92,8 +108,10 @@ class ContractCreationAlert:
             contract_address=contract_address,
             details={
                 "contract_type": contract_type,
-            }
-        )
+                "hidden_mint_probability": hidden_mint_probability,
+                "grey_creator": grey_creator,
+                },
+            )
         return alert_data
     
     def send_alert(self, alert_data: ContractCreationAlertData):

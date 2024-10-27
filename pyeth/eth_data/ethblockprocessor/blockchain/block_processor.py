@@ -13,6 +13,7 @@ Objectives:
 
 from web3 import Web3
 import asyncio
+from typing import Union, Dict
 
 from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
 from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
@@ -79,33 +80,47 @@ class BlockProcessor:
             return txn.hash.hex(), None, []
     
     @profile_async("profiler")
-    async def process_block(self, block_number: int):
+    async def process_block(self, block_input: Union[int, Dict]):
         """
         Process a single block and its transactions.
 
         Args:
-            block_number (int): The number of the block to process.
+            block_input: Either a block number (int) or a block object (Dict) with full transaction data
 
         Returns:
-            int: The block number processed.
+            Tuple[int, Dict, List]: (block_number, transactions_dict, alerts_list)
 
         Raises:
-            ValueError: If the specified block is not found.
+            ValueError: If the block is not found or invalid
         """
-        block = await self.block_fetcher.fetch_block_by_number(block_number)
-        if not block:
-            raise ValueError(f"Block {block_number} not found")
+        try:
+            # Handle block input
+            if isinstance(block_input, int):
+                block = await self.block_fetcher.fetch_block_by_number(block_input)
+                if not block:
+                    raise ValueError(f"Block {block_input} not found")
+            else:
+                block = block_input
+                
+            # Validate block has transactions
+            if 'transactions' not in block:
+                raise ValueError(f"Block {block.get('number', 'unknown')} has no transactions")
 
-        tasks = [self.process_transaction(tx) for tx in block['transactions']]
-        results = await asyncio.gather(*tasks)
+            # Process transactions
+            tasks = [self.process_transaction(tx) for tx in block['transactions']]
+            results = await asyncio.gather(*tasks)
 
-        block_transactions = {}
-        block_alerts = []
-        for txn_hash, txn_result, alerts in results:
-            block_transactions[txn_hash] = txn_result
-            block_alerts.extend(alerts)
-       
-        return block['number'], block_transactions, block_alerts
+            block_transactions = {}
+            block_alerts = []
+            for txn_hash, txn_result, alerts in results:
+                block_transactions[txn_hash] = txn_result
+                block_alerts.extend(alerts)
+           
+            return block['number'], block_transactions, block_alerts
+            
+        except Exception as e:
+            logger.error(f"Error processing block: {str(e)}")
+            raise
 
     @profile_async("profiler")
     async def save_alerts(self, block_alerts):
