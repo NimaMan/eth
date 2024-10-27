@@ -19,3 +19,4 @@ def get_grey_addresses() -> Set[str]:
 
 
 bribe_threshold = 0.1
+HIDDEN_MINT_MODEL_PATH = "/home/nima/code/crypto/Aladdin3_Models/scripts/models/bytecode/best_hidden_mint_model.pth"
