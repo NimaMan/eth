@@ -1,14 +1,62 @@
 """
-BlockProcessor Module
+Block Processor Module
 
-This module provides the BlockProcessor class, which is responsible for processing
-Ethereum blocks and their transactions. It combines the functionality of BlockFetcher
-and TransactionAnalyzer to provide comprehensive block and transaction analysis.
+Objective:
+---------
+Provide a flexible and efficient system for processing Ethereum blocks and their transactions,
+supporting different processing strategies for various use cases like real-time monitoring,
+historical analysis, and parallel processing.
 
-Objectives:
-1. Process individual Ethereum blocks, including all transactions within them.
-2. Analyze the latest block in real-time.
-3. Process a range of blocks for historical analysis or catching up after downtime.
+Key Components and Flow:
+----------------------
+1. Block Processing Strategies:
+   - Sequential Processing: Process blocks one by one (current implementation)
+   - Parallel Processing: Process multiple blocks concurrently
+   - Batch Processing: Process blocks in configurable batch sizes
+   - Real-time Processing: Process latest blocks as they arrive, as efficinetly as possible (preferably within 1 second)
+
+2. Core Operations:
+   - Block Fetching: Retrieve blocks from Ethereum node
+   - Transaction Analysis: Detailed analysis of each transaction
+   - Alert Generation: Monitor for specific patterns or events
+   - Data Persistence: Store results and alerts in database
+
+3. Performance Characteristics:
+   - I/O Bound: Block fetching and database operations
+   - CPU Bound: Transaction analysis and alert checking
+   - Memory Usage: Depends on processing strategy and batch size
+
+Design Considerations:
+-------------------
+1. Processing Strategies:
+   - Sequential: Best for maintaining strict order and consistency
+   - Parallel: Optimal for historical analysis and catching up
+   - Real-time: Suitable for monitoring and immediate alerts
+   - Batch: Balance between performance and resource usage
+
+2. Trade-offs:
+   - Sequential vs Parallel: Consistency vs Speed
+   - Memory vs Performance: Batch size considerations. Memroy is not a botlleneck for our system.
+   - Real-time vs Delayed: Latency vs Processing guarantees
+
+3. Extensibility:
+   - Strategy Pattern: Different processing implementations
+   - Plugin Architecture: Custom analyzers and alert types
+   - Configurable Components: Adjustable parameters per strategy
+
+Usage Examples:
+-------------
+1. Real-time Monitoring:
+   processor = RealTimeBlockProcessor(node_url)
+   await processor.process_latest_block()
+
+2. Historical Analysis:
+   processor = ParallelBlockProcessor(node_url)
+   await processor.process_block_range(start_block, end_block)
+
+3. Batch Processing:
+   processor = BatchBlockProcessor(node_url, batch_size=100)
+   await processor.process_block_range(start_block, end_block)
 """
 
 from web3 import Web3

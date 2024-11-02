@@ -1,3 +1,58 @@
+"""
+Transaction Analyzer for Ethereum Blockchain
+
+Objective:
+---------
+The TransactionAnalyzer serves as a comprehensive transaction parsing and analysis tool that breaks down
+Ethereum transactions into their constituent components and meaningful data structures. It processes raw
+transaction data into a detailed, structured format that can be used for monitoring, analysis, and alert generation.
+
+Key Components and Flow:
+----------------------
+1. Transaction Receipt Analysis:
+   - Fetches and processes transaction receipts
+   - Extracts gas usage and effective prices
+   - Determines transaction status and contract creation
+
+2. Log Analysis:
+   - Processes event logs for common DeFi and token operations
+   - Identifies token transfers (ERC20, ERC721, ERC1155)
+   - Tracks Uniswap interactions and liquidity events
+   - Maintains sets of unique addresses and contract interactions
+
+3. Trace Analysis (Optional):
+   - Performed for transactions with contract interactions
+   - Tracks internal ETH transfers and contract calls
+   - Builds a tree of internal transactions
+
+4. State Difference Analysis (Optional):
+   - Captures state changes in contract storage
+   - Tracks balance changes and storage modifications
+
+Performance Characteristics:
+-------------------------
+- Sequential Processing: Operations are performed synchronously as each step depends on previous results
+- I/O Bound: Main bottlenecks might be the RPC calls to the Ethereum node
+
+Usage:
+-----
+The analyzer is typically used in two contexts:
+1. Real-time monitoring of new transactions
+2. Historical analysis of blockchain data
+
+Note on Design Choice:
+------------------------------
+The analyzer uses synchronous Web3 calls because:
+1. Operations are inherently sequential (receipt → logs → traces)
+2. Each step depends on data from previous steps
+3. The real performance gains come from parallel processing of multiple transactions
+   rather than async processing of a single transaction's components
+
+For parallel processing of multiple transactions, it's might be helpful to:
+1. Create multiple analyzer instances
+2. Process different transactions concurrently at a higher level
+3. Use a transaction queue system for real-time monitoring
+"""
 from web3 import Web3
 from functools import cached_property
 from typing import Dict, Any, Tuple
@@ -23,7 +78,7 @@ class TransactionAnalyzer:
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
-    def analyze_transaction(self, transaction: Dict[str, Any], state_diff: bool = False) -> DetailedTransaction:
+    def analyze_transaction(self, transaction: Dict[str, Any], state_diff: bool = False, receipt: Dict[str, Any] = None) -> DetailedTransaction:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
 
@@ -36,7 +91,8 @@ class TransactionAnalyzer:
         txn_hash = transaction.hash
         from_address = transaction['from']
         to_address = transaction['to']
-        receipt = self.data_fetcher.get_transaction_receipt(txn_hash)
+        if receipt is None:
+            receipt = self.data_fetcher.get_transaction_receipt(txn_hash)
         logs = self.log_analyzer.analyze_logs(receipt.logs)
         
         fees = TransactionFees(
