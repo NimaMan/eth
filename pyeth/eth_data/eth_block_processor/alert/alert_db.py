@@ -4,10 +4,10 @@ import os
 import asyncio
 from typing import List, Dict, Any
 from dataclasses import asdict
-from ethblockprocessor.utils.logger import get_logger
+from general_utils.general_utils.logging.logger import get_logger
 
 
-logger = get_logger()
+logger = get_logger(name="alert_db_logger", log_folder="alert")
 
 
 class AlertDB:

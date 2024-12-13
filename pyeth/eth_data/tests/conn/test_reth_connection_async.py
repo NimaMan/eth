@@ -1,9 +1,10 @@
 import asyncio
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
-from ethblockprocessor.utils.logger import get_logger
+from general_utils.logging.logger import get_logger
 
-logger = get_logger("websocket_test")
+logger = get_logger(name="websocket_test", log_folder="eth_block_processor")
+
 
 async def test_websocket_connection():
     # Use explicit localhost IP address

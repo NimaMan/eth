@@ -3,10 +3,10 @@ from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.data_models.alert_models import UserInvolvedAlertData
 from ethblockprocessor.alert.base_alert_class import BaseAlert
 from ethblockprocessor.alert.config import get_grey_addresses
-from ethblockprocessor.utils.logger import get_logger
+from general_utils.general_utils.logging.logger import get_logger
 
 
-logger = get_logger("user_involved_alert")
+logger = get_logger("user_involved_alert", log_folder="alert")
 
 
 class GreyAddressAlert(BaseAlert):

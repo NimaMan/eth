@@ -1,9 +1,9 @@
 import asyncio
 from ethblockprocessor.blockchain.block_processor import BlockProcessor
-from ethblockprocessor.utils.logger import get_logger
+from general_utils.logging.logger import get_logger
 
 
-logger = get_logger()
+logger = get_logger(name=__name__, log_folder="eth_block_processor")
 
 
 async def main():

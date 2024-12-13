@@ -5,13 +5,12 @@ from typing import List, Union, Optional
 from ethblockprocessor.data_models.txn_models import DetailedTransaction
 from ethblockprocessor.data_models.alert_models import ContractCreationAlertData
 from ethblockprocessor.data_models.txn_models import TransactionType
-from ethblockprocessor.utils.logger import get_logger
 from ethblockprocessor.alert.models.hidden_mint import HiddenMintPredictor
 from ethblockprocessor.alert.config import HIDDEN_MINT_MODEL_PATH, get_grey_addresses
+from general_utils.general_utils.logging.logger import get_logger
 
 
-
-logger = get_logger("contract_creation_alert")
+logger = get_logger("contract_creation_alert", log_folder="alert")
 
 
 erc20_abi = [
