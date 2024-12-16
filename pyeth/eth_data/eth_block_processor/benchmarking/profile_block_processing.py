@@ -2,11 +2,11 @@ import asyncio
 import time
 from web3 import Web3
 
-from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
-from ethblockprocessor.blockchain.block_processor import *
-from ethblockprocessor.alert.alert_manager import AlertManager, ALERT_CLASSES
-from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
-from ethblockprocessor.utils.logger import get_logger
+from eth_block_processor.blockchain.block_fetcher import BlockFetcher
+from eth_block_processor.blockchain.block_processor import *
+from eth_block_processor.alert.alert_manager import AlertManager, ALERT_CLASSES
+from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.utils.logger import get_logger
 
 logger = get_logger("profile_block_processing")
 

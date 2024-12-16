@@ -1,7 +1,7 @@
 from web3.types import Hash32, Wei
 from dataclasses import dataclass
 from typing import List
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import DetailedTransaction
 
 
 @dataclass

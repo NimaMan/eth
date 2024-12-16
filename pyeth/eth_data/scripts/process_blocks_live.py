@@ -1,5 +1,6 @@
-from ethblockprocessor.blockchain.live_block_processor import LiveBlockProcessor
+from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
 import asyncio
+
 
 async def main():
     # Initialize the processor
@@ -16,5 +17,6 @@ async def main():
         if hasattr(processor.w3, 'provider'):
             await processor.w3.provider.disconnect()
 
+        
 if __name__ == "__main__":
     asyncio.run(main())

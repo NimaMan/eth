@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from web3 import Web3
-from ethblockprocessor.data_models.trace_models import InternalTransaction
+from eth_block_processor.data_models.trace_models import InternalTransaction
 
 
 class TransactionTraceAnalyzer:

@@ -2,12 +2,12 @@ from web3 import Web3
 from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 from typing import List, Union, Optional
 
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
-from ethblockprocessor.data_models.alert_models import ContractCreationAlertData
-from ethblockprocessor.data_models.txn_models import TransactionType
-from ethblockprocessor.alert.models.hidden_mint import HiddenMintPredictor
-from ethblockprocessor.alert.config import HIDDEN_MINT_MODEL_PATH, get_grey_addresses
-from general_utils.general_utils.logging.logger import get_logger
+from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.alert_models import ContractCreationAlertData
+from eth_block_processor.data_models.txn_models import TransactionType
+from eth_block_processor.alert.models.hidden_mint import HiddenMintPredictor
+from eth_block_processor.alert.config import HIDDEN_MINT_MODEL_PATH, get_grey_addresses
+from eth_block_processor.utils.logger import get_logger
 
 
 logger = get_logger("contract_creation_alert", log_folder="alert")

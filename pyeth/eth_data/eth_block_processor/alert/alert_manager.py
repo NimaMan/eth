@@ -1,11 +1,11 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Tuple
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
-from ethblockprocessor.alert.trading_enabled_alert import TradingEnabledAlert
-from ethblockprocessor.alert.bribe_alert import BribeAlert
-from ethblockprocessor.alert.contract_creation_alert import ContractCreationAlert
-from ethblockprocessor.alert.user_involved_alert import GreyAddressAlert
+from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.alert.trading_enabled_alert import TradingEnabledAlert
+from eth_block_processor.alert.bribe_alert import BribeAlert
+from eth_block_processor.alert.contract_creation_alert import ContractCreationAlert
+from eth_block_processor.alert.user_involved_alert import GreyAddressAlert
 
 
 ALERT_CLASSES = {

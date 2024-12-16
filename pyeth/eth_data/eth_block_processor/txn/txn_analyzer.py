@@ -55,22 +55,57 @@ For parallel processing of multiple transactions, it's might be helpful to:
 """
 from web3 import Web3
 from functools import cached_property
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 from web3.types import TxData
-from ethblockprocessor.data_models.txn_models import DetailedTransaction, TransactionFees
-from ethblockprocessor.txn.txn_type_classifier import EthTransactionClassifier
-from ethblockprocessor.txn.txn_data_fetcher import TransactionDataFetcher
-from ethblockprocessor.txn.txn_log_analyzer import TransactionLogAnalyzer
-from ethblockprocessor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
-from ethblockprocessor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
-from ethblockprocessor.tokens.erc20_token_txn_store import ERC20TransactionDB
+from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
+from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
+from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
+from eth_block_processor.txn.txn_log_analyzer import TransactionLogAnalyzer
+from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
+from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
+from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
+from functools import wraps
+import cProfile
+import pstats
+import io
+from time import time
+from eth_block_processor.utils.logger import get_logger
+
+logger = get_logger(name="txn_analyzer", log_folder="eth_block_processor")
+
+def detailed_profiler(func):
+    """
+    Detailed profiling decorator that provides function-level timing statistics
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        pr = cProfile.Profile()
+        try:
+            pr.enable()
+            start_time = time()
+            result = func(*args, **kwargs)
+            end_time = time()
+            
+        finally:
+            try:
+                pr.disable()
+                s = io.StringIO()
+                ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+                ps.print_stats(10)  # Print top 10 time-consuming functions
+
+                logger.info(f"\nDetailed profiling for {func.__name__}:")
+                logger.info(f"Total time: {end_time - start_time:.3f}s")
+                logger.info(f"Function breakdown:\n{s.getvalue()}")
+                
+            except Exception as e:
+                logger.error(f"Error in profiler cleanup: {e}")
+                
+        return result
+    return wrapper
 
 
 class TransactionAnalyzer:
-    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = True):
-        if w3 is None:
-            w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-        self.w3 = w3
+    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False):
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_analyzer = TransactionLogAnalyzer(w3=w3)
@@ -78,40 +113,25 @@ class TransactionAnalyzer:
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
-    def analyze_transaction(self, transaction: Dict[str, Any], state_diff: bool = False, receipt: Dict[str, Any] = None) -> DetailedTransaction:
+    @detailed_profiler
+    def analyze_transaction(self, 
+                            transaction: Dict[str, Any], 
+                            receipt: Dict[str, Any],
+                            trace: Dict[str, Any]) -> DetailedTransaction:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
-
-        Args:
-            transaction (TxData): The transaction data from Web3.
-
-        Returns:
-            DetailedTransaction: A comprehensive representation of the transaction.
         """
-        txn_hash = transaction.hash
+        txn_hash = transaction['hash']
         from_address = transaction['from']
         to_address = transaction['to']
-        if receipt is None:
-            receipt = self.data_fetcher.get_transaction_receipt(txn_hash)
-        logs = self.log_analyzer.analyze_logs(receipt.logs)
+        logs = self.log_analyzer.analyze_logs(receipt['logs'])
         
-        fees = TransactionFees(
-            gas_price=receipt['effectiveGasPrice'],
-            gas_used=receipt['gasUsed'],
-            total_fee=receipt['effectiveGasPrice'] * receipt['gasUsed'],
-        )
+        fees = self._extract_transaction_fees(receipt)
         contract_address = receipt.get('contractAddress', None)
-        if state_diff:
-            raw_state_diff = self.data_fetcher.get_state_diff(txn_hash)
-            state_diffs, latest_states = self.state_diff_analyzer.parse_state_diff(raw_state_diff)
-        else:
-            state_diffs, latest_states = {}, {}
 
+        internal_transactions = []
         if self.needs_trace(transaction):
-            trace = self.data_fetcher.get_transaction_trace(txn_hash)
             internal_transactions = self.trace_analyzer.process_trace(trace)
-        else:
-            internal_transactions = []
         
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         unique_addresses = logs['unique_addresses']
@@ -157,8 +177,6 @@ class TransactionAnalyzer:
             fees=fees,
             unique_addresses=unique_addresses,
             erc20_contracts=erc20_contracts,
-            state_diffs=state_diffs,
-            latest_states=latest_states,
         )
         if self.save_erc20_txn_to_db:
             self.store_erc20_transaction(detailed_txn)
@@ -192,3 +210,87 @@ class TransactionAnalyzer:
             len(detailed_txn.withdraws) > 0:
             with ERC20TransactionDB() as erc20_transaction_db:
                 erc20_transaction_db.add_transaction(detailed_txn)
+
+    def _extract_transaction_fees(self, receipt: Dict[str, Any]) -> TransactionFees:
+        """Extract transaction fee information from receipt"""
+        # Convert hex values to integers if needed
+        gas_price = int(receipt['effectiveGasPrice'], 16) if isinstance(receipt['effectiveGasPrice'], str) else receipt['effectiveGasPrice']
+        gas_used = int(receipt['gasUsed'], 16) if isinstance(receipt['gasUsed'], str) else receipt['gasUsed']
+        
+        return TransactionFees(
+            gas_price=gas_price,
+            gas_used=gas_used,
+            total_fee=gas_price * gas_used,
+        )
+
+    async def analyze_transaction_async(self, 
+                                        transaction: Dict[str, Any], 
+                                        receipt: Dict[str, Any] = None,
+                                        trace: Dict[str, Any] = None,
+                                        state_diff: bool = False) -> DetailedTransaction:
+        """Async version of analyze_transaction"""
+        
+        # Process logs
+        logs = self.log_analyzer.analyze_logs(receipt['logs'])
+        
+        # Extract fees
+        fees = self._extract_transaction_fees(receipt)
+        
+        # Get contract address if contract creation
+        contract_address = receipt.get('contractAddress', None)
+        
+        # Process trace if needed
+        internal_transactions = []
+        if self.needs_trace(transaction) and trace:
+            internal_transactions = self.trace_analyzer.process_trace(trace)
+        
+        # Get state diffs if requested
+        if state_diff:
+            state_diffs, latest_states = self.state_diff_analyzer.parse_state_diff(
+                self.data_fetcher.get_state_diff(transaction['hash'])
+            )
+        else:
+            state_diffs, latest_states = {}, {}
+
+        # Classify transaction type
+        tx_type = self.transaction_classifier.classify_transaction(transaction)
+        
+        return DetailedTransaction(
+            hash=transaction['hash'],
+            txn_type=tx_type,
+            block_number=receipt['blockNumber'],
+            txn_index=receipt['transactionIndex'],
+            from_address=transaction['from'],
+            to_address=transaction['to'],
+            contract_address=contract_address,
+            value=transaction['value'],
+            status=receipt['status'],
+            nonce=transaction['nonce'],
+            input=transaction['input'],
+            erc20_transfers=logs['erc20_transfers'],
+            erc721_transfers=logs['erc721_transfers'],
+            erc1155_transfers=logs['erc1155_transfers'],
+            uniswap_v2_syncs=logs['uniswap_v2_syncs'],
+            uniswap_v2_swaps=logs['uniswap_v2_swaps'],
+            approvals=logs['approvals'],
+            mints=logs['mints'],
+            burns=logs['burns'],
+            deposits=logs['deposits'],
+            withdraws=logs['withdraws'],
+            actions=logs.get('actions', []),  # Add missing fields
+            eth_transfers=logs.get('eth_transfers', []),
+            pair_events=logs.get('pair_events', []),
+            owner_events=logs.get('owner_events', []),
+            contract_interactions=logs.get('contract_interactions', []),
+            trading_enabled_events=logs.get('trading_enabled_events', []),
+            trading_disabled_events=logs.get('trading_disabled_events', []),
+            other_events=logs.get('other_events', []),
+            unique_addresses=logs['unique_addresses'],
+            erc20_contracts=logs['erc20_contracts'],
+            internal_transactions=internal_transactions,
+            fees=fees,
+            state_diffs=state_diffs,
+            latest_states=latest_states
+        )
+
+    

@@ -1,7 +1,7 @@
 import time
 import functools
 import asyncio
-from ethblockprocessor.utils.profiling.performance_logger import PerformanceLogger
+from eth_block_processor.utils.profiling.performance_logger import PerformanceLogger
 
 
 def profile_async(category: str):

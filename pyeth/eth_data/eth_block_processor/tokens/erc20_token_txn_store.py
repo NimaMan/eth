@@ -1,7 +1,8 @@
 import lmdb
 import json
 import os
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import DetailedTransaction
+from typing import List
 
 
 class ERC20TransactionDB:
@@ -101,3 +102,26 @@ class ERC20TransactionDB:
         if self.env:
             self.env.close()
             self.env = None
+
+    def add_transactions_batch(self, detailed_txns: List[DetailedTransaction]):
+        """Batch insert ERC20 transactions"""
+        values = []
+        for txn in detailed_txns:
+            if self._should_store_transaction(txn):
+                values.append(self._prepare_transaction_data(txn))
+                
+        if values:
+            with self.engine.connect() as conn:
+                conn.execute(
+                    self.table.insert(),
+                    values
+                )
+                conn.commit()
+    
+    def _should_store_transaction(self, txn: DetailedTransaction) -> bool:
+        return (txn.txn_type == 'ERC20_TRANSFER' or
+                len(txn.erc20_contracts) > 0 or
+                len(txn.approvals) > 0 or
+                any(len(getattr(txn, attr)) > 0 for attr in 
+                    ['uniswap_v2_syncs', 'uniswap_v2_swaps', 
+                     'mints', 'burns', 'deposits', 'withdraws']))

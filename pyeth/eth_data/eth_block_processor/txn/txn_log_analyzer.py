@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 from web3 import Web3
 from decimal import Decimal
-from ethblockprocessor.data_models.receipt_models import *
+from eth_block_processor.data_models.receipt_models import *
 
 
 class TransactionLogAnalyzer:
@@ -150,7 +150,7 @@ class TransactionLogAnalyzer:
     def classify_and_parse_log(self, log: Dict[str, Any]) -> Any:
         if not log['topics']:
             return None
-        topic = log['topics'][0].hex()
+        topic = log['topics'][0].hex() if isinstance(log['topics'][0], bytes) else log['topics'][0]
         try:
             if topic == self.erc20_transfer_topic:
                 return self.parse_erc20_transfer(log)
@@ -188,12 +188,20 @@ class TransactionLogAnalyzer:
             return self.parse_other_event(log)
 
     def parse_erc20_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:
+        """Parse ERC20 Transfer event log"""
+        # Handle both hex string and bytes data formats
+        data = log['data']
+        if isinstance(data, bytes):
+            data = data.hex()
+        if not data.startswith('0x'):
+            data = '0x' + data
+        
         return ERC20Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
-            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
-            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
-            amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-            log_index=log['logIndex'],
+            from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if isinstance(log['topics'][1], bytes) else self.w3.to_checksum_address(log['topics'][1][-40:]),
+            to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if isinstance(log['topics'][2], bytes) else self.w3.to_checksum_address(log['topics'][2][-40:]),
+            amount=int(data, 16) if data != '0x' else 0,
+            log_index=log['logIndex']
         )
 
     def parse_erc721_transfer(self, log: Dict[str, Any]) -> ERC721Transfer:
@@ -362,7 +370,7 @@ class TransactionLogAnalyzer:
     def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
         return {
             'address': self.w3.to_checksum_address(log['address']),
-            'topics': [topic.hex() for topic in log.get('topics', [])],
+            'topics': [topic.hex() if isinstance(topic, bytes) else topic for topic in log.get('topics', [])],
             'data': log['data'].hex() if isinstance(log['data'], bytes) else log['data'],
             'log_index': log.get('logIndex', None),
         }

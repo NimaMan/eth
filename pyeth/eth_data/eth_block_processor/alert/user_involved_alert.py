@@ -1,9 +1,9 @@
 from typing import Set, List
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
-from ethblockprocessor.data_models.alert_models import UserInvolvedAlertData
-from ethblockprocessor.alert.base_alert_class import BaseAlert
-from ethblockprocessor.alert.config import get_grey_addresses
-from general_utils.general_utils.logging.logger import get_logger
+from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.alert_models import UserInvolvedAlertData
+from eth_block_processor.alert.base_alert_class import BaseAlert
+from eth_block_processor.alert.config import get_grey_addresses
+from eth_block_processor.utils.logger import get_logger
 
 
 logger = get_logger("user_involved_alert", log_folder="alert")

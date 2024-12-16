@@ -1,8 +1,8 @@
 # Description: Test the HiddenMintPredict
 
 from web3 import Web3
-from ethblockprocessor.alert.models.hidden_mint import HiddenMintPredictor
-from ethblockprocessor.alert.config import HIDDEN_MINT_MODEL_PATH
+from eth_block_processor.alert.models.hidden_mint import HiddenMintPredictor
+from eth_block_processor.alert.config import HIDDEN_MINT_MODEL_PATH
 
 
 if __name__ == "__main__":

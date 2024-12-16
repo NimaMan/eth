@@ -3,8 +3,8 @@ import asyncio
 import time
 from unittest.mock import Mock, patch
 from web3 import Web3
-from ethblockprocessor.blockchain.block_txn_processor import BlockTxnProcessor
-from ethblockprocessor.data_models.txn_models import DetailedTransaction, TransactionType
+from eth_block_processor.blockchain.block_txn_processor import BlockTxnProcessor
+from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionType
 
 
 TEST_BLOCK = 21142465  

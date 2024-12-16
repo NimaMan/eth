@@ -3,8 +3,8 @@ import asyncio
 import time
 from typing import Dict, Any, List
 
-from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
-from ethblockprocessor.utils.logger import get_logger
+from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.utils.logger import get_logger
 
 
 logger = get_logger()

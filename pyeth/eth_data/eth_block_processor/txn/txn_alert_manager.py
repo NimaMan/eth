@@ -1,8 +1,8 @@
 from web3 import Web3
 from typing import List, Dict, Any
-from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
-from ethblockprocessor.alert.alert_manager import AlertManager
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.alert.alert_manager import AlertManager
+from eth_block_processor.data_models.txn_models import DetailedTransaction
 
 
 class TransactionAlertManager:

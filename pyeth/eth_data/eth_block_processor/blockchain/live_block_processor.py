@@ -4,10 +4,12 @@ from web3.types import BlockData
 from hexbytes import HexBytes
 import asyncio
 
-from ethblockprocessor.blockchain.block_processor import BlockProcessor
-from ethblockprocessor.utils.logger import get_logger
+from eth_block_processor.blockchain.block_processor import BlockProcessor
+from eth_block_processor.utils.logger import get_logger
 
-logger = get_logger("live_block_processor")
+
+logger = get_logger(name="live_block_processor", log_folder="eth_block_processor")
+
 
 class LiveBlockProcessor:
     def __init__(self, websocket_url: str = "ws://127.0.0.1:8546",

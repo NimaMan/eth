@@ -1,4 +1,4 @@
-from ethblockprocessor.utils.logger import get_logger
+from eth_block_processor.utils.logger import get_logger
 import asyncio
 import json
 from typing import Dict, Any, List

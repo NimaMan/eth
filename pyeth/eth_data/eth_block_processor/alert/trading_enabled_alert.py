@@ -1,7 +1,7 @@
 import pandas as pd
-from ethblockprocessor.data_models.txn_models import DetailedTransaction, TransactionType
-from ethblockprocessor.data_models.alert_models import TradingEnabledAlertData
-from general_utils.general_utils.logging.logger import get_logger
+from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionType
+from eth_block_processor.data_models.alert_models import TradingEnabledAlertData
+from eth_block_processor.utils.logger import get_logger
 
 
 logger = get_logger("trading_enabled_alert", log_folder="alert")
@@ -9,7 +9,7 @@ logger = get_logger("trading_enabled_alert", log_folder="alert")
 
 class TradingEnabledAlert:
     def __init__(self):
-        #self.alert_path = "ethblockprocessor/logs/trading_enabled_alert.csv"
+        #self.alert_path = "eth_block_processor/logs/trading_enabled_alert.csv"
         #self.df = pd.read_csv(self.alert_path)
         pass 
     

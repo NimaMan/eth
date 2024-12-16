@@ -6,10 +6,10 @@ import io
 from web3 import Web3
 
 # Import your existing modules
-from ethblockprocessor.blockchain.block_fetcher import BlockFetcher
-from ethblockprocessor.alert.alert_manager import AlertManager
-from ethblockprocessor.txn.txn_analyzer import TransactionAnalyzer
-from ethblockprocessor.utils.logger import get_logger
+from eth_block_processor.blockchain.block_fetcher import BlockFetcher
+from eth_block_processor.alert.alert_manager import AlertManager
+from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.utils.logger import get_logger
 
 
 logger = get_logger("profile_alert_manager")

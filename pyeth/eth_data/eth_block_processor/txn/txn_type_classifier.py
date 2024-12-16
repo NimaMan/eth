@@ -1,7 +1,6 @@
 from hexbytes import HexBytes
 from typing import Dict, Any, Union
 from web3 import Web3
-from ethblockprocessor.data_models.txn_models import TransactionType
 
 
 class ContractInteractionClassifier:
@@ -104,7 +103,7 @@ class ContractInteractionClassifier:
         elif isinstance(input_data, str):
             function_signature = input_data[:10]
         else:
-            return TransactionType.CONTRACT_INTERACTION.value
+            return "Contract Interaction"
 
         if function_signature in self.known_functions:
             return self.known_functions[function_signature]
@@ -112,7 +111,7 @@ class ContractInteractionClassifier:
         if to_address in self.known_contracts:
             return self.known_contracts[to_address]
 
-        return TransactionType.CONTRACT_INTERACTION.value
+        return "Contract Interaction"
 
 
 class EthTransactionClassifier:
@@ -126,19 +125,19 @@ class EthTransactionClassifier:
 
     def classify_transaction(self, transaction: Dict[str, Any]) -> str:
         if transaction.get('to') is None:
-            return TransactionType.CONTRACT_CREATION.value
+            return "Contract Creation"
         else:
             input_data = transaction.get('input')
             if input_data.hex() == '0x' or input_data.hex() == '':
-                return TransactionType.ETH_TRANSFER.value
+                return "Ether Transfer"
             elif self._starts_with(input_data, self.erc20_transfer_signature):
-                return TransactionType.ERC20_TRANSFER.value
+                return "ERC20 Transfer"
             elif self._starts_with(input_data, self.erc721_transfer_signature):
-                return TransactionType.ERC721_TRANSFER.value
+                return "ERC721 Transfer"
             elif self._starts_with(input_data, self.erc1155_transfer_signature):
-                return TransactionType.ERC1155_TRANSFER.value
+                return "ERC1155 Transfer"
             elif self._starts_with(input_data, self.approve_signature):
-                return TransactionType.APPROVE.value
+                return "Approval"
             else:
                 return self.contract_interaction_classifier.classify_interaction(transaction)
 

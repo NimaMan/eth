@@ -1,6 +1,6 @@
 from typing import Any
 from abc import ABC, abstractmethod
-from ethblockprocessor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import DetailedTransaction
 
 
 class BaseAlert(ABC):
