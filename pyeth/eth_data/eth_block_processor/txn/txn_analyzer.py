@@ -53,10 +53,9 @@ For parallel processing of multiple transactions, it's might be helpful to:
 2. Process different transactions concurrently at a higher level
 3. Use a transaction queue system for real-time monitoring
 """
+import numpy as np
 from web3 import Web3
-from functools import cached_property
 from typing import Dict, Any, Tuple, List
-from web3.types import TxData
 from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
@@ -64,48 +63,11 @@ from eth_block_processor.txn.txn_log_analyzer import TransactionLogAnalyzer
 from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
-from functools import wraps
-import cProfile
-import pstats
-import io
-from time import time
-from eth_block_processor.utils.logger import get_logger
-
-logger = get_logger(name="txn_analyzer", log_folder="eth_block_processor")
-
-def detailed_profiler(func):
-    """
-    Detailed profiling decorator that provides function-level timing statistics
-    """
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        pr = cProfile.Profile()
-        try:
-            pr.enable()
-            start_time = time()
-            result = func(*args, **kwargs)
-            end_time = time()
-            
-        finally:
-            try:
-                pr.disable()
-                s = io.StringIO()
-                ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
-                ps.print_stats(10)  # Print top 10 time-consuming functions
-
-                logger.info(f"\nDetailed profiling for {func.__name__}:")
-                logger.info(f"Total time: {end_time - start_time:.3f}s")
-                logger.info(f"Function breakdown:\n{s.getvalue()}")
-                
-            except Exception as e:
-                logger.error(f"Error in profiler cleanup: {e}")
-                
-        return result
-    return wrapper
 
 
 class TransactionAnalyzer:
     def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False):
+        self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_analyzer = TransactionLogAnalyzer(w3=w3)
@@ -113,7 +75,6 @@ class TransactionAnalyzer:
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
-    @detailed_profiler
     def analyze_transaction(self, 
                             transaction: Dict[str, Any], 
                             receipt: Dict[str, Any],
@@ -216,11 +177,12 @@ class TransactionAnalyzer:
         # Convert hex values to integers if needed
         gas_price = int(receipt['effectiveGasPrice'], 16) if isinstance(receipt['effectiveGasPrice'], str) else receipt['effectiveGasPrice']
         gas_used = int(receipt['gasUsed'], 16) if isinstance(receipt['gasUsed'], str) else receipt['gasUsed']
-        
+        total_fee = gas_price * gas_used
+        total_fee = np.float64(self.w3.from_wei(total_fee, 'ether'))
         return TransactionFees(
             gas_price=gas_price,
             gas_used=gas_used,
-            total_fee=gas_price * gas_used,
+            total_fee=total_fee,
         )
 
     async def analyze_transaction_async(self, 
@@ -277,7 +239,7 @@ class TransactionAnalyzer:
             burns=logs['burns'],
             deposits=logs['deposits'],
             withdraws=logs['withdraws'],
-            actions=logs.get('actions', []),  # Add missing fields
+            actions=logs.get('actions', []),
             eth_transfers=logs.get('eth_transfers', []),
             pair_events=logs.get('pair_events', []),
             owner_events=logs.get('owner_events', []),

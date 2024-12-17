@@ -1,43 +1,65 @@
 from eth_block_processor.alert.base_alert_class import BaseAlert
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from web3.types import BlockData
+from typing import List, Any
 from eth_block_processor.data_models.alert_models import BribeAlertData
-from eth_block_processor.alert.config import bribe_threshold
+from eth_block_processor.data_models.txn_models import DetailedTransaction
 from eth_block_processor.utils.logger import get_logger
-
 
 logger = get_logger("bribe_alert", log_folder="alert")
 
-
 class BribeAlert(BaseAlert):
-    def __init__(self, bribe_threshold: float = bribe_threshold):
-        self.fee_recipients_set = fee_recipients_set
-        self.bribe_threshold = bribe_threshold
-
-    def get_alert(self, txn: DetailedTransaction):
-        internal_txns = txn.internal_transactions
-        if internal_txns:
-            for internal_txn in internal_txns:
-                if internal_txn.to_address in self.fee_recipients_set:
-                    txn.bribe_amount += float(internal_txn.value)
-                    if txn.bribe_amount > self.bribe_threshold:
-                        alert_data = self.create_alert(txn)
-                        self.send_alert(alert_data)
-                        return [alert_data]
-        return []
+    def __init__(self):
+        self.max_latency = 1.0  # 1 second max latency
+        self.fee_recipients = fee_recipients  # Using the fee_recipients dict defined in the file
+        
+    def _is_alert(self, tx: DetailedTransaction) -> bool:
+        """
+        Check if transaction is a potential bribe
+        
+        Args:
+            tx: The transaction to check
+            
+        Returns:
+            bool: True if transaction is a potential bribe
+        """
+        # Check if recipient is a known builder
+        if tx.to_address in self.fee_recipients:
+            # Consider it a potential bribe if value is sent to a builder
+            return tx.value > 0
+        return False
+        
+    async def process(self, block: BlockData) -> List[Any]:
+        """Process a block to detect potential bribe events"""
+        alerts = []
+        for tx in block.transactions:
+            if self._is_alert(tx):
+                alert_data = self.create_alert(tx)
+                alerts.append(alert_data)
+        return alerts
     
-    def create_alert(self, txn: DetailedTransaction):
-        alert_data = BribeAlertData(
+    def create_alert(self, txn: DetailedTransaction) -> BribeAlertData:
+        """Create a bribe alert from transaction data"""
+        return BribeAlertData(
             block_number=txn.block_number,
             transaction_hash=txn.hash.hex(),
             from_address=txn.from_address,
+            to_address=txn.to_address,
             value=txn.value,
-            bribe_amount=txn.bribe_amount,
-            alert_type="Bribe",
+            timestamp=txn.timestamp
         )
-        return alert_data
+    
+    def get_alert(self, txn: DetailedTransaction) -> List[BribeAlertData]:
+        """Check if transaction should trigger a bribe alert"""
+        if self._is_alert(txn):
+            alert_data = self.create_alert(txn)
+            self.send_alert(alert_data)
+            return [alert_data]
+        return []
 
-    def send_alert(self, alert_data: BribeAlertData):
-        logger.info(f"{alert_data}")
+    def send_alert(self, alert_data: BribeAlertData) -> None:
+        """Send/log the bribe alert"""
+        builder_name = self.fee_recipients.get(alert_data.to_address, "Unknown Builder")
+        logger.info(f"Potential Bribe Alert: {alert_data.value} ETH sent to {builder_name} ({alert_data.to_address})")
 
 
 fee_recipients = {
@@ -136,8 +158,3 @@ fee_recipients = {
     '0x00066282d9FAc206F8F0fd0b935958ae55E13333': 'MEV Builder: 0x000...333',
     '0x418211EFaf54e6A9b376f6Bfd9E0AE304E064CBb': 'MEV Builder: 0x418...CBb'
     }
-
-# create a set of the fee recipients in lowercase 
-fee_recipients_set = {address.lower() for address in fee_recipients}
-
-

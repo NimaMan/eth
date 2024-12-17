@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 from eth_typing import ChecksumAddress
-from web3.types import Wei, HexBytes
 
 
 @dataclass
@@ -27,13 +26,13 @@ class TransactionTrace:
 class InternalTransaction:
     from_address: ChecksumAddress
     to_address: ChecksumAddress
-    value: Wei
+    value: int 
     depth: int
     type: str
     gas: int
     gas_used: int
     error: Optional[str]
-    #input: HexBytes
+    #input: str
     
 
 @dataclass
@@ -41,8 +40,8 @@ class TraceOperation:
     type: str
     from_address: ChecksumAddress
     to_address: ChecksumAddress
-    value: Wei
+    value: int 
     gas: int
     gas_used: int
-    input: HexBytes
+    input: str
     

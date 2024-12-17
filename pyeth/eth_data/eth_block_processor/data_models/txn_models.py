@@ -1,5 +1,5 @@
+import numpy as np
 from dataclasses import dataclass, field
-from decimal import Decimal
 from enum import Enum
 from typing import List, Optional, Dict, Any, Union, Set
 from web3.types import ChecksumAddress, Wei, Hash32
@@ -35,16 +35,16 @@ class TransactionFees:
 
 @dataclass
 class DetailedTransaction:
-    hash: Union[str, HexBytes]
-    block_number: Union[str, int]
-    txn_index: Union[str, int]
-    from_address: Union[str, HexBytes, ChecksumAddress]
-    to_address: Optional[Union[str, HexBytes, ChecksumAddress]]
-    contract_address: Optional[Union[str, HexBytes, ChecksumAddress]]
-    value: Union[str, int, Wei]
-    status: Union[str, int, bool]
-    nonce: Union[str, int]
-    input: Union[str, HexBytes]
+    hash: str
+    block_number: int
+    txn_index: int
+    from_address: ChecksumAddress
+    to_address: Optional[ChecksumAddress]
+    contract_address: Optional[ChecksumAddress]
+    value: int 
+    status: str
+    nonce: int
+    input: str
     
     txn_type: str
     actions: List[TransactionAction]
@@ -76,16 +76,16 @@ class DetailedTransaction:
     bribe_amount: float = 0
 
     def __init__(self, 
-                 hash: Union[str, HexBytes],
-                 block_number: Union[str, int],
-                 txn_index: Union[str, int],
-                 from_address: Union[str, HexBytes, ChecksumAddress],
-                 to_address: Optional[Union[str, HexBytes, ChecksumAddress]],
-                 contract_address: Optional[Union[str, HexBytes, ChecksumAddress]],
-                 value: Union[str, int, Wei],
-                 status: Union[str, int, bool],
-                 nonce: Union[str, int],
-                 input: Union[str, HexBytes],
+                 hash: str,
+                 block_number: int,
+                 txn_index: int,
+                 from_address: str,
+                 to_address: Optional[str],
+                 contract_address: Optional[str],
+                 value: np.float64,
+                 status: str,
+                 nonce: int,
+                 input: str,
                  txn_type: str,
                  actions: Optional[List[TransactionAction]] = None,
                  eth_transfers: Optional[List[ETHTransfer]] = None,
@@ -115,16 +115,16 @@ class DetailedTransaction:
         """Initialize DetailedTransaction with type conversion handling"""
         
         # Core transaction fields
-        self.hash = HexBytes(hash)
+        self.hash = convert_to_hex_str(hash)
         self.block_number = convert_block_number(block_number)
         self.txn_index = convert_transaction_index(txn_index)
         self.from_address = normalize_address(from_address)
         self.to_address = normalize_address(to_address) if to_address else None
-        self.value = value
+        self.value = np.float64(convert_to_int(value))
         self.contract_address = normalize_address(contract_address) if contract_address else None
         self.status = convert_status(status)
         self.nonce = convert_to_int(nonce)
-        self.input = HexBytes(input)
+        self.input = convert_to_hex_str(input)
         self.txn_type = txn_type
 
         # Lists initialization with empty defaults

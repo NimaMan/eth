@@ -1,22 +1,44 @@
-from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
 import asyncio
+
+from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
+from eth_block_processor.blockchain.block_queue import processed_block_queue
+from eth_block_processor.utils.logger import get_logger
+
+
+logger = get_logger(name="live_block_processor", log_folder="eth_block_processor")
 
 
 async def main():
-    # Initialize the processor
-    processor = LiveBlockProcessor()
+    """
+    Main entry point for the Ethereum Alert System.
     
+    Objective:
+    - Initialize and run LiveBlockProcessor and AlertManager concurrently.
+    - Ensure both components run continuously and handle their respective tasks.
+    - Manage graceful shutdown and resource cleanup.
+    """
+    # Initialize components
+    live_processor = LiveBlockProcessor()
+    
+    # Start monitoring new blocks
+    block_processor_task = asyncio.create_task(
+        live_processor.monitor_new_blocks(),
+        name="LiveBlockProcessor"
+    )
     try:
-        # Connect to WebSocket
-        await processor.w3.provider.connect()
-        
-        # Start monitoring blocks
-        await processor.monitor_new_blocks()
+        # Run both tasks concurrently
+        await asyncio.gather(block_processor_task)
+    except asyncio.CancelledError:
+        logger.info("Main tasks have been cancelled. Initiating shutdown.")
     finally:
         # Ensure proper cleanup
-        if hasattr(processor.w3, 'provider'):
-            await processor.w3.provider.disconnect()
+        if hasattr(live_processor.w3, 'provider'):
+            await live_processor.w3.provider.disconnect()
+        logger.info("Shutdown complete.")
 
-        
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received. Exiting...")

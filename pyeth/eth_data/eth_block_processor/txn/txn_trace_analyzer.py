@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Dict, Any, List
 from web3 import Web3
 from eth_block_processor.data_models.trace_models import InternalTransaction
@@ -17,7 +18,7 @@ class TransactionTraceAnalyzer:
                     InternalTransaction(
                         from_address=trace['from'],
                         to_address=trace.get('to') or trace.get('result', {}).get('address', 'Contract Creation'),
-                        value=self.w3.from_wei(value, 'ether'),
+                        value=np.float64(self.w3.from_wei(value, 'ether')),
                         depth=depth,
                         type=trace['type'],
                         #input=trace.get('input', ''),

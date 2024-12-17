@@ -29,7 +29,8 @@ Key Components and Flow:
 
 Implementation Details:
 --------------------
-1. Data Flow:
+1. Data Flow:sudo systemctl start rabbitmq-server
+sudo systemctl enable rabbitmq-server
    a. Input: Block number(s) or block data
    b. Processing:
       - Fetch blocks in parallel
@@ -92,46 +93,6 @@ from eth_block_processor.utils.profiling.decorators import profile_async
 logger = get_logger(name="block_processor", log_folder="eth_block_processor")
 
 
-from functools import wraps
-import cProfile
-import pstats
-import io
-from time import time
-
-def detailed_profiler(func):
-    """
-    Detailed profiling decorator that provides function-level timing statistics
-    with proper cleanup
-    """
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        pr = cProfile.Profile()
-        try:
-            pr.enable()
-            start_time = time()
-            result = await func(*args, **kwargs)
-            end_time = time()
-            
-        finally:
-            try:
-                pr.disable()
-                # Get detailed stats
-                s = io.StringIO()
-                ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
-                ps.print_stats(10)  # Print top 10 time-consuming functions
-
-                logger.info(f"\nDetailed profiling for {func.__name__}:")
-                logger.info(f"Total time: {end_time - start_time:.3f}s")
-                logger.info(f"Function breakdown:\n{s.getvalue()}")
-                
-            except Exception as e:
-                logger.error(f"Error in profiler cleanup: {e}")
-                
-        return result
-    return wrapper
-
-
-
 class BlockProcessor:
     def __init__(self, node_url: str = "http://127.0.0.1:8545", 
                  save_erc20_txn_to_db: bool = False,):
@@ -142,7 +103,6 @@ class BlockProcessor:
             save_erc20_txn_to_db=save_erc20_txn_to_db,
         )
     
-    @detailed_profiler
     async def process_block_range(self, start_block: int, end_block: int):
         """Process a range of blocks using batched processing"""
         overall_metrics = {
@@ -168,23 +128,21 @@ class BlockProcessor:
         
         return results
 
-    @detailed_profiler
-    async def process_block(self, block_number: int):
+    async def process_block(self, block_number: int, transactions=None):
         """Process a single block"""
         try:
-            # Fetch block
-            block = await self.block_fetcher.fetch_block_by_number(block_number)
-            if not block:
-                raise ValueError(f"Block {block_number} not found")
-            
+            if transactions is None:
+                # Fetch block
+                block_data = await self.block_fetcher.fetch_block_by_number(block_number)
+                transactions = block_data['transactions']
             # Process all transactions in the block 
             processed_transactions = await self.batch_analyzer.analyze_block_transactions(
                 block_number=block_number,
-                transactions=block['transactions']
+                transactions=transactions
             )
             return processed_transactions
         except Exception as e:
-            logger.error(f"Error processing block {block_number}: {str(e)}")
+            logger.error(f" {__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
             raise
 
 

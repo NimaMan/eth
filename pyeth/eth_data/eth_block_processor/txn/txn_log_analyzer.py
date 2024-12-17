@@ -201,7 +201,7 @@ class TransactionLogAnalyzer:
             from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if isinstance(log['topics'][1], bytes) else self.w3.to_checksum_address(log['topics'][1][-40:]),
             to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if isinstance(log['topics'][2], bytes) else self.w3.to_checksum_address(log['topics'][2][-40:]),
             amount=int(data, 16) if data != '0x' else 0,
-            log_index=log['logIndex']
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
 
     def parse_erc721_transfer(self, log: Dict[str, Any]) -> ERC721Transfer:
@@ -210,7 +210,7 @@ class TransactionLogAnalyzer:
             from_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
             to_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
             token_id=int(log['topics'][3].hex(), 16) if len(log['topics']) > 3 and log['topics'][3].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
 
     def parse_erc1155_single_transfer(self, log: Dict[str, Any]) -> ERC1155Transfer:
@@ -222,7 +222,7 @@ class TransactionLogAnalyzer:
             to_address=self.w3.to_checksum_address(log['topics'][3].hex()[-40:]),
             token_ids=[int(data[:64], 16) if data[:64] else 0],
             amounts=[int(data[64:128], 16) if len(data) >= 128 and data[64:128] else 0],
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
 
     def parse_erc1155_batch_transfer(self, log: Dict[str, Any]) -> ERC1155Transfer:
@@ -242,7 +242,7 @@ class TransactionLogAnalyzer:
             to_address=self.w3.to_checksum_address(log['topics'][3].hex()[-40:]),
             token_ids=ids,
             amounts=amounts,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_uniswap_v2_sync(self, log: Dict[str, Any]) -> UniswapV2Sync:
@@ -250,7 +250,7 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             reserve0=int(log['data'].hex()[:64], 16) if log['data'].hex()[:64] != '' else 0,
             reserve1=int(log['data'].hex()[64:], 16) if log['data'].hex()[64:] != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_uniswap_v2_swap(self, log: Dict[str, Any]) -> UniswapV2Swap:
@@ -262,7 +262,7 @@ class TransactionLogAnalyzer:
             amount1In=int(log['data'].hex()[64:128], 16) if log['data'].hex()[64:128] != '' else 0,
             amount0Out=int(log['data'].hex()[128:192], 16) if log['data'].hex()[128:192] != '' else 0,
             amount1Out=int(log['data'].hex()[192:], 16) if log['data'].hex()[192:] != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
 
     def parse_approve(self, log: Dict[str, Any]) -> ERC20Approval:
@@ -271,7 +271,7 @@ class TransactionLogAnalyzer:
             owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if len(log['topics']) > 1 else None,
             spender=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
             amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_erc721_approval(self, log: Dict[str, Any]) -> ERC721Approval:
@@ -280,7 +280,7 @@ class TransactionLogAnalyzer:
             owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             approved=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
             token_id=int(log['topics'][3].hex(), 16) if log['topics'][3].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_mint(self, log: Dict[str, Any]) -> MintAction:
@@ -289,7 +289,7 @@ class TransactionLogAnalyzer:
             sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             amount0=int(log['data'].hex()[:64], 16) if log['data'].hex()[:64] != '' else 0,
             amount1=int(log['data'].hex()[64:], 16) if log['data'].hex()[64:] != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_burn(self, log: Dict[str, Any]) -> BurnAction:
@@ -297,7 +297,7 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_deposit(self, log: Dict[str, Any]) -> DepositAction:
@@ -307,7 +307,7 @@ class TransactionLogAnalyzer:
                 pair_address=self.w3.to_checksum_address(log['address']),
                 sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
                 amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-                log_index=log['logIndex'],
+                log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
             )
         else:
             # This is likely the custom deposit
@@ -318,7 +318,7 @@ class TransactionLogAnalyzer:
                 pair_address=self.w3.to_checksum_address(log['address']),
                 sender=sender,
                 amount=amount,
-                log_index=log['logIndex'],
+                log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
             )
     
     def parse_withdraw(self, log: Dict[str, Any]) -> WithdrawAction:
@@ -327,14 +327,14 @@ class TransactionLogAnalyzer:
                 pair_address=self.w3.to_checksum_address(log['address']),
                 sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
                 amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-                log_index=log['logIndex'],
+                log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
             )
         else:
             return WithdrawAction(
                 pair_address=self.w3.to_checksum_address(log['address']),
                 sender=None,
                 amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
-                log_index=log['logIndex'],
+                log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
             )
     
     def parse_pair(self, log: Dict[str, Any]) -> PairAction:
@@ -342,7 +342,7 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             token0=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             token1=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_owner(self, log: Dict[str, Any]) -> OwnerEvent:
@@ -350,21 +350,21 @@ class TransactionLogAnalyzer:
             pair_address=self.w3.to_checksum_address(log['address']),
             previous_owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             new_owner=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_trading_enabled(self, log: Dict[str, Any]) -> TradingEnabledEvent:
         return TradingEnabledEvent(
             token_address=self.w3.to_checksum_address(log['address']),
             block_number=int(log['topics'][1].hex(), 16) if log['topics'][1].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_trading_disabled(self, log: Dict[str, Any]) -> TradingDisabledEvent:  
         return TradingDisabledEvent(
             token_address=self.w3.to_checksum_address(log['address']),
             block_number=int(log['topics'][1].hex(), 16) if log['topics'][1].hex() != '' else 0,
-            log_index=log['logIndex'],
+            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         )
     
     def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
@@ -372,5 +372,5 @@ class TransactionLogAnalyzer:
             'address': self.w3.to_checksum_address(log['address']),
             'topics': [topic.hex() if isinstance(topic, bytes) else topic for topic in log.get('topics', [])],
             'data': log['data'].hex() if isinstance(log['data'], bytes) else log['data'],
-            'log_index': log.get('logIndex', None),
+            'log_index': log.get('logIndex', None) if isinstance(log['logIndex'], int) else int(log['logIndex'], 16),
         }

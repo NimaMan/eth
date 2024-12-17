@@ -32,7 +32,7 @@ import time
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger()
+logger = get_logger(name="txn_analyzer")
 
 
 class TransactionBatchAnalyzer:
@@ -150,6 +150,6 @@ class TransactionBatchAnalyzer:
                 state_diff=state_diff
             )
         except Exception as e:
-            logger.error(f"Error analyzing transaction {transaction['hash']}: {str(e)}")
+            logger.error(f"{__name__} Error analyzing transaction {transaction['hash']}: {str(e)}")
             raise
     

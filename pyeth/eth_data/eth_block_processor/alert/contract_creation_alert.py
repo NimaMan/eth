@@ -4,11 +4,10 @@ from typing import List, Union, Optional
 
 from eth_block_processor.data_models.txn_models import DetailedTransaction
 from eth_block_processor.data_models.alert_models import ContractCreationAlertData
-from eth_block_processor.data_models.txn_models import TransactionType
 from eth_block_processor.alert.models.hidden_mint import HiddenMintPredictor
 from eth_block_processor.alert.config import HIDDEN_MINT_MODEL_PATH, get_grey_addresses
 from eth_block_processor.utils.logger import get_logger
-
+from eth_block_processor.alert.base_alert_class import BaseAlert    
 
 logger = get_logger("contract_creation_alert", log_folder="alert")
 
@@ -82,7 +81,7 @@ class ContractCreationAlert:
         self.grey_addresses = get_grey_addresses()
 
     def get_alert(self, transaction: DetailedTransaction) -> List[ContractCreationAlertData]:
-        if transaction.txn_type == TransactionType.CONTRACT_CREATION.value:
+        if transaction.txn_type == "ContractCreation":
             alert_data = self.create_alert(transaction)
             self.send_alert(alert_data)
             return [alert_data]
