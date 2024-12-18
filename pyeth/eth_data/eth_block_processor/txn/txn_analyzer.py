@@ -90,6 +90,9 @@ class TransactionAnalyzer:
         for internal_txn in internal_transactions:
             unique_addresses.add(internal_txn.from_address)
             unique_addresses.add(internal_txn.to_address)
+        # remove None from unique_addresses if it exists
+        if None in unique_addresses:
+            unique_addresses.remove(None)
         return erc20_contracts, unique_addresses
     
     def store_erc20_transaction(self, detailed_txn: DetailedTransaction):

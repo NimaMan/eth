@@ -27,7 +27,8 @@ def get_logger(name="block_processor", log_folder="eth_block_processor", base_lo
     
     Args:
         name (str): Name of the logger. Defaults to "block_processor" if not provided.
-        log_dir (str): Directory where log files will be stored. Defaults to LOG_DIR.
+        log_folder (str): Subfolder name within the base log directory
+        base_log_dir (str): Override the base log directory. If None, uses ETH_LOG_DIR
         
     Returns:
         logging.Logger: Configured logger instance.
@@ -47,7 +48,8 @@ def get_logger(name="block_processor", log_folder="eth_block_processor", base_lo
     if not logger.handlers:
         logger.setLevel(logging.INFO)
 
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        # Simplified format without the logger name
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
         # Add timestamp to the log file name
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

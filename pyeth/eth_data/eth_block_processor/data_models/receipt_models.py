@@ -29,6 +29,11 @@ class ERC20Transfer:
     amount: int
     log_index: int
 
+    def __post_init__(self):
+        # Convert amount to string if it's not already
+        if not isinstance(self.amount, str):
+            self.amount = str(self.amount)
+
 
 @dataclass
 class ERC721Transfer:

@@ -14,10 +14,16 @@ class TransactionTraceAnalyzer:
         if trace['type'] in ['CALL', 'DELEGATECALL', 'STATICCALL', 'CREATE', 'CREATE2']:
             value = int(trace.get('value', '0'), 16)
             if value > 0 or trace['type'] in ['CREATE', 'CREATE2']:
+                # For CREATE calls, use the created address if successful, None if failed
+                to_address = trace.get('result', {}).get('address') if 'error' not in trace else None
+            else:
+                # For normal calls, use the 'to' address
+                to_address = trace.get('to')
+            if trace.get("from"):
                 internal_transactions.append(
                     InternalTransaction(
                         from_address=self.w3.to_checksum_address(trace['from']),
-                        to_address=self.w3.to_checksum_address(trace.get('to') or trace.get('result', {}).get('address', 'Contract Creation')),
+                        to_address=self.w3.to_checksum_address(to_address) if self.w3.is_address(to_address) else None, # check if the to_address is a valid eth address
                         value=np.float64(self.w3.from_wei(value, 'ether')),
                         depth=depth,
                         type=trace['type'],
@@ -32,7 +38,6 @@ class TransactionTraceAnalyzer:
         for call in trace.get('calls', []):
             internal_transactions.extend(self.process_trace(call, depth + 1))
         return internal_transactions
-
 
 
 '''
