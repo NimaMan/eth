@@ -1,54 +1,58 @@
 from typing import Dict, Any, List
 from web3 import Web3
-from decimal import Decimal
+from eth_block_processor.constants.function_signatures import EVENT_TOPICS
 from eth_block_processor.data_models.receipt_models import *
 
 
 class TransactionLogAnalyzer:
     def __init__(self, w3: Web3):
         self.w3 = w3
-        self.erc20_transfer_topic = self.w3.keccak(text="Transfer(address,address,uint256)").hex()
-        self.erc721_transfer_topic = self.w3.keccak(text="Transfer(address,address,uint256)").hex()
-        self.erc1155_transfer_single_topic = self.w3.keccak(text="TransferSingle(address,address,address,uint256,uint256)").hex()
-        self.erc1155_transfer_batch_topic = self.w3.keccak(text="TransferBatch(address,address,address,uint256[],uint256[])").hex()
-        self.uniswap_v2_sync_topic = self.w3.keccak(text="Sync(uint112,uint112)").hex()
-        self.uniswap_v2_swap_topic = self.w3.keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)").hex()
-        self.approve_signature = self.w3.keccak(text="Approval(address,address,uint256)").hex()
-        self.mint_signature = self.w3.keccak(text="Mint(address,uint256,uint256)").hex()
-        self.burn_signature = self.w3.keccak(text="Burn(address,uint256,uint256,address)").hex()
-        self.deposit_signature = self.w3.keccak(text="Deposit(address,uint256)").hex()
-        self.withdraw_signature = self.w3.keccak(text="Withdraw(address,uint256)").hex()
-        self.weth_withdrawal_topic = self.w3.keccak(text="Withdrawal(address,uint256)").hex()
-        self.pair_signature = self.w3.keccak(text="PairCreated(address,address,address,uint256)").hex()
-        self.owner_signature = self.w3.keccak(text="OwnershipTransferred(address,address)").hex()
-        self.trading_enabled_signature = self.w3.keccak(text="TradingEnabled(uint256)").hex()
-        self.trading_disabled_signature = self.w3.keccak(text="TradingDisabled(uint256)").hex()
-
-        # Additional events
-        self.uniswap_v2_collect_topic = self.w3.keccak(text="Collect(address,address,uint256,uint256)").hex()
-        self.uniswap_v2_flash_topic = self.w3.keccak(text="Flash(address,uint256,uint256,uint256,uint256)").hex()
-        self.uniswap_v2_increase_observation_cardinality_next_topic = self.w3.keccak(text="IncreaseObservationCardinalityNext(uint16,uint16)").hex()
-        self.uniswap_v2_set_fee_protocol_topic = self.w3.keccak(text="SetFeeProtocol(uint8,uint8)").hex()
-        self.uniswap_v2_collect_protocol_topic = self.w3.keccak(text="CollectProtocol(address,address,uint128,uint128)").hex()
-
-        self.exclude_from_fees_signature = self.w3.keccak(text="ExcludeFromFees(address,bool)").hex()
-        self.exclude_from_limits_signature = self.w3.keccak(text="ExcludeFromLimits(address,bool)").hex()
-        self.set_max_tx_amount_signature = self.w3.keccak(text="SetMaxTxAmount(uint256)").hex()
-        self.set_max_wallet_token_signature = self.w3.keccak(text="SetMaxWalletToken(uint256)").hex()
-        self.set_max_wallet_signature = self.w3.keccak(text="SetMaxWallet(uint256)").hex()
+                # ERC Token Events
+        self.erc20_transfer_topic = EVENT_TOPICS['Transfer']
+        self.erc721_transfer_topic = EVENT_TOPICS['Transfer']
+        self.erc1155_transfer_single_topic = EVENT_TOPICS['TransferSingle']
+        self.erc1155_transfer_batch_topic = EVENT_TOPICS['TransferBatch']
         
-        # Uniswap V3 Pool events
-        self.uniswap_v3_initialize_topic = self.w3.keccak(text="Initialize(uint160,int24)").hex()
-        self.uniswap_v3_mint_topic = self.w3.keccak(text="Mint(address,address,int24,int24,uint128,uint256,uint256)").hex()
-        self.uniswap_v3_burn_topic = self.w3.keccak(text="Burn(address,int24,int24,uint128,uint256,uint256)").hex()
-        self.uniswap_v3_swap_topic = self.w3.keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex()
-
-        # Uniswap V3 Factory events
-        self.uniswap_v3_pool_created_topic = self.w3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex()
-
-        # Uniswap V3 NFT Manager events
-        self.uniswap_v3_increase_liquidity_topic = self.w3.keccak(text="IncreaseLiquidity(uint256,uint128,uint256,uint256)").hex()
-        self.uniswap_v3_decrease_liquidity_topic = self.w3.keccak(text="DecreaseLiquidity(uint256,uint128,uint256,uint256)").hex()
+        # Basic Token Operations
+        self.approve_signature = EVENT_TOPICS['Approval']
+        self.mint_signature = EVENT_TOPICS['Mint']
+        self.burn_signature = EVENT_TOPICS['Burn']
+        self.deposit_signature = EVENT_TOPICS['Deposit']
+        self.withdraw_signature = EVENT_TOPICS['Withdraw']
+        self.weth_withdrawal_topic = EVENT_TOPICS['WETHWithdrawal']
+        
+        # Uniswap V2 Events
+        self.uniswap_v2_sync_topic = EVENT_TOPICS['Sync']
+        self.uniswap_v2_swap_topic = EVENT_TOPICS['Swap']
+        self.pair_signature = EVENT_TOPICS['PairCreated']
+        self.uniswap_v2_collect_topic = EVENT_TOPICS['Collect']
+        self.uniswap_v2_flash_topic = EVENT_TOPICS['Flash']
+        self.uniswap_v2_increase_observation_cardinality_next_topic = EVENT_TOPICS['IncreaseObservationCardinalityNext']
+        self.uniswap_v2_set_fee_protocol_topic = EVENT_TOPICS['SetFeeProtocol']
+        self.uniswap_v2_collect_protocol_topic = EVENT_TOPICS['CollectProtocol']
+        
+        # Token Management Events
+        self.owner_signature = EVENT_TOPICS['OwnershipTransferred']
+        self.trading_enabled_signature = EVENT_TOPICS['TradingEnabled']
+        self.trading_disabled_signature = EVENT_TOPICS['TradingDisabled']
+        self.exclude_from_fees_signature = EVENT_TOPICS['ExcludeFromFees']
+        self.exclude_from_limits_signature = EVENT_TOPICS['ExcludeFromLimits']
+        self.set_max_tx_amount_signature = EVENT_TOPICS['SetMaxTxAmount']
+        self.set_max_wallet_token_signature = EVENT_TOPICS['SetMaxWalletToken']
+        self.set_max_wallet_signature = EVENT_TOPICS['SetMaxWallet']
+        
+        # Uniswap V3 Pool Events
+        self.uniswap_v3_initialize_topic = EVENT_TOPICS['Initialize']
+        self.uniswap_v3_mint_topic = EVENT_TOPICS['UniswapV3Mint']
+        self.uniswap_v3_burn_topic = EVENT_TOPICS['UniswapV3Burn']
+        self.uniswap_v3_swap_topic = EVENT_TOPICS['UniswapV3Swap']
+        
+        # Uniswap V3 Factory Events
+        self.uniswap_v3_pool_created_topic = EVENT_TOPICS['PoolCreated']
+        
+        # Uniswap V3 NFT Manager Events
+        self.uniswap_v3_increase_liquidity_topic = EVENT_TOPICS['IncreaseLiquidity']
+        self.uniswap_v3_decrease_liquidity_topic = EVENT_TOPICS['DecreaseLiquidity']
 
     def analyze_logs(self, logs: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
         result = {
@@ -79,69 +83,70 @@ class TransactionLogAnalyzer:
                 raise e
             if isinstance(event, ERC20Transfer):
                 result['erc20_transfers'].append(event)
-                result['unique_addresses'].add(event.from_address)
-                result['unique_addresses'].add(event.to_address)
-                result['erc20_contracts'].add(event.token_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.from_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.to_address))
+                result['erc20_contracts'].add(self.w3.to_checksum_address(event.token_address))
             elif isinstance(event, ERC721Transfer):
                 result['erc721_transfers'].append(event)
-                result['unique_addresses'].add(event.from_address)
-                result['unique_addresses'].add(event.to_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.from_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.to_address))
             elif isinstance(event, ERC1155Transfer):
                 result['erc1155_transfers'].append(event)
-                result['unique_addresses'].add(event.from_address)
-                result['unique_addresses'].add(event.to_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.from_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.to_address))
             elif isinstance(event, UniswapV2Sync):
                 result['uniswap_v2_syncs'].append(event)
-                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
             elif isinstance(event, UniswapV2Swap):
                 result['uniswap_v2_swaps'].append(event)
-                result['unique_addresses'].add(event.sender)
-                result['unique_addresses'].add(event.to)
-                result['unique_addresses'].add(event.pair_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.to))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
             elif isinstance(event, MintAction):
                 result['mints'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.sender)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
             elif isinstance(event, BurnAction):
                 result['burns'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.sender)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
             elif isinstance(event, DepositAction):
                 result['deposits'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.sender)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
             elif isinstance(event, WithdrawAction):
                 result['withdraws'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.sender)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
             elif isinstance(event, PairAction):
                 result['pair_events'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.token0)
-                result['unique_addresses'].add(event.token1)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token0))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token1))
             elif isinstance(event, ERC20Approval):
                 result['approvals'].append(event)
-                result['unique_addresses'].add(event.token_address)
-                result['unique_addresses'].add(event.owner)
-                result['unique_addresses'].add(event.spender)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.owner))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.spender))
+                result['erc20_contracts'].add(self.w3.to_checksum_address(event.token_address))
             elif isinstance(event, ERC721Approval):
                 result['approvals'].append(event)
-                result['unique_addresses'].add(event.token_address)
-                result['unique_addresses'].add(event.owner)
-                result['unique_addresses'].add(event.approved_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.owner))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.approved_address))
             elif isinstance(event, OwnerEvent):
                 result['owner_events'].append(event)
-                result['unique_addresses'].add(event.pair_address)
-                result['unique_addresses'].add(event.previous_owner)
-                result['unique_addresses'].add(event.new_owner)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.contract_address))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.previous_owner))
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.new_owner))
             elif isinstance(event, TradingEnabledEvent):
                 result['trading_enabled_events'].append(event)
-                result['unique_addresses'].add(event.token_address)
-                result['erc20_contracts'].add(event.token_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token_address))
+                result['erc20_contracts'].add(self.w3.to_checksum_address(event.token_address))
             elif isinstance(event, TradingDisabledEvent):
                 result['trading_disabled_events'].append(event)
-                result['unique_addresses'].add(event.token_address)
-                result['erc20_contracts'].add(event.token_address)
+                result['unique_addresses'].add(self.w3.to_checksum_address(event.token_address))
+                result['erc20_contracts'].add(self.w3.to_checksum_address(event.token_address))
             else:
                 result['other_events'].append(event)
         
@@ -151,6 +156,8 @@ class TransactionLogAnalyzer:
         if not log['topics']:
             return None
         topic = log['topics'][0].hex() if isinstance(log['topics'][0], bytes) else log['topics'][0]
+        if topic.startswith('0x'):
+            topic = topic[2:]
         try:
             if topic == self.erc20_transfer_topic:
                 return self.parse_erc20_transfer(log)
@@ -188,7 +195,12 @@ class TransactionLogAnalyzer:
             return self.parse_other_event(log)
 
     def parse_erc20_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:
-        """Parse ERC20 Transfer event log"""
+        """Parse ERC20 Transfer event log Event signature: Transfer(address indexed from, address indexed to, uint256 value)
+        Topic[0]: Event signature hash
+        Topic[1]: from address (indexed)
+        Topic[2]: to address (indexed)
+        Data: value (uint256)
+        """
         # Handle both hex string and bytes data formats
         data = log['data']
         if isinstance(data, bytes):
@@ -301,18 +313,32 @@ class TransactionLogAnalyzer:
         )
     
     def parse_deposit(self, log: Dict[str, Any]) -> DepositAction:
+        """Parse deposit event log
+        Event signature: Deposit(uint256 id, address indexed tokenAddress, address indexed withdrawalAddress, uint256 amount, uint256 unlockTime)
+        Topic[0]: Event signature hash
+        Topic[1]: tokenAddress (indexed)
+        Topic[2]: withdrawalAddress (indexed)
+        Data: id (uint256), amount (uint256), unlockTime (uint256)
+        """
         if len(log['topics']) > 1:
-            # This is likely a WETH deposit
+            data = log['data']
+            # Extract values from data field
+            id = int(data[:66], 16)  # First 32 bytes
+            amount = int(data[66:130], 16)  # Second 32 bytes
+            unlock_time = int(data[130:], 16)  # Third 32 bytes
+            
             return DepositAction(
-                pair_address=self.w3.to_checksum_address(log['address']),
-                sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-                amount=int(log['data'].hex(), 16) if log['data'].hex() != '' else 0,
+                id=id,
+                token_address=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
+                withdrawal_address=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
+                amount=amount,
+                unlock_time=unlock_time,
                 log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
             )
         else:
-            # This is likely the custom deposit
+            # Fallback for other deposit types
             data = log['data']
-            sender = None # figure out how to get this
+            sender = None
             amount = int(data[66:], 16) if data[66:] else None
             return DepositAction(
                 pair_address=self.w3.to_checksum_address(log['address']),
@@ -338,16 +364,29 @@ class TransactionLogAnalyzer:
             )
     
     def parse_pair(self, log: Dict[str, Any]) -> PairAction:
+        """Parse Uniswap pair creation event
+        
+        PairCreated(address token0, address token1, address pair, uint)
+        Topic[0]: Event signature
+        Topic[1]: token0 address (indexed)
+        Topic[2]: token1 address (indexed)
+        Data: [pair address (32 bytes), uint256]
+        """
+        # Extract addresses from topics
+        token0 = self.w3.to_checksum_address("0x" + log['topics'][1].hex()[-40:])
+        token1 = self.w3.to_checksum_address("0x" + log['topics'][2].hex()[-40:])
+        pair_address = self.w3.to_checksum_address("0x" + log['data'].hex()[24:64])
+        log_index = log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
         return PairAction(
-            pair_address=self.w3.to_checksum_address(log['address']),
-            token0=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
-            token1=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
-            log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)
+            pair_address=pair_address,
+            token0=token0,
+            token1=token1,
+            log_index=log_index
         )
     
     def parse_owner(self, log: Dict[str, Any]) -> OwnerEvent:
         return OwnerEvent(
-            pair_address=self.w3.to_checksum_address(log['address']),
+            contract_address=self.w3.to_checksum_address(log['address']),
             previous_owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]),
             new_owner=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]),
             log_index=log['logIndex'] if isinstance(log['logIndex'], int) else int(log['logIndex'], 16)

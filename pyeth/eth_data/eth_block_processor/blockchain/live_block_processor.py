@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import time
 from decimal import Decimal
 import orjson
 from eth_typing import ChecksumAddress
@@ -135,9 +136,11 @@ class LiveBlockProcessor:
             dict: The processed block data or None if processing fails
         """
         try:
+            start_time = time.time()
             # Pass the full block directly to process_block
             processed_block = await self.block_processor.process_block(block_number=block_number)
-            logger.info(f"Processed block {block_number} with {len(processed_block)} processed transactions")                
+            end_time = time.time()
+            logger.info(f"Processed block {block_number} with {len(processed_block)} processed transactions in {end_time - start_time:.2f} seconds")                
             return processed_block
             
         except Exception as e:

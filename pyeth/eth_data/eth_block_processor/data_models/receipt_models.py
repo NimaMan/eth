@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
+from pyparsing import Union
 from web3.types import TxData, TxReceipt, ChecksumAddress, EventData
 
 
@@ -106,11 +107,15 @@ class PairAction:
 
 @dataclass
 class DepositAction:
-    pair_address: ChecksumAddress
-    sender: ChecksumAddress
-    amount: int
-    log_index: int
-
+    """Model for deposit events"""
+    id: Optional[int] = None
+    token_address: Optional[str] = None
+    withdrawal_address: Optional[str] = None
+    amount: Optional[Union[int, str]] = None
+    unlock_time: Optional[int] = None
+    pair_address: Optional[str] = None  # For backward compatibility
+    sender: Optional[str] = None  # For backward compatibility
+    log_index: Optional[int] = None
 
 @dataclass
 class WithdrawAction:
@@ -146,9 +151,10 @@ class SwapAction:
 
 @dataclass
 class OwnerEvent:
-    pair_address: ChecksumAddress
-    previous_owner: ChecksumAddress
-    new_owner: ChecksumAddress
+    """Owner transfer event"""
+    contract_address: str
+    previous_owner: str
+    new_owner: str
     log_index: int
 
 

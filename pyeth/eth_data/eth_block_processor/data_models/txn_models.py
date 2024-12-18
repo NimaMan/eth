@@ -44,7 +44,6 @@ class DetailedTransaction:
     value: int 
     status: str
     nonce: int
-    input: str
     
     txn_type: str
     actions: List[TransactionAction]
@@ -74,6 +73,7 @@ class DetailedTransaction:
     state_diffs: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
     bribe_amount: float = 0
+    input: str = ""
 
     def __init__(self, 
                  hash: str,
@@ -120,7 +120,7 @@ class DetailedTransaction:
         self.txn_index = convert_transaction_index(txn_index)
         self.from_address = normalize_address(from_address)
         self.to_address = normalize_address(to_address) if to_address else None
-        self.value = np.float64(convert_to_int(value))
+        self.value = value
         self.contract_address = normalize_address(contract_address) if contract_address else None
         self.status = convert_status(status)
         self.nonce = convert_to_int(nonce)
@@ -164,3 +164,46 @@ class DetailedTransaction:
             raise ValueError("Block number cannot be negative")
         if self.txn_index < 0:
             raise ValueError("Transaction index cannot be negative")
+
+    def __eq__(self, other):
+        if not isinstance(other, DetailedTransaction):
+            return False
+            
+        # Compare all fields except sets
+        basic_fields_match = (
+            self.hash == other.hash and
+            self.block_number == other.block_number and
+            self.txn_index == other.txn_index and
+            self.from_address == other.from_address and
+            self.to_address == other.to_address and
+            self.contract_address == other.contract_address and
+            self.value == other.value and
+            self.status == other.status and
+            self.nonce == other.nonce and
+            self.txn_type == other.txn_type and
+            self.erc20_transfers == other.erc20_transfers and
+            self.eth_transfers == other.eth_transfers and
+            self.actions == other.actions and
+            self.mints == other.mints and
+            self.burns == other.burns and
+            self.deposits == other.deposits and
+            self.withdraws == other.withdraws and
+            self.pair_events == other.pair_events and
+            self.owner_events == other.owner_events and
+            self.contract_interactions == other.contract_interactions and
+            self.trading_enabled_events == other.trading_enabled_events and
+            self.trading_disabled_events == other.trading_disabled_events and
+            self.other_events == other.other_events and
+            self.fees == other.fees and
+            self.state_diffs == other.state_diffs and
+            self.latest_states == other.latest_states and
+            self.bribe_amount == other.bribe_amount
+        )
+        
+        # Compare sets separately (order doesn't matter)
+        sets_match = (
+            set(self.unique_addresses) == set(other.unique_addresses) and
+            set(self.erc20_contracts) == set(other.erc20_contracts)
+        )
+        
+        return basic_fields_match and sets_match

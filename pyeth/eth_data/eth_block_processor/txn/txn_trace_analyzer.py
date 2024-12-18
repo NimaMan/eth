@@ -16,8 +16,8 @@ class TransactionTraceAnalyzer:
             if value > 0 or trace['type'] in ['CREATE', 'CREATE2']:
                 internal_transactions.append(
                     InternalTransaction(
-                        from_address=trace['from'],
-                        to_address=trace.get('to') or trace.get('result', {}).get('address', 'Contract Creation'),
+                        from_address=self.w3.to_checksum_address(trace['from']),
+                        to_address=self.w3.to_checksum_address(trace.get('to') or trace.get('result', {}).get('address', 'Contract Creation')),
                         value=np.float64(self.w3.from_wei(value, 'ether')),
                         depth=depth,
                         type=trace['type'],

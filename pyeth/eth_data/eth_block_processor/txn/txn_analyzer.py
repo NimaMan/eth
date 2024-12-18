@@ -53,6 +53,7 @@ For parallel processing of multiple transactions, it's might be helpful to:
 2. Process different transactions concurrently at a higher level
 3. Use a transaction queue system for real-time monitoring
 """
+from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
@@ -74,74 +75,6 @@ class TransactionAnalyzer:
         self.trace_analyzer = TransactionTraceAnalyzer(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
-
-    def analyze_transaction(self, 
-                            transaction: Dict[str, Any], 
-                            receipt: Dict[str, Any],
-                            trace: Dict[str, Any]) -> DetailedTransaction:
-        """
-        Analyzes a transaction and returns a DetailedTransaction object.
-        """
-        txn_hash = transaction['hash']
-        from_address = transaction['from']
-        to_address = transaction['to']
-        logs = self.log_analyzer.analyze_logs(receipt['logs'])
-        
-        fees = self._extract_transaction_fees(receipt)
-        contract_address = receipt.get('contractAddress', None)
-
-        internal_transactions = []
-        if self.needs_trace(transaction):
-            internal_transactions = self.trace_analyzer.process_trace(trace)
-        
-        tx_type = self.transaction_classifier.classify_transaction(transaction)
-        unique_addresses = logs['unique_addresses']
-        erc20_contracts = logs['erc20_contracts']
-        erc20_contracts, unique_addresses = self.extend_unique_addresses(
-            from_address, 
-            to_address,
-            internal_transactions, 
-            unique_addresses,
-            erc20_contracts,
-            )
-        detailed_txn = DetailedTransaction(
-            hash=txn_hash,
-            txn_type=tx_type,
-            block_number=receipt['blockNumber'],
-            txn_index=receipt['transactionIndex'],
-            from_address=from_address,
-            to_address=to_address,
-            contract_address=contract_address,
-            value=transaction['value'],
-            status=receipt['status'],
-            nonce=transaction['nonce'],
-            input=transaction['input'],
-            erc20_transfers=logs['erc20_transfers'],
-            erc721_transfers=logs['erc721_transfers'],
-            erc1155_transfers=logs['erc1155_transfers'],
-            uniswap_v2_syncs=logs['uniswap_v2_syncs'],
-            uniswap_v2_swaps=logs['uniswap_v2_swaps'],
-            approvals=logs['approvals'],
-            mints=logs['mints'],
-            burns=logs['burns'],
-            deposits=logs['deposits'],
-            withdraws=logs['withdraws'],
-            pair_events=logs['pair_events'],
-            owner_events=logs['owner_events'],
-            trading_enabled_events=logs['trading_enabled_events'],
-            trading_disabled_events=logs['trading_disabled_events'],
-            other_events=logs['other_events'],
-            actions=[],
-            eth_transfers=[],
-            contract_interactions=[],
-            internal_transactions=internal_transactions,
-            fees=fees,
-            unique_addresses=unique_addresses,
-            erc20_contracts=erc20_contracts,
-        )
-        if self.save_erc20_txn_to_db:
-            self.store_erc20_transaction(detailed_txn)
-        return detailed_txn
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
         return txn['to'] is not None and len(txn['input']) > 2  # '0x' is 2 characters
@@ -184,6 +117,92 @@ class TransactionAnalyzer:
             gas_used=gas_used,
             total_fee=total_fee,
         )
+    
+    def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any]) -> None:
+        """Add synthetic events based on transaction type"""
+        if tx_type == "Trading Enabled":
+            logs['trading_enabled_events'].append(
+                TradingEnabledEvent(
+                    token_address=transaction['to'],
+                    block_number=transaction['blockNumber'],
+                    log_index=0
+                )
+            )
+            logs['erc20_contracts'].add(transaction['to'])
+        elif tx_type == "Set Tax":
+            # Add the contract address to erc20_contracts for Set Tax transactions
+            logs['erc20_contracts'].add(transaction['to'])
+
+    def analyze_transaction(self, 
+                            transaction: Dict[str, Any], 
+                            receipt: Dict[str, Any],
+                            trace: Dict[str, Any]) -> DetailedTransaction:
+        """
+        Analyzes a transaction and returns a DetailedTransaction object.
+        """
+        txn_hash = transaction['hash']
+        from_address = self.w3.to_checksum_address(transaction['from'])
+        to_address = self.w3.to_checksum_address(transaction['to'])
+        logs = self.log_analyzer.analyze_logs(receipt['logs'])
+        
+        fees = self._extract_transaction_fees(receipt)
+        contract_address = receipt.get('contractAddress', None)
+
+        internal_transactions = []
+        if self.needs_trace(transaction):
+            internal_transactions = self.trace_analyzer.process_trace(trace)
+        
+        unique_addresses = logs['unique_addresses']
+        erc20_contracts = logs['erc20_contracts']
+        erc20_contracts, unique_addresses = self.extend_unique_addresses(
+            from_address, 
+            to_address,
+            internal_transactions, 
+            unique_addresses,
+            erc20_contracts,
+            )
+        value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
+        tx_type = self.transaction_classifier.classify_transaction(transaction)
+        self._add_txn_type_events(tx_type, logs, transaction)
+        
+        detailed_txn = DetailedTransaction(
+            hash=txn_hash,
+            txn_type=tx_type,
+            block_number=receipt['blockNumber'],
+            txn_index=receipt['transactionIndex'],
+            from_address=from_address,
+            to_address=to_address,
+            contract_address=contract_address,
+            value=value,
+            status=receipt['status'],
+            nonce=transaction['nonce'],
+            input=transaction['input'],
+            erc20_transfers=logs['erc20_transfers'],
+            erc721_transfers=logs['erc721_transfers'],
+            erc1155_transfers=logs['erc1155_transfers'],
+            uniswap_v2_syncs=logs['uniswap_v2_syncs'],
+            uniswap_v2_swaps=logs['uniswap_v2_swaps'],
+            approvals=logs['approvals'],
+            mints=logs['mints'],
+            burns=logs['burns'],
+            deposits=logs['deposits'],
+            withdraws=logs['withdraws'],
+            pair_events=logs['pair_events'],
+            owner_events=logs['owner_events'],
+            trading_enabled_events=logs['trading_enabled_events'],
+            trading_disabled_events=logs['trading_disabled_events'],
+            other_events=logs['other_events'],
+            actions=[],
+            eth_transfers=[],
+            contract_interactions=[],
+            internal_transactions=internal_transactions,
+            fees=fees,
+            unique_addresses=unique_addresses,
+            erc20_contracts=erc20_contracts,
+        )
+        if self.save_erc20_txn_to_db:
+            self.store_erc20_transaction(detailed_txn)
+        return detailed_txn
 
     async def analyze_transaction_async(self, 
                                         transaction: Dict[str, Any], 
@@ -214,18 +233,25 @@ class TransactionAnalyzer:
         else:
             state_diffs, latest_states = {}, {}
 
-        # Classify transaction type
+        unique_addresses = logs['unique_addresses']
+        from_address = transaction['from']
+        to_address = transaction['to']
+        erc20_contracts = logs['erc20_contracts']
+        erc20_contracts, unique_addresses = self.extend_unique_addresses(from_address, to_address, internal_transactions, unique_addresses, erc20_contracts)
+        
+        value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
+        self._add_txn_type_events(tx_type, logs, transaction)
         
         return DetailedTransaction(
             hash=transaction['hash'],
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
             txn_index=receipt['transactionIndex'],
-            from_address=transaction['from'],
-            to_address=transaction['to'],
+            from_address=from_address,
+            to_address=to_address,
             contract_address=contract_address,
-            value=transaction['value'],
+            value=value,
             status=receipt['status'],
             nonce=transaction['nonce'],
             input=transaction['input'],
@@ -247,8 +273,8 @@ class TransactionAnalyzer:
             trading_enabled_events=logs.get('trading_enabled_events', []),
             trading_disabled_events=logs.get('trading_disabled_events', []),
             other_events=logs.get('other_events', []),
-            unique_addresses=logs['unique_addresses'],
-            erc20_contracts=logs['erc20_contracts'],
+            unique_addresses=unique_addresses,
+            erc20_contracts=erc20_contracts,
             internal_transactions=internal_transactions,
             fees=fees,
             state_diffs=state_diffs,
