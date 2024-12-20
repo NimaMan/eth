@@ -79,3 +79,15 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
     )
     
     assert sync_result == expected_trading 
+
+   
+    # Test asynchronous analysis
+    async def run_async_analysis():
+        return await txn_analyzer.analyze_transaction_async(
+            txn_data['transaction'],
+            txn_data['receipt'],
+            txn_data['trace']
+        )
+    
+    async_result = asyncio.run(run_async_analysis())
+    assert async_result == expected_trading 

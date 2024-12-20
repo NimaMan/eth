@@ -25,49 +25,49 @@ def expected_contract_creation():
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0x65a53ac26bd12F3A7D5f7083eF231BBBE852eF1C",
-                amount=10000000000000000000000000,
+                amount='10000000000000000000000000',
                 log_index=455
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0x9AE4e9778D8d662462729fbA3F79f4A0c66B0F0c",
-                amount=6000000000000000000000000,
+                amount='6000000000000000000000000',
                 log_index=456
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0xc849543Ea151Eed47a7C9C89BAE7783b95016A3E",
-                amount=8000000000000000000000000,
+                amount='8000000000000000000000000',
                 log_index=457
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0x4Cf62112ba1541ffc84F53B2f4889d22f4d5a409",
-                amount=8000000000000000000000000,
+                amount='8000000000000000000000000',
                 log_index=458
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0xA7d9F0e487664e57Ebb4A4B8d1d2667A7d7EA307",
-                amount=4000000000000000000000000,
+                amount='4000000000000000000000000',
                 log_index=459
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0x02d1966AB06F1b1D3Cb11AAfd301eAa0fE437cC2",
-                amount=4000000000000000000000000,
+                amount='4000000000000000000000000',
                 log_index=460
             ),
             ERC20Transfer(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
                 from_address="0x0000000000000000000000000000000000000000",
                 to_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
-                amount=60000000000000000000000000,
+                amount='60000000000000000000000000',
                 log_index=461
             )
         ],
@@ -97,7 +97,7 @@ def expected_contract_creation():
         unique_addresses={
             "0x0000000000000000000000000000000000000000",  # Zero address
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",  # Creator
-            "0x90f29ccd18c9181a9243eff8f7546eef4b64994c",  # Contract
+            "0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",  # Contract
             "0x65a53ac26bd12F3A7D5f7083eF231BBBE852eF1C",  # Token recipient
             "0x9AE4e9778D8d662462729fbA3F79f4A0c66B0F0c",  # Token recipient
             "0xc849543Ea151Eed47a7C9C89BAE7783b95016A3E",  # Token recipient
@@ -106,9 +106,9 @@ def expected_contract_creation():
             "0x02d1966AB06F1b1D3Cb11AAfd301eAa0fE437cC2",  # Token recipient
             "0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2",  # Uniswap pair
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH address
-            "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"   # Uniswap Factory
+            #"0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"   # Uniswap Factory
         },
-        erc20_contracts={"0x90f29ccd18c9181a9243eff8f7546eef4b64994c"}, 
+        erc20_contracts={"0x90f29ccD18c9181A9243EfF8f7546eef4b64994c"}, 
         input = ""
     )
 

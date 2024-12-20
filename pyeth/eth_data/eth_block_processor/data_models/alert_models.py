@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Set
 
 
 @dataclass
@@ -9,7 +9,7 @@ class TradingEnabledAlertData:
     contract_address: str
     from_address: str
     alert_type: str = "Trading Enabled"
-    details: Dict[str, Any] = field(default_factory=dict)
+    erc20_contracts: Set[str] = field(default_factory=tuple)
 
 
 @dataclass
@@ -20,7 +20,7 @@ class BribeAlertData:
     value: float
     bribe_amount: float
     alert_type: str = "Bribe"
-    details: Dict[str, Any] = field(default_factory=dict)
+    erc20_contracts: Set[str] = field(default_factory=tuple)
 
 
 @dataclass
@@ -29,8 +29,9 @@ class ContractCreationAlertData:
     transaction_hash: str
     creator_address: str    
     contract_address: str
+    contract_type: str
     alert_type: str = "Contract Creation"
-    details: Dict[str, Any] = field(default_factory=dict)
+    input: str = ""
 
 
 @dataclass
@@ -38,7 +39,8 @@ class UserInvolvedAlertData:
     block_number: int
     transaction_hash: str
     from_address: str
-    involved_addresses: List[str]
+    involved_addresses: Set[str]
     txn_type: str
     alert_type: str
-    details: Dict[str, Any] = field(default_factory=dict)
+    erc20_contracts: Set[str] = field(default_factory=tuple)
+

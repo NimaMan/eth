@@ -1,8 +1,8 @@
-from typing import Any, List
+from typing import Any, List, Dict, Optional
 from abc import ABC, abstractmethod
 from enum import IntEnum
 from eth_block_processor.data_models.txn_models import DetailedTransaction
-from web3.types import BlockData
+
 
 class AlertPriority(IntEnum):
     CRITICAL = 0  # Block processing
@@ -10,23 +10,22 @@ class AlertPriority(IntEnum):
     MEDIUM = 2    # Complex analysis
     LOW = 3       # Storage & maintenance
 
+
 class BaseAlert(ABC):
+    """Base class for all alert processors"""
+    
     def __init__(self):
-        self.priority = AlertPriority.HIGH  # Default to high priority
-        self.max_latency = 1.0  # Default to 1 second max latency
+        self.priority = AlertPriority.LOW
 
     @abstractmethod
-    async def process(self, block: BlockData) -> List[Any]:
-        """Process a block and return any alerts"""
+    async def process_txn(self, detailed_txn: DetailedTransaction):
+        """
+        Process a single transaction to generate alerts, and send them to the alert system
+        """
         pass
 
     @abstractmethod
-    async def get_alert(self, transaction: DetailedTransaction):
-        """Process a single transaction and return alerts"""
-        pass
-
-    @abstractmethod
-    def create_alert(self, transaction: DetailedTransaction):
+    def create_alert(self, detailed_txn: DetailedTransaction):
         """Create alert data from transaction"""
         pass
 
@@ -36,7 +35,6 @@ class BaseAlert(ABC):
         pass
 
     @abstractmethod
-    def _is_alert(self, tx) -> bool:
+    def _is_alert(self, txn: DetailedTransaction) -> bool:
         """Helper method to detect if the event is an alert"""
-        # Implement your detection logic here
-        return False  # Placeholder
+        pass
