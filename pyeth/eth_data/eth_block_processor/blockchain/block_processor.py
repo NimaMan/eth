@@ -78,16 +78,10 @@ Error Handling:
 """
 
 from web3 import Web3
-from hexbytes import HexBytes
-
-import asyncio
-from typing import Union, Dict, List, Any
 from time import time
-from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
 from eth_block_processor.txn.txn_batch_analyzer import TransactionBatchAnalyzer
 from eth_block_processor.blockchain.block_fetcher import BlockFetcher
 from eth_block_processor.utils.logger import get_logger
-from eth_block_processor.utils.profiling.decorators import profile_async
 
 
 logger = get_logger(name="block_processor", log_folder="eth_block_processor")
@@ -131,6 +125,7 @@ class BlockProcessor:
     async def process_block(self, block_number: int, transactions=None):
         """Process a single block"""
         try:
+            start_time = time()
             if transactions is None:
                 # Fetch block
                 block_data = await self.block_fetcher.fetch_block_by_number(block_number)
@@ -140,6 +135,9 @@ class BlockProcessor:
                 block_number=block_number,
                 transactions=transactions
             )
+            end_time = time()
+            num_failed_txns = len(transactions) - len(processed_transactions)
+            logger.info(f"Processed block {block_number} with {len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f} seconds")                
             return processed_transactions
         except Exception as e:
             logger.error(f" {__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")

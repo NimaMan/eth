@@ -1,6 +1,119 @@
+"""
+LiveBlockProcessor: Real-time Ethereum Block Processing and Alert System
+
+Objective:
+---------
+Create a high-performance, resilient system that:
+1. Monitors the Ethereum blockchain in real-time
+2. Processes blocks and their transactions
+3. Generates and publishes alerts based on transaction patterns in less than 1 second
+4. Maintains system stability through proper error handling and reconnection logic
+
+Architecture & Workflow:
+----------------------
+1. Blockchain Connectivity:
+    - Uses WebSocket for real-time block notifications (faster than polling)
+    - Maintains separate HTTP connection for detailed data fetching
+    - Implements automatic reconnection with exponential backoff
+
+2. Block Processing Pipeline:
+    - Receives new block headers via WebSocket subscription
+    - Fetches full block data including transactions
+    - Processes transactions to extract:
+        * ERC20/721/1155 transfers
+        * Internal transactions
+        * Contract interactions
+        * Other relevant on-chain events
+
+3. Message Queue Integration:
+    - Uses RabbitMQ for reliable message delivery
+    - Maintains two separate exchanges:
+        * blocks_exchange: For processed block data
+        * alerts_exchange: For detected alerts
+    - Implements persistent messaging to prevent data loss
+
+4. Alert Processing:
+    - Analyzes transactions for specific patterns
+    - Generates alerts based on configurable criteria
+    - Processes alerts concurrently for better performance
+
+Key Design Decisions:
+-------------------
+1. Separation of Concerns:
+    - WebSocket for notifications, HTTP for data fetching
+    - Separate exchanges for blocks and alerts
+    - Modular processing pipeline for maintainability
+
+2. Error Handling:
+    - Graceful handling of connection failures
+    - Automatic reconnection with backoff
+    - Continued processing despite individual failures
+    - Exchange reinitialization on connection issues
+
+3. Performance Optimization:
+    - Asynchronous processing throughout
+    - Efficient serialization with orjson
+    - Minimal blocking operations
+    - Concurrent alert processing
+
+4. Data Integrity:
+    - Persistent message delivery
+    - Transaction validation
+    - Proper cleanup on shutdown
+    - Error logging for debugging
+
+Configuration Options:
+--------------------
+- websocket_url: WebSocket endpoint for real-time updates
+- http_url: HTTP endpoint for detailed data fetching
+- rabbitmq_url: RabbitMQ connection string
+- save_erc20_txns: Toggle for ERC20 transaction storage
+
+Error Handling Strategy:
+----------------------
+1. Connection Failures:
+    - Automatic reconnection with exponential backoff
+    - Separate handling for WebSocket and RabbitMQ
+    - Resource cleanup before reconnection attempts
+
+2. Processing Errors:
+    - Continue processing on non-critical errors
+    - Log errors for debugging
+    - Reset connections when necessary
+    - Maintain system stability
+
+3. Data Validation:
+    - Verify block and transaction data
+    - Handle missing or malformed data
+    - Proper type checking and conversion
+
+Dependencies:
+------------
+- web3: Ethereum interaction
+- aio_pika: RabbitMQ integration
+- orjson: High-performance JSON handling
+- asyncio: Asynchronous operations
+
+Usage:
+------
+1. Initialize:
+    processor = LiveBlockProcessor(websocket_url, http_url, rabbitmq_url)
+
+2. Run:
+    await processor.run()
+
+3. Cleanup:
+    await processor.cleanup()
+
+Note: This system is designed for production use with emphasis on:
+- Reliability: Handles network issues and data anomalies
+- Performance: Optimized for high-throughput processing
+- Maintainability: Clear separation of concerns and error handling
+- Scalability: Modular design for easy extension
+"""
+
 import asyncio
 import dataclasses
-import time
 from decimal import Decimal
 import orjson
 from eth_typing import ChecksumAddress
@@ -10,9 +123,12 @@ from web3.providers import WebSocketProvider
 import aio_pika
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
+from eth_block_processor.alert.block_alert_processor import BlockAlertProcessor
 from eth_block_processor.utils.logger import get_logger
 
-logger = get_logger(name="live_block_processor", log_folder="eth_block_processor")
+
+logger = get_logger(name="block_processor", log_folder="eth_block_processor")
+alert_logger = get_logger("alert_processor", log_folder="alert")
 
 
 def transaction_serializer(obj):
@@ -31,26 +147,31 @@ def transaction_serializer(obj):
         return [transaction_serializer(item) for item in obj]
     if isinstance(obj, Decimal):    
         return float(obj)
+    elif isinstance(obj, int) and (obj > 2**63 - 1 or obj < -(2**63)):
+        return str(obj)
     return obj
 
 
+def alert_serializer(alert_data):
+    """Serialize alert data, converting bytes and other special types to JSON-compatible format"""
+    if dataclasses.is_dataclass(alert_data):
+        return transaction_serializer(dataclasses.asdict(alert_data))
+    if isinstance(alert_data, (str, int, float, bool, type(None))):
+        return alert_data
+    elif isinstance(alert_data, bytes):
+        return alert_data.hex()  # Convert bytes to hex string
+    elif isinstance(alert_data, (list, tuple)):
+        return [alert_serializer(item) for item in alert_data]
+    elif isinstance(alert_data, dict):
+        return {k: alert_serializer(v) for k, v in alert_data.items()}
+    elif hasattr(alert_data, '__dict__'):
+        # Handle dataclass/custom objects
+        return {k: alert_serializer(v) for k, v in alert_data.__dict__.items()}
+    else:
+        return str(alert_data)
+
+
 class LiveBlockProcessor:
-    """
-    LiveBlockProcessor handles real-time block monitoring and processing.
-    
-    Objective:
-    - Monitor new Ethereum blocks via WebSocket
-    - Process blocks and publish to RabbitMQ for alert processing
-    - Ensure non-blocking operations for high performance
-    - Handle connection failures and reconnections gracefully
-    
-    Flow:
-    1. Connect to Ethereum node via WebSocket
-    2. Subscribe to new block headers
-    3. Process each block with transaction details
-    4. Publish processed blocks to RabbitMQ
-    5. Handle errors and reconnections
-    """
     
     def __init__(
         self,
@@ -69,11 +190,12 @@ class LiveBlockProcessor:
             node_url=http_url,
             save_erc20_txn_to_db=save_erc20_txns,
         )
-        
+        self.block_alert_processor = BlockAlertProcessor()
         # RabbitMQ connection and channel
         self.connection = None
         self.channel = None
-        self.exchange = None
+        self.blocks_exchange = None
+        self.alerts_exchange = None
 
         self.reconnect_delay = 1  
 
@@ -83,8 +205,13 @@ class LiveBlockProcessor:
             if not self.connection or self.connection.is_closed:
                 self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
                 self.channel = await self.connection.channel()
-                self.exchange = await self.channel.declare_exchange(
+                self.blocks_exchange = await self.channel.declare_exchange(
                     "blocks_exchange",
+                    aio_pika.ExchangeType.FANOUT,
+                    durable=True
+                )
+                self.alerts_exchange = await self.channel.declare_exchange(
+                    "alerts_exchange",
                     aio_pika.ExchangeType.FANOUT,
                     durable=True
                 )
@@ -96,9 +223,12 @@ class LiveBlockProcessor:
     async def publish_block(self, block_number: int, processed_block):
         """Publish the processed block to RabbitMQ."""
         try:
-            if not self.exchange:
-                await self.setup_rabbitmq()
-            
+            # First check if exchange exists, if not set it up
+            if not self.blocks_exchange:
+                await self.setup_rabbitmq()         
+            if not self.blocks_exchange:
+                raise RuntimeError("Failed to initialize RabbitMQ exchange")
+
             # Convert block data to JSON-serializable format
             block_data = orjson.dumps(
                 processed_block,
@@ -113,7 +243,7 @@ class LiveBlockProcessor:
                 headers={'block_number': str(block_number)} 
             )
             
-            await self.exchange.publish(
+            await self.blocks_exchange.publish(
                 message, 
                 routing_key='processed_blocks'
             )
@@ -122,29 +252,58 @@ class LiveBlockProcessor:
         except Exception as e:
             logger.error(f" {__name__} Error publishing processed block to RabbitMQ: {e}: {processed_block[0]}")
             # Attempt to reconnect on next publish
-            self.exchange = None
+            self.blocks_exchange = None
+
+    async def publish_alert(self, alert_data):
+        """Publish alert to RabbitMQ alerts exchange"""
+        try:
+            # First check if exchange exists, if not set it up
+            if not self.alerts_exchange:
+                await self.setup_rabbitmq()
+            
+            # Convert block data to JSON-serializable format
+            serialized_data = orjson.dumps(
+                alert_data,
+                default=alert_serializer,
+                option=orjson.OPT_SERIALIZE_NUMPY
+            )
+            
+            message = aio_pika.Message(
+                body=serialized_data,
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                content_type='application/json'  # Add content type
+            )
+            
+            await self.alerts_exchange.publish(
+                message, 
+                routing_key="alerts"
+            )
+            alert_logger.info(f"Successfully published {len(alert_data)} alerts")
+        except Exception as e:
+            alert_logger.error(f"{__name__}: Error publishing alert: {e}", exc_info=True)
+            alert_logger.error(f"Failed alert data: {alert_data}")
+            # Reset exchange on error to force reconnection
+            self.alerts_exchange = None
             raise
 
-    async def process_latest_block(self, block_number: int) -> dict:
+    async def process_latest_block(self, block_number: int):
         """
         Process a single block and prepare it for publishing.
-        
-        Args:
-            block_hash: The hash of the block to process
-            
-        Returns:
-            dict: The processed block data or None if processing fails
         """
         try:
-            start_time = time.time()
-            # Pass the full block directly to process_block
             processed_block = await self.block_processor.process_block(block_number=block_number)
-            end_time = time.time()
-            logger.info(f"Processed block {block_number} with {len(processed_block)} processed transactions in {end_time - start_time:.2f} seconds")                
             return processed_block
-            
         except Exception as e:
             logger.error(f" {__name__} Error processing block {block_number} transactions: {e}")
+            return
+        
+    async def process_latest_block_alerts(self, processed_block):
+        """Process alerts for the latest block"""
+        try:
+            alerts = await self.block_alert_processor.process_block_transactions(processed_block)
+            return alerts
+        except Exception as e:
+            logger.error(f" {__name__} Error processing alerts: {e}")
             return
 
     async def monitor_new_blocks(self):
@@ -165,15 +324,18 @@ class LiveBlockProcessor:
                         block_number = block_data["number"] if isinstance(block_data["number"], int) else int(block_data["number"], 16)
                         processed_block = await self.process_latest_block(block_number=block_number)   
                         if processed_block:
-                            await self.publish_block(block_number=block_number, processed_block=processed_block)
+                            await self.publish_block(block_number, processed_block)
+                            alerts = await self.process_latest_block_alerts(processed_block)
+                            if alerts and len(alerts) > 0:
+                                await self.publish_alert(alerts)
                     except Exception as e:
+                        logger.error(f" {__name__} Error processing block: {e}", exc_info=True)
                         continue
         
         except Exception as e:
             logger.error(f"WebSocket subscription error: {e}", exc_info=True)
             await asyncio.sleep(self.reconnect_delay)
-            self.reconnect_delay = min(self.reconnect_delay * 2, 60)  # Max 60s delay
-            # Recursive call to restart monitoring
+            self.reconnect_delay = min(self.reconnect_delay * 2, 60)
             await self.monitor_new_blocks()
             
         finally:
@@ -190,7 +352,8 @@ class LiveBlockProcessor:
             if self.connection and not self.connection.is_closed:
                 await self.connection.close()
                 
-            self.exchange = None
+            self.blocks_exchange = None
+            self.alerts_exchange = None
             self.channel = None
             self.connection = None
             

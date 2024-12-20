@@ -1,11 +1,10 @@
 import asyncio
 
 from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
-from eth_block_processor.blockchain.block_queue import processed_block_queue
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger(name="live_block_processor", log_folder="eth_block_processor")
+logger = get_logger(name="block_processor", log_folder="eth_block_processor")
 
 
 async def main():

@@ -43,6 +43,9 @@ class ERC721Transfer:
     token_id: int
     log_index: int
 
+    def __post_init__(self):
+        self.token_id = str(self.token_id)
+
 
 @dataclass
 class ERC1155Transfer:
@@ -54,13 +57,20 @@ class ERC1155Transfer:
     amounts: List[int]
     log_index: int
 
+    def __post_init__(self):
+        self.amounts = [str(amount) for amount in self.amounts]
+
+
 @dataclass
 class UniswapV2Sync:
     pair_address: ChecksumAddress
     reserve0: int
     reserve1: int
     log_index: int
-    
+
+    def __post_init__(self):
+        self.reserve0 = str(self.reserve0)
+        self.reserve1 = str(self.reserve1)
 
 @dataclass
 class UniswapV2Swap:
@@ -73,6 +83,12 @@ class UniswapV2Swap:
     amount1Out: int
     log_index: int
 
+    def __post_init__(self):
+        self.amount0In = str(self.amount0In)
+        self.amount1In = str(self.amount1In)
+        self.amount0Out = str(self.amount0Out)
+        self.amount1Out = str(self.amount1Out)
+
 
 @ dataclass
 class UniswapV3Swap:
@@ -83,6 +99,10 @@ class UniswapV3Swap:
     amount_out: int
     log_index: int
 
+    def __post_init__(self):
+        self.amount_in = str(self.amount_in)
+        self.amount_out = str(self.amount_out)
+
 
 @dataclass
 class ERC20Approval:
@@ -91,6 +111,9 @@ class ERC20Approval:
     spender: ChecksumAddress
     amount: int
     log_index: int
+
+    def __post_init__(self):
+        self.amount = str(self.amount)
 
 
 @dataclass
@@ -101,6 +124,9 @@ class ERC721Approval:
     token_id: int
     log_index: int
 
+    def __post_init__(self):
+        self.token_id = str(self.token_id)
+
 
 @dataclass
 class PairAction:
@@ -108,6 +134,10 @@ class PairAction:
     token0: ChecksumAddress
     token1: ChecksumAddress
     log_index: int
+
+    def __post_init__(self):
+        self.token0 = str(self.token0)
+        self.token1 = str(self.token1)
 
 
 @dataclass
@@ -122,6 +152,9 @@ class DepositAction:
     sender: Optional[str] = None  # For backward compatibility
     log_index: Optional[int] = None
 
+    def __post_init__(self):
+        self.amount = str(self.amount)
+
 @dataclass
 class WithdrawAction:
     pair_address: ChecksumAddress
@@ -129,6 +162,8 @@ class WithdrawAction:
     amount: int
     log_index: int
 
+    def __post_init__(self):
+        self.amount = str(self.amount)
 
 @dataclass
 class MintAction:
@@ -138,6 +173,10 @@ class MintAction:
     amount1: int
     log_index: int
 
+    def __post_init__(self):
+        self.amount0 = str(self.amount0)
+        self.amount1 = str(self.amount1)
+
 
 @dataclass
 class BurnAction:
@@ -146,12 +185,19 @@ class BurnAction:
     amount: int
     log_index: int
 
+    def __post_init__(self):
+        self.amount = str(self.amount)
+
 
 @dataclass
 class SwapAction:
     dex_name: str
     token_in: ERC20Transfer
     token_out: ERC20Transfer
+
+    def __post_init__(self):
+        self.token_in = str(self.token_in)
+        self.token_out = str(self.token_out)
 
 
 @dataclass
