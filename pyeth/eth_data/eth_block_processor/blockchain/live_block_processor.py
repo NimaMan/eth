@@ -199,10 +199,21 @@ class LiveBlockProcessor:
 
         self.reconnect_delay = 1  
 
-    async def setup_rabbitmq(self):
-        """Initialize RabbitMQ connection and channel."""
-        try:
-            if not self.connection or self.connection.is_closed:
+    async def setup_rabbitmq(self, max_retries=3):
+        """Initialize RabbitMQ connection and channel with retries."""
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                # First cleanup any existing connections
+                if self.connection:
+                    if not self.connection.is_closed:
+                        await self.connection.close()
+                    self.connection = None
+                    self.channel = None
+                    self.blocks_exchange = None
+                    self.alerts_exchange = None
+
+                # Create new connection
                 self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
                 self.channel = await self.connection.channel()
                 self.blocks_exchange = await self.channel.declare_exchange(
@@ -216,25 +227,35 @@ class LiveBlockProcessor:
                     durable=True
                 )
                 logger.info("Successfully connected to RabbitMQ")
-        except Exception as e:
-            logger.error(f"Failed to setup RabbitMQ connection: {e}")
-            raise
+                return True
+                
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {e}")
+                await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
+                
+        raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")
 
     async def publish_block(self, block_number: int, processed_block):
-        """Publish the processed block to RabbitMQ."""
+        """Publish the processed block to RabbitMQ. Continue on failure."""
         try:
-            # First check if exchange exists, if not set it up
+            # Only try to setup if we don't have an exchange
             if not self.blocks_exchange:
-                await self.setup_rabbitmq()         
-            if not self.blocks_exchange:
-                raise RuntimeError("Failed to initialize RabbitMQ exchange")
-
-            # Convert block data to JSON-serializable format
-            block_data = orjson.dumps(
-                processed_block,
-                default=transaction_serializer,
-                option=orjson.OPT_SERIALIZE_NUMPY
-            )
+                success = await self.setup_rabbitmq()
+                if not success:
+                    logger.error(f"Failed to initialize RabbitMQ for block {block_number}")
+                    return False  # Return False but don't reset exchange
+            
+            try:
+                # Try to serialize first to catch any serialization errors
+                block_data = orjson.dumps(
+                    processed_block,
+                    default=transaction_serializer,
+                    option=orjson.OPT_SERIALIZE_NUMPY
+                )
+            except Exception as e:
+                logger.error(f"Serialization error for block {block_number}: {e}")
+                return False  # Continue with next block without resetting exchange
         
             message = aio_pika.Message(
                 body=block_data,
@@ -248,30 +269,42 @@ class LiveBlockProcessor:
                 routing_key='processed_blocks'
             )
             logger.info(f"RabbitMQ: Published block {block_number}")
+            return True
+            
+        except aio_pika.exceptions.ConnectionClosed:
+            logger.error(f"RabbitMQ connection lost while publishing block {block_number}")
+            self.blocks_exchange = None  # Only reset on actual connection issues
+            return False
             
         except Exception as e:
-            logger.error(f" {__name__} Error publishing processed block to RabbitMQ: {e}: {processed_block[0]}")
-            # Attempt to reconnect on next publish
-            self.blocks_exchange = None
+            logger.error(f"{__name__} Error publishing block {block_number}: {e}")
+            return False  # Don't reset exchange for other errors
 
     async def publish_alert(self, alert_data):
         """Publish alert to RabbitMQ alerts exchange"""
         try:
             # First check if exchange exists, if not set it up
             if not self.alerts_exchange:
-                await self.setup_rabbitmq()
+                success = await self.setup_rabbitmq()
+                if not success:
+                    alert_logger.error("Failed to initialize RabbitMQ for alert")
+                    return False
             
-            # Convert block data to JSON-serializable format
-            serialized_data = orjson.dumps(
-                alert_data,
-                default=alert_serializer,
-                option=orjson.OPT_SERIALIZE_NUMPY
-            )
+            try:
+                # Try to serialize first to catch any serialization errors
+                serialized_data = orjson.dumps(
+                    alert_data,
+                    default=alert_serializer,
+                    option=orjson.OPT_SERIALIZE_NUMPY
+                )
+            except Exception as e:
+                alert_logger.error(f"Alert serialization error: {e}")
+                return False  # Continue without resetting exchange
             
             message = aio_pika.Message(
                 body=serialized_data,
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                content_type='application/json'  # Add content type
+                content_type='application/json'
             )
             
             await self.alerts_exchange.publish(
@@ -279,12 +312,16 @@ class LiveBlockProcessor:
                 routing_key="alerts"
             )
             alert_logger.info(f"Successfully published {len(alert_data)} alerts")
+            return True
+            
+        except aio_pika.exceptions.ConnectionClosed:
+            alert_logger.error(f"{__name__}: RabbitMQ connection lost while publishing alert")
+            self.alerts_exchange = None  # Only reset on connection issues
+            return False
+            
         except Exception as e:
             alert_logger.error(f"{__name__}: Error publishing alert: {e}", exc_info=True)
-            alert_logger.error(f"Failed alert data: {alert_data}")
-            # Reset exchange on error to force reconnection
-            self.alerts_exchange = None
-            raise
+            return False  # Don't reset exchange for other errors
 
     async def process_latest_block(self, block_number: int):
         """
@@ -321,16 +358,23 @@ class LiveBlockProcessor:
                         block_data = message.get("result", {})
                         if not block_data or "hash" not in block_data:
                             continue
+                        
                         block_number = block_data["number"] if isinstance(block_data["number"], int) else int(block_data["number"], 16)
                         processed_block = await self.process_latest_block(block_number=block_number)   
+                        
                         if processed_block:
-                            await self.publish_block(block_number, processed_block)
+                            # Continue with alerts even if block publish fails
+                            publish_success = await self.publish_block(block_number, processed_block)
+                            if not publish_success:
+                                logger.warning(f"Failed to publish block {block_number}, continuing with next block")
+                                
                             alerts = await self.process_latest_block_alerts(processed_block)
                             if alerts and len(alerts) > 0:
                                 await self.publish_alert(alerts)
+                            
                     except Exception as e:
-                        logger.error(f" {__name__} Error processing block: {e}", exc_info=True)
-                        continue
+                        logger.error(f"{__name__} Error processing block: {e}", exc_info=True)
+                        continue  # Continue with next block regardless of error
         
         except Exception as e:
             logger.error(f"WebSocket subscription error: {e}", exc_info=True)
