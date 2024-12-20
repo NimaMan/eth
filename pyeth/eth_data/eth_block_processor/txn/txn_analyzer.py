@@ -143,9 +143,9 @@ class TransactionAnalyzer:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
         """
-        txn_hash = transaction['hash']
+        txn_hash = transaction['hash'] if isinstance(transaction['hash'], str) else transaction['hash'].hex()
         from_address = self.w3.to_checksum_address(transaction['from'])
-        to_address = self.w3.to_checksum_address(transaction['to'])
+        to_address = self.w3.to_checksum_address(transaction['to']) if transaction['to'] is not None else None
         logs = self.log_analyzer.analyze_logs(receipt['logs'])
         
         fees = self._extract_transaction_fees(receipt)

@@ -67,14 +67,13 @@ class TransactionBatchAnalyzer:
         receipt_map, trace_map = await self.batch_data_fetcher.fetch_block_data(block_number)
         
         results = []
+        failed_txns = []
+        
         # Use 8 workers as it shows optimal performance
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
             for idx, txn in enumerate(transactions):
-                if not isinstance(txn['hash'], str):
-                    txn_hash = f"0x{txn['hash'].hex()}"
-                else:
-                    txn_hash = txn['hash']
+                txn_hash = f"0x{txn['hash'].hex()}" if not isinstance(txn['hash'], str) else txn['hash']
                 receipt = receipt_map.get(txn_hash)    
                 trace = trace_map.get(txn_hash)
                 
@@ -84,18 +83,22 @@ class TransactionBatchAnalyzer:
                     receipt=receipt,
                     trace=trace,
                 )
-                futures.append((idx, future))
+                futures.append((idx, txn_hash, future))
             
             # Process completed futures in order
-            for idx, future in futures:
+            for idx, txn_hash, future in futures:
                 try:
                     result = future.result()
                     if result is not None:
                         results.append(result)
                 except Exception as e:
-                    logger.error(f"Error processing transaction at index {idx} with hash {txn_hash}: {str(e)}")
+                    failed_txns.append(txn_hash)
+                    logger.error(f"{__name__} Error processing transaction at index {idx} with hash {txn_hash}: {str(e)}")
+                    continue  # Continue with next transaction
         
-
+        if failed_txns:
+            logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+        
         return results
 
     async def _process_transaction_batch_asyncio(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[DetailedTransaction]:
@@ -110,46 +113,53 @@ class TransactionBatchAnalyzer:
             receipt = receipt_map.get(txn_hash)
             trace = trace_map.get(txn_hash)
             if receipt:
-                batch_data.append((txn, receipt, trace))
+                batch_data.append((txn, receipt, trace, txn_hash))
         
         # Process transactions concurrently using asyncio
         tasks = []
-        for txn, receipt, trace in batch_data:
+        for txn, receipt, trace, txn_hash in batch_data:
             task = asyncio.create_task(
-                self._analyze_single_transaction(
+                self._analyze_single_transaction_safe(
                     transaction=txn,
                     receipt=receipt,
-                    trace=trace
+                    trace=trace,
+                    txn_hash=txn_hash
                 )
             )
             tasks.append(task)
         
         # Wait for all tasks to complete
         results = []
-        try:
-            completed_tasks = await asyncio.gather(*tasks)
-            for result in completed_tasks:
-                if result is not None:
-                    results.append(result)
-        except Exception as e:
-            logger.error(f"Error in async processing: {str(e)}")
+        failed_txns = []
+        
+        completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in completed_tasks:
+            if isinstance(result, Exception):
+                if hasattr(result, 'txn_hash'):
+                    failed_txns.append(result.txn_hash)
+                continue
+            if result is not None:
+                results.append(result)
+        
+        if failed_txns:
+            logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
         
         return results
 
-    async def _analyze_single_transaction(self, 
-                                        transaction: Dict[str, Any], 
-                                        receipt: Dict[str, Any] = None,
-                                        trace: Dict[str, Any] = None,
-                                        state_diff: bool = False) -> DetailedTransaction:
-        """Analyze a single transaction using pre-fetched data"""
+    async def _analyze_single_transaction_safe(self, 
+                                             transaction: Dict[str, Any], 
+                                             receipt: Dict[str, Any] = None,
+                                             trace: Dict[str, Any] = None,
+                                             txn_hash: str = None) -> DetailedTransaction:
+        """Safely analyze a single transaction with error handling"""
         try:
             return await self.transaction_analyzer.analyze_transaction_async(
                 transaction=transaction,
                 receipt=receipt,
-                trace=trace,
-                state_diff=state_diff
+                trace=trace
             )
         except Exception as e:
-            logger.error(f"{__name__} Error analyzing transaction {transaction['hash']}: {str(e)}")
+            logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
+            e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
             raise
     

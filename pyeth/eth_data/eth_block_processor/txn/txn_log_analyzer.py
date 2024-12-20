@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from web3 import Web3
-from eth_block_processor.constants.function_signatures import EVENT_TOPICS
+from eth_block_processor.contracts.function_signatures import EVENT_TOPICS
 from eth_block_processor.data_models.receipt_models import *
 
 
@@ -113,7 +113,8 @@ class TransactionLogAnalyzer:
             elif isinstance(event, DepositAction):
                 result['deposits'].append(event)
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))
-                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
+                if self.w3.is_address(event.sender):
+                    result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
             elif isinstance(event, WithdrawAction):
                 result['withdraws'].append(event)
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.pair_address))

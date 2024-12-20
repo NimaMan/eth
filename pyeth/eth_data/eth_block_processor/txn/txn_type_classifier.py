@@ -1,7 +1,8 @@
 from hexbytes import HexBytes
 from typing import Dict, Any, Union
 from web3 import Web3
-from eth_block_processor.constants.function_signatures import FUNCTION_SIGNATURES
+from eth_block_processor.contracts.function_signatures import FUNCTION_SIGNATURES
+
 
 class ContractInteractionClassifier:
     def __init__(self, w3: Web3):
