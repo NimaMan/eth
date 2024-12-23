@@ -84,18 +84,19 @@ from eth_block_processor.blockchain.block_fetcher import BlockFetcher
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger(name="block_processor", log_folder="eth_block_processor")
-
-
 class BlockProcessor:
     def __init__(self, node_url: str = "http://127.0.0.1:8545", 
-                 save_erc20_txn_to_db: bool = False,):
+                 save_erc20_txn_to_db: bool = False,
+                 logger=None):
         self.w3 = Web3(Web3.HTTPProvider(node_url))
         self.block_fetcher = BlockFetcher(node_url)
         self.batch_analyzer = TransactionBatchAnalyzer(
             w3=self.w3,
             save_erc20_txn_to_db=save_erc20_txn_to_db,
         )
+        if logger is None:
+            logger = get_logger(name="block_processor", log_folder="eth_block_processor")
+        self.logger = logger
     
     async def process_block_range(self, start_block: int, end_block: int):
         """Process a range of blocks using batched processing"""
@@ -115,10 +116,10 @@ class BlockProcessor:
                 results[block_number] = processed_transactions
         except Exception as e:
             overall_metrics['failed_blocks'] += 1
-            logger.error(f"Failed to process blocks {start_block}-{end_block}: {e}")
+            self.logger.error(f"Failed to process blocks {start_block}-{end_block}: {e}")
 
         overall_metrics['total_time'] = time() - start_time
-        logger.info(f"Overall processing metrics: {overall_metrics}")
+        self.logger.info(f"Overall processing metrics: {overall_metrics}")
         
         return results
 
@@ -137,10 +138,10 @@ class BlockProcessor:
             )
             end_time = time()
             num_failed_txns = len(transactions) - len(processed_transactions)
-            logger.info(f"Processed block {block_number} with {len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f} seconds")                
+            self.logger.info(f"Processed block {block_number} with {len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f} seconds")                
             return processed_transactions
         except Exception as e:
-            logger.error(f" {__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
+            self.logger.error(f" {__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
             raise
 
 

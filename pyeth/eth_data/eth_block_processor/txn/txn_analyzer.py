@@ -93,6 +93,9 @@ class TransactionAnalyzer:
         # remove None from unique_addresses if it exists
         if None in unique_addresses:
             unique_addresses.remove(None)
+        # remove WETH from erc20_contracts if it exists
+        if '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' in erc20_contracts:
+            erc20_contracts.remove('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
         return erc20_contracts, unique_addresses
     
     def store_erc20_transaction(self, detailed_txn: DetailedTransaction):

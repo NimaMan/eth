@@ -42,6 +42,7 @@ import asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
 from web3.exceptions import BlockNotFound
 
+
 class BlockFetcher:
     def __init__(self, node_url: str, max_retries: int = 3, retry_delay: float = 1.0):
         """Initialize the BlockFetcher with async Web3 instance."""

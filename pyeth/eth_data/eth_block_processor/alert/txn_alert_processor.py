@@ -11,7 +11,7 @@ from eth_block_processor.utils.logger import get_logger
 logger = get_logger("alert_processor", log_folder="alert")
 
 
-class TxnAlertProcessor:
+class TransactionAlertProcessor:
     def __init__(self):
         # Initialize all alert processors
         self.alert_processors = {

@@ -21,11 +21,11 @@ from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_block_processor.blockchain.live_block_processor import transaction_serializer
 
 
-TEST_BLOCK_NUMBER = 21442705
-
+TEST_BLOCK_NUMBER_1 = 21442705
+TEST_BLOCK_NUMBER_2 = 21446809 # has taken very long to process (3 seconds at least 10x slower than normal)
 
 @pytest.mark.asyncio
-async def test_block_encoding():
+async def test_block_encoding(block_number: int):
     """Test encoding of test block which failed in production"""
     
     # Initialize block processor
@@ -35,7 +35,6 @@ async def test_block_encoding():
     
     try:
         # Process the specific block
-        block_number = TEST_BLOCK_NUMBER
         processed_block = await processor.process_block(block_number)
         
         # Attempt to encode with different approaches to identify the issue
@@ -91,4 +90,5 @@ async def test_block_encoding():
         pass
 
 if __name__ == "__main__":
-    asyncio.run(test_block_encoding())
+    asyncio.run(test_block_encoding(TEST_BLOCK_NUMBER_1))
+    asyncio.run(test_block_encoding(TEST_BLOCK_NUMBER_2))

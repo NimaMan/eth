@@ -7,15 +7,12 @@ from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger()
-
-
 class BlockTxnProcessor:
     """
     A class to process transactions within an Ethereum block.
     """
 
-    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = True):
+    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = True, logger=None):
         """
         Initialize the BlockTxnProcessor with a Web3 instance and TransactionAnalyzer.
 
@@ -27,6 +24,9 @@ class BlockTxnProcessor:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
         self.transaction_analyzer = TransactionAnalyzer(w3=self.w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
+        if logger is None:
+            logger = get_logger(name="block_txn_processor", log_folder="eth_block_processor")
+        self.logger = logger
 
     async def process_transactions(self, block: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -48,7 +48,7 @@ class BlockTxnProcessor:
 
         end_time = time.perf_counter()
         processing_time = end_time - start_time
-        logger.info(f"Processed {len(transactions)} transactions in {processing_time:.4f} seconds")
+        self.logger.info(f"Processed {len(transactions)} transactions in {processing_time:.4f} seconds")
 
         for tx_hash, analysis in analysis_results:
             results[tx_hash] = analysis
@@ -69,5 +69,5 @@ class BlockTxnProcessor:
             analysis = self.transaction_analyzer.analyze_transaction(txn)
             return txn.hash.hex(), analysis
         except Exception as e:
-            logger.error(f"Error processing transaction {txn.hash.hex()}: {e}")
+            self.logger.error(f"Error processing transaction {txn.hash.hex()}: {e}")
             return txn.hash.hex(), None

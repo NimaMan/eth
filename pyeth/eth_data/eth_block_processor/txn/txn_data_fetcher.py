@@ -1,10 +1,7 @@
 from web3 import Web3
-from web3.types import TxData, LogReceipt
 from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import aiohttp
-import json
-from hexbytes import HexBytes
 
 
 class TransactionDataFetcher:
