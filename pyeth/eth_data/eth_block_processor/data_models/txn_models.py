@@ -30,7 +30,7 @@ class ContractInteraction:
 class TransactionFees:
     gas_price: Wei
     gas_used: int
-    total_fee: Wei
+    txn_fee: Wei
     
 
 @dataclass
@@ -73,6 +73,7 @@ class DetailedTransaction:
     state_diffs: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
     bribe_amount: float = 0
+    block_timestamp: int = 0
     input: str = ""
 
     def __init__(self, 
@@ -111,7 +112,8 @@ class DetailedTransaction:
                  erc20_contracts: Optional[Set[ChecksumAddress]] = None,
                  state_diffs: Optional[Dict[str, Any]] = None,
                  latest_states: Optional[Dict[str, Any]] = None,
-                 bribe_amount: float = 0):
+                 bribe_amount: float = 0,
+                 block_timestamp: int = 0):
         """Initialize DetailedTransaction with type conversion handling"""
         
         # Core transaction fields
@@ -149,13 +151,13 @@ class DetailedTransaction:
         self.other_events = other_events or []
 
         # Complex fields
-        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, total_fee=0)
+        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
         self.unique_addresses = unique_addresses or set()
         self.erc20_contracts = erc20_contracts or set()
         self.state_diffs = state_diffs or {}
         self.latest_states = latest_states or {}
         self.bribe_amount = float(bribe_amount)
-
+        self.block_timestamp = block_timestamp
     def __post_init__(self):
         """Validate the transaction data after initialization"""
         if not self.hash:

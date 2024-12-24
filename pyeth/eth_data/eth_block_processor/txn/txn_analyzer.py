@@ -53,10 +53,11 @@ For parallel processing of multiple transactions, it's might be helpful to:
 2. Process different transactions concurrently at a higher level
 3. Use a transaction queue system for real-time monitoring
 """
-from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
+from eth_block_processor.data_models.trace_models import InternalTransaction
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
+from eth_block_processor.utils.common_addresses import fee_recipients
 from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
@@ -64,6 +65,7 @@ from eth_block_processor.txn.txn_log_analyzer import TransactionLogAnalyzer
 from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
+from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
 
 
 class TransactionAnalyzer:
@@ -121,7 +123,7 @@ class TransactionAnalyzer:
         return TransactionFees(
             gas_price=gas_price,
             gas_used=gas_used,
-            total_fee=total_fee,
+            txn_fee=total_fee,
         )
     
     def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any]) -> None:
@@ -138,6 +140,19 @@ class TransactionAnalyzer:
         elif tx_type == "Set Tax":
             # Add the contract address to erc20_contracts for Set Tax transactions
             logs['erc20_contracts'].add(transaction['to'])
+    
+    def _get_block_timestamp(self, receipt: Dict[str, Any]) -> int:
+        try:
+            return int(receipt['logs'][0]['blockTimestamp'], 16) if isinstance(receipt['logs'][0]['blockTimestamp'], str) else receipt['logs'][0]['blockTimestamp']
+        except Exception as e:
+            return 0
+    
+    def _get_bribe_amount(self, internal_transactions: List[InternalTransaction]) -> float:
+        bribe_amount = 0
+        for internal_txn in internal_transactions:
+            if internal_txn.to_address in fee_recipients:
+                bribe_amount += internal_txn.value
+        return bribe_amount
 
     def analyze_transaction(self, 
                             transaction: Dict[str, Any], 
@@ -150,7 +165,6 @@ class TransactionAnalyzer:
         from_address = self.w3.to_checksum_address(transaction['from'])
         to_address = self.w3.to_checksum_address(transaction['to']) if transaction['to'] is not None else None
         logs = self.log_analyzer.analyze_logs(receipt['logs'])
-        
         fees = self._extract_transaction_fees(receipt)
         contract_address = receipt.get('contractAddress', None)
 
@@ -170,7 +184,9 @@ class TransactionAnalyzer:
         value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction)
-        
+        block_timestamp = self._get_block_timestamp(receipt)
+        bribe_amount = self._get_bribe_amount(internal_transactions)
+
         detailed_txn = DetailedTransaction(
             hash=txn_hash,
             txn_type=tx_type,
@@ -205,6 +221,8 @@ class TransactionAnalyzer:
             fees=fees,
             unique_addresses=unique_addresses,
             erc20_contracts=erc20_contracts,
+            block_timestamp=block_timestamp,
+            bribe_amount=bribe_amount,
         )
         if self.save_erc20_txn_to_db:
             self.store_erc20_transaction(detailed_txn)
@@ -248,7 +266,9 @@ class TransactionAnalyzer:
         value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction)
-        
+        block_timestamp = self._get_block_timestamp(receipt)
+        bribe_amount = self._get_bribe_amount(internal_transactions)
+
         return DetailedTransaction(
             hash=transaction['hash'],
             txn_type=tx_type,
@@ -284,7 +304,9 @@ class TransactionAnalyzer:
             internal_transactions=internal_transactions,
             fees=fees,
             state_diffs=state_diffs,
-            latest_states=latest_states
+            latest_states=latest_states,
+            block_timestamp=block_timestamp,
+            bribe_amount=bribe_amount,
         )
 
     

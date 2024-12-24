@@ -12,27 +12,32 @@ erc20_abi = [
 ]
 
 
-def is_erc20_contract(contract_address: str) -> Optional[dict]:
+def get_erc20_contract_info(contract_address: str) -> Optional[dict]:
     web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     contract = web3.eth.contract(address=contract_address, abi=erc20_abi)
-    
     try:
         symbol = contract.functions.symbol().call()
         decimals = contract.functions.decimals().call()
-        total_supply = contract.functions.totalSupply().call()
-        
+        total_supply = contract.functions.totalSupply().call()/10**decimals
+        name = contract.functions.name().call()
         return {
             'contract_address': contract_address,
+            'name': name,
             'symbol': symbol,
             'decimals': decimals,
             'total_supply': total_supply,
         }
+    
     except (BadFunctionCallOutput, ContractLogicError):
         return None
     except Exception as e:
         if "execution reverted" not in str(e):
             raise Exception(f"Unexpected error checking ERC-20 compliance: {str(e)}")
         return None
+
+
+def is_erc20_contract(contract_address: str) -> Optional[dict]:
+    return get_erc20_contract_info(contract_address) is not None
 
 
 erc721_abi = [
