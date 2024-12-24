@@ -25,7 +25,7 @@ def expected_eth_transfer():
         fees=TransactionFees(
             gas_price=42070009906,  # 42.070009906 Gwei
             gas_used=21000,
-            total_fee=np.float64(0.000883470208026)  # 21000 * 42070009906 / 1e18
+            txn_fee=np.float64(0.000883470208026)  # 21000 * 42070009906 / 1e18
         ),
         unique_addresses={
             "0xc6c66cb4EC3b80159D36F0A566491450de1F5731",

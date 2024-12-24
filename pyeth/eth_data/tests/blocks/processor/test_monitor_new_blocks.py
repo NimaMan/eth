@@ -1,11 +1,13 @@
 import asyncio
 from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
 from eth_block_processor.utils.logger import get_logger
+import pytest
 
 # Initialize the logger
 logger = get_logger(name="test_live_block_processor", log_folder="tests")
 
 
+@pytest.mark.asyncio
 async def test_live_block_processor():
     # Initialize LiveBlockProcessor with your node and RabbitMQ URLs
     live_block_processor = LiveBlockProcessor(

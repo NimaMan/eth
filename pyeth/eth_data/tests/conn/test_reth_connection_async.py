@@ -2,10 +2,13 @@ import asyncio
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 from general_utils.logging.logger import get_logger
+import pytest
 
-logger = get_logger(name="websocket_test", log_folder="eth_block_processor")
+
+logger = get_logger(name="test_reth_connection_async", log_folder="tests")
 
 
+@pytest.mark.asyncio
 async def test_websocket_connection():
     # Use explicit localhost IP address
     WS_ENDPOINT = "ws://127.0.0.1:8546"

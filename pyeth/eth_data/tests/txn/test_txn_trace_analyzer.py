@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 from web3 import Web3
 from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
@@ -6,6 +7,7 @@ from eth_block_processor.data_models.trace_models import InternalTransaction
 from eth_block_processor.data_models.txn_models import (
     DetailedTransaction, 
     TransactionFees,
+    ERC20Transfer,
     InternalTransaction
 )
 
@@ -122,7 +124,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=36532968599,
             gas_used=127110,
-            total_fee=0.00464370563861889
+            txn_fee=0.00464370563861889
         ),
         unique_addresses={
             "0x24a0A2E8943330b9e2C26BA3ccb954D9cF76c232",
@@ -147,3 +149,43 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
     )
     
     assert sync_result == expected_transaction
+
+     # Test asynchronous analysis
+    async def run_async_analysis():
+        return await txn_analyzer.analyze_transaction_async(
+            txn_data['transaction'],
+            txn_data['receipt'],
+            txn_data['trace']
+        )
+    
+    async_result = asyncio.run(run_async_analysis())
+    assert async_result == expected_transaction 
+
+
+def test_transaction_bribe_amount(txn_analyzer, txn_data_fetcher):
+    """Test analysis of a complex swap transaction with multiple internal transfers"""
+    
+    txn_hash = "0xc8e4638975eae8e711b6bdc0f62119d8a9a29a9c7a09c32b62b10274b512d916"
+    bribe_amount = 0.01
+    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
+    # Test synchronous analysis
+    sync_result = txn_analyzer.analyze_transaction(
+        txn_data['transaction'],
+        txn_data['receipt'],
+        txn_data['trace']
+    )    
+    # Verify specific aspects of the swap
+    assert sync_result.bribe_amount == bribe_amount
+
+    # Test async analysis
+    async def run_async_analysis():
+        return await txn_analyzer.analyze_transaction_async(
+            txn_data['transaction'],
+            txn_data['receipt'],
+            txn_data['trace']
+        )
+    
+    async_result = asyncio.run(run_async_analysis())
+    assert async_result.bribe_amount == bribe_amount 
+
+    

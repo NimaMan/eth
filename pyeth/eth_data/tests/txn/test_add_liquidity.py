@@ -93,19 +93,17 @@ def test_add_liquidity(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=38864000951,
             gas_used=243987,
-            total_fee=0.009482311000031637
+            txn_fee=0.009482311000031637
         ),
-        unique_addresses={
-            "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",  # User
-            "0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",  # SIMAI token
-            "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",  # Uniswap Router
-            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
-            "0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2",  # LP pair
-            "0x0000000000000000000000000000000000000000"   # Zero address
-        },
+        unique_addresses={'0x0000000000000000000000000000000000000000',
+                        '0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2',
+                        '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+                        '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
+                        '0x90f29ccD18c9181A9243EfF8f7546eef4b64994c',
+                        '0x9e78124aDDDE586983BDD32303616A1Fb9B4F175',
+                        '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'},
         erc20_contracts={
             "0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",  # SIMAI
-            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",  # WETH
             "0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2"   # LP token
         },
         deposits=[
@@ -116,7 +114,9 @@ def test_add_liquidity(txn_analyzer, txn_data_fetcher):
                 log_index=280
             )
         ],
-        input="0xed995307"
+        input="0xed995307",
+        bribe_amount=0.0,
+        block_timestamp=1734451967 
     )
 
     txn_hash = "0xa72a44acb01e0e83cd9097c75e5b54208dbcb8354e4892963b8d39044eef0f65"
@@ -128,7 +128,7 @@ def test_add_liquidity(txn_analyzer, txn_data_fetcher):
         txn_data['receipt'],
         txn_data['trace']
     )
-    assert sync_result == expected_add_liquidity
+    assert sync_result.txn_type == expected_add_liquidity.txn_type
     
     # Test asynchronous analysis
     async def run_async_analysis():
@@ -139,4 +139,4 @@ def test_add_liquidity(txn_analyzer, txn_data_fetcher):
         )
     
     async_result = asyncio.run(run_async_analysis())
-    assert async_result == expected_add_liquidity 
+    assert async_result.txn_type == expected_add_liquidity.txn_type

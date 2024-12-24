@@ -50,7 +50,7 @@ async def test_thread_pool_vs_asyncio_consistency():
             f"ERC20 transfer count mismatch for transaction {tp_tx.hash}"
         assert len(tp_tx.internal_transactions) == len(async_tx.internal_transactions), \
             f"Internal transaction count mismatch for transaction {tp_tx.hash}"
-        assert tp_tx.fees.total_fee == async_tx.fees.total_fee, \
+        assert tp_tx.fees.txn_fee == async_tx.fees.txn_fee, \
             f"Fee mismatch for transaction {tp_tx.hash}"
 
     print(f"Successfully verified consistency between implementations for {len(thread_pool_results)} transactions")

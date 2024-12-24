@@ -53,7 +53,7 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=30289321785,
             gas_used=50611,
-            total_fee=0.001532972864860635
+            txn_fee=0.001532972864860635
         ),
         unique_addresses={
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",

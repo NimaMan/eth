@@ -74,7 +74,7 @@ async def test_process_single_block(block_processor, web3_instance):
         # Process the block
         processed_block = await block_processor.process_block(
             block_number=test_block_number,
-            block_data=block_data
+            transactions=block_data['transactions']
         )
 
         # Verify the processed block

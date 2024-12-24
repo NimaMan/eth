@@ -51,7 +51,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=33931291438,
             gas_used=46386,
-            total_fee=0.001573936884643068
+            txn_fee=0.001573936884643068
         ),
         unique_addresses={
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",  # Token owner

@@ -47,7 +47,7 @@ def test_set_tax(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=39268710360,
             gas_used=33922,
-            total_fee=0.00133207319283192
+            txn_fee=0.00133207319283192
         ),
         unique_addresses={
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",

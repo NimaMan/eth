@@ -92,7 +92,7 @@ def expected_contract_creation():
         fees=TransactionFees(
             gas_price=38919347153,
             gas_used=4591482,
-            total_fee=0.17869748190475074
+            txn_fee=0.17869748190475074
         ),
         unique_addresses={
             "0x0000000000000000000000000000000000000000",  # Zero address
