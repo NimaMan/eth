@@ -4,7 +4,7 @@ from eth_block_processor.data_models.txn_models import DetailedTransaction
 from eth_block_processor.data_models.alert_models import ContractCreationAlertData
 from eth_block_processor.alert.base_alert_class import BaseAlert
 from eth_block_processor.utils.logger import get_logger
-from eth_block_processor.contracts.contract_type import is_erc20_contract, is_erc721_contract
+from eth_block_processor.contracts.contract_type import classify_contract
 
 
 logger = get_logger("contract_creation_alert", log_folder="alert")
@@ -48,8 +48,4 @@ class ContractCreationAlert(BaseAlert):
 
     def _classify_contract(self, contract_address: str) -> str:
         """Classify the type of contract"""
-        if is_erc20_contract(contract_address):
-            return "ERC20"
-        elif is_erc721_contract(contract_address):
-            return "ERC721"
-        return "Unknown"
+        return classify_contract(contract_address)

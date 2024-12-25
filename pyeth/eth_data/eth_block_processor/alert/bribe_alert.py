@@ -17,12 +17,9 @@ class BribeAlert(BaseAlert):
         self.bribe_threshold = bribe_threshold
         
     def _is_alert(self, detailed_txn: DetailedTransaction) -> bool:
-        if set(detailed_txn.unique_addresses) & self.fee_recipients:
-            for internal_txn in detailed_txn.internal_transactions:
-                if internal_txn.to_address in self.fee_recipients:
-                    if internal_txn.value > self.bribe_threshold:
-                        return True, internal_txn.value
-        return False, 0
+        if detailed_txn.bribe_amount > self.bribe_threshold:
+            return True, detailed_txn.bribe_amount
+        return False, 0.0
         
     async def process_txn(self, detailed_txn: DetailedTransaction) -> List[BribeAlertData]:
         """Process a block to detect potential bribe events"""
@@ -46,7 +43,9 @@ class BribeAlert(BaseAlert):
     
     def send_alert(self, alert_data: BribeAlertData) -> None:
         """Send/log the bribe alert"""
-        builder_name = self.fee_recipients.get(alert_data.to_address, "Unknown Builder")
-        logger.info(f"Potential Bribe Alert: {alert_data.value} ETH sent to {builder_name} ({alert_data.to_address})")
+        logger.info(f"Bribe-> Txn: {alert_data.transaction_hash} "
+                    f"From: {alert_data.from_address} "
+                    f"Value: {alert_data.bribe_amount}"
+                    )
 
 
