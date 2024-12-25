@@ -83,9 +83,16 @@ def expected_contract_creation():
             token1="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
             log_index=462
         )],
-        actions=[],
+        actions=('Ownership Change', 'Contract Creation'),
         eth_transfers=[],
-        contract_interactions=[],
+        contract_creation_events=[ContractCreationEvent(
+            contract_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
+            contract_type='ERC-20', 
+            symbol='SIMAI', 
+            decimals=18, 
+            name='Simian AI', 
+            total_supply=100000000.0
+        )],
         trading_enabled_events=[],
         trading_disabled_events=[],
         other_events=[],

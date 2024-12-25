@@ -69,5 +69,5 @@ class BlockTxnProcessor:
             analysis = self.transaction_analyzer.analyze_transaction(txn)
             return txn.hash.hex(), analysis
         except Exception as e:
-            self.logger.error(f"Error processing transaction {txn.hash.hex()}: {e}")
+            self.logger.error(f"{__name__}: Error processing transaction {txn.hash.hex()}: {e}")
             return txn.hash.hex(), None

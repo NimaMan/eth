@@ -53,7 +53,7 @@ For parallel processing of multiple transactions, it's might be helpful to:
 2. Process different transactions concurrently at a higher level
 3. Use a transaction queue system for real-time monitoring
 """
-from eth_block_processor.data_models.trace_models import InternalTransaction
+from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
@@ -66,6 +66,9 @@ from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
+from eth_block_processor.txn.txn_action_classifier import TransactionActionClassifier
+from eth_block_processor.data_models.trace_models import InternalTransaction
+from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
 
 class TransactionAnalyzer:
@@ -76,6 +79,7 @@ class TransactionAnalyzer:
         self.log_analyzer = TransactionLogAnalyzer(w3=w3)
         self.trace_analyzer = TransactionTraceAnalyzer(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
+        self.action_classifier = TransactionActionClassifier()
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
@@ -126,7 +130,7 @@ class TransactionAnalyzer:
             txn_fee=total_fee,
         )
     
-    def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any]) -> None:
+    def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
         """Add synthetic events based on transaction type"""
         if tx_type == "Trading Enabled":
             logs['trading_enabled_events'].append(
@@ -140,7 +144,20 @@ class TransactionAnalyzer:
         elif tx_type == "Set Tax":
             # Add the contract address to erc20_contracts for Set Tax transactions
             logs['erc20_contracts'].add(transaction['to'])
-    
+        elif tx_type == "Contract Creation":
+            contract_address = self.w3.to_checksum_address(receipt['contractAddress'])
+            contract_info = get_erc20_contract_info(contract_address, self.w3)
+            if contract_info is not None:
+                logs['contract_creation_events'].append(
+                    ContractCreationEvent(
+                        contract_address=contract_address,
+                        contract_type="ERC-20",
+                        symbol=contract_info['symbol'],
+                        decimals=contract_info['decimals'],
+                        name=contract_info['name'],
+                        total_supply=contract_info['total_supply'],
+                    )
+                )
     def _get_block_timestamp(self, receipt: Dict[str, Any]) -> int:
         try:
             return int(receipt['logs'][0]['blockTimestamp'], 16) if isinstance(receipt['logs'][0]['blockTimestamp'], str) else receipt['logs'][0]['blockTimestamp']
@@ -183,9 +200,10 @@ class TransactionAnalyzer:
             )
         value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
-        self._add_txn_type_events(tx_type, logs, transaction)
+        self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
+        actions = self.action_classifier.classify_transaction_actions(tx_type, logs)
 
         detailed_txn = DetailedTransaction(
             hash=txn_hash,
@@ -209,14 +227,14 @@ class TransactionAnalyzer:
             burns=logs['burns'],
             deposits=logs['deposits'],
             withdraws=logs['withdraws'],
+            contract_creation_events=logs['contract_creation_events'],
             pair_events=logs['pair_events'],
             owner_events=logs['owner_events'],
             trading_enabled_events=logs['trading_enabled_events'],
             trading_disabled_events=logs['trading_disabled_events'],
             other_events=logs['other_events'],
-            actions=[],
+            actions=actions,
             eth_transfers=[],
-            contract_interactions=[],
             internal_transactions=internal_transactions,
             fees=fees,
             unique_addresses=unique_addresses,
@@ -265,9 +283,10 @@ class TransactionAnalyzer:
         
         value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
-        self._add_txn_type_events(tx_type, logs, transaction)
+        self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
+        actions = self.action_classifier.classify_transaction_actions(tx_type, logs)
 
         return DetailedTransaction(
             hash=transaction['hash'],
@@ -291,11 +310,11 @@ class TransactionAnalyzer:
             burns=logs['burns'],
             deposits=logs['deposits'],
             withdraws=logs['withdraws'],
-            actions=logs.get('actions', []),
+            actions=actions,
             eth_transfers=logs.get('eth_transfers', []),
             pair_events=logs.get('pair_events', []),
             owner_events=logs.get('owner_events', []),
-            contract_interactions=logs.get('contract_interactions', []),
+            contract_creation_events=logs.get('contract_creation_events', []),
             trading_enabled_events=logs.get('trading_enabled_events', []),
             trading_disabled_events=logs.get('trading_disabled_events', []),
             other_events=logs.get('other_events', []),

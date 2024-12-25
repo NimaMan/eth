@@ -44,7 +44,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
         withdraws=[],
         pair_events=[],
         owner_events=[],
-        contract_interactions=[],
+        contract_creation_events=[],
         trading_enabled_events=[],
         trading_disabled_events=[],
         other_events=[],

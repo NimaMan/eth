@@ -18,13 +18,13 @@ class ETHTransfer:
     amount: Wei
 
 @dataclass
-class ContractInteraction:
+class ContractCreationEvent:
     contract_address: ChecksumAddress
-    contract_name: Optional[str]
-    method_name: str
-    decoded_input: Dict[str, Any]
-    value: Wei
-
+    contract_type: str
+    symbol: Optional[str]
+    decimals: Optional[int]
+    name: Optional[str]
+    total_supply: Optional[int]
 
 @dataclass
 class TransactionFees:
@@ -62,7 +62,7 @@ class DetailedTransaction:
     withdraws: List[WithdrawAction]
     pair_events: List[PairAction]
     owner_events: List[OwnerEvent]
-    contract_interactions: List[ContractInteraction]
+    contract_creation_events: List[ContractCreationEvent]
     trading_enabled_events: List[TradingEnabledEvent]
     trading_disabled_events: List[TradingDisabledEvent]
     other_events: List[Dict[str, Any]]
@@ -103,7 +103,7 @@ class DetailedTransaction:
                  withdraws: Optional[List[WithdrawAction]] = None,
                  pair_events: Optional[List[PairAction]] = None,
                  owner_events: Optional[List[OwnerEvent]] = None,
-                 contract_interactions: Optional[List[ContractInteraction]] = None,
+                 contract_creation_events: Optional[List[ContractCreationEvent]] = None,
                  trading_enabled_events: Optional[List[TradingEnabledEvent]] = None,
                  trading_disabled_events: Optional[List[TradingDisabledEvent]] = None,
                  other_events: Optional[List[Dict[str, Any]]] = None,
@@ -145,7 +145,7 @@ class DetailedTransaction:
         self.withdraws = withdraws or []
         self.pair_events = pair_events or []
         self.owner_events = owner_events or []
-        self.contract_interactions = contract_interactions or []
+        self.contract_creation_events = contract_creation_events or []
         self.trading_enabled_events = trading_enabled_events or []
         self.trading_disabled_events = trading_disabled_events or []
         self.other_events = other_events or []
@@ -192,7 +192,7 @@ class DetailedTransaction:
             self.withdraws == other.withdraws and
             self.pair_events == other.pair_events and
             self.owner_events == other.owner_events and
-            self.contract_interactions == other.contract_interactions and
+            self.contract_creation_events == other.contract_creation_events and
             self.trading_enabled_events == other.trading_enabled_events and
             self.trading_disabled_events == other.trading_disabled_events and
             self.other_events == other.other_events and

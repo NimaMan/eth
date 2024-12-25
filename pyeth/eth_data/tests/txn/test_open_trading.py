@@ -40,7 +40,7 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
         withdraws=[],
         pair_events=[],
         owner_events=[],
-        contract_interactions=[],
+        contract_creation_events=[],
         trading_enabled_events=[
             TradingEnabledEvent(
                 token_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",

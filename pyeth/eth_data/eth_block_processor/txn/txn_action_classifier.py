@@ -1,72 +1,61 @@
-from eth_utils import function_signature_to_4byte_selector
 from web3 import Web3
 from typing import Dict, Any, List
+
 
 class TransactionActionClassifier:
     """
     Classifies transaction types by analyzing function signatures and logs
-    """
     
-    # Common function signatures
-    SIGNATURES = {
-        # Uniswap V2 Router
-        "addLiquidityETH": "addLiquidityETH(address,uint256,uint256,uint256,address,uint256)",
-        "addLiquidity": "addLiquidity(address,address,uint256,uint256,uint256,uint256,address,uint256)",
-        "removeLiquidity": "removeLiquidity(address,address,uint256,uint256,uint256,address,uint256)",
-        "removeLiquidityETH": "removeLiquidityETH(address,uint256,uint256,uint256,address,uint256)",
-        "swapExactTokensForTokens": "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
-        "swapExactETHForTokens": "swapExactETHForTokens(uint256,address[],address,uint256)",
-        "swapExactTokensForETH": "swapExactTokensForETH(uint256,uint256,address[],address,uint256)",
-        
-        # ERC20/ERC721
-        "approve": "approve(address,uint256)",
-        "transfer": "transfer(address,uint256)",
-        "transferFrom": "transferFrom(address,address,uint256)",
-    }
-
-    def __init__(self):
-        # Convert signatures to method IDs
-        self.method_ids = {
-            name: function_signature_to_4byte_selector(sig).hex()
-            for name, sig in self.SIGNATURES.items()
-        }
-        
-        # Reverse mapping from method ID to action type
-        self.action_types = {
-            self.method_ids["addLiquidityETH"]: "Add Liquidity",
-            self.method_ids["addLiquidity"]: "Add Liquidity",
-            self.method_ids["removeLiquidity"]: "Remove Liquidity",
-            self.method_ids["removeLiquidityETH"]: "Remove Liquidity",
-            self.method_ids["swapExactTokensForTokens"]: "Swap",
-            self.method_ids["swapExactETHForTokens"]: "Swap",
-            self.method_ids["swapExactTokensForETH"]: "Swap",
-            self.method_ids["approve"]: "Approve",
-            self.method_ids["transfer"]: "Transfer",
-            self.method_ids["transferFrom"]: "Transfer",
-        }
-
-    def classify_transaction_action(self, 
-                                 transaction: Dict[str, Any],
-                                 parsed_logs: Dict[str, List[Any]]) -> str:
+    Objective:
+    ---------
+    Determine the specific action(s) taken in a transaction by analyzing:
+    1. Function signatures
+    2. Event logs
+    3. Event sequences and relationships
+    
+    This helps in accurate alert generation by understanding the context
+    of token transfers and other events.
+    """
+    def classify_transaction_actions(self, 
+                                    txn_type: str,
+                                    parsed_logs: Dict[str, List[Any]]) -> List[str]:
         """
-        Determine the transaction type based on:
-        1. Function signature in input data
-        2. Event logs if no matching signature
-        """
-        # Check input data for function signature
-        input_data = transaction.get('input', '0x')
-        if len(input_data) >= 10:
-            method_id = input_data[:10]  # includes '0x' prefix
-            if method_id in self.action_types:
-                return self.action_types[method_id]
+        Determine all actions in the transaction based on log analysis
         
-        # Fallback to log analysis
+        Returns a list of actions like:
+        - "Token Swap"
+        - "Add Liquidity"
+        - "Remove Liquidity"
+        - "Token Transfer"
+        - "Token Receive"
+        - "Trading Enable"
+        - "Contract Creation"
+        etc.
+        """
+        actions = []
+        
+        # Check for contract creation
+        if txn_type == 'Contract Creation':
+            actions.append("Contract Creation")
+        
+        if txn_type == 'Trading Enable':
+            actions.append("Trading Enable")
+        elif txn_type == 'Trading Disable':
+            actions.append("Trading Disable")
+        
+        # Check for liquidity actions
         if self._is_add_liquidity_action(parsed_logs):
-            return "Add Liquidity"
-        elif self._is_swap_action(parsed_logs):
-            return "Swap"
+            actions.append("Add Liquidity")
             
-        return "Unknown"
+        # Check for swaps
+        if self._is_swap_action(parsed_logs):
+            actions.append("Swap")
+
+        # Check for ownership changes
+        if parsed_logs.get('owner_events', []):
+            actions.append("Ownership Change")
+    
+        return tuple(set(actions))  # Remove duplicates
     
     def _is_add_liquidity_action(self, parsed_logs: Dict[str, List[Any]]) -> bool:
         """Check for add liquidity pattern in logs"""
@@ -78,3 +67,50 @@ class TransactionActionClassifier:
         """Check for swap pattern in logs"""
         has_swap = len(parsed_logs.get('uniswap_v2_swaps', [])) > 0
         return has_swap
+    
+    def _is_token_transfer_action(self, parsed_logs: Dict[str, List[Any]], transaction: Dict[str, Any]) -> bool:
+        """
+        Check for token transfer pattern in logs.
+        
+        A transaction is considered a pure token transfer if:
+        1. Contains ERC20 transfer events
+        2. Does NOT contain:
+           - Swap events (DEX trading)
+           - Pair events (Liquidity operations)
+           - Contract creation events
+           - Mint/Burn events (Supply changes)
+           - Trading enable/disable events
+        3. Is not a contract interaction (direct transfer)
+        
+        Returns:
+        --------
+        bool: True if the transaction is a pure token transfer
+        """
+        # Check for ERC20 transfers
+        has_transfer = len(parsed_logs.get('erc20_transfers', [])) > 0
+        if not has_transfer:
+            return False
+        
+        # Check for other events that would indicate this isn't a pure transfer
+        has_swap = len(parsed_logs.get('uniswap_v2_swaps', [])) > 0
+        has_pair = len(parsed_logs.get('pair_events', [])) > 0
+        has_mint = len(parsed_logs.get('mints', [])) > 0
+        has_burn = len(parsed_logs.get('burns', [])) > 0
+        has_trading_events = (
+            len(parsed_logs.get('trading_enabled_events', [])) > 0 or 
+            len(parsed_logs.get('trading_disabled_events', [])) > 0
+        )
+        
+        # Check if this is a contract interaction
+        input_data = transaction.get('input', '0x')
+        is_contract_interaction = len(input_data) > 10  # More than just the function selector
+        
+        # Return true only if it's a pure transfer
+        return not any([
+            has_swap,
+            has_pair,
+            has_mint,
+            has_burn,
+            has_trading_events,
+            is_contract_interaction
+        ])

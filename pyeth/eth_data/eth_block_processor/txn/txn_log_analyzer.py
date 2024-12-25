@@ -65,6 +65,7 @@ class TransactionLogAnalyzer:
             'burns': [],
             'deposits': [],
             'withdraws': [],
+            'contract_creation_events': [],
             'pair_events': [],
             'approvals': [],
             'owner_events': [],

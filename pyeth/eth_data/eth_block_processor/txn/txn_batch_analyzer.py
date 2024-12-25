@@ -19,7 +19,6 @@ Key Components:
    - Maintains transaction ordering within blocks
 """
 
-from hexbytes import HexBytes
 from web3 import Web3
 from typing import List, Dict, Any, Union
 import asyncio
@@ -28,21 +27,20 @@ from eth_block_processor.data_models.txn_models import DetailedTransaction
 from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
 from eth_block_processor.txn.txn_data_fetcher import BatchTransactionDataFetcher
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
-import time
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger(name="txn_analyzer")
-
-
 class TransactionBatchAnalyzer:
-    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False):
+    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False, logger=None):
         if w3 is None:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
         self.transaction_analyzer = TransactionAnalyzer(w3=w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
         self.batch_data_fetcher = BatchTransactionDataFetcher(w3=w3)
+        if logger is None:
+            logger = logger = get_logger(name="txn_analyzer")
+        self.logger = logger
 
     async def analyze_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], use_asyncio: bool = True) -> List[DetailedTransaction]:
         """
@@ -93,11 +91,11 @@ class TransactionBatchAnalyzer:
                         results.append(result)
                 except Exception as e:
                     failed_txns.append(txn_hash)
-                    logger.error(f"{__name__} Error processing transaction at index {idx} with hash {txn_hash}: {str(e)}")
+                    self.logger.error(f"{__name__} Error processing transaction at index {idx} with hash {txn_hash}: {str(e)}")
                     continue  # Continue with next transaction
         
         if failed_txns:
-            logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+            self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
         
         return results
 
@@ -142,7 +140,7 @@ class TransactionBatchAnalyzer:
                 results.append(result)
         
         if failed_txns:
-            logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+            self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
         
         return results
 
@@ -159,7 +157,7 @@ class TransactionBatchAnalyzer:
                 trace=trace
             )
         except Exception as e:
-            logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
+            self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
             e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
             raise
     
