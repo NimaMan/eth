@@ -1,6 +1,6 @@
 from web3 import Web3
 from typing import Optional
-from web3.exceptions import BadFunctionCallOutput, ContractLogicError
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError, Web3RPCError
 
 
 erc20_abi = [
@@ -12,9 +12,10 @@ erc20_abi = [
 ]
 
 
-def get_erc20_contract_info(contract_address: str) -> Optional[dict]:
-    web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-    contract = web3.eth.contract(address=contract_address, abi=erc20_abi)
+def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[dict]:
+    if w3 is None:
+        w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+    contract = w3.eth.contract(address=w3.to_checksum_address(contract_address), abi=erc20_abi)
     try:
         symbol = contract.functions.symbol().call()
         decimals = contract.functions.decimals().call()
@@ -27,11 +28,11 @@ def get_erc20_contract_info(contract_address: str) -> Optional[dict]:
             'decimals': decimals,
             'total_supply': total_supply,
         }
-    
-    except (BadFunctionCallOutput, ContractLogicError):
+    except (BadFunctionCallOutput, ContractLogicError, Web3RPCError) as e:
+        # Contract is not an ERC20 token or has invalid bytecode
         return None
     except Exception as e:
-        if "execution reverted" not in str(e):
+        if "execution reverted" not in str(e) and "InvalidFEOpcode" not in str(e):
             raise Exception(f"Unexpected error checking ERC-20 compliance: {str(e)}")
         return None
 
@@ -68,3 +69,12 @@ def is_erc721_contract(contract_address: str) -> Optional[dict]:
         if "execution reverted" not in str(e):
             raise Exception(f"Unexpected error checking ERC-721 compliance: {str(e)}")
         return None
+
+
+def classify_contract(contract_address: str) -> str:
+    """Classify the type of contract"""
+    if is_erc20_contract(contract_address):
+        return "ERC20"
+    elif is_erc721_contract(contract_address):
+            return "ERC721"
+    return "Unknown"  

@@ -91,6 +91,8 @@ FUNCTION_SIGNATURES = {
     "51b001": "LayerSwap 1",
 
     'c9567bf9': 'Trading Enabled',
+    'fb201b1d': 'Trading Enabled',
+    "8a8c523c": "Trading Enabled",
     "ed995307": "Add Liquidity",
     '667f6526': 'Set Tax',
     '74010ece': 'Set Max Txn Amount',
