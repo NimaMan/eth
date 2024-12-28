@@ -1,5 +1,5 @@
 """
-BlockFetcher Module
+BlockFetcher Module optimized for RETH node
 
 Objective:
 ---------
@@ -41,6 +41,7 @@ The fetcher is typically used in two contexts:
 import asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
 from web3.exceptions import BlockNotFound
+import aiohttp
 
 
 class BlockFetcher:
@@ -88,6 +89,54 @@ class BlockFetcher:
                 if attempt == self.max_retries - 1:
                     raise
                 await asyncio.sleep(self.retry_delay)
+
+    async def fetch_blocks_batch(self, start_block: int, end_block: int, batch_size: int = 100):
+        """
+        Fetch blocks in batches to handle RPC response size limits
+        Args:
+            start_block: Starting block number
+            end_block: Ending block number
+            batch_size: Number of blocks per batch (default 100)
+        """
+        all_blocks = {}
+        
+        async with aiohttp.ClientSession() as session:
+            for batch_start in range(start_block, end_block + 1, batch_size):
+                batch_end = min(batch_start + batch_size - 1, end_block)
+                
+                try:
+                    # Create batch request for current range
+                    batch = [
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "eth_getBlockByNumber",
+                            "params": [hex(block_num), True],
+                            "id": block_num
+                        }
+                        for block_num in range(batch_start, batch_end + 1)
+                    ]
+                    
+                    async with session.post(
+                        self.w3.provider.endpoint_uri,
+                        json=batch,
+                        headers={'Content-Type': 'application/json'}
+                    ) as response:
+                        results = await response.json()
+                        
+                        # Handle batch-level error
+                        if isinstance(results, dict) and 'error' in results:
+                            raise Exception(f"Batch error: {results['error']}")
+                        
+                        # Process results
+                        for result in results:
+                            if isinstance(result, dict) and result.get('result'):
+                                block_num = int(result['result']['number'], 16)
+                                all_blocks[block_num] = result['result']
+                    
+                except Exception as e:
+                    raise Exception(f"Batch fetch failed for blocks {batch_start}-{batch_end}: {e}")
+                
+        return all_blocks
 
     async def close(self):
         """Close the connection to the Ethereum node."""

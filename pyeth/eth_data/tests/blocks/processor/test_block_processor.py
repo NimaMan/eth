@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 import pytest_asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
@@ -37,7 +38,7 @@ async def block_processor(web3_instance):
         BlockProcessor: An instance of BlockProcessor initialized with the node URL.
     """
     node_url = "http://127.0.0.1:8545"
-    processor = BlockProcessor(node_url=node_url)
+    processor = BlockProcessor(node_url=node_url, logger=logger)
     try:
         yield processor
     finally:
@@ -88,3 +89,48 @@ async def test_process_single_block(block_processor, web3_instance):
     except Exception as e:
         logger.error(f"Error in test_process_single_block: {e}", exc_info=True)
         raise
+
+@pytest.mark.asyncio
+async def test_batch_block_processing():
+    """Test complete batch processing flow"""
+    # Setup
+    node_url = "http://localhost:8545"
+    processor = BlockProcessor(node_url)
+    
+    try:
+        # Get a range of recent blocks
+        latest_block = await processor.block_fetcher.fetch_latest_block_number()
+        start_block = latest_block - 10  # Test with 10 blocks
+        
+        print(f"\nTesting batch processing for blocks {start_block} to {latest_block}")
+        
+        # Process blocks
+        processed_blocks = await processor.process_block_range(start_block, latest_block)
+        
+        # Verify results
+        assert len(processed_blocks) > 0, "No blocks processed"
+        
+        # Check data completeness for each block
+        for block_num, block_data in processed_blocks.items():
+            assert isinstance(block_data, list), f"Invalid data format for block {block_num}"
+            
+            # Verify each transaction was analyzed
+            for tx_result in block_data:
+                if isinstance(tx_result, Exception):
+                    print(f"Error processing transaction: {tx_result}")
+                    continue
+                    
+                assert hasattr(tx_result, 'hash'), "Transaction missing hash"
+                assert hasattr(tx_result, 'from_address'), "Transaction missing from_address"
+                assert hasattr(tx_result, 'to_address'), "Transaction missing to_address"
+                assert hasattr(tx_result, 'value'), "Transaction missing value"
+        
+        print(f"\nSuccessfully processed {len(processed_blocks)} blocks")
+        
+    except Exception as e:
+        print(f"Test failed: {str(e)}")
+        raise
+
+
+if __name__ == "__main__":
+    asyncio.run(test_batch_block_processing())

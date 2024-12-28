@@ -48,7 +48,7 @@ class EthTransactionClassifier:
             return "Contract Creation"
         else:
             input_data = transaction.get('input')
-            if input_data.hex() == '0x' or input_data.hex() == '':
+            if self.is_eth_transfer(input_data):
                 return "Ether Transfer"
             elif self._starts_with(input_data, self.erc20_transfer_signature):
                 return "ERC20 Transfer"
@@ -61,6 +61,15 @@ class EthTransactionClassifier:
             else:
                 return self.contract_interaction_classifier.classify_interaction(transaction)
 
+    def is_eth_transfer(self, input_data: Union[HexBytes, str]) -> bool:
+        if isinstance(input_data, HexBytes):
+            if input_data.hex() == '0x' or input_data.hex() == '':
+                return True
+        elif isinstance(input_data, str):
+            if input_data == '0x' or input_data == '':
+                return True
+        return False
+    
     def _starts_with(self, input_data: Union[HexBytes, str], prefix: str) -> bool:
         if isinstance(input_data, HexBytes):
             return input_data.hex().startswith(prefix)

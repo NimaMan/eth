@@ -30,6 +30,6 @@ async def test_scam_orca_alert(txn_analyzer, txn_data_fetcher, scam_orca_alert):
     assert len(alert) == 1
     
     alert = alert[0]
-    assert alert.alert_type == 'Orca Scam'
+    assert alert.alert_type == 'Scam | Orca'
     assert alert.transaction_hash == txn_hash
     
