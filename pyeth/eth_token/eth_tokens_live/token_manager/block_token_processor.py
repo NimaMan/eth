@@ -11,8 +11,9 @@ Objective:
 """
 
 import asyncio
+from web3 import Web3
 from dataclasses import asdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Set
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_tokens_live.live_erc20_token.live_token import LiveERC20Token
@@ -22,12 +23,12 @@ from eth_tokens_live.utils.logger import get_logger
 
 class BlockTokenProcessor:
     def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None):
-        self.logger = logger or get_logger(name="tokens_live", log_folder="tokens_live")
-        
+        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
         # Token tracking
         self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger, redis_url=redis_url)
         self.token_first_seen: Dict[str, int] = {}
         self.updated_tokens: Dict[str, LiveERC20Token] = {}
+        self.processed_blocks: Dict[int, bool] = {}
         self.latest_processed_block = 0
 
     async def process_block(self, block_data: List[Dict]):
@@ -36,8 +37,13 @@ class BlockTokenProcessor:
             return    
         
         self.updated_tokens.clear()
-        tasks = [self._process_transaction(asdict(txn)) for txn in block_data]
+        tasks = []
+        for txn in block_data:
+            if not isinstance(txn, dict):
+                txn = asdict(txn)
+            tasks.append(self._process_transaction(txn))
         await asyncio.gather(*tasks)
+        self.processed_blocks[txn.get('block_number')] = True # Mark block as processed
 
     async def _process_transaction(self, transaction: Dict):
         """Process a single transaction and update relevant tokens"""
@@ -137,39 +143,51 @@ class BlockRangeTokenProcessor:
    """
     def __init__(self, 
                  block_token_processor: BlockTokenProcessor = None,
+                 w3: Web3 = None,
                  logger=None):
-        self.logger = logger or get_logger(name="tokens_live", log_folder="tokens_live")
+        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
+        self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
             logger=self.logger
         )
-        self.processed_blocks: Dict[int, List[Dict]] = {}
+        self.processed_blocks = self.block_token_processor.processed_blocks
     
-    async def fetch_block_range_data(self, start_block: int, end_block: int):
-        """Fetch and return block data for a specific range"""
-        try:
-            block_range_detailed_transaction_data = await self.block_processor.process_block_range(
-                start_block=start_block,
-                end_block=end_block
-            )   
-            return block_range_detailed_transaction_data                 
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing blocks {start_block}-{end_block}: {e}")
-            raise
-
-    async def process_blocks(self, block_range_detailed_transaction_data: Dict[int, List[Dict]]):
+    async def process_block_range(self, start_block: int, end_block: int):
         """Process block data in sequential order using shared base processor"""
         try:
-            for block_number, block_data in sorted(block_range_detailed_transaction_data.items()):
+            for block_number in range(start_block, end_block + 1):
                 if block_number not in self.processed_blocks:
-                    # Use shared base processor for token processing
-                    await self.block_token_processor.process_block(block_data)
-                    self.processed_blocks[block_number] = True
-                    self.block_token_processor.latest_processed_block = max(
-                        self.block_token_processor.latest_processed_block, 
-                        block_number
-                    )
+                    # Use shared base processor for token processing            
+                    block_data = await self.block_processor.process_block(block_number)
+                    # Process block data for token updates
+                    await self.block_token_processor.process_block(block_data)                    
+                    self.block_token_processor.latest_processed_block = block_number
+
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing block: {e}")
             raise
 
+    async def process_range_until_live(self, block_range: int):
+        """Process blocks in ranges until we're close enough to live"""
+        start_block = self.w3.eth.get_block_number() - block_range
+        self._has_caught_up_to_live = False
+        try:
+            current_block = start_block
+            while not self._has_caught_up_to_live:
+                
+                current_block_data = await self.block_processor.process_block(block_number=current_block)
+                # Process block data for token updates 
+                await self.block_token_processor.process_block(current_block_data)
+                self.block_token_processor.latest_processed_block = current_block
+                # Check if we're caught up after processing this range
+                latest_block = self.w3.eth.get_block_number()
+                if latest_block - current_block == 0:
+                    self._has_caught_up_to_live = True
+                    self.logger.info(f"Caught up to live (gap: {latest_block - current_block} blocks)")
+                    break
+                current_block += 1
+            return self.block_token_processor.latest_processed_block
+        except Exception as e:
+            self.logger.error(f"Error catching up to live: {e}")
+            raise

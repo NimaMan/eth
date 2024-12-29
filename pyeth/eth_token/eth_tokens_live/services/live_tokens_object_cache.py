@@ -33,7 +33,7 @@ class LiveTokenObjectsCache:
         self.max_size = max_size
         self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._lock = Lock()
-        self.logger = logger or get_logger(name="tokens_live", log_folder="tokens_live")
+        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
         
         # Initialize Redis service
         #self.cache_service = TokenCacheService(redis_url=redis_url, logger=self.logger)

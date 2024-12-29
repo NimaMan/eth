@@ -2,13 +2,8 @@
 Base subscriber class for handling RabbitMQ connections and message processing
 """
 
-import asyncio
 import aio_pika
 from typing import Optional, Callable, Any
-from eth_tokens_live.utils.logger import get_logger
-
-
-logger = get_logger(log_folder="tokens_live")
 
 
 class BaseSubscriber:
@@ -44,16 +39,16 @@ class BaseSubscriber:
                 durable=True
             )
             await self.queue.bind(self.exchange, routing_key=self.routing_key)
-            logger.info(f"Connected to RabbitMQ exchange: {self.exchange_name}")
+            self.logger.info(f"Connected to RabbitMQ exchange: {self.exchange_name}")
         except Exception as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
+            self.logger.error(f"Failed to connect to RabbitMQ: {e}")
             raise
 
     async def disconnect(self):
         """Close RabbitMQ connection"""
         if self.connection and not self.connection.is_closed:
             await self.connection.close()
-            logger.info("Disconnected from RabbitMQ")
+            self.logger.info("Disconnected from RabbitMQ")
 
     async def process_message(self, message: aio_pika.Message):
         """Override this method in derived classes"""
