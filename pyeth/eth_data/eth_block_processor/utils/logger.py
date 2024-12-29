@@ -67,15 +67,22 @@ def get_logger(name="block_processor", log_folder="eth_block_processor", base_lo
 
 def cleanup_empty_logs():
     """
-    Delete log files that are completely empty (0 bytes)
+    Delete log files that are empty or contain only one line
     """
     for log_file in _log_files:
         try:
             if os.path.exists(log_file):
-                # Check if file is empty (0 bytes)
+                # Check if file is empty
                 if os.path.getsize(log_file) == 0:
                     os.remove(log_file)
-                    
+                    continue
+                
+                # Check number of lines
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    if len(lines) <= 1:
+                        os.remove(log_file)
+                        
         except Exception as e:
             print(f"Error cleaning up log file {log_file}: {str(e)}")
 
