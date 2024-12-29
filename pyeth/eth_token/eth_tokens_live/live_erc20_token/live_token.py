@@ -1,10 +1,3 @@
-"""
-# Live ERC20Token Class
-The ERC20Token class represents an Ethereum ERC20 token and serves as an interface for upper-level analysis. 
-
-### Purpose
-- Keep track of the live data of an ERC20 token.
-"""
 
 from typing import Any, Dict
 from eth_tokens_live.live_erc20_token.data.live_token_data import LiveTokenData
@@ -12,6 +5,7 @@ from eth_tokens_live.live_erc20_token.network.live_token_network import LiveToke
 from eth_token_analyzer.erc20_token.token_metrics import UniV2PairSyncInfo
 from eth_token_analyzer.erc20_token.token_metrics import ScamInfo
 from eth_token_analyzer.erc20_token.token_metrics import LifetimeInfo
+from eth_tokens_live.live_erc20_token.scam_pred.token_health_predictor import TokenHealthPredictor
 
 
 class LiveERC20Token:
@@ -28,14 +22,19 @@ class LiveERC20Token:
         self.contract_address = contract_address
         self.token_data = LiveTokenData(contract_address=contract_address)
         self.token_network = LiveTokenNetwork(token_data=self.token_data)
+        self.token_health_predictor = TokenHealthPredictor()
 
     def update_from_transaction(self, transaction: Dict):
         self.token_data.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
-
+        #if not self.token_health_predictor.is_scam:
+        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction)
+    
     async def update_from_transaction_async(self, transaction: Dict):
         self.token_data.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
+        #if not self.token_health_predictor.is_scam:
+        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction)
 
     @property
     def sync_info(self):
@@ -127,5 +126,8 @@ class LiveERC20Token:
                 raise AttributeError(f"'{self.__class__.__name__}' has no attribute '{name}'")
 
     def to_dict(self):
-        return self.metrics
+        return {
+            'token_data': self.token_data.to_dict(),
+            'latest_token_assessment': self.token_health_predictor.to_dict(),
+        }
     

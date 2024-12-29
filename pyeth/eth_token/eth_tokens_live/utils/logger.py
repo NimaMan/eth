@@ -22,11 +22,23 @@ ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
 _log_files = set()
 
 def cleanup_empty_logs():
-    """Delete empty log files when the program exits"""
+    """
+    Delete log files that are empty or contain only one line
+    """
     for log_file in _log_files:
         try:
-            if os.path.exists(log_file) and os.path.getsize(log_file) == 0:
-                os.remove(log_file)
+            if os.path.exists(log_file):
+                # Check if file is empty
+                if os.path.getsize(log_file) == 0:
+                    os.remove(log_file)
+                    continue
+                
+                # Check number of lines
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    if len(lines) <= 1:
+                        os.remove(log_file)
+                        
         except Exception as e:
             print(f"Error cleaning up log file {log_file}: {str(e)}")
 

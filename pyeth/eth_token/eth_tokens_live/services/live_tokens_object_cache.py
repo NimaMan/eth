@@ -14,7 +14,9 @@ from collections import OrderedDict
 from typing import Optional, Dict, List
 from threading import Lock
 from eth_tokens_live.live_erc20_token.live_token import LiveERC20Token
+from eth_tokens_live.services.cache.token_cache_service import TokenCacheService
 from eth_tokens_live.utils.logger import get_logger
+import asyncio
 
 
 @dataclass
@@ -25,14 +27,56 @@ class CacheEntry:
 
 
 class LiveTokenObjectsCache:
-    def __init__(self, max_size: int = 10000, logger=None):
+    def __init__(self, max_size: int = 10000,
+                 redis_url: str = "redis://localhost:6379/0",
+                 logger=None):
         self.max_size = max_size
         self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._lock = Lock()
-        self.logger = logger
-        if logger is None:
-            self.logger = get_logger(name="tokens_live", log_folder="tokens_live")
-    
+        self.logger = logger or get_logger(name="tokens_live", log_folder="tokens_live")
+        
+        # Initialize Redis service
+        #self.cache_service = TokenCacheService(redis_url=redis_url, logger=self.logger)
+        
+        # Start periodic sync
+        #self._start_sync_task()
+
+    def _start_sync_task(self):
+        """Start background task for periodic Redis sync"""
+        asyncio.create_task(self._periodic_sync())
+
+    async def _periodic_sync(self):
+        """Sync cached tokens to Redis every minute"""
+        while True:
+            try:
+                await asyncio.sleep(60)  # 1 minute interval
+                await self._sync_cached_tokens()
+            except Exception as e:
+                self.logger.error(f"Error in periodic sync: {e}")
+
+    async def _sync_cached_tokens(self):
+        """Sync all cached tokens to Redis cache service"""
+        try:
+            with self._lock:
+                cached_tokens = self.get_cached_tokens()
+                
+            if not cached_tokens:
+                return
+                
+            try:
+                # Use batch store for efficiency
+                success = await self.cache_service.store_tokens_batch(cached_tokens)
+                if success:
+                    self.logger.info(f"Successfully synced {len(cached_tokens)} tokens to Redis")
+                else:
+                    self.logger.warning("Failed to sync tokens batch to Redis")
+                    
+            except Exception as e:
+                self.logger.error(f"Error in batch sync to Redis: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"Critical error in token sync: {e}")
+
     def clear_cache(self):
         """Clear the cache"""
         with self._lock:
@@ -47,15 +91,19 @@ class LiveTokenObjectsCache:
     def get_cached_tokens(self) -> Dict[str, 'LiveERC20Token']:
         """Get a dictionary of cached tokens"""
         with self._lock:
-            return {addr: entry.token for addr, entry in self.cache.items()}
+            return {
+                addr: entry.token 
+                for addr, entry in self.cache.items() 
+                if entry.token is not None  # Ensure token exists
+            }
         
     def get_active_tokens(self) -> Dict[str, 'LiveERC20Token']:
-        """Get a dictionary of active tokens"""
+        """Get dictionary of active tokens"""
         with self._lock:
             active_tokens = {}
             for addr, entry in self.cache.items():
                 if entry.token is not None:
-                    if entry.token.token_status == 'Active':
+                    if entry.token_status == 'Active':
                         active_tokens[addr] = entry.token
             return active_tokens
 

@@ -79,6 +79,8 @@ class LiveTokenData:
     unique_addresses: Set[str] = field(default_factory=set)
     total_bribe_amount: float = 0
     bribe_amount_dict: Dict[str, float] = field(default_factory=dict)
+
+    latest_block_number: Optional[int] = None
     
     def _handle_creation(self, transaction: Dict):
         """Process contract creation event"""
@@ -419,7 +421,7 @@ class LiveTokenData:
         """Process other relevant events"""
         # Process trading enabled events
         for event in transaction.get('trading_enabled_events', []):
-            if event['token_address'].lower() == self.contract_address.lower():
+            if event['token_address'] == self.contract_address:
                 self.trading_enabled = True
                 self.trading_enabled_block = transaction['block_number']
                 self.trading_enabled_txn = transaction['hash']
@@ -427,9 +429,10 @@ class LiveTokenData:
     def _update_bribe_amount(self, transaction: Dict):
         """Update the bribe amount"""
         bribe_amount = transaction['bribe_amount']
-        briber_address = transaction['from_address']
-        self.bribe_amount_dict[briber_address] = bribe_amount
-        self.total_bribe_amount += bribe_amount
+        if bribe_amount > 0:
+            briber_address = transaction['from_address']
+            self.bribe_amount_dict[briber_address] = bribe_amount
+            self.total_bribe_amount += bribe_amount
 
     def _sort_df(self, df: pd.DataFrame) -> pd.DataFrame:
         """Sort the dataframe"""
@@ -488,7 +491,7 @@ class LiveTokenData:
     
     def to_dict(self):
         return self.__dict__
-    
+           
     def update_from_transaction(self, transaction: Dict):
         """Update token data from a new transaction"""
         # Handle contract creation
@@ -521,3 +524,6 @@ class LiveTokenData:
 
         # update bribe amount
         self._update_bribe_amount(transaction)
+
+        # update latest block number
+        self.latest_block_number = transaction['block_number']
