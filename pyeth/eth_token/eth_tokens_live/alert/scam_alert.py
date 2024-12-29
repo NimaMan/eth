@@ -23,6 +23,7 @@ class ScamAlert(BaseAlert):
     """Alert for detected scam patterns"""
     def __init__(self):
         super().__init__()
+        self._last_alerts = {}  # Store last alert per token
         
     def _is_alert(self, live_erc20_token: LiveERC20Token) -> bool:
         """Check if token has been flagged for scam activity"""
@@ -31,7 +32,28 @@ class ScamAlert(BaseAlert):
             return False
             
         scam_data = assessment.get('scam_assessment', {})
-        return scam_data.get('is_scam', False)
+        is_scam = scam_data.get('is_scam', False)
+        
+        if not is_scam:
+            return False
+            
+        # Check if this is a duplicate alert
+        last_alert = self._last_alerts.get(live_erc20_token.contract_address)
+        if last_alert:
+            current_data = {
+                'reason': scam_data.get('reason', ''),
+                'confidence': scam_data.get('confidence', 0),
+                'involved_addresses': scam_data.get('involved_addresses', set())
+            }
+            last_data = {
+                'reason': last_alert.reason,
+                'confidence': last_alert.confidence,
+                'involved_addresses': last_alert.involved_addresses
+            }
+            if current_data == last_data:
+                return False
+                
+        return True
         
     def create_alert(self, live_erc20_token: LiveERC20Token) -> ScamAlertData:
         assessment = live_erc20_token.latest_token_assessment
@@ -54,11 +76,14 @@ class ScamAlert(BaseAlert):
         return []
     
     def send_alert(self, alert_data: ScamAlertData) -> None:
+        # Store this alert as the last one for this token
+        self._last_alerts[alert_data.contract_address] = alert_data
+        
         logger.info(
-            f"SCAM ALERT: {alert_data.alert_type}\n"
-            f"Token: {alert_data.contract_address}\n"
-            f"Reason: {alert_data.reason}\n"
-            f"Confidence: {alert_data.confidence}\n"
+            f"SCAM ALERT: {alert_data.alert_type}"
+            f"Txn: {alert_data.transaction_hash}"
+            f"Token: {alert_data.contract_address}"
+            f"Reason: {alert_data.reason}"
+            f"Confidence: {alert_data.confidence}"
             f"Involved Addresses: {alert_data.involved_addresses}\n"
-            f"Detection Txn: {alert_data.transaction_hash}"
         )

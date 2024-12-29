@@ -22,6 +22,7 @@ class GreenActorAlert(BaseAlert):
     """Alert for legitimate trading activity from green actors"""
     def __init__(self):
         super().__init__()
+        self._last_alerts = {}  # Store last alert per token
         
     def _is_alert(self, live_erc20_token: LiveERC20Token) -> Tuple[bool, str]:
         """
@@ -37,6 +38,11 @@ class GreenActorAlert(BaseAlert):
         green_actors = green_assessment.get('green_actors', set())
         
         if not green_actors:
+            return False, ""
+            
+        # Check if this is a duplicate alert
+        last_alert = self._last_alerts.get(live_erc20_token.contract_address)
+        if last_alert and last_alert.involved_addresses == green_actors:
             return False, ""
             
         return True, "Swap"    
@@ -65,8 +71,11 @@ class GreenActorAlert(BaseAlert):
         return []
     
     def send_alert(self, alert_data: GreenActorAlertData) -> None:
+        # Store this alert as the last one for this token
+        self._last_alerts[alert_data.contract_address] = alert_data
+        
         logger.info(
+            f"Txn: {alert_data.transaction_hash}"
             f"Green Actor {alert_data.action}: {alert_data.contract_address} "
             f"Addresses: {alert_data.involved_addresses} "
-            f"Txn: {alert_data.transaction_hash}"
         )

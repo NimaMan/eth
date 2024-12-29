@@ -3,18 +3,15 @@ Token Manager Script
 
 Objective:
 ---------
-1. Subscribe to existing block processor messages
-2. Track and update token states
-3. Handle graceful shutdown
+1. Initialize and run the token manager service
+2. Handle proper startup with historical processing
+3. Manage graceful shutdown
 4. Monitor token creation and updates
 """
 
 import asyncio
 import signal
-from typing import Optional
 import sys
-import os
-
 from eth_tokens_live.token_manager.live_token_manager import LiveTokenManager
 from eth_tokens_live.utils.logger import get_logger
 
@@ -23,22 +20,21 @@ logger = get_logger(name="token_manager", log_folder="tokens_live")
 
 
 class TokenManagerService:
-    def __init__(
-        self,
-        rabbitmq_url: str = "amqp://guest:guest@localhost/",
-        max_queue_size: int = 1000
-    ):
-        self.token_manager = LiveTokenManager(rabbitmq_url=rabbitmq_url, logger=logger)
-        self.is_running = False
-        self._is_shutting_down = False
+    def __init__(self, warmup_blocks: int = 1000):
+        self.token_manager = LiveTokenManager(
+            logger=logger,
+            warmup_blocks=warmup_blocks
+        )
         self._shutdown_event = asyncio.Event()
+        self._is_shutting_down = False
+        self._main_task = None  # Add this to track the main task
 
     async def start(self):
         """Start the token manager service"""
-        self.is_running = True
-        
         def handle_signal():
             if not self._is_shutting_down:
+                logger.info("Received shutdown signal")
+                # Create task but don't await it here
                 asyncio.create_task(self.shutdown())
         
         # Setup signal handlers
@@ -49,14 +45,27 @@ class TokenManagerService:
             )
 
         try:
-            # Start token manager
-            await self.token_manager.start()
+            logger.info("Starting token manager service")
+            # Start token manager (this includes historical processing)
+            self._main_task = asyncio.create_task(self.token_manager.start())
             
-            # Wait for shutdown signal
-            await self._shutdown_event.wait()
+            # Wait for either shutdown event or main task completion
+            done, pending = await asyncio.wait(
+                [self._shutdown_event.wait(), self._main_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
             
-        except KeyboardInterrupt:
-            await self.shutdown()
+            # Cancel any pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+        except Exception as e:
+            logger.error(f"Error in token manager service: {e}")
+            raise
         finally:
             await self.cleanup()
 
@@ -66,34 +75,32 @@ class TokenManagerService:
             return
             
         self._is_shutting_down = True
-        logger.info("Shutting down...")
+        logger.info("Initiating service shutdown...")
         
-        self.is_running = False
+        # Signal shutdown
         self._shutdown_event.set()
         
-        # Signal token manager to stop
-        await self.token_manager.stop()
+        # Stop token manager
+        try:
+            await self.token_manager.stop()
+        except Exception as e:
+            logger.error(f"Error stopping token manager: {e}")
 
     async def cleanup(self):
         """Cleanup resources"""
         if not self._is_shutting_down:
             await self.shutdown()
 
+
 def main():
-    # Configuration
-    config = {
-        'rabbitmq_url': os.getenv('RABBITMQ_URL', 'amqp://guest:guest@localhost/'),
-        'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', '1000'))
-    }
-
-    # Initialize service
-    service = TokenManagerService(**config)
-
-    # Run the service
+    # Initialize service with 1000 blocks warm-up
+    service = TokenManagerService(warmup_blocks=1000)
+    
     try:
+        # Run with proper signal handling
         asyncio.run(service.start())
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.error(f"Error running token manager: {e}", exc_info=True)
         sys.exit(1)
