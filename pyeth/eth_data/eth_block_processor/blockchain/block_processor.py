@@ -82,10 +82,12 @@ from time import time
 from eth_block_processor.txn.txn_batch_analyzer import TransactionBatchAnalyzer
 from eth_block_processor.blockchain.block_fetcher import BlockFetcher
 from eth_block_processor.utils.logger import get_logger
+import asyncio
+from tqdm import tqdm
 
 
 class BlockProcessor:
-    def __init__(self, node_url: str = "http://127.0.0.1:8545", 
+   def __init__(self, node_url: str = "http://127.0.0.1:8545", 
                  save_erc20_txn_to_db: bool = False,
                  logger=None):
         self.w3 = Web3(Web3.HTTPProvider(node_url))
@@ -98,32 +100,25 @@ class BlockProcessor:
             logger = get_logger(name="block_processor", log_folder="eth_block_processor")
         self.logger = logger
     
-    async def process_block_range(self, start_block: int, end_block: int):
-        """Process a range of blocks using batched processing"""
-        overall_metrics = {
-            'total_blocks': end_block - start_block + 1,
-            'processed_blocks': 0,
-            'failed_blocks': 0,
-            'total_transactions': 0,
-            'total_processing_time': 0
-        }
-
-        start_time = time()
+   async def process_block_range(self, start_block: int, end_block: int):
+        """
+        Process a range of blocks sequentially with progress bar
+        Args:
+            start_block: Starting block number
+            end_block: Ending block number
+        """
         results = {}
-        try:
-            for block_number in range(start_block, end_block + 1):
-                processed_transactions = await self.process_block(block_number)
-                results[block_number] = processed_transactions
-        except Exception as e:
-            overall_metrics['failed_blocks'] += 1
-            self.logger.error(f"Failed to process blocks {start_block}-{end_block}: {e}")
-
-        overall_metrics['total_time'] = time() - start_time
-        self.logger.info(f"Overall processing metrics: {overall_metrics}")
         
+        for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks", unit="blocks"):    
+            try:
+                result = await self.process_block(block_number)
+                results[block_number] = result
+            except Exception as e:
+                self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}")
+
         return results
 
-    async def process_block(self, block_number: int, transactions=None):
+   async def process_block(self, block_number: int, transactions=None):
         """Process a single block"""
         try:
             start_time = time()

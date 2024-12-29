@@ -69,16 +69,24 @@ class OrcaAlert(BaseUserAlert):
     async def process_txn(self, detailed_txn: DetailedTransaction) -> List[UserInvolvedAlertData]:
         if self._is_alert(detailed_txn):
             # check if the txn has a swap action
-            if "Swap" in detailed_txn.actions:
+            num_erc20_token_transfers = len(detailed_txn.erc20_contracts)
+            if detailed_txn.txn_type == "Swap" or detailed_txn.txn_type == "Approve":
                 self.alert_type = "Orca"
                 alert_data = self.create_alert(detailed_txn)
                 self.send_alert(alert_data)
                 return [alert_data]
-            else:
+            
+            elif num_erc20_token_transfers > 15 or len(detailed_txn.unique_addresses) > 15:
                 self.alert_type = "Scam | Orca"
                 alert_data = self.create_alert(detailed_txn)
                 self.send_alert(alert_data)
                 return [alert_data]
+            else:
+                self.alert_type = "Orca"
+                alert_data = self.create_alert(detailed_txn)
+                self.send_alert(alert_data)
+                return [alert_data]
+            
         return []
     
 
@@ -90,16 +98,25 @@ class WhaleAlert(BaseUserAlert):
 
     async def process_txn(self, detailed_txn: DetailedTransaction) -> List[UserInvolvedAlertData]:
         if self._is_alert(detailed_txn):
-            if "Swap" in detailed_txn.actions:
-                self.alert_type = "Whale"
+            # check if the txn has a swap action
+            num_erc20_token_transfers = len(detailed_txn.erc20_contracts)
+            
+            if detailed_txn.txn_type == "Swap" or detailed_txn.txn_type == "Approve":
+                self.alert_type = "Orca"
+                alert_data = self.create_alert(detailed_txn)
+                self.send_alert(alert_data)
+                return [alert_data]
+            
+            elif num_erc20_token_transfers > 15 or len(detailed_txn.unique_addresses) > 15:
+                self.alert_type = "Scam | Orca"
                 alert_data = self.create_alert(detailed_txn)
                 self.send_alert(alert_data)
                 return [alert_data]
             else:
-                self.alert_type = "Scam | Whale"
+                self.alert_type = "Orca"
                 alert_data = self.create_alert(detailed_txn)
                 self.send_alert(alert_data)
                 return [alert_data]
+            
         return []
-
-
+    

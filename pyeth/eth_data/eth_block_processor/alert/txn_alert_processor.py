@@ -1,12 +1,13 @@
 
 import asyncio
-from typing import List, Dict, Type
+from typing import List
 from eth_block_processor.alert.trading_enabled_alert import TradingEnabledAlert
 from eth_block_processor.alert.bribe_alert import BribeAlert
 from eth_block_processor.alert.contract_creation_alert import ContractCreationAlert
-from eth_block_processor.alert.user_involved_alert import GreyAddressAlert, OrcaAlert, WhaleAlert
+from eth_block_processor.alert.user_involved_alert import OrcaAlert, WhaleAlert
 from eth_block_processor.data_models.txn_models import DetailedTransaction
 from eth_block_processor.utils.logger import get_logger
+
 
 logger = get_logger("alert_processor", log_folder="alert")
 
@@ -18,7 +19,6 @@ class TransactionAlertProcessor:
             'trading_enabled': TradingEnabledAlert(),
             'bribe': BribeAlert(),
             'contract_creation': ContractCreationAlert(),
-            'grey_address': GreyAddressAlert(),
             'orca': OrcaAlert(),
             'whale': WhaleAlert()
         }

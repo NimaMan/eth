@@ -42,6 +42,23 @@ class TransactionBatchAnalyzer:
             logger = logger = get_logger(name="txn_analyzer")
         self.logger = logger
 
+    async def _analyze_single_transaction_safe(self, 
+                                             transaction: Dict[str, Any], 
+                                             receipt: Dict[str, Any] = None,
+                                             trace: Dict[str, Any] = None,
+                                             txn_hash: str = None) -> DetailedTransaction:
+        """Safely analyze a single transaction with error handling"""
+        try:
+            return await self.transaction_analyzer.analyze_transaction_async(
+                transaction=transaction,
+                receipt=receipt,
+                trace=trace
+            )
+        except Exception as e:
+            self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
+            e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
+            raise
+    
     async def analyze_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], use_asyncio: bool = True) -> List[DetailedTransaction]:
         """
         Analyzes all transactions in a block using batch processing
@@ -144,20 +161,36 @@ class TransactionBatchAnalyzer:
         
         return results
 
-    async def _analyze_single_transaction_safe(self, 
-                                             transaction: Dict[str, Any], 
-                                             receipt: Dict[str, Any] = None,
-                                             trace: Dict[str, Any] = None,
-                                             txn_hash: str = None) -> DetailedTransaction:
-        """Safely analyze a single transaction with error handling"""
-        try:
-            return await self.transaction_analyzer.analyze_transaction_async(
-                transaction=transaction,
-                receipt=receipt,
-                trace=trace
-            )
-        except Exception as e:
-            self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
-            e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
-            raise
-    
+    async def process_batch_with_fetched_data(self, blocks: Dict[int, Any], block_data: Dict[int, Dict]) -> Dict[int, List[DetailedTransaction]]:
+        analyzed_blocks = {}
+        
+        for block_num, block in blocks.items():
+            if block_num not in block_data:
+                continue
+            
+            receipts = block_data[block_num]["receipts"]
+            traces = block_data[block_num]["traces"]
+            batch_data = []
+            
+            # Match exactly how the working version handles transactions
+            for txn in block['transactions']:
+                txn_hash = f"0x{txn['hash'].hex()}" if not isinstance(txn['hash'], str) else txn['hash']
+                receipt = receipts.get(txn_hash)
+                trace = traces.get(txn_hash)
+                if receipt:  # Only check receipt like the working version
+                    batch_data.append((txn, receipt, trace, txn_hash))
+            
+            # Process transactions
+            tasks = []
+            for txn, receipt, trace, txn_hash in batch_data:
+                task = self._analyze_single_transaction_safe(
+                    transaction=txn,
+                    receipt=receipt,
+                    trace=trace,
+                    txn_hash=txn_hash
+                )
+                tasks.append(task)
+            
+            analyzed_blocks[block_num] = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        return analyzed_blocks
