@@ -37,7 +37,7 @@ class DeceptiveVolumeChecker:
         self.green_addresses: Set[str] = get_green_addresses()
         self.grey_addresses: Set[str] = get_grey_addresses()
         
-    def malicious_actor_swap(self, transaction: Dict) -> bool:
+    def malicious_actor_swap(self, transaction: Dict):
         """Check if transaction is a malicious swap with legitimate actors"""   
         involved_addresses = set(transaction.get('unique_addresses', []))
         mal_actors = self.grey_addresses & involved_addresses
@@ -45,7 +45,7 @@ class DeceptiveVolumeChecker:
             return mal_actors
         return None
 
-    def green_actors_involved(self, transaction: Dict) -> bool:
+    def green_actors_involved(self, transaction: Dict):
         """Check if transaction is a fake buy (transfer without swap)"""
         involved_addresses = set(transaction.get('unique_addresses', []))
         green_actors = self.green_addresses & involved_addresses
@@ -53,7 +53,7 @@ class DeceptiveVolumeChecker:
             return green_actors
         return None
     
-    def is_fake_buy(self, transaction: Dict) -> bool:
+    def is_fake_buy(self, transaction: Dict):
         """Check if transaction is a fake buy (transfer without swap)"""
         if not transaction.get('erc20_transfers'):
             return False

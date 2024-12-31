@@ -92,9 +92,9 @@ class TokenManagerService:
             await self.shutdown()
 
 
-def main():
+def main(warmup_blocks: int = 1000):
     # Initialize service with 1000 blocks warm-up
-    service = TokenManagerService(warmup_blocks=1000)
+    service = TokenManagerService(warmup_blocks=warmup_blocks)
     
     try:
         # Run with proper signal handling
@@ -107,4 +107,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main(warmup_blocks=1000) 

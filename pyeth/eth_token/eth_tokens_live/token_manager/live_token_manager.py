@@ -88,7 +88,7 @@ class LiveTokenManager:
             try:
                 # Wait for block processing to complete
                 await self.live_token_processor.block_processed_event.wait()
-
+                self.logger.info(f"Block processed event triggered for block {self.live_token_processor.latest_processed_block}")
                 # Process alerts for updated tokens
                 if self.live_token_processor.updated_tokens:
                     current_block = self.live_token_processor.latest_processed_block
@@ -100,7 +100,7 @@ class LiveTokenManager:
                 
                 # Clear the event for next block
                 self.live_token_processor.block_processed_event.clear()
-                
+            
             except Exception as e:
                 self.logger.error(f"Error processing alerts: {e}")
                 

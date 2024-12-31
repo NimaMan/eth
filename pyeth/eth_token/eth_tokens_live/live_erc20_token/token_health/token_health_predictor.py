@@ -17,24 +17,26 @@ Objective:
 
 from typing import Dict, Set, Optional, List
 from dataclasses import dataclass, asdict
-from eth_tokens_live.live_erc20_token.scam_pred.deceptive_volume_checker import DeceptiveVolumeChecker
+from collections import OrderedDict
+from eth_tokens_live.live_erc20_token.token_health.deceptive_volume_checker import DeceptiveVolumeChecker
 
 
 @dataclass
 class ScamScore:
+    block_number: int
+    transaction_hash: str
+    from_address: str
     is_scam: bool
     confidence: float
     reason: str
-    block_number: int
-    transaction_hash: str
-
-
+    
+    
 class TokenHealthPredictor:
     def __init__(self):
         self.deceptive_volume_checker = DeceptiveVolumeChecker()
-        self.scam_scores: List[ScamScore] = []
+        self.scam_scores: OrderedDict[str, ScamScore] = OrderedDict()
+        self.involved_green_actors: OrderedDict[str, ScamScore] = OrderedDict() # txn hash -> green actors
         self.involved_mal_actors: Set[str] = set()
-        self.involved_green_actors: Set[str] = set()
         self.abused_green_actors: Set[str] = set()
         
     def update_from_transaction(self, transaction: Dict) -> Dict:
@@ -46,7 +48,7 @@ class TokenHealthPredictor:
                 if self._check_fake_buy(transaction, green_actors):
                     return self.token_health_assessment
                 else:
-                    self.involved_green_actors.update(green_actors)
+                    self.involved_green_actors[transaction.get('hash')] = green_actors
                     return self.token_health_assessment
             # Check if it is  a malicious swap for deceptive volume
             self._check_malicious_swap(transaction)
@@ -58,13 +60,14 @@ class TokenHealthPredictor:
     def _check_fake_buy(self, transaction: Dict, green_actors: Set[str]) -> bool:
         """Check for fake buy pattern and update scores if detected"""
         if self.deceptive_volume_checker.is_fake_buy(transaction):
-            self.scam_scores.append(ScamScore(
+            self.scam_scores[transaction.get('hash')] = ScamScore(
+                block_number=transaction.get('block_number'),
+                transaction_hash=transaction.get('hash'),
+                from_address=transaction.get('from_address'),
                 is_scam=True,
                 confidence=1,
                 reason="Fake Volume detected",
-                block_number=transaction.get('block_number'),
-                transaction_hash=transaction.get('hash')
-            ))
+            )
             self.abused_green_actors.update(green_actors)
             return True
         return False
@@ -74,35 +77,40 @@ class TokenHealthPredictor:
         mal_actors = self.deceptive_volume_checker.malicious_actor_swap(transaction)
         if mal_actors:
             self.involved_mal_actors.update(mal_actors)
-            self.scam_scores.append(ScamScore(
+            self.scam_scores[transaction.get('hash')] = ScamScore(
+                block_number=transaction.get('block_number'),
+                transaction_hash=transaction.get('hash'),
+                from_address=transaction.get('from_address'),
                 is_scam=True,
                 confidence=.95,
                 reason="Malicious actors involved",
-                block_number=transaction.get('block_number'),
-                transaction_hash=transaction.get('hash')
-            ))
+            )
             return True
         return False
     
     @property
     def is_scam(self) -> bool:
         """Return whether token is currently flagged as scam"""
-        return any(score.is_scam for score in self.scam_scores)
+        return any(score.is_scam for score in self.scam_scores.values())
     
     @property
     def scam_confidence(self) -> float:
         """Return confidence in scam classification"""
-        return max(score.confidence for score in self.scam_scores) if self.scam_scores else 0.0
+        return max(score.confidence for score in self.scam_scores.values()) if self.scam_scores else 0.0
     
     @property
     def scam_reason(self) -> str:
         """Return reason for scam classification"""
-        return set(score.reason for score in self.scam_scores) if self.scam_scores else "Not analyzed"
+        return set(score.reason for score in self.scam_scores.values()) if self.scam_scores else "Not analyzed"
     
     @property
     def scam_detection_block_and_txn(self):
         """Return block number and transaction hash where scam was detected"""
-        return (self.scam_scores[0].block_number, self.scam_scores[0].transaction_hash) if self.scam_scores else None
+        if not self.scam_scores:
+            return None
+        last_hash = next(reversed(self.scam_scores))
+        last_score = self.scam_scores[last_hash]
+        return (last_score.block_number, last_score.transaction_hash)
     
     @property
     def num_involved_green_actors(self) -> int:

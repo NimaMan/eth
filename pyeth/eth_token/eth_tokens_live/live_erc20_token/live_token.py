@@ -5,7 +5,7 @@ from eth_tokens_live.live_erc20_token.network.live_token_network import LiveToke
 from eth_token_analyzer.erc20_token.token_metrics import UniV2PairSyncInfo
 from eth_token_analyzer.erc20_token.token_metrics import ScamInfo
 from eth_token_analyzer.erc20_token.token_metrics import LifetimeInfo
-from eth_tokens_live.live_erc20_token.scam_pred.token_health_predictor import TokenHealthPredictor
+from eth_tokens_live.live_erc20_token.token_health.token_health_predictor import TokenHealthPredictor
 
 
 class LiveERC20Token:

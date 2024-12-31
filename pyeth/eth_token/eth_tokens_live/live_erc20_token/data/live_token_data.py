@@ -25,7 +25,8 @@ logger = get_logger(name="live_token_data", log_folder="tokens_live")
 @dataclass
 class LiveTokenData:
     contract_address: str  
-    
+    txn_hashes: List[str] = field(default_factory=list)
+
     # Core token info
     name: Optional[str] = None
     symbol: Optional[str] = None
@@ -494,6 +495,10 @@ class LiveTokenData:
            
     def update_from_transaction(self, transaction: Dict):
         """Update token data from a new transaction"""
+
+        # Add the txn hash to the set of processed txns
+        self.txn_hashes.append(transaction['hash'])
+
         # Handle contract creation
         if transaction['txn_type'] == 'Contract Creation':
             self._handle_creation(transaction)
