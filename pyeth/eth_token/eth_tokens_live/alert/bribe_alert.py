@@ -1,6 +1,5 @@
-from collections.abc import Set
-from dataclasses import dataclass, field
-from typing import List, Any, Dict
+from dataclasses import dataclass
+from typing import List
 
 from eth_tokens_live.alert.base_alert_class import BaseAlert
 from eth_tokens_live.live_erc20_token.live_token import LiveERC20Token
@@ -11,8 +10,8 @@ from eth_tokens_live.utils.logger import get_logger
 @dataclass
 class BribeAlertData:
     block_number: int
-    bribe_amount: float
     contract_address: str
+    bribe_amount: float
     alert_type: str = "Bribe"
 
 
@@ -63,10 +62,10 @@ class BribeAlert(BaseAlert):
         """Create a bribe alert from token data"""
         return BribeAlertData(
             block_number=live_erc20_token.token_data.latest_block_number,
-            bribe_amount=bribe_value,
             contract_address=live_erc20_token.contract_address,
-        )
+            bribe_amount=bribe_value,
+        )   
     
     def send_alert(self, alert_data: BribeAlertData) -> None:
         """Send/log the bribe alert"""
-        self.logger.info(f"Bribe Alert for {alert_data.contract_address} at block {alert_data.block_number}: {alert_data.bribe_amount}")
+        self.logger.info(f"{alert_data}")

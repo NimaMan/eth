@@ -10,9 +10,9 @@ logger = get_logger("green_tokens", log_folder="alert")
 
 @dataclass
 class GreenActorAlertData:
+    transaction_hash: str
     contract_address: str
     block_number: int
-    transaction_hash: str
     involved_addresses: Set[str]
     alert_type: str = "Green Actor"
     action: str = ""
@@ -50,15 +50,18 @@ class GreenActorAlert(BaseAlert):
     def create_alert(self, live_erc20_token: LiveERC20Token, action: str) -> GreenActorAlertData:
         assessment = live_erc20_token.latest_token_assessment
         green_assessment = assessment.get('green_assessment', {})
+        green_actors_dict = green_assessment.get('green_actors', {})
+        involved_addresses = green_actors_dict.values() # get all green actors
+        
+        # Get last transaction from OrderedDict
+        latest_txn_hash = next(reversed(green_actors_dict))
         
         return GreenActorAlertData(
-            block_number=live_erc20_token.latest_block_number,
+            transaction_hash=latest_txn_hash,
             contract_address=live_erc20_token.contract_address,
-            alert_type=f"Green Actor {action}",
-            involved_addresses=green_assessment.get('green_actors', set()),
-            transaction_hash=assessment.get('transaction_hash', ''),
+            block_number=live_erc20_token.latest_block_number,
+            involved_addresses=involved_addresses,
             action=action,
-            
         )
 
     async def process_token(self, live_erc20_token: LiveERC20Token) -> List[GreenActorAlertData]:
@@ -74,8 +77,4 @@ class GreenActorAlert(BaseAlert):
         # Store this alert as the last one for this token
         self._last_alerts[alert_data.contract_address] = alert_data
         
-        logger.info(
-            f"Txn: {alert_data.transaction_hash}"
-            f"Green Actor {alert_data.action}: {alert_data.contract_address} "
-            f"Addresses: {alert_data.involved_addresses} "
-        )
+        logger.info(f"{alert_data}")

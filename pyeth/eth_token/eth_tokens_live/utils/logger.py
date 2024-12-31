@@ -11,7 +11,6 @@ The primary objective of this logger module is to provide a centralized and cons
 import os
 from datetime import datetime
 import logging
-from logging.handlers import RotatingFileHandler
 import atexit
 
 
@@ -46,7 +45,7 @@ def cleanup_empty_logs():
 atexit.register(cleanup_empty_logs)
 
 
-def get_logger(name="tokens_live", log_folder="tokens_live", base_log_dir=None):
+def get_logger(name="token_manager", log_folder="tokens_live", base_log_dir=None):
     """
     Initializes and returns a logger with the specified name.
     

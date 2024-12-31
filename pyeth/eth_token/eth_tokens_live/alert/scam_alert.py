@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Set, Dict
+from collections import OrderedDict, defaultdict
 from eth_tokens_live.alert.base_alert_class import BaseAlert
 from eth_tokens_live.live_erc20_token.live_token import LiveERC20Token
 from eth_tokens_live.utils.logger import get_logger
@@ -10,9 +11,9 @@ logger = get_logger("scam_tokens", log_folder="alert")
 
 @dataclass
 class ScamAlertData:
+    transaction_hash: str
     block_number: int
     contract_address: str
-    transaction_hash: str
     reason: str
     confidence: float
     involved_addresses: Set[str]
@@ -23,7 +24,8 @@ class ScamAlert(BaseAlert):
     """Alert for detected scam patterns"""
     def __init__(self):
         super().__init__()
-        self._last_alerts = {}  # Store last alert per token
+        # Track all alerts per token: token_address -> OrderedDict[txn_hash -> alert_data]
+        self._token_alerts: Dict[str, OrderedDict[str, ScamAlertData]] = defaultdict(OrderedDict)
         
     def _is_alert(self, live_erc20_token: LiveERC20Token) -> bool:
         """Check if token has been flagged for scam activity"""
@@ -32,28 +34,18 @@ class ScamAlert(BaseAlert):
             return False
             
         scam_data = assessment.get('scam_assessment', {})
-        is_scam = scam_data.get('is_scam', False)
+        txn_hash = scam_data.get('transaction_hash', '')
+        contract_address = live_erc20_token.contract_address
         
-        if not is_scam:
+        # If we've already alerted on this txn, skip
+        if txn_hash in self._token_alerts[contract_address]:
             return False
             
-        # Check if this is a duplicate alert
-        last_alert = self._last_alerts.get(live_erc20_token.contract_address)
-        if last_alert:
-            current_data = {
-                'reason': scam_data.get('reason', ''),
-                'confidence': scam_data.get('confidence', 0),
-                'involved_addresses': scam_data.get('involved_addresses', set())
-            }
-            last_data = {
-                'reason': last_alert.reason,
-                'confidence': last_alert.confidence,
-                'involved_addresses': last_alert.involved_addresses
-            }
-            if current_data == last_data:
-                return False
-                
-        return True
+        # If it's a scam, alert
+        if scam_data.get('is_scam', False):
+            return True
+            
+        return False
         
     def create_alert(self, live_erc20_token: LiveERC20Token) -> ScamAlertData:
         assessment = live_erc20_token.latest_token_assessment
@@ -76,14 +68,15 @@ class ScamAlert(BaseAlert):
         return []
     
     def send_alert(self, alert_data: ScamAlertData) -> None:
-        # Store this alert as the last one for this token
-        self._last_alerts[alert_data.contract_address] = alert_data
+        # Store alert in token's history
+        self._token_alerts[alert_data.contract_address][alert_data.transaction_hash] = alert_data
         
-        logger.info(
-            f"SCAM ALERT: {alert_data.alert_type}"
-            f"Txn: {alert_data.transaction_hash}"
-            f"Token: {alert_data.contract_address}"
-            f"Reason: {alert_data.reason}"
-            f"Confidence: {alert_data.confidence}"
-            f"Involved Addresses: {alert_data.involved_addresses}\n"
-        )
+        logger.info(f"{alert_data}")
+        
+    @property
+    def latest_alerts(self) -> Dict[str, ScamAlertData]:
+        """Get the most recent alert for each token"""
+        return {
+            token: next(reversed(alerts.values())) if alerts else None
+            for token, alerts in self._token_alerts.items()
+        }
