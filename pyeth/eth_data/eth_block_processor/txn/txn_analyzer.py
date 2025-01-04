@@ -66,7 +66,7 @@ from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
-from eth_block_processor.txn.txn_action_classifier import TransactionActionClassifier
+from eth_block_processor.txn.txn_action_identifier import TransactionActionIdentifier
 from eth_block_processor.data_models.trace_models import InternalTransaction
 from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
@@ -79,7 +79,7 @@ class TransactionAnalyzer:
         self.log_analyzer = TransactionLogAnalyzer(w3=w3)
         self.trace_analyzer = TransactionTraceAnalyzer(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
-        self.action_classifier = TransactionActionClassifier()
+        self.action_identifier = TransactionActionIdentifier()
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
@@ -203,7 +203,7 @@ class TransactionAnalyzer:
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
-        actions = self.action_classifier.classify_transaction_actions(tx_type, logs)
+        actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
         detailed_txn = DetailedTransaction(
             hash=txn_hash,
@@ -241,6 +241,11 @@ class TransactionAnalyzer:
             erc20_contracts=erc20_contracts,
             block_timestamp=block_timestamp,
             bribe_amount=bribe_amount,
+            uniswap_v3_pools=logs['uniswap_v3_pools'],
+            uniswap_v3_initializations=logs['uniswap_v3_initializations'],
+            uniswap_v3_mints=logs['uniswap_v3_mints'],
+            uniswap_v3_swaps=logs['uniswap_v3_swaps'],
+            uniswap_v3_positions=logs['uniswap_v3_positions'],
         )
         if self.save_erc20_txn_to_db:
             self.store_erc20_transaction(detailed_txn)
@@ -286,7 +291,7 @@ class TransactionAnalyzer:
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
-        actions = self.action_classifier.classify_transaction_actions(tx_type, logs)
+        actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
         return DetailedTransaction(
             hash=transaction['hash'],
@@ -326,6 +331,11 @@ class TransactionAnalyzer:
             latest_states=latest_states,
             block_timestamp=block_timestamp,
             bribe_amount=bribe_amount,
+            uniswap_v3_pools=logs['uniswap_v3_pools'],
+            uniswap_v3_initializations=logs['uniswap_v3_initializations'],
+            uniswap_v3_mints=logs['uniswap_v3_mints'],
+            uniswap_v3_swaps=logs['uniswap_v3_swaps'],
+            uniswap_v3_positions=logs['uniswap_v3_positions'],
         )
 
     

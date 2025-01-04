@@ -83,6 +83,24 @@ FUNCTION_SIGNATURES = {
     w3.keccak(text="setApprovalForAll(address,bool)").hex()[:8]: "Set Approval For All",
     w3.keccak(text="upgradeTo(address)").hex()[:8]: "Upgrade Contract",
     
+    # Uniswap V3 NonfungiblePositionManager Functions
+    w3.keccak(text="mint((address,address,uint24,int24,int24,uint256,uint256,uint256,uint256,address,uint256))").hex()[:8]: "Mint Position V3",
+    w3.keccak(text="increaseLiquidity((uint256,uint256,uint256,uint256,uint256,uint256))").hex()[:8]: "Increase Liquidity V3",
+    w3.keccak(text="decreaseLiquidity((uint256,uint128,uint256,uint256,uint256))").hex()[:8]: "Decrease Liquidity V3",
+    w3.keccak(text="collect((uint256,address,uint128,uint128))").hex()[:8]: "Collect V3",
+    w3.keccak(text="burn(uint256)").hex()[:8]: "Burn Position V3",
+    
+    # Uniswap V3 Pool Functions
+    w3.keccak(text="initialize(uint160)").hex()[:8]: "Initialize Pool V3",
+    w3.keccak(text="mint(address,int24,int24,uint128,bytes)").hex()[:8]: "Add Liquidity V3",
+    w3.keccak(text="swap(address,bool,int256,uint160,bytes)").hex()[:8]: "Swap V3",
+    w3.keccak(text="flash(address,uint256,uint256,bytes)").hex()[:8]: "Flash V3",
+    
+    # Uniswap V3 Factory Functions
+    w3.keccak(text="createPool(address,address,uint24)").hex()[:8]: "Create Pool V3",
+    w3.keccak(text="setOwner(address)").hex()[:8]: "Set Factory Owner V3",
+    w3.keccak(text="enableFeeAmount(uint24,int24)").hex()[:8]: "Enable Fee Amount V3",
+
     "0162e2d0": "BananaGun",
     "088890dc": "Maestro",
     "2f100e4a": "Maestro",
@@ -103,8 +121,8 @@ FUNCTION_SIGNATURES = {
     }
 
 EVENT_TOPICS = {
-    # ERC20/721/1155 Events
-    'Transfer': w3.keccak(text="Transfer(address,address,uint256)").hex(),
+    # ERC20/721/1155 Events (these are shared standards)
+    'Transfer': w3.keccak(text="Transfer(address,address,uint256)").hex(),  # Used for ERC20/721/NFT positions
     'TransferSingle': w3.keccak(text="TransferSingle(address,address,address,uint256,uint256)").hex(),
     'TransferBatch': w3.keccak(text="TransferBatch(address,address,address,uint256[],uint256[])").hex(),
     'Approval': w3.keccak(text="Approval(address,address,uint256)").hex(),
@@ -137,13 +155,31 @@ EVENT_TOPICS = {
     'SetMaxWallet': w3.keccak(text="SetMaxWallet(uint256)").hex(),
     
     # Uniswap V3 Pool Events
-    'Initialize': w3.keccak(text="Initialize(uint160,int24)").hex(),
-    'UniswapV3Mint': w3.keccak(text="Mint(address,address,int24,int24,uint128,uint256,uint256)").hex(),
-    'UniswapV3Burn': w3.keccak(text="Burn(address,int24,int24,uint128,uint256,uint256)").hex(),
-    'UniswapV3Swap': w3.keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex(),
-    'PoolCreated': w3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex(),
+    'InitializeV3': w3.keccak(text="Initialize(uint160,int24)").hex(),
+    'MintV3': w3.keccak(text="Mint(address,address,int24,int24,uint128,uint256,uint256)").hex(),
+    'BurnV3': w3.keccak(text="Burn(address,int24,int24,uint128,uint256,uint256)").hex(),
+    'SwapV3': w3.keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex(),
+    'SetFeeProtocolV3': w3.keccak(text="SetFeeProtocol(uint8,uint8,uint8,uint8)").hex(),
+    'CollectProtocolV3': w3.keccak(text="CollectProtocol(address,address,uint128,uint128)").hex(),
     
-    # Uniswap V3 NFT Manager Events
-    'IncreaseLiquidity': w3.keccak(text="IncreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
-    'DecreaseLiquidity': w3.keccak(text="DecreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
+    # Uniswap V3 Factory Events
+    'PoolCreatedV3': w3.keccak(text="PoolCreated(address,address,uint24,int24,address)").hex(),
+    'FeeAmountEnabled': w3.keccak(text="FeeAmountEnabled(uint24,int24)").hex(),
+    'OwnerChanged': w3.keccak(text="OwnerChanged(address,address)").hex(),
+    
+    # Uniswap V3 NonfungiblePositionManager Events
+    'IncreaseLiquidityV3': w3.keccak(text="IncreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
+    'DecreaseLiquidityV3': w3.keccak(text="DecreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
+    
+}
+
+EVENT_TOPICS_REVERSE = {v: k for k, v in EVENT_TOPICS.items()}
+
+UNISWAP_CONTRACTS = {
+    "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D": "Uniswap V2: Router 2",
+    "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45": "Uniswap V3: Router 2",
+    '0xC36442b4a4522E871399CD717aBDD847Ab11FE88': "POSITION_MANAGER",
+    '0x1f98431c8ad98523631ae4a59f267346ea31f984': "FACTORY",
+    '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45': "ROUTER",
+    '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6': "QUOTER",
 }
