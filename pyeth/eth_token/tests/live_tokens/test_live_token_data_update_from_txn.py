@@ -14,7 +14,7 @@ Test Cases:
 """
 
 import pytest
-from eth_tokens_live.live_erc20_token.data.live_token_data import LiveTokenData
+from eth_token_monitor.live_erc20_token.data.live_token_data import LiveTokenData
 from dataclasses import asdict
 
 # Test tokens with their expected properties

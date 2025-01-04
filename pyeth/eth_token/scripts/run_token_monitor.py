@@ -12,8 +12,8 @@ Objective:
 import asyncio
 import signal
 import sys
-from eth_tokens_live.token_manager.live_token_manager import LiveTokenManager
-from eth_tokens_live.utils.logger import get_logger
+from eth_token_monitor.token_manager.live_token_manager import LiveTokenManager
+from eth_token_monitor.utils.logger import get_logger
 
 
 logger = get_logger(name="token_manager", log_folder="tokens_live")

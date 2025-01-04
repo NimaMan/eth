@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-NAME="eth_tokens_live"
+NAME="eth_token_monitor"
 VERSION="0.1.0"
 # To install the library, run the following
 #
@@ -15,7 +15,7 @@ REQUIRES=[
 setup(
     name=NAME,
     version=VERSION,
-    description="eth_tokens_live",
+    description="eth_token_monitor",
     author="Nima",
     author_email="",
     url="",
@@ -26,6 +26,6 @@ setup(
     package_data={'': ['abis/*.json', 'apis/api_keys/*.yaml', 'db/config.yaml']},
     include_package_data=True,
     long_description="""\
-    eth_tokens_live provides ...
+    eth_token_monitor provides ...
     """
 )

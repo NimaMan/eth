@@ -10,8 +10,8 @@ without requiring RabbitMQ subscription
 from dataclasses import asdict
 import asyncio
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_tokens_live.token_manager.block_live_token_processor import BlockLiveTokenProcessor
-from eth_tokens_live.utils.logger import get_logger
+from eth_token_monitor.token_manager.live_block_token_processor import BlockLiveTokenProcessor
+from eth_token_monitor.utils.logger import get_logger
 
 
 logger = get_logger(name='test_block_live_token_processor', log_folder='tests')

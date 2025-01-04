@@ -146,3 +146,119 @@ Data Persistence / Snapshot
 - Instead of bulk-loading historical data, the token state is incrementally updated in response to new transactions.
 - Rolling metrics (balances, volumes, holders) must be continuously recalculated or adjusted rather than computed in one pass.
 - Concurrency, race conditions, and partial updates should be handled carefully for production stability.
+
+### 4. Token Cache Architecture
+
+```mermaid
+graph TD
+    A[BlockTokenProcessor] --> B[LiveTokenObjectsCache]
+    A --> C[Redis Cache Service]
+    D[FastAPI Service] --> C
+    E[External Clients] --> D
+    F[Jupyter Notebook] --> D
+    G[Other Services] --> D
+    H[RabbitMQ] --> A
+```
+
+#### Cache Architecture Design
+
+1. **Dual-Layer Caching**
+   - In-Memory Cache (LiveTokenObjectsCache)
+     * Fast access for real-time processing
+     * Optimized for high-frequency updates
+     * Memory-efficient with LRU eviction
+   
+   - Redis Persistence Layer
+     * Distributed access across services
+     * Persistence across restarts
+     * Scalable storage solution
+
+2. **Access Patterns**
+   - Real-time Processing
+     * Direct access via LiveTokenObjectsCache
+     * Zero-latency updates for block processing
+   
+   - External Access
+     * REST API via FastAPI
+     * Standardized token data format
+     * Rate-limited endpoints
+
+3. **Data Flow**
+   ```mermaid
+   sequenceDiagram
+       participant BP as BlockProcessor
+       participant LC as LocalCache
+       participant RC as RedisCache
+       participant API as FastAPI
+       participant Client
+       
+       BP->>LC: Update Token
+       BP->>RC: Sync Update
+       Client->>API: Request Token
+       API->>RC: Fetch Token
+       RC->>API: Return Token
+       API->>Client: Response
+   ```
+
+#### Why This Architecture?
+
+1. **Performance Benefits**
+   - Local cache for processing speed
+   - Redis for distributed access
+   - Minimal inter-process communication
+
+2. **Reliability Features**
+   - Data persistence across restarts
+   - Automatic failover capability
+   - Consistent state management
+
+3. **Scalability Advantages**
+   - Horizontal scaling of API layer
+   - Independent scaling of cache
+   - Load distribution across services
+
+4. **Integration Flexibility**
+   - Standard REST API access
+   - Multiple client support
+   - Language-agnostic interface
+
+#### Implementation Components
+
+1. **TokenCacheService**
+   - Redis backend integration
+   - Atomic operations support
+   - Serialization handling
+
+2. **FastAPI Service**
+   - Token data endpoints
+   - Query parameters support
+   - Rate limiting and security
+
+3. **Monitoring & Metrics**
+   - Cache hit/miss rates
+   - API response times
+   - Resource utilization
+
+#### Usage Examples
+
+1. **Jupyter Notebook Access**
+```python
+import aiohttp
+import asyncio
+
+async def get_token_data(token_address):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"http://api:8000/tokens/{token_address}") as response:
+            return await response.json()
+
+# Usage
+token_data = await get_token_data("0x123...")
+```
+
+2. **Service Integration**
+```python
+from token_cache_service import TokenCacheService
+
+cache = TokenCacheService()
+token = await cache.get_token("0x123...")
+```

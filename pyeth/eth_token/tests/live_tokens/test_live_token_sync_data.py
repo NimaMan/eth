@@ -14,7 +14,7 @@ Test Cases:
 
 import pytest
 from eth_token_analyzer.erc20_token.erc20_token import ERC20Token
-from eth_tokens_live.live_erc20_token.live_token import LiveERC20Token
+from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from dataclasses import asdict
 
 
