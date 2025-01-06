@@ -81,6 +81,8 @@ class LiveTokenManager:
         self._shutdown_event = asyncio.Event()
         self._monitor_task = None
         self._is_shutting_down = False
+        self.unprocessed_updates = asyncio.PriorityQueue(maxsize=100)  # Queue for updates
+        self.new_updates_event = asyncio.Event()  # Event to signal new updates
     
     async def _monitor_token_updates(self):
         """Monitor for token updates using event notification"""
@@ -92,6 +94,8 @@ class LiveTokenManager:
                 # Process alerts for updated tokens
                 if self.live_token_processor.updated_tokens:
                     current_block = self.live_token_processor.latest_processed_block
+                    await self.unprocessed_updates.put((current_block, self.live_token_processor.updated_tokens))
+                    self.new_updates_event.set()
                     await self.alert_processor.process_block_token_updates(
                         block_number=current_block,
                         updated_tokens=self.live_token_processor.updated_tokens
@@ -144,33 +148,41 @@ class LiveTokenManager:
             raise
 
     async def stop(self):
-        """Stop all processing"""
-        if self._is_shutting_down:
+        """Stop the token manager and cleanup resources"""
+        if self._shutdown_event.is_set():
             return
             
-        self._is_shutting_down = True
-        self.logger.info("Initiating shutdown sequence...")
-        
         try:
-            # 1. Signal shutdown
+            self.logger.info("=== Stopping LiveTokenManager ===")
             self._shutdown_event.set()
             
-            # 2. Stop monitoring first
+            # Stop live processor first (includes block subscriber)
+            if self.live_token_processor:
+                self.logger.info("Stopping live token processor...")
+                await self.live_token_processor.stop()
+            
+            # Stop monitoring task if running
             if self._monitor_task and not self._monitor_task.done():
-                self.logger.info("Stopping monitoring task...")
+                self.logger.info("Stopping monitor task...")
                 self._monitor_task.cancel()
                 try:
                     await self._monitor_task
                 except asyncio.CancelledError:
                     pass
-                
-            # 3. Stop live processor and its subscriber
-            self.logger.info("Stopping live processor...")
-            await self.live_token_processor.stop()
             
-            # 4. Final cleanup
-            self.logger.info("Token manager stopped successfully")
+            # Clear events
+            self.new_updates_event.clear()
+            
+            # Clear queue
+            while not self.unprocessed_updates.empty():
+                try:
+                    await self.unprocessed_updates.get_nowait()
+                    self.unprocessed_updates.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            
+            self.logger.info("LiveTokenManager stopped successfully")
             
         except Exception as e:
-            self.logger.error(f"Error during shutdown: {e}")
+            self.logger.error(f"Error during LiveTokenManager shutdown: {e}")
             raise
