@@ -22,7 +22,7 @@ logger = get_logger(name="portfolio_manager", log_folder="portfolio_manager")
 async def run_portfolio_manager():
     """Run the portfolio manager"""
     try:
-        portfolio_manager = PortfolioManager(logger=logger)
+        portfolio_manager = PortfolioManager(logger=logger, warmup_blocks=1000)
         await portfolio_manager.start()
         
     except KeyboardInterrupt:

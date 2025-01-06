@@ -3,46 +3,98 @@ Portfolio Position Manager
 
 Objective:
 ---------
-Manage and track portfolio positions with async updates and Redis persistence.
+1. Manage portfolio-wide position tracking
+2. Coordinate position updates across multiple tokens
+3. Maintain portfolio state persistence
+4. Calculate portfolio-wide metrics
 
-Key Features:
-------------
-1. Position Management:
-   - Create and track token positions
-   - Process concurrent position updates
-   - Maintain position states and metrics
-   - Interface with Redis for persistence
+Position Management Flow:
+----------------------
+1. Token Position Creation:
+   - New token detected by PortfolioManager
+   - Creates TokenPositionData in INIT state
+   - Adds to portfolio position tracking
+   - Initializes Redis persistence
 
-2. Token Processing:
-   - Handle token updates in parallel
-   - Track trading signals and state changes
-   - Monitor token metrics and status
-   - Apply trading strategies
+2. Position Updates:
+   - Receives batch updates from PortfolioManager
+   - Processes updates concurrently for efficiency
+   - Updates individual positions via LiveTokenPositionManager
+   - Persists changes to Redis
 
-3. Portfolio Analytics:
-   - Calculate portfolio-wide metrics
-   - Track P&L and position values
-   - Monitor active positions
-   - Generate performance reports
+3. Portfolio Metrics:
+   - Tracks total portfolio value
+   - Calculates aggregate P&L
+   - Monitors active position count
+   - Updates metrics after position changes
 
-Implementation Details:
----------------------
-1. Async Processing:
-   - Uses asyncio for concurrent token updates
-   - Batches Redis operations for efficiency
-   - Maintains data consistency with atomic updates
+4. State Persistence:
+   - Maintains Redis connection
+   - Atomic updates to prevent race conditions
+   - Periodic state snapshots
+   - Recovery from persistence layer
 
-2. State Management:
-   - Persists positions in Redis
-   - Tracks historical position data
-   - Manages position state transitions
-   - Handles error recovery
+Event Handling:
+-------------
+1. New Token Detection:
+   - Source: PortfolioManager token creation events
+   - Handler: create_position()
+   - Action: Initializes new position tracking
+   - Updates: Redis state, portfolio metrics
 
-3. Performance Optimization:
-   - Parallel token processing
-   - Batched Redis operations
-   - Efficient state updates
-   - Memory-optimized data structures
+2. Token Updates:
+   - Source: PortfolioManager batch updates
+   - Handler: update_token_positions()
+   - Action: Concurrent position processing
+   - Updates: Position states, Redis, metrics
+
+3. Position State Changes:
+   - Source: LiveTokenPositionManager
+   - Handler: _process_single_token()
+   - Action: Updates individual position states
+   - Updates: Position data, portfolio metrics
+
+4. Portfolio Metrics:
+   - Source: Any position change
+   - Handler: update_portfolio_metrics()
+   - Action: Recalculates portfolio totals
+   - Updates: Metrics in Redis
+
+Data Flow:
+---------
+1. Token Creation:
+   PortfolioManager -> create_position()
+   -> Redis -> update_portfolio_metrics()
+
+2. Position Updates:
+   PortfolioManager -> update_token_positions()
+   -> _process_single_token() -> LiveTokenPositionManager
+   -> Redis -> update_portfolio_metrics()
+
+3. Metrics Updates:
+   Position changes -> update_portfolio_metrics()
+   -> Redis -> PortfolioMetrics
+
+4. State Persistence:
+   Any state change -> PortfolioStateServer
+   -> Redis -> Recovery on restart
+
+Key Metrics Tracked:
+------------------
+1. Total Portfolio Value
+2. Total Profit/Loss
+3. Active Position Count
+4. Last Update Timestamp
+5. Individual Position States
+6. Portfolio State History
+
+Implementation Notes:
+------------------
+1. Concurrent position processing
+2. Atomic Redis updates
+3. Efficient state management
+4. Error recovery handling
+5. Metrics calculation optimization
 """
 
 from dataclasses import dataclass
