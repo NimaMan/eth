@@ -45,11 +45,11 @@ class PortfolioManager:
                     # Update positions
                     start_time = time.time()
                     updated_positions = await self.portfolio_position_manager.update_token_positions(token_updates)
-                    end_time = time.time()
                     
-                    # Get latest metrics
-                    metrics = await self.portfolio_position_manager.get_portfolio_metrics()
-                    self.logger.info(f"Portfolio metrics after update in {end_time - start_time} seconds for block {block_num} and {len(updated_positions)}: {metrics}")
+                    # Update metrics
+                    await self.portfolio_position_manager.update_portfolio_metrics(updated_positions)
+                    
+                    self.logger.info(f"Portfolio positions updated for block {block_num} and {len(updated_positions)} positions in {time.time() - start_time:.2f} seconds")
                     
                     # Mark task as done
                     self.token_manager.unprocessed_updates.task_done()

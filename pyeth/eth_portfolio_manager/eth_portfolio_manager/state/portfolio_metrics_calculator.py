@@ -84,11 +84,12 @@ Implementation Notes:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List
 from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from eth_portfolio_manager.utils.logger import get_logger
 from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
 from eth_portfolio_manager.state.portfolio_state_server import PortfolioStateServer
 
@@ -120,17 +121,15 @@ class PortfolioMetrics:
 
 
 class PortfolioMetricsCalculator:
-    def __init__(self, state_server: PortfolioStateServer):
+    def __init__(self, state_server: PortfolioStateServer, logger=None):
         self.state_server = state_server
+        self.logger = logger or get_logger(name="portfolio_manager")
         self.metrics = PortfolioMetrics()
         self.position_history: Dict[str, List[TokenPositionData]] = {}
         
     async def update_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
         """Calculate all portfolio metrics from current positions"""
         self.metrics = await self._calculate_core_metrics(positions)
-        await self._update_position_history(positions)
-        await self._calculate_risk_metrics(positions)
-        await self.state_server.update_portfolio_metrics(self.metrics)
         return self.metrics
         
     async def _calculate_core_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:

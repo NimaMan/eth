@@ -111,7 +111,7 @@ class PortfolioStateServer:
                 await pipe.execute()
                 
             self.current_positions.update(positions)
-            self.logger.info(f"Updated {len(positions)} positions in Redis")
+            #self.logger.info(f"Updated {len(positions)} positions in Redis")
             
         except Exception as e:
             self.logger.error(f"Error updating positions: {e}")
@@ -125,28 +125,7 @@ class PortfolioStateServer:
             return [orjson.loads(entry) for entry in history_data]
         except Exception as e:
             self.logger.error(f"Error getting position history: {e}")
-            raise
-            
-    async def get_portfolio_metrics(self) -> Dict:
-        """Get current portfolio-wide metrics"""
-        try:
-            total_value = 0
-            total_pnl = 0
-            
-            for position in self.current_positions.values():
-                if position.has_active_position:
-                    total_value += position.current_value
-                    total_pnl += position.realized_profit + position.unrealized_profit
-                    
-            return {
-                "total_value": total_value,
-                "total_profit_loss": total_pnl,
-                "position_count": len([p for p in self.current_positions.values() if p.has_active_position]),
-                "last_updated": datetime.now().isoformat()
-            }
-        except Exception as e:
-            self.logger.error(f"Error getting portfolio metrics: {e}")
-            raise
+            raise            
             
     async def clear_state(self):
         """Clear all state (useful for testing)"""
@@ -163,4 +142,10 @@ class PortfolioStateServer:
             self.logger.error(f"Error clearing state: {e}")
             raise
             
-   
+    async def update_portfolio_metrics(self, metrics):
+        """Update portfolio metrics in Redis"""
+        try:
+            await self.redis.hset("metrics", mapping=metrics.__dict__)
+        except Exception as e:
+            self.logger.error(f"Error updating portfolio metrics: {e}")
+            raise
