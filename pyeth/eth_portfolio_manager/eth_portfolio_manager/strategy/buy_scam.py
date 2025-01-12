@@ -1,5 +1,5 @@
 """
-Simple Buy and Sell Strategy
+Buy Scam Strategy
 
 Position State Transitions:
 -------------------------
@@ -10,8 +10,8 @@ Position State Transitions:
    - Waiting for trading to be enabled
 
 2. Buy Submission (INIT -> BUY_SUBMITTED)
-   Trigger: Token becomes trading enabled
-   Actions:
+   Trigger: Token is flagged as Particular SCAM
+   Actions that we know:
    - Generate SUBMIT_BUY signal
    - Record entry price attempt
    - Mark position as active
@@ -47,11 +47,6 @@ Special Cases:
 - Only evaluate sell signals in BUY_CONFIRMED state
 - Must confirm buy before allowing sell signals
 - Position remains active until sell is confirmed
-
-Configuration:
-------------
-- position_size_eth: Fixed position size (default 0.01 ETH)
-- profit_target_x: Sell threshold multiplier (default 10x)
 """
 
 from typing import Optional
@@ -68,10 +63,10 @@ from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 @dataclass
 class StrategyConfig:
     position_size_eth: float = 0.01    # Size of each position in ETH
-    profit_target_x: float = 3.0      # Sell when price increases by this multiple
+    profit_target_x: float = 5.0      # Sell when price increases by this multiple
     
 
-class JustBuyEverythingStrategy(BaseStrategy):
+class BuyScamStrategy(BaseStrategy):
     def __init__(self, config: Optional[StrategyConfig] = None):
         self.config = config or StrategyConfig()
         
@@ -100,7 +95,7 @@ class JustBuyEverythingStrategy(BaseStrategy):
 
     def handle_init_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
-        if token.token_status == TokenStatusEnum.TRADING_ENABLED:
+        if token.latest_token_assessment.get('is_scam'):
             return TradeSignal(
                 token_address=token.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,

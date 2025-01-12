@@ -47,6 +47,12 @@ class TokenPositionData:
     has_active_position: bool
     position_state: TokenPositionState
     token_address: str
+    scam_probability: float = None 
+    scam_reason: str = None 
+    num_greys: int = None 
+    num_greens: int = None
+    strategy_name: str = None 
+    
     
 
 @dataclass

@@ -30,14 +30,16 @@ async def main():
     # Run the backtest
     results = await backtest_manager.run_backtest()
     
-    # covert dict keys to str 
-    results = {str(k): v for k, v in results.items()}
+    # covert dict keys of each strategy to str 
+    results = {str(k): {str(k2): v2 for k2, v2 in v.items()} for k, v in results.items()}
     # Save the results to a file
     log_dir = os.path.join(ETH_LOG_DIR, "backtesting")
+    os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"backtest_results_{start_block}_{end_block}.json")
     with open(log_file, "wb") as f:
         f.write(json.dumps(results))
 
+    print(f"Backtest results saved to {log_file}")
 
 if __name__ == "__main__":
     # Run the main function in an event loop

@@ -109,25 +109,23 @@ Implementation Notes:
 5. Error states are properly handled
 """
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
-from datetime import datetime
-from enum import Enum
+import asyncio
+from typing import Dict, List 
 
+from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
-from eth_portfolio_manager.strategy.buy_everything import JustBuyEverythingStrategy
-
-
-STRATEGY_NAME = "LiveTokenPositionManager"
-STRATEGY = JustBuyEverythingStrategy
 
 
 class TokenPositionManagerBacktest:
-    def __init__(self):
-        self.investment_strategy = STRATEGY()
-        
+    def __init__(self, investment_strategy_class: BaseStrategy):
+        self.investment_strategy = investment_strategy_class()
+    
+    @property
+    def strategy_name(self):
+        return self.investment_strategy.strategy_name
+    
     async def process_token_updates(self, updated_token: LiveERC20Token, current_position: TokenPositionData) -> TokenPositionData:
         """Process token updates and manage positions
             - Update position state form the token data
@@ -242,6 +240,10 @@ class TokenPositionManagerBacktest:
         position.last_updated_block = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio
+        position.scam_probability = token.latest_token_assessment.get('scam_probability')
+        position.scam_reason = token.latest_token_assessment.get('scam_reason')
+        position.num_greys = token.latest_token_assessment.get('num_greys')
+        position.num_greens = token.latest_token_assessment.get('num_greens')
            
         # Update price and value metrics based on position state
         if position.has_active_position:

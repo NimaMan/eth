@@ -131,7 +131,7 @@ class PortfolioPositionManager:
             return token_address, updated_position
             
         except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing token {token_address}: {e}")
+            self.logger.error(f"{self.__class__.__name__} Error processing token {token_address} with strategy {self.token_position_manager.strategy_name}: {e}")
             return token_address, None
 
     def create_position(self, token: LiveTokenData) -> TokenPositionData:
@@ -165,7 +165,12 @@ class PortfolioPositionManager:
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error updating portfolio metrics: {e}")
             raise
- 
+            
+    @property
+    def strategy_name(self) -> str:
+        """Return the name of the strategy"""
+        return self.token_position_manager.strategy_name
+
 
 class LivePortfolioPositionManager(PortfolioPositionManager):
     def __init__(self, logger=None):

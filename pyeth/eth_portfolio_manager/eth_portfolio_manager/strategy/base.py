@@ -91,4 +91,7 @@ class BaseStrategy(ABC):
         """Handle SELL_SUBMITTED state and confirm exits"""
         pass
 
-    
+    @property
+    def strategy_name(self) -> str:
+        """Return the name of the strategy"""
+        return self.__class__.__name__
