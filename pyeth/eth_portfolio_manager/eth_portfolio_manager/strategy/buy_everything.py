@@ -1,34 +1,68 @@
 """
 Simple Buy and Sell Strategy
 
-Objective:
----------
-1. Buy all newly enabled tokens immediately
-2. Fixed position size for all trades
-3. Sell when price ratio (Xprice) exceeds threshold
+Position State Transitions:
+-------------------------
+1. Position Creation (INIT)
+   - New token detected
+   - Position created in INIT state
+   - No active position
+   - Waiting for trading to be enabled
 
-Algorithm:
----------
-1. Buy Conditions:
-   - Token is trading enabled
-   - No active position exists
-   - Use fixed position size
+2. Buy Submission (INIT -> BUY_SUBMITTED)
+   Trigger: Token becomes trading enabled
+   Actions:
+   - Generate SUBMIT_BUY signal
+   - Record entry price attempt
+   - Mark position as active
+   - Set initial position size (0.01 ETH)
 
-2. Sell Conditions:
-   - Have active position
-   - Current price / Entry price >= threshold
-   - Sell entire position
+3. Buy Confirmation (BUY_SUBMITTED -> BUY_CONFIRMED)
+   Trigger: Next update after BUY_SUBMITTED
+   Actions:
+   - Generate CONFIRM_BUY signal
+   - Finalize entry price
+   - Begin tracking position value
+   - Calculate unrealized profit/loss
+
+4. Sell Submission (BUY_CONFIRMED -> SELL_SUBMITTED)
+   Trigger: Price ratio (Xprice) >= profit_target_x
+   Actions:
+   - Generate SUBMIT_SELL signal
+   - Record exit price attempt
+   - Prepare for position closure
+   - Continue tracking unrealized P/L
+
+5. Sell Confirmation (SELL_SUBMITTED -> SELL_CONFIRMED)
+   Trigger: Next update after SELL_SUBMITTED
+   Actions:
+   - Generate CONFIRM_SELL signal
+   - Finalize exit price
+   - Calculate realized profit
+   - Mark position as inactive
+
+Special Cases:
+------------
+- SCAM Detection: Any state can transition to SCAMMED
+- Only evaluate sell signals in BUY_CONFIRMED state
+- Must confirm buy before allowing sell signals
+- Position remains active until sell is confirmed
+
+Configuration:
+------------
+- position_size_eth: Fixed position size (default 0.01 ETH)
+- profit_target_x: Sell threshold multiplier (default 10x)
 """
 
 from typing import Optional
 from dataclasses import dataclass
 
-from eth_portfolio_manager.core.data_models import TokenPositionData
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
-from eth_token_monitor.live_erc20_token.data.live_token_data import LiveTokenData, TokenStatusEnum
+from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
+
+from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
 from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
-from eth_portfolio_manager.utils.logger import get_logger
 
 
 @dataclass
@@ -39,51 +73,67 @@ class StrategyConfig:
 
 class JustBuyEverythingStrategy(BaseStrategy):
     def __init__(self, config: Optional[StrategyConfig] = None):
-        self.logger = get_logger(name="portfolio_manager", log_folder="portfolio_manager")
         self.config = config or StrategyConfig()
         
     def analyze_token(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
         """
-        Analyze token and generate trading signals
+        Analyze token and generate trading signals based on current position state
         
-        Args:
-            token: Token data to analyze
-            position_state: Current state of our position (if any)
+        State Flow:
+        INIT -> BUY_SUBMITTED -> BUY_CONFIRMED -> SELL_SUBMITTED -> SELL_CONFIRMED (end)
         """
-        # Check for sell signal if we have a position
-        if position_state.has_active_position:
-            return self.evaluate_sell_action(token, position_state)
+        
+        # Handle each state explicitly
+        if position_state.position_state == TokenPositionState.INIT:
+            return self.handle_init_state(token, position_state)
+        
+        elif position_state.position_state == TokenPositionState.BUY_SUBMITTED:
+            return self.handle_buy_submitted_state(token, position_state)
+        
+        elif position_state.position_state == TokenPositionState.BUY_CONFIRMED:
+            return self.handle_buy_confirmed_state(token, position_state)
+        
+        elif position_state.position_state == TokenPositionState.SELL_SUBMITTED:
+            return self.handle_sell_submitted_state(token, position_state)
+        
+        return None
 
-        # Check for buy signal if we don't have a position
-        return self.evaluate_buy_action(token)
-        
-    def evaluate_buy_action(self, token: LiveERC20Token) -> Optional[TradeSignal]:
-        """Generate buy signal if token is trading enabled"""
-        
-        # Only check if trading is enabled
-        if token.token_status != TokenStatusEnum.TRADING_ENABLED:
-            return None
-                    
-        # Generate buy signal with current price
+    def handle_init_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+        """Handle INIT state: Submit buy if trading enabled"""
+        if token.token_status == TokenStatusEnum.TRADING_ENABLED:
+            return TradeSignal(
+                token_address=token.contract_address,
+                decision=TradingDecision.SUBMIT_BUY,
+                quantity=self.config.position_size_eth,
+                strategy_name=self.__class__.__name__,
+            )
+        return None
+
+    def handle_buy_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+        """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
             token_address=token.contract_address,
-            decision=TradingDecision.SUBMIT_BUY,
+            decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
             strategy_name=self.__class__.__name__,
         )
 
-    def evaluate_sell_action(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Generate sell signal if price target is reached"""
-        # Calculate current price ratio
-        price_ratio = position_state.Xprice
-        
-        # Sell if we hit our target
-        if price_ratio >= self.config.profit_target_x:
+    def handle_buy_confirmed_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+        """Handle BUY_CONFIRMED state: Submit sell if price target reached"""
+        if position_state.Xprice >= self.config.profit_target_x:
             return TradeSignal(
                 token_address=token.contract_address,
                 decision=TradingDecision.SUBMIT_SELL,
-                quantity=0,
+                quantity=position_state.quantity,
                 strategy_name=self.__class__.__name__,
             )
-            
         return None
+
+    def handle_sell_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+        """Handle SELL_SUBMITTED state: Confirm sell on next update"""
+        return TradeSignal(
+            token_address=token.contract_address,
+            decision=TradingDecision.CONFIRM_SELL,
+            quantity=position_state.quantity,
+            strategy_name=self.__class__.__name__,
+        )

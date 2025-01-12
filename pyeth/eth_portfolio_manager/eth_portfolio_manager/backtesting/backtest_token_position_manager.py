@@ -1,5 +1,5 @@
 """
-Live Token Position Manager
+Backtest Token Position Manager
 
 Objective:
 ---------
@@ -11,7 +11,7 @@ Position State Flow:
 ------------------
 1. Token Creation & Initial State
    - New token detected -> Create TokenPositionData with INIT state
-   - Tracked in PortfolioPositionManager
+   - Tracked in BacktestPositionManager
    - No active position yet
 
 2. Position Updates from Token Data
@@ -124,7 +124,7 @@ STRATEGY_NAME = "LiveTokenPositionManager"
 STRATEGY = JustBuyEverythingStrategy
 
 
-class LiveTokenPositionManager:
+class TokenPositionManagerBacktest:
     def __init__(self):
         self.investment_strategy = STRATEGY()
         
@@ -242,14 +242,14 @@ class LiveTokenPositionManager:
         position.last_updated_block = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio
-            
+           
         # Update price and value metrics based on position state
         if position.has_active_position:
             # Active position updates
             position.Xprice = position.current_Xprice / position.entry_Xprice if position.entry_Xprice else 0
             position.current_value = position.purchase_value * position.Xprice
             position.unrealized_profit = position.current_value - position.purchase_value
-                
+          
         return position
     
     def _update_position_from_signal(self, signal: TradingDecision, position: TokenPositionData, token: LiveERC20Token):
@@ -259,7 +259,6 @@ class LiveTokenPositionManager:
             - if the signal is set to buy confirmed, then the position state is set to BUY_CONFIRMED
             - if the signal is set to sell confirmed, then the position state is set to SELL_CONFIRMED
         """
-        print(f"Processing signal: {signal.decision}")
         if signal.decision == TradingDecision.SUBMIT_BUY:
             position = self.update_submit_buy(position, token)
         

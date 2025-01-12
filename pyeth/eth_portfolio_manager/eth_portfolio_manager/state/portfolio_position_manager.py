@@ -98,10 +98,9 @@ Implementation Notes:
 """
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 import asyncio
 
-from eth_portfolio_manager.core.data_models import TokenPositionData, TradeSignal, TradingDecision, TokenPositionState
+from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
 from eth_portfolio_manager.state.live_token_position_manager import LiveTokenPositionManager
 from eth_portfolio_manager.state.portfolio_state_server import PortfolioStateServer
 from eth_portfolio_manager.state.portfolio_metrics_calculator import PortfolioMetricsCalculator
@@ -112,67 +111,15 @@ from eth_portfolio_manager.utils.logger import get_logger
 class PortfolioPositionManager:
     def __init__(self, logger=None):
         self.logger = logger or get_logger(name="portfolio_manager")
-        self.state_server = PortfolioStateServer(logger=self.logger)
-        self.positions: Dict[str, TokenPositionData] = self.state_server.current_positions
-        self.token_position_manager = LiveTokenPositionManager()
-        self.portfolio_metrics_calculator = PortfolioMetricsCalculator(self.state_server)
-
-    async def initialize(self):
-        """Initialize portfolio state from Redis"""
-        try:
-            await self.state_server.load_state()
-            self.positions = self.state_server.current_positions
-            await self.update_portfolio_metrics(self.positions)
-            self.logger.info(f"Initialized portfolio with {len(self.positions)} positions")
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error initializing portfolio: {e}")
-            raise e
-
-    async def update_token_positions(self, updated_tokens: Dict[str, LiveTokenData]) -> Dict[str, TokenPositionData]:
-        """
-        Process multiple token updates concurrently and update portfolio state
-        
-        Args:
-            updated_tokens: Dict mapping token addresses to their updated data
-            
-        Returns:
-            Dict of updated position data
-            
-        Implementation:
-        1. Group tokens into batches for efficient processing
-        2. Process each batch concurrently using asyncio.gather
-        3. Update Redis state atomically
-        4. Update portfolio metrics
-        """
-        try:
-            # Process token updates in parallel
-            update_tasks = []
-            for token_address, token in updated_tokens.items():
-                task = self._process_single_token(token_address, token)
-                update_tasks.append(task)
-            
-            # Wait for all updates to complete
-            position_updates = await asyncio.gather(*update_tasks)
-            
-            # Combine updates into single dict
-            updated_positions = {
-                addr: pos for addr, pos in position_updates if pos is not None
-            }
-            
-            # Batch update Redis state and metrics
-            if updated_positions:
-                await self.state_server.update_positions(updated_positions)
-                await self.update_portfolio_metrics(updated_positions)
-            return updated_positions
-            
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error updating token positions: {e}")
-            raise
-
-    async def _process_single_token(self, token_address: str, token: LiveTokenData) -> Tuple[str, Optional[TokenPositionData]]:
+        self.positions: Dict[str, TokenPositionData] = {}
+        self.metrics_calculator = PortfolioMetricsCalculator()
+        self.token_position_manager = None
+       
+    async def _process_single_token(self, token: LiveTokenData) -> Tuple[str, Optional[TokenPositionData]]:
         """Process updates for a single token"""
         try:
             # Create or get existing position
+            token_address = token.contract_address
             if token_address not in self.positions:
                 position = self.create_position(token)
                 self.positions[token_address] = position
@@ -209,15 +156,77 @@ class PortfolioPositionManager:
             token_address=token.contract_address
         )
 
-    async def update_portfolio_metrics(self, updated_positions: Dict[str, TokenPositionData]):
+    async def get_portfolio_metrics(self):
         """Calculate and update portfolio-wide metrics"""
         try:
-            metrics = await self.portfolio_metrics_calculator.update_metrics(updated_positions)
+            metrics = await self.metrics_calculator.update_metrics(self.positions)
             self.metrics = metrics
+            return metrics
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error updating portfolio metrics: {e}")
             raise
+ 
 
+class LivePortfolioPositionManager(PortfolioPositionManager):
+    def __init__(self, logger=None):
+        super().__init__(logger=logger)
+        self.state_server = PortfolioStateServer(logger=self.logger)
+        self.positions: Dict[str, TokenPositionData] = self.state_server.current_positions
+        self.token_position_manager = LiveTokenPositionManager()
+        
+    async def initialize(self):
+        """Initialize portfolio state from Redis"""
+        try:
+            await self.state_server.load_state()
+            self.positions = self.state_server.current_positions
+            await self.update_portfolio_metrics(self.positions)
+            self.logger.info(f"Initialized portfolio with {len(self.positions)} positions")
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Error initializing portfolio: {e}")
+            raise e
+
+    async def update_token_positions(self, updated_tokens: Dict[str, LiveTokenData]) -> Dict[str, TokenPositionData]:
+        """
+        Process multiple token updates concurrently and update portfolio state
+        
+        Args:
+            updated_tokens: Dict mapping token addresses to their updated data
+            
+        Returns:
+            Dict of updated position data
+            
+        Implementation:
+        1. Group tokens into batches for efficient processing
+        2. Process each batch concurrently using asyncio.gather
+        3. Update Redis state atomically
+        4. Update portfolio metrics
+        """
+        try:
+            # Process token updates in parallel
+            update_tasks = []
+            for token_address, token in updated_tokens.items():
+                task = self._process_single_token(token)
+                update_tasks.append(task)
+            
+            # Wait for all updates to complete
+            position_updates = await asyncio.gather(*update_tasks)
+            
+            # Combine updates into single dict
+            updated_positions = {
+                addr: pos for addr, pos in position_updates if pos is not None
+            }
+            
+            # Batch update Redis state and metrics
+            if updated_positions:
+                await self.state_server.update_positions(updated_positions)
+                await self.update_portfolio_metrics(updated_positions)
+            return updated_positions
+            
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Error updating token positions: {e}")
+            raise
+    
     def get_position(self, token_address: str) -> Optional[TokenPositionData]:
         """Get position data for a specific token"""
         return self.positions.get(token_address)
+   
