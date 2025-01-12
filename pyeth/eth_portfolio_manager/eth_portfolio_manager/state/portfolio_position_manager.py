@@ -98,10 +98,9 @@ Implementation Notes:
 """
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 import asyncio
 
-from eth_portfolio_manager.core.data_models import TokenPositionData, TradeSignal, TradingDecision, TokenPositionState
+from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
 from eth_portfolio_manager.state.live_token_position_manager import LiveTokenPositionManager
 from eth_portfolio_manager.state.portfolio_state_server import PortfolioStateServer
 from eth_portfolio_manager.state.portfolio_metrics_calculator import PortfolioMetricsCalculator
@@ -112,11 +111,74 @@ from eth_portfolio_manager.utils.logger import get_logger
 class PortfolioPositionManager:
     def __init__(self, logger=None):
         self.logger = logger or get_logger(name="portfolio_manager")
+        self.positions: Dict[str, TokenPositionData] = {}
+        self.metrics_calculator = PortfolioMetricsCalculator()
+        self.token_position_manager = None
+       
+    async def _process_single_token(self, token: LiveTokenData) -> Tuple[str, Optional[TokenPositionData]]:
+        """Process updates for a single token"""
+        try:
+            # Create or get existing position
+            token_address = token.contract_address
+            if token_address not in self.positions:
+                position = self.create_position(token)
+                self.positions[token_address] = position
+            else:
+                position = self.positions[token_address]
+
+            # Process token updates
+            updated_position = await self.token_position_manager.process_token_updates(token, position)
+            return token_address, updated_position
+            
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Error processing token {token_address} with strategy {self.token_position_manager.strategy_name}: {e}")
+            return token_address, None
+
+    def create_position(self, token: LiveTokenData) -> TokenPositionData:
+        """Create a new position for a token"""
+        return TokenPositionData(
+            symbol=token.symbol,
+            entry_Xprice=0,
+            current_Xprice=0,
+            Xprice=0,
+            purchase_value=0,
+            current_value=0,
+            realized_profit=0,
+            unrealized_profit=0,
+            quantity=0,
+            token_age_blocks=token.latest_block_number - token.creation_block,
+            token_age_hours=0,
+            last_updated_block=token.latest_block_number,
+            last_updated_time=token.latest_block_timestamp,
+            entry_block=0,
+            has_active_position=False,
+            position_state=TokenPositionState.INIT,
+            token_address=token.contract_address
+        )
+
+    async def get_portfolio_metrics(self):
+        """Calculate and update portfolio-wide metrics"""
+        try:
+            metrics = await self.metrics_calculator.update_metrics(self.positions)
+            self.metrics = metrics
+            return metrics
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Error updating portfolio metrics: {e}")
+            raise
+            
+    @property
+    def strategy_name(self) -> str:
+        """Return the name of the strategy"""
+        return self.token_position_manager.strategy_name
+
+
+class LivePortfolioPositionManager(PortfolioPositionManager):
+    def __init__(self, logger=None):
+        super().__init__(logger=logger)
         self.state_server = PortfolioStateServer(logger=self.logger)
         self.positions: Dict[str, TokenPositionData] = self.state_server.current_positions
         self.token_position_manager = LiveTokenPositionManager()
-        self.portfolio_metrics_calculator = PortfolioMetricsCalculator(self.state_server)
-
+        
     async def initialize(self):
         """Initialize portfolio state from Redis"""
         try:
@@ -148,7 +210,7 @@ class PortfolioPositionManager:
             # Process token updates in parallel
             update_tasks = []
             for token_address, token in updated_tokens.items():
-                task = self._process_single_token(token_address, token)
+                task = self._process_single_token(token)
                 update_tasks.append(task)
             
             # Wait for all updates to complete
@@ -168,56 +230,8 @@ class PortfolioPositionManager:
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error updating token positions: {e}")
             raise
-
-    async def _process_single_token(self, token_address: str, token: LiveTokenData) -> Tuple[str, Optional[TokenPositionData]]:
-        """Process updates for a single token"""
-        try:
-            # Create or get existing position
-            if token_address not in self.positions:
-                position = self.create_position(token)
-                self.positions[token_address] = position
-            else:
-                position = self.positions[token_address]
-
-            # Process token updates
-            updated_position = await self.token_position_manager.process_token_updates(token, position)
-            return token_address, updated_position
-            
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing token {token_address}: {e}")
-            return token_address, None
-
-    def create_position(self, token: LiveTokenData) -> TokenPositionData:
-        """Create a new position for a token"""
-        return TokenPositionData(
-            symbol=token.symbol,
-            entry_Xprice=0,
-            current_Xprice=0,
-            Xprice=0,
-            purchase_value=0,
-            current_value=0,
-            realized_profit=0,
-            unrealized_profit=0,
-            quantity=0,
-            token_age_blocks=token.latest_block_number - token.creation_block,
-            token_age_hours=0,
-            last_updated_block=token.latest_block_number,
-            last_updated_time=token.latest_block_timestamp,
-            entry_block=0,
-            has_active_position=False,
-            position_state=TokenPositionState.INIT,
-            token_address=token.contract_address
-        )
-
-    async def update_portfolio_metrics(self, updated_positions: Dict[str, TokenPositionData]):
-        """Calculate and update portfolio-wide metrics"""
-        try:
-            metrics = await self.portfolio_metrics_calculator.update_metrics(updated_positions)
-            self.metrics = metrics
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error updating portfolio metrics: {e}")
-            raise
-
+    
     def get_position(self, token_address: str) -> Optional[TokenPositionData]:
         """Get position data for a specific token"""
         return self.positions.get(token_address)
+   

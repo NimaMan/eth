@@ -13,7 +13,7 @@ from typing import Dict, Optional, Set
 import asyncio
 from datetime import datetime
 
-from eth_portfolio_manager.state.portfolio_position_manager import PortfolioPositionManager
+from eth_portfolio_manager.state.portfolio_position_manager import LivePortfolioPositionManager
 from eth_token_monitor.token_manager.live_token_manager import LiveTokenManager
 from eth_portfolio_manager.utils.logger import get_logger
 
@@ -26,7 +26,7 @@ class PortfolioManager:
     ):
         self.logger = logger or get_logger(name="portfolio_manager")
         self.token_manager = LiveTokenManager(logger=self.logger, warmup_blocks=warmup_blocks)
-        self.portfolio_position_manager = PortfolioPositionManager(logger=self.logger)
+        self.portfolio_position_manager = LivePortfolioPositionManager(logger=self.logger)
         self._shutdown_event = asyncio.Event()
 
     async def _monitor_token_updates(self):

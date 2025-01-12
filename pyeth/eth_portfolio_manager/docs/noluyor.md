@@ -1,17 +1,3 @@
-
-- The scam labeler needs correction
-
-
-
-
-# eth_token_monitor
-
-- Add txn info such as the hash to the live token. currently we miss that in the bribe alert. 
-- Add api to be able to get the current live tokens
-- Add more alerts
-- A preslae case 
-
-
 # PNL 
 One thing to remeber here is that the scam is logarithmic.  
 
@@ -21,6 +7,16 @@ One thing to remeber here is that the scam is logarithmic.
     - The ones that have a lot of trades 
         - The wales
         - The orcas 
+
+
+- The scam labeler needs correction
+
+# eth_token_monitor
+
+- Add txn info such as the hash to the live token. currently we miss that in the bribe alert. 
+- Add api to be able to get the current live tokens
+- Add more alerts
+- A preslae case 
 
 
 
@@ -51,10 +47,7 @@ One thing to remeber here is that the scam is logarithmic.
     - BlockProcessor: The only thing that is missing is the uniswap v3 positions. 
     - TokenProcessor: The only thing that is missing is the uniswap v3 positions. 
     
-    - PotfolioManager: This is missing. write down the code. 
-
+    - PotfolioManager: This has a basic backtest in place. 
     - TxnManager: This is missing. write down the code. 
-
-    - 
-
-
+        - start with a simple one on a strategy that you know will work for sure 
+        - submit txn 

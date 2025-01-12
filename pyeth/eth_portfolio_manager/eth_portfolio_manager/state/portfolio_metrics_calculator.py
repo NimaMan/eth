@@ -121,9 +121,7 @@ class PortfolioMetrics:
 
 
 class PortfolioMetricsCalculator:
-    def __init__(self, state_server: PortfolioStateServer, logger=None):
-        self.state_server = state_server
-        self.logger = logger or get_logger(name="portfolio_manager")
+    def __init__(self):
         self.metrics = PortfolioMetrics()
         self.position_history: Dict[str, List[TokenPositionData]] = {}
         
