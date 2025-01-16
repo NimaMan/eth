@@ -9,20 +9,30 @@ Objective:
 """
 
 import asyncio
-import argparse
-from datetime import datetime
 
-from eth_portfolio_manager.core.portfolio_manager import PortfolioManager
+from eth_portfolio_manager.strategy.buy_everything import JustBuyEverythingStrategy
+from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
+from eth_portfolio_manager.live.live_portfolio_manager import LivePortfolioManager
 from eth_portfolio_manager.utils.logger import get_logger
 
 
 logger = get_logger(name="portfolio_manager", log_folder="portfolio_manager")
 
 
-async def run_portfolio_manager():
+BUY_EVERYTHING_STRATEGY = JustBuyEverythingStrategy
+BUY_SCAM_STRATEGY = BuyScamStrategy
+
+
+
+class LivePortfolioConfig:
+    initial_balance: float = 1.0  # ETH
+    strategies = [BUY_EVERYTHING_STRATEGY, BUY_SCAM_STRATEGY]
+
+
+async def run_portfolio_manager(config: LivePortfolioConfig):
     """Run the portfolio manager"""
     try:
-        portfolio_manager = PortfolioManager(logger=logger, warmup_blocks=1000)
+        portfolio_manager = LivePortfolioManager(config=config, logger=logger, warmup_blocks=1000)
         await portfolio_manager.start()
         
     except KeyboardInterrupt:
@@ -36,9 +46,10 @@ async def run_portfolio_manager():
 
 def main():
     """Main entry point"""
+    config = LivePortfolioConfig()
     try:
         logger.info("Starting Portfolio Manager Runner")
-        asyncio.run(run_portfolio_manager())
+        asyncio.run(run_portfolio_manager(config))
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     except Exception as e:

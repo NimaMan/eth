@@ -114,19 +114,16 @@ from typing import Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 
+from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
-from eth_portfolio_manager.strategy.buy_everything import JustBuyEverythingStrategy
 
-
-STRATEGY_NAME = "LiveTokenPositionManager"
-STRATEGY = JustBuyEverythingStrategy
 
 
 class LiveTokenPositionManager:
-    def __init__(self):
-        self.investment_strategy = STRATEGY()
+    def __init__(self, investment_strategy: BaseStrategy):
+        self.investment_strategy = investment_strategy()
         
     async def process_token_updates(self, updated_token: LiveERC20Token, current_position: TokenPositionData) -> TokenPositionData:
         """Process token updates and manage positions
@@ -259,7 +256,6 @@ class LiveTokenPositionManager:
             - if the signal is set to buy confirmed, then the position state is set to BUY_CONFIRMED
             - if the signal is set to sell confirmed, then the position state is set to SELL_CONFIRMED
         """
-        print(f"Processing signal: {signal.decision}")
         if signal.decision == TradingDecision.SUBMIT_BUY:
             position = self.update_submit_buy(position, token)
         
