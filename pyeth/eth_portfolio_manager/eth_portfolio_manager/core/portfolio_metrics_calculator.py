@@ -89,9 +89,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from eth_portfolio_manager.utils.logger import get_logger
 from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
-from eth_portfolio_manager.state.portfolio_state_server import PortfolioStateServer
+from eth_portfolio_manager.live.live_portfolio_state_server import PortfolioStateServer
 
 
 @dataclass
