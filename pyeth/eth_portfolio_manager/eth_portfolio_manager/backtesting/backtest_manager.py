@@ -42,42 +42,23 @@ Implementation Notes:
 """
 import asyncio
 import time
-from dataclasses import dataclass
-from typing import Dict
 from collections import defaultdict, OrderedDict
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_portfolio_manager.backtesting.backtest_portfolio_position_manager import PortfolioPositionManagerBacktest
 from eth_token_monitor.token_manager.block_token_processor import BlockTokenProcessor
 from eth_portfolio_manager.utils.logger import get_logger
-from eth_portfolio_manager.strategy.buy_everything import JustBuyEverythingStrategy
-from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
 
 
-STRATEGY_NAME = "LiveTokenPositionManager"
-BUY_EVERYTHING_STRATEGY = JustBuyEverythingStrategy
-BUY_SCAM_STRATEGY = BuyScamStrategy
-
-
-
-@dataclass
-class BacktestConfig:
-    start_block: int
-    end_block: int
-    initial_balance: float = 1.0  # ETH
-
-
-class BacktestManager:
-    def __init__(self, config: BacktestConfig):
+class BacktestPortfolioManager:
+    def __init__(self, config):
         self.config = config
         self.logger = get_logger(name="backtester")
         self.portfolio_performance_history = defaultdict(OrderedDict)
         # Initialize components
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = BlockTokenProcessor(logger=self.logger)
-        self.buy_everything_position_manager = PortfolioPositionManagerBacktest( investment_strategy_class=BUY_EVERYTHING_STRATEGY, logger=self.logger )
-        self.buy_scam_position_manager = PortfolioPositionManagerBacktest( investment_strategy_class=BUY_SCAM_STRATEGY, logger=self.logger )
-        self.strategies = [self.buy_everything_position_manager, self.buy_scam_position_manager]
+        self.strategies = [PortfolioPositionManagerBacktest(investment_strategy=strategy, logger=self.logger ) for strategy in self.config.strategies]
     
     async def run_backtest(self):
         """Run complete backtest simulation with multiple strategies"""

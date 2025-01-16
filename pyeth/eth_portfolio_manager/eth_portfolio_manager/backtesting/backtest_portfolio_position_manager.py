@@ -23,18 +23,19 @@ from typing import Dict
 from datetime import datetime
 from collections import OrderedDict
 
-from eth_portfolio_manager.state.portfolio_position_manager import PortfolioPositionManager
+from eth_portfolio_manager.live.live_portfolio_position_manager import PortfolioPositionManager
 from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
 from eth_portfolio_manager.core.data_models import TokenPositionData
 from eth_portfolio_manager.strategy.base import BaseStrategy
 
 
 class PortfolioPositionManagerBacktest(PortfolioPositionManager):
-    def __init__(self, investment_strategy_class: BaseStrategy, logger=None):
+    def __init__(self, investment_strategy: BaseStrategy, logger=None):
         super().__init__(logger=logger)
         self.logger = logger
         self.positions: Dict[str, TokenPositionData] = {}
-        self.token_position_manager = TokenPositionManagerBacktest(investment_strategy_class=investment_strategy_class)
+        self.investment_strategy = investment_strategy
+        self.token_position_manager = TokenPositionManagerBacktest(investment_strategy=investment_strategy)
         # Backtest specific tracking
         self.position_history = OrderedDict()
         

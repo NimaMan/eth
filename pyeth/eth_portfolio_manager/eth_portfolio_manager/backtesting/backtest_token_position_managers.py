@@ -119,8 +119,8 @@ from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositio
 
 
 class TokenPositionManagerBacktest:
-    def __init__(self, investment_strategy_class: BaseStrategy):
-        self.investment_strategy = investment_strategy_class()
+    def __init__(self, investment_strategy: BaseStrategy):
+        self.investment_strategy = investment_strategy()
     
     @property
     def strategy_name(self):
