@@ -8,13 +8,13 @@ Objective: Verify correct parsing of set tax transactions including:
 """
 
 import asyncio
-from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
+from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 
 
 def test_set_tax(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected set tax details"""
     
-    expected_tax = DetailedTransaction(
+    expected_tax = ProcessedTransaction(
         hash="0x25d4b79545273e46a2685247138c38ce71ace2ec1398fa5b7a547b55f22efe77",
         block_number=21423708,
         txn_index=0,

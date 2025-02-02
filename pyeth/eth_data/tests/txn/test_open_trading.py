@@ -8,13 +8,13 @@ Objective: Verify correct parsing of trading enabled transactions including:
 """
 
 import asyncio
-from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees, TradingEnabledEvent
+from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees, TradingEnabledEvent
 
 
 def test_open_trading(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected trading enabled details"""
     
-    expected_trading = DetailedTransaction(
+    expected_trading = ProcessedTransaction(
         hash="0x9fc6130629c69e689d6023ffb2cfbfcd7df18210e2ba97d527c9b93819c6ec5b",
         block_number=21423691,
         txn_index=0,  # Position In Block: 0

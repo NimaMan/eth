@@ -16,7 +16,7 @@ import time
 import asyncio
 from typing import List
 from eth_block_processor.alert.txn_alert_processor import TransactionAlertProcessor
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.utils.logger import get_logger
 
 
@@ -27,7 +27,7 @@ class BlockAlertProcessor:
     def __init__(self):
         self.txn_alert_processor = TransactionAlertProcessor()
 
-    async def process_block_transactions(self, txn_list: List[DetailedTransaction]):
+    async def process_block_transactions(self, txn_list: List[ProcessedTransaction]):
         """Process list of transaction dictionaries concurrently"""
         try:
             start_time = time.time()

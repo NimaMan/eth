@@ -72,6 +72,7 @@ class UniswapV2Sync:
         self.reserve0 = str(self.reserve0)
         self.reserve1 = str(self.reserve1)
 
+
 @dataclass
 class UniswapV2Swap:
     pair_address: ChecksumAddress
@@ -88,20 +89,6 @@ class UniswapV2Swap:
         self.amount1In = str(self.amount1In)
         self.amount0Out = str(self.amount0Out)
         self.amount1Out = str(self.amount1Out)
-
-
-@ dataclass
-class UniswapV3Swap:
-    pool_address: ChecksumAddress
-    sender: ChecksumAddress
-    recipient: ChecksumAddress
-    amount_in: int
-    amount_out: int
-    log_index: int
-
-    def __post_init__(self):
-        self.amount_in = str(self.amount_in)
-        self.amount_out = str(self.amount_out)
 
 
 @dataclass

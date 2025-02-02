@@ -1,6 +1,6 @@
 from typing import List, Any, Optional, Set
 from eth_block_processor.alert.base_alert_class import BaseAlert, AlertPriority
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.data_models.alert_models import UserInvolvedAlertData
 from eth_block_processor.alert.config import get_grey_addresses, get_orca_addresses, get_whale_addresses
 from eth_block_processor.utils.logger import get_logger
@@ -15,19 +15,19 @@ class BaseUserAlert(BaseAlert):
         self.addresses_set: Set[str] = addresses_getter()
         self.alert_type = None
 
-    def _is_alert(self, detailed_txn: DetailedTransaction) -> bool:
+    def _is_alert(self, detailed_txn: ProcessedTransaction) -> bool:
         # Check both from and to addresses, including contract interactions
         involved_addresses = set(detailed_txn.unique_addresses)
         return bool(involved_addresses & self.addresses_set)
     
-    async def process_txn(self, detailed_txn: DetailedTransaction) -> List[UserInvolvedAlertData]:
+    async def process_txn(self, detailed_txn: ProcessedTransaction) -> List[UserInvolvedAlertData]:
         if self._is_alert(detailed_txn):
             alert_data = self.create_alert(detailed_txn)
             self.send_alert(alert_data)
             return [alert_data]
         return []
 
-    def create_alert(self, txn: DetailedTransaction) -> UserInvolvedAlertData:
+    def create_alert(self, txn: ProcessedTransaction) -> UserInvolvedAlertData:
         involved_addresses = self.addresses_set & txn.unique_addresses
         return UserInvolvedAlertData(
             block_number=txn.block_number,
@@ -66,7 +66,7 @@ class OrcaAlert(BaseUserAlert):
         super().__init__(get_orca_addresses)
         self.priority = AlertPriority.MEDIUM
 
-    async def process_txn(self, detailed_txn: DetailedTransaction) -> List[UserInvolvedAlertData]:
+    async def process_txn(self, detailed_txn: ProcessedTransaction) -> List[UserInvolvedAlertData]:
         if self._is_alert(detailed_txn):
             # check if the txn has a swap action
             num_erc20_token_transfers = len(detailed_txn.erc20_contracts)
@@ -96,7 +96,7 @@ class WhaleAlert(BaseUserAlert):
         super().__init__(get_whale_addresses)
         self.priority = AlertPriority.MEDIUM
 
-    async def process_txn(self, detailed_txn: DetailedTransaction) -> List[UserInvolvedAlertData]:
+    async def process_txn(self, detailed_txn: ProcessedTransaction) -> List[UserInvolvedAlertData]:
         if self._is_alert(detailed_txn):
             # check if the txn has a swap action
             num_erc20_token_transfers = len(detailed_txn.erc20_contracts)

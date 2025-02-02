@@ -1,7 +1,7 @@
 import lmdb
 import json
 import os
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from typing import List
 
 
@@ -33,7 +33,7 @@ class ERC20TransactionDB:
             # If there's an error, reopen the environment
             self._open_env()
 
-    def add_transaction(self, detailed_txn: DetailedTransaction, max_retries=3):
+    def add_transaction(self, detailed_txn: ProcessedTransaction, max_retries=3):
         for attempt in range(max_retries):
             try:
                 self._ensure_env_open()
@@ -103,7 +103,7 @@ class ERC20TransactionDB:
             self.env.close()
             self.env = None
 
-    def add_transactions_batch(self, detailed_txns: List[DetailedTransaction]):
+    def add_transactions_batch(self, detailed_txns: List[ProcessedTransaction]):
         """Batch insert ERC20 transactions"""
         values = []
         for txn in detailed_txns:
@@ -118,7 +118,7 @@ class ERC20TransactionDB:
                 )
                 conn.commit()
     
-    def _should_store_transaction(self, txn: DetailedTransaction) -> bool:
+    def _should_store_transaction(self, txn: ProcessedTransaction) -> bool:
         return (txn.txn_type == 'ERC20_TRANSFER' or
                 len(txn.erc20_contracts) > 0 or
                 len(txn.approvals) > 0 or

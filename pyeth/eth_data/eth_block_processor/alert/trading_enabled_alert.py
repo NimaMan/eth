@@ -1,5 +1,5 @@
 import pandas as pd
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.data_models.alert_models import TradingEnabledAlertData
 from eth_block_processor.utils.logger import get_logger
 from eth_block_processor.alert.base_alert_class import BaseAlert
@@ -13,7 +13,7 @@ class TradingEnabledAlert(BaseAlert):
     def __init__(self):
         pass
     
-    def _is_alert(self, detailed_txn: DetailedTransaction) -> bool:
+    def _is_alert(self, detailed_txn: ProcessedTransaction) -> bool:
         """
         Check if the transaction should trigger a trading enabled alert
         """
@@ -21,7 +21,7 @@ class TradingEnabledAlert(BaseAlert):
             return True
         return False
         
-    async def process_txn(self, detailed_txn: DetailedTransaction) -> List[TradingEnabledAlertData]:
+    async def process_txn(self, detailed_txn: ProcessedTransaction) -> List[TradingEnabledAlertData]:
         """
         Process a block to detect trading enabled events
         
@@ -37,7 +37,7 @@ class TradingEnabledAlert(BaseAlert):
             return [alert_data]
         return []
     
-    def create_alert(self, detailed_txn: DetailedTransaction) -> TradingEnabledAlertData:
+    def create_alert(self, detailed_txn: ProcessedTransaction) -> TradingEnabledAlertData:
         alert_data = TradingEnabledAlertData(
             block_number=detailed_txn.block_number,
             transaction_hash=detailed_txn.hash,

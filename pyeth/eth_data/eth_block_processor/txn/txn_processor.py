@@ -58,7 +58,7 @@ import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
 from eth_block_processor.utils.common_addresses import fee_recipients
-from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
+from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
@@ -104,7 +104,7 @@ class TransactionProcessor:
             erc20_contracts.remove('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
         return erc20_contracts, unique_addresses
     
-    def store_erc20_transaction(self, detailed_txn: DetailedTransaction):
+    def store_erc20_transaction(self, detailed_txn: ProcessedTransaction):
         if detailed_txn.txn_type == 'ERC20_TRANSFER' or\
             len(detailed_txn.erc20_contracts) > 0 or \
             len(detailed_txn.approvals) > 0 or \
@@ -175,7 +175,7 @@ class TransactionProcessor:
     def process_transaction(self, 
                             transaction: Dict[str, Any], 
                             receipt: Dict[str, Any],
-                            trace: Dict[str, Any]) -> DetailedTransaction:
+                            trace: Dict[str, Any]) -> ProcessedTransaction:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
         """
@@ -206,7 +206,7 @@ class TransactionProcessor:
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
-        detailed_txn = DetailedTransaction(
+        detailed_txn = ProcessedTransaction(
             hash=txn_hash,
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
@@ -258,7 +258,7 @@ class TransactionProcessor:
                                         transaction: Dict[str, Any], 
                                         receipt: Dict[str, Any] = None,
                                         trace: Dict[str, Any] = None,
-                                        state_diff: bool = False) -> DetailedTransaction:
+                                        state_diff: bool = False) -> ProcessedTransaction:
         """Async version of process_transaction"""
         
         # Process logs
@@ -296,7 +296,7 @@ class TransactionProcessor:
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
-        return DetailedTransaction(
+        return ProcessedTransaction(
             hash=transaction['hash'],
             txn_type=tx_type,
             block_number=receipt['blockNumber'],

@@ -1,6 +1,6 @@
 from typing import List, Optional
 from dataclasses import asdict
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.data_models.alert_models import ContractCreationAlertData
 from eth_block_processor.alert.base_alert_class import BaseAlert
 from eth_block_processor.utils.logger import get_logger
@@ -12,11 +12,11 @@ logger = get_logger("contract_creation_alert", log_folder="alert")
 
 class ContractCreationAlert(BaseAlert):
     
-    def _is_alert(self, detailed_txn: DetailedTransaction) -> bool:
+    def _is_alert(self, detailed_txn: ProcessedTransaction) -> bool:
         """Check if transaction is a contract creation"""
         return detailed_txn.contract_address is not None and detailed_txn.txn_type == "Contract Creation"
 
-    async def process_txn(self, detailed_txn: DetailedTransaction) -> List[ContractCreationAlertData]:
+    async def process_txn(self, detailed_txn: ProcessedTransaction) -> List[ContractCreationAlertData]:
         """Process a transaction to detect contract creation events"""
         if self._is_alert(detailed_txn):
             alert_data = self.create_alert(detailed_txn)
@@ -24,7 +24,7 @@ class ContractCreationAlert(BaseAlert):
             return [alert_data]
         return []
 
-    def create_alert(self, detailed_txn: DetailedTransaction) -> ContractCreationAlertData:
+    def create_alert(self, detailed_txn: ProcessedTransaction) -> ContractCreationAlertData:
         """Create a contract creation alert"""
         contract_type = self._classify_contract(detailed_txn.contract_address)
         

@@ -96,6 +96,7 @@ class UniswapV3Swap:
         self.amount1 = str(self.amount1)
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
         self.liquidity = str(self.liquidity)
+        self.tick = str(self.tick)
 
 @dataclass
 class UniswapV3Burn:

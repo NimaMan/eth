@@ -8,7 +8,7 @@ from eth_block_processor.data_models.txn_models import *
 @pytest.fixture
 def expected_contract_creation():
     """Expected DetailedTransaction object for the SIMAI token creation"""
-    return DetailedTransaction(
+    return ProcessedTransaction(
         hash="0x45fbb2326ee70cbaacb56c12b6a14b2ab5efd41635e9d3ba9ff4fed4eee52b89",
         block_number=21423372,
         block_timestamp=1734451943, 
@@ -84,7 +84,7 @@ def expected_contract_creation():
             token1="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
             log_index=462
         )],
-        actions=('Ownership Change', 'Contract Creation'),
+        actions={'Ownership Change', 'Contract Creation'},
         eth_transfers=[],
         contract_creation_events=[ContractCreationEvent(
             contract_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
@@ -136,6 +136,8 @@ def test_contract_creation(txn_analyzer, txn_data_fetcher, expected_contract_cre
     )
     # Debug differences
     for key in sync_result.__dict__:
+        if key == "input":
+            continue
         expected_val = getattr(expected_contract_creation, key, None)
         actual_val = getattr(sync_result, key)
         if expected_val != actual_val:

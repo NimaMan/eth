@@ -16,7 +16,7 @@ from eth_block_processor.data_models.txn_models import *
 def test_add_liquidity(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected add liquidity details"""
     
-    expected_add_liquidity = DetailedTransaction(
+    expected_add_liquidity = ProcessedTransaction(
         hash="0xa72a44acb01e0e83cd9097c75e5b54208dbcb8354e4892963b8d39044eef0f65",
         block_number=21423374,
         txn_index=128,

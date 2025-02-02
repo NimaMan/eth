@@ -5,7 +5,7 @@ from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcesso
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.data_models.trace_models import InternalTransaction
 from eth_block_processor.data_models.txn_models import (
-    DetailedTransaction, 
+    ProcessedTransaction, 
     TransactionFees,
     ERC20Transfer,
     InternalTransaction
@@ -20,7 +20,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     actual_input = txn_data['transaction']['input']
     
-    expected_transaction = DetailedTransaction(
+    expected_transaction = ProcessedTransaction(
         hash="0x8304000190747e7f8ace1510304ada10d66ec24e05427dc8f994ddbea3b97d6c",
         block_number=21430859,
         txn_index=5,

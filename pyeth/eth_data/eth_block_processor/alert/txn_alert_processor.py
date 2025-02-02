@@ -5,7 +5,7 @@ from eth_block_processor.alert.trading_enabled_alert import TradingEnabledAlert
 from eth_block_processor.alert.bribe_alert import BribeAlert
 from eth_block_processor.alert.contract_creation_alert import ContractCreationAlert
 from eth_block_processor.alert.user_involved_alert import OrcaAlert, WhaleAlert
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.utils.logger import get_logger
 
 
@@ -23,7 +23,7 @@ class TransactionAlertProcessor:
             'whale': WhaleAlert()
         }
 
-    async def process_single_alert(self, alert_type: str, processor, txn: DetailedTransaction):
+    async def process_single_alert(self, alert_type: str, processor, txn: ProcessedTransaction):
         """Process a single alert type asynchronously"""
         try:
             alerts = await processor.process_txn(txn)
@@ -34,7 +34,7 @@ class TransactionAlertProcessor:
             logger.error(f"{__name__}: Error processing {alert_type} alert for tx {txn.hash}: {str(e)}")
             return []
 
-    async def process_transaction(self, txn: DetailedTransaction):
+    async def process_transaction(self, txn: ProcessedTransaction):
         """
         Process a transaction through all alert processors concurrently
         

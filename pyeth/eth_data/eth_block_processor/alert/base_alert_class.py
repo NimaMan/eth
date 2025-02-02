@@ -1,7 +1,7 @@
 from typing import Any, List, Dict, Optional
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 
 
 class AlertPriority(IntEnum):
@@ -18,14 +18,14 @@ class BaseAlert(ABC):
         self.priority = AlertPriority.LOW
 
     @abstractmethod
-    async def process_txn(self, detailed_txn: DetailedTransaction):
+    async def process_txn(self, detailed_txn: ProcessedTransaction):
         """
         Process a single transaction to generate alerts, and send them to the alert system
         """
         pass
 
     @abstractmethod
-    def create_alert(self, detailed_txn: DetailedTransaction):
+    def create_alert(self, detailed_txn: ProcessedTransaction):
         """Create alert data from transaction"""
         pass
 
@@ -35,6 +35,6 @@ class BaseAlert(ABC):
         pass
 
     @abstractmethod
-    def _is_alert(self, txn: DetailedTransaction) -> bool:
+    def _is_alert(self, txn: ProcessedTransaction) -> bool:
         """Helper method to detect if the event is an alert"""
         pass

@@ -23,7 +23,7 @@ from web3 import Web3
 from typing import List, Dict, Any, Union
 import asyncio
 import concurrent.futures
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.txn.txn_data_fetcher import BatchTransactionDataFetcher
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
@@ -46,7 +46,7 @@ class TransactionBatchAnalyzer:
                                              transaction: Dict[str, Any], 
                                              receipt: Dict[str, Any] = None,
                                              trace: Dict[str, Any] = None,
-                                             txn_hash: str = None) -> DetailedTransaction:
+                                             txn_hash: str = None) -> ProcessedTransaction:
         """Safely analyze a single transaction with error handling"""
         try:
             return await self.transaction_analyzer.process_transaction_async(
@@ -59,7 +59,7 @@ class TransactionBatchAnalyzer:
             e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
             raise
     
-    async def analyze_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], use_asyncio: bool = True) -> List[DetailedTransaction]:
+    async def analyze_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], use_asyncio: bool = True) -> List[ProcessedTransaction]:
         """
         Analyzes all transactions in a block using batch processing
         Args:
@@ -76,7 +76,7 @@ class TransactionBatchAnalyzer:
 
         return results
 
-    async def _process_transaction_batch_thread_pool(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[DetailedTransaction]:
+    async def _process_transaction_batch_thread_pool(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[ProcessedTransaction]:
         """Process a batch of transactions with optimized data fetching and timing metrics"""
         
         receipt_map, trace_map = await self.batch_data_fetcher.fetch_block_data(block_number)
@@ -116,7 +116,7 @@ class TransactionBatchAnalyzer:
         
         return results
 
-    async def _process_transaction_batch_asyncio(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[DetailedTransaction]:
+    async def _process_transaction_batch_asyncio(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[ProcessedTransaction]:
         """Process transactions using asyncio for comparison with thread pool version"""
         
         receipt_map, trace_map = await self.batch_data_fetcher.fetch_block_data(block_number)
@@ -161,7 +161,7 @@ class TransactionBatchAnalyzer:
         
         return results
 
-    async def process_batch_with_fetched_data(self, blocks: Dict[int, Any], block_data: Dict[int, Dict]) -> Dict[int, List[DetailedTransaction]]:
+    async def process_batch_with_fetched_data(self, blocks: Dict[int, Any], block_data: Dict[int, Dict]) -> Dict[int, List[ProcessedTransaction]]:
         analyzed_blocks = {}
         
         for block_num, block in blocks.items():

@@ -29,47 +29,77 @@ TEST_BLOCK_NUMBERS = [TEST_BLOCK_NUMBER_1,
 
 
 @pytest.mark.asyncio
-async def test_block_encoding():  # Remove the parameter
+async def test_block_encoding():
     """Test encoding of test blocks which failed in production"""
     
-    # Test both block numbers
     for block_number in TEST_BLOCK_NUMBERS:
-        # Initialize block processor
-        processor = BlockProcessor(
-            save_erc20_txn_to_db=False
-        )
+        processor = BlockProcessor(save_erc20_txn_to_db=False)
         
         try:
-            # Process the specific block
             processed_block = await processor.process_block(block_number)
+            print(f"\nProcessing block {block_number} with {len(processed_block)} transactions")
             
-            # Attempt to encode with different approaches
-            try:
-                # 1. Try direct JSON encoding (should fail)
-                encoded_direct = orjson.dumps(processed_block)
-                print("Direct encoding succeeded (unexpected)")
-            except Exception as e:
-                print(f"Direct encoding failed (expected): {e}")
+            failed_txs = []
+            for idx, tx in enumerate(processed_block):
+                try:
+                    # Try to encode each transaction individually
+                    encoded_tx = orjson.dumps(
+                        tx,
+                        default=transaction_serializer,
+                        option=orjson.OPT_SERIALIZE_NUMPY
+                    )
+                except Exception as e:
+                    failed_txs.append({
+                        'index': idx,
+                        'hash': tx.hash if hasattr(tx, 'hash') else 'N/A',
+                        'error': str(e),
+                        'problematic_fields': {}
+                    })
+                    
+                    # Check each field for encoding issues
+                    for attr_name, attr_value in tx.__dict__.items():
+                        try:
+                            orjson.dumps({attr_name: attr_value}, default=transaction_serializer)
+                        except Exception as field_error:
+                            failed_txs[-1]['problematic_fields'][attr_name] = {
+                                'type': str(type(attr_value)),
+                                'value': str(attr_value),
+                                'error': str(field_error)
+                            }
+            
+            # If any transactions failed to encode, print details and fail the test
+            if failed_txs:
+                print("\nEncoding failures detected:")
+                for failed_tx in failed_txs:
+                    print(f"\nTransaction {failed_tx['index']} (hash: {failed_tx['hash']}):")
+                    print(f"Error: {failed_tx['error']}")
+                    print("\nProblematic fields:")
+                    for field_name, field_info in failed_tx['problematic_fields'].items():
+                        print(f"\n  {field_name}:")
+                        print(f"    Type: {field_info['type']}")
+                        print(f"    Value: {field_info['value']}")
+                        print(f"    Error: {field_info['error']}")
                 
-            # 2. Try with our custom serializer
-            encoded_custom = orjson.dumps(
-                processed_block,
-                default=transaction_serializer,
-                option=orjson.OPT_SERIALIZE_NUMPY
-            )
-            print("Custom serializer encoding succeeded")
+                raise ValueError(f"Failed to encode {len(failed_txs)} transactions in block {block_number}")
             
-            # Decode and verify the data
-            decoded = orjson.loads(encoded_custom)
-            print(f"Successfully encoded and decoded block with {len(processed_block)} transactions")
-            
-            # Print some stats about the encoded data
-            print(f"\nEncoding Statistics for block {block_number}:")
-            print(f"Original block transactions: {len(processed_block)}")
-            print(f"Encoded size: {len(encoded_custom)} bytes")
+            # Try encoding the full block
+            try:
+                encoded_custom = orjson.dumps(
+                    processed_block,
+                    default=transaction_serializer,
+                    option=orjson.OPT_SERIALIZE_NUMPY
+                )
+                print(f"Successfully encoded block {block_number}")
+                print(f"Encoded size: {len(encoded_custom)} bytes")
+                
+            except Exception as e:
+                print(f"\nFailed to encode full block {block_number}:")
+                print(f"Error: {str(e)}")
+                raise
             
         except Exception as e:
-            print(f"Failed to process/encode block {block_number}: {e}")
+            print(f"Failed to process/encode block {block_number}")
+            print(f"Error: {str(e)}")
             raise
 
 if __name__ == "__main__":

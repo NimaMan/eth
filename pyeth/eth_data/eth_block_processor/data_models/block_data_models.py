@@ -1,7 +1,7 @@
 from web3.types import Hash32, Wei
 from dataclasses import dataclass
 from typing import List
-from eth_block_processor.data_models.txn_models import DetailedTransaction
+from eth_block_processor.data_models.txn_models import ProcessedTransaction
 
 
 @dataclass
@@ -12,7 +12,7 @@ class BlockTransactions:
     gas_used: int
     gas_limit: int
     base_fee_per_gas: Wei
-    transactions: List[DetailedTransaction]
+    transactions: List[ProcessedTransaction]
     parent_hash: Hash32
     state_root: Hash32
     transactions_root: Hash32

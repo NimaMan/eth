@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 NAME="eth_block_processor"
-VERSION="0.1.0"
+VERSION="0.2.0"
 # To install the library, run the following
 #
 # python setup.py install
@@ -29,3 +29,21 @@ setup(
     eth_block_processor provides ...
     """
 )
+
+
+'''
+Change log 
+0.1.0: 
+- Initial release with the basic functionality:
+    - Process the transactions  
+        - Uniswap v2 
+    - Process the blocks
+    - Publish the processed blocks for the other components
+    - Basic alerts
+        - contract creation
+        - trading enabled
+
+0.2.0: 
+- Add uniswap v3 positions
+
+'''

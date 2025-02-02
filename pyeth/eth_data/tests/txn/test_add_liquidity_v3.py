@@ -20,7 +20,7 @@ from eth_block_processor.data_models.uniswap_v3_models import *
 def test_add_liquidity_v3(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected add liquidity V3 details"""
     
-    expected_add_liquidity = DetailedTransaction(
+    expected_add_liquidity = ProcessedTransaction(
         hash="0xb6550ffbe2bbca45edf1ffcdea957a57b4f83a9ac15e1f5d3af3fd032cda1482",
         block_number=21479418,
         block_timestamp=1735128851,

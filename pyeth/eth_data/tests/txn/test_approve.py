@@ -16,7 +16,7 @@ from eth_block_processor.data_models.txn_models import *
 def test_approve_lp(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected approval details"""
     
-    expected_approve = DetailedTransaction(
+    expected_approve = ProcessedTransaction(
         hash="0xc98c2b4ddc936ac6dba70bc7bacc9e37d406bcd24b2ecaf58a30f47521dbddf2",
         block_number=21423699,
         txn_index=156,

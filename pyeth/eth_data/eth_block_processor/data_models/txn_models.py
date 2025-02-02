@@ -35,7 +35,7 @@ class TransactionFees:
     
 
 @dataclass
-class DetailedTransaction:
+class ProcessedTransaction:
     hash: str
     block_number: int
     block_timestamp: int
@@ -199,7 +199,7 @@ class DetailedTransaction:
             raise ValueError("Transaction index cannot be negative")
 
     def __eq__(self, other):
-        if not isinstance(other, DetailedTransaction):
+        if not isinstance(other, ProcessedTransaction):
             return False
             
         # Compare all fields except sets
@@ -216,7 +216,6 @@ class DetailedTransaction:
             self.txn_type == other.txn_type and
             self.erc20_transfers == other.erc20_transfers and
             self.eth_transfers == other.eth_transfers and
-            self.actions == other.actions and
             self.mints == other.mints and
             self.burns == other.burns and
             self.deposits == other.deposits and
@@ -243,7 +242,8 @@ class DetailedTransaction:
         # Compare sets separately (order doesn't matter)
         sets_match = (
             set(self.unique_addresses) == set(other.unique_addresses) and
-            set(self.erc20_contracts) == set(other.erc20_contracts)
+            set(self.erc20_contracts) == set(other.erc20_contracts) and 
+            set(self.actions) == set(other.actions)
         )
         
         return basic_fields_match and sets_match

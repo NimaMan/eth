@@ -5,12 +5,12 @@ Transaction Analyzer Test Suite - Real Transaction Tests
 import pytest
 import asyncio
 import numpy as np
-from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
+from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 
 @pytest.fixture
 def expected_eth_transfer():
     """Expected DetailedTransaction object for the ETH transfer"""
-    return DetailedTransaction(
+    return ProcessedTransaction(
         hash="0x0d6a7c23ba11f31a01cab82d8ae0b770286d7a189828e57d3f871bed4e0480f3",
         block_number=21423357,
         txn_index=37,
