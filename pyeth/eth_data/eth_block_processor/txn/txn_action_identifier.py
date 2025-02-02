@@ -94,9 +94,6 @@ class TransactionActionIdentifier:
         if not has_transfers:
             return False
             
-        # Check for WETH deposit (common when adding ETH liquidity)
-        has_deposit = len(parsed_logs.get('deposits', [])) > 0
-        
         # Check for pool creation and initialization (optional - only for new pools)
         has_pool_created = len(parsed_logs.get('uniswap_v3_pools', [])) > 0
         has_initialization = len(parsed_logs.get('uniswap_v3_initializations', [])) > 0

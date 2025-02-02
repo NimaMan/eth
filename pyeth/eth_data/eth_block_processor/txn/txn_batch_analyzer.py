@@ -24,7 +24,7 @@ from typing import List, Dict, Any, Union
 import asyncio
 import concurrent.futures
 from eth_block_processor.data_models.txn_models import DetailedTransaction
-from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.txn.txn_data_fetcher import BatchTransactionDataFetcher
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.utils.logger import get_logger
@@ -36,7 +36,7 @@ class TransactionBatchAnalyzer:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
-        self.transaction_analyzer = TransactionAnalyzer(w3=w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
+        self.transaction_analyzer = TransactionProcessor(w3=w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
         self.batch_data_fetcher = BatchTransactionDataFetcher(w3=w3)
         if logger is None:
             logger = logger = get_logger(name="txn_analyzer")
@@ -49,7 +49,7 @@ class TransactionBatchAnalyzer:
                                              txn_hash: str = None) -> DetailedTransaction:
         """Safely analyze a single transaction with error handling"""
         try:
-            return await self.transaction_analyzer.analyze_transaction_async(
+            return await self.transaction_analyzer.process_transaction_async(
                 transaction=transaction,
                 receipt=receipt,
                 trace=trace
@@ -93,7 +93,7 @@ class TransactionBatchAnalyzer:
                 trace = trace_map.get(txn_hash)
                 
                 future = executor.submit(
-                    self.transaction_analyzer.analyze_transaction,
+                    self.transaction_analyzer.process_transaction,
                     transaction=txn,
                     receipt=receipt,
                     trace=trace,

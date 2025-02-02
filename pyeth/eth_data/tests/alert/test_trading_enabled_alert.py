@@ -14,7 +14,7 @@ async def test_trading_enabled_alert(txn_analyzer, txn_data_fetcher, trading_ena
     txn_hash = "0x9fc6130629c69e689d6023ffb2cfbfcd7df18210e2ba97d527c9b93819c6ec5b"
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     
-    processed_txn = txn_analyzer.analyze_transaction(
+    processed_txn = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']

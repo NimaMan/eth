@@ -66,7 +66,7 @@ def test_set_tax(txn_analyzer, txn_data_fetcher):
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.analyze_transaction(
+    sync_result = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']

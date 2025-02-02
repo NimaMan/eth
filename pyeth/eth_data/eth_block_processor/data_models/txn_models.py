@@ -38,6 +38,7 @@ class TransactionFees:
 class DetailedTransaction:
     hash: str
     block_number: int
+    block_timestamp: int
     txn_index: int
     from_address: ChecksumAddress
     to_address: Optional[ChecksumAddress]
@@ -50,12 +51,10 @@ class DetailedTransaction:
     actions: List[TransactionAction]
     
     fees: TransactionFees
+    bribe_amount: float = 0
     unique_addresses: Set[ChecksumAddress] = field(default_factory=set)
     erc20_contracts: Set[ChecksumAddress] = field(default_factory=set)
-    bribe_amount: float = 0
-    block_timestamp: int = 0
-    input: str = ""
-    
+   
     eth_transfers: List[ETHTransfer] = field(default_factory=list)
     erc20_transfers: List[ERC20Transfer] = field(default_factory=list)
     erc721_transfers: List[ERC721Transfer] = field(default_factory=list)
@@ -87,6 +86,7 @@ class DetailedTransaction:
     other_events: List[Dict[str, Any]] = field(default_factory=list)
     state_diffs: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
+    input: str = ""
     
     def __init__(self, 
                  hash: str,

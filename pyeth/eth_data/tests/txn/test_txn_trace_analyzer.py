@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from web3 import Web3
-from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
+from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.data_models.trace_models import InternalTransaction
 from eth_block_processor.data_models.txn_models import (
@@ -142,7 +142,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
     )
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.analyze_transaction(
+    sync_result = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']
@@ -152,7 +152,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
 
      # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.analyze_transaction_async(
+        return await txn_analyzer.process_transaction_async(
             txn_data['transaction'],
             txn_data['receipt'],
             txn_data['trace']
@@ -169,7 +169,7 @@ def test_transaction_bribe_amount(txn_analyzer, txn_data_fetcher):
     bribe_amount = 0.01
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     # Test synchronous analysis
-    sync_result = txn_analyzer.analyze_transaction(
+    sync_result = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']
@@ -179,7 +179,7 @@ def test_transaction_bribe_amount(txn_analyzer, txn_data_fetcher):
 
     # Test async analysis
     async def run_async_analysis():
-        return await txn_analyzer.analyze_transaction_async(
+        return await txn_analyzer.process_transaction_async(
             txn_data['transaction'],
             txn_data['receipt'],
             txn_data['trace']

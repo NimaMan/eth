@@ -11,6 +11,7 @@ def expected_contract_creation():
     return DetailedTransaction(
         hash="0x45fbb2326ee70cbaacb56c12b6a14b2ab5efd41635e9d3ba9ff4fed4eee52b89",
         block_number=21423372,
+        block_timestamp=1734451943, 
         txn_index=239,
         from_address="0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",
         to_address=None,
@@ -116,7 +117,9 @@ def expected_contract_creation():
             #"0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"   # Uniswap Factory
         },
         erc20_contracts={"0x90f29ccD18c9181A9243EfF8f7546eef4b64994c"}, 
-        input = ""
+        input = "",
+        internal_transactions=[],
+        bribe_amount=0.0
     )
 
 def test_contract_creation(txn_analyzer, txn_data_fetcher, expected_contract_creation):
@@ -126,16 +129,24 @@ def test_contract_creation(txn_analyzer, txn_data_fetcher, expected_contract_cre
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.analyze_transaction(
+    sync_result = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']
     )
+    # Debug differences
+    for key in sync_result.__dict__:
+        expected_val = getattr(expected_contract_creation, key, None)
+        actual_val = getattr(sync_result, key)
+        if expected_val != actual_val:
+            print(f"\nDifference in {key}:")
+            print(f"Expected: {expected_val}")
+            print(f"Actual  : {actual_val}")
     assert sync_result == expected_contract_creation
     
     # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.analyze_transaction_async(
+        return await txn_analyzer.process_transaction_async(
             txn_data['transaction'],
             txn_data['receipt'],
             txn_data['trace']

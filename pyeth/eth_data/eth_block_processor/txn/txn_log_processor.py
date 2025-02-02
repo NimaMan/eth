@@ -5,7 +5,7 @@ from eth_block_processor.data_models.receipt_models import *
 from eth_block_processor.data_models.uniswap_v3_models import *
 
 
-class TransactionLogAnalyzer:
+class TransactionLogProcessor:
     def __init__(self, w3: Web3):
         self.w3 = w3
 
@@ -126,11 +126,6 @@ class TransactionLogAnalyzer:
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.pool_address))
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.owner))
-            elif isinstance(event, UniswapV3Swap):
-                result['uniswap_v3_swaps'].append(event)
-                result['unique_addresses'].add(self.w3.to_checksum_address(event.pool_address))
-                result['unique_addresses'].add(self.w3.to_checksum_address(event.sender))
-                result['unique_addresses'].add(self.w3.to_checksum_address(event.recipient))
             elif isinstance(event, UniswapV3Position):
                 result['uniswap_v3_positions'].append(event)
                 result['unique_addresses'].add(self.w3.to_checksum_address(event.pool_address))
@@ -179,7 +174,7 @@ class TransactionLogAnalyzer:
                 return self.parse_withdraw(log)
             elif topic == EVENT_TOPICS['PairCreated']:
                 return self.parse_pair(log)
-            elif topic == EVENT_TOPICS['OwnerChanged']:
+            elif topic == EVENT_TOPICS['OwnershipTransferred']:
                 return self.parse_owner(log)
             elif topic == EVENT_TOPICS['TradingEnabled']:
                 return self.parse_trading_enabled(log)
@@ -203,7 +198,8 @@ class TransactionLogAnalyzer:
             else:
                 return self.parse_other_event(log)
         except Exception as e:
-            print(e)
+            #print(f"Error parsing log for txn {log['transactionHash']}: {e}")
+            #raise e 
             return self.parse_other_event(log)
 
     def parse_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:
@@ -442,6 +438,15 @@ class TransactionLogAnalyzer:
     # --------------------------------------------------------------------------
     # Uniswap V3 Pool Events 
     # --------------------------------------------------------------------------
+
+    def _ensure_hex_string(self, data) -> str:
+        """Convert bytes or string data to a hex string with '0x' prefix"""
+        if isinstance(data, bytes):
+            data = data.hex()
+        elif isinstance(data, str) and data.startswith('0x'):
+            data = data[2:]  # Remove '0x' prefix if present
+        return '0x' + data
+
     def parse_uniswap_v3_pool_created(self, log: Dict[str, Any]) -> UniswapV3PoolCreated:
         """Parse Uniswap V3 pool creation event
         Event: PoolCreated(token0, token1, fee, tickSpacing, pool)
@@ -452,16 +457,11 @@ class TransactionLogAnalyzer:
         Topics[3]: fee (indexed)
         Data: tickSpacing (int24), pool (address)
         """
+        data = self._ensure_hex_string(log['data'])
         # Handle both hex string and bytes formats for topics
         token0 = self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if isinstance(log['topics'][1], bytes) else self.w3.to_checksum_address(log['topics'][1][-40:])
         token1 = self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if isinstance(log['topics'][2], bytes) else self.w3.to_checksum_address(log['topics'][2][-40:])
         fee = int(log['topics'][3].hex(), 16) if isinstance(log['topics'][3], bytes) else int(log['topics'][3], 16)    
-        
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
         
         tick_spacing = int(data[2:66], 16)  # First 32 bytes
         pool = self.w3.to_checksum_address('0x' + data[90:130])  # Last 40 bytes of second 32-byte chunk
@@ -482,11 +482,7 @@ class TransactionLogAnalyzer:
         Topics[0]: Event signature
         Data: sqrtPriceX96 (uint160), tick (int24)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
         
         # Parse sqrtPriceX96 as uint160 (first 32 bytes)
         sqrt_price_x96 = int(data[2:66], 16)
@@ -515,11 +511,7 @@ class TransactionLogAnalyzer:
             - amount0 (uint256, 32 bytes)
             - amount1 (uint256, 32 bytes)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
         
         # Parse sender from first 32 bytes (padded address)
         sender = '0x' + data[26:66]  # Take last 40 chars of first 32 bytes
@@ -549,11 +541,7 @@ class TransactionLogAnalyzer:
         Topics[2]: recipient address (indexed)
         Data: amount0 (int256), amount1 (int256), sqrtPriceX96 (uint160), liquidity (uint128), tick (int24)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
         
         return UniswapV3Swap(
             pool_address=self.w3.to_checksum_address(log['address']),
@@ -575,11 +563,7 @@ class TransactionLogAnalyzer:
         Topics[1]: tokenId (indexed)
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
             
         return UniswapV3Position(
             token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),
@@ -601,11 +585,7 @@ class TransactionLogAnalyzer:
         Topics[1]: tokenId (indexed)
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
             
         return UniswapV3IncreaseLiquidity(
             token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),
@@ -625,11 +605,7 @@ class TransactionLogAnalyzer:
         Topics[1]: tokenId (indexed)
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
-        data = log['data']
-        if isinstance(data, bytes):
-            data = data.hex()
-        if not data.startswith('0x'):
-            data = '0x' + data
+        data = self._ensure_hex_string(log['data'])
               
         return UniswapV3DecreaseLiquidity(
             token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),

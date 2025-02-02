@@ -71,7 +71,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.analyze_transaction(
+    sync_result = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']
@@ -81,7 +81,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
     
     # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.analyze_transaction_async(
+        return await txn_analyzer.process_transaction_async(
             txn_data['transaction'],
             txn_data['receipt'],
             txn_data['trace']

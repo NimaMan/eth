@@ -22,7 +22,7 @@ async def test_scam_orca_alert(txn_analyzer, txn_data_fetcher, scam_orca_alert):
     for txn_hash in TXN_HASHES:
         txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
         
-        processed_txn = txn_analyzer.analyze_transaction(
+        processed_txn = txn_analyzer.process_transaction(
             txn_data['transaction'],
             txn_data['receipt'],
             txn_data['trace']

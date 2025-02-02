@@ -3,7 +3,7 @@ import asyncio
 import time
 from typing import Dict, Any, List
 
-from eth_block_processor.txn.txn_analyzer import TransactionAnalyzer
+from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.utils.logger import get_logger
 
 
@@ -23,7 +23,7 @@ class BlockTxnProcessor:
         if w3 is None:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
-        self.transaction_analyzer = TransactionAnalyzer(w3=self.w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
+        self.transaction_analyzer = TransactionProcessor(w3=self.w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
         if logger is None:
             logger = get_logger(name="block_txn_processor", log_folder="eth_block_processor")
         self.logger = logger
@@ -66,7 +66,7 @@ class BlockTxnProcessor:
             Tuple[str, Any]: The transaction hash and the analysis result.
         """
         try:
-            analysis = self.transaction_analyzer.analyze_transaction(txn)
+            analysis = self.transaction_analyzer.process_transaction(txn)
             return txn.hash.hex(), analysis
         except Exception as e:
             self.logger.error(f"{__name__}: Error processing transaction {txn.hash.hex()}: {e}")

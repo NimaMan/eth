@@ -1,6 +1,6 @@
 from web3 import Web3
 from typing import Optional
-from web3.exceptions import BadFunctionCallOutput, ContractLogicError, Web3RPCError
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
 
 erc20_abi = [
@@ -28,7 +28,7 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[
             'decimals': decimals,
             'total_supply': total_supply,
         }
-    except (BadFunctionCallOutput, ContractLogicError, Web3RPCError) as e:
+    except (BadFunctionCallOutput, ContractLogicError) as e:
         # Contract is not an ERC20 token or has invalid bytecode
         return None
     except Exception as e:

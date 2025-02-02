@@ -61,8 +61,8 @@ from eth_block_processor.utils.common_addresses import fee_recipients
 from eth_block_processor.data_models.txn_models import DetailedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.txn.txn_log_analyzer import TransactionLogAnalyzer
-from eth_block_processor.txn.txn_trace_analyzer import TransactionTraceAnalyzer
+from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
+from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
 from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
@@ -71,13 +71,13 @@ from eth_block_processor.data_models.trace_models import InternalTransaction
 from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
 
-class TransactionAnalyzer:
+class TransactionProcessor:
     def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False):
         self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
-        self.log_analyzer = TransactionLogAnalyzer(w3=w3)
-        self.trace_analyzer = TransactionTraceAnalyzer(w3=w3)
+        self.log_analyzer = TransactionLogProcessor(w3=w3)
+        self.trace_analyzer = TransactionTraceProcessor(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.action_identifier = TransactionActionIdentifier()
         self.save_erc20_txn_to_db = save_erc20_txn_to_db
@@ -158,6 +158,7 @@ class TransactionAnalyzer:
                         total_supply=contract_info['total_supply'],
                     )
                 )
+                
     def _get_block_timestamp(self, receipt: Dict[str, Any]) -> int:
         try:
             return int(receipt['logs'][0]['blockTimestamp'], 16) if isinstance(receipt['logs'][0]['blockTimestamp'], str) else receipt['logs'][0]['blockTimestamp']
@@ -171,7 +172,7 @@ class TransactionAnalyzer:
                 bribe_amount += internal_txn.value
         return bribe_amount
 
-    def analyze_transaction(self, 
+    def process_transaction(self, 
                             transaction: Dict[str, Any], 
                             receipt: Dict[str, Any],
                             trace: Dict[str, Any]) -> DetailedTransaction:
@@ -246,17 +247,19 @@ class TransactionAnalyzer:
             uniswap_v3_mints=logs['uniswap_v3_mints'],
             uniswap_v3_swaps=logs['uniswap_v3_swaps'],
             uniswap_v3_positions=logs['uniswap_v3_positions'],
+            uniswap_v3_increases=logs['uniswap_v3_increases'],
+            uniswap_v3_decreases=logs['uniswap_v3_decreases'],
         )
         if self.save_erc20_txn_to_db:
             self.store_erc20_transaction(detailed_txn)
         return detailed_txn
 
-    async def analyze_transaction_async(self, 
+    async def process_transaction_async(self, 
                                         transaction: Dict[str, Any], 
                                         receipt: Dict[str, Any] = None,
                                         trace: Dict[str, Any] = None,
                                         state_diff: bool = False) -> DetailedTransaction:
-        """Async version of analyze_transaction"""
+        """Async version of process_transaction"""
         
         # Process logs
         logs = self.log_analyzer.analyze_logs(receipt['logs'])
@@ -336,6 +339,8 @@ class TransactionAnalyzer:
             uniswap_v3_mints=logs['uniswap_v3_mints'],
             uniswap_v3_swaps=logs['uniswap_v3_swaps'],
             uniswap_v3_positions=logs['uniswap_v3_positions'],
+            uniswap_v3_increases=logs['uniswap_v3_increases'],
+            uniswap_v3_decreases=logs['uniswap_v3_decreases'],
         )
 
     

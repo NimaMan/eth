@@ -14,7 +14,7 @@ async def test_contract_creation_alert(txn_analyzer, txn_data_fetcher, contract_
     txn_hash = "0x45fbb2326ee70cbaacb56c12b6a14b2ab5efd41635e9d3ba9ff4fed4eee52b89"
     txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
     
-    processed_txn = txn_analyzer.analyze_transaction(
+    processed_txn = txn_analyzer.process_transaction(
         txn_data['transaction'],
         txn_data['receipt'],
         txn_data['trace']

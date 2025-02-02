@@ -268,7 +268,6 @@ class LiveBlockProcessor:
                 message, 
                 routing_key='processed_blocks'
             )
-            logger.info(f"RabbitMQ: Published block {block_number}")
             return True
             
         except aio_pika.exceptions.ConnectionClosed:
