@@ -33,7 +33,7 @@ async def test_batch_analyzer_with_real_transactions(w3, txn_batch_analyzer, rea
                     'receipt': dict(tx_data['receipt'])
                 }
                 
-            result = await txn_batch_analyzer._analyze_single_transaction_safe(
+            result = await txn_batch_analyzer._process_single_transaction(
                 transaction=tx_data['transaction'],
                 receipt=tx_data['receipt']
             )

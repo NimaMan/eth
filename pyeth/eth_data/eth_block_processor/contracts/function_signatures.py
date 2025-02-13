@@ -174,6 +174,8 @@ EVENT_TOPICS = {
 }
 
 EVENT_TOPICS_REVERSE = {v: k for k, v in EVENT_TOPICS.items()}
+EVENT_TOPICS_REVERSE[w3.keccak(text="Mint(address,uint256)").hex()] = "Mint"
+
 
 UNISWAP_CONTRACTS = {
     "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D": "Uniswap V2: Router 2",

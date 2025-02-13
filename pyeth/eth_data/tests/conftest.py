@@ -1,11 +1,14 @@
 """Common fixtures for all transaction tests"""
 
 import pytest
+import asyncio
+from aiohttp import ClientSession, TCPConnector
 from web3 import Web3
 from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
-from eth_block_processor.txn.txn_batch_analyzer import TransactionBatchAnalyzer
+from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
+from eth_block_processor.blockchain.block_processor import BlockProcessor
 
 
 @pytest.fixture(scope="session")
@@ -26,4 +29,20 @@ def txn_analyzer(w3):
 
 @pytest.fixture
 def txn_batch_analyzer(w3, txn_analyzer):
-    return TransactionBatchAnalyzer(w3=w3) 
+    return TransactionBatchProcessor(w3=w3)
+
+@pytest.fixture(scope="function")
+async def session():
+    """Fixture to provide a shared aiohttp session"""
+    connector = TCPConnector(limit=100, force_close=True)
+    async with ClientSession(connector=connector) as session:
+        yield session
+
+@pytest.fixture(scope="function")
+async def block_processor(session):
+    """Fixture to provide a BlockProcessor with managed session"""
+    processor = BlockProcessor(
+        node_url="http://127.0.0.1:8545",
+        session=session
+    )
+    yield processor 

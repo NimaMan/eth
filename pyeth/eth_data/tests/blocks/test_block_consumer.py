@@ -1,15 +1,12 @@
 import asyncio
 import json
-from dotenv import load_dotenv
 import os
 import aio_pika
-
 from eth_block_processor.utils.logger import get_logger
 
-# Load environment variables
-load_dotenv()
 
 logger = get_logger(name="test_block_consumer", log_folder="eth_block_processor")
+
 
 async def process_message(message: aio_pika.IncomingMessage):
     """Process received block message."""

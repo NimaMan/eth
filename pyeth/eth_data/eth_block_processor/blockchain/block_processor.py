@@ -79,7 +79,7 @@ Error Handling:
 
 from web3 import Web3
 from time import time
-from eth_block_processor.txn.txn_batch_analyzer import TransactionBatchAnalyzer
+from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
 from eth_block_processor.blockchain.block_fetcher import BlockFetcher
 from eth_block_processor.utils.logger import get_logger
 import asyncio
@@ -92,7 +92,7 @@ class BlockProcessor:
                  logger=None):
         self.w3 = Web3(Web3.HTTPProvider(node_url))
         self.block_fetcher = BlockFetcher(node_url)
-        self.batch_analyzer = TransactionBatchAnalyzer(
+        self.batch_analyzer = TransactionBatchProcessor(
             w3=self.w3,
             save_erc20_txn_to_db=save_erc20_txn_to_db,
         )
@@ -127,7 +127,7 @@ class BlockProcessor:
                 block_data = await self.block_fetcher.fetch_block_by_number(block_number)
                 transactions = block_data['transactions']
             # Process all transactions in the block 
-            processed_transactions = await self.batch_analyzer.analyze_block_transactions(
+            processed_transactions = await self.batch_analyzer.process_block_transactions(
                 block_number=block_number,
                 transactions=transactions
             )

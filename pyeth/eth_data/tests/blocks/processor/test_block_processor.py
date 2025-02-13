@@ -8,7 +8,7 @@ from eth_block_processor.utils.logger import get_logger
 logger = get_logger(name="test_block_processor", log_folder="tests")
 
 @pytest_asyncio.fixture
-async def web3_instance():
+async def web3_instance(session):
     """
     Create an AsyncWeb3 instance for testing.
     
@@ -16,14 +16,13 @@ async def web3_instance():
         AsyncWeb3: An instance connected to the specified Ethereum node.
     """
     node_url = "http://127.0.0.1:8545"
-    w3 = AsyncWeb3(AsyncHTTPProvider(node_url))
+    w3 = AsyncWeb3(AsyncHTTPProvider(node_url, client_session=session))
     try:
         # Verify connection by fetching the latest block number
         latest_block = await w3.eth.block_number
         logger.info(f"Connected to Ethereum node. Latest block number: {latest_block}")
         yield w3
     finally:
-        # AsyncHTTPProvider does not support disconnecting, so we skip this step
         logger.info("Teardown for web3_instance fixture completed.")
 
 @pytest_asyncio.fixture
@@ -33,6 +32,7 @@ async def block_processor(web3_instance):
     
     Args:
         web3_instance (AsyncWeb3): The Web3 instance to be used by the BlockProcessor.
+        session (ClientSession): The shared aiohttp session.
     
     Yields:
         BlockProcessor: An instance of BlockProcessor initialized with the node URL.
@@ -42,12 +42,7 @@ async def block_processor(web3_instance):
     try:
         yield processor
     finally:
-        # If BlockProcessor has an async close method, call it here
-        if hasattr(processor, 'close') and callable(getattr(processor, 'close')):
-            await processor.close()
-            logger.info("BlockProcessor instance closed.")
-        else:
-            logger.info("No cleanup required for BlockProcessor.")
+        logger.info("BlockProcessor instance cleanup completed.")
 
 @pytest.mark.asyncio
 async def test_process_single_block(block_processor, web3_instance):

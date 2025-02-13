@@ -2,8 +2,8 @@ from typing import Dict, Any, List, Tuple
 from decimal import Decimal
 from web3 import Web3
 from collections import defaultdict, OrderedDict
-from eth_data.addresses.common_addresses import fee_recipients_set
-from eth_token_analyzer.utils.logger import get_logger
+from eth_block_processor.utils.common_addresses import fee_recipients_set
+from eth_block_processor.utils.logger import get_logger
 
 
 class TxnStateDiffCalculator:

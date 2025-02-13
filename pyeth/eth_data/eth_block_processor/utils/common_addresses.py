@@ -94,3 +94,5 @@ fee_recipients = {
     '0x00066282d9FAc206F8F0fd0b935958ae55E13333': 'MEV Builder: 0x000...333',
     '0x418211EFaf54e6A9b376f6Bfd9E0AE304E064CBb': 'MEV Builder: 0x418...CBb'
     }
+
+fee_recipients_set = set(fee_recipients.keys())
