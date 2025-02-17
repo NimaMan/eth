@@ -205,7 +205,7 @@ class LiveTokenPositionManager:
         position.unrealized_profit = 0
         position.token_age_blocks = token.token_age_blocks
         position.token_age_hours = token.token_age_hours
-        position.last_updated_block = token.token_data.latest_block_number
+        position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.has_active_position = False
         
@@ -236,7 +236,7 @@ class LiveTokenPositionManager:
         # Always update token metrics
         position.token_age_blocks = token.token_trading_age_blocks
         position.token_age_hours = token.token_trading_age_hours
-        position.last_updated_block = token.token_data.latest_block_number
+        position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio
             
@@ -304,7 +304,7 @@ class LiveTokenPositionManager:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position
@@ -335,7 +335,7 @@ class LiveTokenPositionManager:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position
@@ -366,7 +366,7 @@ class LiveTokenPositionManager:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position
@@ -397,7 +397,7 @@ class LiveTokenPositionManager:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position

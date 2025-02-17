@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest Results{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Strategy Selection -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Strategy Selection</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-12">
+                    <select class="form-control" id="strategy-run-selector">
+                        <option value="">Select a strategy run...</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Portfolio Stats Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Portfolio Overview</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <!-- Total Value -->
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card border-left-primary shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                        Total Value
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="total-value">0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Realized Profit -->
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card border-left-success shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                        Realized Profit
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="realized-profit">0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unrealized Profit -->
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card border-left-warning shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                        Unrealized Profit
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="unrealized-profit">0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Total P/L -->
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card border-left-info shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                                        Total P/L
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="total-pl">0.00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Position Counts Row -->
+            <div class="row mt-4">
+                <!-- Init Positions -->
+                <div class="col-xl-4 col-md-4 mb-4">
+                    <div class="card border-left-primary shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                        Init Positions
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="init-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Buy Positions -->
+                <div class="col-xl-4 col-md-4 mb-4">
+                    <div class="card border-left-success shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                        Buy Positions
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="buy-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sell Positions -->
+                <div class="col-xl-4 col-md-4 mb-4">
+                    <div class="card border-left-danger shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                        Sell Positions
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="sell-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Tables -->
+     <!-- Sell State Tokens Table -->
+     <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-danger">Sell State Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="sell-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Scam Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Buy State Tokens Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-success">Buy State Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="buy-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Scam Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+     <!-- Init State Tokens Table -->
+     <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Init State Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="init-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Scam Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+   
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/backtest_results.js') }}"></script>
+{% endblock %} 

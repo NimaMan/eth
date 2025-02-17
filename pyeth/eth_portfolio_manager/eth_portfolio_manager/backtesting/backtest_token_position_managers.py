@@ -120,7 +120,7 @@ from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositio
 
 class TokenPositionManagerBacktest:
     def __init__(self, investment_strategy: BaseStrategy):
-        self.investment_strategy = investment_strategy()
+        self.investment_strategy = investment_strategy
     
     @property
     def strategy_name(self):
@@ -206,7 +206,7 @@ class TokenPositionManagerBacktest:
         position.unrealized_profit = 0
         position.token_age_blocks = token.token_age_blocks
         position.token_age_hours = token.token_age_hours
-        position.last_updated_block = token.token_data.latest_block_number
+        position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.has_active_position = False
         
@@ -237,7 +237,7 @@ class TokenPositionManagerBacktest:
         # Always update token metrics
         position.token_age_blocks = token.token_trading_age_blocks
         position.token_age_hours = token.token_trading_age_hours
-        position.last_updated_block = token.token_data.latest_block_number
+        position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio
         position.scam_probability = token.latest_token_assessment.get('scam_probability')
@@ -309,7 +309,7 @@ class TokenPositionManagerBacktest:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position
@@ -340,7 +340,7 @@ class TokenPositionManagerBacktest:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
             
         return position
@@ -371,8 +371,9 @@ class TokenPositionManagerBacktest:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
+            position.exit_block = token.token_data.latest_block_number
             
         return position
 
@@ -402,7 +403,7 @@ class TokenPositionManagerBacktest:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.last_updated_block = token.token_data.latest_block_number
+            position.block_number = token.token_data.latest_block_number
             position.last_updated_time = token.token_data.latest_block_timestamp
-            
+
         return position

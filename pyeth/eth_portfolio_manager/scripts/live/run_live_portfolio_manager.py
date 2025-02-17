@@ -10,7 +10,7 @@ Objective:
 
 import asyncio
 
-from eth_portfolio_manager.strategy.buy_everything import JustBuyEverythingStrategy
+from eth_portfolio_manager.strategy.buy_everything import BuyAll
 from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
 from eth_portfolio_manager.live.live_portfolio_manager import LivePortfolioManager
 from eth_portfolio_manager.utils.logger import get_logger
@@ -19,7 +19,7 @@ from eth_portfolio_manager.utils.logger import get_logger
 logger = get_logger(name="portfolio_manager", log_folder="portfolio_manager")
 
 
-BUY_EVERYTHING_STRATEGY = JustBuyEverythingStrategy
+BUY_EVERYTHING_STRATEGY = BuyAll
 BUY_SCAM_STRATEGY = BuyScamStrategy
 
 

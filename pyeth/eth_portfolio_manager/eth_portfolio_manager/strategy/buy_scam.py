@@ -69,7 +69,15 @@ class StrategyConfig:
 class BuyScamStrategy(BaseStrategy):
     def __init__(self, config: Optional[StrategyConfig] = None):
         self.config = config or StrategyConfig()
-        
+    
+    @property
+    def strategy_parameters(self) -> dict:
+        return {
+            "strategy_name": "BuyScam",
+            "position_size_eth": self.config.position_size_eth,
+            "profit_target_x": self.config.profit_target_x,
+        }
+    
     def analyze_token(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
         """
         Analyze token and generate trading signals based on current position state

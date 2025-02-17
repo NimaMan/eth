@@ -66,32 +66,41 @@ from eth_portfolio_manager.core.data_models import TokenPositionData, TradeSigna
 
 
 class BaseStrategy(ABC):
-    @abstractmethod
-    def analyze_token(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Main entry point for token analysis and signal generation"""
-        pass
+   @abstractmethod
+   def analyze_token(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+      """Main entry point for token analysis and signal generation"""
+      pass
 
-    @abstractmethod
-    def handle_init_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Handle INIT state and evaluate buy conditions"""
-        pass
+   @abstractmethod
+   def handle_init_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+      """Handle INIT state and evaluate buy conditions"""
+      pass
 
-    @abstractmethod
-    def handle_buy_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Handle BUY_SUBMITTED state and confirm entries"""
-        pass
+   @abstractmethod
+   def handle_buy_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+      """Handle BUY_SUBMITTED state and confirm entries"""
+      pass
 
-    @abstractmethod
-    def handle_buy_confirmed_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Handle BUY_CONFIRMED state and evaluate sell conditions"""
-        pass
+   @abstractmethod
+   def handle_buy_confirmed_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+      """Handle BUY_CONFIRMED state and evaluate sell conditions"""
+      pass
 
-    @abstractmethod
-    def handle_sell_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
-        """Handle SELL_SUBMITTED state and confirm exits"""
-        pass
+   @abstractmethod
+   def handle_sell_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+      """Handle SELL_SUBMITTED state and confirm exits"""
+      pass
 
-    @property
-    def strategy_name(self) -> str:
-        """Return the name of the strategy"""
-        return self.__class__.__name__
+   @property
+   def strategy_name(self) -> str:
+      """Return the name of the strategy"""
+      return self.__class__.__name__
+
+   @property
+   def strategy_parameters(self) -> dict:
+      """Return the parameters of the strategy"""
+      return {}
+   
+   def get_parameters(self) -> dict:
+      """Return the parameters of the strategy"""
+      return self.strategy_parameters

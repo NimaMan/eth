@@ -120,43 +120,46 @@ class PortfolioMetrics:
 
 
 class PortfolioMetricsCalculator:
-    def __init__(self):
-        self.metrics = PortfolioMetrics()
-        self.position_history: Dict[str, List[TokenPositionData]] = {}
-        
-    async def update_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
-        """Calculate all portfolio metrics from current positions"""
-        self.metrics = await self._calculate_core_metrics(positions)
-        return self.metrics
-        
-    async def _calculate_core_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
-        """Calculate core portfolio metrics"""
-        metrics = PortfolioMetrics(last_updated=datetime.now())
-        
-        for position in positions.values():
-            # Update value metrics
-            if position.has_active_position:
-                metrics.active_value += position.current_value
-                metrics.active_position_count += 1
-            else:
-                metrics.inactive_value += position.current_value
-                metrics.inactive_position_count += 1
+   def __init__(self):
+      self.metrics = PortfolioMetrics()
+      self.position_history: Dict[str, List[TokenPositionData]] = {}
+      
+   async def update_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
+      """Calculate all portfolio metrics from current positions"""
+      self.metrics = await self.calculate_portfolio_metrics(positions)
+      return self.metrics
+      
+   async def calculate_portfolio_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
+      """Calculate core portfolio metrics"""
+      metrics = PortfolioMetrics(last_updated=datetime.now())
+      
+      for position in positions.values():
+         if isinstance(position, dict):
+            position = TokenPositionData.from_dict(position)
             
-            # Update profit metrics
-            metrics.realized_profit += position.realized_profit
-            metrics.unrealized_profit += position.unrealized_profit
-            
-            # Track largest position
-            if position.current_value > metrics.largest_position_value:
-                metrics.largest_position_value = position.current_value
-        
-        # Calculate totals
-        metrics.total_value = metrics.active_value + metrics.inactive_value
-        metrics.total_profit_loss = metrics.realized_profit + metrics.unrealized_profit
-        metrics.total_position_count = metrics.active_position_count + metrics.inactive_position_count
-        
-        # Calculate percentages
-        if metrics.total_value > 0:
-            metrics.largest_position_pct = metrics.largest_position_value / metrics.total_value
-            
-        return metrics 
+         # Update value metrics
+         if position.has_active_position:
+               metrics.active_value += position.current_value
+               metrics.active_position_count += 1
+         else:
+               metrics.inactive_value += position.current_value
+               metrics.inactive_position_count += 1
+         
+         # Update profit metrics
+         metrics.realized_profit += position.realized_profit
+         metrics.unrealized_profit += position.unrealized_profit
+         
+         # Track largest position
+         if position.current_value > metrics.largest_position_value:
+               metrics.largest_position_value = position.current_value
+      
+      # Calculate totals
+      metrics.total_value = metrics.active_value + metrics.inactive_value
+      metrics.total_profit_loss = metrics.realized_profit + metrics.unrealized_profit
+      metrics.total_position_count = metrics.active_position_count + metrics.inactive_position_count
+      
+      # Calculate percentages
+      if metrics.total_value > 0:
+         metrics.largest_position_pct = metrics.largest_position_value / metrics.total_value
+         
+      return metrics

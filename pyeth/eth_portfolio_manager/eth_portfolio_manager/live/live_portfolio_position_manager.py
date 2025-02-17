@@ -26,7 +26,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
             self.logger.error(f"{self.__class__.__name__} Error initializing portfolio: {e}")
             raise e
 
-    async def update_token_positions(self, updated_tokens) -> Dict[str, TokenPositionData]:
+    async def update_portfolio_tokens_positions(self, updated_tokens) -> Dict[str, TokenPositionData]:
         """
         Process multiple token updates concurrently and update portfolio state
         
@@ -46,7 +46,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
             # Process token updates in parallel
             update_tasks = []
             for token_address, token in updated_tokens.items():
-                task = self._process_single_token(token)
+                task = self.process_single_token(token)
                 update_tasks.append(task)
             
             # Wait for all updates to complete

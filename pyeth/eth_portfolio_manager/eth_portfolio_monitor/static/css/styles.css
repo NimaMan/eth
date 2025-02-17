@@ -1,0 +1,50 @@
+
+.metric-card .card-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0.75rem;  /* Adjust padding as needed */
+}
+
+.metric-card .card-title {
+    font-size: 0.8rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+    color: #6c757d;
+}
+
+.metric-card .card-text.h3 {
+    font-size: 1.1rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+}
+
+
+
+.sorting::after,
+.sorting_asc::after,
+.sorting_desc::after {
+  display: inline-block;
+  margin-left: 5px;
+  font-family: 'Font Awesome 5 Free';
+  font-weight: 900;
+}
+
+.sorting::after {
+  content: '\f0dc';
+  opacity: 0.5;
+}
+
+.sorting_asc::after {
+  content: '\f0de';
+}
+
+.sorting_desc::after {
+  content: '\f0dd';
+}
+
+.sorting-icon-white.sorting::after,
+.sorting-icon-white.sorting_asc::after,
+.sorting-icon-white.sorting_desc::after {
+  color: white;
+}

@@ -45,7 +45,8 @@ import time
 from collections import defaultdict, OrderedDict
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_portfolio_manager.backtesting.backtest_portfolio_position_manager import PortfolioPositionManagerBacktest
+from eth_portfolio_manager.live.live_portfolio_position_manager import PortfolioPositionManager
+from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
 from eth_token_monitor.token_manager.block_token_processor import BlockTokenProcessor
 from eth_portfolio_manager.utils.logger import get_logger
 
@@ -53,21 +54,19 @@ from eth_portfolio_manager.utils.logger import get_logger
 class BacktestPortfolioManager:
     def __init__(self, config):
         self.config = config
-        self.logger = get_logger(name="backtester")
-        self.portfolio_performance_history = defaultdict(OrderedDict)
+        self.logger = get_logger(name="backtester", log_folder="backtesting")
         # Initialize components
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = BlockTokenProcessor(logger=self.logger)
-        self.strategies = [PortfolioPositionManagerBacktest(investment_strategy=strategy, logger=self.logger ) for strategy in self.config.strategies]
+        self.token_position_managers = {}
+        for strategy_name, strategy in self.config.strategies.items():
+            self.token_position_managers[strategy_name] = TokenPositionManagerBacktest(investment_strategy=strategy)
+        self.strategy_position_managers = {strategy_name: PortfolioPositionManager(token_position_manager=self.token_position_managers[strategy_name], logger=self.logger ) for strategy_name, strategy in self.config.strategies.items()}
     
     async def run_backtest(self):
         """Run complete backtest simulation with multiple strategies"""
         try:
             self.logger.info(f"Starting backtest from block {self.config.start_block} to {self.config.end_block}")
-            
-            # Initialize performance history for each strategy
-            for strategy in self.strategies:
-                self.portfolio_performance_history[strategy.strategy_name] = OrderedDict()
             
             # Process blocks sequentially
             current_block = self.config.start_block
@@ -80,23 +79,17 @@ class BacktestPortfolioManager:
                 # 2. Process tokens in this block
                 await self.block_token_processor.process_block(block_data)
                 token_updates = self.block_token_processor.updated_tokens
+                # 3. Update positions for all strategies
                 if token_updates:
-                    # Run all strategies concurrently
-                    tasks = [self.run_strategy_for_block(position_manager, token_updates, current_block) for position_manager in self.strategies]
+                    tasks = []
+                    for strategy_name, position_manager in self.strategy_position_managers.items():
+                        # Run all strategies concurrently
+                        tasks.append(position_manager.update_portfolio_tokens_positions(token_updates, current_block))
                     await asyncio.gather(*tasks)
                 
                 self.logger.info(f"Backtest: Processed block {current_block} in {time.time() - start_time:.2f} seconds")
                 current_block += 1
-                
-            return self.portfolio_performance_history
-            
+                            
         except Exception as e:
             self.logger.error(f"Backtest failed: {e}")
             raise
-
-    async def run_strategy_for_block(self, position_manager, token_updates, current_block):
-        """Run a single strategy for a given block and record its performance."""
-        await position_manager.update_token_positions(token_updates)
-        # Record state for this strategy
-        self.portfolio_performance_history[position_manager.strategy_name][current_block] = await position_manager.get_portfolio_metrics()
-        

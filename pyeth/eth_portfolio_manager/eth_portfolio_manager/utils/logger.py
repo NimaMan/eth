@@ -12,10 +12,11 @@ import os
 from datetime import datetime
 import logging
 import atexit
+from logging.handlers import RotatingFileHandler
 
 
 # Default log directory; can be customized as needed
-ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
+LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
 
 # Track all created log files
 _log_files = set()
@@ -58,9 +59,9 @@ def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_lo
     """
     if base_log_dir is None:
         if log_folder is None:
-            base_log_dir = os.path.join(ETH_LOG_DIR, name)
+            base_log_dir = os.path.join(LOG_DIR, name)
         else:
-            base_log_dir = os.path.join(ETH_LOG_DIR, log_folder)
+            base_log_dir = os.path.join(LOG_DIR, log_folder)
         # Create the log directory if it doesn't exist
         os.makedirs(base_log_dir, exist_ok=True)
     
@@ -85,3 +86,110 @@ def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_lo
         logger.addHandler(file_handler)
 
     return logger
+
+
+
+def get_monitoring_logger(name: str = "portfolio_monitor", 
+               log_folder: str = "portfolio_monitor", 
+               log_dir: str = None) -> logging.Logger:
+    """
+    Get a configured logger instance
+    
+    Args:
+        name: Logger name (usually __name__)
+        log_folder: Folder name under LOG_DIR
+        log_dir: Optional custom log directory
+        
+    Returns:
+        logging.Logger: Configured logger instance
+    """
+    if log_dir is None:
+        log_dir = os.path.join(LOG_DIR, log_folder)
+        
+    # Ensure log directory exists
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create logger
+    logger = logging.getLogger(name)
+    
+    # Only add handlers if none exist
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        
+        # Create formatter
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        
+        # Create console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # Create rotating file handler
+        timestamp = datetime.now().strftime('%Y%m%d_%H')
+        log_file_path = os.path.join(log_dir, f"{name}_{timestamp}.log")
+        
+        # Track the log file
+        _log_files.add(log_file_path)
+        
+        file_handler = RotatingFileHandler(
+            filename=log_file_path,
+            maxBytes=10485760,  # 10MB
+            backupCount=10
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
+    return logger
+
+def setup_flask_logger(app, 
+                      name: str = "portfolio_monitor", 
+                      log_folder="portfolio_monitor", 
+                      log_dir=None) -> logging.Logger:
+    """
+    Configure Flask application logger using the same standards
+    
+    Args:
+        app: Flask application instance
+        name: Logger name
+        log_folder: Folder name to store the log file
+        log_dir: Optional custom log directory
+        
+    Returns:
+        logging.Logger: Configured Flask logger
+    """
+    if log_dir is None:
+        if log_folder is None:
+            log_dir = LOG_DIR
+        else:
+            log_dir = os.path.join(LOG_DIR, log_folder)
+        
+    # Ensure log directory exists
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Create formatter consistent with main logger
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Create rotating file handler
+    timestamp = datetime.now().strftime('%Y%m%d_%H')
+    log_file_path = os.path.join(log_dir, f"{name}_{timestamp}.log")
+    
+    # Track the log file
+    _log_files.add(log_file_path)
+    
+    file_handler = RotatingFileHandler(
+        filename=log_file_path,
+        maxBytes=10485760,  # 10MB
+        backupCount=10
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    
+    # Clear existing handlers
+    app.logger.handlers.clear()
+    
+    # Add our handler
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    
+    return app.logger
+
