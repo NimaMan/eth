@@ -64,12 +64,13 @@ function updateStrategyInfo(run) {
 
 async function loadPositions(strategyRunId) {
     try {
-        const response = await fetch(`/api/backtest/positions/${strategyRunId}`);
+        // Change to use latest-strategy-positions endpoint
+        const response = await fetch(`/api/backtest/latest-strategy-positions/${strategyRunId}`);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        console.log("Positions data:", data); // Debug log
+        console.log("Latest positions data:", data); // Debug log
         
         if (!data || !data.positions) {
             throw new Error('Invalid positions data format');
@@ -182,25 +183,26 @@ function updateTable(tableId, positions) {
     tbody.innerHTML = '';
     
     positions.forEach(position => {
-        // Parse numeric values
+        // Parse numeric values for proper formatting.
         const realizedProfit = parseFloat(position.realized_profit) || 0;
         const unrealizedProfit = parseFloat(position.unrealized_profit) || 0;
         
         const row = tbody.insertRow();
         row.innerHTML = `
             <td><a href="https://dexscreener.com/ethereum/${position.token_address}" target="_blank">${position.token_address.substring(0, 8)}...</a></td>
-            <td>${position.symbol || 'UNKNOWN'}</td>
+            <td>${position.symbol || ''}</td>
             <td>${position.token_age_blocks || 0}</td>
             <td>${(position.token_age_hours || 0).toFixed(2)}</td>
             <td>${position.position_state || 'Init'}</td>
             <td>${(position.current_value || 0).toFixed(2)}</td>
             <td>${(position.current_Xprice || 0).toFixed(2)}</td>
-            <td class="${realizedProfit >= 0 ? 'text-success' : 'text-danger'}">${realizedProfit.toFixed(2)}</td>
-            <td class="${unrealizedProfit >= 0 ? 'text-success' : 'text-danger'}">${unrealizedProfit.toFixed(2)}</td>
+            <td class="${realizedProfit > 0 ? 'text-success' : realizedProfit < 0 ? 'text-danger' : ''}">${realizedProfit.toFixed(2)}</td>
+            <td class="${unrealizedProfit > 0 ? 'text-success' : unrealizedProfit < 0 ? 'text-danger' : ''}">${unrealizedProfit.toFixed(2)}</td>
             <td>${position.num_greys || 0}</td>
             <td>${position.num_greens || 0}</td>
             <td>${((position.scam_probability || 0) * 100).toFixed(2)}%</td>
             <td>${position.scam_reason || 'NA'}</td>
+            <td>${position.currency || ''}</td>
         `;
     });
 }

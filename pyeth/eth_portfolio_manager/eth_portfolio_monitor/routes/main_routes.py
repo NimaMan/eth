@@ -57,12 +57,12 @@ def backtest_results():
         logger.error(f"Error rendering backtest results: {str(e)}", exc_info=True)
         raise
 
-@main.route('/token-position')
+@main.route('/token-position-history')
 def token_position():
     """Render the token position analysis page"""
     try:
         return render_template(
-            'token_position.html',
+            'token_position_history.html',
             **static_loader.get_static_files()
         )
     except Exception as e:

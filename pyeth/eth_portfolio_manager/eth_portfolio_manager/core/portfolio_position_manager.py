@@ -119,6 +119,7 @@ class PortfolioPositionManager:
       """Create a new position for a token"""
       return TokenPositionData(
          symbol=token.symbol,
+         currency=token.denom_currency,
          entry_Xprice=None,
          current_Xprice=None,
          Xprice=None,
@@ -129,12 +130,17 @@ class PortfolioPositionManager:
          quantity=None,
          token_age_blocks=token.latest_block_number - token.creation_block,
          token_age_hours=None,
+         trading_enabled_block=token.trading_enabled_block,
+         trading_enabled_timestamp=token.trading_enabled_timestamp,
          block_number=token.latest_block_number,
          last_updated_time=token.latest_block_timestamp,
          entry_block=None,
          has_active_position=False,
          position_state=TokenPositionState.INIT,
-         token_address=token.contract_address
+         token_address=token.contract_address,
+         num_bribers=None,
+         token_bribe_amount=None,
+         txn_fee=None
       )
    
    def track_portfolio_token_position_history(self, token: LiveTokenData, position: TokenPositionData):

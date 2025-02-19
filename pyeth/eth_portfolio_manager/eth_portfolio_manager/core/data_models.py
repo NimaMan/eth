@@ -17,6 +17,7 @@ TOKEN_POSITION_COLUMNS: List[str] = [
     'strategy_run_id',
     'token_address',
     'symbol',
+    'currency',
     'entry_Xprice',
     'current_Xprice',
     'Xprice',
@@ -27,6 +28,8 @@ TOKEN_POSITION_COLUMNS: List[str] = [
     'quantity',
     'token_age_blocks',
     'token_age_hours',
+    'trading_enabled_block',
+    'trading_enabled_timestamp',
     'block_number',
     'last_updated_time',
     'entry_block',
@@ -36,7 +39,10 @@ TOKEN_POSITION_COLUMNS: List[str] = [
     'scam_probability',
     'scam_reason',
     'num_greys',
-    'num_greens'
+    'num_greens',
+    'num_bribers',
+    'token_bribe_amount',
+    'txn_fee'
 ]
 
 
@@ -68,6 +74,7 @@ class TokenPositionState(Enum):
 @dataclass
 class TokenPositionData:
     symbol: str
+    currency: str
     entry_Xprice: float  # relative price of the token at entry 
     current_Xprice: float  # relative price of the token at current time
     Xprice: float  # ratio current_Xprice to entry_Xprice
@@ -78,6 +85,8 @@ class TokenPositionData:
     quantity: float
     token_age_blocks: int
     token_age_hours: int
+    trading_enabled_block: int
+    trading_enabled_timestamp: datetime
     block_number: int
     last_updated_time: datetime
     entry_block: int
@@ -89,6 +98,9 @@ class TokenPositionData:
     scam_reason: str = None 
     num_greys: int = None 
     num_greens: int = None
+    num_bribers: int = None 
+    token_bribe_amount: float = None
+    txn_fee: float = None
 
     def to_dict(self):
         # Return a dictionary representation of the TokenPositionData
@@ -139,7 +151,8 @@ class TokenPositionData:
                 return datetime.fromtimestamp(0)
 
         processed = {}
-        processed['symbol'] = data.get('symbol', '') or 'UNKNOWN'
+        processed['symbol'] = data.get('symbol', '') or ''
+        processed['currency'] = data.get('currency', '') or ''
         processed['entry_Xprice'] = to_float(data.get('entry_Xprice'))
         processed['current_Xprice'] = to_float(data.get('current_Xprice'))
         processed['Xprice'] = to_float(data.get('Xprice'))
@@ -150,6 +163,8 @@ class TokenPositionData:
         processed['quantity'] = to_float(data.get('quantity'))
         processed['token_age_blocks'] = to_int(data.get('token_age_blocks'))
         processed['token_age_hours'] = to_int(data.get('token_age_hours'))
+        processed['trading_enabled_block'] = to_int(data.get('trading_enabled_block'))
+        processed['trading_enabled_timestamp'] = to_datetime(data.get('trading_enabled_timestamp'))
         processed['block_number'] = to_int(data.get('block_number'))
         processed['last_updated_time'] = to_datetime(data.get('last_updated_time'))
         processed['entry_block'] = to_int(data.get('entry_block'))
@@ -171,6 +186,9 @@ class TokenPositionData:
         processed['scam_reason'] = data.get('scam_reason') if data.get('scam_reason') not in ['', None] else None
         processed['num_greys'] = to_int(data.get('num_greys'))
         processed['num_greens'] = to_int(data.get('num_greens'))
+        processed['num_bribers'] = to_int(data.get('num_bribers'))
+        processed['token_bribe_amount'] = to_float(data.get('token_bribe_amount'))
+        processed['txn_fee'] = to_float(data.get('txn_fee'))
 
         return cls(**processed)
     

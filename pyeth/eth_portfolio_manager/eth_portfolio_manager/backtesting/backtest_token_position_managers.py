@@ -244,7 +244,10 @@ class TokenPositionManagerBacktest:
         position.scam_reason = token.latest_token_assessment.get('scam_reason')
         position.num_greys = token.latest_token_assessment.get('num_greys')
         position.num_greens = token.latest_token_assessment.get('num_greens')
-           
+        position.currency = token.token_data.denom_currency
+        position.num_bribers = token.token_data.num_bribers
+        position.token_bribe_amount = token.token_data.total_bribe_amount
+        position.txn_fee = token.token_data.txn_fee
         # Update price and value metrics based on position state
         if position.has_active_position:
             # Active position updates

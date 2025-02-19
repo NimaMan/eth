@@ -55,6 +55,13 @@ STRATEGY_POSITIONS_LATEST = f"""
     ORDER BY block_number DESC;
 """
 
+
+CURRENCY_TOKENS_LIST = """
+    SELECT DISTINCT currency
+    FROM token_positions
+    WHERE currency IS NOT NULL
+"""
+
 def get_strategy_runs_query() -> text:
     """Get all strategy runs with performance metrics."""
     return text(STRATEGY_LIST)

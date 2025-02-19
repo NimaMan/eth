@@ -78,10 +78,7 @@ class BacktestResultsWriter:
             self.conn.close()
 
 
-
-
 if __name__ == "__main__":
-
 
     async def test_write_from_json():
         # Load JSON file
