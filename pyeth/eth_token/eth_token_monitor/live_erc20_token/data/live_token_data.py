@@ -13,14 +13,19 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 from collections import defaultdict, OrderedDict
+from enum import Enum
 
 from eth_token_monitor.live_erc20_token.data.token_approval_sync_data import UniV2PairSyncData, ERC20TokenApprovalData
 from eth_token_monitor.utils.common_addresses import names_by_address, addresses_by_name, known_denom_decimals
 from eth_block_processor.contracts.contract_type import get_erc20_contract_info
-from eth_token_monitor.utils.logger import get_logger
 
 
-logger = get_logger(name="live_token_data", log_folder="tokens_live")
+class TokenStatusEnum(Enum):
+    CREATION = "CONTRACT_CREATION"
+    PAIR_CREATION = "PAIR_CREATION"
+    TRADING_ENABLED = "TRADING_ENABLED"
+    INACTIVE_SCAM = "INACTIVE_SCAM"
+    INACTIVE_OTHER = "INACTIVE_OTHER"
 
 
 @dataclass
@@ -37,15 +42,18 @@ class LiveTokenData:
     
     # Creation info
     creation_block: Optional[int] = None
+    creation_timestamp: Optional[datetime] = None
     creation_txn: Optional[str] = None
     creator_address: Optional[str] = None
     creator_nonce: Optional[int] = None
-    creation_time: Optional[datetime] = None
+    
     # Contract state
     trading_enabled: bool = False
     trading_enabled_block: Optional[int] = None
+    trading_enabled_timestamp: Optional[datetime] = None
     trading_enabled_txn: Optional[str] = None
-    
+    token_status: Optional[TokenStatusEnum] = None
+
     # Event collections with proper typing
     erc20_transfers: List[Dict] = field(default_factory=list)
     eth_transfers: List[Dict] = field(default_factory=list)
@@ -53,10 +61,12 @@ class LiveTokenData:
     other_denom_transfers: List[Dict] = field(default_factory=list)
     approvals: List[Dict] = field(default_factory=list)
     syncs: List[Dict] = field(default_factory=list)
+    swaps: Dict[str, List[Dict]] = field(default_factory=dict)
     mints: List[Dict] = field(default_factory=list)
     burns: List[Dict] = field(default_factory=list)
     
     # Pair info
+    has_uni_v2_pair: bool = False
     pair_events: List[Dict] = field(default_factory=list)
     pair_addresses: Set[str] = field(default_factory=set)
     lp_token_info: Optional[Dict] = None
@@ -76,18 +86,35 @@ class LiveTokenData:
     transaction_fees: List[Dict] = field(default_factory=list)
     
     # Tracked addresses
-    all_denom_addresses: Set[str] = field(default_factory=set)
+    all_denom_currencies: Set[str] = field(default_factory=set)
     approved_addresses: Set[str] = field(default_factory=set)
     unique_addresses: Set[str] = field(default_factory=set)
     total_bribe_amount: float = 0
     bribe_amount_dict: Dict[str, float] = field(default_factory=dict)
 
     latest_block_number: Optional[int] = None
+    latest_block_timestamp: Optional[datetime] = None
+    
+    @property
+    def denom_currency(self):
+        """Get the denom currency"""
+        if len(self.all_denom_currencies) > 1:
+            return f"{', '.join(self.all_denom_currencies)}"
+        elif len(self.all_denom_currencies) == 1:
+            return tuple(self.all_denom_currencies)[0]
+        else:
+            return None
+    
+    @property
+    def num_bribers(self):
+        """Get the number of bribers greater than 0.1 ETH"""
+        return len([bribe_amount for bribe_amount in self.bribe_amount_dict.values() if bribe_amount > 0.1])
     
     def _handle_creation(self, transaction: Dict):
         """Process contract creation event"""
         self.contract_address = transaction['contract_address']
         self.creation_block = transaction['block_number']
+        self.creation_timestamp = transaction['block_timestamp']
         self.creation_txn = transaction['hash']
         self.creator_address = transaction['from_address']
         self.creator_nonce = transaction['nonce']
@@ -98,14 +125,25 @@ class LiveTokenData:
         self.symbol = contract_creation_event['symbol']
         self.decimals = contract_creation_event['decimals']
         self.total_supply = contract_creation_event['total_supply']
+        self.token_status = TokenStatusEnum.CREATION
+    
+    def _update_trading_enabled(self, transaction: Dict):
+        """Update the trading enabled status"""
+        self.trading_enabled = True
+        self.trading_enabled_block = transaction['block_number']
+        self.trading_enabled_timestamp = transaction['block_timestamp']
+        self.trading_enabled_txn = transaction['hash']
+        self.trading_enabled_event_index = transaction['txn_index']
+        self.token_status = TokenStatusEnum.TRADING_ENABLED
 
     def _add_pair_event(self, transaction: Dict):
         """Process a pair event"""
         txn_hash = transaction['hash']
         block_number = transaction['block_number']
         txn_index = transaction['txn_index']
-       
         for pair_event in transaction.get('pair_events', []):
+            if self.token_status != TokenStatusEnum.TRADING_ENABLED:
+                self.token_status = TokenStatusEnum.PAIR_CREATION
             self.pair_addresses.add(pair_event['pair_address'])
             self.has_uni_v2_pair = True
             if pair_event['token0'] == self.contract_address:
@@ -114,7 +152,7 @@ class LiveTokenData:
             else:
                 self.denom_address = pair_event['token0']
                 self.token1_is_denom = False
-            self.all_denom_addresses.add(names_by_address[self.denom_address])
+            self.all_denom_currencies.add(names_by_address[self.denom_address])
             self.lp_token_info = get_erc20_contract_info(pair_event['pair_address'])
             if self.lp_token_info is not None:
                 self.lp_token_name = self.lp_token_info['name']
@@ -130,20 +168,15 @@ class LiveTokenData:
                 'pair_address': pair_event['pair_address'],
                 'token0': pair_event['token0'],
                 'token1': pair_event['token1']
-            })
-        
+            })        
+    
     def _add_trading_enabled_event(self, transaction: Dict):
         """Process a trading enabled event"""
-        txn_hash = transaction['hash']
-        block_number = transaction['block_number']
-        txn_index = transaction['txn_index']
         for trading_enabled_event in transaction.get('trading_enabled_events', []):
-            self.trading_enabled = True
-            self.trading_enabled_block = block_number
-            self.trading_enabled_txn = txn_hash
             self.trading_enabled_event = trading_enabled_event
-            self.trading_enabled_event_index = txn_index
-
+            if not self.trading_enabled:
+                self._update_trading_enabled(transaction)
+        
     def _add_erc20_transfer(self, transaction: Dict, transfer: Dict):
         """Process a transfer event"""
         txn_hash = transaction['hash']
@@ -226,7 +259,7 @@ class LiveTokenData:
             denom_name = names_by_address[transfer['token_address']]
             denom_decimals = known_denom_decimals[denom_name]
             amount = float(transfer['amount'])/10**denom_decimals
-            self.all_denom_addresses.add(denom_name)
+            self.all_denom_currencies.add(denom_name)
         
             self.other_denom_transfers.append({
                 'txn_hash': txn_hash,
@@ -238,9 +271,7 @@ class LiveTokenData:
                 'amount': amount,
                 'token_address': transfer['token_address'],
             })
-        else:
-            logger.warning(f"Different tokens being transfered {transfer['token_address']}, txn {transaction['hash']}")
-
+        
     def _add_transfers(self, transaction: Dict):
         """Process transfer events for all relevant tokens"""
         # Track all transfers in the transaction
@@ -264,7 +295,7 @@ class LiveTokenData:
                     # Other known token transfers (USDC, USDT, etc.)
                     self._add_other_token_transfer(transaction, transfer)      
             except Exception as e:
-                logger.error(f" {__name__} Error processing transfer {token_address}, txn {transaction['hash']}: {e}")
+                raise Exception(f" {__name__} Error processing transfer {token_address}, txn {transaction['hash']}: {e}")
 
     def _add_syncs(self, transaction: Dict):
         """Process a sync event"""
@@ -293,6 +324,27 @@ class LiveTokenData:
                 'token_reserve': token_reserve,
                 'denom_reserve': denom_reserve,
                 })  
+            
+    def _add_swaps(self, transaction: Dict):
+        """Process a swap event"""
+        txn_hash = transaction['hash']
+        if len(transaction.get('uniswap_v2_swaps', [])) > 0 or len(transaction.get('uniswap_v3_swaps', [])) > 0:
+            self.swaps[txn_hash] = []
+            if not self.trading_enabled:
+                self._update_trading_enabled(transaction)
+
+        for swap in transaction.get('uniswap_v2_swaps', []):
+            self.swaps[txn_hash].append({
+                'log_index': swap['log_index'],
+                'from_address': swap['sender'],
+                'to_address': swap['to'],
+            })
+        for swap in transaction.get('uniswap_v3_swaps', []):
+            self.swaps[txn_hash].append({
+                'log_index': swap['log_index'],
+                'from_address': swap['sender'],
+                'to_address': swap['recipient'],
+            })
 
     def _add_mint(self, transaction: Dict):
         """Process a mint event"""
@@ -507,8 +559,15 @@ class LiveTokenData:
         # Process pair events
         self._add_pair_event(transaction)
         
+                # Process sync events
+        self._add_syncs(transaction)
+
+        # Process swap events
+        self._add_swaps(transaction)
+
         # Process trading enabled events
-        self._add_trading_enabled_event(transaction)
+        if self.has_uni_v2_pair or not self.trading_enabled:
+            self._add_trading_enabled_event(transaction)
 
         # Process ERC20 transfers
         self._add_transfers(transaction)
@@ -522,9 +581,6 @@ class LiveTokenData:
         # Process owner events
         self._add_owner_event(transaction)
 
-        # Process sync events
-        self._add_syncs(transaction)
-
         # Update unique addresses
         self.unique_addresses.update(transaction.get('unique_addresses', set()))
 
@@ -533,3 +589,4 @@ class LiveTokenData:
 
         # update latest block number
         self.latest_block_number = transaction['block_number']
+        self.latest_block_timestamp = transaction['block_timestamp']

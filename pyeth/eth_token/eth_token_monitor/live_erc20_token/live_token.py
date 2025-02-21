@@ -4,8 +4,11 @@ from eth_token_monitor.live_erc20_token.data.live_token_data import LiveTokenDat
 from eth_token_monitor.live_erc20_token.network.live_token_network import LiveTokenNetwork
 from eth_token_analyzer.erc20_token.token_metrics import UniV2PairSyncInfo
 from eth_token_analyzer.erc20_token.token_metrics import ScamInfo
-from eth_token_analyzer.erc20_token.token_metrics import LifetimeInfo
 from eth_token_monitor.live_erc20_token.token_health.token_health_predictor import TokenHealthPredictor
+from eth_token_monitor.utils.logger import get_logger
+
+
+logger = get_logger(name="live_token", log_folder="token_manager")
 
 
 class LiveERC20Token:
@@ -20,7 +23,7 @@ class LiveERC20Token:
 
     def __init__(self, contract_address):
         self.contract_address = contract_address
-        self.token_data = LiveTokenData(contract_address=contract_address)
+        self.token_data = LiveTokenData(contract_address=contract_address, logger=logger)
         self.token_network = LiveTokenNetwork(token_data=self.token_data)
         self.token_health_predictor = TokenHealthPredictor()
 
@@ -28,13 +31,13 @@ class LiveERC20Token:
         self.token_data.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
         #if not self.token_health_predictor.is_scam:
-        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction)
+        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
     
     async def update_from_transaction_async(self, transaction: Dict):
         self.token_data.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
         #if not self.token_health_predictor.is_scam:
-        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction)
+        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
 
     @property
     def sync_info(self):
@@ -64,20 +67,24 @@ class LiveERC20Token:
         return self.scam_info.txn
     
     @property
-    def lifetime_info(self):
-        return LifetimeInfo(token_data=self.token_data)
+    def token_creation_age_blocks(self):
+        return self.token_data.latest_block_number - self.token_data.creation_block
     
     @property
-    def token_status(self):
-        return self.lifetime_info.token_status
+    def token_trading_age_blocks(self):
+        if self.token_data.trading_enabled_block is None:
+            return None
+        return self.token_data.latest_block_number - self.token_data.trading_enabled_block
+
+    @property
+    def token_creation_age_hours(self):
+        return (self.token_data.latest_block_timestamp - self.token_data.creation_timestamp) / 3600
     
     @property
-    def token_age_blocks(self):
-        return self.lifetime_info.token_lifetime_blocks
-    
-    @property
-    def token_age_hours(self):
-        return self.lifetime_info.token_lifetime_hours
+    def token_trading_age_hours(self):
+        if self.token_data.trading_enabled_timestamp is None:
+            return None
+        return (self.token_data.latest_block_timestamp - self.token_data.trading_enabled_timestamp) / 3600
     
     @property
     def metrics(self) -> Dict[str, Any]:

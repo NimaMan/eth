@@ -1,5 +1,5 @@
 """
-MaliciousActor: Tracks known malicious addresses and their interactions
+DeceptiveVolumeChecker: Tracks known malicious addresses and their interactions
 
 Objective:
 ---------
@@ -21,10 +21,10 @@ Architecture:
 """
 
 from typing import List, Set, Dict
-from eth_token_monitor.alert.config import get_grey_addresses, get_green_addresses
+from eth_token_monitor.alert.config import get_mimic_octopus_addresses, get_green_addresses
 
 
-class DeceptiveVolumeChecker:
+class VolumeAnalyzer:
     """
     DeceptiveVolume: Analyzes token transfers for deceptive patterns
     ---------
@@ -35,17 +35,17 @@ class DeceptiveVolumeChecker:
 
     def __init__(self):
         self.green_addresses: Set[str] = get_green_addresses()
-        self.grey_addresses: Set[str] = get_grey_addresses()
+        self.mimic_octopus_addresses: Set[str] = get_mimic_octopus_addresses()
         
-    def malicious_actor_swap(self, transaction: Dict):
+    def get_malicious_actor_swap(self, transaction: Dict):
         """Check if transaction is a malicious swap with legitimate actors"""   
         involved_addresses = set(transaction.get('unique_addresses', []))
-        mal_actors = self.grey_addresses & involved_addresses
+        mal_actors = self.mimic_octopus_addresses & involved_addresses
         if len(mal_actors) > 1:
             return mal_actors
         return None
 
-    def green_actors_involved(self, transaction: Dict):
+    def get_green_actors_involved(self, transaction: Dict):
         """Check if transaction is a fake buy (transfer without swap)"""
         involved_addresses = set(transaction.get('unique_addresses', []))
         green_actors = self.green_addresses & involved_addresses
@@ -53,19 +53,10 @@ class DeceptiveVolumeChecker:
             return green_actors
         return None
     
-    def is_fake_buy(self, transaction: Dict):
-        """Check if transaction is a fake buy (transfer without swap)"""
-        if not transaction.get('erc20_transfers'):
-            return False
-            
-        # Must not be a swap
-        if transaction.get('txn_type') == "Swap" or transaction.get('txn_type') == "Approve":
-            return False
-            
+    def get_num_transfers_and_addresses(self, transaction: Dict):
+        """Get the number of transfers and addresses in a transaction"""                
         # Check for high number of transfers or addresses (suspicious pattern)
         num_erc20_transfers = len(transaction.get('erc20_transfers', []))
         num_unique_addresses = len(transaction.get('unique_addresses', []))
-        if num_erc20_transfers > 15 or num_unique_addresses > 15:
-            return True
-        return False
+        return num_erc20_transfers, num_unique_addresses
 

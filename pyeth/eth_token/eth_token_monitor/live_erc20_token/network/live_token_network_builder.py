@@ -1,9 +1,10 @@
 import networkx as nx
 from collections import defaultdict, OrderedDict
 import pandas as pd
-from eth_token_analyzer.users.user_activity_tracker import UserTokenActivityTracker
-from eth_data.addresses.common_addresses import fee_recipients_set
-from eth_token_analyzer.utils.logger import get_logger
+from eth_block_processor.utils.common_addresses import fee_recipients_set
+
+from eth_token_monitor.live_erc20_token.network.user_activity_tracker import UserTokenActivityTracker
+from eth_token_monitor.utils.logger import get_logger
 
 
 class LiveTokenTxnStateDiffCalculator:

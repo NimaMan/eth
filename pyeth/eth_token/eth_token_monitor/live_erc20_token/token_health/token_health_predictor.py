@@ -1,12 +1,12 @@
 """
-ScamPredictor: Analyzes token transactions for scam patterns
+TokenHealthPredictor: Analyzes token transactions for health patterns
 
 Objective:
 ---------
 1. Track known malicious actors' involvement
 2. Detect deceptive trading patterns
 3. Identify fake volume through transfers to legitimate actors
-4. Provide real-time scam probability scoring
+4. Provide real-time health probability scoring
 
 1. Malicious Actor Tracking:
    - Maintains list of known scammer addresses
@@ -18,7 +18,7 @@ Objective:
 from typing import Dict, Set, Optional, List
 from dataclasses import dataclass, asdict
 from collections import OrderedDict
-from eth_token_monitor.live_erc20_token.token_health.deceptive_volume_checker import DeceptiveVolumeChecker
+from eth_token_monitor.live_erc20_token.token_health.volume_analyzer import VolumeAnalyzer
 
 
 @dataclass
@@ -33,48 +33,47 @@ class ScamScore:
     
 class TokenHealthPredictor:
     def __init__(self):
-        self.deceptive_volume_checker = DeceptiveVolumeChecker()
+        self.volume_analyzr = VolumeAnalyzer()
         self.scam_scores: OrderedDict[str, ScamScore] = OrderedDict()
         self.involved_green_actors: OrderedDict[str, ScamScore] = OrderedDict() # txn hash -> green actors
         self.involved_mal_actors: Set[str] = set()
-        self.abused_green_actors: Set[str] = set()
         
-    def update_from_transaction(self, transaction: Dict) -> Dict:
+    def update_from_transaction(self, transaction: Dict, live_token) -> Dict:
         """Process new transaction for scam detection"""
         try:
-            green_actors = self.deceptive_volume_checker.green_actors_involved(transaction)
-            if green_actors:
-                # Check if it is  a fake buy for deceptive volume
-                if self._check_fake_buy(transaction, green_actors):
-                    return self.token_health_assessment
-                else:
-                    self.involved_green_actors[transaction.get('hash')] = green_actors
-                    return self.token_health_assessment
-            # Check if it is  a malicious swap for deceptive volume
+            self._check_green_actors_involved(transaction)
+            # Check if it is  a deceptive transfer
+            self._check_deceptive_transfer(transaction)
+            # Check if it is  a malicious swap for deceptive volume from grey addresses
             self._check_malicious_swap(transaction)
+            self._check_token_scam_label(transaction, live_token)
             return self.token_health_assessment
-        
         except Exception as e:
             raise Exception(f"{self.__class__.__name__} Error processing transaction: {e}")    
 
-    def _check_fake_buy(self, transaction: Dict, green_actors: Set[str]) -> bool:
-        """Check for fake buy pattern and update scores if detected"""
-        if self.deceptive_volume_checker.is_fake_buy(transaction):
-            self.scam_scores[transaction.get('hash')] = ScamScore(
-                block_number=transaction.get('block_number'),
-                transaction_hash=transaction.get('hash'),
-                from_address=transaction.get('from_address'),
-                is_scam=True,
-                confidence=1,
-                reason="Fake Volume detected",
-            )
-            self.abused_green_actors.update(green_actors)
-            return True
-        return False
+    def _check_green_actors_involved(self, transaction: Dict) -> bool:
+        """Check if the transaction involves green actors"""
+        green_actors = self.volume_analyzr.get_green_actors_involved(transaction)
+        if green_actors:
+            self.involved_green_actors[transaction.get('hash')] = green_actors
+
+    def _check_deceptive_transfer(self, transaction: Dict, num_transfers_threshold: int = 15, num_addresses_threshold: int = 20) -> bool:
+        """Check for deceptive transfer pattern and update scores if detected"""
+        num_erc20_transfers, num_unique_addresses = self.volume_analyzr.get_num_transfers_and_addresses(transaction)
+        if num_erc20_transfers and num_unique_addresses:
+            if num_erc20_transfers > num_transfers_threshold or num_unique_addresses > num_addresses_threshold:
+                self.scam_scores[transaction.get('hash')] = ScamScore(
+                    block_number=transaction.get('block_number'),
+                    transaction_hash=transaction.get('hash'),
+                    from_address=transaction.get('from_address'),
+                    is_scam=True,
+                    confidence=1,
+                    reason=f"{num_erc20_transfers} transfers and {num_unique_addresses} unique addresses",
+                )
 
     def _check_malicious_swap(self, transaction: Dict) -> bool:
         """Check for malicious swap pattern and update scores if detected"""
-        mal_actors = self.deceptive_volume_checker.malicious_actor_swap(transaction)
+        mal_actors = self.volume_analyzr.get_malicious_actor_swap(transaction)
         if mal_actors:
             self.involved_mal_actors.update(mal_actors)
             self.scam_scores[transaction.get('hash')] = ScamScore(
@@ -85,8 +84,18 @@ class TokenHealthPredictor:
                 confidence=.95,
                 reason="Malicious actors involved",
             )
-            return True
-        return False
+
+    def _check_token_scam_label(self, transaction: Dict, live_token) -> bool:
+        """Check if the token has a scam label"""
+        if live_token.is_scam:
+            self.scam_scores[transaction.get('hash')] = ScamScore(
+                block_number=transaction.get('block_number'),
+                transaction_hash=transaction.get('hash'),
+                from_address=transaction.get('from_address'),
+                is_scam=True,
+                confidence=1,
+                reason=f"{live_token.scam_label}",
+            )
     
     @property
     def is_scam(self) -> bool:
@@ -94,14 +103,14 @@ class TokenHealthPredictor:
         return any(score.is_scam for score in self.scam_scores.values())
     
     @property
-    def scam_confidence(self) -> float:
-        """Return confidence in scam classification"""
+    def scam_probability(self) -> float:
+        """Return probability of scam"""
         return max(score.confidence for score in self.scam_scores.values()) if self.scam_scores else 0.0
     
     @property
     def scam_reason(self) -> str:
         """Return reason for scam classification"""
-        return set(score.reason for score in self.scam_scores.values()) if self.scam_scores else "Not analyzed"
+        return tuple(set(score.reason for score in self.scam_scores.values())) if self.scam_scores else "NA"
     
     @property
     def scam_detection_block_and_txn(self):
@@ -127,11 +136,12 @@ class TokenHealthPredictor:
         """Return assessment of token health"""
         return {
             "is_scam": self.is_scam,
-            "confidence": self.scam_confidence,
-            "reason": self.scam_reason,
+            "scam_probability": self.scam_probability,
+            "scam_reason": self.scam_reason,
             "block_number": self.scam_detection_block_and_txn[0] if self.scam_detection_block_and_txn else None,
             "transaction_hash": self.scam_detection_block_and_txn[1] if self.scam_detection_block_and_txn else None,
-            'involved_addresses': list(self.involved_mal_actors | self.abused_green_actors),
+            'involved_grey_addresses': list(self.involved_mal_actors),
+            'num_greys': len(self.involved_mal_actors),
         }
     
     @property
@@ -139,14 +149,15 @@ class TokenHealthPredictor:
         """Return assessment of green actors"""
         return {
             "green_actors": self.involved_green_actors,
+            'num_greens': len(self.involved_green_actors),
         }
     
     @property
     def token_health_assessment(self) -> Dict:
         """Return assessment of token health"""
         return {
-            'scam_assessment': self.scam_assessment,
-            'green_assessment': self.green_assessment,
+            **self.scam_assessment,
+            **self.green_assessment,
         }
 
     def to_dict(self):
