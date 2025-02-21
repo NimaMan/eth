@@ -1,58 +1,6 @@
-"""
-Shared types and enums for portfolio management
-
-Objective:
----------
-Define common data structures and types used across the portfolio management system
-"""
-
 from enum import Enum
 from dataclasses import dataclass, asdict
-from typing import Optional, List, Tuple
-from datetime import datetime
-
-
-# Database column definitions
-TOKEN_POSITION_COLUMNS: List[str] = [
-    'strategy_run_id',
-    'token_address',
-    'symbol',
-    'currency',
-    'entry_Xprice',
-    'current_Xprice',
-    'Xprice',
-    'purchase_value',
-    'current_value',
-    'realized_profit',
-    'unrealized_profit',
-    'quantity',
-    'token_age_blocks',
-    'token_age_hours',
-    'trading_enabled_block',
-    'trading_enabled_timestamp',
-    'block_number',
-    'last_updated_time',
-    'entry_block',
-    'has_active_position',
-    'position_state',
-    'exit_block',
-    'scam_probability',
-    'scam_reason',
-    'num_greys',
-    'num_greens',
-    'num_bribers',
-    'token_bribe_amount',
-    'txn_fee'
-]
-
-
-# For SQL generation
-def get_token_position_columns_sql() -> Tuple[str, str]:
-    """Returns properly quoted column names"""
-    quoted_columns = [f'"{col}"' for col in TOKEN_POSITION_COLUMNS]  # Add quotes
-    columns = ', '.join(quoted_columns)
-    placeholders = ', '.join(['%s'] * len(TOKEN_POSITION_COLUMNS))
-    return columns, placeholders
+from typing import Optional, List, Tuple, Dict, Any
 
 
 class TradingDecision(Enum):
@@ -72,131 +20,62 @@ class TokenPositionState(Enum):
 
 
 @dataclass
-class TokenPositionData:
-    symbol: str
-    currency: str
-    entry_Xprice: float  # relative price of the token at entry 
-    current_Xprice: float  # relative price of the token at current time
-    Xprice: float  # ratio current_Xprice to entry_Xprice
-    purchase_value: float
-    current_value: float
-    realized_profit: float
-    unrealized_profit: float
-    quantity: float
-    token_age_blocks: int
-    token_age_hours: int
-    trading_enabled_block: int
-    trading_enabled_timestamp: datetime
-    block_number: int
-    last_updated_time: datetime
-    entry_block: int
-    has_active_position: bool
-    position_state: TokenPositionState
-    token_address: str
-    exit_block: int = None
-    scam_probability: float = None 
-    scam_reason: str = None 
-    num_greys: int = None 
-    num_greens: int = None
-    num_bribers: int = None 
-    token_bribe_amount: float = None
-    txn_fee: float = None
-
-    def to_dict(self):
-        # Return a dictionary representation of the TokenPositionData
-        attributes = asdict(self)
-        attributes['position_state'] = attributes['position_state'].value
-        return attributes
-
-    @classmethod
-    def from_dict(cls, data: dict) -> 'TokenPositionData':
-        """
-        Create a TokenPositionData from a dictionary.
-        This method handles empty strings in numeric fields or booleans by converting them 
-        to appropriate default types so that the instance can be created without errors.
-        """
-        # Helper functions for conversion
-        def to_float(value):
-            if value in [None, '']:
-                return 0.0
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return 0.0
-
-        def to_int(value):
-            if value in [None, '']:
-                return 0
-            try:
-                return int(value)
-            except (ValueError, TypeError):
-                return 0
-
-        def to_bool(value):
-            if value in [None, '', 0, 0.0]:
-                return False
-            try:
-                return bool(int(value))
-            except (ValueError, TypeError):
-                return False
-
-        def to_datetime(value):
-            if value in [None, '']:
-                return datetime.fromtimestamp(0)
-            if isinstance(value, datetime):
-                return value
-            try:
-                return datetime.fromtimestamp(float(value))
-            except Exception:
-                return datetime.fromtimestamp(0)
-
-        processed = {}
-        processed['symbol'] = data.get('symbol', '') or ''
-        processed['currency'] = data.get('currency', '') or ''
-        processed['entry_Xprice'] = to_float(data.get('entry_Xprice'))
-        processed['current_Xprice'] = to_float(data.get('current_Xprice'))
-        processed['Xprice'] = to_float(data.get('Xprice'))
-        processed['purchase_value'] = to_float(data.get('purchase_value'))
-        processed['current_value'] = to_float(data.get('current_value'))
-        processed['realized_profit'] = to_float(data.get('realized_profit'))
-        processed['unrealized_profit'] = to_float(data.get('unrealized_profit'))
-        processed['quantity'] = to_float(data.get('quantity'))
-        processed['token_age_blocks'] = to_int(data.get('token_age_blocks'))
-        processed['token_age_hours'] = to_int(data.get('token_age_hours'))
-        processed['trading_enabled_block'] = to_int(data.get('trading_enabled_block'))
-        processed['trading_enabled_timestamp'] = to_datetime(data.get('trading_enabled_timestamp'))
-        processed['block_number'] = to_int(data.get('block_number'))
-        processed['last_updated_time'] = to_datetime(data.get('last_updated_time'))
-        processed['entry_block'] = to_int(data.get('entry_block'))
-        processed['has_active_position'] = to_bool(data.get('has_active_position'))
-
-        # Convert position state string to TokenPositionState enum
-        raw_state = data.get('position_state', 'Init') or 'Init'
-        try:
-            processed['position_state'] = TokenPositionState(raw_state)
-        except ValueError:
-            processed['position_state'] = TokenPositionState.INIT
-
-        processed['token_address'] = data.get('token_address', '')
-
-        # Handle optional fields, providing defaults if necessary
-        exit_block_val = data.get('exit_block')
-        processed['exit_block'] = to_int(exit_block_val) if exit_block_val not in [None, ''] else None
-        processed['scam_probability'] = to_float(data.get('scam_probability'))
-        processed['scam_reason'] = data.get('scam_reason') if data.get('scam_reason') not in ['', None] else None
-        processed['num_greys'] = to_int(data.get('num_greys'))
-        processed['num_greens'] = to_int(data.get('num_greens'))
-        processed['num_bribers'] = to_int(data.get('num_bribers'))
-        processed['token_bribe_amount'] = to_float(data.get('token_bribe_amount'))
-        processed['txn_fee'] = to_float(data.get('txn_fee'))
-
-        return cls(**processed)
-    
-    
-@dataclass
 class TradeSignal:
     token_address: str
     decision: TradingDecision
     quantity: float
     strategy_name: str
+
+
+@dataclass
+class TokenPositionStaticData:
+    token_address: str
+    symbol: str
+    currency: str
+    creation_block: int
+    creation_timestamp: int
+    trading_enabled_block: int
+    trading_enabled_timestamp: int
+    purchase_value: float
+    entry_price_ratio: float  # relative price of the token at entry to its intial price 
+    exit_price_ratio: float  # relative price of the token at exit to its intial price 
+    entry_block: int
+    exit_block: int
+    entry_timestamp: int
+    exit_timestamp: int
+    entry_txn_fee: float
+    exit_txn_fee: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TokenPositionDynamicSnapshot:
+    '''
+    Defalt values represent the initial state of the token position
+    '''
+    current_price_ratio: float = 0.0  # relative price of the token at current time
+    roi: float = 0.0  # ratio current_price_ratio to entry_price_ratio -1 
+    current_value: float = 0.0
+    realized_profit: float = 0.0
+    unrealized_profit: float = 0.0
+    quantity: float = 0.0
+    token_age_blocks: int = 0
+    token_age_hours: int = 0
+    block_number: int = 0
+    timestamp: int = 0 
+    has_active_position: bool = False
+    position_state: TokenPositionState = TokenPositionState.INIT
+    scam_probability: Optional[float] = None 
+    scam_reason: Optional[str] = None 
+    num_greys: Optional[int] = None 
+    num_greens: Optional[int] = None
+    num_bribers: Optional[int] = None 
+    token_bribe_amount: Optional[float] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        attr = asdict(self)
+        attr['position_state'] = self.position_state.value
+        return attr
 
