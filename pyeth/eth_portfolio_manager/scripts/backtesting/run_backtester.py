@@ -9,26 +9,45 @@ from eth_portfolio_manager.strategy.buy_everything import BuyAll
 from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
 from eth_portfolio_manager.backtesting.db.backtest_results_writer import BacktestResultsWriter
 
-# Define log directory
+# Define log directory for backtest result JSON files
 BACKTEST_LOG_DIR = "/home/nima/code/crypto/logs/backtesting"
 
+def serialize_token_position(token_position):
+    """
+    Helper function to convert a TokenPosition instance into its JSON-serializable dictionary.
+    """
+    if hasattr(token_position, "to_full_dict"):
+        return token_position.to_full_dict()
+    return token_position
 
-def save_results_to_json(strategy_name: str, params: dict, start_block: int, end_block: int, token_history: dict):
-    """Save backtest results to JSON file using new token-centric structure"""
+def save_results_to_json(strategy_name: str, params: dict, start_block: int, end_block: int, token_positions: dict):
+    """
+    Save backtest results to a JSON file using the new token-centric structure.
+    Each token's complete aggregated position (both static and dynamic history) is stored.
+    
+    Algorithm:
+      1. For each token in token_positions (which is a mapping from token_address to a TokenPosition instance),
+         convert it to a serializable dict using its `to_full_dict()` method.
+      2. Assemble a serializable dictionary with:
+           • strategy_name, parameters, start and end blocks,
+           • and a mapping from token_address to the aggregated token position dict.
+      3. Write the complete JSON to a file.
+    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{strategy_name}_{start_block}_{end_block}_{timestamp}.json"
     filepath = os.path.join(BACKTEST_LOG_DIR, filename)
     
-    # Convert to serializable format
+    serializable_history = {
+        token_address: serialize_token_position(token_position)
+        for token_address, token_position in token_positions.items()
+    }
+    
     serializable_data = {
         "strategy_name": strategy_name,
         "parameters": params,
         "start_block": start_block,
         "end_block": end_block,
-        "token_history": {
-            token_address: [pos for pos in positions]
-            for token_address, positions in token_history.items()
-        }
+        "token_history": serializable_history
     }
     
     with open(filepath, 'w') as f:
@@ -53,11 +72,10 @@ async def main():
     start_time = time.time()
     w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     latest_block = w3.eth.get_block_number()
-    num_days = 14
-    num_blocks_per_day = 24*60*60/12 # 1 block is 12 seconds
+    num_days = 2
+    num_blocks_per_day = 24 * 60 * 60 / 12  # 1 block is 12 seconds
     num_blocks = int(num_days * num_blocks_per_day)
-    block_range = num_blocks
-    start_block = latest_block - block_range
+    start_block = latest_block - num_blocks
     end_block = latest_block
     
     config = BacktestConfig(
@@ -66,56 +84,15 @@ async def main():
         initial_balance=1.0
     )
     
-    # Initialize BacktestManager with the given configuration
+    # Initialize BacktestManager with the given configuration 
     backtest_manager = BacktestPortfolioManager(config=config)
     
-    # Run the backtest
+    # Run the backtest (this will update token positions and record their snapshots)
     await backtest_manager.run_backtest()
     
-    
-    saved_files = []
-    # First save results to JSON
-    for strategy_name, strategy in backtest_manager.strategy_position_managers.items():
-        strategy_params = strategy.token_position_manager.investment_strategy.get_parameters()
-        print(f"\nStrategy {strategy_name} parameters:")
-        print(strategy_params)
-        print(f"Position history length: {len(strategy.portfolio_tokens_position_history)}")
-        
-        # Save to JSON first
-        json_file = save_results_to_json(
-            strategy_name=strategy_name,
-            params=strategy_params,
-            start_block=start_block,
-            end_block=end_block,
-            token_history=strategy.portfolio_tokens_position_history
-        )
-        saved_files.append(json_file)
-    
-    # Then try to write to database
+    # Write results to the database using the BacktestResultsWriter
     results_writer = BacktestResultsWriter()
-    # Write results for each strategy
-    for strategy_name, strategy in backtest_manager.strategy_position_managers.items():
-        try:
-            # Get strategy parameters
-            strategy_params = strategy.token_position_manager.investment_strategy.get_parameters()
-            print(f"\nWriting results for strategy {strategy_name}")
-            print(f"Parameters: {strategy_params}")
-            print(f"Position history length: {len(strategy.portfolio_tokens_position_history)}")
-            
-            # Write strategy run and position history
-            run_id = await results_writer.write_strategy_run(
-                strategy_name=strategy_name,
-                params=strategy_params,
-                start_block=start_block,
-                end_block=end_block
-            )
-            
-            await results_writer.write_position_history(strategy.portfolio_tokens_position_history)
-            print(f"Successfully wrote strategy {strategy_name} (ID: {run_id})")
-            
-        except Exception as e:
-            print(f"Error writing results for strategy {strategy_name}: {e}")
-            continue
+    results_writer.write_backtest_results(backtest_manager, start_block, end_block)
     
     duration = (time.time() - start_time) / 3600
     print(f"\nBacktest completed and saved in {duration:.2f} hours")
@@ -123,5 +100,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Run the main function in an event loop
+    # Run the main backtest function using an event loop
     asyncio.run(main())

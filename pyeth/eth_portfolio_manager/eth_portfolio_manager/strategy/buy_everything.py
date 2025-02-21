@@ -60,7 +60,8 @@ from dataclasses import dataclass
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
 
-from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
+from eth_portfolio_manager.core.data_models import TokenPositionState
+from eth_portfolio_manager.core.token_position import TokenPosition
 from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 
@@ -68,7 +69,7 @@ from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 @dataclass
 class StrategyConfig:
     position_size_eth: float = 0.01    # Size of each position in ETH
-    profit_target_x: float = 3.0      # Sell when price increases by this multiple
+    profit_target_x: float = 7.0      # Sell when price increases by this multiple
     
 
 class BuyAll(BaseStrategy):
@@ -83,7 +84,7 @@ class BuyAll(BaseStrategy):
             "profit_target_x": self.config.profit_target_x,
         }
     
-    def analyze_token(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+    def analyze_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """
         Analyze token and generate trading signals based on current position state
         
@@ -92,56 +93,56 @@ class BuyAll(BaseStrategy):
         """
         
         # Handle each state explicitly
-        if position_state.position_state == TokenPositionState.INIT:
-            return self.handle_init_state(token, position_state)
+        if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
+            return self.handle_init_state(live_token, token_position)
         
-        elif position_state.position_state == TokenPositionState.BUY_SUBMITTED:
-            return self.handle_buy_submitted_state(token, position_state)
+        elif token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
+            return self.handle_buy_submitted_state(live_token, token_position)
         
-        elif position_state.position_state == TokenPositionState.BUY_CONFIRMED:
-            return self.handle_buy_confirmed_state(token, position_state)
+        elif token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
+            return self.handle_buy_confirmed_state(live_token, token_position)
         
-        elif position_state.position_state == TokenPositionState.SELL_SUBMITTED:
-            return self.handle_sell_submitted_state(token, position_state)
+        elif token_position.latest_snapshot.position_state == TokenPositionState.SELL_SUBMITTED:
+            return self.handle_sell_submitted_state(live_token, token_position)
         
         return None
 
-    def handle_init_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+    def handle_init_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
-        if token.token_status == TokenStatusEnum.TRADING_ENABLED:
+        if live_token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
             return TradeSignal(
-                token_address=token.contract_address,
+                token_address=live_token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,
                 quantity=self.config.position_size_eth,
                 strategy_name=self.__class__.__name__,
             )
         return None
 
-    def handle_buy_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+    def handle_buy_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
-            token_address=token.contract_address,
+            token_address=live_token.token_data.contract_address,
             decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
             strategy_name=self.__class__.__name__,
         )
 
-    def handle_buy_confirmed_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+    def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_CONFIRMED state: Submit sell if price target reached"""
-        if position_state.Xprice >= self.config.profit_target_x:
+        if token_position.latest_snapshot.current_price_ratio >= self.config.profit_target_x:
             return TradeSignal(
-                token_address=token.contract_address,
+                token_address=live_token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_SELL,
-                quantity=position_state.quantity,
+                quantity=token_position.latest_snapshot.quantity,
                 strategy_name=self.__class__.__name__,
             )
         return None
 
-    def handle_sell_submitted_state(self, token: LiveERC20Token, position_state: TokenPositionData) -> Optional[TradeSignal]:
+    def handle_sell_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle SELL_SUBMITTED state: Confirm sell on next update"""
         return TradeSignal(
-            token_address=token.contract_address,
+            token_address=live_token.token_data.contract_address,
             decision=TradingDecision.CONFIRM_SELL,
-            quantity=position_state.quantity,
+            quantity=token_position.latest_snapshot.quantity,
             strategy_name=self.__class__.__name__,
         )
