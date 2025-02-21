@@ -115,7 +115,8 @@ from typing import Dict, List
 from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
-from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
+from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
+from eth_portfolio_manager.core.token_position import TokenPosition
 
 
 class TokenPositionManagerBacktest:
@@ -126,138 +127,20 @@ class TokenPositionManagerBacktest:
     def strategy_name(self):
         return self.investment_strategy.strategy_name
     
-    async def process_token_updates(self, updated_token: LiveERC20Token, current_position: TokenPositionData) -> TokenPositionData:
+    async def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
         """Process token updates and manage positions
-            - Update position state form the token data
             - Apply investment strategy to generate trade signals
             - Update position data based on trade signals
         """
-        
-        # Update position state
-        updated_position = self._update_position_state(current_position, updated_token)
-        
         # Apply investment strategy
-        signal = self.investment_strategy.analyze_token(
-            token=updated_token,
-            position_state=updated_position
-        )
-        
+        signal = self.investment_strategy.analyze_token(live_token=live_token, token_position=token_position)
         # Update position based on signals
         if signal:
-            updated_position = self._update_position_from_signal(signal, updated_position, updated_token)
+            token_position = self._update_position_from_signal(signal=signal, token_position=token_position, live_token=live_token)
             
-        return updated_position
+        return token_position
     
-    def _update_position_state(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
-        """Update position state based on current position and the token data
-        
-        State Updates by Position State:
-        ------------------------------
-        1. ANY_STATE -> SCAMMED:
-           - Token detected as scam
-           - Zero out position value
-           - Record realized losses
-           
-        2. INIT:
-           - Update basic token metrics
-           - No price/value calculations yet
-           
-        3. BUY_SUBMITTED:
-           - Update token metrics
-           - Track price changes before confirmation
-           - No value/profit calculations yet
-           
-        4. BUY_CONFIRMED:
-           - Update token metrics
-           - Calculate current position value
-           - Track unrealized profits
-           
-        5. SELL_SUBMITTED:
-           - Update token metrics
-           - Continue tracking position value
-           - Prepare for exit price calculation
-           
-        6. SELL_CONFIRMED:
-           - Update final metrics
-           - Calculate realized profits
-           - Position marked as inactive
-        """
-        # First check for scam status
-        if token.token_status == TokenStatusEnum.INACTIVE_SCAM:
-            return self._update_scammed_position(position, token)
-        
-        # Then update based on current position state
-        return self._update_position_from_token_data(position, token)
-    
-    def _update_scammed_position(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
-        """Update position state to scammed
-        
-        Actions:
-        1. Mark position as SCAMMED state
-        2. Zero out current value and price ratios
-        3. Move all value to realized losses
-        4. Update token metrics
-        5. Mark position as inactive
-        """
-        position.position_state = TokenPositionState.SCAMMED
-        position.Xprice = 0
-        position.current_value = 0
-        position.realized_profit = -position.purchase_value  # Full loss
-        position.unrealized_profit = 0
-        position.token_age_blocks = token.token_age_blocks
-        position.token_age_hours = token.token_age_hours
-        position.block_number = token.token_data.latest_block_number
-        position.last_updated_time = token.token_data.latest_block_timestamp
-        position.has_active_position = False
-        
-        return position
-    
-    def _update_position_from_token_data(self, position: TokenPositionData, token: LiveERC20Token):
-        """Update position state based on current position and the token data
-        
-        Updates by Position State:
-        ------------------------
-        1. INIT/BUY_SUBMITTED:
-           - Update token metrics only
-           - Track price for entry
-           
-        2. BUY_CONFIRMED:
-           - Update token metrics
-           - Calculate current position value
-           - Track unrealized profit/loss
-           
-        3. SELL_SUBMITTED:
-           - Similar to BUY_CONFIRMED
-           - Continue tracking until confirmation
-           
-        4. SELL_CONFIRMED:
-           - Update final metrics only
-           - No value/profit updates
-        """
-        # Always update token metrics
-        position.token_age_blocks = token.token_trading_age_blocks
-        position.token_age_hours = token.token_trading_age_hours
-        position.block_number = token.token_data.latest_block_number
-        position.last_updated_time = token.token_data.latest_block_timestamp
-        position.current_Xprice = token.sync_info.current_price_ratio
-        position.scam_probability = token.latest_token_assessment.get('scam_probability')
-        position.scam_reason = token.latest_token_assessment.get('scam_reason')
-        position.num_greys = token.latest_token_assessment.get('num_greys')
-        position.num_greens = token.latest_token_assessment.get('num_greens')
-        position.currency = token.token_data.denom_currency
-        position.num_bribers = token.token_data.num_bribers
-        position.token_bribe_amount = token.token_data.total_bribe_amount
-        position.txn_fee = token.token_data.txn_fee
-        # Update price and value metrics based on position state
-        if position.has_active_position:
-            # Active position updates
-            position.Xprice = position.current_Xprice / position.entry_Xprice if position.entry_Xprice else 0
-            position.current_value = position.purchase_value * position.Xprice
-            position.unrealized_profit = position.current_value - position.purchase_value
-          
-        return position
-    
-    def _update_position_from_signal(self, signal: TradingDecision, position: TokenPositionData, token: LiveERC20Token):
+    def _update_position_from_signal(self, signal: TradeSignal, token_position: TokenPosition, live_token: LiveERC20Token):
         """Update position state based on current position and the signal
             - if the signal is set to submit buy, then the position state is set to BUY_SUBMITTED
             - if the signal is set to submit sell, then the position state is set to SELL_SUBMITTED
@@ -265,122 +148,90 @@ class TokenPositionManagerBacktest:
             - if the signal is set to sell confirmed, then the position state is set to SELL_CONFIRMED
         """
         if signal.decision == TradingDecision.SUBMIT_BUY:
-            position = self.update_submit_buy(position, token)
+            token_position = self.update_submit_buy(token_position, live_token)
         
         elif signal.decision == TradingDecision.CONFIRM_BUY:
-            position = self.update_confirm_buy(position, token)
+            token_position = self.update_confirm_buy(token_position, live_token)
 
         elif signal.decision == TradingDecision.SUBMIT_SELL:
-            position = self.update_submit_sell(position, token)
+            token_position = self.update_submit_sell(token_position, live_token)
         
         elif signal.decision == TradingDecision.CONFIRM_SELL:
-            position = self.update_confirm_sell(position, token)
+            token_position = self.update_confirm_sell(token_position, live_token)
         
-        return position
+        return token_position
     
-    def update_submit_buy(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_submit_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
         """Update position state when submitting a buy order
         
         State Transition: INIT -> BUY_SUBMITTED
         
         This function:
         1. Updates position state to BUY_SUBMITTED
-        2. Records entry price and block
+        2. Records entry static data
         3. Calculates initial position metrics
         4. Sets position as active
-
-        In production:
-        - Would be called before submitting transaction to chain
-        - Next state should be BUY_CONFIRMED once our transaction is mined
         """
-        if position.position_state == TokenPositionState.INIT:
-            position.position_state = TokenPositionState.BUY_SUBMITTED
-            position.has_active_position = True
+        if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
+            token_position.latest_snapshot.position_state = TokenPositionState.BUY_SUBMITTED
+            token_position.latest_snapshot.has_active_position = True
             
-            # Record entry data
-            position.entry_block = token.token_data.latest_block_number
-            position.entry_Xprice = token.sync_info.current_price_ratio
+            # Record entry static data
+            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_Xprice = live_token.sync_info.current_price_ratio
             
             # Update current metrics
-            position.current_Xprice = token.sync_info.current_price_ratio
-            position.Xprice = 1.0  # At entry, current price = entry price
+            token_position.latest_snapshot.current_price_ratio = live_token.sync_info.current_price_ratio
+            token_position.latest_snapshot.roi = 1.0  # At entry, current price = entry price
             
             # Set initial position size (0.01 ETH worth)
-            position.purchase_value = 0.01
-            position.current_value = 0.01
-            position.realized_profit = 0
-            position.unrealized_profit = 0
+            token_position.static_data.purchase_value = 0.01
+            token_position.latest_snapshot.current_value = 0.01
+            token_position.latest_snapshot.realized_profit = 0
+            token_position.latest_snapshot.unrealized_profit = 0
             
-            # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
-            
-        return position
+        return token_position
 
-    def update_confirm_buy(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_confirm_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
         """Update position state when buy order is confirmed
-        
         State Transition: BUY_SUBMITTED -> BUY_CONFIRMED
-        
-        This function:
-        1. Updates position state to BUY_CONFIRMED
-        2. Verifies and updates final entry price
-        3. Updates position metrics with confirmed values
-        
         In production:
-        - Would be called after our buy transaction is mined
-        - Confirms actual entry price and position size
+        - This will get the entry information from the blockchain
         """
-        if position.position_state == TokenPositionState.BUY_SUBMITTED:
-            position.position_state = TokenPositionState.BUY_CONFIRMED
-            
-            # Update current metrics
-            position.current_Xprice = token.sync_info.current_price_ratio
-            position.Xprice = position.current_Xprice / position.entry_Xprice
-            
-            # Update value and profit calculations
-            position.current_value = position.purchase_value * position.Xprice
-            position.unrealized_profit = position.current_value - position.purchase_value
-            
-            # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
-            
-        return position
+        if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
+            token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
-    def update_submit_sell(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+        return token_position
+
+    def update_submit_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
         """Update position state when submitting a sell order
         
         State Transition: BUY_CONFIRMED -> SELL_SUBMITTED
         
         This function:
         1. Updates position state to SELL_SUBMITTED
-        2. Records exit price attempt
+        2. Records exit static data
         3. Prepares for position closure
-        
-        In production:
-        - Would be called before submitting sell transaction
-        - Next state should be SELL_CONFIRMED once our transaction is mined
         """
-        if position.position_state == TokenPositionState.BUY_CONFIRMED:
-            position.position_state = TokenPositionState.SELL_SUBMITTED
+        if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
+            token_position.latest_snapshot.position_state = TokenPositionState.SELL_SUBMITTED
+            token_position.latest_snapshot.has_active_position = False
             
-            # Update current metrics
-            position.current_Xprice = token.sync_info.current_price_ratio
-            position.Xprice = position.current_Xprice / position.entry_Xprice
-            
-            # Calculate current position value
-            position.current_value = position.purchase_value * position.Xprice
-            position.unrealized_profit = position.current_value - position.purchase_value
+            # Update profit
+            token_position.latest_snapshot.unrealized_profit = 0
+            token_position.latest_snapshot.realized_profit = token_position.latest_snapshot.current_value - token_position.static_data.purchase_value
+            # Record exit static data
+            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_price_ratio = live_token.sync_info.current_price_ratio
             
             # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
-            position.exit_block = token.token_data.latest_block_number
+            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
+            token_position.static_data.exit_txn_fee = live_token.token_data.latest_block_timestamp
             
-        return position
+        return token_position
 
-    def update_confirm_sell(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_confirm_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
         """Update position state when sell order is confirmed
         
         State Transition: SELL_SUBMITTED -> SELL_CONFIRMED
@@ -394,19 +245,11 @@ class TokenPositionManagerBacktest:
         - Would be called after our sell transaction is mined
         - Finalizes actual exit price and realized profit
         """
-        if position.position_state == TokenPositionState.SELL_SUBMITTED:
-            position.position_state = TokenPositionState.SELL_CONFIRMED
-            position.has_active_position = False
-            
-            # Calculate final position value and profit
-            position.current_Xprice = token.sync_info.current_price_ratio
-            position.Xprice = position.current_Xprice / position.entry_Xprice
-            position.current_value = position.purchase_value * position.Xprice
-            position.realized_profit = position.current_value - position.purchase_value
-            position.unrealized_profit = 0
-            
-            # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
+        if token_position.latest_snapshot.position_state == TokenPositionState.SELL_SUBMITTED:
+            token_position.latest_snapshot.position_state = TokenPositionState.SELL_CONFIRMED
+            token_position.latest_snapshot.has_active_position = False
 
-        return position
+            # Record exit static data
+            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+                        
+        return token_position

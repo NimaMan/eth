@@ -41,11 +41,11 @@ Implementation Notes:
 4. Tracks complete trading history
 """
 import asyncio
+import tqdm
 import time
-from collections import defaultdict, OrderedDict
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_portfolio_manager.live.live_portfolio_position_manager import PortfolioPositionManager
+from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
 from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
 from eth_token_monitor.token_manager.block_token_processor import BlockTokenProcessor
 from eth_portfolio_manager.utils.logger import get_logger
@@ -70,26 +70,29 @@ class BacktestPortfolioManager:
             
             # Process blocks sequentially
             current_block = self.config.start_block
-            while current_block <= self.config.end_block:
-                start_time = time.time()
+            for current_block in tqdm.tqdm(range(self.config.start_block, self.config.end_block + 1)):
                 
                 # 1. Get block data
                 block_data = await self.block_processor.process_block(block_number=current_block)
                 
+                start_token_process_time = time.time()
                 # 2. Process tokens in this block
                 await self.block_token_processor.process_block(block_data)
                 token_updates = self.block_token_processor.updated_tokens
+                token_process_time = time.time() - start_token_process_time
+                self.logger.info(f"[Performance] Token processing took {token_process_time:.2f}s for block {current_block}")
                 # 3. Update positions for all strategies
                 if token_updates:
+                    start_strategy_update_time = time.time()
                     tasks = []
                     for strategy_name, position_manager in self.strategy_position_managers.items():
                         # Run all strategies concurrently
-                        tasks.append(position_manager.update_portfolio_tokens_positions(token_updates, current_block))
+                        tasks.append(position_manager.update_portfolio_tokens_positions(token_updates))
                     await asyncio.gather(*tasks)
+                    strategy_update_time = time.time() - start_strategy_update_time
+                    self.logger.info(f"[Performance] Strategy updates took {strategy_update_time:.2f}s for block {current_block}")                
                 
-                self.logger.info(f"Backtest: Processed block {current_block} in {time.time() - start_time:.2f} seconds")
                 current_block += 1
-                            
         except Exception as e:
             self.logger.error(f"Backtest failed: {e}")
             raise
