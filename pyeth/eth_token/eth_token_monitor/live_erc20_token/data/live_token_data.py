@@ -20,6 +20,10 @@ from eth_token_monitor.utils.common_addresses import names_by_address, addresses
 from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 
 
+DENOM_RESERVE_THRESHOLD = 1e-2
+HIDDEN_MINTS_THRESHOLD = 1+1e-2
+
+
 class TokenStatusEnum(Enum):
     CREATION = "CONTRACT_CREATION"
     PAIR_CREATION = "PAIR_CREATION"
@@ -64,7 +68,8 @@ class LiveTokenData:
     swaps: Dict[str, List[Dict]] = field(default_factory=dict)
     mints: List[Dict] = field(default_factory=list)
     burns: List[Dict] = field(default_factory=list)
-    
+    token_prices: List[float] = field(default_factory=list)
+
     # Pair info
     has_uni_v2_pair: bool = False
     pair_events: List[Dict] = field(default_factory=list)
@@ -94,6 +99,12 @@ class LiveTokenData:
 
     latest_block_number: Optional[int] = None
     latest_block_timestamp: Optional[datetime] = None
+    latest_price: Optional[float] = None
+
+    is_scam: bool = False
+    scam_label: Optional[str] = None
+    scam_block: Optional[int] = None
+    scam_txn: Optional[str] = None
     
     @property
     def denom_currency(self):
@@ -106,10 +117,25 @@ class LiveTokenData:
             return None
     
     @property
-    def num_bribers(self):
-        """Get the number of bribers greater than 0.1 ETH"""
-        return len([bribe_amount for bribe_amount in self.bribe_amount_dict.values() if bribe_amount > 0.1])
+    def current_price_ratio(self):
+        """Get the current price ratio"""
+        if len(self.token_prices) > 0:
+            return self.token_prices[-1]/self.token_prices[0]
+        else:
+            return None
     
+    @property
+    def average_bribe_amount(self):
+        """Get the average bribe amount"""
+        return sum(self.bribe_amount_dict.values())/len(self.bribe_amount_dict)
+    
+    @property
+    def num_bribes(self):
+        """Get the bribes frequency"""
+        from collections import Counter
+        counter = Counter(self.bribe_amount_dict.values())
+        return f"({', '.join([f'{c}:{v:.3f}' for v, c in counter.items()])})"
+
     def _handle_creation(self, transaction: Dict):
         """Process contract creation event"""
         self.contract_address = transaction['contract_address']
@@ -297,6 +323,28 @@ class LiveTokenData:
             except Exception as e:
                 raise Exception(f" {__name__} Error processing transfer {token_address}, txn {transaction['hash']}: {e}")
 
+    def _check_scam(self, denom_reserve: float, token_reserve: float, block_number: int, txn_hash: str):
+        if denom_reserve < DENOM_RESERVE_THRESHOLD:
+            self.is_scam = True
+            self.scam_label = f'Denom removal (<{DENOM_RESERVE_THRESHOLD})'
+            self.scam_block = block_number
+            self.scam_txn = txn_hash
+
+        token_supply_ratio = token_reserve/self.total_supply
+        if token_supply_ratio > HIDDEN_MINTS_THRESHOLD:
+            self.is_scam = True
+            self.scam_label = f'Hidden mint ({token_supply_ratio:.2f})'
+            self.scam_block = block_number
+            self.scam_txn = txn_hash
+        
+        if self.is_scam:
+            self.token_status = TokenStatusEnum.INACTIVE_SCAM
+
+    def add_price_info(self, token_reserve: float, denom_reserve: float):
+        """Add a price info"""
+        price = denom_reserve/token_reserve
+        self.token_prices.append(price)
+
     def _add_syncs(self, transaction: Dict):
         """Process a sync event"""
         txn_hash = transaction['hash']
@@ -304,27 +352,31 @@ class LiveTokenData:
         txn_index = transaction['txn_index']
         timestamp = transaction['block_timestamp']
         for sync in transaction.get('uniswap_v2_syncs', []):
-            if self.token1_is_denom:
-                denom_name = names_by_address[self.denom_address]
-                denom_reserve = float(sync['reserve1'])/10**known_denom_decimals[denom_name]
-                token_reserve = float(sync['reserve0'])/10**self.decimals
-            else:
-                denom_name = names_by_address[self.denom_address]
-                denom_reserve = float(sync['reserve0'])/10**known_denom_decimals[denom_name]
-                token_reserve = float(sync['reserve1'])/10**self.decimals
-            self.syncs.append({
-                'txn_hash': txn_hash,            
-                'block_number': block_number,
-                'txn_index': txn_index,
-                'log_index': sync['log_index'],
-                'timestamp': timestamp,
-                'from_address': transaction['from_address'],
-                'to_address': transaction['to_address'],
-                'pair_address': sync['pair_address'],
-                'token_reserve': token_reserve,
-                'denom_reserve': denom_reserve,
-                })  
-            
+            if sync["pair_address"] in self.pair_addresses:
+                if self.token1_is_denom:
+                    denom_name = names_by_address[self.denom_address]
+                    denom_reserve = float(sync['reserve1'])/10**known_denom_decimals[denom_name]
+                    token_reserve = float(sync['reserve0'])/10**self.decimals
+                else:
+                    denom_name = names_by_address[self.denom_address]
+                    denom_reserve = float(sync['reserve0'])/10**known_denom_decimals[denom_name]
+                    token_reserve = float(sync['reserve1'])/10**self.decimals
+                self.syncs.append({
+                    'txn_hash': txn_hash,            
+                    'block_number': block_number,
+                    'txn_index': txn_index,
+                    'log_index': sync['log_index'],
+                    'timestamp': timestamp,
+                    'from_address': transaction['from_address'],
+                    'to_address': transaction['to_address'],
+                    'pair_address': sync['pair_address'],
+                    'token_reserve': token_reserve,
+                    'denom_reserve': denom_reserve,
+                    })  
+                
+                self.add_price_info(token_reserve, denom_reserve)
+                self._check_scam(denom_reserve, token_reserve, block_number, txn_hash)
+                
     def _add_swaps(self, transaction: Dict):
         """Process a swap event"""
         txn_hash = transaction['hash']
