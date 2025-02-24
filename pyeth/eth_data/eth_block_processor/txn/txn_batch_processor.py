@@ -25,21 +25,17 @@ import asyncio
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.txn.txn_data_fetcher import BatchTransactionDataFetcher
-from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.utils.logger import get_logger
 
 
 class TransactionBatchProcessor:
-    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False, logger=None):
+    def __init__(self, w3: Web3 = None, logger=None):
         if w3 is None:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
-        self.save_erc20_txn_to_db = save_erc20_txn_to_db
-        self.transaction_processor = TransactionProcessor(w3=w3, save_erc20_txn_to_db=save_erc20_txn_to_db)
+        self.transaction_processor = TransactionProcessor(w3=w3)
         self.batch_data_fetcher = BatchTransactionDataFetcher(w3=w3)
-        if logger is None:
-            logger = get_logger(name="txn_processor")
-        self.logger = logger
+        self.logger = logger or get_logger(name="txn_processor")
 
     async def _process_single_transaction(self, 
                                              transaction: Dict[str, Any], 
@@ -60,17 +56,6 @@ class TransactionBatchProcessor:
             raise
     
     async def process_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[ProcessedTransaction]:
-        """
-        Analyzes all transactions in a block using batch processing
-        """
-        results = await self._process_transaction_batch_asyncio(block_number, transactions)
-        if self.save_erc20_txn_to_db and results:
-            with ERC20TransactionDB() as db:
-                db.add_transactions_batch(results)
-
-        return results
-
-    async def _process_transaction_batch_asyncio(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[ProcessedTransaction]:
         """Process transactions using asyncio for comparison with thread pool version"""
         receipt_map, trace_map = await self.batch_data_fetcher.fetch_block_data(block_number)
         # Pre-process transaction data

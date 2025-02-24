@@ -21,7 +21,7 @@ ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
 _log_files = set()
 
 
-def get_logger(name="block_processor", log_folder="eth_block_processor", base_log_dir=None):
+def get_logger(name="block_processor", log_folder="block_processor", base_log_dir=None):
     """
     Initializes and returns a logger with the specified name.
     

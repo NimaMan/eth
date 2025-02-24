@@ -53,18 +53,17 @@ For parallel processing of multiple transactions, it's might be helpful to:
 2. Process different transactions concurrently at a higher level
 3. Use a transaction queue system for real-time monitoring
 """
-from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
 from eth_block_processor.utils.common_addresses import fee_recipients
+from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
 from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
 from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
-from eth_block_processor.tokens.erc20_token_txn_store import ERC20TransactionDB
 from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
 from eth_block_processor.txn.txn_action_identifier import TransactionActionIdentifier
 from eth_block_processor.data_models.trace_models import InternalTransaction
@@ -72,7 +71,7 @@ from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
 
 class TransactionProcessor:
-    def __init__(self, w3: Web3 = None, save_erc20_txn_to_db: bool = False):
+    def __init__(self, w3: Web3 = None):
         self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
@@ -80,7 +79,6 @@ class TransactionProcessor:
         self.trace_analyzer = TransactionTraceProcessor(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.action_identifier = TransactionActionIdentifier()
-        self.save_erc20_txn_to_db = save_erc20_txn_to_db
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
         return txn['to'] is not None and len(txn['input']) > 2  # '0x' is 2 characters
@@ -104,19 +102,6 @@ class TransactionProcessor:
             erc20_contracts.remove('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
         return erc20_contracts, unique_addresses
     
-    def store_erc20_transaction(self, detailed_txn: ProcessedTransaction):
-        if detailed_txn.txn_type == 'ERC20_TRANSFER' or\
-            len(detailed_txn.erc20_contracts) > 0 or \
-            len(detailed_txn.approvals) > 0 or \
-            len(detailed_txn.uniswap_v2_syncs) > 0 or \
-            len(detailed_txn.uniswap_v2_swaps) > 0 or \
-            len(detailed_txn.mints) > 0 or \
-            len(detailed_txn.burns) > 0 or \
-            len(detailed_txn.deposits) > 0 or \
-            len(detailed_txn.withdraws) > 0:
-            with ERC20TransactionDB() as erc20_transaction_db:
-                erc20_transaction_db.add_transaction(detailed_txn)
-
     def _extract_transaction_fees(self, receipt: Dict[str, Any]) -> TransactionFees:
         """Extract transaction fee information from receipt"""
         # Convert hex values to integers if needed
@@ -210,6 +195,7 @@ class TransactionProcessor:
             hash=txn_hash,
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
+            block_timestamp=block_timestamp,
             txn_index=receipt['transactionIndex'],
             from_address=from_address,
             to_address=to_address,
@@ -240,7 +226,6 @@ class TransactionProcessor:
             fees=fees,
             unique_addresses=unique_addresses,
             erc20_contracts=erc20_contracts,
-            block_timestamp=block_timestamp,
             bribe_amount=bribe_amount,
             uniswap_v3_pools=logs['uniswap_v3_pools'],
             uniswap_v3_initializations=logs['uniswap_v3_initializations'],
@@ -250,8 +235,6 @@ class TransactionProcessor:
             uniswap_v3_increases=logs['uniswap_v3_increases'],
             uniswap_v3_decreases=logs['uniswap_v3_decreases'],
         )
-        if self.save_erc20_txn_to_db:
-            self.store_erc20_transaction(detailed_txn)
         return detailed_txn
 
     async def process_transaction_async(self, 
@@ -300,6 +283,7 @@ class TransactionProcessor:
             hash=transaction['hash'],
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
+            block_timestamp=block_timestamp,
             txn_index=receipt['transactionIndex'],
             from_address=from_address,
             to_address=to_address,
@@ -332,7 +316,6 @@ class TransactionProcessor:
             fees=fees,
             state_diffs=state_diffs,
             latest_states=latest_states,
-            block_timestamp=block_timestamp,
             bribe_amount=bribe_amount,
             uniswap_v3_pools=logs['uniswap_v3_pools'],
             uniswap_v3_initializations=logs['uniswap_v3_initializations'],
