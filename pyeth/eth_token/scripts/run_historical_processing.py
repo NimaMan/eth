@@ -67,7 +67,7 @@ async def test_token_access(latest_block: int, logger=None):
         # Test accessing each token
         for token in active_tokens:
             logger.info(f"\nToken: {token.contract_address}")
-            logger.info(f"Age: {token.token_age_blocks} blocks")
+            logger.info(f"Age: {token.token_creation_age_blocks} blocks")
             logger.info(f"Is scam: {token.is_scam}")
             if token.is_scam:
                 logger.info(f"Scam label: {token.scam_label}")
@@ -78,7 +78,7 @@ async def test_token_access(latest_block: int, logger=None):
                 logger.info("Successfully retrieved token directly")
                 
             # Verify token data consistency
-            assert retrieved_token.token_age_blocks == token.token_age_blocks, "Token age mismatch"
+            assert retrieved_token.token_creation_age_blocks == token.token_creation_age_blocks, "Token age mismatch"
             assert retrieved_token.is_scam == token.is_scam, "Scam status mismatch"
             
     except Exception as e:

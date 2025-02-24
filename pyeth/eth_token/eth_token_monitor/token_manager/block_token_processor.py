@@ -5,9 +5,9 @@ Objective:
 ---------
 1. Provide core token processing functionality for both live and historical modes
     - Process blocks and their transactions
-    - Create and update token instances
+    - Create and update token instances of LiveERC20Token class
     - Cache token states
-2. Process blocks and their transactions efficiently
+2. Process blocks and their transactions efficiently  with Concurrency Limit
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from eth_token_monitor.utils.logger import get_logger
 
 
 class BlockTokenProcessor:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None):
+    def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None, max_concurrency=20):
         self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
         # Token tracking
         self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger, redis_url=redis_url)
@@ -31,25 +31,37 @@ class BlockTokenProcessor:
         self.processed_blocks: Dict[int, bool] = {}
         self.latest_processed_block = 0
 
+        # Introduce concurrency semaphore
+        self.semaphore = asyncio.Semaphore(value=max_concurrency)
+
     async def process_block(self, block_data: List[Dict]):
-        """Process a single block's transactions"""
+        """Process a single block's transactions with concurrency limit."""
         if not block_data:
-            return    
+            return
+        
+        if isinstance(block_data[0], dict):
+           block_number = block_data[0].get('block_number')
+        else:
+            block_number = block_data[0].block_number
         
         self.updated_tokens.clear()
         tasks = []
         for txn in block_data:
-            if not isinstance(txn, dict):
-                txn = asdict(txn)
-            tasks.append(self._process_transaction(txn))
-        await asyncio.gather(*tasks)
-        self.processed_blocks[txn.get('block_number')] = True # Mark block as processed
+            async def sem_task(txn_data=txn):
+                async with self.semaphore:
+                    return await self._process_transaction(txn_data, block_number)
 
-    async def _process_transaction(self, transaction: Dict):
+            tasks.append(asyncio.create_task(sem_task()))
+        await asyncio.gather(*tasks)
+
+        # Mark the block as processed (assumes all txns in the same block)
+        self.processed_blocks[block_number] = True
+
+    async def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
+        if not isinstance(transaction, dict):
+            transaction = asdict(transaction)
         try:
-            block_number = transaction.get('block_number')
-            
             # Handle contract creation
             if self._is_token_creation(transaction):
                 await self._handle_token_creation(transaction, block_number)

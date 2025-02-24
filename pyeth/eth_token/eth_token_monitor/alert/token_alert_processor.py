@@ -108,7 +108,7 @@ class UpdateLiveTokenAlertProcessor:
                         if alert and not isinstance(alert, (Exception, list))
                     ])
             
-            self.logger.info(f"Checked block {block_number} in {time.time() - start_time:.2f} seconds for alerts with {len(valid_alerts)} alerts")
+            self.logger.info(f"Checked alerts for block {block_number} in {time.time() - start_time:.2f} seconds with {len(valid_alerts)} alerts")
             return valid_alerts
         
         except Exception as e:

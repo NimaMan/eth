@@ -67,7 +67,7 @@ class TokenHealthPredictor:
                     transaction_hash=transaction.get('hash'),
                     from_address=transaction.get('from_address'),
                     is_scam=True,
-                    confidence=1,
+                    confidence=.5,
                     reason=f"{num_erc20_transfers} transfers and {num_unique_addresses} unique addresses",
                 )
 
@@ -87,7 +87,7 @@ class TokenHealthPredictor:
 
     def _check_token_scam_label(self, transaction: Dict, live_token) -> bool:
         """Check if the token has a scam label"""
-        if live_token.is_scam:
+        if live_token.token_data.is_scam:
             self.scam_scores[transaction.get('hash')] = ScamScore(
                 block_number=transaction.get('block_number'),
                 transaction_hash=transaction.get('hash'),
@@ -110,7 +110,7 @@ class TokenHealthPredictor:
     @property
     def scam_reason(self) -> str:
         """Return reason for scam classification"""
-        return tuple(set(score.reason for score in self.scam_scores.values())) if self.scam_scores else "NA"
+        return tuple(set(score.reason for score in self.scam_scores.values())) if self.scam_scores else ""
     
     @property
     def scam_detection_block_and_txn(self):

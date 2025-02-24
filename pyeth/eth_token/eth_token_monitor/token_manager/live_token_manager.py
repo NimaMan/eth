@@ -57,7 +57,7 @@ from eth_token_monitor.utils.logger import get_logger
 
 class LiveTokenManager:
     def __init__(self, logger=None, warmup_blocks: int = 1000):
-        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
+        self.logger = logger or get_logger(name="token_manager", log_folder="token_manager")
         self.web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.warmup_blocks = warmup_blocks
         
@@ -90,7 +90,7 @@ class LiveTokenManager:
             try:
                 # Wait for block processing to complete
                 await self.live_token_processor.block_processed_event.wait()
-                self.logger.info(f"Block processed event triggered for block {self.live_token_processor.latest_processed_block}")
+                self.logger.info(f"Updated {len(self.live_token_processor.updated_tokens)} tokens in block {self.live_token_processor.latest_processed_block}")
                 # Process alerts for updated tokens
                 if self.live_token_processor.updated_tokens:
                     current_block = self.live_token_processor.latest_processed_block

@@ -57,17 +57,37 @@ class BlockSubscriber(BaseSubscriber):
 
     async def stop(self):
         """Stop consuming messages and processing blocks"""
-        self._processing = False
-        
-        if self._processor_task and not self._processor_task.done():
-            self._processor_task.cancel()
-            try:
-                await self._processor_task
-            except asyncio.CancelledError:
-                pass
-                
-        await self.disconnect()
-        self.logger.info("Block subscriber stopped")
+        try:
+            self.logger.info("Stopping block subscriber...")
+            self._processing = False
+            
+            # Cancel processor task first
+            if self._processor_task and not self._processor_task.done():
+                self._processor_task.cancel()
+                try:
+                    await asyncio.wait_for(self._processor_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    self.logger.warning("Processor task cancelled or timed out")
+            
+            # Close queue iterator and channel
+            if hasattr(self, 'queue'):
+                try:
+                    await asyncio.wait_for(self.queue.close(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception) as e:
+                    self.logger.warning(f"Queue close timed out or failed: {e}")
+            
+            # Close connection
+            if self.connection and not self.connection.is_closed:
+                try:
+                    await asyncio.wait_for(self.connection.close(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception) as e:
+                    self.logger.warning(f"Connection close timed out or failed: {e}")
+            
+            self.logger.info("Block subscriber stopped successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error during block subscriber shutdown: {e}")
+            raise
 
     async def process_message(self, message: aio_pika.Message, start_from_block: Optional[int] = None):
         """Add block to processing queue"""
