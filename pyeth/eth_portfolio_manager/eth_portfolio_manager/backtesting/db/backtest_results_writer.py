@@ -29,6 +29,7 @@ import asyncio
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import os
 
 
 class BacktestResultsWriter:
@@ -44,7 +45,7 @@ class BacktestResultsWriter:
         self.cur = self.conn.cursor(cursor_factory=RealDictCursor)
         self.current_run_id = None
 
-    async def write_strategy_run(self, strategy_name: str, params: dict, start_block: int, end_block: int) -> int:
+    def write_strategy_run(self, strategy_name: str, params: dict, start_block: int, end_block: int) -> int:
         """
         Inserts a new strategy run record into the database, returning the generated run ID.
         """
@@ -66,7 +67,7 @@ class BacktestResultsWriter:
             print(f"Error writing strategy run: {e}")
             raise
 
-    async def write_position_history(self, token_history: dict):
+    def write_position_history(self, token_history: dict):
         """
         Writes token positions to the database.
 
@@ -137,11 +138,52 @@ class BacktestResultsWriter:
                 
             except Exception as e:
                 print(f"Error writing results for strategy {strategy_name}: {e}")
-                continue
-            
+                raise  # Changed from continue to raise to see errors
 
     def __del__(self):
         if hasattr(self, 'cur'):
             self.cur.close()
         if hasattr(self, 'conn'):
             self.conn.close()
+
+
+if __name__ == "__main__":
+    # Test database writing with sample JSON file
+    writer = BacktestResultsWriter()
+    BACKTEST_LOG_DIR = "/home/nima/code/crypto/logs/backtesting"
+    json_path = os.path.join(BACKTEST_LOG_DIR, "BuyAll_21887626_21888346_20250220_160701.json")
+    
+    print(f"Loading test data from: {json_path}")
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    
+    try:
+        # Write strategy run
+        run_id = writer.write_strategy_run(
+            strategy_name=data['strategy_name'],
+            params=data['parameters'],
+            start_block=data['start_block'],
+            end_block=data['end_block']
+        )
+        print(f"Created strategy run with ID: {run_id}")
+        
+        # Write token positions
+        writer.write_position_history(data['token_history'])
+        
+        # Verify the write
+        writer.cur.execute("SELECT COUNT(*) FROM strategy_runs")
+        strategy_count = writer.cur.fetchone()['count']
+        
+        writer.cur.execute("SELECT COUNT(*) FROM token_positions")
+        position_count = writer.cur.fetchone()['count']
+        
+        print(f"\nVerification Results:")
+        print(f"Strategy runs in database: {strategy_count}")
+        print(f"Token positions in database: {position_count}")
+        print(f"Token positions in JSON: {len(data['token_history'])}")
+        
+    except Exception as e:
+        print(f"Error during test: {e}")
+        raise
+    finally:
+        writer.conn.close()

@@ -1,129 +1,140 @@
 """
-Objective: Analyze backtest results for algorithmic trading strategies by providing hierarchical access to:
-1. Strategy Run Overviews
-2. Strategy Run Details
-3. Positions Analysis for each strategy run
-4. Token Metrics for each strategy run
-5. Token Position History for each strategy run
+Backtest Data Fetcher Module
 
-Data Flow Architecture:
-1. Strategy Runs List:
-   - Retrieve all executed strategies with high-level performance metrics, start and end block, and total tokens.
-   - Serves as the entry point for analysis.
+Objective:
+----------
+This module provides hierarchical access to backtest results by leveraging the TokenPosition aggregate pattern. It retrieves and reconstructs token position data (both static metadata and dynamic snapshots) from JSON-serialized database records, enabling comprehensive analysis of strategy performance across multiple dimensions.
 
-2. Strategy Run Details:
-   - Drill down into specific strategy execution parameters (e.g. start/end time, total trades, success rate).
-   - Self-describing the strategy run, its performance and parameters. 
+Key Concepts:
+------------
+1. Strategy Run Metadata:
+   - Represents the high-level execution context of a trading strategy.
+   - Contains:
+       • Strategy name and parameters
+       • Execution timeframe (start/end blocks)
+       • Creation timestamp
+       • Performance summary metrics
 
-3. Token List Metrics:
-   - Aggregate statistics per token per strategy run. Summerizes the performance of the token in the strategy run. 
-   - Important for analyzing the performance of the strategy across different tokens. 
+2. Token Position Data:
+   - Stored as JSON in the database (via BacktestResultsWriter)
+   - Comprises two main components:
+       a) Static Data:
+          • Token identifiers (address, symbol)
+          • Creation/trading enablement blocks
+          • Entry/exit price ratios and timestamps
+          • Purchase values and transaction fees
+       b) Dynamic History:
+          • Time-series of position snapshots
+          • Price evolution and ROI calculations
+          • Scam detection metrics
+          • Position state transitions
 
-4. Token Position History:
-   - Retrieve the full timeline of position-related events for an individual token.
-   - Enables detailed trade pattern analysis and strategy validation.
-   - Includes All the changes happening to the token positions in the strategy run in each block. 
+Data Access Patterns:
+-------------------
+1. Strategy Overview Access:
+   - Retrieves all strategy runs with their metadata
+   - Entry point for drilling down into specific strategies
 
-5. Positions Analysis:
-   - Retrieve current state of all token positions within a strategy run.
-   - Includes All the changes happening to the token positions in the strategy run. 
+2. Strategy Details Access:
+   - Fetches complete information about a specific strategy run
+   - Includes execution parameters and aggregate performance metrics
 
-Data Flow Pattern:
-Frontend Request → API Route → DataFetcher (DB Access) → Formatter (Data Standardization) → API Response
+3. Token Position Access:
+   - Three levels of granularity:
+       a) Token List: Summary of all tokens in a strategy
+       b) Latest Positions: Current state of each token position
+       c) Position History: Complete evolution of individual token positions
 
-Benefits of the Formatter Class:
-- Centralizes and standardizes the transformation of raw database data into a frontend-friendly format.
-- Ensures consistency in null handling, type conversion (e.g. formatting dates and converting numeric values), and naming conventions.
-- Separates data access logic from presentation logic to simplify maintenance and scalability.
+4. Performance Metrics Access:
+   - Calculates strategy-wide metrics from token position data
+   - Aggregates ROI, profit/loss, and risk metrics across positions
+
+Integration Points:
+-----------------
+1. Database Layer:
+   - Reads JSON-serialized TokenPosition data
+   - Reconstructs TokenPosition instances via from_dict factory method
+
+2. API Layer:
+   - Provides formatted data to API routes
+   - Maintains consistent structure for frontend consumption
+
+3. Analysis Layer:
+   - Supports both real-time monitoring and historical analysis
+   - Enables strategy comparison and optimization
+
+Usage Guidelines:
+---------------
+1. Strategy Run Queries:
+   - Use fetch_strategy_runs() for overview of all strategies
+   - Use fetch_strategy_run_details() for specific strategy metadata
+
+2. Token Position Queries:
+   - Use fetch_token_list_for_strategy() for token summaries
+   - Use fetch_latest_strategy_positions() for current position states
+   - Use fetch_token_position_history() for complete position evolution
+
+3. Performance Analysis:
+   - Use fetch_strategy_performance_metrics() for aggregate statistics
+   - Metrics are computed from the latest position snapshots
 """
 
-import asyncio
 from typing import Dict, Optional, List, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime
-from eth_portfolio_manager.backtesting.db.backtest_queries import *
 from eth_portfolio_manager.core.portfolio_metrics_calculator import *
 from eth_portfolio_manager.utils.logger import get_monitoring_logger
 
 
-class BacktestDataFrontEndFormatter:
-    """Standardizes data formatting for frontend consumption"""
+# Retrieve all strategy runs with minute-level timestamp
+STRATEGY_LIST = """
+    SELECT 
+        id,
+        name,
+        parameters,
+        start_block,
+        end_block,
+        DATE_TRUNC('minute', created_at) as created_at
+    FROM strategy_runs
+    ORDER BY created_at DESC;
+"""
 
-    @staticmethod
-    def format_strategy_run(run: Dict) -> Dict:
-        return {
-            'id': run['id'],
-            'strategy_name': run.get('strategy_name') or 'Unnamed Strategy',
-            'created_at': run['created_at'].isoformat() if run.get('created_at') else None,
-            'start_block': run.get('start_block') or 0,
-            'end_block': run.get('end_block') or 0,
-            'total_tokens': run.get('total_tokens') or 0,
-            'closed_trades': run.get('closed_trades') or 0,
-            'scammed_positions': run.get('scammed_positions') or 0,
-            'total_profit': float(run.get('total_profit') or 0)
-        }
 
-    @staticmethod
-    def format_strategy_run_details(run: Dict) -> Dict:
-        """Format detailed information for a strategy run."""
-        return {
-            'id': run['id'],
-            'start_time': run['start_time'].isoformat() if run.get('start_time') else None,
-            'end_time': run['end_time'].isoformat() if run.get('end_time') else None,
-            'total_trades': run.get('total_trades') or 0,
-            'success_rate': float(run.get('success_rate') or 0),
-            'start_block': run.get('start_block') or 0,
-            'end_block': run.get('end_block') or 0,
-            'strategy_name': run.get('strategy_name') or 'Unnamed Strategy'
-        }
+STRATEGY_POSITIONS_LIST = """
+    SELECT 
+        token_address,
+        token_position->'static' as static_data,
+        token_position->'dynamic_history'->-1 as latest_snapshot
+    FROM token_positions
+    WHERE strategy_run_id = %s
+    ORDER BY (token_position->'static'->>'creation_block')::integer DESC;
+"""
 
-    @staticmethod
-    def format_position(position: Dict) -> Dict:
-        # drop :"id", "strategy_run_id"
-        position.pop('id', None)
-        position.pop('strategy_run_id', None)
-        return position
 
-    @staticmethod
-    def format_token(token: Dict) -> Dict:
-        return {
-            'token_address': token['token_address'],
-            'symbol': token.get('symbol') or 'UNKNOWN',
-            'position_count': token.get('position_count', 0),
-            'first_seen_block': token.get('first_seen_block', 0),
-            'last_seen_block': token.get('last_seen_block', 0),
-            'total_realized_profit': float(token.get('total_realized_profit', 0)),
-            'num_greys': int(token.get('num_greys', 0)),
-            'num_greens': int(token.get('num_greens', 0)),
-            'scam_probability': float(token.get('scam_probability', 0)),
-            'scam_reason': token.get('scam_reason', 'NA')
-        }
+# Get complete raw position history for a specific token in a strategy.
+TOKEN_POSITION_HISTORY = """
+    SELECT 
+        token_address,
+        token_position->'static' as static_data,
+        token_position->'dynamic_history' as dynamic_history
+    FROM token_positions
+    WHERE strategy_run_id = %s 
+      AND token_address = %s;
+"""
 
-    @staticmethod
-    def format_history_record(record: Dict) -> Dict:
-        """Format a record from the token position history."""
-        formatted_record = {}
-        for key, value in record.items():
-            if isinstance(value, datetime):
-                formatted_record[key] = value.isoformat()
-            else:
-                # If the value is numeric, cast to float; otherwise, leave as is (or empty string if None)
-                if value is None:
-                    formatted_record[key] = ''  # or 0 depending on the expected type
-                elif isinstance(value, (int, float)):
-                    formatted_record[key] = float(value)
-                else:
-                    formatted_record[key] = value
-        return formatted_record
+
+CURRENCY_TOKENS_LIST = """
+    SELECT DISTINCT currency
+    FROM token_positions
+    WHERE currency IS NOT NULL
+"""
 
 
 class BacktestDataFetcher:
     """Data access layer for backtest portfolio data in PostgreSQL"""
 
-    def __init__(self, formatter=BacktestDataFrontEndFormatter):
+    def __init__(self, ):
         """Initialize with database connection and a formatter for data normalization."""
-        self.formatter = formatter
         self.db_conn = self._create_default_connection()
         self.cursor = self.db_conn.cursor(cursor_factory=RealDictCursor)
         self.logger = get_monitoring_logger()
@@ -140,99 +151,92 @@ class BacktestDataFetcher:
         )
 
     def fetch_strategy_runs(self) -> List[dict]:
-        """Retrieve and format all strategy runs with performance metrics."""
+        """Retrieve and format all strategy runs."""
         try:
             self.cursor.execute(STRATEGY_LIST)
             strategy_runs = self.cursor.fetchall()
-            self.logger.info(f"Found {strategy_runs} strategy runs")
-            return strategy_runs
+            self.logger.info(f"Found {len(strategy_runs)} strategy runs")
+            # Format the output to match expected structure
+            formatted_runs = {}
+            for run in strategy_runs:
+                formatted_runs[run['id']] = {
+                    'id': run['id'],
+                    'name': run['name'],
+                    'parameters': run['parameters'],
+                    'start_block': run['start_block'],
+                    'end_block': run['end_block'],
+                    'created_at': run['created_at']
+                }
+            self.strategy_runs = formatted_runs
+            return formatted_runs
         except Exception as e:
             self.logger.error(f"Error fetching strategy runs: {e}", exc_info=True)
             if self.db_conn:
                 self.db_conn.rollback()
-            return []
+            return {}
 
     def fetch_strategy_run_details(self, strategy_run_id: int) -> Dict[str, Any]:
         """Retrieve and format detailed information for a specific strategy run."""
+        if not hasattr(self, 'strategy_runs') or self.strategy_runs is None:
+            self.fetch_strategy_runs()
+        return self.strategy_runs[strategy_run_id]
+            
+    def fetch_strategy_token_positions(self, strategy_run_id: int) -> List[Dict[str, Any]]:
+        """Retrieve and format current positions for a specific strategy run."""
+        if hasattr(self, 'strategy_token_positions') and self.strategy_token_positions is not None:
+            if strategy_run_id in self.strategy_token_positions:
+                return self.strategy_token_positions[strategy_run_id]
         try:
-            self.cursor.execute(STRATEGY_RUN_DETAILS, (strategy_run_id,))
-            result = self.cursor.fetchone()
-            return result
+            self.strategy_token_positions = {}
+            self.cursor.execute(STRATEGY_POSITIONS_LIST, (strategy_run_id,))
+            positions = self.cursor.fetchall()
+            self.logger.info(f"Found {len(positions)} positions for strategy run {strategy_run_id}")
+            formatted_positions = {}
+            for pos in positions:
+                formatted_positions[pos['token_address']] = {
+                    'static_data': pos['static_data'],
+                    'latest_snapshot': pos['latest_snapshot']
+                }
+            self.strategy_token_positions[strategy_run_id] = formatted_positions
+            return formatted_positions
         except Exception as e:
-            self.logger.error(f"Error fetching strategy run details: {e}", exc_info=True)
+            self.logger.error(f"Error fetching positions from database: {e}", exc_info=True)
             if self.db_conn:
                 self.db_conn.rollback()
             return {}
 
     def fetch_token_list_for_strategy(self, strategy_run_id: int) -> List[Dict[str, Any]]:
         """Retrieve and format the list of unique tokens with metrics for a specific strategy run."""
-        try:
-            self.cursor.execute(TOKEN_LIST_FOR_STRATEGY, (strategy_run_id,))
-            tokens = self.cursor.fetchall()
-            return tokens
-        except Exception as e:
-            self.logger.error(f"Error fetching token list: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
-            return []
-
-    def fetch_strategy_positions(self, strategy_run_id: int) -> List[Dict[str, Any]]:
-        """Retrieve and format current positions for a specific strategy run."""
-        try:
-            self.cursor.execute(STRATEGY_POSITIONS_LIST, (strategy_run_id,))
-            positions = self.cursor.fetchall()
-            self.logger.info(f"Found {len(positions)} positions for strategy run {strategy_run_id}")
-            return positions
-        except Exception as e:
-            self.logger.error(f"Error fetching positions from database: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
-            return []
-
-    def fetch_latest_strategy_positions(self, strategy_run_id: int) -> List[Dict[str, Any]]:
-        """Retrieve and format the latest positions for a specific strategy run."""
-        try:
-            self.cursor.execute(STRATEGY_POSITIONS_LATEST, (strategy_run_id,))
-            positions = self.cursor.fetchall()
-            return positions
-        except Exception as e:
-            self.logger.error(f"Error fetching latest positions: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
-            return []
+        if not hasattr(self, 'strategy_token_positions') or self.strategy_token_positions is None:
+            self.fetch_strategy_token_positions(strategy_run_id)    
+        return list(self.strategy_token_positions[strategy_run_id].keys())
 
     def fetch_token_position_history(self, strategy_run_id: int, token_address: str) -> List[Dict[str, Any]]:
-        """Retrieve and format the complete position history for a specific token in a strategy."""
+        """Retrieve and format the complete position history for a specific token in a strategy."""            
         try:
             self.cursor.execute(TOKEN_POSITION_HISTORY, (strategy_run_id, token_address))
-            raw_history = self.cursor.fetchall()
-            return [self.formatter.format_history_record(record) for record in raw_history]
+            token_position_history = self.cursor.fetchall()[0]
+            formatted_history = {
+                'static_data': token_position_history['static_data'],
+                'dynamic_history': token_position_history['dynamic_history']
+            }
+            return formatted_history
+        
         except Exception as e:
-            self.logger.error(f"Error fetching position history: {e}", exc_info=True)
+            self.logger.error(f"Error fetching token position history: {e}", exc_info=True)
             if self.db_conn:
                 self.db_conn.rollback()
             return []
 
-    async def fetch_strategy_performance_metrics(self, strategy_run_id: int) -> PortfolioMetrics:
+    def fetch_strategy_performance_metrics(self, strategy_run_id: int) -> PortfolioMetrics:
         """
         Retrieves strategy positions, groups them by token address,
         and then calculates portfolio metrics using the PortfolioMetricsCalculator.
         """
         try:
-            loop = asyncio.get_event_loop()
-            # Execute the synchronous fetch_strategy_positions in a thread.
-            positions = await loop.run_in_executor(None, self.fetch_strategy_positions, strategy_run_id)
-            
-            # Select the latest position for each token (assuming positions are sorted in descending order by block number)
-            latest_positions = {}
-            for pos in positions:
-                token_address = pos.get('token_address', '')
-                # Using the first encountered position for each token (as query orders by block_number descending)
-                if token_address not in latest_positions:
-                    latest_positions[token_address] = pos
-            
+            latest_positions = self.fetch_strategy_token_positions(strategy_run_id)
             # Calculate metrics using the latest positions for each token.
-            metrics = await self.metrics_calculator.update_metrics(latest_positions)
+            metrics = self.metrics_calculator.calculate_portfolio_metrics(latest_positions)
             return metrics
 
         except Exception as e:
