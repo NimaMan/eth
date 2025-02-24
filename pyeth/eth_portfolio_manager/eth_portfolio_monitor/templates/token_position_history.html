@@ -24,11 +24,14 @@
                 <table class="table table-bordered" id="token-list-table" width="100%" cellspacing="0">
                     <thead>
                         <tr>
+                            <th>Creation Time</th>
                             <th>Symbol</th>
                             <th>Address</th>
-                            <th>Age (hours)</th>
+                            <th>Age (blocks)</th>
+                            <th>ROI</th>
+                            <th>Total Profit</th>
                             <th>State</th>
-                            <th>Current Value</th>
+                            <th>Current Price Ratio</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -37,66 +40,94 @@
         </div>
     </div>
 
-    <!-- Position Details (initially hidden) -->
-    <div id="position-details" style="display: none;">
-        <!-- Constant Position Cards -->
-        <div class="row mb-4">
-            <!-- Entry Details Card -->
-            <div class="col-xl-4 col-md-6 mb-4">
-                <div class="card border-left-primary shadow h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Entry Details</div>
-                                <div class="mb-1 small">Entry Block: <span id="position-entry-block">-</span></div>
-                                <div class="mb-1 small">XPrice: <span id="position-entry-price">-</span></div>
-                                <div class="mb-1 small">Quantity: <span id="position-quantity">-</span></div>
-                                <div class="mb-1 small">Value: <span id="position-entry-value">-</span></div>
-                                <div class="mb-1 small">Currency: <span id="position-currency">-</span></div>
-                            </div>
-                        </div>
-                    </div>
+    <!-- Static Data Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Token Static Data</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <p><strong>Symbol:</strong> <span id="token-symbol">-</span></p>
+                    <p><strong>Currency:</strong> <span id="token-currency">-</span></p>
+                    <p><strong>Address:</strong> <span id="token-address">-</span></p>
+                    <p><strong>Creation Block:</strong> <span id="creation-block">-</span></p>
                 </div>
-            </div>
-
-            <!-- Current Position Card -->
-            <div class="col-xl-4 col-md-6 mb-4">
-                <div class="card border-left-info shadow h-100 py-2">
-                    <div class="card-body">
-                        <div class="row no-gutters align-items-center">
-                            <div class="col mr-2">
-                                <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Current Position</div>
-                                <div class="mb-1 small">Last Block: <span id="position-current-block">-</span></div>
-                                <div class="mb-1 small">State: <span id="position-state">-</span></div>
-                                <div class="mb-1 small">Scam Score: <span id="position-scam-prob">-</span></div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="col-md-3">
+                    <p><strong>Trading Enabled:</strong> <span id="trading-enabled-block">-</span></p>
+                    <p><strong>Entry Block:</strong> <span id="entry-block">-</span></p>
+                    <p><strong>Exit Block:</strong> <span id="exit-block">-</span></p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Entry Price:</strong> <span id="entry-price">-</span></p>
+                    <p><strong>Exit Price:</strong> <span id="exit-price">-</span></p>
+                    <p><strong>Purchase Value:</strong> <span id="purchase-value">-</span></p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Entry Fee:</strong> <span id="entry-fee">-</span></p>
+                    <p><strong>Exit Fee:</strong> <span id="exit-fee">-</span></p>
                 </div>
             </div>
         </div>
+    </div>
 
+    <!-- Latest Snapshot Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Current Position Status</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <p><strong>Current Block:</strong> <span id="current-block">-</span></p>
+                    <p><strong>Current Price:</strong> <span id="current-price">-</span></p>
+                    <p><strong>Current Value:</strong> <span id="current-value">-</span></p>
+                    <p><strong>Position State:</strong> <span id="position-state">-</span></p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Quantity:</strong> <span id="position-quantity">-</span></p>
+                    <p><strong>Realized P/L:</strong> <span id="realized-profit">-</span></p>
+                    <p><strong>Unrealized P/L:</strong> <span id="unrealized-profit">-</span></p>
+                    <p><strong>ROI:</strong> <span id="roi">-</span></p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Age (blocks):</strong> <span id="token-age-blocks">-</span></p>
+                    <p><strong>Age (hours):</strong> <span id="token-age-hours">-</span></p>
+                    <p><strong>Scam Probability:</strong> <span id="scam-probability">-</span></p>
+                    <p><strong>Scam Reason:</strong> <span id="scam-reason">-</span></p>
+                </div>
+                <div class="col-md-3">
+                    <p><strong>Grey Holders:</strong> <span id="num-greys">-</span></p>
+                    <p><strong>Green Holders:</strong> <span id="num-greens">-</span></p>
+                    <p><strong>Bribers:</strong> <span id="num-bribers">-</span></p>
+                    <p><strong>Bribe Amount:</strong> <span id="token-bribe-amount">-</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Details (initially hidden) -->
+    <div id="position-details" style="display: none;">
         <!-- Position History Table -->
         <div class="card shadow mb-4">
             <div class="card-header py-3">
-                <h6 class="m-0 font-weight-bold text-primary">Position History</h6>
+                <h6 class="m-0 font-weight-bold text-primary">Token Position History</h6>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-bordered" id="position-table" width="100%" cellspacing="0">
                         <thead>
                             <tr>
-                                <th>Symbol</th>
+                                <th>Block</th>
                                 <th>State</th>
                                 <th>Current Value</th>
-                                <th>Current XPrice</th>
+                                <th>Current Price Ratio</th>
                                 <th>Age (blocks)</th>
                                 <th>Age (hours)</th>
-                                <th>Scam Reason</th>
                                 <th>Scam Prob</th>
                                 <th>Greys</th>
                                 <th>Greens</th>
-                                <th>Address</th>
+                                <th>Bribe Amount</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -119,5 +150,7 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Add utils.js before token_position_history.js -->
+<script src="{{ url_for('static', filename='js/utils.js') }}"></script>
 <script src="{{ url_for('static', filename='js/token_position_history.js') }}"></script>
 {% endblock %}
