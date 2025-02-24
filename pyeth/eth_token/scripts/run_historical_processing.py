@@ -12,9 +12,9 @@ Objective:
 import asyncio
 import sys
 from typing import Optional
-from eth_token_monitor.token_manager.block_token_processor import BlockTokenProcessor
-from eth_token_monitor.services.api.live_token_provider import LiveTokenProvider
-from eth_token_monitor.utils.logger import get_logger
+from eth_token.token_manager.block_token_processor import BlockTokenProcessor
+from eth_token.services.api.live_token_provider import LiveTokenProvider
+from eth_token.utils.logger import get_logger
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 
 

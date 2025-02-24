@@ -4,7 +4,7 @@ import pytest
 from web3 import Web3
 from eth_block_processor.txn.txn_processor import TransactionProcessor
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_token_monitor.token_manager.live_block_token_processor import LiveBlockTokenProcessor
+from eth_token.token_manager.live_block_token_processor import LiveBlockTokenProcessor
 
 
 @pytest.fixture(scope="session")
