@@ -127,7 +127,7 @@ class TokenPositionManagerBacktest:
     def strategy_name(self):
         return self.investment_strategy.strategy_name
     
-    async def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
+    def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
         """Process token updates and manage positions
             - Apply investment strategy to generate trade signals
             - Update position data based on trade signals
@@ -162,73 +162,80 @@ class TokenPositionManagerBacktest:
         return token_position
     
     def update_submit_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
-        """Update position state when submitting a buy order
+        """
+        Update position state when submitting a buy order using token information directly.
         
         State Transition: INIT -> BUY_SUBMITTED
         
         This function:
-        1. Updates position state to BUY_SUBMITTED
-        2. Records entry static data
-        3. Calculates initial position metrics
-        4. Sets position as active
+          - Records entry static data from live_token.
+          - Updates the existing latest snapshot in place.
+          - Avoids creating an extra snapshot object.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
-            token_position.latest_snapshot.position_state = TokenPositionState.BUY_SUBMITTED
-            token_position.latest_snapshot.has_active_position = True
-            
             # Record entry static data
             token_position.static_data.entry_block = live_token.token_data.latest_block_number
-            token_position.static_data.entry_Xprice = live_token.sync_info.current_price_ratio
-            
-            # Update current metrics
-            token_position.latest_snapshot.current_price_ratio = live_token.sync_info.current_price_ratio
-            token_position.latest_snapshot.roi = 1.0  # At entry, current price = entry price
-            
-            # Set initial position size (0.01 ETH worth)
-            token_position.static_data.purchase_value = 0.01
-            token_position.latest_snapshot.current_value = 0.01
+            token_position.static_data.entry_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
+
+            # Update the latest snapshot in place
+            token_position.latest_snapshot.position_state = TokenPositionState.BUY_SUBMITTED
+            token_position.latest_snapshot.has_active_position = True
+            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
+            token_position.latest_snapshot.roi = 0.0  # ROI equals 0 at entry (i.e. 1 - 1 = 0)
+            token_position.latest_snapshot.current_value = token_position.static_data.purchase_value
             token_position.latest_snapshot.realized_profit = 0
             token_position.latest_snapshot.unrealized_profit = 0
-            
+
         return token_position
 
     def update_confirm_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
-        """Update position state when buy order is confirmed
+        """
+        Update position state when buy order is confirmed using token data directly.
+        
         State Transition: BUY_SUBMITTED -> BUY_CONFIRMED
-        In production:
-        - This will get the entry information from the blockchain
+        
+        This function:
+          - Updates the latest snapshot in place with blockchain-confirmed data.
+          - Recalculates ROI and current value based on the confirmed price.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
+            # Recalculate metrics using data directly from live_token
+            if token_position.static_data.entry_price_ratio:
+                x_value = live_token.token_data.current_price_ratio / token_position.static_data.entry_price_ratio
+                token_position.latest_snapshot.roi = x_value - 1
+                token_position.latest_snapshot.current_value = token_position.static_data.purchase_value * x_value
+            # Additional fields can be updated here if necessary
+
         return token_position
 
     def update_submit_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
-        """Update position state when submitting a sell order
+        """
+        Update position state when submitting a sell order using token information directly.
         
         State Transition: BUY_CONFIRMED -> SELL_SUBMITTED
         
         This function:
-        1. Updates position state to SELL_SUBMITTED
-        2. Records exit static data
-        3. Prepares for position closure
+          - Records exit static data from live_token.
+          - Updates the latest snapshot in place to reflect the sell submission.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
+            # Record exit static data directly from the token data
+            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
+            
+            # Update the latest snapshot in place for sell submission
             token_position.latest_snapshot.position_state = TokenPositionState.SELL_SUBMITTED
             token_position.latest_snapshot.has_active_position = False
-            
-            # Update profit
-            token_position.latest_snapshot.unrealized_profit = 0
+            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
             token_position.latest_snapshot.realized_profit = token_position.latest_snapshot.current_value - token_position.static_data.purchase_value
-            # Record exit static data
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
-            token_position.static_data.exit_price_ratio = live_token.sync_info.current_price_ratio
-            
-            # Update timestamp
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
-            token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
-            token_position.static_data.exit_txn_fee = live_token.token_data.latest_block_timestamp
-            
+            token_position.latest_snapshot.unrealized_profit = 0
+            token_position.latest_snapshot.token_age_blocks = live_token.token_trading_age_blocks
+            token_position.latest_snapshot.token_age_hours = live_token.token_trading_age_hours
+
         return token_position
 
     def update_confirm_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:

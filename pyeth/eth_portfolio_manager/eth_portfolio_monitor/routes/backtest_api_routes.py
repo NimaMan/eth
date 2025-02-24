@@ -15,8 +15,10 @@ def get_strategy_runs():
     logger.info("API: Fetching strategy runs")
     try:
         runs = backtest_data.fetch_strategy_runs()
-        logger.info(f"First strategy run: {runs[0]}")
-        return jsonify({'strategy_runs': runs})
+        # Convert dict to list for API response
+        runs_list = list(runs.values())
+        logger.info(f"Found {len(runs_list)} strategy runs")
+        return jsonify({'strategy_runs': runs_list})
     except Exception as e:
         logger.error(f"API Error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -27,12 +29,17 @@ def get_strategy_positions(strategy_run_id):
     """Get all positions for a specific strategy run"""
     logger.info(f"API: Fetching positions for strategy run {strategy_run_id}")
     try:
-        # Fetch positions using the fetcher which already applies the formatter.
-        positions = backtest_data.fetch_strategy_positions(strategy_run_id)
-        logger.info(f"Found {len(positions)} positions for strategy run {strategy_run_id}")
-        # Log the first position.
-        logger.info(f"[DEBUG] First position: {positions[0]}")
-        return jsonify({'positions': positions})
+        positions = backtest_data.fetch_strategy_token_positions(strategy_run_id)
+        # Convert dict to list for table display
+        positions_list = [
+            {
+                'token_address': addr,
+                'static_data': pos['static_data'],
+                'latest_snapshot': pos['latest_snapshot']
+            } for addr, pos in positions.items()
+        ]
+        logger.info(f"Found {len(positions_list)} positions")
+        return jsonify({'positions': positions_list})
     except Exception as e:
         logger.error(f"API Error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -96,10 +103,29 @@ def get_metrics(strategy_run_id):
     """Get metrics for a specific strategy run"""
     logger.info(f"API: Fetching metrics for strategy run {strategy_run_id}")
     try:
-        # Execute the async metrics call synchronously.
-        metrics = asyncio.run(backtest_data.fetch_strategy_performance_metrics(strategy_run_id))
-        logger.info("API: Successfully retrieved metrics")
-        return jsonify({'metrics': metrics})
+        metrics = backtest_data.fetch_strategy_performance_metrics(strategy_run_id)
+        # Convert metrics to dict for JSON serialization
+        metrics_dict = {
+            'currency_metrics': {
+                currency: {
+                    'currency': m.currency,
+                    'total_value': m.total_value,
+                    'realized_profit': m.realized_profit,
+                    'unrealized_profit': m.unrealized_profit,
+                    'total_profit_loss': m.total_profit_loss,
+                    'position_count': m.position_count,
+                    'active_position_count': m.active_position_count,
+                    'inactive_sold_position_count': m.inactive_sold_position_count,
+                    'inactive_init_position_count': m.inactive_init_position_count
+                } for currency, m in metrics.currency_metrics.items()
+            },
+            'total_position_count': metrics.total_position_count,
+            'init_position_count': metrics.init_position_count,
+            'buy_position_count': metrics.buy_position_count,
+            'sell_position_count': metrics.sell_position_count,
+            'last_updated': metrics.last_updated.isoformat()
+        }
+        return jsonify({'metrics': metrics_dict})
     except Exception as e:
         logger.error(f"API Error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500

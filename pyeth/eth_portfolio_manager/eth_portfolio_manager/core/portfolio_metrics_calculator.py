@@ -3,10 +3,17 @@ Portfolio Metrics Calculator
 
 Objective:
 ---------
-1. Calculate comprehensive portfolio performance metrics
-2. Track historical portfolio states
-3. Generate risk analytics
-4. Provide real-time portfolio insights
+Calculate comprehensive portfolio performance metrics from both live TokenPosition objects 
+and JSON-structured database records, providing unified analytics across real-time and historical data.
+
+Key Features:
+------------
+1. Dual Input Support:
+   - Live TokenPosition objects
+   - JSON database records (static + dynamic history)
+2. Consistent Metric Calculation
+3. Historical Analysis
+4. Performance Tracking
 
 Metric Categories:
 ----------------
@@ -84,82 +91,104 @@ Implementation Notes:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Union, Any
 from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from eth_portfolio_manager.core.data_models import TokenPositionData, TokenPositionState
-from eth_portfolio_manager.live.live_portfolio_state_server import PortfolioStateServer
+from eth_portfolio_manager.core.token_position import TokenPosition
+
+
+@dataclass
+class CurrencyMetrics:
+    """Metrics for a specific currency"""
+    currency: str
+    total_value: float = 0.0
+    realized_profit: float = 0.0
+    unrealized_profit: float = 0.0
+    total_profit_loss: float = 0.0
+    position_count: int = 0
+    active_position_count: int = 0
+    inactive_sold_position_count: int = 0
+    inactive_init_position_count: int = 0
 
 
 @dataclass
 class PortfolioMetrics:
     """Core portfolio metrics"""
-    # Value metrics
-    total_value: float = 0.0
-    active_value: float = 0.0
-    inactive_value: float = 0.0
+    # Metrics by currency
+    currency_metrics: Dict[str, CurrencyMetrics] = None
     
-    # Performance metrics
-    total_profit_loss: float = 0.0
-    realized_profit: float = 0.0
-    unrealized_profit: float = 0.0
-    
-    # Position metrics
+    # Position metrics (currency-independent)
     total_position_count: int = 0
-    active_position_count: int = 0
-    inactive_position_count: int = 0
-    
-    # Risk metrics
-    largest_position_value: float = 0.0
-    largest_position_pct: float = 0.0
+    init_position_count: int = 0
+    buy_position_count: int = 0
+    sell_position_count: int = 0
     
     # Timestamp
     last_updated: datetime = None
+    
+    def __post_init__(self):
+        if self.currency_metrics is None:
+            self.currency_metrics = {}
 
 
 class PortfolioMetricsCalculator:
-   def __init__(self):
-      self.metrics = PortfolioMetrics()
-      self.position_history: Dict[str, List[TokenPositionData]] = {}
-      
-   async def update_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
-      """Calculate all portfolio metrics from current positions"""
-      self.metrics = await self.calculate_portfolio_metrics(positions)
-      return self.metrics
-      
-   async def calculate_portfolio_metrics(self, positions: Dict[str, TokenPositionData]) -> PortfolioMetrics:
-      """Calculate core portfolio metrics"""
-      metrics = PortfolioMetrics(last_updated=datetime.now())
-      
-      for position in positions.values():
-         if isinstance(position, dict):
-            position = TokenPositionData.from_dict(position)
+    def __init__(self):
+        self.metrics = PortfolioMetrics()
+        self.position_history: Dict[str, List[Any]] = {}
             
-         # Update value metrics
-         if position.has_active_position:
-               metrics.active_value += position.current_value
-               metrics.active_position_count += 1
-         else:
-               metrics.inactive_value += position.current_value
-               metrics.inactive_position_count += 1
-         
-         # Update profit metrics
-         metrics.realized_profit += position.realized_profit
-         metrics.unrealized_profit += position.unrealized_profit
-         
-         # Track largest position
-         if position.current_value > metrics.largest_position_value:
-               metrics.largest_position_value = position.current_value
-      
-      # Calculate totals
-      metrics.total_value = metrics.active_value + metrics.inactive_value
-      metrics.total_profit_loss = metrics.realized_profit + metrics.unrealized_profit
-      metrics.total_position_count = metrics.active_position_count + metrics.inactive_position_count
-      
-      # Calculate percentages
-      if metrics.total_value > 0:
-         metrics.largest_position_pct = metrics.largest_position_value / metrics.total_value
-         
-      return metrics
+    def calculate_portfolio_metrics(self, token_positions: Dict[str, Union[Dict, Any]]) -> PortfolioMetrics:
+        """Calculate core portfolio metrics grouped by currency"""
+        metrics = PortfolioMetrics(last_updated=datetime.now())
+        
+        for token_address, position in token_positions.items():
+            if isinstance(position, dict):
+                static_data = position['static_data']
+                latest_snapshot = position['latest_snapshot']
+                
+                # Handle currency
+                currency = static_data.get('currency', 'Unknown')
+                if currency is None:
+                    currency = 'Unknown'
+                
+                # Extract position state and values
+                position_state = latest_snapshot.get('position_state', 'Unknown')
+                current_value = float(latest_snapshot.get('current_value', 0.0))
+                realized_profit = float(latest_snapshot.get('realized_profit', 0.0))
+                unrealized_profit = float(latest_snapshot.get('unrealized_profit', 0.0))
+                
+                # Initialize currency metrics if needed
+                if currency not in metrics.currency_metrics:
+                    metrics.currency_metrics[currency] = CurrencyMetrics(currency=currency)
+                
+                curr_metrics = metrics.currency_metrics[currency]
+                curr_metrics.position_count += 1
+                
+                # Update state-based counts
+                if position_state == 'Init':
+                    metrics.init_position_count += 1
+                    curr_metrics.inactive_init_position_count += 1
+                elif position_state in ['BuySubmitted', 'BuyConfirmed']:
+                    metrics.buy_position_count += 1
+                    curr_metrics.active_position_count += 1
+                elif position_state in ['SellSubmitted', 'SellConfirmed']:
+                    metrics.sell_position_count += 1
+                    curr_metrics.inactive_sold_position_count += 1
+                
+                # Update value metrics
+                curr_metrics.total_value += current_value
+                curr_metrics.realized_profit += realized_profit
+                curr_metrics.unrealized_profit += unrealized_profit
+                
+                metrics.total_position_count += 1
+            
+            else:
+                # Handle TokenPosition object format if needed
+                continue
+        
+        # Calculate totals for each currency
+        for curr_metrics in metrics.currency_metrics.values():
+            curr_metrics.total_profit_loss = curr_metrics.realized_profit + curr_metrics.unrealized_profit
+        
+        return metrics

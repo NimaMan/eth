@@ -64,7 +64,7 @@ from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 @dataclass
 class StrategyConfig:
     position_size_eth: float = 0.01    # Size of each position in ETH
-    profit_target_x: float = 5.0      # Sell when price increases by this multiple
+    profit_target_x: float = 10.0      # Sell when price increases by this multiple
     
 
 class BuyScamStrategy(BaseStrategy):
@@ -109,7 +109,7 @@ class BuyScamStrategy(BaseStrategy):
                 token_address=live_token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,
                 quantity=self.config.position_size_eth,
-                strategy_name=self.__class__.__name__,
+                strategy_name=self.strategy_parameters["strategy_name"],
             )
         return None
 
@@ -119,7 +119,7 @@ class BuyScamStrategy(BaseStrategy):
             token_address=live_token.token_data.contract_address,
             decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
-            strategy_name=self.__class__.__name__,
+            strategy_name=self.strategy_parameters["strategy_name"],
         )
 
     def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
@@ -129,7 +129,7 @@ class BuyScamStrategy(BaseStrategy):
                 token_address=live_token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_SELL,
                 quantity=token_position.latest_snapshot.quantity,
-                strategy_name=self.__class__.__name__,
+                strategy_name=self.strategy_parameters["strategy_name"],
             )
         return None
 
@@ -139,5 +139,5 @@ class BuyScamStrategy(BaseStrategy):
             token_address=live_token.token_data.contract_address,
             decision=TradingDecision.CONFIRM_SELL,
             quantity=token_position.latest_snapshot.quantity,
-            strategy_name=self.__class__.__name__,
+            strategy_name=self.strategy_parameters["strategy_name"],
         )

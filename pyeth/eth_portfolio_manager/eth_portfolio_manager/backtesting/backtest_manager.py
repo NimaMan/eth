@@ -80,7 +80,6 @@ class BacktestPortfolioManager:
                 await self.block_token_processor.process_block(block_data)
                 token_updates = self.block_token_processor.updated_tokens
                 token_process_time = time.time() - start_token_process_time
-                self.logger.info(f"[Performance] Token processing took {token_process_time:.2f}s for block {current_block}")
                 # 3. Update positions for all strategies
                 if token_updates:
                     start_strategy_update_time = time.time()
@@ -90,7 +89,9 @@ class BacktestPortfolioManager:
                         tasks.append(position_manager.update_portfolio_tokens_positions(token_updates))
                     await asyncio.gather(*tasks)
                     strategy_update_time = time.time() - start_strategy_update_time
-                    self.logger.info(f"[Performance] Strategy updates took {strategy_update_time:.2f}s for block {current_block}")                
+                if not token_updates:
+                    strategy_update_time = 0
+                self.logger.info(f"[Performance] Token updates {len(token_updates)} in {token_process_time:.2f}s Strategy {strategy_update_time:.2f}s for block {current_block}")                
                 
                 current_block += 1
         except Exception as e:

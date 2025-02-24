@@ -63,8 +63,6 @@ Usage Guidelines:
   suitable for both database insertion and JSON responses for the frontend.
 """
 
-from enum import Enum
-from dataclasses import dataclass, asdict
 from typing import Optional, List, Tuple, Dict, Any
 from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
 from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
@@ -113,14 +111,14 @@ class TokenPosition:
             trading_enabled_block=live_token.token_data.trading_enabled_block,
             trading_enabled_timestamp=live_token.token_data.trading_enabled_timestamp,
             purchase_value=0.0,  # Initially zero, updated on buy signal.
-            entry_price_ratio=0.0, # Initially zero, updated on buy signal.
-            exit_price_ratio=0.0, # Initially zero, updated on sell signal.
-            entry_block=0,
-            exit_block=0,
-            entry_timestamp=0,
-            exit_timestamp=0,
-            entry_txn_fee=0.0,
-            exit_txn_fee=0.0
+            entry_price_ratio=None, # Initially zero, updated on buy signal.
+            exit_price_ratio=None, # Initially zero, updated on sell signal.
+            entry_block=live_token.token_data.creation_block, # update when the first buy signal is received
+            exit_block=0, # update when the first sell signal is received
+            entry_timestamp=live_token.token_data.creation_timestamp, # update when the first buy signal is received
+            exit_timestamp=0, # update when the first sell signal is received
+            entry_txn_fee=0.0, # update when the first buy signal is received
+            exit_txn_fee=0.0 # update when the first sell signal is received
         )
         return cls(static_data)
 
@@ -136,9 +134,6 @@ class TokenPosition:
         static_data = TokenPositionStaticData(**data["static"])
         dynamic_history = []
         for snap_data in data.get("dynamic_history", []):
-            # Assuming 'position_state' is stored as a string and needs conversion to the enum.
-            # Adjust conversion as per your enum implementation.
-            snap_data["position_state"] = snap_data["position_state"]  # You might convert it here, e.g., TokenPositionState(snap_data["position_state"])
             dynamic_history.append(TokenPositionDynamicSnapshot(**snap_data))
         return cls(static_data, dynamic_history=dynamic_history)
 
@@ -167,18 +162,6 @@ class TokenPosition:
             return self.dynamic_history[-1]
         return None
     
-    def update_static_data(self, live_token: LiveERC20Token) -> None:
-        """
-        Updates static data, if missing.
-                
-        Args:
-            live_token: The live token data containing updated static data.
-        """
-        if live_token.token_data.trading_enabled_block:
-            self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
-            self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
-
-
     def update_from_token_data(self, live_token: LiveERC20Token) -> None:
         """
         Updates the token position with live token data from the new block. It:
@@ -192,19 +175,24 @@ class TokenPosition:
             self.update_scammed_position(live_token)
             return
         
-        self.update_static_data(live_token)
+        if live_token.token_data.trading_enabled_block:
+            self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
+            self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
 
-        x_value = live_token.sync_info.current_price_ratio / self.static_data.entry_price_ratio if self.static_data.entry_price_ratio else 0
-        roi = x_value - 1
-        current_value = self.static_data.purchase_value * x_value
+        x_value = 0
+        roi = 0
+        current_value = 0
+        unrealized_profit = 0
         if self.latest_snapshot.has_active_position:
-            unrealized_profit = current_value - self.static_data.purchase_value
-        else:
-            unrealized_profit = 0
+            if self.static_data.entry_price_ratio:
+                x_value = live_token.token_data.current_price_ratio / self.static_data.entry_price_ratio 
+                roi = x_value - 1
+                current_value = self.static_data.purchase_value * x_value
+                unrealized_profit = current_value - self.static_data.purchase_value
         
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
-            current_price_ratio=live_token.sync_info.current_price_ratio,
+            current_price_ratio=live_token.token_data.current_price_ratio,
             roi=roi,
             current_value=current_value,
             realized_profit=self.latest_snapshot.realized_profit,
@@ -220,7 +208,7 @@ class TokenPosition:
             scam_reason=live_token.latest_token_assessment.get('scam_reason'),
             num_greys=live_token.latest_token_assessment.get('num_greys'),
             num_greens=live_token.latest_token_assessment.get('num_greens'),
-            num_bribers=live_token.token_data.num_bribers,
+            num_bribers=live_token.token_data.num_bribes,
             token_bribe_amount=live_token.token_data.total_bribe_amount
         )
         
@@ -234,7 +222,7 @@ class TokenPosition:
         if current_snapshot:
             new_snapshot = TokenPositionDynamicSnapshot(
                 current_price_ratio=0,
-                X=0,
+                roi=0,
                 current_value=0,
                 realized_profit=-self.static_data.purchase_value,
                 unrealized_profit=0,
@@ -243,13 +231,13 @@ class TokenPosition:
                 token_age_hours=live_token.token_trading_age_hours,
                 block_number=live_token.token_data.latest_block_number,
                 timestamp=live_token.token_data.latest_block_timestamp,
-                has_active_position=False,
+                has_active_position=True,
                 position_state=TokenPositionState.SCAMMED,
                 scam_probability=1.0,
                 scam_reason=live_token.latest_token_assessment.get('scam_reason'),
                 num_greys=live_token.latest_token_assessment.get('num_greys'),
                 num_greens=live_token.latest_token_assessment.get('num_greens'),
-                num_bribers=live_token.token_data.num_bribers,
+                num_bribers=live_token.token_data.num_bribes,
                 token_bribe_amount=live_token.token_data.total_bribe_amount
             )
             self.add_snapshot(new_snapshot)

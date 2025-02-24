@@ -66,13 +66,14 @@ class TokenPositionDynamicSnapshot:
     block_number: int = 0
     timestamp: int = 0 
     has_active_position: bool = False
-    position_state: TokenPositionState = TokenPositionState.INIT
-    scam_probability: Optional[float] = None 
-    scam_reason: Optional[str] = None 
     num_greys: Optional[int] = None 
     num_greens: Optional[int] = None
-    num_bribers: Optional[int] = None 
     token_bribe_amount: Optional[float] = None
+    num_bribers: Optional[str] = None 
+    scam_probability: Optional[float] = None 
+    scam_reason: Optional[str] = None 
+    comment: Optional[str] = None 
+    position_state: TokenPositionState = TokenPositionState.INIT
     
     def to_dict(self) -> Dict[str, Any]:
         attr = asdict(self)

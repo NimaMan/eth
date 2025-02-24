@@ -67,13 +67,12 @@ class BacktestConfig:
         }       
 
 
-async def main():
+async def main(num_days=2):
     # Configuration for backtesting
     start_time = time.time()
     w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     latest_block = w3.eth.get_block_number()
-    num_days = 2
-    num_blocks_per_day = 24 * 60 * 60 / 12  # 1 block is 12 seconds
+    num_blocks_per_day = 24 * 60 * 60 / 12  # 1 block is 12 seconds roughly 7200 blocks per day
     num_blocks = int(num_days * num_blocks_per_day)
     start_block = latest_block - num_blocks
     end_block = latest_block
@@ -101,4 +100,4 @@ async def main():
 
 if __name__ == "__main__":
     # Run the main backtest function using an event loop
-    asyncio.run(main())
+    asyncio.run(main(num_days=14))
