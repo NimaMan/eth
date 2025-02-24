@@ -37,7 +37,7 @@ from typing import Dict, List, Optional
 import asyncio
 import redis.asyncio as aioredis
 
-from eth_portfolio_manager.core.data_models import TokenPositionData, TradeSignal
+from eth_portfolio_manager.core.token_position import TokenPosition
 from eth_portfolio_manager.utils.logger import get_logger
 
 
@@ -45,7 +45,7 @@ class PortfolioStateServer:
     def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None):
         self.redis = aioredis.from_url(redis_url, decode_responses=True)
         self.logger = logger or get_logger(name="portfolio_manager")
-        self.current_positions: Dict[str, TokenPositionData] = {}
+        self.token_positions: Dict[str, TokenPosition] = {}
         
     async def load_state(self):
         """Load existing state from Redis"""
@@ -59,7 +59,7 @@ class PortfolioStateServer:
                 if pos_data:
                     pos_dict = orjson.loads(pos_data)
                     token_address = key.split(":")[-1]
-                    self.current_positions[token_address] = TokenPositionData(**pos_dict)
+                    self.current_positions[token_address] = TokenPosition(**pos_dict)
                     
             self.logger.info(f"Loaded {len(self.current_positions)} positions from Redis")
             

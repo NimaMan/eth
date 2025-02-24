@@ -47,7 +47,7 @@ import time
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
 from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
-from eth_token_monitor.token_manager.block_token_processor import BlockTokenProcessor
+from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_portfolio_manager.utils.logger import get_logger
 
 

@@ -61,7 +61,7 @@ Required Methods:
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
+from eth_token.live_erc20_token.live_token import LiveERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal
 from eth_portfolio_manager.core.token_position import TokenPosition
 

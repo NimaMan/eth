@@ -115,8 +115,8 @@ from datetime import datetime
 from enum import Enum
 
 from eth_portfolio_manager.strategy.base import BaseStrategy
-from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
-from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
 
 
@@ -203,8 +203,8 @@ class LiveTokenPositionManager:
         position.current_value = 0
         position.realized_profit = -position.purchase_value  # Full loss
         position.unrealized_profit = 0
-        position.token_age_blocks = token.token_age_blocks
-        position.token_age_hours = token.token_age_hours
+        position.token_age_blocks = token.token_creation_age_blocks
+        position.token_age_hours = token.token_creation_age_hours
         position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.has_active_position = False

@@ -29,7 +29,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from eth_portfolio_manager.core.token_position import TokenPosition
-from eth_token_analyzer.live_erc20_token.live_token import LiveERC20Token
+from eth_token.live_erc20_token.live_token import LiveERC20Token
 from eth_portfolio_manager.utils.logger import get_logger
 
 

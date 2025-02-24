@@ -2,7 +2,7 @@ import asyncio
 from typing import Dict, Optional
 
 from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
-from eth_portfolio_manager.core.data_models import TokenPositionData
+from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.live.live_portfolio_state_server import PortfolioStateServer
 from eth_portfolio_manager.live.live_token_position_manager import LiveTokenPositionManager
 from eth_portfolio_manager.strategy.base import BaseStrategy
@@ -12,7 +12,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
     def __init__(self, investment_strategy: BaseStrategy, logger=None):
         super().__init__(logger=logger)
         self.state_server = PortfolioStateServer(logger=self.logger)
-        self.positions: Dict[str, TokenPositionData] = self.state_server.current_positions
+        self.positions: Dict[str, TokenPositionState] = self.state_server.current_positions
         self.token_position_manager = LiveTokenPositionManager(investment_strategy=investment_strategy)
         
     async def initialize(self):
@@ -26,7 +26,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
             self.logger.error(f"{self.__class__.__name__} Error initializing portfolio: {e}")
             raise e
 
-    async def update_portfolio_tokens_positions(self, updated_tokens) -> Dict[str, TokenPositionData]:
+    async def update_portfolio_tokens_positions(self, updated_tokens) -> Dict[str, TokenPositionState]:
         """
         Process multiple token updates concurrently and update portfolio state
         
@@ -66,7 +66,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
             self.logger.error(f"{self.__class__.__name__} Error updating token positions: {e}")
             raise
     
-    def get_position(self, token_address: str) -> Optional[TokenPositionData]:
+    def get_position(self, token_address: str) -> Optional[TokenPositionState]:
         """Get position data for a specific token"""
         return self.positions.get(token_address)
    

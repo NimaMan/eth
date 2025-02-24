@@ -26,7 +26,7 @@ baygus is a system that orchestrates and monitors all system components. It will
 - MEV detection and protection (how do we do this?)
 - Publishing the processed blocks for the other components
 
-### 2. Token Monitor (eth_token_monitor)
+### 2. Token Monitor (eth_token)
 **Objective**: Track and analyze token behavior in real-time
 - New token detection
 - Token state management

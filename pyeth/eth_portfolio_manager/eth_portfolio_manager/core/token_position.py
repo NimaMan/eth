@@ -64,8 +64,8 @@ Usage Guidelines:
 """
 
 from typing import Optional, List, Tuple, Dict, Any
-from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
-from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TokenPositionStaticData, TokenPositionDynamicSnapshot, TokenPositionState
 
 

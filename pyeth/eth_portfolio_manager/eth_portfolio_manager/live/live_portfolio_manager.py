@@ -13,7 +13,7 @@ from typing import Dict, Optional, Set, List
 import asyncio
 from eth_portfolio_manager.live.live_portfolio_position_manager import LivePortfolioPositionManager
 
-from eth_token_monitor.token_manager.live_token_manager import LiveTokenManager
+from eth_token.token_manager.live_token_manager import LiveTokenManager
 from eth_portfolio_manager.utils.logger import get_logger
 
 

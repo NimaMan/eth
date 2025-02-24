@@ -11,7 +11,7 @@ One thing to remeber here is that the scam is logarithmic.
 
 - The scam labeler needs correction
 
-# eth_token_monitor
+# eth_token
 
 - Add txn info such as the hash to the live token. currently we miss that in the bribe alert. 
 - Add api to be able to get the current live tokens

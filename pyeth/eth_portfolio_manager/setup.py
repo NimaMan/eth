@@ -48,7 +48,7 @@ Change log
 - Creates a position manager that:
     - Strategies based on the current alerts in 
         - eth_block_processor
-        - eth_token_monitor
+        - eth_token
     - publishes a decision to the txn manager
 
 '''

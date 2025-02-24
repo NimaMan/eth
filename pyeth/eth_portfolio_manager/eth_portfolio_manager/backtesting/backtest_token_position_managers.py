@@ -113,8 +113,8 @@ import asyncio
 from typing import Dict, List 
 
 from eth_portfolio_manager.strategy.base import BaseStrategy
-from eth_token_monitor.live_erc20_token.live_token import LiveERC20Token
-from eth_token_monitor.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
 
