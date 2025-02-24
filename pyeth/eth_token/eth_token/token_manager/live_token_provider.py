@@ -10,7 +10,7 @@ Objective:
 
 from typing import Optional, List
 from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.services.cache.token_cache_service import TokenCacheService
+from eth_token.token_manager.token_cache_service import TokenCacheService
 from eth_token.utils.logger import get_logger
 
 

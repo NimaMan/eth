@@ -23,7 +23,7 @@ from eth_token.utils.logger import get_logger
 
 class BlockTokenProcessor:
     def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None, max_concurrency=20):
-        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
+        self.logger = logger or get_logger(name="token_manager")
         # Token tracking
         self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger, redis_url=redis_url)
         self.token_first_seen: Dict[str, int] = {}
@@ -110,7 +110,7 @@ class BlockTokenProcessor:
             token = self.live_tokens_cache[token_address]
             if token:
                 update_tasks.append(
-                    self._update_token_safe(
+                    self._update_token(
                         token=token,
                         transaction=transaction,
                         token_address=token_address
@@ -121,7 +121,7 @@ class BlockTokenProcessor:
         if update_tasks:
             await asyncio.gather(*update_tasks)
 
-    async def _update_token_safe(self, token: LiveERC20Token, transaction: Dict, token_address: str):
+    async def _update_token(self, token: LiveERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""
         try:
             await token.update_from_transaction_async(transaction)

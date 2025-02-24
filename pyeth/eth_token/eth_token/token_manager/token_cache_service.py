@@ -25,7 +25,6 @@ import asyncio
 import time
 import redis
 from typing import Dict, Optional
-import orjson
 from eth_token.utils.logger import get_logger
 from eth_token.live_erc20_token.live_token import LiveERC20Token
 
