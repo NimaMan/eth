@@ -5,7 +5,6 @@ from typing import List, Optional, Dict, Any, Union, Set
 from web3.types import ChecksumAddress, Wei, Hash32
 from eth_block_processor.data_models.receipt_models import *
 from eth_block_processor.data_models.trace_models import *
-from eth_block_processor.data_models.uniswap_v3_models import *
 from eth_block_processor.utils.type_converter import (
     convert_to_int, convert_to_hex_str, normalize_address, convert_log_index, convert_block_number,
     convert_transaction_index, convert_status

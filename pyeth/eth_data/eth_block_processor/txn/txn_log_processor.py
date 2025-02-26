@@ -237,6 +237,12 @@ class TransactionLogProcessor:
         # Handle both hex string and bytes data formats
         data = self._ensure_hex_string(log['data'])
         topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        if len(topics) == 3:
+            return self.parse_erc20_transfer(log, data, topics)
+        else:
+            return self.parse_erc721_transfer(log, data, topics)
+
+    def parse_erc20_transfer(self, log: Dict[str, Any], data: str, topics: List[str]) -> ERC20Transfer:
         return ERC20Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
             from_address=self.w3.to_checksum_address(topics[1][-40:]),
@@ -245,13 +251,15 @@ class TransactionLogProcessor:
             log_index=self._process_integer(log['logIndex'])
         )
 
-    def parse_erc721_transfer(self, log: Dict[str, Any]) -> ERC721Transfer:
-        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+    def parse_erc721_transfer(self, log: Dict[str, Any], data: str, topics: List[str]) -> ERC721Transfer:
+        # For ERC721, the token ID is in the 4th topic (index 3)
+        token_id = self._process_integer(topics[3]) if len(topics) > 3 else None
+        
         return ERC721Transfer(
             token_address=self.w3.to_checksum_address(log['address']),
             from_address=self.w3.to_checksum_address(topics[1][-40:]) if len(topics) > 1 else None,
             to_address=self.w3.to_checksum_address(topics[2][-40:]) if len(topics) > 2 else None,
-            token_id=self._process_integer(topics[3]) if len(topics) > 3 and topics[3] != '' else 0,
+            token_id=token_id,
             log_index=self._process_integer(log['logIndex'])
         )
 

@@ -1,29 +1,12 @@
-# File: eth_block_processor/eth_block_processor/db/transaction_saver.py
-
-"""
-Transaction Saver Module
-
-Algorithmic Description:
------------------------
-This module defines a TransactionSaver class that handles saving processed transactions
-to the database. It supports both individual and bulk transaction saving operations.
-
-Key Components:
-1. Session Management: Maintains a session factory for database operations
-2. Bulk Operations: Efficiently saves multiple transactions in a single database transaction
-3. Caching: Uses address caching to minimize database queries
-4. Error Handling: Provides comprehensive error handling and logging
-"""
-
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from eth_block_processor.utils.logger import get_logger
 from sarigoz.data.db.schema.models import Address, Transaction, TxParticipant
 from sarigoz.data.db.conn import get_engine
-from eth_block_processor.utils.logger import get_logger
-from sqlalchemy import text
-
+from eth_block_processor.utils.address_type_labeler import AddressTypeLabeler
 
 class TransactionSaver:
-    def __init__(self, engine=None, logger=None):
+    def __init__(self, w3, engine=None, logger=None):
         """
         Initialize the TransactionSaver with a database engine and logger.
         
@@ -31,6 +14,8 @@ class TransactionSaver:
             engine: SQLAlchemy engine (default: creates new engine for eth_db)
             logger: Logger instance (default: creates new logger)
         """
+        self.w3 = w3
+        self.address_labeler = AddressTypeLabeler(w3)
         self.engine = engine or get_engine(db='eth_db')
         self.SessionLocal = sessionmaker(bind=self.engine)
         self.logger = logger or get_logger(name="transaction_saver")
@@ -90,7 +75,7 @@ class TransactionSaver:
                     if addr not in address_cache:
                         new_address = Address(
                             address=addr,
-                            is_contract=False
+                            is_contract=self.address_labeler.is_contract(addr)
                         )
                         address_cache[addr] = new_address
 
@@ -108,9 +93,63 @@ class TransactionSaver:
 
             # Bulk save all objects, letting DB constraints handle duplicates
             if new_address_objs:
-                session.bulk_save_objects(new_address_objs)
+                # Use ON CONFLICT for addresses too
+                address_params = []
+                for addr_obj in new_address_objs:
+                    try:
+                        param = {
+                            "address": addr_obj.address,
+                            "is_contract": addr_obj.is_contract
+                        }
+                        address_params.append(param)
+                    except AttributeError as e:
+                        self.logger.error(f"AttributeError in address object: {e}")
+                        continue
+                
+                session.execute(
+                    text("""
+                    INSERT INTO eth_db.addresses (address, is_contract)
+                    VALUES (:address, :is_contract)
+                    ON CONFLICT (address) DO NOTHING
+                    """),
+                    address_params
+                )
+            
             if txn_objs:
-                session.bulk_save_objects(txn_objs)
+                try:
+                    # Add debug logging
+                    self.logger.debug(f"Inserting {len(txn_objs)} transactions")
+                    
+                    # Create parameters list with proper error checking
+                    params = []
+                    for txn in txn_objs:
+                        try:
+                            param = {
+                                "tx_hash": txn.tx_hash,
+                                "block_number": txn.block_number,
+                                "from_address": txn.from_address,
+                                "to_address": txn.to_address,
+                                "value": txn.value,
+                                "status": txn.status
+                            }
+                            params.append(param)
+                        except AttributeError as e:
+                            # Log the specific attribute that's missing
+                            self.logger.error(f"AttributeError in transaction object: {e}")
+                            continue
+                    
+                    session.execute(
+                        text("""
+                        INSERT INTO eth_db.transactions (tx_hash, block_number, from_address, to_address, value, status)
+                        VALUES (:tx_hash, :block_number, :from_address, :to_address, :value, :status)
+                        ON CONFLICT (tx_hash) DO NOTHING
+                        """),
+                        params
+                    )
+                except Exception as e:
+                    self.logger.error(f"Error in transaction insertion: {str(e)}")
+                    # Continue with other operations
+            
             if tx_participant_objs:
                 session.execute(
                     text("""
@@ -123,11 +162,6 @@ class TransactionSaver:
                 )
 
             session.commit()
-            self.logger.info(
-                f"Processed block: {len(txn_objs)} transactions, "
-                f"{len(new_address_objs)} new addresses, "
-                f"{len(tx_participant_objs)} participant associations"
-            )
             
         except Exception as e:
             session.rollback()
@@ -145,29 +179,55 @@ class TransactionSaver:
         """
         session = self.SessionLocal()
         try:
-            # Similar to bulk save but for a single transaction
-            txn = Transaction(
-                tx_hash=processed_txn.hash,
-                block_number=processed_txn.block_number,
-                from_address=processed_txn.from_address,
-                to_address=processed_txn.to_address,
-                value=processed_txn.value,
-                status=processed_txn.status
+            # Use the same ON CONFLICT approach for single transactions
+            session.execute(
+                text("""
+                INSERT INTO eth_db.transactions (tx_hash, block_number, from_address, to_address, value, status)
+                VALUES (:tx_hash, :block_number, :from_address, :to_address, :value, :status)
+                ON CONFLICT (tx_hash) DO NOTHING
+                """),
+                {
+                    "tx_hash": processed_txn.hash,
+                    "block_number": processed_txn.block_number,
+                    "from_address": processed_txn.from_address,
+                    "to_address": processed_txn.to_address,
+                    "value": processed_txn.value,
+                    "status": processed_txn.status
+                }
             )
-            session.add(txn)
             
             # Process addresses
             for addr in processed_txn.unique_addresses:
+                # Use ON CONFLICT for addresses too
+                session.execute(
+                    text("""
+                    INSERT INTO eth_db.addresses (address, is_contract)
+                    VALUES (:address, :is_contract)
+                    ON CONFLICT (address) DO NOTHING
+                    """),
+                    {
+                        "address": addr,
+                        "is_contract": self.address_labeler.is_contract(addr)
+                    }
+                )
+                
+                # Check if address exists
                 address = session.query(Address).filter_by(address=addr).first()
                 if not address:
                     address = Address(address=addr, is_contract=False)
                     session.add(address)
                 
-                txp = TxParticipant(tx_hash=processed_txn.hash, address=addr)
-                session.add(txp)
+                # Use ON CONFLICT for transaction participants too
+                session.execute(
+                    text("""
+                    INSERT INTO eth_db.tx_participants (tx_hash, address)
+                    VALUES (:tx_hash, :address)
+                    ON CONFLICT (tx_hash, address) DO NOTHING
+                    """),
+                    {"tx_hash": processed_txn.hash, "address": addr}
+                )
 
             session.commit()
-            self.logger.info(f"Saved transaction {processed_txn.hash}")
             
         except Exception as e:
             session.rollback()
@@ -175,3 +235,22 @@ class TransactionSaver:
             raise
         finally:
             session.close()
+
+    def get_processed_blocks(self):
+        query = text("""
+        SELECT DISTINCT block_number FROM eth_db.transactions
+        """)
+
+        with self.engine.connect() as conn:
+            result = conn.execute(query).fetchall()
+            processed_blocks = set(row[0] for row in result)
+        return processed_blocks
+    
+    def get_max_processed_block(self):
+        query = text("""
+        SELECT MAX(block_number) FROM eth_db.transactions
+        """)
+
+        with self.engine.connect() as conn:
+            result = conn.execute(query).fetchall()
+            return result[0][0]
