@@ -129,7 +129,7 @@ class BuyAll(BaseStrategy):
 
     def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_CONFIRMED state: Submit sell if price target reached"""
-        if token_position.latest_snapshot.current_price_ratio >= self.config.profit_target_x:
+        if token_position.latest_snapshot.roi >= self.config.profit_target_x:
             return TradeSignal(
                 token_address=live_token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_SELL,

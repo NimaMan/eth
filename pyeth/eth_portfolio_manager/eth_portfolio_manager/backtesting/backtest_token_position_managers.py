@@ -109,7 +109,6 @@ Implementation Notes:
 5. Error states are properly handled
 """
 
-import asyncio
 from typing import Dict, List 
 
 from eth_portfolio_manager.strategy.base import BaseStrategy
@@ -202,13 +201,18 @@ class TokenPositionManagerBacktest:
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
-            # Recalculate metrics using data directly from live_token
-            if token_position.static_data.entry_price_ratio:
-                x_value = live_token.token_data.current_price_ratio / token_position.static_data.entry_price_ratio
-                token_position.latest_snapshot.roi = x_value - 1
-                token_position.latest_snapshot.current_value = token_position.static_data.purchase_value * x_value
-            # Additional fields can be updated here if necessary
+            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
+            # Update the latest snapshot in place
+            token_position.latest_snapshot.has_active_position = True
+            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
+            token_position.latest_snapshot.roi = 0.0  # ROI equals 0 at entry (i.e. 1 - 1 = 0)
+            token_position.latest_snapshot.current_value = token_position.static_data.purchase_value
+            token_position.latest_snapshot.realized_profit = 0
+            token_position.latest_snapshot.unrealized_profit = 0
+            
         return token_position
 
     def update_submit_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:

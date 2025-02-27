@@ -91,7 +91,7 @@ class BacktestPortfolioManager:
                     strategy_update_time = time.time() - start_strategy_update_time
                 if not token_updates:
                     strategy_update_time = 0
-                self.logger.info(f"[Performance] Token updates {len(token_updates)} in {token_process_time:.2f}s Strategy {strategy_update_time:.2f}s for block {current_block}")                
+                self.logger.info(f"{current_block} Tokens {len(token_updates)} | Strategies  {token_process_time:.2f} | {strategy_update_time:.2f}")                
                 
                 current_block += 1
         except Exception as e:
