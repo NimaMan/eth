@@ -1,10 +1,10 @@
 from typing import List, Any
 
 from eth_block_processor.utils.common_addresses import fee_recipients
-from eth_block_processor.alert.base_alert_class import BaseAlert
-from eth_block_processor.alert.alert_models import BribeAlertData
+from eth_block_processor.txn_alert.base_alert_class import BaseAlert
+from eth_block_processor.txn_alert.alert_models import BribeAlertData
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
-from eth_block_processor.alert.config import bribe_threshold
+from eth_block_processor.txn_alert.config import bribe_threshold
 from eth_block_processor.utils.logger import get_logger
 
 

@@ -247,19 +247,8 @@ class UniswapV3PoolCreated:
     fee: int
     tick_spacing: int
     pool: str
-    log_index: int
+    log_index: int    
 
-    def get_tick_spacing(self) -> int:
-        """Calculate tick spacing based on fee tier"""
-        if self.fee == 100:
-            return 1
-        elif self.fee == 500:
-            return 10
-        elif self.fee == 3000:
-            return 60
-        elif self.fee == 10000:
-            return 200
-        return 0
 
 @dataclass
 class UniswapV3Initialize:
@@ -273,6 +262,7 @@ class UniswapV3Initialize:
 
     def __post_init__(self):
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
+
 
 @dataclass
 class UniswapV3Mint:
@@ -294,6 +284,7 @@ class UniswapV3Mint:
         self.amount0 = str(self.amount0)
         self.amount1 = str(self.amount1)
 
+
 @dataclass
 class UniswapV3Position:
     token_id: int
@@ -311,6 +302,7 @@ class UniswapV3Position:
         self.liquidity = str(self.liquidity)
         self.amount0 = str(self.amount0)
         self.amount1 = str(self.amount1)
+
 
 @dataclass
 class UniswapV3Swap:
@@ -334,6 +326,7 @@ class UniswapV3Swap:
         self.liquidity = str(self.liquidity)
         self.tick = str(self.tick)
 
+
 @dataclass
 class UniswapV3Burn:
     """Burn Event
@@ -347,6 +340,12 @@ class UniswapV3Burn:
     amount0: int
     amount1: int
     log_index: int
+
+    def __post_init__(self):
+        self.amount = str(self.amount)
+        self.amount0 = str(self.amount0)
+        self.amount1 = str(self.amount1)
+
 
 @dataclass
 class UniswapV3DecreaseLiquidity:
@@ -366,6 +365,7 @@ class UniswapV3DecreaseLiquidity:
         self.amount0 = str(self.amount0)
         self.amount1 = str(self.amount1)
 
+
 @dataclass
 class UniswapV3IncreaseLiquidity:
     """IncreaseLiquidity Event
@@ -384,6 +384,7 @@ class UniswapV3IncreaseLiquidity:
         self.amount0 = str(self.amount0)
         self.amount1 = str(self.amount1)
 
+
 @dataclass
 class UniswapV3Collect:
     """Collect Event
@@ -396,3 +397,100 @@ class UniswapV3Collect:
     pool_address: str
     log_index: int
 
+
+#--------------------------------
+# Uniswap V4
+#--------------------------------
+
+@dataclass
+class UniswapV4Initialize:
+    """
+    Uniswap V4 Initialize Event
+    Event Format:
+      Initialize(bytes32 id, address indexed currency0, address indexed currency1, uint24 fee,
+                 int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)
+    """
+    pool_manager_address: str
+    event_id: str
+    currency0: str
+    currency1: str
+    fee: int
+    tick_spacing: int
+    hooks: str
+    sqrt_price_x96: int
+    tick: int
+    log_index: int
+
+    def __post_init__(self):
+        self.sqrt_price_x96 = str(self.sqrt_price_x96)
+
+
+@dataclass
+class UniswapV4ModifyLiquidity:
+    """
+    Uniswap V4 ModifyLiquidity Event
+    Event Format:
+      ModifyLiquidity(bytes32 id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)
+    """
+    pool_manager_address: str
+    event_id: str
+    sender: str
+    tick_lower: int
+    tick_upper: int
+    liquidity_delta: int
+    salt: str
+    log_index: int
+
+
+@dataclass
+class Permit2:
+    """
+    Uniswap Protocol: Permit2 Event
+    Event Format:
+      Permit(address indexed owner, address indexed token, address indexed spender, uint160 amount, uint48 expiration, uint48 nonce)
+    Example Log:
+      Address: (Permit2 contract address, e.g. Uniswap Protocol: Permit2)
+      Topics[1]: owner
+      Topics[2]: token
+      Topics[3]: spender
+      Data: amount, expiration, nonce
+    """
+    pool_manager_address: str  # The contract address (emitter)
+    owner: str
+    token: str
+    spender: str
+    amount: int
+    expiration: int
+    nonce: int
+    log_index: int
+
+    def __post_init__(self):
+        # Convert the amount to string for consistency with other models.
+        if not isinstance(self.amount, str):
+            self.amount = str(self.amount)
+
+
+@dataclass
+class UniswapV4Swap:
+    """
+    Uniswap V4 Swap Event
+    Event Format:
+      Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1,
+           uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+    """
+    pool_manager_address: str
+    event_id: str
+    sender: str
+    amount0: int
+    amount1: int
+    sqrt_price_x96: int
+    liquidity: int
+    tick: int
+    fee: int
+    log_index: int
+
+    def __post_init__(self):
+        self.amount0 = str(self.amount0)
+        self.amount1 = str(self.amount1)
+        self.sqrt_price_x96 = str(self.sqrt_price_x96)
+        self.liquidity = str(self.liquidity)

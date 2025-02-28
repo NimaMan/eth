@@ -91,6 +91,8 @@ class TransactionProcessor:
                                 erc20_contracts):       
         unique_addresses.add(from_address)
         unique_addresses.add(to_address)
+        for address in erc20_contracts:
+            unique_addresses.add(address)
         for internal_txn in internal_transactions:
             unique_addresses.add(internal_txn.from_address)
             unique_addresses.add(internal_txn.to_address)

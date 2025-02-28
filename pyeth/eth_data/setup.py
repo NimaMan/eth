@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 NAME="eth_block_processor"
-VERSION="0.3.0"
+VERSION="0.4.0"
 # To install the library, run the following
 #
 # python setup.py install
@@ -33,9 +33,11 @@ setup(
 
 '''
 Change log 
+0.4.0: 
+- Add uniswap v4 events
 
 v0.3.0: 
-- Add transaction saver
+- Add transaction participant db saver
 
 v0.2.0: 
 - Add uniswap v3 positions

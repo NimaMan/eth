@@ -45,11 +45,12 @@ async def process_blocks(
         logger.info(f"Block range: {start_block} to {end_block}")
         
         # Get already processed blocks from the database
-        if save_txn_to_db:
-            processed_blocks = processor.transaction_saver.get_processed_blocks()
-            logger.info(f"Found {len(processed_blocks)} already processed blocks in the database")
-        else:
-            processed_blocks = set()
+        #if save_txn_to_db:
+        #    processed_blocks = processor.transaction_saver.get_processed_blocks()
+        #    logger.info(f"Found {len(processed_blocks)} already processed blocks in the database")
+        #else:
+        
+        processed_blocks = set()
         
         for block_number in tqdm(range(end_block, start_block - 1, -1)):
             # Skip if already processed

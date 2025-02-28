@@ -15,17 +15,16 @@ Flow:
 import time 
 import asyncio
 from typing import List
-from eth_block_processor.alert.txn_alert_processor import TransactionAlertProcessor
+from eth_block_processor.txn_alert.txn_alert_processor import TransactionAlertProcessor
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger("alert_processor", log_folder="alert")
-
 
 class BlockAlertProcessor:
-    def __init__(self):
-        self.txn_alert_processor = TransactionAlertProcessor()
+    def __init__(self, logger=None):
+        self.logger = logger or get_logger(name="alert_processor")
+        self.txn_alert_processor = TransactionAlertProcessor(logger=self.logger)
 
     async def process_block_transactions(self, txn_list: List[ProcessedTransaction]):
         """Process list of transaction dictionaries concurrently"""
@@ -53,9 +52,9 @@ class BlockAlertProcessor:
                         if alert and not isinstance(alert, (Exception, list))
                     ])
             
-            logger.info(f"Processed block {block_number} in {time.time() - start_time:.2f} seconds with {len(valid_alerts)} alerts")
+            self.logger.info(f"Processed block {block_number} in {time.time() - start_time:.2f} seconds with {len(valid_alerts)} alerts")
             return valid_alerts
         
         except Exception as e:
-            logger.error(f"{__name__}: Error processing transactions: {e}", exc_info=True)
+            self.logger.error(f"{__name__}: Error processing transactions: {e}", exc_info=True)
             return []

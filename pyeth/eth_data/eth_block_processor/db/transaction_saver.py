@@ -5,6 +5,7 @@ from sarigoz.data.db.schema.models import Address, Transaction, TxParticipant
 from sarigoz.data.db.conn import get_engine
 from eth_block_processor.utils.address_type_labeler import AddressTypeLabeler
 
+
 class TransactionSaver:
     def __init__(self, w3, engine=None, logger=None):
         """

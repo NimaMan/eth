@@ -123,12 +123,8 @@ from web3.providers import WebSocketProvider
 import aio_pika
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_block_processor.alert.block_alert_processor import BlockAlertProcessor
+from eth_block_processor.txn_alert.block_alert_processor import BlockAlertProcessor
 from eth_block_processor.utils.logger import get_logger
-
-
-logger = get_logger(name="block_processor", log_folder="eth_block_processor")
-alert_logger = get_logger("alert_processor", log_folder="alert")
 
 
 def transaction_serializer(obj):
@@ -178,17 +174,20 @@ class LiveBlockProcessor:
         websocket_url: str = "ws://127.0.0.1:8546",
         http_url: str = "http://127.0.0.1:8545",
         rabbitmq_url: str = "amqp://guest:guest@localhost/",
-        save_erc20_txns: bool = False
+        save_txn_to_db: bool = False
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
         self.w3 = AsyncWeb3(self.provider)
         self.rabbitmq_url = rabbitmq_url
+        self.save_txn_to_db = save_txn_to_db
+        self.logger = get_logger(name="live_block_processor")
         
         # Initialize BlockProcessor with HTTP connection for detailed data fetching
         self.block_processor = BlockProcessor(
             node_url=http_url,
-            save_erc20_txn_to_db=save_erc20_txns,
+            logger=self.logger,
+            save_txn_to_db=self.save_txn_to_db
         )
         self.block_alert_processor = BlockAlertProcessor()
         # RabbitMQ connection and channel
@@ -216,22 +215,59 @@ class LiveBlockProcessor:
                 # Create new connection
                 self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
                 self.channel = await self.connection.channel()
+                
+                # Declare exchanges
                 self.blocks_exchange = await self.channel.declare_exchange(
                     "blocks_exchange",
                     aio_pika.ExchangeType.FANOUT,
                     durable=True
                 )
                 self.alerts_exchange = await self.channel.declare_exchange(
-                    "alerts_exchange",
+                    "txn_alerts_exchange",
                     aio_pika.ExchangeType.FANOUT,
                     durable=True
                 )
-                logger.info("Successfully connected to RabbitMQ")
+                
+                # Define queue arguments for all consumers
+                queue_args = {
+                    'x-max-length': 100,        # Keep only latest 100 messages
+                    'x-overflow': 'drop-head',   # Drop oldest messages when full
+                    'x-message-ttl': 3600000,    # Messages expire after 1 hour (in milliseconds)
+                }
+                
+                # Define specific consumer queues with limits
+                consumer_queues = [
+                    "jupyter_consumer", 
+                    "eth_block_tokens_consumer", 
+                    "eth_txn_alerts_consumer"
+                ]
+                
+                # Create/update all consumer queues with proper limits
+                for queue_name in consumer_queues:
+                    queue = await self.channel.declare_queue(
+                        queue_name,
+                        durable=True,
+                        arguments=queue_args
+                    )
+                    
+                    # Bind the queue to the appropriate exchange
+                    if "alert" in queue_name.lower():
+                        await queue.bind(
+                            self.alerts_exchange, 
+                            routing_key="eth_txn_alerts"  # Use the same routing key as in publish_alert
+                        )
+                    else:
+                        await queue.bind(
+                            self.blocks_exchange, 
+                            routing_key="processed_blocks"  # Use the same routing key as in publish_block
+                        )
+                        
+                self.logger.info("Successfully connected to RabbitMQ with queue limits")
                 return True
                 
             except Exception as e:
                 retry_count += 1
-                logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {e}")
+                self.logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {e}")
                 await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
                 
         raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")
@@ -243,7 +279,7 @@ class LiveBlockProcessor:
             if not self.blocks_exchange:
                 success = await self.setup_rabbitmq()
                 if not success:
-                    logger.error(f"Failed to initialize RabbitMQ for block {block_number}")
+                    self.logger.error(f"Failed to initialize RabbitMQ for block {block_number}")
                     return False  # Return False but don't reset exchange
             
             try:
@@ -254,7 +290,7 @@ class LiveBlockProcessor:
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )
             except Exception as e:
-                logger.error(f"Serialization error for block {block_number}: {e}")
+                self.logger.error(f"Serialization error for block {block_number}: {e}")
                 return False  # Continue with next block without resetting exchange
         
             message = aio_pika.Message(
@@ -271,12 +307,12 @@ class LiveBlockProcessor:
             return True
             
         except aio_pika.exceptions.ConnectionClosed:
-            logger.error(f"RabbitMQ connection lost while publishing block {block_number}")
+            self.logger.error(f"RabbitMQ connection lost while publishing block {block_number}")
             self.blocks_exchange = None  # Only reset on actual connection issues
             return False
             
         except Exception as e:
-            logger.error(f"{__name__} Error publishing block {block_number}: {e}")
+            self.logger.error(f"{__name__} Error publishing block {block_number}: {e}")
             return False  # Don't reset exchange for other errors
 
     async def publish_alert(self, alert_data):
@@ -286,7 +322,7 @@ class LiveBlockProcessor:
             if not self.alerts_exchange:
                 success = await self.setup_rabbitmq()
                 if not success:
-                    alert_logger.error("Failed to initialize RabbitMQ for alert")
+                    self.logger.error("Failed to initialize RabbitMQ for alert")
                     return False
             
             try:
@@ -297,7 +333,7 @@ class LiveBlockProcessor:
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )
             except Exception as e:
-                alert_logger.error(f"Alert serialization error: {e}")
+                self.logger.error(f"Alert serialization error: {e}")
                 return False  # Continue without resetting exchange
             
             message = aio_pika.Message(
@@ -308,38 +344,26 @@ class LiveBlockProcessor:
             
             await self.alerts_exchange.publish(
                 message, 
-                routing_key="alerts"
+                routing_key="eth_txn_alerts"
             )
-            alert_logger.info(f"Successfully published {len(alert_data)} alerts")
             return True
             
         except aio_pika.exceptions.ConnectionClosed:
-            alert_logger.error(f"{__name__}: RabbitMQ connection lost while publishing alert")
+            self.logger.error(f"{__name__}: RabbitMQ connection lost while publishing alert")
             self.alerts_exchange = None  # Only reset on connection issues
             return False
             
         except Exception as e:
-            alert_logger.error(f"{__name__}: Error publishing alert: {e}", exc_info=True)
+            self.logger.error(f"{__name__}: Error publishing alert: {e}", exc_info=True)
             return False  # Don't reset exchange for other errors
 
-    async def process_latest_block(self, block_number: int):
-        """
-        Process a single block and prepare it for publishing.
-        """
-        try:
-            processed_block = await self.block_processor.process_block(block_number=block_number)
-            return processed_block
-        except Exception as e:
-            logger.error(f" {__name__} Error processing block {block_number} transactions: {e}")
-            return
-        
     async def process_latest_block_alerts(self, processed_block):
         """Process alerts for the latest block"""
         try:
             alerts = await self.block_alert_processor.process_block_transactions(processed_block)
             return alerts
         except Exception as e:
-            logger.error(f" {__name__} Error processing alerts: {e}")
+            self.logger.error(f" {__name__} Error processing alerts: {e}")
             return
 
     async def monitor_new_blocks(self):
@@ -350,7 +374,7 @@ class LiveBlockProcessor:
                     raise ConnectionError("Failed to connect to WebSocket")
                 
                 subscription_id = await self.w3.eth.subscribe("newHeads")
-                logger.info(f"Subscribed to newHeads with ID: {subscription_id}")
+                self.logger.info(f"Subscribed to newHeads with ID: {subscription_id}")
                 
                 async for message in self.w3.socket.process_subscriptions():
                     try:
@@ -359,24 +383,24 @@ class LiveBlockProcessor:
                             continue
                         
                         block_number = block_data["number"] if isinstance(block_data["number"], int) else int(block_data["number"], 16)
-                        processed_block = await self.process_latest_block(block_number=block_number)   
+                        processed_block = await self.block_processor.process_block(block_number=block_number)
                         
                         if processed_block:
                             # Continue with alerts even if block publish fails
                             publish_success = await self.publish_block(block_number, processed_block)
                             if not publish_success:
-                                logger.warning(f"Failed to publish block {block_number}, continuing with next block")
+                                self.logger.warning(f"Failed to publish block {block_number}, continuing with next block")
                                 
-                            alerts = await self.process_latest_block_alerts(processed_block)
-                            if alerts and len(alerts) > 0:
-                                await self.publish_alert(alerts)
+                            #alerts = await self.block_alert_processor.process_block_transactions(processed_block)
+                            #if alerts and len(alerts) > 0:
+                            #     await self.publish_alert(alerts)
                             
                     except Exception as e:
-                        logger.error(f"{__name__} Error processing block: {e}", exc_info=True)
+                        self.logger.error(f"{__name__} Error processing block: {e}", exc_info=True)
                         continue  # Continue with next block regardless of error
         
         except Exception as e:
-            logger.error(f"WebSocket subscription error: {e}", exc_info=True)
+            self.logger.error(f"WebSocket subscription error: {e}", exc_info=True)
             await asyncio.sleep(self.reconnect_delay)
             self.reconnect_delay = min(self.reconnect_delay * 2, 60)
             await self.monitor_new_blocks()
@@ -401,13 +425,13 @@ class LiveBlockProcessor:
             self.connection = None
             
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            self.logger.error(f"Error during cleanup: {e}")
 
     async def run(self):
         """Main entry point to run the LiveBlockProcessor."""
         try:
             await self.monitor_new_blocks()
         except KeyboardInterrupt:
-            logger.info("Received shutdown signal")
+            self.logger.info("Received shutdown signal")
         finally:
             await self.cleanup()

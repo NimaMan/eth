@@ -32,9 +32,15 @@ class TransactionLogProcessor:
             'uniswap_v3_initializations': [],
             'uniswap_v3_mints': [],
             'uniswap_v3_swaps': [],
+            'uniswap_v3_burns': [],
             'uniswap_v3_positions': [],
             'uniswap_v3_increases': [],
             'uniswap_v3_decreases': [],
+            'uniswap_v4_initializes': [],
+            'uniswap_v4_modifies': [],
+            'uniswap_v4_transfers': [],
+            'uniswap_v4_swaps': [],
+            'permit2_events': [],
         }
         
         for log in logs:
@@ -140,6 +146,25 @@ class TransactionLogProcessor:
                 result['unique_addresses'].add(event.pool_address)
                 result['unique_addresses'].add(event.sender)
                 result['unique_addresses'].add(event.recipient)
+            elif isinstance(event, Permit2):
+                result['permit2_events'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.owner)
+                result['unique_addresses'].add(event.token)
+                result['unique_addresses'].add(event.spender)
+            elif isinstance(event, UniswapV4Initialize):
+                result['uniswap_v4_initializes'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.currency0)
+                result['unique_addresses'].add(event.currency1)
+            elif isinstance(event, UniswapV4ModifyLiquidity):
+                result['uniswap_v4_modifies'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.sender)
+            elif isinstance(event, UniswapV4Swap):
+                result['uniswap_v4_swaps'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.sender)
             else:
                 result['other_events'].append(event)
         return result
@@ -194,6 +219,14 @@ class TransactionLogProcessor:
                 return self.parse_uniswap_v3_increase_liquidity(log)
             elif topic == EVENT_TOPICS['DecreaseLiquidityV3']:
                 return self.parse_uniswap_v3_decrease_liquidity(log)
+            elif topic == EVENT_TOPICS['Permit2']:
+                return self.parse_permit2(log)
+            elif topic == EVENT_TOPICS['InitializeV4']:
+                return self.parse_uniswap_v4_initialize(log)
+            elif topic == EVENT_TOPICS['ModifyLiquidityV4']:
+                return self.parse_uniswap_v4_modify_liquidity(log)
+            elif topic == EVENT_TOPICS['SwapV4']:
+                return self.parse_uniswap_v4_swap(log)
             else:
                 return self.parse_other_event(log)
         except Exception as e:
@@ -227,6 +260,16 @@ class TransactionLogProcessor:
             value = value[2:] if value.startswith('0x') else value
         return int(value, 16)
 
+    def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        return {
+            'address': self.w3.to_checksum_address(log['address']),
+            'topics': topics,
+            'data': data,
+            'log_index': self._process_integer(log['logIndex']),
+        }
+    
     def parse_transfer(self, log: Dict[str, Any]) -> ERC20Transfer:
         """Parse ERC20 Transfer event log Event signature: Transfer(address indexed from, address indexed to, uint256 value)
         Topic[0]: Event signature hash
@@ -648,13 +691,173 @@ class TransactionLogProcessor:
         """
         pass
     
-    def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_uniswap_v4_initialize(self, log: Dict[str, Any]) -> UniswapV4Initialize:
+        """
+        Parse Uniswap V4 pool initialization event.
+        Event Format:
+          Initialize(bytes32 event_id, address indexed currency0, address indexed currency1,
+                     uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)
+
+        Expected log layout:
+          - log['address'] is the pool manager (emitter)
+          - topics[1] is the event id (bytes32)
+          - topics[2] is the first currency address (indexed)
+          - topics[3] is the second currency address (indexed)
+          - log['data'] is a concatenation of five 32-byte words representing:
+                fee, tickSpacing, hooks, sqrtPriceX96, tick
+        """
         data = self._ensure_hex_string(log['data'])
         topics = [self._ensure_hex_string(topic) for topic in log['topics']]
-        return {
-            'address': self.w3.to_checksum_address(log['address']),
-            'topics': topics,
-            'data': data,
-            'log_index': self._process_integer(log['logIndex']),
-        }
+
+        # Extract indexed parameters from topics
+        event_id = topics[1] if isinstance(topics[1], str) else topics[1].hex()
+        currency0 = self.w3.to_checksum_address(topics[2][-40:])
+        currency1 = self.w3.to_checksum_address(topics[3][-40:])
+
+        # Each parameter occupies 64 hex characters (32 bytes)
+        fee = self._process_integer('0x' + data[2:66])
+        tick_spacing = self._process_integer('0x' + data[66:130])
+        # Address is in the last 40 hex characters of the 32-byte word
+        hooks = self.w3.to_checksum_address('0x' + data[130+24:194])
+        sqrt_price_x96 = self._process_integer('0x' + data[194:258])
+        tick = self._process_integer('0x' + data[258:322])
+        
+        return UniswapV4Initialize(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            currency0=currency0,
+            currency1=currency1,
+            fee=fee,
+            tick_spacing=tick_spacing,
+            hooks=hooks,
+            sqrt_price_x96=sqrt_price_x96,
+            tick=tick,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_modify_liquidity(self, log: Dict[str, Any]) -> UniswapV4ModifyLiquidity:
+        """
+        Parse a Uniswap V4 ModifyLiquidity event.
+        
+        Event Format:
+          ModifyLiquidity(bytes32 indexed id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)
+        
+        Topics:
+          [0]: Event signature
+          [1]: id (bytes32)
+          [2]: sender (address)
+        
+        Data (concatenated 32-byte words):
+          - First 32 bytes: tickLower (int24, padded to 32-bytes as signed)
+          - Next 32 bytes: tickUpper (int24, padded to 32-bytes as signed)
+          - Next 32 bytes: liquidityDelta (int256, padded as signed)
+          - Next 32 bytes: salt (bytes32)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Process indexed values.
+        event_id = topics[1]
+        sender = self.w3.to_checksum_address(topics[2][-40:])
+        salt_hex = data[194:258]
+        
+        return UniswapV4ModifyLiquidity(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            sender=sender,
+            tick_lower=   int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True), 
+            tick_upper=self._process_integer(data[66:130]),
+            liquidity_delta=self._process_integer(data[130:194]),
+            salt=salt_hex,
+            log_index=self._process_integer(self._process_integer(log['logIndex']))
+        )
+
+    def parse_permit2(self, log: Dict[str, Any]) -> Permit2:
+        """
+        Parse the Permit (Permit2) event emitted by the Permit2 contract.
+        
+        Event Format:
+          Permit(address indexed owner, address indexed token, address indexed spender,
+                 uint160 amount, uint48 expiration, uint48 nonce)
+        
+        Topics:
+          [0]: Event signature (0xc6a377bfc4eb120024a8ac08eef205be16b817020812c73223e81d1bdb9708ec)
+          [1]: owner
+          [2]: token
+          [3]: spender
+        
+        Data (padded to 32-byte words):
+          - First 32 bytes: amount (uint160)
+          - Next 32 bytes: expiration (uint48)
+          - Next 32 bytes: nonce (uint48)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        owner = self.w3.to_checksum_address(topics[1][-40:])
+        token = self.w3.to_checksum_address(topics[2][-40:])
+        spender = self.w3.to_checksum_address(topics[3][-40:])
+        
+        # Each value occupies a 32-byte word. Slice off the "0x" and process.
+        amount = str(self._process_integer('0x' + data[2:66]))
+        expiration = self._process_integer('0x' + data[66:130])
+        nonce = self._process_integer('0x' + data[130:194])
+        
+        return Permit2(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            owner=owner,
+            token=token,
+            spender=spender,
+            amount=amount,
+            expiration=expiration,
+            nonce=nonce,
+            log_index=self._process_integer(log['logIndex'])
+        )
+
+    def parse_uniswap_v4_swap(self, log: Dict[str, Any]) -> UniswapV4Swap:
+        """
+        Parse Uniswap V4 Swap event
+        Event: Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1,
+                    uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+        
+        Topics:
+          [0]: Event signature
+          [1]: id (bytes32)
+          [2]: sender (address)
+        
+        Data:
+          - amount0 (int128 as 32-byte word)
+          - amount1 (int128 as 32-byte word)
+          - sqrtPriceX96 (uint160 as 32-byte word)
+          - liquidity (uint128 as 32-byte word)
+          - tick (int24 as 32-byte word)
+          - fee (uint24 as 32-byte word)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameters
+        event_id = topics[1]
+        sender = self.w3.to_checksum_address(topics[2][-40:])
+        
+        # Parse data parameters (each 32-byte word)
+        amount0 = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True)
+        amount1 = int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True)
+        sqrt_price_x96 = int.from_bytes(bytes.fromhex(data[130:194]), byteorder='big', signed=False)
+        liquidity = int.from_bytes(bytes.fromhex(data[194:258]), byteorder='big', signed=False)
+        tick = int.from_bytes(bytes.fromhex(data[258:322]), byteorder='big', signed=True)
+        fee = int.from_bytes(bytes.fromhex(data[322:386]), byteorder='big', signed=False)
+        
+        return UniswapV4Swap(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            sender=sender,
+            amount0=amount0,
+            amount1=amount1,
+            sqrt_price_x96=sqrt_price_x96,
+            liquidity=liquidity,
+            tick=tick,
+            fee=fee,
+            log_index=self._process_integer(log['logIndex'])
+        )
     

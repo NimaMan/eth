@@ -213,3 +213,130 @@ def test_parse_uniswap_v2_mint(log_processor):
     assert isinstance(result.amount0, str)
     assert isinstance(result.amount1, str)
     
+
+def test_parse_uniswap_v4_initialize(log_processor):
+    log = {'address': '0x000000000004444c5dc75cb358380d2e3de08a90',
+        'topics': ['0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438',
+        '0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+        '0x00000000000000000000000051ea52a6a885dd34f30494768cf1d9dc9f004185'],
+        'data': '0x0000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a49cd33edf133475ff62f463080000000000000000000000000000000000000000000000000000000000018ebd',
+        'blockHash': '0x897a9d0561dd8bf37db48cb159260fa902f427e629cf1274abb00509dfb64307',
+        'blockNumber': '0x14e6970',
+        'blockTimestamp': '0x67bc5e1f',
+        'transactionHash': '0xfc79f04b0af526a246e32e431c3db813a0cfa6bc9e60ec5eec555d3e238a461e',
+        'transactionIndex': '0x8',
+        'logIndex': '0x2c',
+        'removed': False}
+    
+    result = log_processor.parse_uniswap_v4_initialize(log)
+    
+    expected = UniswapV4Initialize(
+        pool_manager_address='0x000000000004444c5dc75cB358380D2e3dE08A90',
+        event_id='0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        currency0='0x0000000000000000000000000000000000000000',
+        currency1='0x51ea52a6A885DD34f30494768cf1D9DC9f004185',
+        fee=3000,
+        tick_spacing=60,
+        hooks='0x0000000000000000000000000000000000000000',
+        sqrt_price_x96=13041953694121149609898616840968,  # Derived from hex value: "000000000000000000000000a49cd33edf133475ff62f46308000000"
+        tick=102077,
+        log_index=44
+    )
+    
+    assert result == expected
+    
+
+def test_parse_permit2(log_processor):
+    log = {'address': '0x000000000022d473030f116ddee9f6b43ac78ba3',
+        'topics': ['0xc6a377bfc4eb120024a8ac08eef205be16b817020812c73223e81d1bdb9708ec',
+        '0x00000000000000000000000084f607c948951b7bfe3edaefa47e192ca4d6a6aa',
+        '0x00000000000000000000000051ea52a6a885dd34f30494768cf1d9dc9f004185',
+        '0x000000000000000000000000bd216513d74c8cf14cf4747e6aaa6420ff64ee9e'],
+        'data': '0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff0000000000000000000000000000000000000000000000000000000067e3eb0e0000000000000000000000000000000000000000000000000000000000000000',
+        'blockHash': '0x897a9d0561dd8bf37db48cb159260fa902f427e629cf1274abb00509dfb64307',
+        'blockNumber': '0x14e6970',
+        'blockTimestamp': '0x67bc5e1f',
+        'transactionHash': '0xfc79f04b0af526a246e32e431c3db813a0cfa6bc9e60ec5eec555d3e238a461e',
+        'transactionIndex': '0x8',
+        'logIndex': '0x2d',
+        'removed': False}
+    
+    result = log_processor.parse_permit2(log)
+    
+    expected = Permit2(
+        pool_manager_address='0x000000000022D473030F116dDEE9F6B43aC78BA3',
+        owner='0x84f607C948951B7Bfe3EdaEFA47E192Ca4D6a6aA',
+        token='0x51ea52a6A885DD34f30494768cf1D9DC9f004185',
+        spender='0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e',
+        amount='1461501637330902918203684832716283019655932542975',
+        expiration=1742990094,
+        nonce=0,
+        log_index=45
+    )
+    
+    assert result == expected
+    
+
+def test_parse_uniswap_v4_modify_liquidity(log_processor):
+
+    log = {'address': '0x000000000004444c5dc75cb358380d2e3de08a90',
+        'topics': ['0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec',
+        '0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        '0x000000000000000000000000bd216513d74c8cf14cf4747e6aaa6420ff64ee9e'],
+        'data': '0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2764c00000000000000000000000000000000000000000000000000000000000d89b4000000000000000000000000000000000000000000000084f66f4e166aa01e6400000000000000000000000000000000000000000000000000000000000010af',
+        'blockHash': '0x897a9d0561dd8bf37db48cb159260fa902f427e629cf1274abb00509dfb64307',
+        'blockNumber': '0x14e6970',
+        'blockTimestamp': '0x67bc5e1f',
+        'transactionHash': '0xfc79f04b0af526a246e32e431c3db813a0cfa6bc9e60ec5eec555d3e238a461e',
+        'transactionIndex': '0x8',
+        'logIndex': '0x2f',
+        'removed': False}
+            
+    result = log_processor.parse_uniswap_v4_modify_liquidity(log)
+    
+    expected = UniswapV4ModifyLiquidity(
+        pool_manager_address='0x000000000004444c5dc75cB358380D2e3dE08A90',
+        event_id='0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        sender='0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e',
+        tick_lower=-887220,
+        tick_upper=887220,
+        liquidity_delta=2452727715443591093860,
+        salt='00000000000000000000000000000000000000000000000000000000000010af',
+        log_index=47
+    )
+    
+    assert result == expected
+    
+
+def test_parse_uniswap_v4_swap(log_processor):
+    """Test parsing of Uniswap V4 Swap event with negative amounts"""
+    log = {'address': '0x000000000004444c5dc75cb358380d2e3de08a90',
+        'topics': ['0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f',
+        '0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        '0x00000000000000000000000066a9893cc07d91d95644aedd05d03f95e1dba8af'],
+        'data': '0xfffffffffffffffffffffffffffffffffffffffffffffffffecbd5bca6eaa21000000000000000000000000000000000000000000000007e3ddb0e9b8cd8c28d00000000000000000000000000000000000000a39f9ad35cc7c51bdf0a61efc4000000000000000000000000000000000000000000000084f66f4e166aa01e640000000000000000000000000000000000000000000000000000000000018e440000000000000000000000000000000000000000000000000000000000000bb8',
+        'blockHash': '0x8430a7e5fb98fd16babeb750baad6f8683547bd526ab1e078cd2d1846aff9a5b',
+        'blockNumber': '0x14e6d7e',
+        'blockTimestamp': '0x67bc8ef7',
+        'transactionHash': '0x7b7c846ef845c42a2f07919cf6ae955be63746f77d4be28307eaae27c47eaf1b',
+        'transactionIndex': '0x13',
+        'logIndex': '0xa5',
+        'removed': False}
+            
+    result = log_processor.parse_uniswap_v4_swap(log)
+    
+    expected = UniswapV4Swap(
+        pool_manager_address='0x000000000004444c5dc75cB358380D2e3dE08A90',
+        event_id='0x56e7a2e2e41b7868e48c18a2b1de8f78b42c250d366c72485c8fe05edf65e4f3',
+        sender='0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af',
+        amount0=-86740761572630000,  
+        amount1=2328746925604862476941,
+        sqrt_price_x96=12963585779093724829272953188292,
+        liquidity=2452727715443591093860,
+        tick=101956,
+        fee=3000,
+        log_index=165
+    )
+    
+    assert result == expected

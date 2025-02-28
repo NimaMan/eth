@@ -118,7 +118,13 @@ FUNCTION_SIGNATURES = {
     '715018a6': "Renounce Ownership",
     '8af416f6': "Lock Liquidity Tokens",
     
-    }
+    # --- Uniswap V4 Events ---
+    w3.keccak(text="Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)").hex()[:8]: "InitializeV4",
+    w3.keccak(text="ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)").hex()[:8]: "ModifyLiquidityV4",
+    w3.keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex()[:8]: "SwapV4",
+    # --- Uniswap Protocol: Permit2 ---
+    w3.keccak(text="Permit(address,address,address,uint160,uint48,uint48)").hex()[:8]: "Permit2",
+}
 
 EVENT_TOPICS = {
     # ERC20/721/1155 Events (these are shared standards)
@@ -171,6 +177,12 @@ EVENT_TOPICS = {
     'IncreaseLiquidityV3': w3.keccak(text="IncreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
     'DecreaseLiquidityV3': w3.keccak(text="DecreaseLiquidity(uint256,uint128,uint256,uint256)").hex(),
     
+    # --- Uniswap V4 Events ---
+    'InitializeV4': w3.keccak(text="Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)").hex(),
+    'ModifyLiquidityV4': w3.keccak(text="ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)").hex(),
+    'SwapV4': w3.keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex(),
+    # --- Uniswap Protocol: Permit2 ---
+    'Permit2': w3.keccak(text="Permit(address,address,address,uint160,uint48,uint48)").hex(),
 }
 
 EVENT_TOPICS_REVERSE = {v: k for k, v in EVENT_TOPICS.items()}
@@ -178,7 +190,7 @@ EVENT_TOPICS_REVERSE[w3.keccak(text="Mint(address,uint256)").hex()] = "Mint"
 
 
 UNISWAP_CONTRACTS = {
-    "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D": "Uniswap V2: Router 2",
+    "0x7a250d5630B4cF539739dF2C5dAcb4c659f2488D": "Uniswap V2: Router 2",
     "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45": "Uniswap V3: Router 2",
     '0xC36442b4a4522E871399CD717aBDD847Ab11FE88': "POSITION_MANAGER",
     '0x1f98431c8ad98523631ae4a59f267346ea31f984': "FACTORY",
