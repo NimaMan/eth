@@ -1,5 +1,94 @@
 from web3 import Web3
 
+
+DENOM_ADDRESSES = {
+    # Stablecoins
+    '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48': 'USDC',
+    '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'USDT',
+    '0x6B175474E89094C44Da98b954EedeAC495271d0F': 'DAI',
+    '0x4Fabb145d64652a948d72533023f6E7A623C7C53': 'BUSD',
+    '0x8E870D67F660D95d5be530380D0eC0bd388289E1': 'PAX',
+    '0x956F47F50A910163D8BF957Cf5846D573E7f87CA': 'FEI',
+    '0x853d955aCEf822Db058eb8505911ED77F175b99e': 'FRAX',
+    '0x5f98805A4E8be255a32880FDeC7F6728C6568bA0': 'LUSD',
+    
+    # Wrapped Tokens
+    '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2': 'WETH',
+    '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599': 'WBTC',
+    '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c': 'WBNB',
+    
+    # Other Major Tokens
+    '0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0': 'MATIC',
+    '0x514910771AF9Ca656af840dff83E8264EcF986CA': 'LINK',
+    '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984': 'UNI',
+    '0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9': 'AAVE',
+    
+    # Wrapped Versions of Stablecoins
+    '0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643': 'cDAI',
+    '0x39AA39c021dfbaE8faC545936693aC917d5E7563': 'cUSDC',
+    '0x4Ddc2D193948926D02f9B1fE9e1daa0718270ED5': 'cETH',
+    
+    # Curve LP Tokens
+    '0x6c3F90f043a72FA612cbac8115EE7e52BDe6E490': '3Crv',
+    '0x06325440D014e39736583c165C2963BA99fAf14E': 'stETH-ETH',
+    
+    # Yearn Tokens
+    '0xdA816459F1AB5631232FE5e97a05BBBb94970c95': 'yvDAI',
+    '0xa354F35829Ae975e850e23e9615b11Da1B3dC4DE': 'yvUSDC',
+    
+    # Liquid Staking Derivatives
+    '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84': 'stETH',
+    '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704': 'cbETH',
+    '0xae78736Cd615f374D3085123A210448E74Fc6393': 'rETH',
+}
+
+
+DENOM_NAMES_TO_ADDRESS = {v: k for k, v in DENOM_ADDRESSES.items()}
+
+
+# Complete decimals mapping for all tokens
+DENOM_DECIMALS = {
+    # Stablecoins
+    'USDC': 6,
+    'USDT': 6,
+    'DAI': 18,
+    'BUSD': 18,
+    'PAX': 18,
+    'FEI': 18,
+    'FRAX': 18,
+    'LUSD': 18,
+    
+    # Wrapped Tokens
+    'WETH': 18,
+    'WBTC': 8,
+    'WBNB': 18,
+    
+    # Other Major Tokens
+    'MATIC': 18,
+    'LINK': 18,
+    'UNI': 18,
+    'AAVE': 18,
+    
+    # Wrapped Versions of Stablecoins
+    'cDAI': 8,    # Compound DAI
+    'cUSDC': 8,   # Compound USDC
+    'cETH': 8,    # Compound ETH
+    
+    # Curve LP Tokens
+    '3Crv': 18,   # 3pool LP token
+    'stETH-ETH': 18,  # stETH-ETH LP token
+    
+    # Yearn Tokens
+    'yvDAI': 18,  # Yearn DAI vault
+    'yvUSDC': 6,  # Yearn USDC vault
+    
+    # Liquid Staking Derivatives
+    'stETH': 18,  # Lido staked ETH
+    'cbETH': 18,  # Coinbase staked ETH
+    'rETH': 18,   # Rocket Pool ETH
+}
+
+
 addresses_by_name = {
     'zero_address': '0x0000000000000000000000000000000000000000',
     'dead_address': '0x000000000000000000000000000000000000dEaD',

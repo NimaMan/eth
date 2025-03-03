@@ -81,7 +81,7 @@ class TokenHealthPredictor:
                 transaction_hash=transaction.get('hash'),
                 from_address=transaction.get('from_address'),
                 is_scam=True,
-                confidence=.95,
+                confidence=.99,
                 reason="Malicious actors involved",
             )
 

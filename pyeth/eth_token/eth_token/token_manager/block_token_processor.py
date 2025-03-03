@@ -17,15 +17,15 @@ from typing import Dict, List, Set
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.services.live_tokens_object_cache import LiveTokenObjectsCache
+from eth_token.token_manager.live_tokens_object_cache import LiveTokenObjectsCache
 from eth_token.utils.logger import get_logger
 
 
 class BlockTokenProcessor:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0", logger=None, max_concurrency=20):
+    def __init__(self, logger=None, max_concurrency=20):
         self.logger = logger or get_logger(name="token_manager")
         # Token tracking
-        self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger, redis_url=redis_url)
+        self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger)
         self.token_first_seen: Dict[str, int] = {}
         self.updated_tokens: Dict[str, LiveERC20Token] = {}
         self.processed_blocks: Dict[int, bool] = {}
