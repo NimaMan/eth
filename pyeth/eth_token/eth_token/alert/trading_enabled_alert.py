@@ -1,13 +1,18 @@
-import pandas as pd
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
-from eth_block_processor.data_models.alert_models import TradingEnabledAlertData
-from eth_block_processor.utils.logger import get_logger
-from eth_block_processor.alert.base_alert_class import BaseAlert
-from typing import List, Any
-
+from eth_token.alert.base_alert import BaseAlert
+from typing import List
+from dataclasses import dataclass
+from eth_token.utils.logger import get_logger
 
 logger = get_logger("trading_enabled_alert", log_folder="alert")
 
+
+@dataclass
+class TradingEnabledAlertData:
+    block_number: int
+    transaction_hash: str
+    from_address: str
+    to_address: str
 
 class TradingEnabledAlert(BaseAlert):
     def __init__(self):

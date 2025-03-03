@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Set
 from functools import lru_cache
 from sqlalchemy.orm import Session
-from sarigoz.data.db.conn import get_session
+from sarigoz.data.db.conn import get_engine
 from sarigoz.data.db.queries.scam_queries import get_mimic_octopus_addresses_query
 
 
@@ -135,15 +135,15 @@ orca_addresses = {
     "0x5dD21d9e20949dBcDCc9cA3123aC7335f3f9296F",   
 }
 
+
 @lru_cache(maxsize=1)
 def load_mimic_octopus_addresses() -> Set[str]:
     """Get current Mimic Octopus addresses from database"""
-    session: Session = get_session()
-    try:
-        result = session.execute(get_mimic_octopus_addresses_query())
+    engine = get_engine()
+    with engine.connect() as connection:
+        result = connection.execute(get_mimic_octopus_addresses_query())
         return {row[0] for row in result}
-    finally:
-        session.close()
+
 
 def get_mimic_octopus_addresses() -> Set[str]:
     """Public accessor with caching"""

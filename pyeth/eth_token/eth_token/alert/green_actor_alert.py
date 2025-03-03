@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Set, Tuple
-from eth_token.alert.base_alert_class import BaseAlert
+from eth_token.alert.base_alert import BaseAlert
 from eth_token.live_erc20_token.live_token import LiveERC20Token
 from eth_token.utils.logger import get_logger
 
