@@ -22,24 +22,37 @@ _log_files = set()
 
 def cleanup_empty_logs():
     """
-    Delete log files that are empty or contain only one line
+    Delete log files that are empty or contain fewer than two lines.
+    Scans both tracked files and the entire log directory structure.
     """
+    # First clean up tracked files
     for log_file in _log_files:
         try:
             if os.path.exists(log_file):
-                # Check if file is empty
-                if os.path.getsize(log_file) == 0:
-                    os.remove(log_file)
-                    continue
-                
-                # Check number of lines
                 with open(log_file, 'r') as f:
-                    lines = f.readlines()
-                    if len(lines) <= 1:
-                        os.remove(log_file)
-                        
+                    line_count = sum(1 for _ in f)
+                if line_count < 2:
+                    os.remove(log_file)
+                    print(f"Removed tracked empty log file: {log_file}")
         except Exception as e:
-            print(f"Error cleaning up log file {log_file}: {str(e)}")
+            print(f"Error cleaning up tracked log file {log_file}: {str(e)}")
+    
+    # Then scan the entire log directory to catch any untracked log files
+    try:
+        for root, _, files in os.walk(ETH_LOG_DIR):
+            for file in files:
+                if file.endswith('.log'):
+                    log_file_path = os.path.join(root, file)
+                    try:
+                        with open(log_file_path, 'r') as f:
+                            line_count = sum(1 for _ in f)
+                        if line_count < 2:
+                            os.remove(log_file_path)
+                            print(f"Removed untracked empty log file: {log_file_path}")
+                    except Exception as e:
+                        print(f"Error cleaning up untracked log file {log_file_path}: {str(e)}")
+    except Exception as e:
+        print(f"Error scanning log directory: {str(e)}")
 
 # Register cleanup function to run at exit
 atexit.register(cleanup_empty_logs)

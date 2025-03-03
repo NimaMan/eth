@@ -87,8 +87,8 @@ def test_live_token_basic_info(
         f"Creation transaction mismatch: expected {expected['creation_txn']}, got {token_data.creation_txn}"
     
     # Verify pair addresses and denominator
-    assert token_data.pair_addresses == expected["pair_addresses"], \
-        f"Pair addresses mismatch: expected {expected['pair_addresses']}, got {token_data.pair_addresses}"
+    assert token_data.pool_addresses == expected["pair_addresses"], \
+        f"Pair addresses mismatch: expected {expected['pair_addresses']}, got {token_data.pool_addresses}"
     assert token_data.denom_address == expected["denom_address"], \
         f"Denominator address mismatch: expected {expected['denom_address']}, got {token_data.denom_address}"
     

@@ -33,8 +33,11 @@ setup(
 
 
 '''
+v0.3.0
+ - pnl calculltor using live token
+
 v0.2.0
- - 
+ - added uniswap v3 and v4 support
 
 
 v 0.1.0 - Initial release
