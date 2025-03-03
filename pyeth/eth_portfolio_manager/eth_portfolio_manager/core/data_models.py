@@ -32,6 +32,8 @@ class TokenPositionStaticData:
     token_address: str
     symbol: str
     currency: str
+    pool_address: str
+    pool_type: str
     creation_block: int
     creation_timestamp: int
     trading_enabled_block: int

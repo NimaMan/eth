@@ -105,7 +105,9 @@ class TokenPosition:
         static_data = TokenPositionStaticData(
             token_address=live_token.token_data.contract_address,
             symbol=live_token.token_data.symbol,
-            currency=live_token.token_data.denom_currency,
+            currency=None,
+            pool_address=None,
+            pool_type=None,
             creation_block=live_token.token_data.creation_block,
             creation_timestamp=live_token.token_data.creation_timestamp,
             trading_enabled_block=live_token.token_data.trading_enabled_block,
@@ -178,21 +180,24 @@ class TokenPosition:
         if live_token.token_data.trading_enabled_block:
             self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
             self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
+            self.static_data.pool_address = tuple(live_token.token_data.pool_addresses)[0]
+            self.static_data.pool_type = live_token.token_data.pool_info[self.static_data.pool_address]['pool_type']
+            self.static_data.currency = live_token.token_data.pool_info[self.static_data.pool_address]['denom_currency']
 
-        x_value = 0
+        current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(self.static_data.pool_address, 0)
         roi = 0
         current_value = 0
         unrealized_profit = 0
         if self.latest_snapshot.has_active_position:
             if self.static_data.entry_price_ratio:
-                x_value = live_token.token_data.current_price_ratio / self.static_data.entry_price_ratio 
+                x_value = current_price_ratio / self.static_data.entry_price_ratio 
                 roi = x_value - 1
                 current_value = self.static_data.purchase_value * x_value
                 unrealized_profit = current_value - self.static_data.purchase_value
         
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
-            current_price_ratio=live_token.token_data.current_price_ratio,
+            current_price_ratio=current_price_ratio,
             roi=roi,
             current_value=current_value,
             realized_profit=self.latest_snapshot.realized_profit,

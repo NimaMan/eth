@@ -113,7 +113,6 @@ from typing import Dict, List
 
 from eth_portfolio_manager.strategy.base import BaseStrategy
 from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
 
@@ -172,15 +171,16 @@ class TokenPositionManagerBacktest:
           - Avoids creating an extra snapshot object.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
+            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record entry static data
             token_position.static_data.entry_block = live_token.token_data.latest_block_number
-            token_position.static_data.entry_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
             # Update the latest snapshot in place
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_SUBMITTED
             token_position.latest_snapshot.has_active_position = True
-            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
+            token_position.latest_snapshot.current_price_ratio = current_price_ratio
             token_position.latest_snapshot.roi = 0.0  # ROI equals 0 at entry (i.e. 1 - 1 = 0)
             token_position.latest_snapshot.current_value = token_position.static_data.purchase_value
             token_position.latest_snapshot.realized_profit = 0
@@ -199,15 +199,16 @@ class TokenPositionManagerBacktest:
           - Recalculates ROI and current value based on the confirmed price.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
+            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
             token_position.static_data.entry_block = live_token.token_data.latest_block_number
-            token_position.static_data.entry_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
             # Update the latest snapshot in place
             token_position.latest_snapshot.has_active_position = True
-            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
+            token_position.latest_snapshot.current_price_ratio = current_price_ratio
             token_position.latest_snapshot.roi = 0.0  # ROI equals 0 at entry (i.e. 1 - 1 = 0)
             token_position.latest_snapshot.current_value = token_position.static_data.purchase_value
             token_position.latest_snapshot.realized_profit = 0
@@ -226,15 +227,16 @@ class TokenPositionManagerBacktest:
           - Updates the latest snapshot in place to reflect the sell submission.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
+            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record exit static data directly from the token data
             token_position.static_data.exit_block = live_token.token_data.latest_block_number
-            token_position.static_data.exit_price_ratio = live_token.token_data.current_price_ratio
+            token_position.static_data.exit_price_ratio = current_price_ratio
             token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
             
             # Update the latest snapshot in place for sell submission
             token_position.latest_snapshot.position_state = TokenPositionState.SELL_SUBMITTED
             token_position.latest_snapshot.has_active_position = False
-            token_position.latest_snapshot.current_price_ratio = live_token.token_data.current_price_ratio
+            token_position.latest_snapshot.current_price_ratio = current_price_ratio
             token_position.latest_snapshot.realized_profit = token_position.latest_snapshot.current_value - token_position.static_data.purchase_value
             token_position.latest_snapshot.unrealized_profit = 0
             token_position.latest_snapshot.token_age_blocks = live_token.token_trading_age_blocks

@@ -69,7 +69,7 @@ from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 @dataclass
 class StrategyConfig:
     position_size_eth: float = 0.01    # Size of each position in ETH
-    profit_target_x: float = 10.0      # Sell when price increases by this multiple
+    profit_target_x: float = 7.0      # Sell when price increases by this multiple
     
 
 class BuyAll(BaseStrategy):
