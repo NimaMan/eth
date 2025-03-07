@@ -4,10 +4,7 @@ LiveTokenData: Real-time Token Data Management and Analytics
 
 Objective:
 ----------
-To provide a comprehensive data structure and associated methods for managing, processing, and analyzing 
-real-time token data for ERC20 tokens on Ethereum. This module is designed to capture both static token details 
-and dynamic, event-based data from on-chain activities, facilitating real-time analytics, historical analysis, 
-and integration with decentralized exchange (DEX) pool data.
+To provide a comprehensive data structure and associated methods for managing, processing, and analyzing real-time token data for ERC20 tokens on Ethereum. This module is designed to capture both static token details and dynamic, event-based data from on-chain activities, facilitating real-time analytics, historical analysis, and integration with decentralized exchange (DEX) pool data.
 
 Main Concepts:
 --------------
@@ -74,7 +71,7 @@ Main Concepts:
 Usage:
 ------
 1. **Instantiation:**  
-   Create a LiveTokenData object with the token’s contract address to initialize token state tracking.
+   Create a LiveTokenData object with the token's contract address to initialize token state tracking.
 
 2. **Event Updates:**  
    As new blockchain transactions occur, call `update_from_transaction(transaction_dict)` with the transaction 
@@ -115,12 +112,11 @@ This documentation serves as a blueprint to re-implement or understand the desig
 of the LiveTokenData class for real-time token state management and analytics.
 """
 from datetime import datetime
-import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 from enum import Enum
+from collections import OrderedDict
 
-from eth_token.live_erc20_token.data.token_approval_sync_data import UniV2PairSyncData, ERC20TokenApprovalData
 from eth_token.utils.common_addresses import DENOM_ADDRESSES, DENOM_DECIMALS, DENOM_NAMES_TO_ADDRESS
 from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 
@@ -140,7 +136,7 @@ class TokenStatusEnum(Enum):
 @dataclass
 class LiveTokenData:
     contract_address: str  
-    txn_hashes: List[str] = field(default_factory=list)
+    txn_hashes_to_makers: Dict[str, str] = field(default_factory=dict) # key: txn_hash, value: fee source
 
     # Core token info
     name: Optional[str] = None
@@ -164,10 +160,11 @@ class LiveTokenData:
     token_status: Optional[TokenStatusEnum] = None
 
     # Event collections with proper typing
-    erc20_transfers: List[Dict] = field(default_factory=list)
-    eth_transfers: List[Dict] = field(default_factory=list)
-    liquidity_token_transfers: List[Dict] = field(default_factory=list)
-    other_denom_transfers: List[Dict] = field(default_factory=list)
+    erc20_transfers: Dict[str, List[Dict]] = field(default_factory=dict) # key: txn_hash, value: list of erc20 transfers
+    eth_transfers: Dict[str, List[Dict]] = field(default_factory=dict) # key: txn_hash, value: list of eth transfers
+    liquidity_token_transfers: Dict[str, List[Dict]] = field(default_factory=dict) # key: txn_hash, value: list of liquidity token transfers
+    other_denom_transfers: Dict[str, List[Dict]] = field(default_factory=dict) # key: txn_hash, value: list of other denom transfers
+    
     approvals: List[Dict] = field(default_factory=list)
     
     # Uniswap V2
@@ -193,7 +190,7 @@ class LiveTokenData:
     has_uni_v2_pool: bool = False
     has_uni_v3_pool: bool = False
     has_uni_v4_pool: bool = False
-    pool_prices: Dict[str, List[float]] = field(default_factory=dict)
+    pool_prices: OrderedDict[str, List[float]] = field(default_factory=dict)
     # Token Type Series
     pool_info: Dict[str, Dict] = field(default_factory=dict) # {pool_address: {pool_type: str, denom_currency: str, decimals: int, is_token1_denom: bool}}
     other_currencies: Dict[str, int] = field(default_factory=dict) # {Currency: Number of transfers}
@@ -216,12 +213,24 @@ class LiveTokenData:
 
     latest_block_number: Optional[int] = None
     latest_block_timestamp: Optional[datetime] = None
-    latest_price: Optional[float] = None
 
     is_scam: bool = False
     scam_label: Optional[str] = None
     scam_block: Optional[int] = None
     scam_txn: Optional[str] = None
+    
+    def to_dict(self):
+        return self.__dict__
+    
+    @property
+    def fee_sources(self):
+        """Get the fee sources"""
+        return list(set(self.txn_hashes_to_makers.values()))
+    
+    @property
+    def txn_hashes(self):
+        """Get the txn hashes"""
+        return list(set(self.txn_hashes_to_makers.keys()))
     
     def get_pool_denom_currency(self, pool_address: str):
         """Get the denom currency for a given pool address"""
@@ -258,6 +267,9 @@ class LiveTokenData:
     def latest_pools_price_ratio(self):
         """Get the current price ratio"""
         latest_price_ratios = {}
+        if self.is_scam:
+            return {pool_address: 0 for pool_address in self.pool_addresses}
+        
         for pool_address, prices in self.pool_prices.items():
             if self.pool_info[pool_address]['pool_type'] == "V2":
                 if len(prices) > 0:
@@ -379,7 +391,9 @@ class LiveTokenData:
         block_number = transaction['block_number']
         txn_index = transaction['txn_index']
         amount = int(transfer['amount'])/10**self.decimals
-        self.erc20_transfers.append({
+        if txn_hash not in self.erc20_transfers.keys():
+            self.erc20_transfers[txn_hash] = []
+        self.erc20_transfers[txn_hash].append({
             'txn_hash': txn_hash,
             'block_number': block_number,
             'txn_index': txn_index,
@@ -397,7 +411,9 @@ class LiveTokenData:
         txn_hash = transaction['hash']
         block_number = transaction['block_number']
         txn_index = transaction['txn_index']
-        self.eth_transfers.append({
+        if txn_hash not in self.eth_transfers.keys():
+            self.eth_transfers[txn_hash] = []
+        self.eth_transfers[txn_hash].append({
             'txn_hash': txn_hash,
             'block_number': block_number,
             'txn_index': txn_index,
@@ -405,7 +421,7 @@ class LiveTokenData:
             'from_address': transfer['from_address'],
             'to_address': transfer['to_address'],
             'amount': float(transfer['amount'])/10**18,
-            'token_address': transfer['token_address']
+            'token_address': "WETH"
         })
 
     def _add_liquidity_token_transfer(self, transaction: Dict, transfer: Dict):
@@ -418,7 +434,9 @@ class LiveTokenData:
         else:
             decimals = None
         
-        self.liquidity_token_transfers.append({
+        if txn_hash not in self.liquidity_token_transfers.keys():
+            self.liquidity_token_transfers[txn_hash] = []
+        self.liquidity_token_transfers[txn_hash].append({
             'txn_hash': txn_hash,
             'block_number': block_number,
             'txn_index': txn_index,
@@ -435,16 +453,18 @@ class LiveTokenData:
         txn_hash = transaction['hash']
         block_number = transaction['block_number']
         txn_index = transaction['txn_index']
-        for transfer in transaction.get('internal_transfers', []):
-            self.eth_transfers.append({
+        for transfer in transaction.get('internal_transactions', []):
+            if txn_hash not in self.eth_transfers.keys():
+                self.eth_transfers[txn_hash] = []
+            self.eth_transfers[txn_hash].append({
                 'txn_hash': txn_hash,
                 'block_number': block_number,
                 'txn_index': txn_index,
-                'log_index': transfer['log_index'],
+                'depth': transfer['depth'],
                 'from_address': transfer['from_address'],
                 'to_address': transfer['to_address'],
                 'amount': float(transfer['value']),
-                'token_address': transfer['token_address'] if 'token_address' in transfer else "ETH"
+                'token_address': "ETH"
             })
 
     def _add_other_token_transfer(self, transaction: Dict, transfer: Dict):
@@ -460,7 +480,9 @@ class LiveTokenData:
                 self.other_currencies[denom_name] = 0
             self.other_currencies[denom_name] += 1
         
-            self.other_denom_transfers.append({
+            if txn_hash not in self.other_denom_transfers.keys():
+                self.other_denom_transfers[txn_hash] = []
+            self.other_denom_transfers[txn_hash].append({
                 'txn_hash': txn_hash,
                 'block_number': block_number,
                 'txn_index': txn_index,
@@ -803,70 +825,95 @@ class LiveTokenData:
             briber_address = transaction['from_address']
             self.bribe_amount_dict[briber_address] = bribe_amount
             self.total_bribe_amount += bribe_amount
-
-    def _sort_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Sort the dataframe"""
-        if not df.empty:
-            df = df.sort_values(by=['block_number', 'txn_index', 'log_index']).reset_index(drop=True)
-            df = df.set_index('txn_hash')
-        return df
     
-    @property
-    def erc20_transfer_df(self):
-        """Get the transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.erc20_transfers))
+    # --- Update _add_univ4_pool for Uniswap V4 Events ---
+    def _add_univ4_pool(self, transaction: Dict):
+        """Process Uniswap V4 pool initialization events and update pool info."""
+        for pool_event in transaction.get('uniswap_v4_initializes', []):
+            self.has_uni_v4_pool = True
+            if pool_event.get('currency0') == self.contract_address:
+                denom_address = pool_event.get('currency1')
+                token1_is_denom = True
+            else:
+                denom_address = pool_event.get('currency0')
+                token1_is_denom = False
+            # Use provided pool field; if missing, use 'id' field instead
+            pool_id = pool_event.get('pool') or pool_event.get('id')
+            self.uniswap_v4_pool.append({
+                'txn_hash': transaction['hash'],
+                'block_number': transaction['block_number'],
+                'txn_index': transaction['txn_index'],
+                'log_index': pool_event.get('log_index'),
+                'pool': pool_id,
+                'currency0': pool_event.get('currency0'),
+                'currency1': pool_event.get('currency1'),
+                'fee': pool_event.get('fee')
+            })
+            self.set_pool_info(pool_id, "V4", denom_address, token1_is_denom)
+            self.set_lp_token_info(pool_id)
 
-    @property
-    def eth_transfer_df(self):
-        """Get the ETH transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.eth_transfers))
-    
-    @property
-    def liquidity_token_transfer_df(self):
-        """Get the liquidity token transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.liquidity_token_transfers))
+    def _add_univ4_swaps(self, transaction: Dict):
+        """Process Uniswap V4 swap events."""
+        txn_hash = transaction['hash']
+        v4_swaps = transaction.get('uniswap_v4_swaps', [])
+        if v4_swaps:
+            self.univ4_swaps[txn_hash] = []
+            if not self.trading_enabled:
+                self._update_trading_enabled(transaction)
+            for swap in v4_swaps:
+                self.univ4_swaps[txn_hash].append({
+                    'log_index': swap.get('log_index'),
+                    'sender': swap.get('sender'),
+                    'amount0': swap.get('amount0'),
+                    'amount1': swap.get('amount1'),
+                    'sqrtPriceX96': swap.get('sqrt_price_x96'),
+                    'liquidity': swap.get('liquidity'),
+                    'tick': swap.get('tick'),
+                    'fee': swap.get('fee'),
+                    'pool_address': swap.get('pool_address')
+                })
+                if swap.get('pool_address') in self.pool_addresses:
+                    price = float(swap.get('sqrt_price_x96'))
+                    if swap.get('pool_address') not in self.pool_prices:
+                        self.pool_prices[swap.get('pool_address')] = []
+                    self.pool_prices[swap.get('pool_address')].append(price)
 
-    @property
-    def liquidity_token_mint_df(self):
-        """Get the liquidity token mint dataframe"""
-        return self._sort_df(pd.DataFrame(self.univ2_mints))
+    def _add_univ4_mints(self, transaction: Dict):
+        """Process Uniswap V4 mint events."""
+        txn_hash = transaction['hash']
+        v4_mints = transaction.get('uniswap_v4_mints', [])
+        if v4_mints:
+            for mint in v4_mints:
+                self.univ4_mints.append({
+                    'txn_hash': txn_hash,
+                    'block_number': transaction['block_number'],
+                    'txn_index': transaction['txn_index'],
+                    'log_index': mint.get('log_index'),
+                    'to_address': mint.get('to_address'),
+                    'amount': mint.get('amount'),
+                    'token_address': mint.get('token_address')
+                })
 
-    @property
-    def liquidity_token_burn_df(self):
-        """Get the liquidity token burn dataframe"""
-        return self._sort_df(pd.DataFrame(self.univ2_burns))
+    def _add_univ4_burns(self, transaction: Dict):
+        """Process Uniswap V4 burn events."""
+        txn_hash = transaction['hash']
+        v4_burns = transaction.get('uniswap_v4_burns', [])
+        if v4_burns:
+            for burn in v4_burns:
+                self.univ4_burns.append({
+                    'txn_hash': txn_hash,
+                    'block_number': transaction['block_number'],
+                    'txn_index': transaction['txn_index'],
+                    'log_index': burn.get('log_index'),
+                    'from_address': burn.get('from_address'),
+                    'amount': burn.get('amount'),
+                    'token_address': burn.get('token_address')
+                })
 
-    @property
-    def liquidity_token_lock_df(self):
-        """Get the liquidity token lock dataframe"""
-        lock_df = pd.DataFrame(self.locks)
-        lock_df['duration'] = lock_df['unlock_at'] - lock_df['timestamp']
-     
-        return self._sort_df(lock_df)
-
-    @property
-    def sync_data(self):
-        """Get the sync data"""
-        return UniV2PairSyncData(self.univ2_syncs)
-
-    @property
-    def price_df(self):
-        """Get the price dataframe"""
-        return UniV2PairSyncData(self.univ2_syncs).to_dataframe()
-    
-    @property
-    def approval_df(self):
-        """Get the approval dataframe"""
-        return ERC20TokenApprovalData(self.approvals).to_dataframe()
-    
-    def to_dict(self):
-        return self.__dict__
-        
     def update_from_transaction(self, transaction: Dict):
         """Update token data from a new transaction"""
-
-        # Add the txn hash to the set of processed txns
-        self.txn_hashes.append(transaction['hash'])
+        # Add the txn hash to the list of processed transactions
+        self.txn_hashes_to_makers[transaction['hash']] = transaction['from_address']
 
         # Handle contract creation
         if transaction['txn_type'] == 'Contract Creation':
@@ -874,20 +921,27 @@ class LiveTokenData:
         
         # Process pair events (Uniswap V2 pools)
         self._add_univ2_pair_event(transaction)
-        # --- PROCESS UNISWAP V3 POOL CREATION EVENTS ---
+        # Process Uniswap V3 pool creation events
         self._add_univ3_pool(transaction)
+        # Process Uniswap V4 pool initialization events
+        self._add_univ4_pool(transaction)
         
         # Process Uniswap V2 events
         self._add_univ2_syncs(transaction)
         self._add_univ2_swaps(transaction)
 
-        # --- PROCESS UNISWAP V3 EVENTS ---
+        # Process Uniswap V3 events
         self._add_univ3_swaps(transaction)
         self._add_univ3_mints(transaction)
         self._add_univ3_burns(transaction)
         
+        # Process Uniswap V4 events
+        #self._add_univ4_swaps(transaction)
+        #self._add_univ4_mints(transaction)
+        #self._add_univ4_burns(transaction)
+        
         # Process trading enabled events
-        if self.has_uni_v2_pool or not self.trading_enabled:
+        if self.has_pool or not self.trading_enabled:
             self._add_trading_enabled_event(transaction)
 
         # Process ERC20 transfers
@@ -905,9 +959,10 @@ class LiveTokenData:
         # Update unique addresses
         self.unique_addresses.update(transaction.get('unique_addresses', set()))
 
-        # update bribe amount
+        # Update bribe amount
         self._update_bribe_amount(transaction)
 
-        # update latest block number and timestamp
+        # Update latest block number and timestamp
         self.latest_block_number = transaction['block_number']
         self.latest_block_timestamp = transaction['block_timestamp']
+

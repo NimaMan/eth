@@ -1,6 +1,44 @@
 """
 # Token Network Subgraph Analyzer
-Analyzes connected subgraphs in token transaction networks to identify meaningful patterns and relationships.
+Simplifies token transaction networks by removing common nodes that are not fee sources such as:
+    - Token contract address
+    - Liquidity pool contract address
+    - Dead Address
+    - Zero Address
+    - Tax collector address
+    - Any other high degree node like tax collector, etc that is common in the transactions of several fee sources
+
+    
+Network Structure:
+----------------
+1. Nodes:
+   - Represent addresses (wallets or contracts) with significant activity
+   - Store UserTokenActivityTracker data containing:
+     * Token balances and movements
+     * Denomination (ETH) balances
+     * If the address is a fee source
+     * Transaction history
+     * Profit/loss tracking
+
+2. Edges:
+   - Types:
+     * 'txn owner': if address has been in the txn of another address, we have an edge from the txn owner to the address
+
+Simplification Process:
+--------------------
+1. Remove the high degree and default addresses
+2. Degree Calculation:
+We create a direct graph for the tx_owner type of edges. This shows all the addresses that have been in the txn of another address. 
+
+# TODO:
+define the high degree nodes.   
+    - Maybe I will need to use teh type fo the address to limit the wallets and the contracts. 
+    I might need to do this becuase of the fake transfer done by some addresses to create fake volume.
+
+   - Adjusted Degree Computation
+     * Accounts for both in and out edges
+     * Excludes self-loops from degree count
+     * Separate thresholds for wallets and contracts
 
 Subgraph Structure:
 ------------------
@@ -9,6 +47,9 @@ Subgraph Structure:
    - Identified through graph traversal
    - Can be weakly or strongly connected
    - Sorted by size and significance
+
+The connected subgraphs in token transaction networks identifies the subset of related addresses that are most likely related to same people or bots.
+
 """
 
 import networkx as nx
@@ -17,6 +58,7 @@ import pandas as pd
 from collections import Counter
 from typing import List, Set, Dict, Optional
 from dataclasses import dataclass
+from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
 
 
 @dataclass
@@ -35,7 +77,7 @@ class SubgraphMetrics:
     
 
 class NetworkSubgraphAnalyzer:
-    def __init__(self, graph: nx.DiGraph, simplified_graph: nx.DiGraph):
+    def __init__(self, graph: nx.DiGraph, token_data: LiveTokenData, degree_threshold: int = 10):
         """
         Initialize component analyzer with original and simplified graphs.
         
@@ -44,41 +86,66 @@ class NetworkSubgraphAnalyzer:
             simplified_graph: Simplified version of the graph
         """
         self.graph = graph
-        self.simplified_graph = simplified_graph
-        self.connected_components: List[Set[str]] = []
-        self.component_metrics: Dict[int, SubgraphMetrics] = {}
-        self.components_df: Optional[pd.DataFrame] = None
+        self.token_data = token_data
+        self.degree_threshold = degree_threshold
+        self.removed_nodes = set()
+        self._edge_types = {'txn owner'}
+        self.simplified_graph = None
+
+    def default_addresses_to_remove(self) -> set:
+        """Default addresses to remove"""
+        addresses_to_remove = {
+            self.token_data.contract_address,
+            "0x0000000000000000000000000000000000000000",
+            "0x000000000000000000000000000000000000dEaD",
+        }
+        # Add the pool addresses to the set of addresses to remove
+        addresses_to_remove.union(set(self.token_data.pool_info.keys()))
+        return addresses_to_remove
+    
+    def simplify(self) -> nx.DiGraph:
+        """Create simplified version of the graph"""
+        simplified_graph = self.graph.copy()
+        for node, degree in self.graph.in_degree():
+            # Keep the fee sources 
+            if node in self.token_data.fee_sources:
+                continue
+            if degree > self.degree_threshold:
+                self.removed_nodes.add(node)        
         
+        # If a fee source is having a significant number of outgoing edges, we remove it (potential spammer or scammer)
+        for node, degree in self.graph.out_degree():
+            # Keep the fee sources 
+            if node in self.token_data.fee_sources:
+                continue
+            if degree > 2*self.degree_threshold:
+                self.removed_nodes.add(node)        
+        
+        simplified_graph.remove_nodes_from(self.removed_nodes)
+        simplified_graph.remove_nodes_from(self.default_addresses_to_remove())
+        return simplified_graph
+    
     def find_subgraphs(self):
         """Identify and sort connected components"""
-        if isinstance(self.simplified_graph, nx.DiGraph):
-            self.connected_components = list(nx.weakly_connected_components(self.simplified_graph))
-        else:
-            self.connected_components = list(nx.connected_components(self.simplified_graph))
-        
-        self.connected_components.sort(key=len, reverse=True)
-        self.component_sizes = [len(c) for c in self.connected_components]
-        self.size_counts = Counter(self.component_sizes)
-    
-    def get_related_addresses(self, address):
-        """
-        Retrieve the connected component that the given address belongs to.
-        :param address: The wallet address to search for.
-        :return: A set of addresses in the same connected component or None if the address is not found.
-        """
         if self.simplified_graph is None:
-            print("Simplified graph (H) not built yet. Please run simplify_graph() first.")
-            return None
+            self.simplified_graph = self.simplify()
+        if isinstance(self.simplified_graph, nx.DiGraph):
+            connected_components = list(nx.weakly_connected_components(self.simplified_graph))
+        else:
+            connected_components = list(nx.connected_components(self.simplified_graph))
         
-        if address not in self.simplified_graph:
-            print(f"Address {address} not found in the simplified graph.")
-            return None
-        
+        connected_components.sort(key=len, reverse=True)
+        self.component_sizes = [len(c) for c in connected_components]
+        self.size_counts = Counter(self.component_sizes)
+        self.connected_components = connected_components
+        return connected_components
+
+    def get_related_addresses(self, address):
+        """Retrieve the connected component that the given address belongs to."""
         for component in self.connected_components:
             if address in component:
                 return component
         
-        print(f"Address {address} does not belong to any connected component.")
         return None
        
     def get_address_subgraph(self, address, depth=1):

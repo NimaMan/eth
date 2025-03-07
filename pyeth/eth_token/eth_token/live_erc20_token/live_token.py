@@ -1,7 +1,9 @@
 from typing import Any, Dict
+import pandas as pd
 from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
 from eth_token.live_erc20_token.network.live_token_network import LiveTokenNetwork
 from eth_token.live_erc20_token.token_health.token_health_predictor import TokenHealthPredictor
+from eth_token.live_erc20_token.data.token_approval_sync_data import UniV2PairSyncData, ERC20TokenApprovalData
 from eth_token.utils.logger import get_logger
 
 
@@ -19,7 +21,7 @@ class LiveERC20Token:
         self.logger = logger or get_logger(name="live_token", log_folder="token_manager")   
         self.contract_address = contract_address
         self.token_data = LiveTokenData(contract_address=contract_address)
-        self.token_network = LiveTokenNetwork(token_data=self.token_data, logger=self.logger)
+        self.token_network = LiveTokenNetwork(live_token=self, logger=self.logger)
         self.token_health_predictor = TokenHealthPredictor()
 
     def update_from_transaction(self, transaction: Dict):
@@ -54,6 +56,61 @@ class LiveERC20Token:
             # Calulate the age from the blocks. Zero is returned if the block timestamp is not available.
             return (self.token_data.latest_block_number - self.token_data.trading_enabled_block) / 300
         return (self.token_data.latest_block_timestamp - self.token_data.trading_enabled_timestamp) / 3600
+
+    def _sort_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Sort the dataframe"""
+        if not df.empty:
+            df = df.sort_values(by=['block_number', 'txn_index', 'log_index']).reset_index(drop=True)
+            df = df.set_index('txn_hash')
+        return df
+    
+    @property
+    def erc20_transfer_df(self):
+        """Get the transfer dataframe"""
+        return self._sort_df(pd.DataFrame(self.token_data.erc20_transfers))
+
+    @property
+    def eth_transfer_df(self):
+        """Get the ETH transfer dataframe"""
+        return self._sort_df(pd.DataFrame(self.token_data.eth_transfers))
+    
+    @property
+    def liquidity_token_transfer_df(self):
+        """Get the liquidity token transfer dataframe"""
+        return self._sort_df(pd.DataFrame(self.token_data.liquidity_token_transfers))
+
+    @property
+    def liquidity_token_mint_df(self):
+        """Get the liquidity token mint dataframe"""
+        return self._sort_df(pd.DataFrame(self.token_data.univ2_mints))
+
+    @property
+    def liquidity_token_burn_df(self):
+        """Get the liquidity token burn dataframe"""
+        return self._sort_df(pd.DataFrame(self.token_data.univ2_burns))
+
+    @property
+    def liquidity_token_lock_df(self):
+        """Get the liquidity token lock dataframe"""
+        lock_df = pd.DataFrame(self.token_data.locks)
+        lock_df['duration'] = lock_df['unlock_at'] - lock_df['timestamp']
+     
+        return self._sort_df(lock_df)
+
+    @property
+    def sync_data(self):
+        """Get the sync data"""
+        return UniV2PairSyncData(self.token_data.univ2_syncs)
+
+    @property
+    def price_df(self):
+        """Get the price dataframe"""
+        return UniV2PairSyncData(self.token_data.univ2_syncs).to_dataframe()
+    
+    @property
+    def approval_df(self):
+        """Get the approval dataframe"""
+        return ERC20TokenApprovalData(self.token_data.approvals).to_dataframe()
     
     @property
     def metrics(self) -> Dict[str, Any]:
@@ -81,7 +138,7 @@ class LiveERC20Token:
                     **self.token_data.to_dict(),
                 }
         except Exception as e:
-            logger.error(f"[{self.contract_address}] Error computing metrics: {str(e)}")
+            self.logger.error(f"[{self.contract_address}] Error computing metrics: {str(e)}")
             raise
 
     def __getitem__(self, item: str):

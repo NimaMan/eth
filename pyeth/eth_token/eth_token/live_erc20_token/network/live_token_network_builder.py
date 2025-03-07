@@ -1,6 +1,5 @@
 import networkx as nx
 from collections import defaultdict, OrderedDict
-import pandas as pd
 
 from eth_block_processor.utils.common_addresses import fee_recipients_set
 from eth_token.live_erc20_token.network.user_activity_tracker import UserTokenActivityTracker
@@ -60,12 +59,12 @@ class LiveTokenTxnStateDiffCalculator:
     - Only addresses with significant state changes (above threshold) are included in output
     """
     def __init__(self, 
-                 token_data,
+                 live_token,
                  denom_state_change_threshold=0.0005, 
                  token_state_change_threshold=0.1,
                  logger=None):
         self.logger = logger
-        self.token_data = token_data
+        self.live_token = live_token
         self.WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
         self.null_address = "0x0000000000000000000000000000000000000000"
         self.dead_address = "0x000000000000000000000000000000000000dEaD"
@@ -76,16 +75,6 @@ class LiveTokenTxnStateDiffCalculator:
             'denom': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()})
         }
 
-    def get_erc20_transfers(self, txn_dict: dict):
-        """Process a transfer event"""
-        erc20_transfer_df = self.token_data.erc20_transfer_df
-        return erc20_transfer_df.loc[[txn_dict['hash']]] if txn_dict['hash'] in erc20_transfer_df.index else pd.DataFrame()
-
-    def get_eth_transfers(self, txn_dict: dict):
-        """Process a transfer event"""
-        eth_transfer_df = self.token_data.eth_transfer_df
-        return eth_transfer_df.loc[[txn_dict['hash']]] if txn_dict['hash'] in eth_transfer_df.index else pd.DataFrame()
-    
     def _track_movement(self, movement_type: str, from_addr: str, to_addr: str, amount: float, transfer_id: tuple):
         """Track a movement between addresses and handle special cases"""
         # Handle WETH conversions
@@ -124,8 +113,8 @@ class LiveTokenTxnStateDiffCalculator:
             denom_out = sum(self.movements['denom'][address]['out'].values())
             denom_net = denom_in - denom_out
             
-            # Check if state change is significant
-            if abs(token_net) > self.token_state_change_threshold or abs(denom_net) > self.denom_state_change_threshold:
+            # Check if state change is significant or if address is a fee source
+            if abs(token_net) > self.token_state_change_threshold or abs(denom_net) > self.denom_state_change_threshold or address in self.live_token.token_data.txn_hashes_to_makers.values():
                 net_changes[address] = {
                     'token_net': token_net,
                     'denom_net': denom_net,
@@ -154,11 +143,11 @@ class LiveTokenTxnStateDiffCalculator:
         valid = abs(net_eth) < 1e-10
         # Only log if it's actually invalid (net_eth >= 1e-10)
         if not valid:
-            self.logger.warning(f"Invalid ETH movements net_eth: {net_eth} for {txn_hash} for {self.token_data.contract_address}")
+            self.logger.warning(f"Invalid ETH movements net_eth: {net_eth} for {txn_hash} for {self.live_token.contract_address}")
             
         return valid
 
-    def calculate_state_changes(self, txn_dict: dict, block_number: int, txn_index: int) -> dict:
+    def calculate_state_changes(self, txn_hash: str, block_number: int, txn_index: int) -> dict:
         """Calculate state changes including special cases"""
         self.movements = {  
             'token': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()}),
@@ -166,8 +155,8 @@ class LiveTokenTxnStateDiffCalculator:
         }          
         
         # Process all transfers with special case handling
-        erc20_transfers = self.get_erc20_transfers(txn_dict)
-        for txn_hash, transfer in erc20_transfers.iterrows():
+        erc20_transfers = self.live_token.token_data.erc20_transfers.get(txn_hash, [])
+        for transfer in erc20_transfers:
             log_index = transfer['log_index']
             transfer_id = (block_number, txn_index, log_index)
             is_wet_transfer = transfer["token_address"] == self.WETH_ADDRESS
@@ -182,10 +171,13 @@ class LiveTokenTxnStateDiffCalculator:
                                  transfer_id
                                  )
         
-        eth_transfers = self.get_eth_transfers(txn_dict)
-        for txn_hash, transfer in eth_transfers.iterrows():
-            log_index = transfer['log_index']
-            transfer_id = (block_number, txn_index, log_index)
+        eth_transfers = self.live_token.token_data.eth_transfers.get(txn_hash, [])
+        for transfer in eth_transfers:
+            if "log_index" in transfer:
+                log_index = transfer['log_index']
+                transfer_id = (block_number, txn_index, log_index)
+            else:
+                transfer_id = (block_number, txn_index, f"depth_{transfer['depth']}")
             self._track_movement('denom', 
                                  transfer['from_address'], 
                                  transfer['to_address'], 
@@ -201,13 +193,11 @@ class LiveTokenTxnStateDiffCalculator:
 
 
 class LiveTokenNetworkBuilder:
-    def __init__(self, token_data, logger=None):
+    def __init__(self, live_token, logger=None):
         self.logger = logger
-        self.token_data = token_data
+        self.live_token = live_token
         self.graph = nx.MultiDiGraph()
-        self.special_addresses = {"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"}
-        self.processed_txn = OrderedDict() # key:txn_hash, value: fee source
-        self.state_calculator = LiveTokenTxnStateDiffCalculator(token_data, logger=self.logger)
+        self.state_calculator = LiveTokenTxnStateDiffCalculator(live_token, logger=self.logger)
 
     def __iter__(self):
         return iter(self.graph.nodes)
@@ -217,11 +207,11 @@ class LiveTokenNetworkBuilder:
     
     @property
     def fee_sources(self):
-        return self.processed_txn.values()
+        return self.live_token.token_data.fee_sources
     
     @property
     def txn_hashes(self):
-        return self.processed_txn.keys()
+        return self.live_token.token_data.txn_hashes
 
     def _add_fee_source_edges(self, fee_source: str, addresses: list):
         """Add edges from fee source to all addresses involved in its transaction"""
@@ -236,7 +226,7 @@ class LiveTokenNetworkBuilder:
 
     def graph_add_or_update_address(self, 
                                address: str, 
-                               changes: dict, 
+                               state_changes: dict, 
                                block_number: int, 
                                txn_index: int, 
                                fee_source: str, 
@@ -244,17 +234,20 @@ class LiveTokenNetworkBuilder:
         """Add new address or update existing one with movement data"""
         is_fee_source = address == fee_source
         if address not in self.graph:
-            # Create new node
-            self.graph.add_node(address, data=UserTokenActivityTracker(
-                address=address,
-                address_type=None,
-                token_data=self.token_data,
-                entry_block=block_number,
-                entry_index=txn_index,
-                entry_log_index=None,
-                is_fee_source=is_fee_source,
-                fee_source=fee_source,
-            ))
+            # Create new node if it doesn't exist
+            self.graph.add_node(
+                address, 
+                data=UserTokenActivityTracker(
+                    address=address,
+                    address_type=None,
+                    token_data=self.live_token.token_data,
+                    entry_block=block_number,
+                    entry_index=txn_index,
+                    entry_log_index=None,
+                    is_fee_source=is_fee_source,
+                    fee_source=fee_source,
+                )
+            )
     
         # Get the user activity tracker
         user_activity = self.graph.nodes[address]['data']
@@ -264,7 +257,7 @@ class LiveTokenNetworkBuilder:
             user_activity.bribe_amount += bribe_amount
         
         # Update movements
-        movements = changes['movements']
+        movements = state_changes['movements']
         # Add token movements
         for transfer_id, amount in movements['token']['in'].items():
             user_activity.token_in_dict[transfer_id] = amount
@@ -277,19 +270,25 @@ class LiveTokenNetworkBuilder:
         for transfer_id, amount in movements['denom']['out'].items():
             user_activity.denom_out_dict[transfer_id] = amount
     
-    def update_network_from_txn(self, txn_dict: dict):
+    def update_from_transaction(self, txn_dict: dict):
         """Process transaction and update network with significant changes"""
         block_number = txn_dict['block_number']
+        txn_hash = txn_dict['hash']
         txn_index = txn_dict['txn_index']
         fee_source = txn_dict['from_address']
-        self.bribe_amount = txn_dict['bribe_amount']
+        bribe_amount = txn_dict['bribe_amount']
+        
         # Get state changes (only significant ones are returned by calculator)
-        state_changes = self.state_calculator.calculate_state_changes(txn_dict, block_number, txn_index)
+        state_changes = self.state_calculator.calculate_state_changes(txn_hash, block_number, txn_index)
         
         # Add or update addresses with their movements
-        for address, addr_changes in state_changes.items():
-            self.graph_add_or_update_address(address, addr_changes, block_number, txn_index, fee_source, self.bribe_amount)
+        for address, addr_state_changes in state_changes.items():
+            self.graph_add_or_update_address(address, 
+                                             addr_state_changes, 
+                                             block_number, 
+                                             txn_index, 
+                                             fee_source, 
+                                             bribe_amount
+                                             )
         
         self._add_fee_source_edges(fee_source, state_changes.keys())
-
-        self.processed_txn[txn_dict['hash']] = fee_source

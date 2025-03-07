@@ -1,6 +1,5 @@
 
 import numpy as np
-from functools import cached_property
 from collections import defaultdict
 
 # ignore warnings
@@ -60,7 +59,7 @@ class UserTokenActivityTracker:
             f"address_type={self.address_type}, "
         )
     
-    @cached_property
+    @property
     def all_token_movements(self):
         '''
         Returns a list of all token movements. 
@@ -74,7 +73,7 @@ class UserTokenActivityTracker:
                 all_movements[key] = -val
         return all_movements
     
-    @cached_property
+    @property
     def all_denom_movements(self):
         '''
         Returns a list of all denom movements.  Add the denom_in_dict and negative of denom_out_dict
@@ -92,39 +91,37 @@ class UserTokenActivityTracker:
         for (block, txn_index, _), val in movements.items():
             net[(block, txn_index)] += val
         return net    
-
-    @cached_property
+    
+    @property
     def token_got_list(self):
         grouped_movements = self._net_movements(self.all_token_movements)
         return [val for val in grouped_movements.values() if val > 0]
 
-    @cached_property
+    @property
     def token_sent_list(self):
         grouped_movements = self._net_movements(self.all_token_movements)
         return [-val for val in grouped_movements.values() if val < 0]
 
-    @cached_property
+    @property
     def denom_got_list(self):
         grouped_movements = self._net_movements(self.all_denom_movements)
         return [val for val in grouped_movements.values() if val > 0]
 
-    @cached_property
+    @property
     def denom_sent_list(self):
         grouped_movements = self._net_movements(self.all_denom_movements)
         return [-val for val in grouped_movements.values() if val < 0]
     
     @property
     def token_latest_price(self):
-        denom_reserve = self.token_data.price_df.iloc[-1].denom_reserve
-        token_reserve = self.token_data.price_df.iloc[-1].token_reserve
-        # check if token reserve is number or not 
-        if self.token_data.is_scam:
-            return 0
-        return denom_reserve / token_reserve
+        pool_address = self.token_data.pool_addresses[0]
+        return self.token_data.pool_prices[pool_address][-1]
     
     @property
     def token_balance(self):
-        return np.sum(self.token_got_list) - np.sum(self.token_sent_list)
+        balance = np.sum(self.token_got_list) - np.sum(self.token_sent_list)
+        #round it to zero if it is less than 0.000001
+        return 0 if abs(balance) < 0.000001 else balance
     
     @property
     def denom_balance(self):
@@ -192,7 +189,7 @@ class UserTokenActivityTracker:
     
     @property
     def token_holdings_to_total_supply_ratio(self):
-        return self.token_holdings / self.token_data["total_supply"]
+        return self.token_holdings / self.token_data.total_supply
 
     @property  
     def token_holdings_ratio(self):
@@ -230,9 +227,9 @@ class UserTokenActivityTracker:
             'num_sells': self.num_sells,
             'num_txn': self.num_txn,
             'mean_buy': self.mean_buy,
-            'buy_volatility': self.buy_volatility,
+            #'buy_volatility': self.buy_volatility,
             'mean_sell': self.mean_sell,
-            'sell_volatility': self.sell_volatility,            
+            #'sell_volatility': self.sell_volatility,            
             'total_token_bought': self.total_token_bought,
             'total_token_sold': self.total_token_sold,
             'token_holdings': self.token_holdings,
@@ -244,7 +241,7 @@ class UserTokenActivityTracker:
             'address': self.address,
             'is_scam': self.token_data.is_scam,
             'scam_label': self.token_data.scam_label,
-            'contract_address': self.token_data["contract_address"],
+            'contract_address': self.token_data.contract_address,
         }
 
     def check_associated_cashflow(self, processed_addresses=None):
