@@ -167,50 +167,13 @@ class BacktestDataFetcher:
                     'end_block': run['end_block'],
                     'created_at': run['created_at']
                 }
-            self.strategy_runs = formatted_runs
             return formatted_runs
         except Exception as e:
             self.logger.error(f"Error fetching strategy runs: {e}", exc_info=True)
             if self.db_conn:
                 self.db_conn.rollback()
             return {}
-
-    def fetch_strategy_run_details(self, strategy_run_id: int) -> Dict[str, Any]:
-        """Retrieve and format detailed information for a specific strategy run."""
-        if not hasattr(self, 'strategy_runs') or self.strategy_runs is None:
-            self.fetch_strategy_runs()
-        return self.strategy_runs[strategy_run_id]
-            
-    def fetch_strategy_token_positions(self, strategy_run_id: int) -> List[Dict[str, Any]]:
-        """Retrieve and format current positions for a specific strategy run."""
-        if hasattr(self, 'strategy_token_positions') and self.strategy_token_positions is not None:
-            if strategy_run_id in self.strategy_token_positions:
-                return self.strategy_token_positions[strategy_run_id]
-        try:
-            self.strategy_token_positions = {}
-            self.cursor.execute(STRATEGY_POSITIONS_LIST, (strategy_run_id,))
-            positions = self.cursor.fetchall()
-            self.logger.info(f"Found {len(positions)} positions for strategy run {strategy_run_id}")
-            formatted_positions = {}
-            for pos in positions:
-                formatted_positions[pos['token_address']] = {
-                    'static_data': pos['static_data'],
-                    'latest_snapshot': pos['latest_snapshot']
-                }
-            self.strategy_token_positions[strategy_run_id] = formatted_positions
-            return formatted_positions
-        except Exception as e:
-            self.logger.error(f"Error fetching positions from database: {e}", exc_info=True)
-            if self.db_conn:
-                self.db_conn.rollback()
-            return {}
-
-    def fetch_token_list_for_strategy(self, strategy_run_id: int) -> List[Dict[str, Any]]:
-        """Retrieve and format the list of unique tokens with metrics for a specific strategy run."""
-        if not hasattr(self, 'strategy_token_positions') or self.strategy_token_positions is None:
-            self.fetch_strategy_token_positions(strategy_run_id)    
-        return list(self.strategy_token_positions[strategy_run_id].keys())
-
+        
     def fetch_token_position_history(self, strategy_run_id: int, token_address: str) -> List[Dict[str, Any]]:
         """Retrieve and format the complete position history for a specific token in a strategy."""            
         try:
@@ -228,6 +191,73 @@ class BacktestDataFetcher:
                 self.db_conn.rollback()
             return []
 
+    def fetch_strategy_run_details(self, strategy_run_id: int) -> Dict[str, Any]:
+        """Retrieve and format detailed information for a specific strategy run."""
+        return self.fetch_strategy_runs()[strategy_run_id]
+            
+    def fetch_strategy_token_positions(self, strategy_run_id: int) -> Dict[str, List[Dict[str, Any]]]:
+        """Retrieve and format current positions for a specific strategy run."""
+        try:
+            self.strategy_token_positions = {}
+            self.cursor.execute(STRATEGY_POSITIONS_LIST, (strategy_run_id,))
+            positions = self.cursor.fetchall()
+            self.logger.info(f"Found {len(positions)} positions for strategy run {strategy_run_id}")
+            
+            # Initialize position lists by state
+            init_state_positions = []
+            buy_state_positions = []
+            sell_state_positions = []
+            scam_state_positions = []
+
+            for pos in positions:
+                # Create a position object with the token address and latest snapshot data
+                static_data = pos['static_data']
+                latest_snapshot = pos['latest_snapshot']
+                
+                # Skip if either data component is missing
+                if not static_data or not latest_snapshot:
+                    continue
+                    
+                # Combine static and latest snapshot data
+                position_data = {
+                    'token_address': pos['token_address'],
+                    **static_data,  # Include static data fields
+                    **latest_snapshot  # Include latest snapshot fields
+                }
+                
+                # Categorize by position state
+                state = latest_snapshot.get('position_state')
+                if state == 'Init':
+                    init_state_positions.append(position_data)
+                elif state in {'Buy Submitted', 'Buy Confirmed'}:
+                    buy_state_positions.append(position_data)
+                elif state in {'Sell Submitted', 'Sell Confirmed'}:
+                    sell_state_positions.append(position_data)
+                elif state == 'Scammed':
+                    scam_state_positions.append(position_data)
+            
+            formatted_positions = {
+                'init_positions': init_state_positions,
+                'buy_positions': buy_state_positions,
+                'sell_positions': sell_state_positions, 
+                'scam_positions': scam_state_positions
+            }
+            return formatted_positions
+        except Exception as e:
+            self.logger.error(f"Error fetching positions from database: {e}", exc_info=True)
+            if self.db_conn:
+                self.db_conn.rollback()
+            # Return empty position lists to avoid frontend errors
+            return {
+                'init_positions': [],
+                'buy_positions': [],
+                'sell_positions': [],
+                'scam_positions': []
+            }
+
+    def fetch_token_list_for_strategy(self, strategy_run_id: int) -> List[Dict[str, Any]]:
+        return list(self.strategy_token_positions[strategy_run_id].keys())
+
     def fetch_strategy_performance_metrics(self, strategy_run_id: int) -> PortfolioMetrics:
         """
         Retrieves strategy positions, groups them by token address,
@@ -238,7 +268,6 @@ class BacktestDataFetcher:
             # Calculate metrics using the latest positions for each token.
             metrics = self.metrics_calculator.calculate_portfolio_metrics(latest_positions)
             return metrics
-
         except Exception as e:
             self.logger.error(f"Error calculating portfolio metrics: {e}")
             raise e

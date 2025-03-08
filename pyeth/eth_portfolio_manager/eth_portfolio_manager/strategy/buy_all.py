@@ -62,7 +62,7 @@ from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
 
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
-from eth_portfolio_manager.strategy.base import BaseStrategy
+from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 
 

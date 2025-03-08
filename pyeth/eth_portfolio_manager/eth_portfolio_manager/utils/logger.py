@@ -61,7 +61,7 @@ def cleanup_empty_logs():
 atexit.register(cleanup_empty_logs)
 
 
-def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_log_dir=None):
+def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_log_dir=None, console_output=False):
     """
     Initializes and returns a logger with the specified name.
     
@@ -96,9 +96,15 @@ def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_lo
         # Track the log file
         _log_files.add(log_file_path)
         
-        file_handler = logging.FileHandler(log_file_path)
+        file_handler = RotatingFileHandler(log_file_path, maxBytes=50*1024*1024, backupCount=5)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     return logger
 
@@ -106,7 +112,8 @@ def get_logger(name="portfolio_manager", log_folder="portfolio_manager", base_lo
 
 def get_monitoring_logger(name: str = "portfolio_monitor", 
                log_folder: str = "portfolio_monitor", 
-               log_dir: str = None) -> logging.Logger:
+               log_dir: str = None,
+               console_output: bool = False) -> logging.Logger:
     """
     Get a configured logger instance
     
@@ -146,20 +153,23 @@ def get_monitoring_logger(name: str = "portfolio_monitor",
         # Track the log file
         _log_files.add(log_file_path)
         
-        file_handler = RotatingFileHandler(
-            filename=log_file_path,
-            maxBytes=10485760,  # 10MB
-            backupCount=10
-        )
+        file_handler = RotatingFileHandler(filename=log_file_path, maxBytes=50*1024*1024, backupCount=5)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+    
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     return logger
 
 def setup_flask_logger(app, 
                       name: str = "portfolio_monitor", 
                       log_folder="portfolio_monitor", 
-                      log_dir=None) -> logging.Logger:
+                      log_dir=None,
+                      console_output: bool = False) -> logging.Logger:
     """
     Configure Flask application logger using the same standards
     
@@ -191,11 +201,7 @@ def setup_flask_logger(app,
     # Track the log file
     _log_files.add(log_file_path)
     
-    file_handler = RotatingFileHandler(
-        filename=log_file_path,
-        maxBytes=10485760,  # 10MB
-        backupCount=10
-    )
+    file_handler = RotatingFileHandler(filename=log_file_path, maxBytes=50*1024*1024, backupCount=5)
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
     
@@ -205,6 +211,12 @@ def setup_flask_logger(app,
     # Add our handler
     app.logger.addHandler(file_handler)
     app.logger.setLevel(logging.INFO)
+    
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        app.logger.addHandler(console_handler)
     
     return app.logger
 

@@ -48,13 +48,12 @@ from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
 from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
-from eth_portfolio_manager.utils.logger import get_logger
 
 
 class BacktestPortfolioManager:
-    def __init__(self, config):
+    def __init__(self, config, logger):
         self.config = config
-        self.logger = get_logger(name="backtester", log_folder="backtesting")
+        self.logger = logger
         # Initialize components
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = BlockTokenProcessor(logger=self.logger)

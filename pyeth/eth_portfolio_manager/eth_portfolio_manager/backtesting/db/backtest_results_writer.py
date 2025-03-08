@@ -25,7 +25,6 @@ This design ensures consistency and traceability by persisting the full evolutio
 """
 
 import json
-import asyncio
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -33,7 +32,7 @@ import os
 
 
 class BacktestResultsWriter:
-    def __init__(self):
+    def __init__(self, logger):
         # Establish a direct database connection.
         self.conn = psycopg2.connect(
             dbname="backtest",
@@ -44,7 +43,7 @@ class BacktestResultsWriter:
         )
         self.cur = self.conn.cursor(cursor_factory=RealDictCursor)
         self.current_run_id = None
-
+        self.logger = logger
     def write_strategy_run(self, strategy_name: str, params: dict, start_block: int, end_block: int) -> int:
         """
         Inserts a new strategy run record into the database, returning the generated run ID.
@@ -60,11 +59,11 @@ class BacktestResultsWriter:
             )
             self.current_run_id = self.cur.fetchone()['id']
             self.conn.commit()
-            print(f"Created strategy run with ID: {self.current_run_id} and name: {strategy_name}")
+            self.logger.info(f"Created strategy run with ID: {self.current_run_id} and name: {strategy_name}")
             return self.current_run_id
         except Exception as e:
             self.conn.rollback()
-            print(f"Error writing strategy run: {e}")
+            self.logger.error(f"Error writing strategy run: {e}")
             raise
 
     def write_position_history(self, token_history: dict):
@@ -72,56 +71,82 @@ class BacktestResultsWriter:
         Writes token positions to the database.
 
         Args:
-            token_history: A dictionary mapping token_address (string) to an aggregated token position dictionary.
-                           The token position is expected to be in the format returned by TokenPosition.to_full_dict(),
-                           including both 'static' and 'dynamic_history' keys.
+            token_history: A dictionary mapping composite keys (token_address-pool_address) 
+                           to TokenPosition objects.
         
         Process:
             - Iterates over all tokens in token_history.
+            - Extracts token_address and pool_address from the composite key.
             - Serializes the token position to JSON.
-            - Inserts each record into the token_positions table with (strategy_run_id, token_address, token_position).
+            - Inserts each record with strategy_run_id, token_address, pool_address, and token_position.
         """
         try:
             insert_sql = """
                 INSERT INTO token_positions (
                     strategy_run_id,
                     token_address,
+                    pool_address,
+                    currency,
                     token_position
                 ) VALUES (
-                    %s, %s, %s
+                    %s, %s, %s, %s, %s
                 )
+                ON CONFLICT (strategy_run_id, token_address, pool_address) 
+                DO UPDATE SET token_position = EXCLUDED.token_position,
+                              currency = EXCLUDED.currency
             """
 
             total_positions = 0
-            for token_address, token_position in token_history.items():
-                # token_position is expected to be a dict as produced by TokenPosition.to_full_dict()
+            for composite_key, token_position in token_history.items():
+                # Extract token_address and pool_address from the composite key
+                key_parts = composite_key.split('-')
+                if len(key_parts) >= 2:
+                    token_address = key_parts[0]
+                    pool_address = key_parts[1]
+                else:
+                    # Handle legacy keys that might not have pool_address
+                    token_address = composite_key
+                    pool_address = None
+                    
+                # Get currency from token position if available
+                currency = None
+                if hasattr(token_position, 'static_data') and hasattr(token_position.static_data, 'currency'):
+                    currency = token_position.static_data.currency
+                    
+                # Convert TokenPosition to dictionary
+                position_dict = token_position.to_full_dict()
+                    
                 values = (
                     self.current_run_id,
                     token_address,
-                    json.dumps(token_position)
+                    pool_address,
+                    currency,
+                    json.dumps(position_dict)
                 )
                 self.cur.execute(insert_sql, values)
                 total_positions += 1
 
             self.conn.commit()
-            print(f"Successfully wrote {total_positions} token positions to database")
+            self.logger.info(f"Successfully wrote {total_positions} token positions to database")
         except Exception as e:
             self.conn.rollback()
-            print(f"Error writing position history: {e}")
-            # If available, report the failed token
+            self.logger.error(f"Error writing position history: {e}")
             raise
 
     def write_backtest_results(self, backtest_manager, start_block: int, end_block: int):
         """
         Writes backtest results to the database.
         """
-        for strategy_name, strategy in backtest_manager.strategy_position_managers.items():
+        for strategy_name, strategy_position_manager in backtest_manager.strategy_position_managers.items():
             try:
-                strategy_params = strategy.token_position_manager.investment_strategy.get_parameters()
+                token_position_manager = strategy_position_manager.token_position_manager
+                strategy_params = token_position_manager.investment_strategy.get_parameters()
                 print(f"\nWriting results for strategy {strategy_name}")
                 print(f"Parameters: {strategy_params}")
-                print(f"Aggregated token positions count: {len(strategy.token_positions)}")
-                
+                num_positions = len(strategy_position_manager.token_positions_cache)
+                print(f"Aggregated token positions count: {num_positions}")
+                if num_positions == 0:
+                    continue
                 run_id = self.write_strategy_run(
                     strategy_name=strategy_name,
                     params=strategy_params,
@@ -129,61 +154,17 @@ class BacktestResultsWriter:
                     end_block=end_block
                 )
                 
-                aggregated_history = {
-                    token_address: token_position.to_full_dict()
-                    for token_address, token_position in strategy.token_positions.items()
-                }
-                self.write_position_history(aggregated_history)
-                print(f"Successfully wrote strategy {strategy_name} (ID: {run_id})")
+                # Get token positions from the cache
+                token_positions = strategy_position_manager.token_positions_cache.items()
+                self.write_position_history(token_positions)
+                self.logger.info(f"Successfully wrote strategy {strategy_name} (ID: {run_id})")
                 
             except Exception as e:
-                print(f"Error writing results for strategy {strategy_name}: {e}")
-                raise  # Changed from continue to raise to see errors
+                self.logger.error(f"Error writing results for strategy {strategy_name}: {e}")
+                raise
 
     def __del__(self):
         if hasattr(self, 'cur'):
             self.cur.close()
         if hasattr(self, 'conn'):
             self.conn.close()
-
-
-if __name__ == "__main__":
-    # Test database writing with sample JSON file
-    writer = BacktestResultsWriter()
-    BACKTEST_LOG_DIR = "/home/nima/code/crypto/logs/backtesting"
-    json_path = os.path.join(BACKTEST_LOG_DIR, "BuyAll_21887626_21888346_20250220_160701.json")
-    
-    print(f"Loading test data from: {json_path}")
-    with open(json_path, 'r') as f:
-        data = json.load(f)
-    
-    try:
-        # Write strategy run
-        run_id = writer.write_strategy_run(
-            strategy_name=data['strategy_name'],
-            params=data['parameters'],
-            start_block=data['start_block'],
-            end_block=data['end_block']
-        )
-        print(f"Created strategy run with ID: {run_id}")
-        
-        # Write token positions
-        writer.write_position_history(data['token_history'])
-        
-        # Verify the write
-        writer.cur.execute("SELECT COUNT(*) FROM strategy_runs")
-        strategy_count = writer.cur.fetchone()['count']
-        
-        writer.cur.execute("SELECT COUNT(*) FROM token_positions")
-        position_count = writer.cur.fetchone()['count']
-        
-        print(f"\nVerification Results:")
-        print(f"Strategy runs in database: {strategy_count}")
-        print(f"Token positions in database: {position_count}")
-        print(f"Token positions in JSON: {len(data['token_history'])}")
-        
-    except Exception as e:
-        print(f"Error during test: {e}")
-        raise
-    finally:
-        writer.conn.close()

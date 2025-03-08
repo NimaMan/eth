@@ -10,7 +10,7 @@ Objective:
 
 import asyncio
 
-from eth_portfolio_manager.strategy.buy_everything import BuyAll
+from eth_portfolio_manager.strategy.buy_all import BuyAll
 from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
 from eth_portfolio_manager.live.live_portfolio_manager import LivePortfolioManager
 from eth_portfolio_manager.utils.logger import get_logger

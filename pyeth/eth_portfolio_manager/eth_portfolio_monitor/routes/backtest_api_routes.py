@@ -25,21 +25,17 @@ def get_strategy_runs():
 
 
 @backtest_api.route('/positions/<int:strategy_run_id>')
-def get_strategy_positions(strategy_run_id):
+def get_strategy_token_positions(strategy_run_id):
     """Get all positions for a specific strategy run"""
     logger.info(f"API: Fetching positions for strategy run {strategy_run_id}")
     try:
-        positions = backtest_data.fetch_strategy_token_positions(strategy_run_id)
-        # Convert dict to list for table display
-        positions_list = [
-            {
-                'token_address': addr,
-                'static_data': pos['static_data'],
-                'latest_snapshot': pos['latest_snapshot']
-            } for addr, pos in positions.items()
-        ]
-        logger.info(f"Found {len(positions_list)} positions")
-        return jsonify({'positions': positions_list})
+        # Get the data
+        strategy_token_positions = backtest_data.fetch_strategy_token_positions(strategy_run_id)
+        for key, value in strategy_token_positions.items():
+            print(f"{key}: {len(value)}")
+        
+        # Return the data as is for now
+        return jsonify(strategy_token_positions)
     except Exception as e:
         logger.error(f"API Error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -99,33 +95,15 @@ def get_token_position_history(strategy_run_id, token_address):
 
 
 @backtest_api.route('/metrics/<int:strategy_run_id>')
-def get_metrics(strategy_run_id):
+def get_strategy_metrics(strategy_run_id):
     """Get metrics for a specific strategy run"""
     logger.info(f"API: Fetching metrics for strategy run {strategy_run_id}")
     try:
-        metrics = backtest_data.fetch_strategy_performance_metrics(strategy_run_id)
-        # Convert metrics to dict for JSON serialization
-        metrics_dict = {
-            'currency_metrics': {
-                currency: {
-                    'currency': m.currency,
-                    'total_value': m.total_value,
-                    'realized_profit': m.realized_profit,
-                    'unrealized_profit': m.unrealized_profit,
-                    'total_profit_loss': m.total_profit_loss,
-                    'position_count': m.position_count,
-                    'active_position_count': m.active_position_count,
-                    'inactive_sold_position_count': m.inactive_sold_position_count,
-                    'inactive_init_position_count': m.inactive_init_position_count
-                } for currency, m in metrics.currency_metrics.items()
-            },
-            'total_position_count': metrics.total_position_count,
-            'init_position_count': metrics.init_position_count,
-            'buy_position_count': metrics.buy_position_count,
-            'sell_position_count': metrics.sell_position_count,
-            'last_updated': metrics.last_updated.isoformat()
-        }
-        return jsonify({'metrics': metrics_dict})
+        # First get positions data
+        positions_data = backtest_data.fetch_strategy_token_positions(strategy_run_id)
+        metrics = backtest_data.metrics_calculator.calculate_metrics_for_api(positions_data)
+        logger.info(f"Calculated metrics for strategy run {strategy_run_id}")
+        return jsonify(metrics)
     except Exception as e:
         logger.error(f"API Error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500

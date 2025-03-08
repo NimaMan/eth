@@ -14,37 +14,31 @@ from typing import Optional, Dict
 from eth_portfolio_manager.core.token_position import TokenPosition
 
 
-@dataclass
-class CacheEntry:
-    token_position: TokenPosition
-    timestamp: float
-
-
 class TokenPositionsCache:
     def __init__(self, max_size: int = 10000):
         self.max_size = max_size
-        self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
+        self.token_positions: OrderedDict[str, TokenPosition] = OrderedDict()
         self._lock = Lock()
 
     def _compose_key(self, token_address: str, pool_address: str) -> str:
         """
         Compose a composite key using token address and pool address.
         """
-        return f"{token_address.lower()}:{pool_address.lower()}"
+        return f"{token_address}-{pool_address}"
 
     def clear_cache(self) -> None:
         """
         Clear the entire cache.
         """
         with self._lock:
-            self.cache.clear()
+            self.token_positions.clear()
 
     def get_cached_keys(self) -> Dict[str, TokenPosition]:
         """
         Retrieve a dictionary mapping keys to TokenPosition objects.
         """
         with self._lock:
-            return {key: entry.token_position for key, entry in self.cache.items()}
+            return {key: entry for key, entry in self.token_positions.items()}
 
     def get(self, token_address: str, pool_address: str) -> Optional[TokenPosition]:
         """
@@ -52,12 +46,12 @@ class TokenPositionsCache:
         """
         key = self._compose_key(token_address, pool_address)
         with self._lock:
-            if key not in self.cache:
+            if key not in self.token_positions:
                 return None
-            entry = self.cache[key]
+            entry = self.token_positions[key]
             # Move key to the end (LRU behavior)
-            self.cache.move_to_end(key)
-            return entry.token_position
+            self.token_positions.move_to_end(key)
+            return entry
 
     def add(self, token_position: TokenPosition, token_address: str, pool_address: str) -> None:
         """
@@ -65,49 +59,48 @@ class TokenPositionsCache:
         """
         key = self._compose_key(token_address, pool_address)
         with self._lock:
-            if key in self.cache:
+            if key in self.token_positions:
                 # Update the existing entry with a new timestamp
-                self.cache[key].timestamp = time.time()
-                self.cache[key].token_position = token_position
-                self.cache.move_to_end(key)
+                self.token_positions[key] = token_position
+                self.token_positions.move_to_end(key)
             else:
-                if len(self.cache) >= self.max_size:
+                if len(self.token_positions) >= self.max_size:
                     # Remove the least-recently used entry
-                    self.cache.popitem(last=False)
-                self.cache[key] = CacheEntry(token_position=token_position, timestamp=time.time())
-                self.cache.move_to_end(key)
+                    self.token_positions.popitem(last=False)
+                self.token_positions[key] = token_position
+                self.token_positions.move_to_end(key)
 
     def __contains__(self, key: str) -> bool:
         with self._lock:
-            return key in self.cache
+            return key in self.token_positions
 
     def __len__(self) -> int:
         with self._lock:
-            return len(self.cache)
+            return len(self.token_positions)
 
-    def items(self) -> Dict[str, CacheEntry]:
+    def items(self) -> Dict[str, TokenPosition]:
         with self._lock:
-            return self.cache.items()
+            return {key: entry for key, entry in self.token_positions.items()}
         
-    def values(self) -> Dict[str, CacheEntry]:
+    def values(self) -> Dict[str, TokenPosition]:
         with self._lock:
-            return self.cache.values()
+            return {key: entry for key, entry in self.token_positions.items()}
         
-    def keys(self) -> Dict[str, CacheEntry]:
+    def keys(self) -> Dict[str, str]:
         with self._lock:
-            return self.cache.keys()
+            return self.token_positions.keys()
         
-    def __getitem__(self, key: str) -> CacheEntry:
+    def __getitem__(self, key: str) -> TokenPosition:
         with self._lock:
-            return self.cache[key]
+            return self.token_positions[key]
         
-    def __setitem__(self, key: str, value: CacheEntry):
+    def __setitem__(self, key: str, value: TokenPosition):
         with self._lock:
-            self.cache[key] = value
+            self.token_positions[key] = value
             
     def __iter__(self):
         with self._lock:
-            return iter(self.cache.values())
+            return iter({key: entry for key, entry in self.token_positions.items()})
 
     def __repr__(self) -> str:
-        return f"TokenPositionsCache(max_size={self.max_size}, current_size={len(self.cache)})" 
+        return f"TokenPositionsCache(max_size={self.max_size}, current_size={len(self.token_positions)})" 

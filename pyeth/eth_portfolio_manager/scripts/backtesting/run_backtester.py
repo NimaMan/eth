@@ -5,55 +5,12 @@ from datetime import datetime
 from web3 import Web3
 import asyncio
 from eth_portfolio_manager.backtesting.backtest_manager import BacktestPortfolioManager
-from eth_portfolio_manager.strategy.buy_everything import BuyAll
-from eth_portfolio_manager.strategy.buy_scam import BuyScamStrategy
+from eth_portfolio_manager.strategy import BuyAll, BuyScamStrategy, MarketTracker
 from eth_portfolio_manager.backtesting.db.backtest_results_writer import BacktestResultsWriter
+from eth_portfolio_manager.utils.logger import get_logger
 
-# Define log directory for backtest result JSON files
-BACKTEST_LOG_DIR = "/home/nima/code/crypto/logs/backtesting"
 
-def serialize_token_position(token_position):
-    """
-    Helper function to convert a TokenPosition instance into its JSON-serializable dictionary.
-    """
-    if hasattr(token_position, "to_full_dict"):
-        return token_position.to_full_dict()
-    return token_position
-
-def save_results_to_json(strategy_name: str, params: dict, start_block: int, end_block: int, token_positions: dict):
-    """
-    Save backtest results to a JSON file using the new token-centric structure.
-    Each token's complete aggregated position (both static and dynamic history) is stored.
-    
-    Algorithm:
-      1. For each token in token_positions (which is a mapping from token_address to a TokenPosition instance),
-         convert it to a serializable dict using its `to_full_dict()` method.
-      2. Assemble a serializable dictionary with:
-           • strategy_name, parameters, start and end blocks,
-           • and a mapping from token_address to the aggregated token position dict.
-      3. Write the complete JSON to a file.
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{strategy_name}_{start_block}_{end_block}_{timestamp}.json"
-    filepath = os.path.join(BACKTEST_LOG_DIR, filename)
-    
-    serializable_history = {
-        token_address: serialize_token_position(token_position)
-        for token_address, token_position in token_positions.items()
-    }
-    
-    serializable_data = {
-        "strategy_name": strategy_name,
-        "parameters": params,
-        "start_block": start_block,
-        "end_block": end_block,
-        "token_history": serializable_history
-    }
-    
-    with open(filepath, 'w') as f:
-        json.dump(serializable_data, f, indent=2, default=str)
-    print(f"Saved results to {filepath}")
-    return filepath
+logger = get_logger(name="backtester", log_folder="backtesting")
 
 
 class BacktestConfig:
@@ -62,6 +19,7 @@ class BacktestConfig:
         self.end_block = end_block
         self.initial_balance = initial_balance
         self.strategies = {
+            "MarketTracker": MarketTracker(),
             "BuyAll": BuyAll(),
             "BuyScam": BuyScamStrategy()
         }       
@@ -84,13 +42,18 @@ async def main(num_days=2):
     )
     
     # Initialize BacktestManager with the given configuration 
-    backtest_manager = BacktestPortfolioManager(config=config)
+    backtest_manager = BacktestPortfolioManager(
+        config=config,
+        logger=logger
+    )
     
     # Run the backtest (this will update token positions and record their snapshots)
     await backtest_manager.run_backtest()
     
     # Write results to the database using the BacktestResultsWriter
-    results_writer = BacktestResultsWriter()
+    results_writer = BacktestResultsWriter(
+        logger=logger
+    )
     results_writer.write_backtest_results(backtest_manager, start_block, end_block)
     
     duration = (time.time() - start_time) / 3600

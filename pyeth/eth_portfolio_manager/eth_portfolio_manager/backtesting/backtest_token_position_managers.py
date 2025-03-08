@@ -111,7 +111,7 @@ Implementation Notes:
 
 from typing import Dict, List 
 
-from eth_portfolio_manager.strategy.base import BaseStrategy
+from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_token.live_erc20_token.live_token import LiveERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
