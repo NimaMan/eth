@@ -35,7 +35,7 @@ class TransactionBatchProcessor:
         self.w3 = w3
         self.transaction_processor = TransactionProcessor(w3=w3)
         self.batch_data_fetcher = BatchTransactionDataFetcher(w3=w3)
-        self.logger = logger or get_logger(name="txn_processor")
+        self.logger = logger
 
     async def _process_single_transaction(self, 
                                              transaction: Dict[str, Any], 
@@ -51,7 +51,8 @@ class TransactionBatchProcessor:
             )
             return processed_txn
         except Exception as e:
-            self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
+            if self.logger is not None:
+                self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
             e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
             raise
     
@@ -92,7 +93,8 @@ class TransactionBatchProcessor:
             if result is not None:
                 results.append(result)
         if failed_txns:
-            self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+            if self.logger is not None:
+                self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
         
         return results
 

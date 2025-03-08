@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from decimal import Decimal
 from typing import List, Optional, Dict, Any
 from pyparsing import Union
 from web3.types import TxData, TxReceipt, ChecksumAddress, EventData
@@ -208,28 +207,6 @@ class TradingDisabledEvent:
     token_address: ChecksumAddress
     block_number: int
     log_index: int
-
-
-@dataclass
-class TransactionAction:
-    action_type: str  # e.g., "Swap", "Approve", "Transfer"
-    description: str
-    involved_addresses: List[str]
-    involved_tokens: List[str]
-    amounts: List[Decimal]
-    additional_info: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class EventLog:
-    block_number: int
-    log_index: int    
-    address: ChecksumAddress
-    event_name: str
-    params: Dict[str, Any]
-    transaction_index: int
-    transaction_hash: str
-
 
 
 #--------------------------------

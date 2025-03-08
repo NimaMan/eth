@@ -95,7 +95,7 @@ class BlockProcessor:
             w3=self.w3,
             logger=logger
         )
-        self.logger = logger or get_logger(name="block_processor")
+        self.logger = logger
         if save_txn_to_db:
             from eth_block_processor.db.transaction_saver import TransactionSaver
             self.transaction_saver = TransactionSaver(w3=self.w3, logger=logger)
@@ -115,7 +115,8 @@ class BlockProcessor:
                 result = await self.process_block(block_number)
                 results[block_number] = result
             except Exception as e:
-                self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}")
+                if self.logger is not None:
+                    self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}")
 
         return results
 
@@ -136,10 +137,12 @@ class BlockProcessor:
             num_failed_txns = len(transactions) - len(processed_transactions)
             if self.save_txn_to_db:
                 self.transaction_saver.save_transactions(processed_transactions)
-            self.logger.info(f"{block_number}->{len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f}s")                
+            if self.logger is not None:
+                self.logger.info(f"{block_number}->{len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f}s")                
             return processed_transactions
         except Exception as e:
-            self.logger.error(f"{__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
+            if self.logger is not None:
+                self.logger.error(f"{__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
             raise
 
 

@@ -19,7 +19,7 @@ class TransactionSaver:
         self.address_labeler = AddressTypeLabeler(w3)
         self.engine = engine or get_engine(db='eth_db')
         self.SessionLocal = sessionmaker(bind=self.engine)
-        self.logger = logger or get_logger(name="transaction_saver")
+        self.logger = logger
         
     def save_transactions(self, processed_txns):
         """
@@ -104,7 +104,8 @@ class TransactionSaver:
                         }
                         address_params.append(param)
                     except AttributeError as e:
-                        self.logger.error(f"AttributeError in address object: {e}")
+                        if self.logger is not None:
+                            self.logger.error(f"AttributeError in address object: {e}")
                         continue
                 
                 session.execute(
@@ -136,7 +137,8 @@ class TransactionSaver:
                             params.append(param)
                         except AttributeError as e:
                             # Log the specific attribute that's missing
-                            self.logger.error(f"AttributeError in transaction object: {e}")
+                            if self.logger is not None:
+                                self.logger.error(f"AttributeError in transaction object: {e}")
                             continue
                     
                     session.execute(
@@ -148,7 +150,8 @@ class TransactionSaver:
                         params
                     )
                 except Exception as e:
-                    self.logger.error(f"Error in transaction insertion: {str(e)}")
+                    if self.logger is not None:
+                        self.logger.error(f"Error in transaction insertion: {str(e)}")
                     # Continue with other operations
             
             if tx_participant_objs:
@@ -166,7 +169,8 @@ class TransactionSaver:
             
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error in bulk_save_transactions: {str(e)}")
+            if self.logger is not None:
+                self.logger.error(f"Error in bulk_save_transactions: {str(e)}")
             raise
         finally:
             session.close()
@@ -232,7 +236,8 @@ class TransactionSaver:
             
         except Exception as e:
             session.rollback()
-            self.logger.error(f"Error in save_single_transaction: {str(e)}")
+            if self.logger is not None:
+                self.logger.error(f"Error in save_single_transaction: {str(e)}")
             raise
         finally:
             session.close()

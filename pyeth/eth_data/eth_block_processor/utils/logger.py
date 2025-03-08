@@ -5,7 +5,8 @@ The primary objective of this logger module is to provide a centralized and cons
 1. Create a standardized logging format across all modules.
 2. Allow for easy integration of logging in any part of the project.
 3. Ensure that all logs are stored in a predefined location for easy access and analysis.
-4. Delete empty log files when the program exits.
+4. Implement log rotation to prevent log explosion (max 50MB per file with 5 backups).
+5. Delete empty log files when the program exits.
 
 '''
 import os
@@ -21,14 +22,19 @@ ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
 _log_files = set()
 
 
-def get_logger(name="block_processor", log_folder="block_processor", base_log_dir=None):
+def get_logger(name="block_processor", log_folder="block_processor", base_log_dir=None, 
+               log_level=logging.INFO, max_bytes=50*1024*1024, backup_count=5, console_output=False):
     """
-    Initializes and returns a logger with the specified name.
+    Initializes and returns a logger with the specified name and rotation capability.
     
     Args:
         name (str): Name of the logger. Defaults to "block_processor" if not provided.
         log_folder (str): Subfolder name within the base log directory
         base_log_dir (str): Override the base log directory. If None, uses ETH_LOG_DIR
+        log_level: Logging level (default: INFO)
+        max_bytes: Maximum size of each log file (default: 50MB)
+        backup_count: Number of backup files to keep (default: 5)
+        console_output: Whether to output logs to console (default: False)
         
     Returns:
         logging.Logger: Configured logger instance.
@@ -45,22 +51,35 @@ def get_logger(name="block_processor", log_folder="block_processor", base_log_di
     logger = logging.getLogger(name)
     
     # Prevent adding multiple handlers to the same logger
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-
-        # Simplified format without the logger name
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-        # Add timestamp to the log file name
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file_path = os.path.join(base_log_dir, f"{name}_{timestamp}.log")
+    if logger.handlers:
+        logger.handlers.clear()
         
-        # Track the log file
-        _log_files.add(log_file_path)
-        
-        file_handler = logging.FileHandler(log_file_path)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+    logger.setLevel(log_level)
+
+    # Simplified format without the logger name
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Add timestamp to the log file name
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file_path = os.path.join(base_log_dir, f"{name}_{timestamp}.log")
+    
+    # Track the log file
+    _log_files.add(log_file_path)
+    
+    # Use RotatingFileHandler instead of FileHandler to prevent log explosion
+    file_handler = RotatingFileHandler(
+        log_file_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     return logger
 

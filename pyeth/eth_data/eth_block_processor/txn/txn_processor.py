@@ -88,7 +88,8 @@ class TransactionProcessor:
                                 to_address, 
                                 internal_transactions, 
                                 unique_addresses, 
-                                erc20_contracts):       
+                                erc20_contracts, 
+                                contract_address=None):       
         unique_addresses.add(from_address)
         unique_addresses.add(to_address)
         for address in erc20_contracts:
@@ -96,6 +97,8 @@ class TransactionProcessor:
         for internal_txn in internal_transactions:
             unique_addresses.add(internal_txn.from_address)
             unique_addresses.add(internal_txn.to_address)
+        if contract_address:
+            unique_addresses.add(contract_address)
         # remove None from unique_addresses if it exists
         if None in unique_addresses:
             unique_addresses.remove(None)
@@ -185,6 +188,7 @@ class TransactionProcessor:
             internal_transactions, 
             unique_addresses,
             erc20_contracts,
+            contract_address
             )
         value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
@@ -236,6 +240,10 @@ class TransactionProcessor:
             uniswap_v3_positions=logs['uniswap_v3_positions'],
             uniswap_v3_increases=logs['uniswap_v3_increases'],
             uniswap_v3_decreases=logs['uniswap_v3_decreases'],
+            uniswap_v4_initializes=logs['uniswap_v4_initializes'],
+            uniswap_v4_modifies=logs['uniswap_v4_modifies'],
+            uniswap_v4_swaps=logs['uniswap_v4_swaps'],
+            permit2_events=logs['permit2_events'],
         )
         return detailed_txn
 
@@ -326,6 +334,10 @@ class TransactionProcessor:
             uniswap_v3_positions=logs['uniswap_v3_positions'],
             uniswap_v3_increases=logs['uniswap_v3_increases'],
             uniswap_v3_decreases=logs['uniswap_v3_decreases'],
+            uniswap_v4_initializes=logs['uniswap_v4_initializes'],
+            uniswap_v4_modifies=logs['uniswap_v4_modifies'],
+            uniswap_v4_swaps=logs['uniswap_v4_swaps'],
+            permit2_events=logs['permit2_events'],
         )
 
     

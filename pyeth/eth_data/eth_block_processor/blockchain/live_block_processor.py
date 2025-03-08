@@ -212,6 +212,9 @@ class LiveBlockProcessor:
                     self.blocks_exchange = None
                     self.alerts_exchange = None
 
+                # Log the connection attempt with more details
+                self.logger.info(f"Attempting to connect to RabbitMQ at {self.rabbitmq_url}")
+                
                 # Create new connection
                 self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
                 self.channel = await self.connection.channel()
@@ -267,7 +270,15 @@ class LiveBlockProcessor:
                 
             except Exception as e:
                 retry_count += 1
-                self.logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {e}")
+                # Enhanced error logging with exception type
+                self.logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {type(e).__name__}: {e}")
+                
+                # Add specific check for common connection issues
+                if "Connection refused" in str(e):
+                    self.logger.error("RabbitMQ connection refused - check if the server is running at the specified address")
+                elif "authentication" in str(e).lower():
+                    self.logger.error("RabbitMQ authentication failed - check credentials")
+                
                 await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
                 
         raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")

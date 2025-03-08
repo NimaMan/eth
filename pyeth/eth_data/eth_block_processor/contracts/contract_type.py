@@ -13,14 +13,32 @@ erc20_abi = [
 
 
 def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[dict]:
+    """
+    Attempts to identify if a contract is an ERC-20 token and returns its information.
+    
+    This function calls standard ERC-20 methods on the contract to determine if it
+    implements the ERC-20 interface. It handles various error conditions that might
+    occur when interacting with non-ERC-20 contracts.
+    
+    Args:
+        contract_address: The Ethereum contract address to check
+        w3: Optional Web3 instance (creates one with local provider if None)
+        
+    Returns:
+        Dictionary with token info if ERC-20, None otherwise
+    """
     if w3 is None:
         w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     contract = w3.eth.contract(address=w3.to_checksum_address(contract_address), abi=erc20_abi)
     try:
-        symbol = contract.functions.symbol().call()
-        decimals = contract.functions.decimals().call()
-        total_supply = contract.functions.totalSupply().call()/10**decimals
-        name = contract.functions.name().call()
+        # Set explicit gas limit to prevent out-of-gas errors
+        call_params = {'gas': 100000}  # 100k gas should be more than enough for view functions
+        
+        symbol = contract.functions.symbol().call(call_params)
+        decimals = contract.functions.decimals().call(call_params)
+        total_supply = contract.functions.totalSupply().call(call_params)/10**decimals
+        name = contract.functions.name().call(call_params)
+        
         return {
             'contract_address': contract_address,
             'name': name,
@@ -32,9 +50,25 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[
         # Contract is not an ERC20 token or has invalid bytecode
         return None
     except Exception as e:
-        if "execution reverted" not in str(e) and "InvalidFEOpcode" not in str(e):
-            raise Exception(f"Unexpected error checking ERC-20 compliance: {str(e)}")
-        return None
+        error_str = str(e)
+        # Common EVM errors that indicate the contract is not an ERC-20 token
+        evm_errors = [
+            "execution reverted", 
+            "InvalidFEOpcode", 
+            "InvalidJump",
+            "EVM error: InvalidJump",
+            "StackUnderflow",
+            "EVM error: StackUnderflow",
+            "out of gas",  # Add out of gas as a recognized error
+            "gas required exceeds allowance"  # Add gas limit error as recognized
+        ]
+        
+        # If the error is one of the expected EVM errors, treat it as "not an ERC-20 token"
+        if any(err in error_str for err in evm_errors):
+            return None
+            
+        # For unexpected errors, raise with more context
+        raise Exception(f"Unexpected error checking ERC-20 compliance: {error_str}")
 
 
 def is_erc20_contract(contract_address: str) -> Optional[dict]:
@@ -49,6 +83,15 @@ erc721_abi = [
 
 
 def is_erc721_contract(contract_address: str) -> Optional[dict]:
+    """
+    Attempts to identify if a contract is an ERC-721 token and returns its information.
+    
+    Args:
+        contract_address: The Ethereum contract address to check
+        
+    Returns:
+        Dictionary with token info if ERC-721, None otherwise
+    """
     web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     contract = web3.eth.contract(address=contract_address, abi=erc721_abi)
     
@@ -66,9 +109,23 @@ def is_erc721_contract(contract_address: str) -> Optional[dict]:
     except (BadFunctionCallOutput, ContractLogicError):
         return None
     except Exception as e:
-        if "execution reverted" not in str(e):
-            raise Exception(f"Unexpected error checking ERC-721 compliance: {str(e)}")
-        return None
+        error_str = str(e)
+        # Common EVM errors that indicate the contract is not an ERC-721 token
+        evm_errors = [
+            "execution reverted",
+            "InvalidFEOpcode",
+            "InvalidJump",
+            "EVM error: InvalidJump",
+            "StackUnderflow",
+            "EVM error: StackUnderflow"
+        ]
+        
+        # If the error is one of the expected EVM errors, treat it as "not an ERC-721 token"
+        if any(err in error_str for err in evm_errors):
+            return None
+            
+        # For unexpected errors, raise with more context
+        raise Exception(f"Unexpected error checking ERC-721 compliance: {str(e)}")
 
 
 def classify_contract(contract_address: str) -> str:

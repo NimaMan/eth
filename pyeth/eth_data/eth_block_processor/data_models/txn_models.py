@@ -47,7 +47,7 @@ class ProcessedTransaction:
     nonce: int
     
     txn_type: str
-    actions: List[TransactionAction]
+    actions: List[str]
     
     fees: TransactionFees
     bribe_amount: float = 0
@@ -82,6 +82,12 @@ class ProcessedTransaction:
     uniswap_v3_increases: List[UniswapV3IncreaseLiquidity] = field(default_factory=list)
     uniswap_v3_decreases: List[UniswapV3DecreaseLiquidity] = field(default_factory=list)
     
+    # Uniswap V4 specific fields
+    uniswap_v4_initializes: List[UniswapV4Initialize] = field(default_factory=list)
+    uniswap_v4_modifies: List[UniswapV4ModifyLiquidity] = field(default_factory=list)
+    uniswap_v4_swaps: List[UniswapV4Swap] = field(default_factory=list)
+    permit2_events: List[Permit2] = field(default_factory=list)
+
     other_events: List[Dict[str, Any]] = field(default_factory=list)
     state_diffs: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
@@ -99,7 +105,7 @@ class ProcessedTransaction:
                  nonce: int,
                  input: str,
                  txn_type: str,
-                 actions: Optional[List[TransactionAction]] = None,
+                 actions: Optional[List[str]] = None,
                  eth_transfers: Optional[List[ETHTransfer]] = None,
                  erc20_transfers: Optional[List[ERC20Transfer]] = None,
                  erc721_transfers: Optional[List[ERC721Transfer]] = None,
@@ -125,6 +131,10 @@ class ProcessedTransaction:
                  uniswap_v3_positions: Optional[List[UniswapV3Position]] = None,
                  uniswap_v3_increases: Optional[List[UniswapV3IncreaseLiquidity]] = None,
                  uniswap_v3_decreases: Optional[List[UniswapV3DecreaseLiquidity]] = None,
+                 uniswap_v4_initializes: Optional[List[UniswapV4Initialize]] = None,
+                 uniswap_v4_modifies: Optional[List[UniswapV4ModifyLiquidity]] = None,
+                 uniswap_v4_swaps: Optional[List[UniswapV4Swap]] = None,
+                 permit2_events: Optional[List[Permit2]] = None,
                  other_events: Optional[List[Dict[str, Any]]] = None,
                  fees: Optional[TransactionFees] = None,
                  unique_addresses: Optional[Set[ChecksumAddress]] = None,
@@ -179,6 +189,12 @@ class ProcessedTransaction:
         self.uniswap_v3_decreases = uniswap_v3_decreases or []
         self.other_events = other_events or []
 
+        # Uniswap V4 specific fields
+        self.uniswap_v4_initializes = uniswap_v4_initializes or []
+        self.uniswap_v4_modifies = uniswap_v4_modifies or []
+        self.uniswap_v4_swaps = uniswap_v4_swaps or []
+        self.permit2_events = permit2_events or []
+
         # Complex fields
         self.fees = fees or TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
         self.unique_addresses = unique_addresses or set()
@@ -231,6 +247,10 @@ class ProcessedTransaction:
             self.uniswap_v3_positions == other.uniswap_v3_positions and
             self.uniswap_v3_increases == other.uniswap_v3_increases and
             self.uniswap_v3_decreases == other.uniswap_v3_decreases and
+            self.uniswap_v4_initializes == other.uniswap_v4_initializes and
+            self.uniswap_v4_modifies == other.uniswap_v4_modifies and
+            self.uniswap_v4_swaps == other.uniswap_v4_swaps and
+            self.permit2_events == other.permit2_events and
             self.other_events == other.other_events and
             self.fees == other.fees and
             self.state_diffs == other.state_diffs and

@@ -53,7 +53,10 @@ async def main(save_txn_to_db: bool = True):
     global _processor
     
     # Initialize components
-    _processor = LiveBlockProcessor(save_txn_to_db=save_txn_to_db)
+    _processor = LiveBlockProcessor(
+        save_txn_to_db=save_txn_to_db,
+        rabbitmq_url="amqp://guest:guest@127.0.0.1/"
+    )
     
     # Register signal handlers for graceful shutdown
     for sig in (signal.SIGTERM, signal.SIGINT):

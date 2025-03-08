@@ -38,8 +38,9 @@ class TransactionLogProcessor:
             'uniswap_v3_decreases': [],
             'uniswap_v4_initializes': [],
             'uniswap_v4_modifies': [],
-            'uniswap_v4_transfers': [],
             'uniswap_v4_swaps': [],
+            'uniswap_v4_mints': [],
+            'uniswap_v4_burns': [],
             'permit2_events': [],
         }
         
@@ -364,23 +365,28 @@ class TransactionLogProcessor:
     def parse_approve(self, log: Dict[str, Any]) -> ERC20Approval:
         data = self._ensure_hex_string(log['data'])
         topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        if len(topics) == 3:
+            return self.parse_erc20_approve(log, data, topics)
+        else:
+            return self.parse_erc721_approval(log, topics)
+
+    def parse_erc20_approve(self, log: Dict[str, Any], data: str, topics: List[str]) -> ERC20Approval:
         return ERC20Approval(
-            token_address=self.w3.to_checksum_address(log['address']),
-            owner=self.w3.to_checksum_address(topics[1][-40:]) if len(topics) > 1 else None,
-            spender=self.w3.to_checksum_address(topics[2][-40:]) if len(topics) > 2 else None,
-            amount=self._process_integer(data),
-            log_index=self._process_integer(log['logIndex'])
-        )
+                token_address=self.w3.to_checksum_address(log['address']),
+                owner=self.w3.to_checksum_address(topics[1][-40:]),
+                spender=self.w3.to_checksum_address(topics[2][-40:]),
+                amount=self._process_integer(data),
+                log_index=self._process_integer(log['logIndex'])
+            )
     
-    def parse_erc721_approval(self, log: Dict[str, Any]) -> ERC721Approval:
-        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
-        return ERC721Approval(
-            token_address=self.w3.to_checksum_address(log['address']),
-            owner=self.w3.to_checksum_address(topics[1][-40:]) if len(topics) > 1 else None,
-            approved=self.w3.to_checksum_address(topics[2][-40:]) if len(topics) > 2 else None,
-            token_id=self._process_integer(topics[3]) if len(topics) > 3 and topics[3] != '' else 0,
-            log_index=self._process_integer(log['logIndex'])
-        )
+    def parse_erc721_approval(self, log: Dict[str, Any], topics: List[str]) -> ERC721Approval:
+        return  ERC721Approval(
+                token_address=self.w3.to_checksum_address(log['address']),
+                owner=self.w3.to_checksum_address(topics[1][-40:]),
+                approved_address=self.w3.to_checksum_address(topics[2][-40:]),
+                token_id=self._process_integer(topics[3]),
+                log_index=self._process_integer(log['logIndex'])
+            )
     
     def parse_mint(self, log: Dict[str, Any]) -> MintAction:
         data = self._ensure_hex_string(log['data'])
@@ -547,17 +553,10 @@ class TransactionLogProcessor:
         Data: sqrtPriceX96 (uint160), tick (int24)
         """
         data = self._ensure_hex_string(log['data'])
-        
-        # Parse sqrtPriceX96 as uint160 (first 32 bytes)
-        sqrt_price_x96 = int(data[2:66], 16)
-        
-        # Parse tick as uint24 (next 32 bytes)
-        tick = int(data[66:130], 16)
-        
         return UniswapV3Initialize(
             pool_address=self.w3.to_checksum_address(log['address']),
-            sqrt_price_x96=sqrt_price_x96,
-            tick=tick,
+            sqrt_price_x96=self._process_integer(data[2:66]),
+            tick=int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True),
             log_index=self._process_integer(log['logIndex'])
         )
     
@@ -576,23 +575,20 @@ class TransactionLogProcessor:
             - amount1 (uint256, 32 bytes)
         """
         data = self._ensure_hex_string(log['data'])
-        
-        # Parse sender from first 32 bytes (padded address)
-        sender = '0x' + data[26:66]  # Take last 40 chars of first 32 bytes
-        
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]        
         # Parse ticks as signed integers
-        tick_lower = int.from_bytes(bytes.fromhex(log['topics'][2].hex()[2:]), byteorder='big', signed=True)
-        tick_upper = int.from_bytes(bytes.fromhex(log['topics'][3].hex()[2:]), byteorder='big', signed=True)
+        tick_lower = int.from_bytes(bytes.fromhex(topics[2][2:]), byteorder='big', signed=True)
+        tick_upper = int.from_bytes(bytes.fromhex(topics[3][2:]), byteorder='big', signed=True)
         
         return UniswapV3Mint(
             pool_address=self.w3.to_checksum_address(log['address']),
-            sender=self.w3.to_checksum_address(sender),
-            owner=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if isinstance(log['topics'][1], bytes) else self.w3.to_checksum_address(log['topics'][1][-40:]),
+            sender=self.w3.to_checksum_address(data[26:66]),
+            owner=self.w3.to_checksum_address(topics[1].hex()[-40:]) if isinstance(topics[1], bytes) else self.w3.to_checksum_address(topics[1][-40:]),
             tick_lower=tick_lower,
             tick_upper=tick_upper,
-            amount=int(data[66:130], 16),    # Second 32 bytes
-            amount0=int(data[130:194], 16),  # Third 32 bytes
-            amount1=int(data[194:258], 16),  # Fourth 32 bytes
+            amount=self._process_integer(data[66:130]),    # Second 32 bytes
+            amount0=self._process_integer(data[130:194]),  # Third 32 bytes
+            amount1=self._process_integer(data[194:258]),  # Fourth 32 bytes
             log_index=self._process_integer(log['logIndex'])
         )
     
@@ -606,16 +602,26 @@ class TransactionLogProcessor:
         Data: amount0 (int256), amount1 (int256), sqrtPriceX96 (uint160), liquidity (uint128), tick (int24)
         """
         data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+         # Convert hex data (skipping "0x") into bytes
+        data_bytes = bytes.fromhex(data[2:])
+        
+        # Parse each field from the data bytes
+        amount0 = int.from_bytes(data_bytes[0:32], byteorder='big', signed=True)
+        amount1 = int.from_bytes(data_bytes[32:64], byteorder='big', signed=True)
+        sqrt_price_x96 = int.from_bytes(data_bytes[64:96], byteorder='big', signed=False)
+        liquidity = int.from_bytes(data_bytes[96:128], byteorder='big', signed=False)
+        tick = int.from_bytes(data_bytes[128:160], byteorder='big', signed=True)
         
         return UniswapV3Swap(
             pool_address=self.w3.to_checksum_address(log['address']),
-            sender=self.w3.to_checksum_address(log['topics'][1].hex()[-40:]) if isinstance(log['topics'][1], bytes) else self.w3.to_checksum_address(log['topics'][1][-40:]),
-            recipient=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if isinstance(log['topics'][2], bytes) else self.w3.to_checksum_address(log['topics'][2][-40:]),
-            amount0=int(data[2:66], 16) if data[2:66] else 0,  # First 32 bytes
-            amount1=int(data[66:130], 16) if data[66:130] else 0,  # Next 32 bytes
-            sqrt_price_x96=int(data[130:194], 16) if data[130:194] else 0,  # Next 32 bytes
-            liquidity=int(data[194:258], 16) if data[194:258] else 0,  # Next 32 bytes
-            tick=int(data[258:322], 16) if data[258:322] else 0,  # Last 32 bytes
+            sender=self.w3.to_checksum_address(topics[1][-40:]),
+            recipient=self.w3.to_checksum_address(topics[2][-40:]),
+            amount0=amount0,
+            amount1=amount1,
+            sqrt_price_x96=sqrt_price_x96,
+            liquidity=liquidity,
+            tick=tick,
             log_index=self._process_integer(log['logIndex'])
         )
         
@@ -625,19 +631,38 @@ class TransactionLogProcessor:
         
         Topics[0]: Event signature
         Topics[1]: tokenId (indexed)
+        Topics[2]: owner address (optional, if provided)
+        Topics[3]: tick_lower (signed, optional)
+        Topics[4]: tick_upper (signed, optional)
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
         data = self._ensure_hex_string(log['data'])
-            
+        # For signed tick values, convert using two's-complement conversion.
+        tick_lower = 0
+        tick_upper = 0
+        if len(log['topics']) > 3:
+            t = self._ensure_hex_string(log['topics'][3])
+            # Remove "0x" and convert to bytes:
+            tick_lower = int.from_bytes(bytes.fromhex(t[2:]), byteorder='big', signed=True)
+        if len(log['topics']) > 4:
+            t = self._ensure_hex_string(log['topics'][4])
+            tick_upper = int.from_bytes(bytes.fromhex(t[2:]), byteorder='big', signed=True)
+        
+        owner = None
+        if len(log['topics']) > 2:
+            # Assume topics[2] is already a hex string; take the last 40 characters.
+            t = self._ensure_hex_string(log['topics'][2])
+            owner = self.w3.to_checksum_address(t[-40:])
+        
         return UniswapV3Position(
-            token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),
-            liquidity=int(data[2:66], 16),  # First 32 bytes
-            amount0=int(data[66:130], 16),  # Next 32 bytes
-            amount1=int(data[130:194], 16),  # Last 32 bytes
+            token_id=int(self._ensure_hex_string(log['topics'][1]).lstrip("0x"), 16),
+            liquidity=int(data[2:66], 16),      # First 32 bytes
+            amount0=int(data[66:130], 16),       # Next 32 bytes
+            amount1=int(data[130:194], 16),      # Last 32 bytes
             pool_address=self.w3.to_checksum_address(log['address']),
-            owner=self.w3.to_checksum_address(log['topics'][2].hex()[-40:]) if len(log['topics']) > 2 else None,
-            tick_lower=int(log['topics'][3].hex(), 16) if len(log['topics']) > 3 else 0,
-            tick_upper=int(log['topics'][4].hex(), 16) if len(log['topics']) > 4 else 0,
+            owner=owner,
+            tick_lower=tick_lower,
+            tick_upper=tick_upper,
             log_index=self._process_integer(log['logIndex'])
         )
     
@@ -650,16 +675,15 @@ class TransactionLogProcessor:
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
         data = self._ensure_hex_string(log['data'])
-            
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
         return UniswapV3IncreaseLiquidity(
-            token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),
+            token_id=int(topics[1].lstrip("0x"), 16),
             liquidity=int(data[2:66], 16) if data[2:66] else 0,
             amount0=int(data[66:130], 16) if data[66:130] else 0,
             amount1=int(data[130:194], 16) if data[130:194] else 0,
             pool_address=self.w3.to_checksum_address(log['address']),
             log_index=self._process_integer(log['logIndex'])
         )
-
 
     def parse_uniswap_v3_decrease_liquidity(self, log: Dict[str, Any]) -> UniswapV3DecreaseLiquidity:
         """Parse Uniswap V3 decrease liquidity event
@@ -670,9 +694,9 @@ class TransactionLogProcessor:
         Data: liquidity (uint128), amount0 (uint256), amount1 (uint256)
         """
         data = self._ensure_hex_string(log['data'])
-              
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
         return UniswapV3DecreaseLiquidity(
-            token_id=int(log['topics'][1].hex(), 16) if isinstance(log['topics'][1], bytes) else int(log['topics'][1], 16),
+            token_id=int(topics[1].lstrip("0x"), 16),
             liquidity=int(data[2:66], 16) if data[2:66] else 0,
             amount0=int(data[66:130], 16) if data[66:130] else 0,
             amount1=int(data[130:194], 16) if data[130:194] else 0,
@@ -685,12 +709,25 @@ class TransactionLogProcessor:
         Event: Burn(address indexed sender, address indexed owner, uint256 amount0, uint256 amount1)
 
         Topics[0]: Event signature
-        Topics[1]: sender address (indexed)
+        Topics[1]: sender address (indexed) - used here as token_id
         Topics[2]: owner address (indexed)
         Data: amount0 (uint256), amount1 (uint256)
         """
-        pass
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        return UniswapV3Burn(
+            token_id=int(topics[1].lstrip("0x"), 16),
+            liquidity=int(data[2:66], 16) if data[2:66] else 0,
+            amount0=int(data[66:130], 16) if data[66:130] else 0,
+            amount1=int(data[130:194], 16) if data[130:194] else 0,
+            pool_address=self.w3.to_checksum_address(log['address']),
+            log_index=self._process_integer(log['logIndex'])
+        )
     
+    # --------------------------------------------------------------------------
+    # Uniswap V4 Pool Events 
+    # --------------------------------------------------------------------------
+
     def parse_uniswap_v4_initialize(self, log: Dict[str, Any]) -> UniswapV4Initialize:
         """
         Parse Uniswap V4 pool initialization event.
@@ -716,12 +753,11 @@ class TransactionLogProcessor:
 
         # Each parameter occupies 64 hex characters (32 bytes)
         fee = self._process_integer('0x' + data[2:66])
-        tick_spacing = self._process_integer('0x' + data[66:130])
+        tick_spacing = int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True)
         # Address is in the last 40 hex characters of the 32-byte word
         hooks = self.w3.to_checksum_address('0x' + data[130+24:194])
         sqrt_price_x96 = self._process_integer('0x' + data[194:258])
-        tick = self._process_integer('0x' + data[258:322])
-        
+        tick = int.from_bytes(bytes.fromhex(data[258:322]), byteorder='big', signed=True)
         return UniswapV4Initialize(
             pool_manager_address=self.w3.to_checksum_address(log['address']),
             event_id=event_id,
@@ -759,17 +795,22 @@ class TransactionLogProcessor:
         # Process indexed values.
         event_id = topics[1]
         sender = self.w3.to_checksum_address(topics[2][-40:])
+        
+        # Parse data fields - ensure both tick values are parsed as signed integers
+        tick_lower = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True)
+        tick_upper = int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True)
+        liquidity_delta = int.from_bytes(bytes.fromhex(data[130:194]), byteorder='big', signed=True)
         salt_hex = data[194:258]
         
         return UniswapV4ModifyLiquidity(
             pool_manager_address=self.w3.to_checksum_address(log['address']),
             event_id=event_id,
             sender=sender,
-            tick_lower=   int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True), 
-            tick_upper=self._process_integer(data[66:130]),
-            liquidity_delta=self._process_integer(data[130:194]),
+            tick_lower=tick_lower,
+            tick_upper=tick_upper,
+            liquidity_delta=liquidity_delta,
             salt=salt_hex,
-            log_index=self._process_integer(self._process_integer(log['logIndex']))
+            log_index=self._process_integer(log['logIndex'])
         )
 
     def parse_permit2(self, log: Dict[str, Any]) -> Permit2:
