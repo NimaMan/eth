@@ -212,7 +212,62 @@ def test_parse_uniswap_v2_mint(log_processor):
     assert Web3.is_checksum_address(result.sender)
     assert isinstance(result.amount0, str)
     assert isinstance(result.amount1, str)
+
+
+def test_parse_uniswap_v3_initialize(log_processor):
+    """Test parsing of Uniswap V3 Initialize event"""
+    log = {'address': '0xbe931909a485643acdb7eef4184c1284cd8efe8f',
+        'topics': ['0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95'],
+        'data': '0x0000000000000000000000000000000000000000000010dc8023230f0bb0a246fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbc900',
+        'blockHash': '0xa33211cc390ecf352ec46ec92fb4d6e8f3da0838ea149956d4434155b7753d1c',
+        'blockNumber': '0x14ee285',
+        'blockTimestamp': '0x67c211f3',
+        'transactionHash': '0xcb878cb2353c10f70837e2bfd3b41b16104b9e08d280ddbf461f2e70a2918719',
+        'transactionIndex': '0x69',
+        'logIndex': '0xc8',
+        'removed': False}
     
+    result = log_processor.parse_uniswap_v3_initialize(log)
+    expected = UniswapV3Initialize(
+        pool_address='0xbe931909a485643ACdb7EeF4184c1284cd8eFe8f',
+        sqrt_price_x96=79625380684338992030278,
+        tick=-276224,
+        log_index=200
+    )
+    
+    assert result == expected
+
+
+def test_parse_v3_swap(log_processor):
+    log = {'address': '0x7c706586679af2ba6d1a9fc2da9c6af59883fdd3',
+        'topics': ['0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67',
+        '0x00000000000000000000000051c72848c68a965f66fa7a88855f9f7784502a7f',
+        '0x00000000000000000000000051c72848c68a965f66fa7a88855f9f7784502a7f'],
+        'data': '0x0000000000000000000000000000000000000000000000000fe2beeece54c200ffffffffffffffffffffffffffffffffffffffffffffffffffffff90e13987da0000000000000000000000000000000000000000002a5a1a94ca527a9d1de4f4000000000000000000000000000000000000000000000000079e60225560e879fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffdc231',
+        'blockHash': '0x1878ae05c456af94ca704f9852033256d25d594b18bf2bb1f91858660f788c67',
+        'blockNumber': '0x14fa6c9',
+        'blockTimestamp': '0x67cb50cf',
+        'transactionHash': '0x0aca9e9c57b3f977c5b9b7f9b63abae3141163798e5964f261a1e4a896adc1f0',
+        'transactionIndex': '0x12',
+        'logIndex': '0x42',
+        'removed': False}
+    
+    result = log_processor.parse_uniswap_v3_swap(log)
+    
+    expected = UniswapV3Swap(
+        pool_address='0x7C706586679Af2BA6D1A9fC2DA9C6aF59883fdD3',
+        sender='0x51C72848c68a965f66FA7a88855F9f7784502a7F',
+        recipient='0x51C72848c68a965f66FA7a88855F9f7784502a7F',
+        amount0='1144687188178682368',
+        amount1='-477257693222',
+        sqrt_price_x96='51200387744091159339590900',
+        liquidity='548981905163348089',
+        tick='-146895',
+        log_index=66
+    )
+    
+    assert result == expected
+
 
 def test_parse_uniswap_v4_initialize(log_processor):
     log = {'address': '0x000000000004444c5dc75cb358380d2e3de08a90',

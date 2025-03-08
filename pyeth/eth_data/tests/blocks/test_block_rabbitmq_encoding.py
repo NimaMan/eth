@@ -21,11 +21,15 @@ from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_block_processor.blockchain.live_block_processor import transaction_serializer
 
 # Define test blocks as constants
-TEST_BLOCK_NUMBER_1 = 21442705
-TEST_BLOCK_NUMBER_2 = 21446809  # has taken very long to process
+TEST_BLOCK_NUMBER_1 = 21966287
+TEST_BLOCK_NUMBER_2 = 21967697  
+TEST_BLOCK_NUMBER_3 = 21971035
 
-TEST_BLOCK_NUMBERS = [TEST_BLOCK_NUMBER_1,
-                        TEST_BLOCK_NUMBER_2]
+TEST_BLOCK_NUMBERS = [
+    TEST_BLOCK_NUMBER_1,
+    TEST_BLOCK_NUMBER_2,
+    TEST_BLOCK_NUMBER_3
+]
 
 
 @pytest.mark.asyncio
@@ -33,7 +37,7 @@ async def test_block_encoding():
     """Test encoding of test blocks which failed in production"""
     
     for block_number in TEST_BLOCK_NUMBERS:
-        processor = BlockProcessor(save_erc20_txn_to_db=False)
+        processor = BlockProcessor()
         
         try:
             processed_block = await processor.process_block(block_number)
