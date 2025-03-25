@@ -1,5 +1,56 @@
 #!/usr/bin/env python3
 """
+TROUBLESHOOTING GUIDE: RabbitMQ Connection Issues
+=================================================
+
+ERROR ENCOUNTERED:
+-----------------
+AMQPInternalError: ("one of ['Connection.OpenOk']", <Connection.Close object>)
+ProbableAccessDeniedError: ConnectionClosedByBroker: (541) "INTERNAL_ERROR - access to vhost '/' refused for user 'guest': vhost '/' is down"
+
+ROOT CAUSE:
+----------
+Corruption in the RabbitMQ message store files for the default virtual host ('/').
+This corruption prevented the virtual host from starting properly, causing all connection
+attempts to be rejected with "vhost '/' is down" errors.
+
+SOLUTION:
+--------
+Complete removal and reinstallation of RabbitMQ:
+
+1. Stop RabbitMQ:
+   sudo systemctl stop rabbitmq-server
+
+2. Remove RabbitMQ completely:
+   sudo apt-get remove --purge rabbitmq-server
+   sudo apt-get autoremove
+
+3. Delete all data directories:
+   sudo rm -rf /var/lib/rabbitmq
+   sudo rm -rf /var/log/rabbitmq
+   sudo rm -rf /etc/rabbitmq
+
+4. Reinstall RabbitMQ:
+   sudo apt-get update
+   sudo apt-get install rabbitmq-server
+
+5. Start RabbitMQ:
+   sudo systemctl start rabbitmq-server
+   sudo systemctl enable rabbitmq-server
+
+PREVENTION:
+----------
+1. Ensure proper shutdown of RabbitMQ when stopping the server
+2. Monitor disk space to prevent running out of space
+3. Consider setting up periodic backups of RabbitMQ configuration
+4. Implement robust error handling in applications to gracefully handle RabbitMQ outages
+
+This test script can be used to verify RabbitMQ connectivity using both synchronous (pika)
+and asynchronous (aio_pika) libraries.
+"""
+
+# Original docstring follows
+"""
 RabbitMQ Connection Test Script
 
 This script tests connectivity to RabbitMQ using different connection parameters

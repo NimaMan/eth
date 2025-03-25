@@ -82,7 +82,7 @@ erc721_abi = [
 ]
 
 
-def is_erc721_contract(contract_address: str) -> Optional[dict]:
+def is_erc721_contract(contract_address: str, w3: Web3 = None) -> Optional[dict]:
     """
     Attempts to identify if a contract is an ERC-721 token and returns its information.
     
@@ -92,8 +92,9 @@ def is_erc721_contract(contract_address: str) -> Optional[dict]:
     Returns:
         Dictionary with token info if ERC-721, None otherwise
     """
-    web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-    contract = web3.eth.contract(address=contract_address, abi=erc721_abi)
+    if w3 is None:
+        w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+    contract = w3.eth.contract(address=w3.to_checksum_address(contract_address), abi=erc721_abi)
     
     try:
         name = contract.functions.name().call()
@@ -128,10 +129,10 @@ def is_erc721_contract(contract_address: str) -> Optional[dict]:
         raise Exception(f"Unexpected error checking ERC-721 compliance: {str(e)}")
 
 
-def classify_contract(contract_address: str) -> str:
+def classify_contract(contract_address: str, w3: Web3 = None) -> str:
     """Classify the type of contract"""
-    if is_erc20_contract(contract_address):
+    if is_erc20_contract(contract_address, w3):
         return "ERC20"
-    elif is_erc721_contract(contract_address):
-            return "ERC721"
+    elif is_erc721_contract(contract_address, w3):
+        return "ERC721"
     return "Unknown"  

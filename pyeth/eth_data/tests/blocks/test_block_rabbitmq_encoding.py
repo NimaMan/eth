@@ -21,9 +21,9 @@ from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_block_processor.blockchain.live_block_processor import transaction_serializer
 
 # Define test blocks as constants
-TEST_BLOCK_NUMBER_1 = 21966287
-TEST_BLOCK_NUMBER_2 = 21967697  
-TEST_BLOCK_NUMBER_3 = 21971035
+TEST_BLOCK_NUMBER_1 = 22003306
+TEST_BLOCK_NUMBER_2 = 22003328  
+TEST_BLOCK_NUMBER_3 = 22003336
 
 TEST_BLOCK_NUMBERS = [
     TEST_BLOCK_NUMBER_1,

@@ -24,7 +24,7 @@ from typing import List, Dict, Any, Union
 import asyncio
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import BatchTransactionDataFetcher
+from eth_block_processor.txn.txn_data_fetcher import TransactionBatchDataFetcher
 from eth_block_processor.utils.logger import get_logger
 
 
@@ -34,14 +34,15 @@ class TransactionBatchProcessor:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
         self.transaction_processor = TransactionProcessor(w3=w3)
-        self.batch_data_fetcher = BatchTransactionDataFetcher(w3=w3)
+        self.batch_data_fetcher = TransactionBatchDataFetcher(w3=w3)
         self.logger = logger
 
-    async def _process_single_transaction(self, 
-                                             transaction: Dict[str, Any], 
-                                             receipt: Dict[str, Any] = None,
-                                             trace: Dict[str, Any] = None,
-                                             txn_hash: str = None) -> ProcessedTransaction:
+    async def _process_single_transaction(
+            self, 
+            transaction: Dict[str, Any], 
+            receipt: Dict[str, Any] = None,
+            trace: Dict[str, Any] = None,
+            txn_hash: str = None) -> ProcessedTransaction:
         """Safely analyze a single transaction with error handling"""
         try:
             processed_txn = await self.transaction_processor.process_transaction_async(
@@ -99,7 +100,7 @@ class TransactionBatchProcessor:
         return results
 
     async def process_batch_with_fetched_data(self, blocks: Dict[int, Any], block_data: Dict[int, Dict]) -> Dict[int, List[ProcessedTransaction]]:
-        analyzed_blocks = {}
+        processed_blocks = {}
         
         for block_num, block in blocks.items():
             if block_num not in block_data:
@@ -128,6 +129,73 @@ class TransactionBatchProcessor:
                 )
                 tasks.append(task)
             
-            analyzed_blocks[block_num] = await asyncio.gather(*tasks, return_exceptions=True)
+            processed_blocks[block_num] = await asyncio.gather(*tasks, return_exceptions=True)
         
-        return analyzed_blocks
+        return processed_blocks
+
+    async def process_transaction_list(self, tx_hashes: List[str]) -> List[ProcessedTransaction]:
+        """
+        Process a list of transactions from any blocks using optimized batch fetching
+        
+        Args:
+            tx_hashes: List of transaction hashes to process
+            
+        Returns:
+            List of processed transactions
+        """
+        if not tx_hashes:
+            return []
+            
+        # Fetch all transaction data in one optimized operation
+        start_time = asyncio.get_event_loop().time()
+        transaction_map, receipt_map, trace_map = await self.batch_data_fetcher.fetch_transaction_list_data(tx_hashes)
+        fetch_time = asyncio.get_event_loop().time() - start_time
+        
+        if self.logger:
+            self.logger.info(f"Fetched {len(transaction_map)}/{len(tx_hashes)} transactions in {fetch_time:.4f}s")
+        
+        # Prepare batch data from maps
+        batch_data = []
+        for tx_hash in tx_hashes:
+            transaction = transaction_map.get(tx_hash)
+            receipt = receipt_map.get(tx_hash)
+            trace = trace_map.get(tx_hash)
+            
+            if transaction and receipt:
+                batch_data.append((transaction, receipt, trace, tx_hash))
+        
+        # Process transactions concurrently
+        tasks = []
+        for txn, receipt, trace, txn_hash in batch_data:
+            task = asyncio.create_task(
+                self._process_single_transaction(
+                    transaction=txn,
+                    receipt=receipt,
+                    trace=trace,
+                    txn_hash=txn_hash
+                )
+            )
+            tasks.append(task)
+        
+        # Wait for all tasks to complete
+        results = []
+        failed_txns = []
+        
+        if tasks:
+            completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in completed_tasks:
+                if isinstance(result, Exception):
+                    if hasattr(result, 'txn_hash'):
+                        failed_txns.append(result.txn_hash)
+                    continue
+                if result is not None:
+                    results.append(result)
+        
+        if failed_txns and self.logger:
+            self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+        
+        if self.logger:
+            process_time = asyncio.get_event_loop().time() - start_time
+            self.logger.info(f"Processed {len(results)}/{len(tx_hashes)} transactions in {process_time:.4f}s")
+        
+        return results
