@@ -239,6 +239,7 @@ class UniswapV3Initialize:
 
     def __post_init__(self):
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
+        self.tick = str(self.tick)
 
 
 @dataclass
@@ -374,6 +375,11 @@ class UniswapV3Collect:
     pool_address: str
     log_index: int
 
+    def __post_init__(self):
+        self.token_id = str(self.token_id)
+        self.amount0 = str(self.amount0)
+        self.amount1 = str(self.amount1)
+
 
 #--------------------------------
 # Uniswap V4
@@ -400,6 +406,8 @@ class UniswapV4Initialize:
 
     def __post_init__(self):
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
+        self.tick = str(self.tick)
+        self.tick_spacing = str(self.tick_spacing)
 
 
 @dataclass
@@ -416,7 +424,12 @@ class UniswapV4ModifyLiquidity:
     tick_upper: int
     liquidity_delta: int
     salt: str
-    log_index: int
+    log_index: int  
+
+    def __post_init__(self):
+        self.liquidity_delta = str(self.liquidity_delta)
+        self.tick_lower = str(self.tick_lower)
+        self.tick_upper = str(self.tick_upper)
 
 
 @dataclass
@@ -471,3 +484,4 @@ class UniswapV4Swap:
         self.amount1 = str(self.amount1)
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
         self.liquidity = str(self.liquidity)
+        self.tick = str(self.tick)

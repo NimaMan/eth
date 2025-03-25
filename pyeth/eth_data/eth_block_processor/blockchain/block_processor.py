@@ -81,17 +81,17 @@ from web3 import Web3
 from time import time
 from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
 from eth_block_processor.blockchain.block_fetcher import BlockFetcher
-from eth_block_processor.utils.logger import get_logger
 from tqdm import tqdm
 
 
 class BlockProcessor:
    def __init__(self, node_url: str = "http://127.0.0.1:8545", 
                  save_txn_to_db: bool = False,
-                 logger=None):
-        self.w3 = Web3(Web3.HTTPProvider(node_url))
+                 logger=None, 
+                 w3=None):
+        self.w3 = w3 or Web3(Web3.HTTPProvider(node_url))
         self.block_fetcher = BlockFetcher(node_url)
-        self.batch_analyzer = TransactionBatchProcessor(
+        self.tx_batch_processor = TransactionBatchProcessor(
             w3=self.w3,
             logger=logger
         )
@@ -129,7 +129,7 @@ class BlockProcessor:
                 block_data = await self.block_fetcher.fetch_block_by_number(block_number)
                 transactions = block_data['transactions']
             # Process all transactions in the block 
-            processed_transactions = await self.batch_analyzer.process_block_transactions(
+            processed_transactions = await self.tx_batch_processor.process_block_transactions(
                 block_number=block_number,
                 transactions=transactions
             )
@@ -145,4 +145,20 @@ class BlockProcessor:
                 self.logger.error(f"{__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
             raise
 
-
+   async def close(self):
+        """Close all aiohttp sessions and other resources"""
+        # Close block fetcher sessions
+        if hasattr(self.block_fetcher, 'close') and callable(self.block_fetcher.close):
+            await self.block_fetcher.close()
+        
+        # Close batch analyzer sessions
+        if hasattr(self.tx_batch_processor, 'close') and callable(self.tx_batch_processor.close):
+            await self.tx_batch_processor.close()
+        
+        # Close transaction saver if it exists
+        if self.save_txn_to_db and hasattr(self.transaction_saver, 'close') and callable(self.transaction_saver.close):
+            await self.transaction_saver.close()
+            
+        if self.logger:
+            self.logger.info("BlockProcessor resources cleaned up")
+            

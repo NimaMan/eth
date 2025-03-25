@@ -41,7 +41,7 @@ class TransactionDataFetcher:
         )
     
 
-class BatchTransactionDataFetcher:
+class TransactionBatchDataFetcher:
     def __init__(self, w3: Web3):
         self.w3 = w3
         self.endpoint_url = w3.provider.endpoint_uri
@@ -105,4 +105,104 @@ class BatchTransactionDataFetcher:
                     trace_map[tx_hash] = trace['result']
             
         return receipt_map, trace_map
+        
+    async def fetch_transaction_list_data(self, tx_hashes: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        """
+        Efficiently fetch complete transaction data (transactions, receipts, and traces) in a single operation
+        with optimized batching of all RPC calls.
+        
+        Args:
+            tx_hashes: List of transaction hashes to fetch
+            
+        Returns:
+            Tuple of (transaction_map, receipt_map, trace_map) where keys are transaction hashes
+        """
+        if not tx_hashes:
+            return {}, {}, {}
+        
+        transaction_map = {}
+        receipt_map = {}
+        trace_map = {}
+        
+        # Create all batch requests at once
+        async with aiohttp.ClientSession() as session:
+            # Prepare all batch requests - transactions, receipts, and traces
+            tx_batch_requests = []
+            receipt_batch_requests = []
+            trace_batch_requests = []
+            
+            for i, tx_hash in enumerate(tx_hashes):
+                # Transaction request
+                tx_batch_requests.append({
+                    "jsonrpc": "2.0",
+                    "method": "eth_getTransactionByHash",
+                    "params": [tx_hash],
+                    "id": i
+                })
+                
+                # Receipt request
+                receipt_batch_requests.append({
+                    "jsonrpc": "2.0",
+                    "method": "eth_getTransactionReceipt",
+                    "params": [tx_hash],
+                    "id": i
+                })
+                
+                # Trace request
+                trace_batch_requests.append({
+                    "jsonrpc": "2.0",
+                    "method": "debug_traceTransaction",
+                    "params": [tx_hash, {"tracer": "callTracer"}],
+                    "id": i
+                })
+            
+            # Execute all batch requests concurrently
+            tasks = [
+                session.post(
+                    self.w3.provider.endpoint_uri,
+                    json=tx_batch_requests,
+                    headers={'Content-Type': 'application/json'}
+                ),
+                session.post(
+                    self.w3.provider.endpoint_uri,
+                    json=receipt_batch_requests,
+                    headers={'Content-Type': 'application/json'}
+                ),
+                session.post(
+                    self.w3.provider.endpoint_uri,
+                    json=trace_batch_requests,
+                    headers={'Content-Type': 'application/json'}
+                )
+            ]
+            
+            tx_response, receipt_response, trace_response = await asyncio.gather(*tasks)
+            
+            # Process transaction results
+            if tx_response.status == 200:
+                tx_results = await tx_response.json()
+                for result in tx_results:
+                    if 'result' in result and result['result']:
+                        request_id = result['id']
+                        tx_hash = tx_hashes[request_id]
+                        transaction_map[tx_hash] = result['result']
+            
+            # Process receipt results
+            if receipt_response.status == 200:
+                receipt_results = await receipt_response.json()
+                for result in receipt_results:
+                    if 'result' in result and result['result']:
+                        request_id = result['id']
+                        tx_hash = tx_hashes[request_id]
+                        receipt_map[tx_hash] = result['result']
+            
+            # Process trace results
+            if trace_response.status == 200:
+                trace_results = await trace_response.json()
+                for result in trace_results:
+                    if 'result' in result and result['result']:
+                        request_id = result['id']
+                        tx_hash = tx_hashes[request_id]
+                        trace_map[tx_hash] = result['result']
+        
+        return transaction_map, receipt_map, trace_map
         

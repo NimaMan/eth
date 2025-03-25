@@ -75,8 +75,8 @@ class TransactionProcessor:
         self.w3 = w3
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
-        self.log_analyzer = TransactionLogProcessor(w3=w3)
-        self.trace_analyzer = TransactionTraceProcessor(w3=w3)
+        self.log_processor = TransactionLogProcessor(w3=w3)
+        self.trace_processor = TransactionTraceProcessor(w3=w3)
         self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
         self.action_identifier = TransactionActionIdentifier()
 
@@ -98,7 +98,7 @@ class TransactionProcessor:
             unique_addresses.add(internal_txn.from_address)
             unique_addresses.add(internal_txn.to_address)
         if contract_address:
-            unique_addresses.add(contract_address)
+            unique_addresses.add(self.w3.to_checksum_address(contract_address))
         # remove None from unique_addresses if it exists
         if None in unique_addresses:
             unique_addresses.remove(None)
@@ -172,13 +172,13 @@ class TransactionProcessor:
         txn_hash = transaction['hash'] if isinstance(transaction['hash'], str) else transaction['hash'].hex()
         from_address = self.w3.to_checksum_address(transaction['from'])
         to_address = self.w3.to_checksum_address(transaction['to']) if transaction['to'] is not None else None
-        logs = self.log_analyzer.process_logs(receipt['logs'])
+        logs = self.log_processor.process_logs(receipt['logs'])
         fees = self._extract_transaction_fees(receipt)
         contract_address = receipt.get('contractAddress', None)
 
         internal_transactions = []
         if self.needs_trace(transaction):
-            internal_transactions = self.trace_analyzer.process_trace(trace)
+            internal_transactions = self.trace_processor.process_trace(trace)
         
         unique_addresses = logs['unique_addresses']
         erc20_contracts = logs['erc20_contracts']
@@ -190,7 +190,7 @@ class TransactionProcessor:
             erc20_contracts,
             contract_address
             )
-        value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
+        value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)
@@ -255,7 +255,7 @@ class TransactionProcessor:
         """Async version of process_transaction"""
         
         # Process logs
-        logs = self.log_analyzer.process_logs(receipt['logs'])
+        logs = self.log_processor.process_logs(receipt['logs'])
         
         # Extract fees
         fees = self._extract_transaction_fees(receipt)
@@ -266,7 +266,7 @@ class TransactionProcessor:
         # Process trace if needed
         internal_transactions = []
         if self.needs_trace(transaction) and trace:
-            internal_transactions = self.trace_analyzer.process_trace(trace)
+            internal_transactions = self.trace_processor.process_trace(trace)
         
         # Get state diffs if requested
         if state_diff:
@@ -280,9 +280,16 @@ class TransactionProcessor:
         from_address = transaction['from']
         to_address = transaction['to']
         erc20_contracts = logs['erc20_contracts']
-        erc20_contracts, unique_addresses = self.extend_unique_addresses(from_address, to_address, internal_transactions, unique_addresses, erc20_contracts)
+        erc20_contracts, unique_addresses = self.extend_unique_addresses(
+            from_address, 
+            to_address,
+            internal_transactions, 
+            unique_addresses, 
+            erc20_contracts,
+            contract_address
+            )
         
-        value = np.float64(self.w3.from_wei(transaction['value'], 'ether'))
+        value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
         block_timestamp = self._get_block_timestamp(receipt)

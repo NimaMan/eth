@@ -71,8 +71,8 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[
         raise Exception(f"Unexpected error checking ERC-20 compliance: {error_str}")
 
 
-def is_erc20_contract(contract_address: str) -> Optional[dict]:
-    return get_erc20_contract_info(contract_address) is not None
+def is_erc20_contract(contract_address: str, w3: Web3 = None) -> Optional[dict]:
+    return get_erc20_contract_info(contract_address, w3) is not None
 
 
 erc721_abi = [
