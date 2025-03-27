@@ -58,6 +58,7 @@ class TokenPositionDynamicSnapshot:
     Defalt values represent the initial state of the token position
     '''
     current_price_ratio: float = 0.0  # relative price of the token at current time
+    reserve: float = 0.0
     roi: float = 0.0  # ratio current_price_ratio to entry_price_ratio -1 
     current_value: float = 0.0
     realized_profit: float = 0.0

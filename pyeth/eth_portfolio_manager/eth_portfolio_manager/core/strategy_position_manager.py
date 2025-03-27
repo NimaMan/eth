@@ -5,7 +5,6 @@ Objective:
 ---------
 1. Manage portfolio-wide position tracking
 2. Process updates for each token concurrently
-3. Limit concurrency to prevent overwhelming the system
 
 Event Flow:
 ----------
@@ -26,7 +25,6 @@ Event Flow:
 
 import asyncio
 from typing import Dict, List, Optional, Tuple
-from collections import defaultdict
 
 from eth_portfolio_manager.core.token_position import TokenPosition
 from eth_token.live_erc20_token.live_token import LiveERC20Token
@@ -34,11 +32,11 @@ from eth_portfolio_manager.core.token_positions_cache import TokenPositionsCache
 from eth_portfolio_manager.utils.logger import get_logger
 
 
-class PortfolioPositionManager:
-   def __init__(self, token_position_manager, max_concurrency=20, logger=None, token_positions_cache_max_size=10000):
+class StrategyPositionManager:
+   def __init__(self, strategy_engine, max_concurrency=20, logger=None, token_positions_cache_max_size=10000):
       self.logger = logger or get_logger(name="portfolio_manager")
       self.token_positions_cache = TokenPositionsCache(max_size=token_positions_cache_max_size)
-      self.token_position_manager = token_position_manager
+      self.strategy_engine = strategy_engine
       self.semaphore = asyncio.Semaphore(value=max_concurrency)  # concurrency limit
    
    def create_position(self, live_token: LiveERC20Token) -> TokenPosition:
@@ -63,7 +61,7 @@ class PortfolioPositionManager:
             else:
                # Process token updates and update the position in place.
                token_position.update_from_token_data(live_token)
-               self.token_position_manager.process_updated_token(live_token, token_position)
+               self.strategy_engine.process_updated_token(live_token, token_position)
             
             results[pool_address] = token_position
          
@@ -71,12 +69,12 @@ class PortfolioPositionManager:
          
       except Exception as e:
          self.logger.error(
-            f"{self.__class__.__name__} Error processing token {token_address} with strategy {self.token_position_manager.strategy_name}: {e}"
+            f"{self.__class__.__name__} Error processing token {token_address} with strategy {self.strategy_engine.strategy_name}: {e}"
          )
          # Return token address with an empty result if error occurs.
          return token_address, {}
 
-   async def update_portfolio_tokens_positions(self, updated_tokens: Dict[str, LiveERC20Token]) -> Dict[str, Dict[str, TokenPosition]]:
+   async def update_updated_tokens_positions(self, updated_tokens: Dict[str, LiveERC20Token]) -> Dict[str, Dict[str, TokenPosition]]:
          """
          Process token updates in backtest mode concurrently.
          Returns a mapping from token address to a dict mapping pool_address -> TokenPosition.
@@ -105,9 +103,9 @@ class PortfolioPositionManager:
             raise
 
          # Aggregate results: token address -> (pool_address -> TokenPosition)
-         aggregated = {}
+         updated_tokens_positions = {}
          for token_address, pos_dict in results:
-             aggregated[token_address] = pos_dict
+             updated_tokens_positions[token_address] = pos_dict
 
-         return aggregated
+         return updated_tokens_positions
                      

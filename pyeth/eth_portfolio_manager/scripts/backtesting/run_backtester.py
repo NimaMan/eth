@@ -4,9 +4,9 @@ import json
 from datetime import datetime
 from web3 import Web3
 import asyncio
-from eth_portfolio_manager.backtesting.backtest_manager import BacktestPortfolioManager
+from eth_portfolio_manager.backtesting.backtest_manager import BacktestExecutionEngine
 from eth_portfolio_manager.strategy import BuyAll, BuyScamStrategy, MarketTracker
-from eth_portfolio_manager.backtesting.db.backtest_results_writer import BacktestResultsWriter
+from eth_portfolio_manager.db.backtest_results_writer import BacktestResultsWriter
 from eth_portfolio_manager.utils.logger import get_logger
 
 
@@ -42,7 +42,7 @@ async def main(num_days=2):
     )
     
     # Initialize BacktestManager with the given configuration 
-    backtest_manager = BacktestPortfolioManager(
+    backtest_manager = BacktestExecutionEngine(
         config=config,
         logger=logger
     )

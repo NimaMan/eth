@@ -22,7 +22,8 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from sqlalchemy import create_engine
-from eth_portfolio_manager.backtesting.db.backtest_db_models import Base, TokenPosition, StrategyRun  # models now include the aggregated JSONB field
+from eth_portfolio_manager.db.token_position_db_models import Base, TokenPosition, StrategyRun  # models now include the aggregated JSONB field
+
 
 def drop_database():
     """Drop the backtest database if it exists"""

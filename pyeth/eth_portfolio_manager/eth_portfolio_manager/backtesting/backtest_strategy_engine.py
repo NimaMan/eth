@@ -117,13 +117,13 @@ from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision,
 from eth_portfolio_manager.core.token_position import TokenPosition
 
 
-class TokenPositionManagerBacktest:
+class BacktestStrategyEngine:
     def __init__(self, investment_strategy: BaseStrategy):
         self.investment_strategy = investment_strategy
     
     @property
-    def strategy_name(self):
-        return self.investment_strategy.strategy_name
+    def strategy_parameters(self):
+        return self.investment_strategy.strategy_parameters
     
     def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
         """Process token updates and manage positions

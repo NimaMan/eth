@@ -78,9 +78,9 @@ class TokenPositionsCache:
         with self._lock:
             return len(self.token_positions)
 
-    def items(self) -> Dict[str, TokenPosition]:
+    def items(self):
         with self._lock:
-            return {key: entry for key, entry in self.token_positions.items()}
+            return self.token_positions.items()
         
     def values(self) -> Dict[str, TokenPosition]:
         with self._lock:

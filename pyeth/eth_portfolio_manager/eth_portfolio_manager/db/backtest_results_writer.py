@@ -44,6 +44,7 @@ class BacktestResultsWriter:
         self.cur = self.conn.cursor(cursor_factory=RealDictCursor)
         self.current_run_id = None
         self.logger = logger
+    
     def write_strategy_run(self, strategy_name: str, params: dict, start_block: int, end_block: int) -> int:
         """
         Inserts a new strategy run record into the database, returning the generated run ID.

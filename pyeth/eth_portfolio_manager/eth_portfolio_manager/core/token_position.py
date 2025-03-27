@@ -198,6 +198,7 @@ class TokenPosition:
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
             current_price_ratio=current_price_ratio,
+            reserve=live_token.token_data.get_pool_reserve(self.static_data.pool_address),
             roi=roi,
             current_value=current_value,
             realized_profit=self.latest_snapshot.realized_profit,

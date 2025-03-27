@@ -1,5 +1,5 @@
 """
-Strategy Backtesting Manager
+Backtest Execution Engine
 
 Objective:
 ---------
@@ -45,22 +45,22 @@ import tqdm
 import time
 
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
-from eth_portfolio_manager.backtesting.backtest_token_position_managers import TokenPositionManagerBacktest
+from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
+from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestStrategyEngine
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 
 
-class BacktestPortfolioManager:
+class BacktestExecutionEngine:
     def __init__(self, config, logger):
         self.config = config
         self.logger = logger
         # Initialize components
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = BlockTokenProcessor(logger=self.logger)
-        self.token_position_managers = {}
+        self.strategy_engines = {}
         for strategy_name, strategy in self.config.strategies.items():
-            self.token_position_managers[strategy_name] = TokenPositionManagerBacktest(investment_strategy=strategy)
-        self.strategy_position_managers = {strategy_name: PortfolioPositionManager(token_position_manager=self.token_position_managers[strategy_name], logger=self.logger ) for strategy_name, strategy in self.config.strategies.items()}
+            self.strategy_engines[strategy_name] = BacktestStrategyEngine(investment_strategy=strategy)
+        self.strategy_position_managers = {strategy_name: StrategyPositionManager(strategy_engine=self.strategy_engines[strategy_name], logger=self.logger ) for strategy_name, strategy in self.config.strategies.items()}
     
     async def run_backtest(self):
         """Run complete backtest simulation with multiple strategies"""
@@ -85,7 +85,7 @@ class BacktestPortfolioManager:
                     tasks = []
                     for strategy_name, position_manager in self.strategy_position_managers.items():
                         # Run all strategies concurrently
-                        tasks.append(position_manager.update_portfolio_tokens_positions(token_updates))
+                        tasks.append(position_manager.update_updated_tokens_positions(token_updates))
                     await asyncio.gather(*tasks)
                     strategy_update_time = time.time() - start_strategy_update_time
                 if not token_updates:
