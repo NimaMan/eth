@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import logging
 import atexit
+from logging.handlers import RotatingFileHandler
 
 
 # Default log directory; can be customized as needed
@@ -58,13 +59,15 @@ def cleanup_empty_logs():
 atexit.register(cleanup_empty_logs)
 
 
-def get_logger(name="token_manager", log_folder="token_manager", base_log_dir=None):
+def get_logger(name="token_manager", log_folder="token_manager", base_log_dir=None, console_output=False):
     """
     Initializes and returns a logger with the specified name.
     
     Args:
         name (str): Name of the logger. Defaults to "eth_logger" if not provided.
-        log_dir (str): Directory where log files will be stored. Defaults to LOG_DIR.
+        log_folder (str): Subfolder name within the base log directory
+        base_log_dir (str): Override the base log directory. If None, uses ETH_LOG_DIR
+        console_output: Whether to output logs to console (default: False)
         
     Returns:
         logging.Logger: Configured logger instance.
@@ -93,8 +96,15 @@ def get_logger(name="token_manager", log_folder="token_manager", base_log_dir=No
         # Track the log file
         _log_files.add(log_file_path)
         
-        file_handler = logging.FileHandler(log_file_path)
+        # Updated: Use RotatingFileHandler with maxBytes=50MB and backupCount=5
+        file_handler = RotatingFileHandler(log_file_path, maxBytes=50*1024*1024, backupCount=5)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
     return logger
