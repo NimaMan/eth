@@ -15,7 +15,6 @@ from typing import Optional, Dict, List
 from threading import Lock
 from eth_token.live_erc20_token.live_token import LiveERC20Token
 from eth_token.utils.logger import get_logger
-import asyncio
 
 
 @dataclass
@@ -25,12 +24,29 @@ class CacheEntry:
     token_status: str
 
 
-class LiveTokenObjectsCache:
-    def __init__(self, max_size: int = 10000, logger=None):
+class LiveTokensCache:
+    def __init__(self, max_size: int = 10000, logger=None, add_pnl_to_db: bool = False):
+        """
+        Initialize LiveTokensCache with optional PnL database writing.
+        
+        Args:
+            max_size: Maximum cache size
+            logger: Logger instance
+            add_pnl_to_db: Flag to enable/disable PnL database writing
+        """
         self.max_size = max_size
         self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._lock = Lock()
         self.logger = logger or get_logger(name="token_manager")
+        self.add_pnl_to_db = add_pnl_to_db
+        
+        # Initialize token PnL writer if PnL writing is enabled
+        if add_pnl_to_db:
+            from sarigoz.data.db.pnl.token_pnl_writer import TokenPnLWriter
+            self.pnl_writer = TokenPnLWriter(logger=logger)
+            self.logger.info("Token PnL writer initialized for database operations")
+        else:
+            self.pnl_writer = None
 
     def clear_cache(self):
         """Clear the cache"""
@@ -78,7 +94,10 @@ class LiveTokenObjectsCache:
         with self._lock:
             try:    
                 if len(self.cache) >= self.max_size:
-                    #remove oldest entry
+                    # Remove oldest entry but write its PnL data first if enabled
+                    oldest_key, _ = next(iter(self.cache.items()))
+                    if self.add_pnl_to_db and self.pnl_writer:
+                        self._write_token_pnl(oldest_key)
                     self.cache.popitem(last=False)
                 self.cache[key] = CacheEntry(
                     token=value,
@@ -110,9 +129,56 @@ class LiveTokenObjectsCache:
         return f"{self.__class__.__name__}(max_size={self.max_size}, current_size={len(self.cache)})"
 
     def __delitem__(self, key: str):
-        """Delete an item from the cache"""
-        del self.cache[key]
+        """Delete an item from the cache, optionally writing PnL data first"""
+        with self._lock:
+            # Write PnL data if enabled
+            if self.add_pnl_to_db and self.pnl_writer:
+                self._write_token_pnl(key)
+            # Delete from cache
+            del self.cache[key]
 
     def __getattr__(self, item: str):
         """Get attribute from token_data"""
         return getattr(self.cache, item)
+    
+    def _write_token_pnl(self, token_address: str) -> bool:
+        """
+        Write PnL data for a token to the database.
+        
+        Args:
+            token_address: Address of the token to write PnL data for
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.add_pnl_to_db or not self.pnl_writer:
+            return False
+            
+        try:
+            token_entry = self.cache.get(token_address)
+            if token_entry and token_entry.token.token_trading_age_blocks is not None:
+                return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
+            return False
+        except Exception as e:
+            self.logger.error(f"Error writing PnL data for token {token_address}: {str(e)}")
+            return False
+    
+    def write_all_token_pnl(self) -> int:
+        """
+        Write PnL data for all tokens in the cache to the database.
+        
+        Returns:
+            int: Number of tokens successfully written
+        """
+        if not self.add_pnl_to_db or not self.pnl_writer:
+            self.logger.warning("PnL writing is disabled or no database connection is available")
+            return 0
+            
+        success_count = 0
+        with self._lock:
+            for addr in list(self.cache.keys()):
+                if self._write_token_pnl(addr):
+                    success_count += 1
+                    
+        self.logger.info(f"Successfully wrote PnL data for {success_count} tokens")
+        return success_count
