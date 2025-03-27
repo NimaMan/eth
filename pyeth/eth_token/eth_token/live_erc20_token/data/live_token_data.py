@@ -121,7 +121,8 @@ from eth_token.utils.common_addresses import DENOM_ADDRESSES, DENOM_DECIMALS, DE
 from eth_block_processor.contracts.contract_type import get_erc20_contract_info
 
 
-DENOM_RESERVE_THRESHOLD = 1e-2
+WETH_DENOM_RESERVE_THRESHOLD = 1e-2
+USD_DENOM_RESERVE_THRESHOLD = 100
 HIDDEN_MINTS_THRESHOLD = 1+1e-2
 
 
@@ -191,6 +192,7 @@ class LiveTokenData:
     has_uni_v3_pool: bool = False
     has_uni_v4_pool: bool = False
     pool_prices: OrderedDict[str, List[float]] = field(default_factory=dict)
+    pool_reserves: OrderedDict[str, List[float]] = field(default_factory=dict)
     # Token Type Series
     pool_info: Dict[str, Dict] = field(default_factory=dict) # {pool_address: {pool_type: str, denom_currency: str, decimals: int, is_token1_denom: bool}}
     other_currencies: Dict[str, int] = field(default_factory=dict) # {Currency: Number of transfers}
@@ -311,23 +313,91 @@ class LiveTokenData:
         self.total_supply = contract_creation_event['total_supply']
         self.token_status = TokenStatusEnum.CREATION
     
-    def set_pool_info(self, pool_address: str, pool_type: str, denom_address: str,  token1_is_denom: bool = None):
-        """Set the pool info"""
+    def set_pool_info(self, pool_address: str, pool_type: str, denom_address: str,  token1_is_denom: bool = None) -> bool:
+        """Set the pool info and return True if the pool is valid, False otherwise"""
         if denom_address in DENOM_ADDRESSES.keys():
             denom_currency = DENOM_ADDRESSES[denom_address]
             decimals = DENOM_DECIMALS[denom_currency]
         else:
             token_info = get_erc20_contract_info(denom_address)
-            denom_currency = token_info['name']
-            decimals = token_info['decimals']
-            
+            if token_info is not None:
+                denom_currency = token_info['name']
+                decimals = token_info['decimals']
+            else:
+                return False # Pool is not a valid denom
         self.pool_info[pool_address] = {
             'pool_type': pool_type,
+            'denom_address': denom_address,
             'denom_currency': denom_currency,
             'decimals': decimals
         }
         if token1_is_denom is not None:
             self.pool_info[pool_address]['token1_is_denom'] = token1_is_denom
+        return True # Pool is valid
+    
+    def update_pool_reserves(self, pool_address: str, reserve_change: float, reserve_type: str):
+        """Update the pool reserves"""
+        if pool_address not in self.pool_reserves.keys():
+            self.pool_reserves[pool_address] = {
+                "denom_reserve_changes": [], 
+                "token_reserve_changes": [],
+                "denom_reserve": 0,
+                "token_reserve": 0
+                }
+        if reserve_type == "denom":
+            self.pool_reserves[pool_address]["denom_reserve_changes"].append(reserve_change)
+            self.pool_reserves[pool_address]["denom_reserve"] += reserve_change
+        else:
+            self.pool_reserves[pool_address]["token_reserve_changes"].append(reserve_change)
+            self.pool_reserves[pool_address]["token_reserve"] += reserve_change
+
+    def _check_pool_reserves(self, transaction: Dict):
+        """Check the pool reserves and set the token status to scam if all the pools have less than denom_threshold"""
+        # check if we have any reserves
+        if len(self.pool_reserves) == 0:
+            return
+        denom_reserves = {}
+        token_reserves = []
+        for pool_address, pool_info in self.pool_info.items():
+            denom_address = pool_info['denom_address']
+            if pool_address not in self.pool_reserves.keys():
+                continue
+            denom_reserves[denom_address] = self.pool_reserves[pool_address]["denom_reserve"]
+            token_reserves.append(self.pool_reserves[pool_address]["token_reserve"])
+        if len(denom_reserves) > 0:
+            for denom_address, denom_reserve in denom_reserves.items():
+                # Check if it is a known denom
+                if denom_address in DENOM_ADDRESSES.keys():
+                    denom_currency = DENOM_ADDRESSES[denom_address]
+        
+                    if denom_currency == 'WETH':
+                        if denom_reserve < WETH_DENOM_RESERVE_THRESHOLD:
+                            self.is_scam = True
+                            self.scam_label = f'Denom Reserve({denom_currency}) < {WETH_DENOM_RESERVE_THRESHOLD}'
+                            self.scam_block = transaction['block_number']
+                            self.scam_txn = transaction['hash']
+                            self.token_status = TokenStatusEnum.INACTIVE_SCAM
+                    else:
+                        if denom_reserve < USD_DENOM_RESERVE_THRESHOLD:
+                            self.is_scam = True
+                            self.scam_label = f'Denom Reserve({denom_currency}) < {USD_DENOM_RESERVE_THRESHOLD}'
+                            self.scam_block = transaction['block_number']
+                            self.scam_txn = transaction['hash']
+                            self.token_status = TokenStatusEnum.INACTIVE_SCAM
+            
+        if len(token_reserves) > 0:
+            if sum(token_reserves)/self.total_supply > HIDDEN_MINTS_THRESHOLD:
+                self.is_scam = True
+                self.scam_label = f'Token in Circulation > 1'
+                self.scam_block = transaction['block_number']
+                self.scam_txn = transaction['hash']
+                self.token_status = TokenStatusEnum.INACTIVE_SCAM
+
+    def get_pool_reserve(self, pool_address: str):
+        """Get the initial reserve"""
+        if pool_address not in self.pool_reserves.keys():
+            return None
+        return self.pool_reserves[pool_address]['denom_reserve']
 
     def set_lp_token_info(self, pool_address: str):
         """Set the lp token info"""
@@ -364,7 +434,9 @@ class LiveTokenData:
             else:
                 denom_address = pair_event['token0']
                 token1_is_denom = False
-            
+            pool_is_valid = self.set_pool_info(pair_event['pair_address'], "V2", denom_address, token1_is_denom)
+            if not pool_is_valid:
+                return
             self.univ2_pair.append({
                 'txn_hash': txn_hash,
                 'block_number': block_number,
@@ -375,7 +447,6 @@ class LiveTokenData:
                 'token1': pair_event['token1']
             })
             
-            self.set_pool_info(pair_event['pair_address'], "V2", denom_address, token1_is_denom)
             self.set_lp_token_info(pair_event['pair_address'])
             
     def _add_trading_enabled_event(self, transaction: Dict):
@@ -384,7 +455,7 @@ class LiveTokenData:
             self.trading_enabled_event = trading_enabled_event
             if not self.trading_enabled:
                 self._update_trading_enabled(transaction)
-        
+    
     def _add_erc20_transfer(self, transaction: Dict, transfer: Dict):
         """Process a transfer event"""
         txn_hash = transaction['hash']
@@ -393,7 +464,7 @@ class LiveTokenData:
         amount = int(transfer['amount'])/10**self.decimals
         if txn_hash not in self.erc20_transfers.keys():
             self.erc20_transfers[txn_hash] = []
-        self.erc20_transfers[txn_hash].append({
+        transfer_dict = {
             'txn_hash': txn_hash,
             'block_number': block_number,
             'txn_index': txn_index,
@@ -402,10 +473,27 @@ class LiveTokenData:
             'to_address': transfer['to_address'],
             'amount': amount,
             'token_address': transfer['token_address']
-        })
+        }
+        self.erc20_transfers[txn_hash].append(transfer_dict)
         if transfer['from_address'] == '0x0000000000000000000000000000000000000000':
             self.total_supply_from_transfers += amount
         
+        # Update pool reserves if pool is the sender
+        if transfer['from_address'] in self.pool_addresses:
+            self.update_pool_reserves(transfer['from_address'], -amount, "token")
+        # Update pool reserves if pool is the recipient
+        if transfer['to_address'] in self.pool_addresses:
+            self.update_pool_reserves(transfer['to_address'], amount, "token")
+
+    def _update_eth_pool_reserves(self, transfer_dict: Dict):
+        """Update the ETH pool reserves"""
+        # Update pool reserves if pool is the sender. its reserves are reduced
+        if transfer_dict['from_address'] in self.pool_addresses:
+            self.update_pool_reserves(transfer_dict['from_address'], -transfer_dict['amount'], "denom")
+        # Update pool reserves if pool is the recipient
+        if transfer_dict['to_address'] in self.pool_addresses:
+            self.update_pool_reserves(transfer_dict['to_address'], transfer_dict['amount'], "denom")
+
     def _add_weth_transfer(self, transaction: Dict, transfer: Dict):
         """Process an ETH transfer event"""
         txn_hash = transaction['hash']
@@ -413,7 +501,7 @@ class LiveTokenData:
         txn_index = transaction['txn_index']
         if txn_hash not in self.eth_transfers.keys():
             self.eth_transfers[txn_hash] = []
-        self.eth_transfers[txn_hash].append({
+        transfer_dict = {
             'txn_hash': txn_hash,
             'block_number': block_number,
             'txn_index': txn_index,
@@ -422,8 +510,73 @@ class LiveTokenData:
             'to_address': transfer['to_address'],
             'amount': float(transfer['amount'])/10**18,
             'token_address': "WETH"
-        })
+        }
+        self.eth_transfers[txn_hash].append(transfer_dict)
+        if transfer_dict['token_address'] in self.pool_addresses:
+            self.update_pool_reserves(transfer_dict['token_address'], transfer_dict['amount'], "denom")
 
+        self._update_eth_pool_reserves(transfer_dict)
+        
+    def _add_eth_transfer(self, transaction: Dict):
+        """Process an internal transfer event"""
+        txn_hash = transaction['hash']
+        block_number = transaction['block_number']
+        txn_index = transaction['txn_index']
+        for transfer in transaction.get('internal_transactions', []):
+            if txn_hash not in self.eth_transfers.keys():
+                self.eth_transfers[txn_hash] = []
+            transfer_dict = {
+                'txn_hash': txn_hash,
+                'block_number': block_number,
+                'txn_index': txn_index,
+                'depth': transfer['depth'],
+                'from_address': transfer['from_address'],
+                'to_address': transfer['to_address'],
+                'amount': float(transfer['value']),
+                'token_address': "ETH"
+            }
+            self.eth_transfers[txn_hash].append(transfer_dict)
+            if transfer_dict['token_address'] in self.pool_addresses:
+                self.update_pool_reserves(transfer_dict['token_address'], transfer_dict['amount'], "denom")
+
+            self._update_eth_pool_reserves(transfer_dict)
+
+    def _add_other_token_transfer(self, transaction: Dict, transfer: Dict):
+        """Process transfers of other known tokens (USDC, USDT, etc.)"""
+        txn_hash = transaction['hash']
+        block_number = transaction['block_number']
+        txn_index = transaction['txn_index']
+        if transfer['token_address'] in DENOM_ADDRESSES.keys():
+            denom_name = DENOM_ADDRESSES[transfer['token_address']]
+            denom_decimals = DENOM_DECIMALS[denom_name]
+            amount = float(transfer['amount'])/10**denom_decimals
+            if denom_name not in self.other_currencies:
+                self.other_currencies[denom_name] = 0
+            self.other_currencies[denom_name] += 1
+        
+            if txn_hash not in self.other_denom_transfers.keys():
+                self.other_denom_transfers[txn_hash] = []
+            transfer_dict = {
+                'txn_hash': txn_hash,
+                'block_number': block_number,
+                'txn_index': txn_index,
+                'log_index': transfer['log_index'],
+                'from_address': transfer['from_address'],
+                'to_address': transfer['to_address'],
+                'amount': amount,
+                'token_address': transfer['token_address'],
+            }
+            self.other_denom_transfers[txn_hash].append(transfer_dict)
+
+            if transfer_dict['from_address'] in self.pool_addresses:
+                pool_address = transfer_dict['from_address']
+                if transfer_dict['token_address'] == self.pool_info[pool_address]['denom_address']:
+                    self.update_pool_reserves(pool_address, -amount, "denom")
+            if transfer_dict['to_address'] in self.pool_addresses:
+                pool_address = transfer_dict['to_address']
+                if transfer_dict['token_address'] == self.pool_info[pool_address]['denom_address']:
+                    self.update_pool_reserves(pool_address, amount, "denom")
+     
     def _add_liquidity_token_transfer(self, transaction: Dict, transfer: Dict):
         """Process a liquidity token transfer event"""
         txn_hash = transaction['hash']
@@ -448,51 +601,6 @@ class LiveTokenData:
             })
         self.liquidity_token_supply_from_transfers += float(transfer['amount'])/decimals if decimals is not None else transfer['amount']
 
-    def _add_eth_transfer(self, transaction: Dict):
-        """Process an internal transfer event"""
-        txn_hash = transaction['hash']
-        block_number = transaction['block_number']
-        txn_index = transaction['txn_index']
-        for transfer in transaction.get('internal_transactions', []):
-            if txn_hash not in self.eth_transfers.keys():
-                self.eth_transfers[txn_hash] = []
-            self.eth_transfers[txn_hash].append({
-                'txn_hash': txn_hash,
-                'block_number': block_number,
-                'txn_index': txn_index,
-                'depth': transfer['depth'],
-                'from_address': transfer['from_address'],
-                'to_address': transfer['to_address'],
-                'amount': float(transfer['value']),
-                'token_address': "ETH"
-            })
-
-    def _add_other_token_transfer(self, transaction: Dict, transfer: Dict):
-        """Process transfers of other known tokens (USDC, USDT, etc.)"""
-        txn_hash = transaction['hash']
-        block_number = transaction['block_number']
-        txn_index = transaction['txn_index']
-        if transfer['token_address'] in DENOM_ADDRESSES.keys():
-            denom_name = DENOM_ADDRESSES[transfer['token_address']]
-            denom_decimals = DENOM_DECIMALS[denom_name]
-            amount = float(transfer['amount'])/10**denom_decimals
-            if denom_name not in self.other_currencies:
-                self.other_currencies[denom_name] = 0
-            self.other_currencies[denom_name] += 1
-        
-            if txn_hash not in self.other_denom_transfers.keys():
-                self.other_denom_transfers[txn_hash] = []
-            self.other_denom_transfers[txn_hash].append({
-                'txn_hash': txn_hash,
-                'block_number': block_number,
-                'txn_index': txn_index,
-                'log_index': transfer['log_index'],
-                'from_address': transfer['from_address'],
-                'to_address': transfer['to_address'],
-                'amount': amount,
-                'token_address': transfer['token_address'],
-            })
-        
     def _add_transfers(self, transaction: Dict):
         """Process transfer events for all relevant tokens"""
         # Track all transfers in the transaction
@@ -518,10 +626,10 @@ class LiveTokenData:
             except Exception as e:
                 raise Exception(f" {__name__} Error processing transfer {token_address}, txn {transaction['hash']}: {e}")
 
-    def _check_scam(self, denom_reserve: float, token_reserve: float, block_number: int, txn_hash: str):
-        if denom_reserve < DENOM_RESERVE_THRESHOLD:
+    def _check_univ2_scam(self, denom_reserve: float, token_reserve: float, block_number: int, txn_hash: str):
+        if denom_reserve < WETH_DENOM_RESERVE_THRESHOLD:
             self.is_scam = True
-            self.scam_label = f'Denom removal (<{DENOM_RESERVE_THRESHOLD})'
+            self.scam_label = f'Denom removal (<{WETH_DENOM_RESERVE_THRESHOLD})'
             self.scam_block = block_number
             self.scam_txn = txn_hash
 
@@ -570,27 +678,25 @@ class LiveTokenData:
                     })  
                 
                 self.add_univ2_price_info(token_reserve, denom_reserve, sync['pair_address'])
-                self._check_scam(denom_reserve, token_reserve, block_number, txn_hash)
+                self._check_univ2_scam(denom_reserve, token_reserve, block_number, txn_hash)
                 
     def _add_univ2_swaps(self, transaction: Dict):
         """Process a swap event"""
         txn_hash = transaction['hash']
-        if len(transaction.get('uniswap_v2_swaps', [])) > 0 or len(transaction.get('uniswap_v3_swaps', [])) > 0:
+        univ2_swaps = transaction.get('uniswap_v2_swaps', [])
+        if len(univ2_swaps) > 0:
             self.univ2_swaps[txn_hash] = []
-            if not self.trading_enabled:
+            # Check if the swap is for a pool that we have already added
+            if not univ2_swaps[0]["pair_address"] in self.pool_addresses:
+                return # We should have already added the pool address
+            if not self.trading_enabled: # Enable trading if it is not already enabled
                 self._update_trading_enabled(transaction)
 
-        for swap in transaction.get('uniswap_v2_swaps', []):
+        for swap in univ2_swaps:
             self.univ2_swaps[txn_hash].append({
                 'log_index': swap['log_index'],
                 'from_address': swap['sender'],
                 'to_address': swap['to'],
-            })
-        for swap in transaction.get('uniswap_v3_swaps', []):
-            self.univ2_swaps[txn_hash].append({
-                'log_index': swap['log_index'],
-                'from_address': swap['sender'],
-                'to_address': swap['recipient'],
             })
 
     def _add_univ2_mint(self, transaction: Dict):
@@ -647,14 +753,16 @@ class LiveTokenData:
     def _add_univ3_pool(self, transaction: Dict):
         """Process Uniswap V3 pool creation events"""
         for pool_event in transaction.get('uniswap_v3_pools', []):
-            self.has_uni_v3_pool = True
             if pool_event['token0'] == self.contract_address:
                 denom_address = pool_event['token1']
                 token1_is_denom = True
             else:
                 denom_address = pool_event['token0']
                 token1_is_denom = False      
-            
+            pool_is_valid = self.set_pool_info(pool_event['pool'], "V3", denom_address, token1_is_denom)
+            if not pool_is_valid:
+                return
+            self.has_uni_v3_pool = True    
             self.uniswap_v3_pool.append({
                 'txn_hash': transaction['hash'],
                 'block_number': transaction['block_number'],
@@ -666,7 +774,6 @@ class LiveTokenData:
                 'fee': pool_event['fee']
             })
         
-            self.set_pool_info(pool_event['pool'], "V3", denom_address, token1_is_denom)
             self.set_lp_token_info(pool_event['pool'])
 
     def add_univ3_price_info(self, sqrt_price_x96: int, pool_address: str):
@@ -678,36 +785,36 @@ class LiveTokenData:
     def _add_univ3_swaps(self, transaction: Dict):
         """Process Uniswap V3 swap events"""
         txn_hash = transaction['hash']
-        v3_swaps = transaction.get('uniswap_v3_swaps', [])
-        if v3_swaps:
+        univ3_swaps = transaction.get('uniswap_v3_swaps', [])
+        if len(univ3_swaps) > 0:
+            if univ3_swaps[0]["pool_address"] not in self.pool_addresses:
+                return # We should have already added the pool address
             self.univ3_swaps[txn_hash] = []
             # Ensure trading is enabled if v3 events exist
             if not self.trading_enabled:
                 self._update_trading_enabled(transaction)
-            for swap in v3_swaps:
-                sqrt_price_x96 = int(swap.get('sqrt_price_x96'))
-                self.univ3_swaps[txn_hash].append({
-                    'log_index': swap.get('log_index'),
-                    'from_address': swap.get('sender'),
-                    'to_address': swap.get('recipient'),
-                    'amount0': swap.get('amount0'),
-                    'amount1': swap.get('amount1'),
-                    'sqrtPriceX96': sqrt_price_x96,
-                    'liquidity': swap.get('liquidity'),
-                    'tick': swap.get('tick'),
-                    'pool_address': swap.get('pool_address')
-                })
-                if swap.get('pool_address') in self.pool_addresses:
-                    self.add_univ3_price_info(sqrt_price_x96, swap.get('pool_address'))
+        
+        for swap in univ3_swaps:
+            sqrt_price_x96 = int(swap.get('sqrt_price_x96'))
+            self.univ3_swaps[txn_hash].append({
+                'log_index': swap.get('log_index'),
+                'from_address': swap.get('sender'),
+                'to_address': swap.get('recipient'),
+                'amount0': swap.get('amount0'),
+                'amount1': swap.get('amount1'),
+                'sqrtPriceX96': sqrt_price_x96,
+                'liquidity': swap.get('liquidity'),
+                'tick': swap.get('tick'),
+                'pool_address': swap.get('pool_address')
+            })
+            if swap.get('pool_address') in self.pool_addresses:
+                self.add_univ3_price_info(sqrt_price_x96, swap.get('pool_address'))
 
     def _add_univ3_mints(self, transaction: Dict):
         """Process Uniswap V3 mint events"""
         txn_hash = transaction['hash']
         v3_mints = transaction.get('uniswap_v3_mints', [])
         if v3_mints:
-            # Ensure trading is enabled if v3 events imply trading
-            if not self.trading_enabled:
-                self._update_trading_enabled(transaction)
             for mint in v3_mints:
                 self.univ3_mints.append({
                     'txn_hash': txn_hash,
@@ -830,27 +937,28 @@ class LiveTokenData:
     def _add_univ4_pool(self, transaction: Dict):
         """Process Uniswap V4 pool initialization events and update pool info."""
         for pool_event in transaction.get('uniswap_v4_initializes', []):
-            self.has_uni_v4_pool = True
+            pool_address = pool_event.get('pool_manager_address')
             if pool_event.get('currency0') == self.contract_address:
                 denom_address = pool_event.get('currency1')
                 token1_is_denom = True
             else:
                 denom_address = pool_event.get('currency0')
                 token1_is_denom = False
-            # Use provided pool field; if missing, use 'id' field instead
-            pool_id = pool_event.get('pool') or pool_event.get('id')
+            pool_is_valid = self.set_pool_info(pool_address, "V4", denom_address, token1_is_denom)
+            if not pool_is_valid:
+                return
+            self.has_uni_v4_pool = True
             self.uniswap_v4_pool.append({
                 'txn_hash': transaction['hash'],
                 'block_number': transaction['block_number'],
                 'txn_index': transaction['txn_index'],
                 'log_index': pool_event.get('log_index'),
-                'pool': pool_id,
+                'pool_address': pool_address,
                 'currency0': pool_event.get('currency0'),
                 'currency1': pool_event.get('currency1'),
                 'fee': pool_event.get('fee')
             })
-            self.set_pool_info(pool_id, "V4", denom_address, token1_is_denom)
-            self.set_lp_token_info(pool_id)
+            self.set_lp_token_info(pool_address)
 
     def _add_univ4_swaps(self, transaction: Dict):
         """Process Uniswap V4 swap events."""
@@ -858,6 +966,10 @@ class LiveTokenData:
         v4_swaps = transaction.get('uniswap_v4_swaps', [])
         if v4_swaps:
             self.univ4_swaps[txn_hash] = []
+            #check if the pool address is in the pool_addresses list
+            if not v4_swaps[0]["pool_manager_address"] in self.pool_addresses:
+                return # We should have already added the pool address
+
             if not self.trading_enabled:
                 self._update_trading_enabled(transaction)
             for swap in v4_swaps:
@@ -870,13 +982,13 @@ class LiveTokenData:
                     'liquidity': swap.get('liquidity'),
                     'tick': swap.get('tick'),
                     'fee': swap.get('fee'),
-                    'pool_address': swap.get('pool_address')
+                    'pool_address': swap.get('pool_manager_address')
                 })
-                if swap.get('pool_address') in self.pool_addresses:
+                if swap.get('pool_manager_address') in self.pool_addresses:
                     price = float(swap.get('sqrt_price_x96'))
-                    if swap.get('pool_address') not in self.pool_prices:
-                        self.pool_prices[swap.get('pool_address')] = []
-                    self.pool_prices[swap.get('pool_address')].append(price)
+                    if swap.get('pool_manager_address') not in self.pool_prices:
+                        self.pool_prices[swap.get('pool_manager_address')] = []
+                    self.pool_prices[swap.get('pool_manager_address')].append(price)
 
     def _add_univ4_mints(self, transaction: Dict):
         """Process Uniswap V4 mint events."""
@@ -918,7 +1030,8 @@ class LiveTokenData:
         # Handle contract creation
         if transaction['txn_type'] == 'Contract Creation':
             self._handle_creation(transaction)
-        
+        if self.total_supply==0:
+            return
         # Process pair events (Uniswap V2 pools)
         self._add_univ2_pair_event(transaction)
         # Process Uniswap V3 pool creation events
@@ -926,29 +1039,14 @@ class LiveTokenData:
         # Process Uniswap V4 pool initialization events
         self._add_univ4_pool(transaction)
         
-        # Process Uniswap V2 events
-        self._add_univ2_syncs(transaction)
-        self._add_univ2_swaps(transaction)
-
-        # Process Uniswap V3 events
-        self._add_univ3_swaps(transaction)
-        self._add_univ3_mints(transaction)
-        self._add_univ3_burns(transaction)
-        
-        # Process Uniswap V4 events
-        #self._add_univ4_swaps(transaction)
-        #self._add_univ4_mints(transaction)
-        #self._add_univ4_burns(transaction)
-        
-        # Process trading enabled events
-        if self.has_pool or not self.trading_enabled:
-            self._add_trading_enabled_event(transaction)
-
         # Process ERC20 transfers
         self._add_transfers(transaction)
         
         # Process internal transfers
         self._add_eth_transfer(transaction)
+
+        # Check the pool reserves
+        self._check_pool_reserves(transaction)
 
         # Process approvals
         self._add_approval(transaction)
@@ -961,6 +1059,24 @@ class LiveTokenData:
 
         # Update bribe amount
         self._update_bribe_amount(transaction)
+
+        # Process Uniswap V2 events
+        self._add_univ2_syncs(transaction)
+        self._add_univ2_swaps(transaction)
+
+        # Process Uniswap V3 events
+        self._add_univ3_swaps(transaction)
+        self._add_univ3_mints(transaction)
+        self._add_univ3_burns(transaction)
+        
+        # Process Uniswap V4 events
+        self._add_univ4_swaps(transaction)
+        self._add_univ4_mints(transaction)
+        self._add_univ4_burns(transaction)
+        
+        # Process trading enabled events
+        if self.has_pool or not self.trading_enabled:
+            self._add_trading_enabled_event(transaction)
 
         # Update latest block number and timestamp
         self.latest_block_number = transaction['block_number']
