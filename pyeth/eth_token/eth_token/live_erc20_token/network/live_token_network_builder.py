@@ -1,5 +1,7 @@
 import networkx as nx
 from collections import defaultdict, OrderedDict
+import orjson
+from networkx.readwrite import json_graph
 
 from eth_block_processor.utils.common_addresses import fee_recipients_set
 from eth_token.live_erc20_token.network.user_activity_tracker import UserTokenActivityTracker
@@ -147,7 +149,13 @@ class LiveTokenTxnStateDiffCalculator:
             
         return valid
 
-    def calculate_state_changes(self, txn_hash: str, block_number: int, txn_index: int) -> dict:
+    def calculate_state_changes(
+            self, 
+            txn_hash: str, 
+            block_number: int, 
+            txn_index: int, 
+            eth_transfers: list, 
+            erc20_transfers: list) -> dict:
         """Calculate state changes including special cases"""
         self.movements = {  
             'token': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()}),
@@ -155,7 +163,6 @@ class LiveTokenTxnStateDiffCalculator:
         }          
         
         # Process all transfers with special case handling
-        erc20_transfers = self.live_token.token_data.erc20_transfers.get(txn_hash, [])
         for transfer in erc20_transfers:
             log_index = transfer['log_index']
             transfer_id = (block_number, txn_index, log_index)
@@ -171,7 +178,6 @@ class LiveTokenTxnStateDiffCalculator:
                                  transfer_id
                                  )
         
-        eth_transfers = self.live_token.token_data.eth_transfers.get(txn_hash, [])
         for transfer in eth_transfers:
             if "log_index" in transfer:
                 log_index = transfer['log_index']
@@ -187,7 +193,8 @@ class LiveTokenTxnStateDiffCalculator:
         try:
             state_changes = self.get_net_changes()
         except Exception as e:
-            print(self.movements)
+            if self.logger:
+                self.logger.error(f"Error calculating state changes for {txn_hash}: {str(e)}")
             return {}
         return state_changes
 
@@ -213,6 +220,19 @@ class LiveTokenNetworkBuilder:
     def txn_hashes(self):
         return self.live_token.token_data.txn_hashes
 
+    def serialize_for_frontend(self):
+        graph_data = json_graph.node_link_data(self.graph)
+
+        simplified_nodes = [{"id": node} for node in graph_data["nodes"]]
+        simplified_links = [
+            {"source": link["source"], "target": link["target"], "type": link["type"]}
+            for link in graph_data["links"]
+        ]
+
+        data = {"nodes": simplified_nodes, "links": simplified_links}
+
+        return orjson.dumps(data)
+    
     def _add_fee_source_edges(self, fee_source: str, addresses: list):
         """Add edges from fee source to all addresses involved in its transaction"""
         if not fee_source or fee_source not in self.graph:
@@ -277,9 +297,17 @@ class LiveTokenNetworkBuilder:
         txn_index = txn_dict['txn_index']
         fee_source = txn_dict['from_address']
         bribe_amount = txn_dict['bribe_amount']
+        erc20_transfers = self.live_token.token_data.erc20_transfers.get(txn_hash, [])
+        eth_transfers = self.live_token.token_data.eth_transfers.get(txn_hash, [])
         
         # Get state changes (only significant ones are returned by calculator)
-        state_changes = self.state_calculator.calculate_state_changes(txn_hash, block_number, txn_index)
+        state_changes = self.state_calculator.calculate_state_changes(
+            txn_hash, 
+            block_number, 
+            txn_index, 
+            eth_transfers, 
+            erc20_transfers
+            )
         
         # Add or update addresses with their movements
         for address, addr_state_changes in state_changes.items():

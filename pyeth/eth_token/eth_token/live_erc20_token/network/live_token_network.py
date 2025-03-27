@@ -42,14 +42,15 @@ class LiveTokenNetwork(LiveTokenNetworkBuilder):
                 user_activity['agg_realized_profit'] = sum(self.graph.nodes[addr]['data'].realized_profit for addr in subgraph_addresses)
                 user_activity['agg_unrealized_profit'] = sum(self.graph.nodes[addr]['data'].unrealized_profit for addr in subgraph_addresses)
                 user_activity['agg_total_profit'] = sum(self.graph.nodes[addr]['data'].total_profit for addr in subgraph_addresses)
-                user_activity['related_addresses'] = tuple(subgraph_addresses - {address})
+                related_addresses = subgraph_addresses - {address}
+                user_activity['related_addresses'] = tuple(related_addresses) if related_addresses else None 
             else:
                 user_activity['agg_denom_balance'] = np.nan
                 user_activity['agg_token_balance'] = np.nan
                 user_activity['agg_realized_profit'] = np.nan
                 user_activity['agg_unrealized_profit'] = np.nan
                 user_activity['agg_total_profit'] = np.nan
-                user_activity['related_addresses'] = tuple()
+                user_activity['related_addresses'] = None
             all_users_activity.append(user_activity)
         
         udf = pd.DataFrame(all_users_activity)
