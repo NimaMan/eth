@@ -251,10 +251,10 @@ class TransactionLogProcessor:
 
     def _process_integer(self, value: Union[str, bytes, int]) -> int:
         """Convert hex string or bytes to integer, handling empty cases"""
+        if isinstance(value, int) or isinstance(value, float):
+            return value
         if not value or value == '0x':
             return None
-        if isinstance(value, int):
-            return value
         if isinstance(value, bytes):
             value = value.hex()
         if isinstance(value, str):

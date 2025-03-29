@@ -177,8 +177,11 @@ class TransactionProcessor:
         contract_address = receipt.get('contractAddress', None)
 
         internal_transactions = []
-        if self.needs_trace(transaction):
-            internal_transactions = self.trace_processor.process_trace(trace)
+        if self.needs_trace(transaction) and trace:
+            internal_transactions = self.trace_processor.process_trace(
+                trace, 
+                receipt_contract_address=contract_address 
+            )
         
         unique_addresses = logs['unique_addresses']
         erc20_contracts = logs['erc20_contracts']
@@ -266,7 +269,10 @@ class TransactionProcessor:
         # Process trace if needed
         internal_transactions = []
         if self.needs_trace(transaction) and trace:
-            internal_transactions = self.trace_processor.process_trace(trace)
+            internal_transactions = self.trace_processor.process_trace(
+                trace, 
+                receipt_contract_address=contract_address
+            )
         
         # Get state diffs if requested
         if state_diff:
