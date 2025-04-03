@@ -6,9 +6,7 @@ positions for tokens that are present in multiple pools. It provides thread-safe
 insertion, and removal and is modeled after the LiveTokenObjectsCache.
 """
 
-import time
 from collections import OrderedDict
-from dataclasses import dataclass
 from threading import Lock
 from typing import Optional, Dict
 from eth_portfolio_manager.core.token_position import TokenPosition
