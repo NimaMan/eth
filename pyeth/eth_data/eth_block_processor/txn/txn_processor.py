@@ -63,7 +63,7 @@ from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
 from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
-from eth_block_processor.txn.txn_state_diff_analyzer import TransactionStateDiffAnalyzer
+from eth_block_processor.txn.processed_tx_state_diff_calculator import ProcessedTxStateDiffCalculator
 from eth_block_processor.data_models.receipt_models import TradingEnabledEvent
 from eth_block_processor.txn.txn_action_identifier import TransactionActionIdentifier
 from eth_block_processor.data_models.trace_models import InternalTransaction
@@ -77,7 +77,7 @@ class TransactionProcessor:
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_processor = TransactionLogProcessor(w3=w3)
         self.trace_processor = TransactionTraceProcessor(w3=w3)
-        self.state_diff_analyzer = TransactionStateDiffAnalyzer(w3=w3)
+        self.state_diff_calculator = ProcessedTxStateDiffCalculator()
         self.action_identifier = TransactionActionIdentifier()
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
@@ -274,14 +274,6 @@ class TransactionProcessor:
                 receipt_contract_address=contract_address
             )
         
-        # Get state diffs if requested
-        if state_diff:
-            state_diffs, latest_states = self.state_diff_analyzer.parse_state_diff(
-                self.data_fetcher.get_state_diff(transaction['hash'])
-            )
-        else:
-            state_diffs, latest_states = {}, {}
-
         unique_addresses = logs['unique_addresses']
         from_address = transaction['from']
         to_address = transaction['to']
@@ -337,8 +329,8 @@ class TransactionProcessor:
             erc20_contracts=erc20_contracts,
             internal_transactions=internal_transactions,
             fees=fees,
-            state_diffs=state_diffs,
-            latest_states=latest_states,
+            state_diffs={},
+            latest_states={},
             bribe_amount=bribe_amount,
             uniswap_v3_pools=logs['uniswap_v3_pools'],
             uniswap_v3_initializations=logs['uniswap_v3_initializations'],
