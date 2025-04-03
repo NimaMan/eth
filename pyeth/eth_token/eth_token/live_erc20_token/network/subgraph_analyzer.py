@@ -77,7 +77,7 @@ class SubgraphMetrics:
     
 
 class NetworkSubgraphAnalyzer:
-    def __init__(self, graph: nx.DiGraph, token_data: LiveTokenData, degree_threshold: int = 10):
+    def __init__(self, graph: nx.DiGraph, token_data: LiveTokenData, degree_threshold: int = 10, frequency_threshold: float = 0.3):
         """
         Initialize component analyzer with original and simplified graphs.
         
@@ -88,6 +88,7 @@ class NetworkSubgraphAnalyzer:
         self.graph = graph
         self.token_data = token_data
         self.degree_threshold = degree_threshold
+        self.frequency_threshold = frequency_threshold
         self.removed_nodes = set()
         self._edge_types = {'txn owner'}
         self.simplified_graph = None
@@ -100,29 +101,59 @@ class NetworkSubgraphAnalyzer:
             "0x000000000000000000000000000000000000dEaD",
         }
         # Add the pool addresses to the set of addresses to remove
-        addresses_to_remove.union(set(self.token_data.pool_info.keys()))
+        addresses_to_remove = addresses_to_remove.union(set(self.token_data.pool_info.keys()))
+        # Add contract addresses to the set of addresses to remove
+        addresses_to_remove = addresses_to_remove.union(set(self.token_data.contract_address))
         return addresses_to_remove
-    
+
     def simplify(self) -> nx.DiGraph:
-        """Create simplified version of the graph"""
+        """
+        Create simplified version of the graph by:
+        1. Removing default addresses (token, pools, etc.)
+        2. Handling high-frequency addresses (remove incoming edges)
+        3. Removing high-degree nodes (unless they're fee sources)
+        """
         simplified_graph = self.graph.copy()
-        for node, degree in self.graph.in_degree():
-            # Keep the fee sources 
-            if node in self.token_data.fee_sources:
-                continue
-            if degree > self.degree_threshold:
-                self.removed_nodes.add(node)        
+        total_txns = len(self.token_data.txn_hashes)
         
-        # If a fee source is having a significant number of outgoing edges, we remove it (potential spammer or scammer)
-        for node, degree in self.graph.out_degree():
-            # Keep the fee sources 
-            if node in self.token_data.fee_sources:
-                continue
-            if degree > 2*self.degree_threshold:
-                self.removed_nodes.add(node)        
+        # Skip if no transactions
+        if total_txns == 0:
+            return simplified_graph
         
+        # Get default addresses to remove
+        default_addresses = self.default_addresses_to_remove()
+        
+        # 1. Handle high-frequency addresses
+        min_appearances = int(total_txns * self.frequency_threshold)
+        
+        for address, count in self.token_data.address_tx_counter.items():
+            if (address is not None and 
+                address not in default_addresses and 
+                count > min_appearances):
+                
+                # Address appears in too many transactions to be meaningful for connections
+                if address not in self.token_data.fee_sources:
+                    # Remove incoming edges to prevent artificial connections
+                    if address in simplified_graph:
+                        incoming_edges = list(simplified_graph.in_edges(address))
+                        simplified_graph.remove_edges_from(incoming_edges)
+        
+        # 2. Remove high in-degree nodes (many addresses interact with it)
+        for node, degree in simplified_graph.in_degree():
+            if (node not in self.token_data.fee_sources and 
+                degree > self.degree_threshold):
+                self.removed_nodes.add(node)
+        
+        # 3. Remove high out-degree nodes (initiates transactions with many addresses)
+        for node, degree in simplified_graph.out_degree():
+            if (node not in self.token_data.fee_sources and 
+                degree > 2*self.degree_threshold):
+                self.removed_nodes.add(node)
+        
+        # 4. Remove identified nodes and default addresses
         simplified_graph.remove_nodes_from(self.removed_nodes)
-        simplified_graph.remove_nodes_from(self.default_addresses_to_remove())
+        simplified_graph.remove_nodes_from(default_addresses)
+        
         return simplified_graph
     
     def find_subgraphs(self):

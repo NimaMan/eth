@@ -32,7 +32,11 @@ class LiveTokenNetwork(LiveTokenNetworkBuilder):
         self.connected_components = self.subgraph_analyzer.find_subgraphs()
         
         for address in self.fee_sources:
-            node_data = self.graph.nodes[address]['data']
+            try:
+                node_data = self.graph.nodes[address]['data']
+            except:
+                self.log(f"Address {address} not found in the graph of {self.live_token.contract_address}.")
+                continue
             user_activity = node_data.get_user_features()
             # Add component information
             subgraph_addresses = self.subgraph_analyzer.get_related_addresses(address)

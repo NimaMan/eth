@@ -17,7 +17,8 @@ class UserTokenActivityTracker:
                  address=None,
                  address_type=None,
                  is_fee_source=None,
-                 fee_source=None):
+                 fee_source=None, 
+                 init_txn_fee=None):
         self.token_data = token_data
         self.entry_block = entry_block
         self.entry_index = entry_index
@@ -30,7 +31,7 @@ class UserTokenActivityTracker:
         self.got_from = []
         self.sent_to = []
         self.bribe_amount = 0
-        self.txn_fees = []
+        self.txn_fees = [] if init_txn_fee is None else [init_txn_fee]
 
         self.address = address
         self.address_type = address_type
@@ -122,11 +123,7 @@ class UserTokenActivityTracker:
         balance = np.sum(self.token_got_list) - np.sum(self.token_sent_list)
         #round it to zero if it is less than 0.000001
         return 0 if abs(balance) < 0.000001 else balance
-    
-    @property
-    def denom_balance(self):
-        return np.sum(self.denom_got_list) - np.sum(self.denom_sent_list)
-    
+      
     @property
     def num_buys(self):
         return len(self.denom_sent_list)
@@ -147,6 +144,10 @@ class UserTokenActivityTracker:
     def total_denom_received(self):
         return np.sum(self.denom_got_list)
     
+    @property
+    def denom_balance(self):
+        return self.total_denom_received - self.total_denom_spent
+  
     @property
     def total_token_bought(self):
         return np.sum(self.token_got_list)
@@ -205,11 +206,15 @@ class UserTokenActivityTracker:
     
     @property
     def realized_profit(self):
-        return self.total_denom_received - self.total_denom_spent - self.bribe_amount
+        return self.denom_balance - self.bribe_amount - self.total_tx_fees
     
     @property
     def total_profit(self):
         return self.realized_profit + self.unrealized_profit
+    
+    @property
+    def total_tx_fees(self):
+        return np.sum(self.txn_fees)
     
     def get_user_features(self):
         return {
@@ -241,81 +246,9 @@ class UserTokenActivityTracker:
             'address': self.address,
             'is_scam': self.token_data.is_scam,
             'scam_label': self.token_data.scam_label,
+            'total_tx_fees': self.total_tx_fees,
             'contract_address': self.token_data.contract_address,
         }
-
-    def check_associated_cashflow(self, processed_addresses=None):
-        """
-        Recursively check the cashflow of associated addresses.
-        
-        :param processed_addresses: Set of addresses already processed to avoid circular references
-        :return: Dictionary with summed attributes of associated addresses
-        """
-        if processed_addresses is None:
-            processed_addresses = set()
-
-        associated_attributes = defaultdict(float)
-        for address, activity in self.associated_addresses.items():
-            if address in processed_addresses:
-                continue
-            processed_addresses.add(address)
-
-            # Sum up attributes
-            associated_attributes['denom_balance'] += activity.denom_balance
-            associated_attributes['token_balance'] += activity.token_balance
-            associated_attributes['realized_profit'] += activity.realized_profit
-            associated_attributes['unrealized_profit'] += activity.unrealized_profit
-            associated_attributes['total_profit'] += activity.total_profit
-            associated_attributes['total_denom_spent'] += activity.total_denom_spent
-            associated_attributes['total_denom_received'] += activity.total_denom_received
-            associated_attributes['denom_received_spent_ratio'] += activity.received_spent_ratio   
-
-            # Recursively check associated addresses of this address
-            if activity.associated_addresses:
-                nested_attributes = activity.check_associated_cashflow(processed_addresses)
-                for key, value in nested_attributes.items():
-                    associated_attributes[key] += value
-
-        return dict(associated_attributes)
-
-    def get_total_cashflow(self):
-        """
-        Get the total cashflow including this address and all associated addresses.
-        
-        :return: Dictionary with total attributes
-        """
-        total_attributes = self.get_user_features()
-        associated_attributes = self.check_associated_cashflow()
-
-        for key, value in associated_attributes.items():
-            if key in total_attributes:
-                total_attributes[f'associated_{key}'] += value
-            else:
-                total_attributes[f'associated_{key}'] = value
-
-        # Calculate ratios and other derived attributes
-        if total_attributes['total_denom_spent'] > 0:
-            total_attributes['associated_received_spent_ratio'] = total_attributes['total_denom_received'] / total_attributes['total_denom_spent']
-        else:
-            total_attributes['associated_received_spent_ratio'] = np.nan
-
-        if total_attributes['total_token_bought'] > 0:
-            total_attributes['associated_token_sell_buy_ratio'] = total_attributes['total_token_sold'] / total_attributes['total_token_bought']
-        else:
-            total_attributes['associated_token_sell_buy_ratio'] = np.nan
-
-        return total_attributes
-
-    def is_cashflow_balanced(self, tolerance=1e-10):
-        """
-        Check if the total cashflow (including associated addresses) is balanced.
-        
-        :param tolerance: Tolerance for floating-point comparison
-        :return: Boolean indicating if cashflow is balanced
-        """
-        total_cashflow = self.get_total_cashflow()
-        total_denom_balance = total_cashflow['denom_balance']
-        return np.isclose(total_denom_balance, 0, atol=tolerance, rtol=0)
 
     def merge(self, other):
         """
