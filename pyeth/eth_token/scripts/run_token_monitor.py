@@ -12,7 +12,7 @@ Objective:
 import asyncio
 import signal
 import sys
-from eth_token.token_manager.live_token_manager import LiveTokenManager
+from eth_token.token_manager.live_token_token_processor_with_warmup import LiveTokenProcessorwithWarmup
 from eth_token.utils.logger import get_logger
 
 
@@ -21,7 +21,7 @@ logger = get_logger(name="token_manager", log_folder="token_monitor")
 
 class TokenManagerService:
     def __init__(self, warmup_blocks: int = 1000):
-        self.token_manager = LiveTokenManager(
+        self.token_manager = LiveTokenProcessorwithWarmup(
             logger=logger,
             warmup_blocks=warmup_blocks
         )
