@@ -59,7 +59,7 @@ def cleanup_empty_logs():
 atexit.register(cleanup_empty_logs)
 
 
-def get_logger(name="token_manager", log_folder="token_manager", base_log_dir=None, console_output=False):
+def get_logger(name="sarigoz", log_folder="sarigoz", base_log_dir=None, console_output=False):
     """
     Initializes and returns a logger with the specified name.
     
