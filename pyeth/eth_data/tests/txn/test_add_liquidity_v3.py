@@ -14,7 +14,7 @@ import asyncio
 from eth_block_processor.data_models.receipt_models import *
 from eth_block_processor.data_models.trace_models import *
 from eth_block_processor.data_models.txn_models import *
-from eth_block_processor.data_models.uniswap_v3_models import *
+from eth_block_processor.data_models import *
 
 
 def test_add_liquidity_v3(txn_analyzer, txn_data_fetcher):

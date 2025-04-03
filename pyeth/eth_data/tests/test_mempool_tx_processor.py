@@ -18,7 +18,7 @@ from datetime import datetime
 from web3 import Web3
 import logging
 
-from eth_block_processor.txn.mempool_tx_processor import MempoolTxProcessor
+from eth_block_processor.txn.mempool_tx_state_diff_processor import MempoolTxProcessor
 
 # Configure logging
 logging.basicConfig(

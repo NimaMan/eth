@@ -16,7 +16,7 @@ from web3 import Web3
 from typing import List, Dict, Any, Set
 from dataclasses import asdict
 
-from eth_block_processor.txn.mempool_tx_processor import MempoolTxProcessor
+from eth_block_processor.txn.mempool_tx_state_diff_processor import MempoolTxProcessor
 from eth_block_processor.txn.mempool_data_fetcher import MempoolDataFetcher
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
 from eth_block_processor.utils.logger import get_logger

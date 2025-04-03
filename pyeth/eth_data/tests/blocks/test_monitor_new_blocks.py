@@ -13,8 +13,6 @@ async def test_live_block_processor():
     live_block_processor = LiveBlockProcessor(
         websocket_url="ws://127.0.0.1:8546",
         http_url="http://127.0.0.1:8545",
-        rabbitmq_url="amqp://guest:guest@127.0.0.1/",
-        save_erc20_txns=False
     )
     
     try:

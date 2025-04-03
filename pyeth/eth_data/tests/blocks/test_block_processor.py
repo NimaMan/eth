@@ -16,7 +16,7 @@ async def web3_instance(session):
         AsyncWeb3: An instance connected to the specified Ethereum node.
     """
     node_url = "http://127.0.0.1:8545"
-    w3 = AsyncWeb3(AsyncHTTPProvider(node_url, client_session=session))
+    w3 = AsyncWeb3(AsyncHTTPProvider(node_url))
     try:
         # Verify connection by fetching the latest block number
         latest_block = await w3.eth.block_number
