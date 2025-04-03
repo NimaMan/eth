@@ -209,7 +209,7 @@ class LiveTokenData:
     transaction_fees: List[Dict] = field(default_factory=list)
     
     approved_addresses: Set[str] = field(default_factory=set)
-    unique_addresses: Set[str] = field(default_factory=set)
+    address_tx_counter: Dict[str, int] = field(default_factory=dict)
     total_bribe_amount: float = 0
     bribe_amount_dict: Dict[str, float] = field(default_factory=dict)
 
@@ -233,6 +233,11 @@ class LiveTokenData:
     def txn_hashes(self):
         """Get the txn hashes"""
         return list(set(self.txn_hashes_to_makers.keys()))
+    
+    @property
+    def unique_addresses(self):
+        """Get the unique addresses"""
+        return list(self.address_tx_counter.keys())
     
     def get_pool_denom_currency(self, pool_address: str):
         """Get the denom currency for a given pool address"""
@@ -1022,6 +1027,13 @@ class LiveTokenData:
                     'token_address': burn.get('token_address')
                 })
 
+    def updated_address_tx_counter(self, unique_addresses: set):
+        """Update the transaction counter for a unique address"""
+        for unique_address in unique_addresses:
+            if unique_address not in self.address_tx_counter:
+                self.address_tx_counter[unique_address] = 0
+        self.address_tx_counter[unique_address] += 1
+
     def update_from_transaction(self, transaction: Dict):
         """Update token data from a new transaction"""
         # Add the txn hash to the list of processed transactions
@@ -1054,8 +1066,8 @@ class LiveTokenData:
         # Process owner events
         self._add_owner_event(transaction)
 
-        # Update unique addresses
-        self.unique_addresses.update(transaction.get('unique_addresses', set()))
+        # Update address tx counter
+        self.updated_address_tx_counter(transaction.get('unique_addresses', set()))
 
         # Update bribe amount
         self._update_bribe_amount(transaction)
