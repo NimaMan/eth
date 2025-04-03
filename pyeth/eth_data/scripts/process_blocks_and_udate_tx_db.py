@@ -73,7 +73,7 @@ async def process_blocks(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process Ethereum blocks and save transactions to database")
     parser.add_argument("--node-url", default="http://127.0.0.1:8545", help="Ethereum node URL")
-    parser.add_argument("--blocks", type=int, default=1000000, help="Total number of blocks to process")
+    parser.add_argument("--blocks", type=int, default=500000, help="Total number of blocks to process")
     parser.add_argument("--start-block", type=int, help="Starting block number (optional)")
     parser.add_argument("--end-block", type=int, help="Ending block number (optional)")
     parser.add_argument("--no-save", action="store_true", help="Don't save transactions to database")
