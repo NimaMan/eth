@@ -1,123 +1,142 @@
 """
-LiveBlockTokenProcessor: Processes Live blocks to maintain live token states
+LiveBlockTokenProcessor: Manages real-time token data processing and tracking with warm-up phase
 
 Objective:
 ---------
-1. Subscribe to processed blocks from RabbitMQ
-2. Handle warm-up phase by queuing blocks without processing
-3. Maintain consistent token state between warm-up and live phases
-4. Provide access to current token states
+1. Process new blocks and track live tokens and their data
+2. Generate token update events for downstream consumers
+3. Provide access to current token states
 
 Architecture & Flow:
 ------------------
-1. Initialization & State Management:
-   - Uses shared BlockTokenProcessor for token state management
-   - Maintains warm-up state flag
-   - Tracks processed blocks and events
-   - Coordinates with BlockRangeTokenProcessor during warm-up
+1. Warm-up Phase:
+   - HistoricalBlockTokenProcessor processes historical blocks
+   - Builds initial token state in LiveTokensCache
+   - Ensures smooth transition to live processing 
 
-2. Block Subscription (via RabbitMQ):
-   - Connects to 'blocks_exchange' with routing_key='blocks'
-   - Uses BlockSubscriber for block queuing and ordering
-   - Queues blocks during warm-up phase
-   - Processes queued blocks after warm-up completes
+2. Live Processing Phase:
+   - Continues from last warm-up block
+   - Subscribes to new blocks in real-time
+   - Maintains token states and generates token update events
 
-3. Processing Phases:
-   a. Warm-up Phase:
-      - Blocks are queued but not processed
-      - BlockRangeTokenProcessor handles historical blocks
-      - Maintains queue order for later processing
-   
-   b. Live Phase:
-      - Processes queued blocks from warm-up
-      - Continues with real-time block processing
-      - Updates shared token state
-
-4. Token State Coordination:
-   - Uses shared BlockTokenProcessor for consistency
-   - Ensures no duplicate processing between phases
-   - Maintains proper block ordering
-   - Signals block processing completion for alerts
-
-Message Flow:
+Event Flow:
 -----------
-Warm-up Phase:
-BlockProcessor -> RabbitMQ -> BlockSubscriber -> Queue (blocks stored)
-                                                         |
-Historical Processing:                                   |
-BlockRangeTokenProcessor -> Shared BlockTokenProcessor   |
-                                                        v
-Live Phase:                                    Process Queued Blocks
-BlockSubscriber -> Queue -> BlockLiveTokenProcessor -> Token Events
-                                      |
-                                      v
-                            Shared BlockTokenProcessor
+1. Block Processing:
+   - BlockSubscriber receives new block -> process_block_live()
+   - process_block_live() processes block -> sets block_processed_event
 
-Components:
-----------
-1. BlockSubscriber:
-   - Handles block queuing and ordering
-   - Maintains queue during warm-up
-   - Ensures no blocks are missed
+2. Token Update Monitoring:
+   - _monitor_token_updates() waits for block_processed_event
+   - When triggered, extracts updated_tokens from processed block
+   - Places updates in unprocessed_token_updates queue
+   - Sets new_updates_event to notify consumers
 
-2. BlockTokenProcessor (shared):
-   - Core token processing logic
-   - Used by both live and historical processing
-   - Maintains consistent token state
+3. Consumer Processing:
+   - External systems wait on new_updates_event
+   - When triggered, consume updates from unprocessed_token_updates queue
+   - Process token updates through their own pipelines (e.g., strategy execution)
 
-3. Event Management:
-   - Tracks block processing completion
-   - Signals for alert generation
-   - Coordinates phase transitions
-
-State Transitions:
----------------
-1. Warm-up -> Live:
-   - Complete historical processing
-   - Signal warm-up completion
-   - Process queued blocks
-   - Continue with live processing
+Historical (Warm-up) -> Live Transition:
+----------------------------------------
+- HistoricalBlockTokenProcessor processes blocks for warm-up
+- Upon completion, LiveBlockTokenProcessor begins real-time processing
+- Token state maintained consistently across transition
 """
 
 import asyncio
 from typing import Dict, List
 from eth_token.subscribers.block_subscriber import BlockSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
+from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
+
 from eth_token.utils.logger import get_logger
 
 
-class LiveBlockTokenProcessor:
-    def __init__(self, 
-                 rabbitmq_url: str = None, 
-                 block_token_processor: BlockTokenProcessor = None,
-                 logger=None):
-        
-        self.logger = logger or get_logger(name="tokens_manager", log_folder="tokens_live")
-        self.block_token_processor = block_token_processor or BlockTokenProcessor(logger=self.logger)
-        self.block_processed_event = asyncio.Event()
-
+class LiveBlockTokenProcessor(BlockTokenProcessor):
+    def __init__(self,
+                 warmup_blocks: int = 1000,
+                 logger=None,
+                 add_pnl_to_db: bool = False):
+        super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)  
         # Initialize subscriber with our callback and block_token_processor
         self.block_subscriber = BlockSubscriber(
-            callback=self._process_block,
-            rabbitmq_url=rabbitmq_url,
+            callback=self.process_block_live,
             logger=self.logger,
-            block_token_processor=self.block_token_processor,  # Pass the processor
+            block_token_processor=self,  # Pass the processor
         )
-        
+
+        self.block_range_token_processor = HistoricalBlockTokenProcessor(
+            block_token_processor=self,
+            logger=self.logger
+        )
+        self.warmup_blocks = warmup_blocks
+
+        self.unprocessed_token_updates = asyncio.PriorityQueue(maxsize=100)  # Queue for unprocessed token 
+        self.block_processed_event = asyncio.Event() # Event to signal block processed is complete
+        self.new_updates_event = asyncio.Event()  # Event to signal new updates is available
+        self._shutdown_event = asyncio.Event() # Event to signal shutdown
         self._is_shutting_down = False
         self._subscriber_task = None
+        self._monitor_task = None
+
+    async def process_block_live(self, block_data: List[Dict]):
+        """Process incoming blocks"""
+        if self._is_shutting_down:
+            return
+        try:
+            block_number = await self.process_block(block_data) # Process block
+            self.latest_processed_block = block_number
+            self.block_processed_event.set() # Signal block processed
+            
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}")
+            # Don't mark as processed if there was an error
+    
+    async def _monitor_token_updates(self):
+        """Monitor for token updates using event notification"""
+        while not self._is_shutting_down:
+            try:
+                # Wait for block processing to complete
+                await self.block_processed_event.wait()
+                # Process alerts for updated tokens
+                if self.updated_tokens:
+                    current_block = self.latest_processed_block
+                    await self.unprocessed_token_updates.put((current_block, self.updated_tokens))
+                    self.new_updates_event.set()
+                # Clear the event for next block
+                self.block_processed_event.clear()
+            
+            except Exception as e:
+                self.logger.error(f"Error processing alerts: {e}")
 
     async def start(self):
         """Start processing live blocks"""
         try:
-            self._is_shutting_down = False
             self.logger.info("Starting block subscriber")
-            # Create a task instead of awaiting
+            # 1. Process historical blocks until we catch up
+            if self.warmup_blocks:
+                self.logger.info(f"Starting historical processing for {self.warmup_blocks} blocks")
+                try:
+                    latest_processed_block = await self.block_range_token_processor.process_range_until_live(block_range=self.warmup_blocks)
+                    self.logger.info(f"Historical processing complete. Processed up to block {latest_processed_block}")
+                except Exception as e:
+                    self.logger.error(f"Error during historical processing: {e}")
+                    raise
+          
+            # 2. Create a task to start the block subscriber for getting live processed blocks
             self._subscriber_task = asyncio.create_task(
                 self.block_subscriber.start(
-                    start_from_block=self.block_token_processor.latest_processed_block
+                    start_from_block=self.latest_processed_block
                 )
             )
+            
+            # 3. Start monitoring for updates
+            self._monitor_task = asyncio.create_task(self._monitor_token_updates())
+            self.logger.info("Token update monitoring started")
+            
+            # Keep running until shutdown
+            while not self._shutdown_event.is_set():
+                await asyncio.sleep(1)
             
         except Exception as e:
             self.logger.error(f"Error starting live processor: {e}")
@@ -145,47 +164,28 @@ class LiveBlockTokenProcessor:
                     pass
                 
             self.logger.info("Live block processor stopped successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error during live processor shutdown: {e}")
-            raise
 
-    async def _process_block(self, block_data: List[Dict]):
-        """Process incoming blocks"""
-        if self._is_shutting_down:
-            return
-            
-        try:
-            block_number = block_data[0]['block_number']
-            
-            # Skip if already processed
-            if block_number in self.block_token_processor.processed_blocks:
-                self.logger.info(f"Block {block_number} already processed, skipping")
-                return
-            # Process block
-            await self.block_token_processor.process_block(block_data)
-            
-            # Update tracking
-            self.block_token_processor.processed_blocks[block_number] = True
-            
-            self.block_token_processor.latest_processed_block = max(
-                self.block_token_processor.latest_processed_block,
-                block_number
-            )
-            
-            # Signal block processed
-            self.block_processed_event.set()
-            
+            # Stop monitoring task if running
+            if self._monitor_task and not self._monitor_task.done():
+                self.logger.info("Stopping monitor task...")
+                self._monitor_task.cancel()
+                try:
+                    await self._monitor_task
+                except asyncio.CancelledError:
+                    pass
+
+            self.logger.info("LiveBlockTokenProcessor stopped successfully")
+            self.new_updates_event.clear()
+            # Clear queue
+            while not self.unprocessed_token_updates.empty():
+                try:
+                    item = self.unprocessed_token_updates.get_nowait()
+                    self.unprocessed_token_updates.task_done()
+                    self.logger.debug(f"Unprocessed token updates: {item}")
+                except asyncio.QueueEmpty:
+                    break
+            self._shutdown_event.set()
+            self.logger.info("LiveBlockTokenProcessor shutdown complete")
         except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}")
-            # Don't mark as processed if there was an error
-        
-    @property
-    def updated_tokens(self):
-        """Return updated tokens"""
-        return self.block_token_processor.updated_tokens
-    
-    @property
-    def latest_processed_block(self):
-        """Return latest processed block"""
-        return self.block_token_processor.latest_processed_block
+            self.logger.error(f"Error during LiveBlockTokenProcessor shutdown: {e}")
+            raise

@@ -14,7 +14,6 @@ from collections import OrderedDict
 from typing import Optional, Dict, List
 from threading import Lock
 from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.utils.logger import get_logger
 
 
 @dataclass
@@ -25,7 +24,7 @@ class CacheEntry:
 
 
 class LiveTokensCache:
-    def __init__(self, max_size: int = 10000, logger=None, add_pnl_to_db: bool = False):
+    def __init__(self, max_size: int = 2000, logger=None, add_pnl_to_db: bool = False):
         """
         Initialize LiveTokensCache with optional PnL database writing.
         
@@ -37,22 +36,27 @@ class LiveTokensCache:
         self.max_size = max_size
         self.cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._lock = Lock()
-        self.logger = logger or get_logger(name="token_manager")
+        self.logger = logger
         self.add_pnl_to_db = add_pnl_to_db
         
         # Initialize token PnL writer if PnL writing is enabled
         if add_pnl_to_db:
             from sarigoz.data.db.pnl.token_pnl_writer import TokenPnLWriter
             self.pnl_writer = TokenPnLWriter(logger=logger)
-            self.logger.info("Token PnL writer initialized for database operations")
+            self.log("Token PnL writer initialized for database operations")
         else:
             self.pnl_writer = None
 
+    def log(self, message: str):
+        """Log a message"""
+        if self.logger:
+            self.logger.info(message)
+ 
     def clear_cache(self):
         """Clear the cache"""
         with self._lock:
             self.cache.clear()
-            self.logger.info("Cache cleared successfully")
+            self.log("Cache cleared successfully")
     
     def get_cached_contract_addresses(self):
         """Get a list of cached addresses"""
@@ -85,7 +89,7 @@ class LiveTokensCache:
         except KeyError:
             return None
         except Exception as e:
-            self.logger.error(f"{__name__}: Error getting item {item}: {str(e)}")
+            self.log(f"{__name__}: Error getting item {item}: {str(e)}")
             raise e
 
     def __setitem__(self, key: str, value: 'LiveERC20Token'):
@@ -106,7 +110,7 @@ class LiveTokensCache:
                 )
                 self.cache.move_to_end(key)                
             except Exception as e:
-                self.logger.error(f"{__name__}: Error adding token {key}: {str(e)}")
+                self.log(f"{__name__}: Error adding token {key}: {str(e)}")
 
     def __contains__(self, item: str):
         """Check if item is in cache"""
@@ -157,10 +161,11 @@ class LiveTokensCache:
         try:
             token_entry = self.cache.get(token_address)
             if token_entry and token_entry.token.token_trading_age_blocks is not None:
+                self.log(f"Writing PnL data for token {token_address}")
                 return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
             return False
         except Exception as e:
-            self.logger.error(f"Error writing PnL data for token {token_address}: {str(e)}")
+            self.log(f"Error writing PnL data for token {token_address}: {str(e)}")
             return False
     
     def write_all_token_pnl(self) -> int:
@@ -171,7 +176,7 @@ class LiveTokensCache:
             int: Number of tokens successfully written
         """
         if not self.add_pnl_to_db or not self.pnl_writer:
-            self.logger.warning("PnL writing is disabled or no database connection is available")
+            self.log("PnL writing is disabled or no database connection is available")
             return 0
             
         success_count = 0
@@ -180,5 +185,5 @@ class LiveTokensCache:
                 if self._write_token_pnl(addr):
                     success_count += 1
                     
-        self.logger.info(f"Successfully wrote PnL data for {success_count} tokens")
+        self.log(f"Successfully wrote PnL data for {success_count} tokens")
         return success_count

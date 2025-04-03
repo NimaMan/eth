@@ -14,27 +14,27 @@ import asyncio
 from web3 import Web3
 from dataclasses import asdict
 from typing import Dict, List, Set
-
+from collections import OrderedDict
+from tqdm import tqdm
 from eth_block_processor.blockchain.block_processor import BlockProcessor
 from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.token_manager.live_tokens_object_cache import LiveTokenObjectsCache
+from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.utils.logger import get_logger
 
 
 class BlockTokenProcessor:
-    def __init__(self, logger=None, max_concurrency=20):
+    def __init__(self, logger=None, max_concurrency=20, add_pnl_to_db: bool = False):
         self.logger = logger or get_logger(name="token_manager")
         # Token tracking
-        self.live_tokens_cache = LiveTokenObjectsCache(logger=self.logger)
-        self.token_first_seen: Dict[str, int] = {}
+        self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
         self.updated_tokens: Dict[str, LiveERC20Token] = {}
-        self.processed_blocks: Dict[int, bool] = {}
+        self.processed_blocks: Dict[int, bool] = OrderedDict()
         self.latest_processed_block = 0
 
         # Introduce concurrency semaphore
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
 
-    async def process_block(self, block_data: List[Dict]):
+    async def process_block(self, block_data: List[Dict]) -> int:
         """Process a single block's transactions with concurrency limit."""
         if not block_data:
             return
@@ -44,7 +44,7 @@ class BlockTokenProcessor:
         else:
             block_number = block_data[0].block_number
         
-        self.updated_tokens.clear()
+        self.updated_tokens.clear() # Clear the updated tokens cache
         tasks = []
         for txn in block_data:
             async def sem_task(txn_data=txn):
@@ -54,8 +54,8 @@ class BlockTokenProcessor:
             tasks.append(asyncio.create_task(sem_task()))
         await asyncio.gather(*tasks)
 
-        # Mark the block as processed (assumes all txns in the same block)
-        self.processed_blocks[block_number] = True
+        self.processed_blocks[block_number] = True # Mark the block as processed
+        return block_number
 
     async def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
@@ -68,7 +68,7 @@ class BlockTokenProcessor:
                 return
                 
             # Handle regular transactions
-            await self._handle_token_transaction(transaction)
+            await self._handle_token_update_from_transaction(transaction)
                 
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
@@ -91,15 +91,21 @@ class BlockTokenProcessor:
                 token.update_from_transaction(transaction)
                 
                 self.live_tokens_cache[new_token_address] = token
-                self.token_first_seen[new_token_address] = block_number
                 self.updated_tokens[new_token_address] = token
-                
-                self.logger.info(f"New token created: {new_token_address} in block {block_number}")
+                if self.logger:
+                    self.logger.info(f"New token created: {new_token_address} in block {block_number}")
                 
             except Exception as e:
                 self.logger.error(f"{self.__class__.__name__} Failed to create token {new_token_address} at txn {transaction.get('hash')}: {e}")
 
-    async def _handle_token_transaction(self, transaction: Dict):
+    async def _update_token(self, token: LiveERC20Token, transaction: Dict, token_address: str):
+        """Safely update a token with transaction data"""
+        try:
+            await token.update_from_transaction_async(transaction)
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} for txn {transaction.get('hash')}: {e}") 
+
+    async def _handle_token_update_from_transaction(self, transaction: Dict):
         """Handle transaction involving existing tokens"""
         erc20_contracts = transaction.get('erc20_contracts', set())
         if not erc20_contracts:
@@ -121,17 +127,10 @@ class BlockTokenProcessor:
         if update_tasks:
             await asyncio.gather(*update_tasks)
 
-    async def _update_token(self, token: LiveERC20Token, transaction: Dict, token_address: str):
-        """Safely update a token with transaction data"""
-        try:
-            await token.update_from_transaction_async(transaction)
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} for txn {transaction.get('hash')}: {e}") 
 
-
-class BlockRangeTokenProcessor:
+class HistoricalBlockTokenProcessor:
     """
-    BlockRangeTokenProcessor: Process historical block ranges for token analysis
+    HistoricalBlockTokenProcessor: Process historical block ranges for token analysis
     Objective:
         ---------
         1. Process specific ranges of historical blocks for token analysis
@@ -157,7 +156,7 @@ class BlockRangeTokenProcessor:
                  block_token_processor: BlockTokenProcessor = None,
                  w3: Web3 = None,
                  logger=None):
-        self.logger = logger or get_logger(name="token_manager", log_folder="tokens_live")
+        self.logger = logger or get_logger(name="token_manager")
         self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
         self.block_processor = BlockProcessor(logger=self.logger)
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
@@ -168,7 +167,7 @@ class BlockRangeTokenProcessor:
     async def process_block_range(self, start_block: int, end_block: int):
         """Process block data in sequential order using shared base processor"""
         try:
-            for block_number in range(start_block, end_block + 1):
+            for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks"):
                 if block_number not in self.processed_blocks:
                     # Use shared base processor for token processing            
                     block_data = await self.block_processor.process_block(block_number)
