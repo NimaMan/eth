@@ -1,8 +1,8 @@
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from eth_block_processor.utils.logger import get_logger
-from sarigoz.data.db.schema.models import Address, Transaction, TxParticipant
-from sarigoz.data.db.conn import get_engine
+from sarigoz.data.db.schema.eth_db_data_models import Address, Transaction, TxParticipant
+from sarigoz.data.db.conn import get_db_engine
 from eth_block_processor.utils.address_type_labeler import AddressTypeLabeler
 
 
@@ -17,7 +17,7 @@ class TransactionSaver:
         """
         self.w3 = w3
         self.address_labeler = AddressTypeLabeler(w3)
-        self.engine = engine or get_engine(db='eth_db')
+        self.engine = engine or get_db_engine(db='eth_db')
         self.SessionLocal = sessionmaker(bind=self.engine)
         self.logger = logger
         
