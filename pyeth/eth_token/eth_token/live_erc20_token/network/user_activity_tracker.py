@@ -1,6 +1,7 @@
 
 import numpy as np
 from collections import defaultdict
+from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
 
 # ignore warnings
 import warnings
@@ -13,7 +14,8 @@ class UserTokenActivityTracker:
                  entry_block=None, 
                  entry_index=None,
                  entry_log_index=None, 
-                 token_data=None,
+                 latest_block=None,
+                 token_data:LiveTokenData=None,
                  address=None,
                  address_type=None,
                  is_fee_source=None,
@@ -21,6 +23,7 @@ class UserTokenActivityTracker:
                  init_txn_fee=None):
         self.token_data = token_data
         self.entry_block = entry_block
+        self.latest_block = latest_block
         self.entry_index = entry_index
         self.entry_log_index = entry_log_index
         self.token_in_dict = {} if init_token_balance <= 0 else {(entry_block, entry_index, entry_log_index): init_token_balance}
@@ -218,7 +221,8 @@ class UserTokenActivityTracker:
     
     def get_user_features(self):
         return {
-            'entry_block': self.entry_block - self.token_data.trading_enabled_block,
+            'entry_block': self.entry_block,
+            'latest_block': self.latest_block,
             'denom_balance': self.denom_balance,
             "bribe_amount": self.bribe_amount,
             'denom_received_spent_ratio': self.received_spent_ratio,

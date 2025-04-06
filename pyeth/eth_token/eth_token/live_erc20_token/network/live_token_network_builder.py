@@ -61,6 +61,7 @@ class LiveTokenNetworkBuilder:
                     address_type=None,
                     token_data=self.live_token.token_data,
                     entry_block=block_number,
+                    latest_block=block_number,
                     entry_index=txn_index,
                     entry_log_index=None,
                     is_fee_source=is_fee_source,
@@ -70,6 +71,7 @@ class LiveTokenNetworkBuilder:
     
         # Get the user activity tracker
         user_activity = self.graph.nodes[address]['data']
+        user_activity.latest_block = block_number
         user_activity.txn_fees.append(tx_fee)
         if is_fee_source:
             # Add bribe amount
