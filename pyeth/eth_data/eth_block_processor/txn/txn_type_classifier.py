@@ -1,7 +1,7 @@
 from hexbytes import HexBytes
 from typing import Dict, Any, Union
 from web3 import Web3
-from eth_block_processor.contracts.function_signatures import FUNCTION_SIGNATURES, UNISWAP_CONTRACTS
+from eth_block_processor.utils.function_signatures import FUNCTION_SIGNATURES, UNISWAP_CONTRACTS
 
 
 class ContractInteractionClassifier:

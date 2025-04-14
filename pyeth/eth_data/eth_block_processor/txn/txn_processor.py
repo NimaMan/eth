@@ -57,7 +57,7 @@ import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
 from eth_block_processor.utils.common_addresses import fee_recipients
-from eth_block_processor.contracts.contract_type import get_erc20_contract_info
+from eth_block_processor.address.contract_type import get_erc20_contract_info
 from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher

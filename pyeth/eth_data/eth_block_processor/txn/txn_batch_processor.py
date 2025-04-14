@@ -62,9 +62,9 @@ class TransactionBatchProcessor:
     def _check_rpc_error(self, data: Dict[str, Any], block_number: int) -> bool:
         if 'error' in data:
             if self.logger is not None:
-                self.logger.error(f"{__name__} Error fetching block {block_number} receipts: {data['error']}")
+                self.logger.error(f"{__name__} Error fetching block {block_number}: {data['error']}")
             else:
-                raise Exception(f"Error fetching block {block_number} receipts: {data['error']}")
+                raise Exception(f"Error fetching block {block_number}: {data['error']}")
         return False
 
     async def process_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], block_timestamp: int=0) -> List[ProcessedTransaction]:

@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from web3 import Web3
-from eth_block_processor.contracts.function_signatures import EVENT_TOPICS
+from eth_block_processor.utils.function_signatures import EVENT_TOPICS
 from eth_block_processor.data_models.receipt_models import *
 
 
