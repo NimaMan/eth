@@ -165,7 +165,8 @@ class TransactionProcessor:
     def process_transaction(self, 
                             transaction: Dict[str, Any], 
                             receipt: Dict[str, Any],
-                            trace: Dict[str, Any]) -> ProcessedTransaction:
+                            trace: Dict[str, Any],
+                            block_timestamp: int = 0) -> ProcessedTransaction:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
         """
@@ -175,7 +176,9 @@ class TransactionProcessor:
         logs = self.log_processor.process_logs(receipt['logs'])
         fees = self._extract_transaction_fees(receipt)
         contract_address = receipt.get('contractAddress', None)
-
+        if block_timestamp == 0:
+            block_timestamp = self._get_block_timestamp(receipt)
+        
         internal_transactions = []
         if self.needs_trace(transaction) and trace:
             internal_transactions = self.trace_processor.process_trace(
@@ -196,7 +199,6 @@ class TransactionProcessor:
         value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
-        block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
@@ -254,6 +256,7 @@ class TransactionProcessor:
                                         transaction: Dict[str, Any], 
                                         receipt: Dict[str, Any] = None,
                                         trace: Dict[str, Any] = None,
+                                        block_timestamp: int = 0,
                                         state_diff: bool = False) -> ProcessedTransaction:
         """Async version of process_transaction"""
         
@@ -265,6 +268,8 @@ class TransactionProcessor:
         
         # Get contract address if contract creation
         contract_address = receipt.get('contractAddress', None)
+        if block_timestamp == 0:
+            block_timestamp = self._get_block_timestamp(receipt)
         
         # Process trace if needed
         internal_transactions = []
@@ -290,7 +295,6 @@ class TransactionProcessor:
         value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
-        block_timestamp = self._get_block_timestamp(receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 

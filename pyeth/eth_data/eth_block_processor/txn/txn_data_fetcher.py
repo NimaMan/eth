@@ -87,23 +87,23 @@ class TransactionBatchDataFetcher:
             receipts_data = await receipts_response.json()
             traces_data = await traces_response.json()
 
-            if 'error' in receipts_data:
-                raise Exception(f"RPC error in receipts: {receipts_data['error']}")
-            if 'error' in traces_data:
-                raise Exception(f"RPC error in traces: {traces_data['error']}")
+            if not 'error' in receipts_data:
+                # Map results to transaction hashes
+                receipt_map = {
+                    receipt['transactionHash']: receipt 
+                    for receipt in receipts_data['result']
+                }
+            else:
+                receipt_map = receipts_data
+            if not 'error' in traces_data:
+                # Map traces to transaction hashes
+                trace_map = {}
+                for tx_hash, trace in zip(receipt_map.keys(), traces_data['result']):
+                    if trace and 'result' in trace:
+                        trace_map[tx_hash] = trace['result']
+            else:
+                trace_map = traces_data
 
-            # Map results to transaction hashes
-            receipt_map = {
-                receipt['transactionHash']: receipt 
-                for receipt in receipts_data['result']
-            }
-            
-            # Map traces to transaction hashes
-            trace_map = {}
-            for tx_hash, trace in zip(receipt_map.keys(), traces_data['result']):
-                if trace and 'result' in trace:
-                    trace_map[tx_hash] = trace['result']
-            
         return receipt_map, trace_map
         
     async def fetch_transaction_list_data(self, tx_hashes: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:

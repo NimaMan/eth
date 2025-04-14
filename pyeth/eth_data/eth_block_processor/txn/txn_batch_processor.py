@@ -42,13 +42,15 @@ class TransactionBatchProcessor:
             transaction: Dict[str, Any], 
             receipt: Dict[str, Any] = None,
             trace: Dict[str, Any] = None,
-            txn_hash: str = None) -> ProcessedTransaction:
+            txn_hash: str = None,
+            block_timestamp: int = 0) -> ProcessedTransaction:
         """Safely analyze a single transaction with error handling"""
         try:
             processed_txn = await self.transaction_processor.process_transaction_async(
                 transaction=transaction,
                 receipt=receipt,
-                trace=trace
+                trace=trace,
+                block_timestamp=block_timestamp
             )
             return processed_txn
         except Exception as e:
@@ -57,9 +59,21 @@ class TransactionBatchProcessor:
             e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
             raise
     
-    async def process_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]]) -> List[ProcessedTransaction]:
+    def _check_rpc_error(self, data: Dict[str, Any], block_number: int) -> bool:
+        if 'error' in data:
+            if self.logger is not None:
+                self.logger.error(f"{__name__} Error fetching block {block_number} receipts: {data['error']}")
+            else:
+                raise Exception(f"Error fetching block {block_number} receipts: {data['error']}")
+        return False
+
+    async def process_block_transactions(self, block_number: int, transactions: List[Dict[str, Any]], block_timestamp: int=0) -> List[ProcessedTransaction]:
         """Process transactions using asyncio for comparison with thread pool version"""
         receipt_map, trace_map = await self.batch_data_fetcher.fetch_block_data(block_number)
+        if self._check_rpc_error(receipt_map, block_number):
+            receipt_map = {}
+        if self._check_rpc_error(trace_map, block_number):
+            trace_map = {}
         # Pre-process transaction data
         batch_data = []
         for txn in transactions:
@@ -77,7 +91,8 @@ class TransactionBatchProcessor:
                     transaction=txn,
                     receipt=receipt,
                     trace=trace,
-                    txn_hash=txn_hash
+                    txn_hash=txn_hash,
+                    block_timestamp=block_timestamp
                 )
             )
             tasks.append(task)

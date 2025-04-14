@@ -97,8 +97,8 @@ class BlockProcessor:
         )
         self.logger = logger
         if save_txn_to_db:
-            from eth_block_processor.db.transaction_saver import TransactionSaver
-            self.transaction_saver = TransactionSaver(w3=self.w3, logger=logger)
+            from sarigoz.data.db.writers.transaction_writer import TransactionWriter
+            self.transaction_writer = TransactionWriter(w3=self.w3, logger=logger)
         self.save_txn_to_db = save_txn_to_db
     
    async def process_block_range(self, start_block: int, end_block: int):
@@ -128,15 +128,17 @@ class BlockProcessor:
                 # Fetch block
                 block_data = await self.block_fetcher.fetch_block_by_number(block_number)
                 transactions = block_data['transactions']
+                block_timestamp = block_data['timestamp']
             # Process all transactions in the block 
             processed_transactions = await self.tx_batch_processor.process_block_transactions(
                 block_number=block_number,
-                transactions=transactions
+                transactions=transactions,
+                block_timestamp=block_timestamp
             )
             end_time = time()
             num_failed_txns = len(transactions) - len(processed_transactions)
             if self.save_txn_to_db:
-                self.transaction_saver.save_transactions(processed_transactions)
+                self.transaction_writer.save_transactions(processed_transactions)
             if self.logger is not None:
                 self.logger.info(f"{block_number}->{len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f}s")                
             return processed_transactions
@@ -156,8 +158,8 @@ class BlockProcessor:
             await self.tx_batch_processor.close()
         
         # Close transaction saver if it exists
-        if self.save_txn_to_db and hasattr(self.transaction_saver, 'close') and callable(self.transaction_saver.close):
-            await self.transaction_saver.close()
+        if self.save_txn_to_db and hasattr(self.transaction_writer, 'close') and callable(self.transaction_writer.close):
+            await self.transaction_writer.close()
             
         if self.logger:
             self.logger.info("BlockProcessor resources cleaned up")
