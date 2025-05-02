@@ -6,7 +6,7 @@ from web3.types import ChecksumAddress, Wei, Hash32
 from eth_block_processor.data_models.receipt_models import *
 from eth_block_processor.data_models.trace_models import *
 from eth_block_processor.utils.type_converter import (
-    convert_to_int, convert_to_hex_str, normalize_address, convert_log_index, convert_block_number,
+    convert_to_int, convert_to_hex_str, normalize_address, convert_block_number,
     convert_transaction_index, convert_status
 )
 
@@ -89,7 +89,7 @@ class ProcessedTransaction:
     permit2_events: List[Permit2] = field(default_factory=list)
 
     other_events: List[Dict[str, Any]] = field(default_factory=list)
-    state_diffs: Dict[str, Any] = field(default_factory=dict)
+    state_changes: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
     input: str = ""
     
@@ -139,7 +139,7 @@ class ProcessedTransaction:
                  fees: Optional[TransactionFees] = None,
                  unique_addresses: Optional[Set[ChecksumAddress]] = None,
                  erc20_contracts: Optional[Set[ChecksumAddress]] = None,
-                 state_diffs: Optional[Dict[str, Any]] = None,
+                 state_changes: Optional[Dict[str, Any]] = None,
                  latest_states: Optional[Dict[str, Any]] = None,
                  bribe_amount: float = 0,
                  block_timestamp: int = 0):
@@ -199,7 +199,7 @@ class ProcessedTransaction:
         self.fees = fees or TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
         self.unique_addresses = unique_addresses or set()
         self.erc20_contracts = erc20_contracts or set()
-        self.state_diffs = state_diffs or {}
+        self.state_changes = state_changes or {}
         self.latest_states = latest_states or {}
         self.bribe_amount = float(bribe_amount)
         self.block_timestamp = block_timestamp
@@ -253,7 +253,7 @@ class ProcessedTransaction:
             self.permit2_events == other.permit2_events and
             self.other_events == other.other_events and
             self.fees == other.fees and
-            self.state_diffs == other.state_diffs and
+            self.state_changes == other.state_changes and
             self.latest_states == other.latest_states and
             self.bribe_amount == other.bribe_amount
         )

@@ -29,11 +29,11 @@ from eth_block_processor.utils.logger import get_logger
 
 
 class TransactionBatchProcessor:
-    def __init__(self, w3: Web3 = None, logger=None):
+    def __init__(self, w3: Web3 = None, logger=None, calculate_state_changes: bool = False):
         if w3 is None:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
-        self.transaction_processor = TransactionProcessor(w3=w3)
+        self.transaction_processor = TransactionProcessor(w3=w3, calculate_state_changes=calculate_state_changes)
         self.batch_data_fetcher = TransactionBatchDataFetcher(w3=w3)
         self.logger = logger
 

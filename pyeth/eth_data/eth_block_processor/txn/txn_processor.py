@@ -3,55 +3,61 @@ Transaction Analyzer for Ethereum Blockchain
 
 Objective:
 ---------
-The TransactionAnalyzer serves as a comprehensive transaction parsing and analysis tool that breaks down
-Ethereum transactions into their constituent components and meaningful data structures. It processes raw
-transaction data into a detailed, structured format that can be used for monitoring, analysis, and alert generation.
+To dissect a single Ethereum transaction, along with its receipt and trace data, into a structured `ProcessedTransaction` object. This involves decoding logs, identifying key events (transfers, swaps, approvals), extracting internal ETH movements from traces, classifying the transaction type, calculating fees, and optionally computing state differences. The goal is to create a rich, standardized representation of the transaction suitable for various downstream analyses (PnL, fund flow, scam detection, etc.).
+
+# Algorithm Overview (`process_transaction` / `process_transaction_async`)
+
+1.  **Input**: Raw `transaction` dictionary, `receipt` dictionary, `trace` dictionary (optional), `block_timestamp`.
+2.  **Basic Info Extraction**: Get hash, from/to addresses, value, nonce, input data, status, contract address (if creation) from transaction and receipt.
+3.  **Fee Calculation (`_extract_transaction_fees`)**: Calculate `gas_used * effective_gas_price` from the receipt.
+4.  **Log Processing (`log_processor.process_logs`)**: Decode event logs from the receipt using known ABIs/event signatures. Categorize logs into specific types (ERC20/721/1155 transfers, Uniswap events, approvals, etc.) and extract relevant data. Collect unique addresses and ERC-20 contract addresses encountered in logs.
+5.  **Trace Processing (`trace_processor.process_trace`)**: If the transaction involves a contract call (`needs_trace`) and a trace is provided, parse the trace structure to identify internal ETH transfers (call/delegatecall with value > 0) and potentially other internal contract interactions. Collect addresses from internal transactions.
+6.  **Address Aggregation (`extend_unique_addresses`)**: Combine addresses from the transaction (from/to), logs, internal transactions, and created contract address into a single set of unique participants.
+7.  **Transaction Classification (`transaction_classifier.classify_transaction`)**: Analyze transaction input data, target address (`to`), and potentially logs/value to assign a high-level type (e.g., "Swap", "Transfer", "Contract Creation", "Approval", "Trading Enabled").
+8.  **Synthetic Event Generation (`_add_txn_type_events`)**: Based on the classified `tx_type`, potentially add synthetic events to the processed logs (e.g., add `ContractCreationEvent` if type is "Contract Creation" and contract info is available).
+9.  **Bribe Calculation (`_get_bribe_amount`)**: Sum the value of internal ETH transfers directed to known fee recipients/builder addresses.
+10. **Action Identification (`action_identifier.identify_transaction_actions`)**: Based on the `tx_type` and decoded logs, identify higher-level actions performed by the transaction (e.g., "Swap ETH for Token", "Add Liquidity").
+11. **State Change Calculation (Optional) (`_calculate_state_changes`)**: If `calculate_state_changes` is enabled, use `ProcessedTxStateDiffCalculator` (which likely needs the trace/state diff data from the node) to compute detailed state changes (balance changes, storage diffs).
+12. **Assemble Output**: Create and return a `ProcessedTransaction` data model instance containing all the extracted and processed information.
 
 Key Components and Flow:
 ----------------------
 1. Transaction Receipt Analysis:
-   - Fetches and processes transaction receipts
-   - Extracts gas usage and effective prices
-   - Determines transaction status and contract creation
+   - Fetches and processes transaction receipts (Assumed fetched by caller, e.g., `TransactionBatchProcessor`)
+   - Extracts gas usage and effective prices (`_extract_transaction_fees`)
+   - Determines transaction status and contract creation (from receipt fields)
 
-2. Log Analysis:
+2. Log Analysis (`TransactionLogProcessor`):
    - Processes event logs for common DeFi and token operations
    - Identifies token transfers (ERC20, ERC721, ERC1155)
    - Tracks Uniswap interactions and liquidity events
    - Maintains sets of unique addresses and contract interactions
 
-3. Trace Analysis (Optional):
-   - Performed for transactions with contract interactions
+3. Trace Analysis (Optional) (`TransactionTraceProcessor`):
+   - Performed for transactions with contract interactions if trace data provided
    - Tracks internal ETH transfers and contract calls
-   - Builds a tree of internal transactions
+   - Builds a list/tree of internal transactions (`InternalTransaction` objects)
 
-4. State Difference Analysis (Optional):
-   - Captures state changes in contract storage
+4. State Difference Analysis (Optional) (`ProcessedTxStateDiffCalculator`):
+   - Captures state changes in contract storage (Requires state diff data from node)
    - Tracks balance changes and storage modifications
+
+5. Classification & Identification:
+    - `EthTransactionClassifier`: Determines broad transaction type.
+    - `TransactionActionIdentifier`: Determines specific actions based on type and logs.
 
 Performance Characteristics:
 -------------------------
-- Sequential Processing: Operations are performed synchronously as each step depends on previous results
-- I/O Bound: Main bottlenecks might be the RPC calls to the Ethereum node
+- Primarily CPU-bound for decoding logs and processing traces once data is available.
+- Some operations might involve Web3 calls (e.g., `get_erc20_contract_info` within `_add_txn_type_events`), potentially adding I/O latency if not cached.
 
 Usage:
 -----
-The analyzer is typically used in two contexts:
-1. Real-time monitoring of new transactions
-2. Historical analysis of blockchain data
+This processor is typically invoked by a higher-level component like `TransactionBatchProcessor` which handles fetching the necessary transaction, receipt, and trace data from the Ethereum node.
 
 Note on Design Choice:
 ------------------------------
-The analyzer uses synchronous Web3 calls because:
-1. Operations are inherently sequential (receipt → logs → traces)
-2. Each step depends on data from previous steps
-3. The real performance gains come from parallel processing of multiple transactions
-   rather than async processing of a single transaction's components
-
-For parallel processing of multiple transactions, it's might be helpful to:
-1. Create multiple analyzer instances
-2. Process different transactions concurrently at a higher level
-3. Use a transaction queue system for real-time monitoring
+The core `process_transaction` logic is synchronous, assuming the caller provides the required data (txn, receipt, trace). Asynchronous operations are handled by the caller (e.g., fetching data in batches). The `process_transaction_async` method provides an async wrapper but performs the same core synchronous logic internally after awaiting data fetching by the caller.
 """
 import numpy as np
 from web3 import Web3
@@ -71,8 +77,9 @@ from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
 
 class TransactionProcessor:
-    def __init__(self, w3: Web3 = None):
+    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = False):
         self.w3 = w3
+        self.calculate_state_changes = calculate_state_changes
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_processor = TransactionLogProcessor(w3=w3)
@@ -162,6 +169,12 @@ class TransactionProcessor:
                 bribe_amount += internal_txn.value
         return bribe_amount
 
+    def _calculate_state_changes(self, processed_tx: ProcessedTransaction) -> Dict[str, Any]:
+        """Calculate state changes for a processed transaction"""
+        if not self.calculate_state_changes:
+            return {}
+        return self.state_diff_calculator.calculate_state_changes_from_processed_tx(processed_tx)
+    
     def process_transaction(self, 
                             transaction: Dict[str, Any], 
                             receipt: Dict[str, Any],
@@ -202,7 +215,7 @@ class TransactionProcessor:
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
 
-        detailed_txn = ProcessedTransaction(
+        processed_tx = ProcessedTransaction(
             hash=txn_hash,
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
@@ -250,7 +263,9 @@ class TransactionProcessor:
             uniswap_v4_swaps=logs['uniswap_v4_swaps'],
             permit2_events=logs['permit2_events'],
         )
-        return detailed_txn
+        state_changes = self._calculate_state_changes(processed_tx)
+        processed_tx.state_changes = state_changes
+        return processed_tx
 
     async def process_transaction_async(self, 
                                         transaction: Dict[str, Any], 
@@ -297,8 +312,8 @@ class TransactionProcessor:
         self._add_txn_type_events(tx_type, logs, transaction, receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
-
-        return ProcessedTransaction(
+        
+        processed_tx = ProcessedTransaction(
             hash=transaction['hash'],
             txn_type=tx_type,
             block_number=receipt['blockNumber'],
@@ -333,7 +348,7 @@ class TransactionProcessor:
             erc20_contracts=erc20_contracts,
             internal_transactions=internal_transactions,
             fees=fees,
-            state_diffs={},
+            state_changes={},
             latest_states={},
             bribe_amount=bribe_amount,
             uniswap_v3_pools=logs['uniswap_v3_pools'],
@@ -348,5 +363,9 @@ class TransactionProcessor:
             uniswap_v4_swaps=logs['uniswap_v4_swaps'],
             permit2_events=logs['permit2_events'],
         )
+        
+        state_changes = self._calculate_state_changes(processed_tx)
+        processed_tx.state_changes = state_changes
+        return processed_tx
 
     
