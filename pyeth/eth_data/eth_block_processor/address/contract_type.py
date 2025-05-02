@@ -1,5 +1,5 @@
 from web3 import Web3
-from typing import Optional
+from typing import Optional, Union
 from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
 
@@ -12,9 +12,10 @@ erc20_abi = [
 ]
 
 
-def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[dict]:
+def get_erc20_contract_info(contract_address: str, w3: Web3 = None, block_identifier: Optional[Union[int, str]] = 'latest') -> Optional[dict]:
     """
-    Attempts to identify if a contract is an ERC-20 token and returns its information.
+    Attempts to identify if a contract is an ERC-20 token and returns its information
+    at a specific block identifier.
     
     This function calls standard ERC-20 methods on the contract to determine if it
     implements the ERC-20 interface. It handles various error conditions that might
@@ -23,31 +24,46 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[
     Args:
         contract_address: The Ethereum contract address to check
         w3: Optional Web3 instance (creates one with local provider if None)
+        block_identifier: The block number or block identifier (e.g., 'latest', 'pending') 
+                          to query the state at. Defaults to 'latest'.
         
     Returns:
         Dictionary with token info if ERC-20, None otherwise
     """
     if w3 is None:
-        w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-    contract = w3.eth.contract(address=w3.to_checksum_address(contract_address), abi=erc20_abi)
-    try:
-        # Set explicit gas limit to prevent out-of-gas errors
-        call_params = {'gas': 100000}  # 100k gas should be more than enough for view functions
+        # Ensure this default provider points to a node capable of handling historical queries if needed.
+        # For historical backfilling, an Archive Node is typically required.
+        w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545")) 
         
-        symbol = contract.functions.symbol().call(call_params)
-        decimals = contract.functions.decimals().call(call_params)
-        total_supply = contract.functions.totalSupply().call(call_params)/10**decimals
-        name = contract.functions.name().call(call_params)
+    if not w3.is_connected():
+        raise ConnectionError("Web3 provider is not connected.")
+
+    checksum_address = w3.to_checksum_address(contract_address)
+    contract = w3.eth.contract(address=checksum_address, abi=erc20_abi)
+    
+    try:
+        # Set explicit gas limit to prevent out-of-gas errors, though usually not needed for static calls
+        # call_params = {'gas': 100000} # Less relevant for block_identifier calls
+        
+        # Use block_identifier in calls
+        symbol = contract.functions.symbol().call(block_identifier=block_identifier)
+        decimals = contract.functions.decimals().call(block_identifier=block_identifier)
+        raw_total_supply = contract.functions.totalSupply().call(block_identifier=block_identifier)
+        name = contract.functions.name().call(block_identifier=block_identifier)
+        
+        # Adjust total supply using decimals
+        adjusted_total_supply = raw_total_supply / (10**decimals)
         
         return {
             'contract_address': contract_address,
             'name': name,
             'symbol': symbol,
             'decimals': decimals,
-            'total_supply': total_supply,
+            'total_supply': adjusted_total_supply, # Return adjusted supply
+            'raw_total_supply': raw_total_supply  # Optionally return raw supply too
         }
     except (BadFunctionCallOutput, ContractLogicError) as e:
-        # Contract is not an ERC20 token or has invalid bytecode
+        # Contract is not an ERC20 token or has invalid bytecode at this block
         return None
     except Exception as e:
         error_str = str(e)
@@ -63,16 +79,16 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None) -> Optional[
             "gas required exceeds allowance"  # Add gas limit error as recognized
         ]
         
-        # If the error is one of the expected EVM errors, treat it as "not an ERC-20 token"
+        # If the error is one of the expected EVM/node errors, treat it as "not an ERC-20 token at this block"
         if any(err in error_str for err in evm_errors):
             return None
             
         # For unexpected errors, raise with more context
-        raise Exception(f"Unexpected error checking ERC-20 compliance: {error_str}")
+        raise Exception(f"Unexpected error checking ERC-20 compliance for {contract_address} at block {block_identifier}: {str(e)}")
 
 
-def is_erc20_contract(contract_address: str, w3: Web3 = None) -> Optional[dict]:
-    return get_erc20_contract_info(contract_address, w3) is not None
+def is_erc20_contract(contract_address: str, w3: Web3 = None, block_identifier: Optional[Union[int, str]] = 'latest') -> Optional[dict]:
+    return get_erc20_contract_info(contract_address, w3, block_identifier) is not None
 
 
 erc721_abi = [
@@ -118,7 +134,9 @@ def is_erc721_contract(contract_address: str, w3: Web3 = None) -> Optional[dict]
             "InvalidJump",
             "EVM error: InvalidJump",
             "StackUnderflow",
-            "EVM error: StackUnderflow"
+            "EVM error: StackUnderflow",
+            "out of gas",  # Add out of gas
+            "gas required exceeds allowance" # Add gas limit error
         ]
         
         # If the error is one of the expected EVM errors, treat it as "not an ERC-721 token"
