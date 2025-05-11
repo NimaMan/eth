@@ -1,14 +1,14 @@
 import asyncio
 from typing import Dict, Optional
 
-from eth_portfolio_manager.core.portfolio_position_manager import PortfolioPositionManager
+from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.live.live_portfolio_state_server import PortfolioStateServer
 from eth_portfolio_manager.live.live_token_position_manager import LiveTokenPositionManager
-from eth_portfolio_manager.strategy.base import BaseStrategy
+from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 
 
-class LivePortfolioPositionManager(PortfolioPositionManager):
+class LivePortfolioPositionManager(StrategyPositionManager):
     def __init__(self, investment_strategy: BaseStrategy, logger=None):
         super().__init__(logger=logger)
         self.state_server = PortfolioStateServer(logger=self.logger)
@@ -26,7 +26,7 @@ class LivePortfolioPositionManager(PortfolioPositionManager):
             self.logger.error(f"{self.__class__.__name__} Error initializing portfolio: {e}")
             raise e
 
-    async def update_portfolio_tokens_positions(self, updated_tokens) -> Dict[str, TokenPositionState]:
+    async def update_updated_tokens_positions(self, updated_tokens) -> Dict[str, TokenPositionState]:
         """
         Process multiple token updates concurrently and update portfolio state
         

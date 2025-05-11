@@ -9,11 +9,10 @@ Objective:
 """
 
 import time
-from typing import Dict, Optional, Set, List
 import asyncio
 from eth_portfolio_manager.live.live_portfolio_position_manager import LivePortfolioPositionManager
 
-from eth_token.token_manager.live_token_manager import LiveTokenManager
+from eth_token.token_manager.live_token_token_processor_with_warmup import LiveTokenProcessorwithWarmup
 from eth_portfolio_manager.utils.logger import get_logger
 
 
@@ -26,7 +25,7 @@ class LivePortfolioManager:
     ):
         self.config = config
         self.logger = logger or get_logger(name="portfolio_manager")
-        self.token_manager = LiveTokenManager(logger=self.logger, warmup_blocks=warmup_blocks)
+        self.token_manager = LiveTokenProcessorwithWarmup(logger=self.logger, warmup_blocks=warmup_blocks)
         self.strategies = [LivePortfolioPositionManager(logger=self.logger, investment_strategy=strategy) for strategy in self.config.strategies]
         self._shutdown_event = asyncio.Event()
 
