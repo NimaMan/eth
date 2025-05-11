@@ -69,14 +69,6 @@ class BlockSubscriber(BaseSubscriber):
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     self.logger.warning("Processor task cancelled or timed out")
             
-            # Close queue iterator and channel
-            if hasattr(self, 'queue'):
-                try:
-                    await asyncio.wait_for(self.queue.close(), timeout=2.0)
-                except (asyncio.TimeoutError, Exception) as e:
-                    self.logger.warning(f"Queue close timed out or failed: {e}")
-            
-            # Close connection
             if self.connection and not self.connection.is_closed:
                 try:
                     await asyncio.wait_for(self.connection.close(), timeout=2.0)
@@ -101,7 +93,7 @@ class BlockSubscriber(BaseSubscriber):
                 else:
                     self.logger.debug(f"Skipping block {block_number} as it is less than start_from_block {start_from_block}")
         except Exception as e:
-            self.logger.error(f"Error processing block message: {e}")
+            self.logger.error(f"Error processing block in BlockSubscriber: {e}", exc_info=True)
 
     async def _process_blocks(self):
         """Process blocks in strict sequence using priority queue"""
@@ -118,6 +110,6 @@ class BlockSubscriber(BaseSubscriber):
                 self.block_queue.task_done()
                 
             except Exception as e:
-                self.logger.error(f"Error processing block: {e}")
+                self.logger.error(f"Error processing block {block_number} in BlockSubscriber: {e}", exc_info=True)
                 if 'block_data' in locals():
                     self.block_queue.task_done()

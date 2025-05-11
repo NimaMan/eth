@@ -70,7 +70,7 @@ class UserTokenActivityTracker:
         Add the token_in_dict and negative of token_out_dict
         '''
         all_movements = self.token_in_dict.copy()
-        for key, val in self.token_out_dict.items():            
+        for key, val in self.token_out_dict.copy().items():            
             if key in all_movements:
                 all_movements[key] -= val
             else:
@@ -83,7 +83,7 @@ class UserTokenActivityTracker:
         Returns a list of all denom movements.  Add the denom_in_dict and negative of denom_out_dict
         '''
         all_movements = self.denom_in_dict.copy()
-        for key, val in self.denom_out_dict.items():
+        for key, val in self.denom_out_dict.copy().items():
             if key in all_movements:
                 all_movements[key] -= val
             else:
@@ -118,6 +118,9 @@ class UserTokenActivityTracker:
     
     @property
     def token_latest_price(self):
+        # TODO: Handle multiple pools
+        if not self.token_data.pool_addresses:
+            return 0
         pool_address = self.token_data.pool_addresses[0]
         return self.token_data.pool_prices[pool_address][-1]
     

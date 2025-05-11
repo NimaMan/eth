@@ -117,8 +117,8 @@ from typing import Dict, List, Set, Optional
 from enum import Enum
 from collections import OrderedDict
 
-from eth_token.utils.common_addresses import DENOM_ADDRESSES, DENOM_DECIMALS, DENOM_NAMES_TO_ADDRESS
-from eth_block_processor.contracts.contract_type import get_erc20_contract_info
+from eth_token.utils.common_addresses import DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, DENOM_NAMES_TO_ADDRESS
+from eth_block_processor.address.contract_type import get_erc20_contract_info
 
 
 WETH_DENOM_RESERVE_THRESHOLD = 1e-2
@@ -322,7 +322,7 @@ class LiveTokenData:
         """Set the pool info and return True if the pool is valid, False otherwise"""
         if denom_address in DENOM_ADDRESSES.keys():
             denom_currency = DENOM_ADDRESSES[denom_address]
-            decimals = DENOM_DECIMALS[denom_currency]
+            decimals = ERC20_TOKEN_DECIMALS[denom_currency]
         else:
             token_info = get_erc20_contract_info(denom_address)
             if token_info is not None:
@@ -553,7 +553,7 @@ class LiveTokenData:
         txn_index = transaction['txn_index']
         if transfer['token_address'] in DENOM_ADDRESSES.keys():
             denom_name = DENOM_ADDRESSES[transfer['token_address']]
-            denom_decimals = DENOM_DECIMALS[denom_name]
+            denom_decimals = ERC20_TOKEN_DECIMALS[denom_name]
             amount = float(transfer['amount'])/10**denom_decimals
             if denom_name not in self.other_currencies:
                 self.other_currencies[denom_name] = 0
@@ -1041,7 +1041,8 @@ class LiveTokenData:
 
         # Handle contract creation
         if transaction['txn_type'] == 'Contract Creation':
-            self._handle_creation(transaction)
+            if len(transaction['contract_creation_events']) > 0:
+                self._handle_creation(transaction)
         if self.total_supply==0:
             return
         # Process pair events (Uniswap V2 pools)

@@ -41,7 +41,7 @@ class LiveTokensCache:
         
         # Initialize token PnL writer if PnL writing is enabled
         if add_pnl_to_db:
-            from sarigoz.data.db.pnl.token_pnl_writer import TokenPnLWriter
+            from sarigoz.data.db.writers.token_pnl_writer import TokenPnLWriter
             self.pnl_writer = TokenPnLWriter(logger=logger)
             self.log("Token PnL writer initialized for database operations")
         else:
@@ -161,11 +161,10 @@ class LiveTokensCache:
         try:
             token_entry = self.cache.get(token_address)
             if token_entry and token_entry.token.token_trading_age_blocks is not None:
-                self.log(f"Writing PnL data for token {token_address}")
                 return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
             return False
         except Exception as e:
-            self.log(f"Error writing PnL data for token {token_address}: {str(e)}")
+            self.log(f"Error writing PnL data for token {token_address}: {str(e)}", exc_info=True)
             return False
     
     def write_all_token_pnl(self) -> int:

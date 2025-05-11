@@ -49,8 +49,6 @@ from eth_token.subscribers.block_subscriber import BlockSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
 
-from eth_token.utils.logger import get_logger
-
 
 class LiveBlockTokenProcessor(BlockTokenProcessor):
     def __init__(self,
@@ -90,24 +88,46 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
             
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}")
-            # Don't mark as processed if there was an error
     
+    async def _schedule_pnl_writes_for_updated_tokens(self, current_block: int):
+        """Schedules PnL writes for tokens updated in the current block."""
+        if not (self.add_pnl_to_db and self.live_tokens_cache.pnl_writer):
+            return # PnL writing disabled or writer not available
+        pnl_tasks = []
+        updated_addresses = list(self.updated_tokens.keys())
+        for token_address in updated_addresses:
+            pnl_tasks.append(
+                asyncio.to_thread(
+                    self.live_tokens_cache._write_token_pnl,
+                    token_address
+                )
+            )
+
+        if pnl_tasks:
+            try:
+                await asyncio.gather(*pnl_tasks, return_exceptions=True)
+            except Exception as gather_err:
+                  self.logger.error(f"Error gathering PnL write tasks via cache for block {current_block}: {gather_err}", exc_info=True)
+
     async def _monitor_token_updates(self):
         """Monitor for token updates using event notification"""
         while not self._is_shutting_down:
             try:
                 # Wait for block processing to complete
                 await self.block_processed_event.wait()
-                # Process alerts for updated tokens
+                current_block = self.latest_processed_block
+                self.logger.info(f"Processing block {current_block} with {len(self.updated_tokens)} tokens")
                 if self.updated_tokens:
-                    current_block = self.latest_processed_block
                     await self.unprocessed_token_updates.put((current_block, self.updated_tokens))
                     self.new_updates_event.set()
                 # Clear the event for next block
                 self.block_processed_event.clear()
-            
+            except asyncio.CancelledError:
+                 self.logger.info("Token update monitoring task cancelled.")
+                 break
             except Exception as e:
-                self.logger.error(f"Error processing alerts: {e}")
+                self.logger.error(f"Error processing token updates: {e}", exc_info=True)
+                await asyncio.sleep(0.1)
 
     async def start(self):
         """Start processing live blocks"""

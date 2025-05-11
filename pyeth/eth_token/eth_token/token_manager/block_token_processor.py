@@ -26,6 +26,7 @@ class BlockTokenProcessor:
     def __init__(self, logger=None, max_concurrency=20, add_pnl_to_db: bool = False):
         self.logger = logger or get_logger(name="token_manager")
         # Token tracking
+        self.add_pnl_to_db = add_pnl_to_db
         self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
         self.updated_tokens: Dict[str, LiveERC20Token] = {}
         self.processed_blocks: Dict[int, bool] = OrderedDict()
@@ -155,10 +156,11 @@ class HistoricalBlockTokenProcessor:
     def __init__(self, 
                  block_token_processor: BlockTokenProcessor = None,
                  w3: Web3 = None,
-                 logger=None):
+                 logger=None,
+                 save_txn_to_db: bool = False):
         self.logger = logger or get_logger(name="token_manager")
         self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
-        self.block_processor = BlockProcessor(logger=self.logger)
+        self.block_processor = BlockProcessor(logger=self.logger, save_txn_to_db=save_txn_to_db)
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
             logger=self.logger
         )
@@ -166,27 +168,25 @@ class HistoricalBlockTokenProcessor:
     
     async def process_block_range(self, start_block: int, end_block: int):
         """Process block data in sequential order using shared base processor"""
-        try:
-            for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks"):
-                if block_number not in self.processed_blocks:
+        for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks"):
+            if block_number not in self.processed_blocks:
+                try:
                     # Use shared base processor for token processing            
                     block_data = await self.block_processor.process_block(block_number)
                     # Process block data for token updates
                     await self.block_token_processor.process_block(block_data)                    
                     self.block_token_processor.latest_processed_block = block_number
-
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing block: {e}")
-            raise
+                except Exception as e:
+                    self.logger.error(f"{self.__class__.__name__} Error processing block {block_number}: {e}", exc_info=True)
+                    raise
 
     async def process_range_until_live(self, block_range: int):
         """Process blocks in ranges until we're close enough to live"""
         start_block = self.w3.eth.get_block_number() - block_range
         self._has_caught_up_to_live = False
-        try:
-            current_block = start_block
-            while not self._has_caught_up_to_live:
-                
+        current_block = start_block
+        while not self._has_caught_up_to_live:
+            try:
                 current_block_data = await self.block_processor.process_block(block_number=current_block)
                 # Process block data for token updates 
                 await self.block_token_processor.process_block(current_block_data)
@@ -198,7 +198,9 @@ class HistoricalBlockTokenProcessor:
                     self.logger.info(f"Caught up to live (gap: {latest_block - current_block} blocks)")
                     break
                 current_block += 1
-            return self.block_token_processor.latest_processed_block
-        except Exception as e:
-            self.logger.error(f"Error catching up to live: {e}")
-            raise
+            except Exception as e:
+                self.logger.error(f"Error catching up to live at block {current_block}: {e}")
+                raise
+
+        return self.block_token_processor.latest_processed_block
+        
