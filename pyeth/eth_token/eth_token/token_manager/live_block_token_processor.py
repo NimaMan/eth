@@ -82,12 +82,10 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         if self._is_shutting_down:
             return
         try:
-            block_number = await self.process_block(block_data) # Process block
-            self.latest_processed_block = block_number
-            self.block_processed_event.set() # Signal block processed
-            
+            self.latest_processed_block = await self.process_block(block_data)  
+            self.block_processed_event.set() # Signal block processed            
         except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}")
+            self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}", exc_info=True)
     
     async def _schedule_pnl_writes_for_updated_tokens(self, current_block: int):
         """Schedules PnL writes for tokens updated in the current block."""
@@ -116,7 +114,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 # Wait for block processing to complete
                 await self.block_processed_event.wait()
                 current_block = self.latest_processed_block
-                self.logger.info(f"Processing block {current_block} with {len(self.updated_tokens)} tokens")
+                self.logger.info(f"Processing block {current_block}({len(self.updated_tokens)} tokens)")
                 if self.updated_tokens:
                     await self.unprocessed_token_updates.put((current_block, self.updated_tokens))
                     self.new_updates_event.set()
@@ -145,9 +143,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
           
             # 2. Create a task to start the block subscriber for getting live processed blocks
             self._subscriber_task = asyncio.create_task(
-                self.block_subscriber.start(
-                    start_from_block=self.latest_processed_block
-                )
+                self.block_subscriber.start()
             )
             
             # 3. Start monitoring for updates
