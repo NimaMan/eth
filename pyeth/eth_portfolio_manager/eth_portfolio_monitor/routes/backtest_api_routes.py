@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from eth_portfolio_manager.backtesting.db.backtest_data_fetcher import BacktestDataFetcher
+from eth_portfolio_manager.db.backtest_data_fetcher import BacktestDataFetcher
 from eth_portfolio_manager.utils.logger import get_monitoring_logger
 import asyncio
 

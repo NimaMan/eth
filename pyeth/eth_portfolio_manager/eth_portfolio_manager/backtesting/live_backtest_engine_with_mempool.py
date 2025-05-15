@@ -279,7 +279,6 @@ class LiveBacktestEngineWithMempool:
                                     self.updated_positions_by_strategy
                                 ))
                             await asyncio.gather(*tasks)
-
                             await self._pool_updates_queue.put((block_number, updated_tokens))
                             self._pool_update_event.set()
                             
@@ -288,7 +287,8 @@ class LiveBacktestEngineWithMempool:
                                 await self._save_strategy_results_to_database(block_number)
                             # Add PnL writing here
                             if self.live_token_processor.add_pnl_to_db:
-                                await self._schedule_pnl_writes_for_tokens(updated_tokens, block_number)
+                                updated_token_addresses = list(updated_tokens.keys())
+                                await self._schedule_pnl_writes_for_tokens(updated_token_addresses, block_number)
                             
                         self.live_token_processor.unprocessed_token_updates.task_done()
 
@@ -472,7 +472,24 @@ class LiveBacktestEngineWithMempool:
                         f"Simulated ETH level: {sim_level:.6f}, "
                         f"Threshold: {self.eth_threshold}"
                     )
+                    # Write scam prediction to DB
+                    if self.results_writer and token_address != 'unknown':
+                        try:
+                            prediction_block_number = self.live_token_processor.latest_processed_block
+                            await asyncio.to_thread(
+                                self.results_writer.write_mempool_scam_prediction,
+                                token_address,
+                                pool_address,
+                                prediction_block_number,
+                                current_level,
+                                sim_level,
+                                self.eth_threshold,
+                            )
+                        
+                        except Exception as e:
+                            self.logger.error(f"Failed to write mempool scam prediction for token {token_address}, pool {pool_address}: {e}", exc_info=True)
                     self.logger.warning(warning_msg)
+                    
         except Exception as e:
             self.logger.error(f"Error in _check_for_scam_transactions: {e}", exc_info=True)
             await asyncio.sleep(2)
@@ -521,19 +538,14 @@ class LiveBacktestEngineWithMempool:
 
         return suspicious_pools
 
-    async def _schedule_pnl_writes_for_tokens(self, updated_tokens, block_number):
+    async def _schedule_pnl_writes_for_tokens(self, updated_token_addresses, block_number):
         """Schedule PnL writes for tokens after strategy processing is complete."""
-        for token_address in updated_tokens:
-            try:
-                # Get token from cache
-                token = self.live_token_processor.live_tokens_cache.get_token(token_address)
-                if token is None:
-                    continue
-                    
+        for token_address in updated_token_addresses:
+            try:    
                 # Schedule PnL writing in a separate thread to avoid blocking
                 await asyncio.to_thread(
                     self.live_token_processor.live_tokens_cache._write_token_pnl, 
                     token_address
                 )
             except Exception as e:
-                self.logger.error(f"Error scheduling PnL write for token {token_address}: {e}")
+                self.logger.error(f"Error scheduling PnL write for token {token_address}, block {block_number}: {e}")

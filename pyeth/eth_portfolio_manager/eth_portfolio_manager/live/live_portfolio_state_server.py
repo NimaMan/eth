@@ -67,7 +67,7 @@ class PortfolioStateServer:
             self.logger.error(f"Error loading state: {e}")
             raise
             
-    async def update_positions(self, positions: Dict[str, TokenPositionData]):
+    async def update_positions(self, positions: Dict[str, TokenPosition]):
         """
         Update multiple positions atomically
         
