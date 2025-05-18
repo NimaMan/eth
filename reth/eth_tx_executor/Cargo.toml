@@ -1,6 +1,59 @@
 [package]
 name = "eth_kartal"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Fast Ethereum response system for scam detection and automated actions"
+authors = ["Nima Manaf <nima.manaf8@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# Ethereum libraries
+ethers = { version = "2.0.7", features = ["ws", "rustls"] }
+revm = { version = "3.3.0", features = ["std", "serde", "ethersdb"] }
+
+# Async runtime
+tokio = { version = "1.28", features = ["full"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+tokio-postgres = "0.7"
+
+# Messaging
+zmq = "0.10"
+
+# Command line parsing
+clap = { version = "4.3.1", features = ["derive", "env"] }
+
+# Logging and error handling
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+eyre = "0.6"
+
+# Utilities
+hex = "0.4"
+chrono = "0.4"
+
+[[bin]]
+name = "kartal_monitor"
+path = "src/bin/monitor.rs"
+
+[[bin]]
+name = "kartal_responder"
+path = "src/bin/responder.rs"
+
+[[bin]]
+name = "kartal"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "test_components"
+path = "src/bin/test_components.rs"
+
+[[bin]]
+name = "test"
+path = "src/bin/test.rs"
