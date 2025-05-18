@@ -9,5 +9,5 @@ mod simulation;
 mod status;
 
 pub use transaction::{Transaction, TransactionParams, TransactionType};
-pub use simulation::{SimulationResult, SimulationError, StateChange};
-pub use status::{TxStatus, TxReceipt, TxConfirmation}; 
+pub use simulation::{SimulationResult, SimulationError, StateChange, StateChangeType};
+pub use status::{TxStatus, TxReceipt, TxConfirmation};

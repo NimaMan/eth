@@ -33,10 +33,14 @@ clap = { version = "4.3.1", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
+thiserror = "1.0"
 
 # Utilities
 hex = "0.4"
 chrono = "0.4"
+
+[dev-dependencies]
+mockall = "0.11"
 
 [[bin]]
 name = "kartal_monitor"

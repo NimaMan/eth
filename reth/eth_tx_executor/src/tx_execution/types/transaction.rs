@@ -2,7 +2,6 @@
 * Transaction Types
 *
 * This module defines the core transaction types used throughout the execution system.
-* It supports both legacy and EIP-1559 transactions with appropriate parameters.
 */
 
 use ethers::types::{Address, U256, Bytes, H256};
@@ -86,22 +85,4 @@ impl Transaction {
             max_retries: 5,
         }
     }
-    
-    /// Set the transaction hash
-    pub fn with_hash(mut self, hash: H256) -> Self {
-        self.hash = Some(hash);
-        self
-    }
-    
-    /// Set the confirmation blocks
-    pub fn with_confirmation_blocks(mut self, blocks: u64) -> Self {
-        self.confirmation_blocks = blocks;
-        self
-    }
-    
-    /// Set the max retries
-    pub fn with_max_retries(mut self, retries: u32) -> Self {
-        self.max_retries = retries;
-        self
-    }
-} 
+}

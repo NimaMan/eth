@@ -33,4 +33,8 @@ pub mod types;
 pub mod error;
 
 // Configuration
-pub mod config; 
+pub mod config;
+
+// Tests
+#[cfg(test)]
+mod tests; 
