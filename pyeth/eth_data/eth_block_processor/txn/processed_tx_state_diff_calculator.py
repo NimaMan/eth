@@ -18,170 +18,175 @@ class ProcessedTxStateDiffCalculator:
     - Identifies significant state changes based on configurable thresholds
     - Excludes WETH conversions from denomination movements
     - Tracks bribe payments to known fee recipients
-
-    Movement Structure:
-    {
-        'token': {
-            'address1': {
-                'in': OrderedDict{(block, txn_index, log_index): amount, ...},
-                'out': OrderedDict{(block, txn_index, log_index): amount, ...}
-            },
-            ...
-        },
-        'denom': {
-            'address1': {
-                'in': OrderedDict{(block, txn_index, log_index): amount, ...},
-                'out': OrderedDict{(block, txn_index, log_index): amount, ...}
-            },
-            ...
-        }
-    }
-
-    Net Changes Output Structure:
-    {
-        'address1': {
-            'token_net': float,  # Net token balance change
-            'denom_net': float,  # Net denomination balance change
-            'movements': {
-                'token': {'in': {...}, 'out': {...}},
-                'denom': {'in': {...}, 'out': {...}}
-            }
-        },
-        ...
-    }
-
-    Special Cases:
-    - WETH conversions (deposit/withdraw) are not counted as denomination movements
-    - Transfers to fee recipients are tracked as bribes
-    - Only addresses with significant state changes (above threshold) are included in output
     """
-    def __init__(self, 
-                 denom_state_change_threshold=0.0005, 
-                 token_state_change_threshold=0.1,
-                 logger=None):
+
+    def __init__(
+        self,
+        denom_state_change_threshold: float = 0.0005,
+        token_state_change_threshold: float = 0.1,
+        logger=None,
+    ):
         self.logger = logger
         self.WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
         self.denom_state_change_threshold = denom_state_change_threshold
         self.token_state_change_threshold = token_state_change_threshold
         self.movements = {
-            'token': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()}),
-            'denom': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()})
+            "token": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
+            "denom": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
         }
 
-    def _track_movement(self, movement_type: str, from_addr: str, to_addr: str, amount: float, transfer_id: tuple):
-        """Track a movement between addresses and handle special cases"""
-        # Handle WETH conversions
-        if to_addr == self.WETH_ADDRESS:
-            # ETH to WETH: Don't count as denom movement
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def _track_movement(
+        self,
+        movement_type: str,
+        from_addr: str,
+        to_addr: str,
+        amount: float,
+        transfer_id: tuple,
+    ):
+        """Track a movement between addresses and handle special cases."""
+        # WETH conversions are denomination-neutral
+        if to_addr == self.WETH_ADDRESS or from_addr == self.WETH_ADDRESS:
             return
-        elif from_addr == self.WETH_ADDRESS:
-            # WETH to ETH: Don't count as denom movement
+        # Skip deployer tx (log_index == '0')
+        if transfer_id[2] == "0":
             return
-        elif transfer_id[2] == '0':
-            # This is a deployer transaction, skip it
-            return
-        
-        # Track from address out movement
-        self.movements[movement_type][from_addr]['out'][transfer_id] = amount
-        # Track bribe amount
-        if to_addr in fee_recipients_set and movement_type == 'denom':
-            return
-        else:
-            # Track to address in movement if not bribe recipient
-            self.movements[movement_type][to_addr]['in'][transfer_id] = amount
 
+        # Outgoing from `from_addr`
+        self.movements[movement_type][from_addr]["out"][transfer_id] = amount
+
+        # Incoming to `to_addr` (unless denom bribe to fee recipient)
+        if not (movement_type == "denom" and to_addr in fee_recipients_set):
+            self.movements[movement_type][to_addr]["in"][transfer_id] = amount
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
     def get_net_changes(self, from_address: str) -> dict:
-        """Get net changes for all addresses in this transaction"""
-        net_changes = {}
-        
-        change_addresses = set(self.movements['token'].keys()) | set(self.movements['denom'].keys())
-        for address in change_addresses:
-            # Calculate token changes
-            token_in = sum(self.movements['token'][address]['in'].values())
-            token_out = sum(self.movements['token'][address]['out'].values())
+        """
+        Aggregate net changes for every address touched in this tx.
+
+        Returns
+        -------
+        dict[address] -> {
+            token_net : float,
+            denom_net : float,
+            movements : {token:{in/out}, denom:{in/out}}
+        }
+        """
+        net = {}
+        addrs = set(self.movements["token"]) | set(self.movements["denom"])
+        for addr in addrs:
+            token_in = sum(self.movements["token"][addr]["in"].values())
+            token_out = sum(self.movements["token"][addr]["out"].values())
+            denom_in = sum(self.movements["denom"][addr]["in"].values())
+            denom_out = sum(self.movements["denom"][addr]["out"].values())
+
             token_net = token_in - token_out
-            
-            # Calculate denomination changes
-            denom_in = sum(self.movements['denom'][address]['in'].values())
-            denom_out = sum(self.movements['denom'][address]['out'].values())
             denom_net = denom_in - denom_out
-            
-            # Check if state change is significant
-            if abs(token_net) > self.token_state_change_threshold or abs(denom_net) > self.denom_state_change_threshold or address == from_address:
-                net_changes[address] = {
-                    'token_net': token_net,
-                    'denom_net': denom_net,
-                    'movements': {
-                        'token': self.movements['token'][address],
-                        'denom': self.movements['denom'][address]
-                    }
+
+            if (
+                abs(token_net) > self.token_state_change_threshold
+                or abs(denom_net) > self.denom_state_change_threshold
+                or addr == from_address
+            ):
+                net[addr] = {
+                    "token_net": token_net,
+                    "denom_net": denom_net,
+                    "movements": {
+                        "token": self.movements["token"][addr],
+                        "denom": self.movements["denom"][addr],
+                    },
                 }
-        return net_changes
+        return net
 
-    def validate_eth_movements(self) -> bool:
-        """
-        Validate that total ETH movement in transaction nets to zero
-        Returns True if movements are valid (net zero), False otherwise
-        """
-        net_eth = 0
-        
-        # Sum all denomination movements
-        for address in self.movements['denom']:
-            eth_in = sum(self.movements['denom'][address]['in'].values())
-            eth_out = sum(self.movements['denom'][address]['out'].values())
-            net_eth += (eth_in - eth_out)
-        
-        # If net is not zero, we likely have a deployer or missing trace
-        net_eth = net_eth + self.bribe_amount
-        valid = abs(net_eth) < 1e-10    
-        return valid
-
+    # ------------------------------------------------------------------ #
+    # Convenience entry points
+    # ------------------------------------------------------------------ #
     def calculate_state_changes(
-            self, 
-            txn_hash: str, 
-            from_address: str,
-            block_number: int, 
-            txn_index: int, 
-            eth_transfers: list, 
-            erc20_transfers: list) -> dict:
-        """Calculate state changes including special cases"""
-        self.movements = {  
-            'token': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()}),
-            'denom': defaultdict(lambda: {'in': OrderedDict(), 'out': OrderedDict()})
-        }          
-        
-        # Process all transfers with special case handling
-        for transfer in erc20_transfers:
-            log_index = transfer['log_index']
-            transfer_id = (block_number, txn_index, log_index)
-            is_wet_transfer = transfer["token_address"] == self.WETH_ADDRESS
-            if is_wet_transfer:
-                movement_type = 'denom'
-            else:
-                movement_type = 'token'
-            self._track_movement(movement_type, 
-                                 transfer['from_address'], 
-                                 transfer['to_address'], 
-                                 transfer['amount'], 
-                                 transfer_id
-                                 )
-        
-        for transfer in eth_transfers:
-            if "log_index" in transfer:
-                log_index = transfer['log_index']
-                transfer_id = (block_number, txn_index, log_index)
-            else:
-                transfer_id = (block_number, txn_index, f"depth_{transfer['depth']}")
-            self._track_movement('denom', 
-                                 transfer['from_address'], 
-                                 transfer['to_address'], 
-                                 transfer['amount'], 
-                                 transfer_id
-                                 )
+        self,
+        txn_hash: str,
+        from_address: str,
+        block_number: int,
+        txn_index: int,
+        eth_transfers: list,
+        erc20_transfers: list,
+    ) -> dict:
+        """
+        Build movements directly from raw transfer lists
+        (legacy entry point).
+        """
+        self.movements = {
+            "token": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
+            "denom": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
+        }
+
+        # ERC-20 transfers
+        for tr in erc20_transfers:
+            tid = (block_number, txn_index, tr["log_index"])
+            is_weth = tr["token_address"] == self.WETH_ADDRESS
+            mtype = "denom" if is_weth else "token"
+            amount = (
+                tr["amount"] / 1e18 if is_weth else tr["amount"]
+            )
+            self._track_movement(
+                mtype, tr["from_address"], tr["to_address"], amount, tid
+            )
+
+        # ETH (internal) transfers
+        for tr in eth_transfers:
+            log_index_or_depth = tr.get("log_index") or tr.get('depth')
+            tid = (block_number, txn_index, log_index_or_depth)
+            self._track_movement(
+                "denom", tr["from_address"], tr["to_address"], tr["amount"], tid
+            )
+
         try:
-            state_changes = self.get_net_changes(from_address)
-        except Exception as e:
+            return self.get_net_changes(from_address)
+        except Exception as exc:
             if self.logger:
-                self.logger.error(f"Error calculating state changes for {txn_hash}: {str(e)}")
+                self.logger.error(
+                    f"State diff error for {txn_hash}: {exc}", exc_info=True
+                )
             return {}
-        return state_changes
+
+    def calculate_state_changes_from_processed_tx(self, processed_tx) -> dict:
+        """
+        Preferred path: use a `ProcessedTransaction` object that already contains
+        parsed ERC-20 and internal transfers.
+        """
+        self.movements = {
+            "token": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
+            "denom": defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()}),
+        }
+
+        bn, txi = processed_tx.block_number, processed_tx.txn_index
+
+        # 1️⃣ ERC-20 transfers
+        for tr in processed_tx.erc20_transfers:
+            tid = (bn, txi, tr.log_index)
+            is_weth = tr.token_address == self.WETH_ADDRESS
+            mtype = "denom" if is_weth else "token"
+            amount = float(tr.amount) / 1e18 if is_weth else float(tr.amount)
+            self._track_movement(
+                mtype, tr.from_address, tr.to_address, amount, tid
+            )
+
+        # 2️⃣ Internal ETH transfers
+        for it in processed_tx.internal_transactions:
+            tid = (bn, txi, it.depth)
+            self._track_movement(
+                "denom", it.from_address, it.to_address, float(it.value), tid
+            )
+
+        try:
+            return self.get_net_changes(processed_tx.from_address)
+        except Exception as exc:
+            if self.logger:
+                self.logger.error(
+                    f"State diff calc failed for {processed_tx.hash}: {exc}",
+                    exc_info=True,
+                )
+            return {}

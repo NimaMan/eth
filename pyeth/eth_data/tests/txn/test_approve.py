@@ -61,7 +61,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
         erc20_contracts={
             "0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2"   # LP token
         },
-        state_diffs={},
+        state_changes={},
         latest_states={},
         bribe_amount=0.0,
         input="0x095ea7b3000000000000000000000000e2fe530c047f2d85298b07d9333c05737f1435fbffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"

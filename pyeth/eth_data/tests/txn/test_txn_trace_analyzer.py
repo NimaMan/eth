@@ -135,7 +135,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
             "0xCe9dcc28791a98EDfd4175a7d55da9f86C560199"
         },
         erc20_contracts=set(),
-        state_diffs={},
+        state_changes={},
         latest_states={},
         bribe_amount=0.0,
         input=actual_input  # Use the actual input from transaction

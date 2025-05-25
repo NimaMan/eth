@@ -187,7 +187,7 @@ class LiveBlockProcessor:
         self.block_processor = BlockProcessor(
             node_url=http_url,
             logger=self.logger,
-            save_txn_to_db=self.save_txn_to_db
+            save_txn_to_db=False
         )
         self.block_alert_processor = BlockAlertProcessor()
         # RabbitMQ connection and channel
@@ -195,7 +195,6 @@ class LiveBlockProcessor:
         self.channel = None
         self.blocks_exchange = None
         self.alerts_exchange = None
-
         self.reconnect_delay = 1  
 
     async def setup_rabbitmq(self, max_retries=3):
@@ -219,7 +218,7 @@ class LiveBlockProcessor:
                 self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
                 self.channel = await self.connection.channel()
                 
-                # Declare exchanges
+                # Declare exchanges only - let consumers create their own queues
                 self.blocks_exchange = await self.channel.declare_exchange(
                     "blocks_exchange",
                     aio_pika.ExchangeType.FANOUT,
@@ -230,42 +229,8 @@ class LiveBlockProcessor:
                     aio_pika.ExchangeType.FANOUT,
                     durable=True
                 )
-                
-                # Define queue arguments for all consumers
-                queue_args = {
-                    'x-max-length': 100,        # Keep only latest 100 messages
-                    'x-overflow': 'drop-head',   # Drop oldest messages when full
-                    'x-message-ttl': 3600000,    # Messages expire after 1 hour (in milliseconds)
-                }
-                
-                # Define specific consumer queues with limits
-                consumer_queues = [
-                    "jupyter_consumer", 
-                    "eth_block_tokens_consumer", 
-                    "eth_txn_alerts_consumer"
-                ]
-                
-                # Create/update all consumer queues with proper limits
-                for queue_name in consumer_queues:
-                    queue = await self.channel.declare_queue(
-                        queue_name,
-                        durable=True,
-                        arguments=queue_args
-                    )
-                    
-                    # Bind the queue to the appropriate exchange
-                    if "alert" in queue_name.lower():
-                        await queue.bind(
-                            self.alerts_exchange, 
-                            routing_key="eth_txn_alerts"  # Use the same routing key as in publish_alert
-                        )
-                    else:
-                        await queue.bind(
-                            self.blocks_exchange, 
-                            routing_key="processed_blocks"  # Use the same routing key as in publish_block
-                        )
                         
-                self.logger.info("Successfully connected to RabbitMQ with queue limits")
+                self.logger.info("Successfully connected to RabbitMQ - exchanges declared")
                 return True
                 
             except Exception as e:
@@ -401,13 +366,16 @@ class LiveBlockProcessor:
                             publish_success = await self.publish_block(block_number, processed_block)
                             if not publish_success:
                                 self.logger.warning(f"Failed to publish block {block_number}, continuing with next block")
-                                
+                              
                             #alerts = await self.block_alert_processor.process_block_transactions(processed_block)
                             #if alerts and len(alerts) > 0:
                             #     await self.publish_alert(alerts)
                             
+                            if self.save_txn_to_db:
+                                self.block_processor.transaction_writer.save_transactions(processed_block)
+                                self.block_processor.stablecoin_analyzer.process_block_transactions(block_number, processed_block)
                     except Exception as e:
-                        self.logger.error(f"{__name__} Error processing block: {e}", exc_info=True)
+                        self.logger.error(f"{__name__} Error processing live block {block_number}: {e}", exc_info=True)
                         continue  # Continue with next block regardless of error
         
         except Exception as e:

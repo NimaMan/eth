@@ -97,8 +97,8 @@ class StateDiffProcessor:
         Returns a dictionary mapping addresses to their balance changes.
         """
         try:
-            # Simulate the transaction
-            simulation_result = await self.tx_simulator.simulate_transaction(txn)
+            # Simulate the transaction - always use 'latest' for block_identifier to avoid 'block not found' errors
+            simulation_result = await self.tx_simulator.simulate_transaction(txn, block_identifier='latest')
             
             # Check if simulation failed or has no state diff
             if not simulation_result or not simulation_result.get('success'):

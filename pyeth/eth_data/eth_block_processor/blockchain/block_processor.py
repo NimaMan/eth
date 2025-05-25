@@ -101,14 +101,13 @@ Error Handling:
 - Automatic retry logic for transient failures (depends on underlying fetchers/processors).
 """
 
-from web3 import Web3
 import time
+from tqdm import tqdm
+from web3 import Web3
 from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
 from eth_block_processor.blockchain.block_fetcher import BlockFetcher
-from tqdm import tqdm
-from typing import List, Dict, Any, Optional
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
-import asyncio
+from sarigoz.data.db.writers.transaction_writer import TransactionWriter 
+from sarigoz.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer           
 
 
 class BlockProcessor:
@@ -118,16 +117,15 @@ class BlockProcessor:
                  logger=None, 
                  w3=None):
         self.w3 = w3 or Web3(Web3.HTTPProvider(node_url))
+        self.logger = logger
         self.block_fetcher = BlockFetcher(node_url)
         self.tx_batch_processor = TransactionBatchProcessor(
             w3=self.w3,
             logger=logger,
             calculate_state_changes=calculate_state_changes
         )
-        self.logger = logger
-        if save_txn_to_db:
-            from sarigoz.data.db.writers.transaction_writer import TransactionWriter
-            self.transaction_writer = TransactionWriter(w3=self.w3, logger=logger)
+        self.transaction_writer = TransactionWriter(w3=self.w3, logger=logger)
+        self.stablecoin_analyzer = BlockLevelStablecoinAnalyzer(w3=self.w3)
         self.save_txn_to_db = save_txn_to_db
     
     async def process_block_range(self, start_block: int, end_block: int):
@@ -145,7 +143,7 @@ class BlockProcessor:
                 results[block_number] = result
             except Exception as e:
                 if self.logger is not None:
-                    self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}")
+                    self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}", exc_info=True)
 
         return results
 
@@ -168,28 +166,19 @@ class BlockProcessor:
             num_failed_txns = len(transactions) - len(processed_transactions)
             if self.save_txn_to_db:
                 self.transaction_writer.save_transactions(processed_transactions)
+                self.stablecoin_analyzer.process_block_transactions(block_number, processed_transactions)
             if self.logger is not None:
                 self.logger.info(f"{block_number}->{len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f}s")                
             return processed_transactions
         except Exception as e:
             if self.logger is not None:
-                self.logger.error(f"{__name__} Error processing block {block_number} with {transactions} transactions: {str(e)}")
+                self.logger.error(f"{__name__} Error processing block {block_number} with {len(transactions)} transactions: {str(e)}", exc_info=True)
             raise
 
     async def close(self):
         """Close all aiohttp sessions and other resources"""
         # Close block fetcher sessions
-        if hasattr(self.block_fetcher, 'close') and callable(self.block_fetcher.close):
-            await self.block_fetcher.close()
-        
-        # Close batch analyzer sessions
-        if hasattr(self.tx_batch_processor, 'close') and callable(self.tx_batch_processor.close):
-            await self.tx_batch_processor.close()
-        
-        # Close transaction saver if it exists
-        if self.save_txn_to_db and hasattr(self.transaction_writer, 'close') and callable(self.transaction_writer.close):
-            await self.transaction_writer.close()
-            
+        await self.block_fetcher.close()    
         if self.logger:
-            self.logger.info("BlockProcessor resources cleaned up")
+            self.logger.info("BlockProcessor core resources cleaned up (fetcher, batch processor)")
             

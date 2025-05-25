@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from web3 import Web3
 from sarigoz.utils.time_block_converter import TimeBlockConverter
-from sarigoz.data.db.conn import get_db_engine
+from sarigoz.data.db.eth_db_conn import get_db_engine
 
 
 async def process_blocks_in_range(

@@ -56,7 +56,7 @@ def test_set_tax(txn_analyzer, txn_data_fetcher):
         erc20_contracts={
             "0x90f29ccD18c9181A9243EfF8f7546eef4b64994c"
         },
-        state_diffs={},
+        state_changes={},
         latest_states={},
         bribe_amount=0.0,
         input="0xfc7e4746"

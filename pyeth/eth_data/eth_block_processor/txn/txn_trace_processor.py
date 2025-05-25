@@ -39,8 +39,12 @@ class TransactionTraceProcessor:
                 # If still no address AND it's top-level creation, use receipt address
                 if to_address is None and depth == 0 and receipt_contract_address:
                     to_address = receipt_contract_address
+                
+                # Regardless of depth, if this is a CREATE operation, we want to track it
+                is_contract_creation = True
             else: # CALL, STATICCALL, DELEGATECALL
                 to_address = trace.get('to')
+                is_contract_creation = False
 
 
             # Include if:
@@ -50,7 +54,7 @@ class TransactionTraceProcessor:
             # 4. Has an error, or
             # 5. Parent transaction failed
             if (depth == 0 or 
-                trace['type'] in ['CREATE', 'CREATE2'] or 
+                is_contract_creation or 
                 value > 0 or 
                 is_failed):
                 

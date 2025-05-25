@@ -52,6 +52,10 @@ class TransactionSimulator:
         self.logger = logger
         self.trace_options = ['trace', 'stateDiff'] # ['trace', 'stateDiff', 'vmTrace']
 
+    def log(self, message):
+        if self.logger:
+            self.logger.debug(message)
+
     def _safe_hex_to_int(self, value):
         """Convert hex string to integer, handling different input formats."""
         if isinstance(value, int):
@@ -181,8 +185,7 @@ class TransactionSimulator:
         except Exception as e:
             revert_info['would_revert'] = True
             revert_info['reason'] = str(e)
-            if self.logger:
-                self.logger.debug(f"Transaction would revert: {str(e)}")
+            self.log(f"Transaction would revert: {str(e)}")
         
         return revert_info
     
@@ -221,33 +224,47 @@ class TransactionSimulator:
             if 'result' in result:
                 return result['result']
             
-            # Handle specific error cases silently
+            # Handle specific error cases
             if 'error' in result:
                 error_code = result['error'].get('code')
                 error_msg = result['error'].get('message', '')
                 
+                # Handle block not found error by retrying with 'latest'
+                if error_code == -32001 and 'block not found' in error_msg:
+                    await asyncio.sleep(1.5)
+                    # Retry with 'latest' block
+                    trace_params[2] = 'latest'
+                    retry_result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.w3.provider.make_request,
+                            "trace_call",
+                            trace_params
+                        ),
+                        timeout=2.0  # Longer timeout for retry
+                    )
+                    
+                    if 'result' in retry_result:
+                        return retry_result['result']
+                    else:
+                        self.log(f"Retry with 'latest' also failed: {retry_result.get('error')}")
+                
                 # Don't log warnings for common expected errors
-                if (error_code == -32003 and 'insufficient funds' in error_msg) or \
+                elif (error_code == -32003 and 'insufficient funds' in error_msg) or \
                    (error_code == -32602 and 'Invalid params' in error_msg) or \
                    (error_code == -32008 and 'Response is too big' in error_msg):
-                    if self.logger and self.logger.isEnabledFor(10):  # DEBUG level
-                        self.logger.debug(f"trace_call issue: {error_code}")
+                    self.log(f"trace_call issue: {error_code}")
                 else:
                     # Only log unusual errors as warnings
-                    if self.logger:
-                        self.logger.warning(f"trace_call failed: {result['error']}")
+                    self.log(f"trace_call failed: {result['error']}")
                 
         except asyncio.TimeoutError:
-            if self.logger and self.logger.isEnabledFor(10):  # DEBUG level
-                self.logger.debug("trace_call timed out")
+            self.log("trace_call timed out")
         except Exception as e:
             # Only log unexpected exceptions as warnings
             if "insufficient funds" in str(e) or "Invalid params" in str(e) or "Response is too big" in str(e):
-                if self.logger and self.logger.isEnabledFor(10):  # DEBUG level
-                    self.logger.debug(f"Expected trace_call error: {str(e)[:30]}...")
+                self.log(f"Expected trace_call error: {str(e)[:30]}...")
             else:
-                if self.logger:
-                    self.logger.warning(f"Unexpected error in trace_call: {str(e)}")
+                self.log(f"Unexpected error in trace_call: {str(e)}")
             
         return None
     
@@ -282,13 +299,10 @@ class TransactionSimulator:
             
             if 'result' in result:
                 return {'debug_trace': result['result']}
-            
-            if self.logger:
-                self.logger.warning(f"debug_traceCall failed: {result.get('error', 'Unknown error')}")
+            self.log(f"debug_traceCall failed: {result.get('error', 'Unknown error')}")
                 
         except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error in debug_traceCall: {str(e)}")
+            self.log(f"Error in debug_traceCall: {str(e)}")
                 
         return None
 
@@ -411,6 +425,35 @@ class TransactionSimulator:
                 batch_requests
             )
             
+            # Check if we have a 'block not found' error
+            block_not_found = any(
+                r.get('error', {}).get('code') == -32001 and 'block not found' in r.get('error', {}).get('message', '')
+                for r in batch_response if 'error' in r
+            )
+            
+            # If block not found, retry with 'latest'
+            if block_not_found:
+                self.log(f"Block not found in batch request. Retrying with 'latest'.")
+                # Wait a full second to allow the node state to stabilize
+                await asyncio.sleep(2.0)
+                
+                # Rebuild batch requests with 'latest'
+                retry_batch_requests = []
+                for i, txn in enumerate(prepared_txns):
+                    trace_params = [txn, ['trace', 'stateDiff'], 'latest']
+                    retry_batch_requests.append({
+                        "jsonrpc": "2.0",
+                        "method": "trace_call",
+                        "params": trace_params,
+                        "id": i + 1
+                    })
+                
+                # Retry the batch request
+                batch_response = await asyncio.to_thread(
+                    self._send_batch_request,
+                    retry_batch_requests
+                )
+            
             # Process results
             results = []
             for i in range(len(prepared_txns)):
@@ -434,9 +477,7 @@ class TransactionSimulator:
             return results
             
         except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error in batch trace_call: {str(e)}")
-            
+            self.log(f"Error in batch trace_call: {str(e)}")
             # Return a list of failed results
             return [{'success': False, 'error': {'message': str(e)}} for _ in prepared_txns]
 
@@ -495,8 +536,7 @@ class TransactionSimulator:
             return results
             
         except Exception as e:
-            if self.logger:
-                self.logger.error(f"Error in batch eth_call: {str(e)}")
+            self.log(f"Error in batch eth_call: {str(e)}")
             
             # Return a list of failed results indicating potential reverts
             return [{'would_revert': True, 'reason': str(e)} for _ in prepared_txns]

@@ -88,7 +88,11 @@ class TransactionProcessor:
         self.action_identifier = TransactionActionIdentifier()
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
-        return txn['to'] is not None and len(txn['input']) > 2  # '0x' is 2 characters
+        # Always get trace for contract creation transactions
+        if txn['to'] is None:
+            return True
+        # Otherwise check if there's input data
+        return len(txn['input']) > 2  # '0x' is 2 characters
 
     def extend_unique_addresses(self, 
                                 from_address, 

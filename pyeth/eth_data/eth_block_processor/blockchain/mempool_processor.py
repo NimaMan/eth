@@ -15,8 +15,8 @@ from typing import Dict, List, Any
 from web3 import Web3
 from collections import OrderedDict
 
-from eth_block_processor.txn.mempool_tx_state_diff_processor import StateDiffProcessor
-from eth_block_processor.txn.mempool_data_fetcher import MempoolDataFetcher
+from eth_block_processor.txn.mempool.mempool_tx_state_diff_processor import StateDiffProcessor
+from eth_block_processor.txn.mempool.mempool_data_fetcher import MempoolDataFetcher
 from eth_token.utils.logger import get_logger
 
 
@@ -144,11 +144,9 @@ class MempoolTxCache:
 
 class MempoolProcessor:
     """
-    Core mempool monitoring system that continuously polls for pending transactions
-    and immediately extracts their state diffs.
-    
-    This class implements a high-frequency polling approach to monitor the Ethereum
-    mempool, tracking new transactions and their simulated state changes.
+    Monitors the Ethereum mempool for pending and queued transactions.
+    Simulates transactions to extract state changes.
+    Provides an API to access transactions and their state diffs.
     """
     
     def __init__(self, 
@@ -177,8 +175,6 @@ class MempoolProcessor:
         
         # Mempool data fetcher for retrieving transactions
         self.mempool_fetcher = MempoolDataFetcher(w3=self.w3, logger=self.logger)
-        
-        # State diff processor
         self.state_diff_processor = StateDiffProcessor(w3=self.w3, logger=self.logger)
         
         # Control flags and tasks
