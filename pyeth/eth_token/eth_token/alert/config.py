@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Set
 from functools import lru_cache
 from sqlalchemy.orm import Session
-from sarigoz.data.db.conn import get_db_engine
+from sarigoz.data.db.eth_db_conn import get_db_engine
 from sarigoz.data.db.queries.scam_queries import get_mimic_octopus_addresses_query
 
 
