@@ -42,22 +42,25 @@ chrono = "0.4"
 [dev-dependencies]
 mockall = "0.11"
 
-[[bin]]
-name = "kartal_monitor"
-path = "src/bin/monitor.rs"
-
-[[bin]]
-name = "kartal_responder"
-path = "src/bin/responder.rs"
-
-[[bin]]
-name = "kartal"
-path = "src/bin/main.rs"
-
-[[bin]]
-name = "test_components"
-path = "src/bin/test_components.rs"
-
-[[bin]]
-name = "test"
-path = "src/bin/test.rs"
+# Note: Binary targets commented out since files don't exist yet
+# Uncomment when the files are created
+# 
+# [[bin]]
+# name = "kartal_monitor"
+# path = "src/bin/monitor.rs"
+# 
+# [[bin]]
+# name = "kartal_responder"
+# path = "src/bin/responder.rs"
+# 
+# [[bin]]
+# name = "kartal"
+# path = "src/bin/main.rs"
+# 
+# [[bin]]
+# name = "test_components"
+# path = "src/bin/test_components.rs"
+# 
+# [[bin]]
+# name = "test"
+# path = "src/bin/test.rs"
