@@ -261,6 +261,11 @@ async fn main() -> eyre::Result<()> {
             Ok(transactions) => {
                 if !transactions.is_empty() {
                     for tx in &transactions {
+                        // Skip if we've already processed this transaction recently
+                        if fetcher.is_transaction_processed(&tx.hash) {
+                            continue;
+                        }
+                        
                         // Process each transaction
                         let scams_found = process_transaction(
                             tx, 
@@ -270,6 +275,9 @@ async fn main() -> eyre::Result<()> {
                             &db_logger,
                             &pool_cache
                         ).await;
+                        
+                        // Mark transaction as processed to avoid reprocessing
+                        fetcher.mark_transaction_processed(&tx.hash);
                         
                         total_txs_processed += 1;
                         total_scams_detected += scams_found;
@@ -320,11 +328,11 @@ async fn process_transaction(
         // Simulate the transaction to get state changes
         match tracker.simulate_transaction(tx).await {
             Ok(Some(changes)) => {
-                // Add to state cache
-                state_cache.add_transaction(tx_hash, tx.clone(), changes.clone());
+                // Skip state cache for now - it expects a different format
+                // TODO: Implement proper conversion if state cache is needed
                 
-                // Process for scam detection
-                let simulation = prepare_simulation_result(tx, &changes, pool_cache.clone());
+                // Process for scam detection using the original HashMap format
+                let simulation = prepare_simulation_result_from_mempool_diffs(tx, &changes, pool_cache.clone());
                 
                 if let Some(sim_result) = simulation {
                     // Process simulation result with the service
@@ -361,30 +369,26 @@ async fn process_transaction(
     0 // No scams detected
 }
 
-// Helper function to prepare a simulation result from transaction changes
-fn prepare_simulation_result(
+// Helper function to prepare a simulation result from mempool diffs
+fn prepare_simulation_result_from_mempool_diffs(
     tx: &TransactionView,
-    changes: &[mempool_processor::tx_simulator::StateChange],
+    changes: &HashMap<String, mempool_processor::tx_simulator::MempoolStateDiff>,
     pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
 ) -> Option<SimulationResult> {
     let mut affected_pools = HashMap::new();
     
     // Extract pool effects from state changes
-    for change in changes {
-        // Calculate ETH delta
-        let eth_delta = (change.balance_after.as_u128() as f64 - 
-                         change.balance_before.as_u128() as f64) / 1e18;
+    for (address_str, change) in changes {
+        // Calculate ETH delta from MempoolStateDiff
+        let eth_delta = change.change;
         
         // Skip addresses where ETH is being added (positive delta)
         if eth_delta >= 0.0 {
             continue;
         }
         
-        // Format address properly - use checksummed format to match Python
-        // Convert H160 to Address for checksum function
-        let address_bytes = change.address.as_bytes();
-        let alloy_address = Address::from_slice(address_bytes);
-        let addr_str = to_checksum_address(alloy_address);
+        // Address is already a string, just use it directly
+        let addr_str = address_str.clone();
         
         if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
             let current_eth = pool_state.eth_reserve;

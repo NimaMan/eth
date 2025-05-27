@@ -165,8 +165,8 @@ impl MempoolFetcher {
         
         Ok(Self { 
             provider,
-            tx_cache: Arc::new(Mutex::new(HashMap::with_capacity(5000))),
-            cache_capacity: 5000,
+            tx_cache: Arc::new(Mutex::new(HashMap::with_capacity(500000))),
+            cache_capacity: 500000,
             use_batch_requests: true,
             max_batch_size: 100,
             base_timeout_ms,
@@ -228,6 +228,32 @@ impl MempoolFetcher {
     /// Get the current fetch mode
     pub fn fetch_mode(&self) -> FetchMode {
         self.fetch_mode
+    }
+    
+    /// Mark a transaction as processed (add to cache to avoid reprocessing)
+    pub fn mark_transaction_processed(&self, tx_hash: &[u8]) {
+        if let Ok(mut cache) = self.tx_cache.lock() {
+            let hash_hex = hex_encode(tx_hash);
+            cache.insert(hash_hex, Instant::now());
+            
+            // Clean up cache if it's getting too large
+            if cache.len() > self.cache_capacity {
+                self.prune_tx_cache();
+            }
+        }
+    }
+    
+    /// Check if a transaction has been processed recently
+    pub fn is_transaction_processed(&self, tx_hash: &[u8]) -> bool {
+        // First clean up old entries to ensure we get fresh transactions
+        self.prune_tx_cache();
+        
+        if let Ok(cache) = self.tx_cache.lock() {
+            let hash_hex = hex_encode(tx_hash);
+            cache.contains_key(&hash_hex)
+        } else {
+            false
+        }
     }
     
     /// Execute a request with exponential backoff and circuit breaker
@@ -485,14 +511,26 @@ impl MempoolFetcher {
     /// Clean up old entries from the transaction cache
     fn prune_tx_cache(&self) {
         if let Ok(mut cache) = self.tx_cache.lock() {
-            // If cache is at capacity, remove the oldest 20% of entries
+            let now = Instant::now();
+            let max_age = Duration::from_secs(60); // Only 1 minute max age - we want fresh transactions!
+            
+            // Remove all entries older than 1 minute
+            let initial_size = cache.len();
+            cache.retain(|_, timestamp| now.duration_since(*timestamp) < max_age);
+            let removed_count = initial_size - cache.len();
+            
+            if removed_count > 0 {
+                debug!("Pruned {} old transactions from cache (older than 1 minute), new size: {}", removed_count, cache.len());
+            }
+            
+            // If cache is still too large after time-based pruning, remove oldest entries
             if cache.len() >= self.cache_capacity {
                 // Sort by timestamp (oldest first)
                 let mut entries: Vec<_> = cache.iter().collect();
                 entries.sort_by_key(|(_, timestamp)| *timestamp);
                 
-                // Determine how many to remove (20% of capacity)
-                let remove_count = self.cache_capacity / 5;
+                // Determine how many to remove (75% of capacity for very aggressive pruning)
+                let remove_count = (self.cache_capacity * 3) / 4;
                 
                 // Get the keys to remove
                 let keys_to_remove: Vec<String> = entries
@@ -506,7 +544,7 @@ impl MempoolFetcher {
                     cache.remove(&key);
                 }
                 
-                debug!("Pruned {} old transactions from cache, new size: {}", remove_count, cache.len());
+                debug!("Pruned {} additional old transactions from cache (capacity limit), new size: {}", remove_count, cache.len());
             }
         }
     }
@@ -536,19 +574,15 @@ impl MempoolFetcher {
                             // Normalize hash
                             let hash = hash_str.strip_prefix("0x").unwrap_or(hash_str).to_lowercase();
                             
-                            // Skip if it's a duplicate or in our cache
+                            // Only skip duplicates within this batch - don't check cache here!
                             if !seen_hashes.contains_key(&hash) {
-                                if let Ok(cache) = self.tx_cache.lock() {
-                                    if !cache.contains_key(&hash) {
-                                        if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
-                                            tx_hashes.push(hash_bytes);
-                                            seen_hashes.insert(hash, true);
-                                            
-                                            // Check if we reached batch size limit
-                                            if tx_hashes.len() >= self.max_batch_size {
-                                                break;
-                                            }
-                                        }
+                                if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
+                                    tx_hashes.push(hash_bytes);
+                                    seen_hashes.insert(hash, true);
+                                    
+                                    // Check if we reached batch size limit
+                                    if tx_hashes.len() >= self.max_batch_size {
+                                        break;
                                     }
                                 }
                             }
@@ -573,19 +607,15 @@ impl MempoolFetcher {
                                 // Normalize hash
                                 let hash = hash_str.strip_prefix("0x").unwrap_or(hash_str).to_lowercase();
                                 
-                                // Skip if it's a duplicate or in our cache
+                                // Only skip duplicates within this batch - don't check cache here!
                                 if !seen_hashes.contains_key(&hash) {
-                                    if let Ok(cache) = self.tx_cache.lock() {
-                                        if !cache.contains_key(&hash) {
-                                            if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
-                                                tx_hashes.push(hash_bytes);
-                                                seen_hashes.insert(hash, true);
-                                                
-                                                // Check if we reached batch size limit
-                                                if tx_hashes.len() >= self.max_batch_size {
-                                                    break;
-                                                }
-                                            }
+                                    if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
+                                        tx_hashes.push(hash_bytes);
+                                        seen_hashes.insert(hash, true);
+                                        
+                                        // Check if we reached batch size limit
+                                        if tx_hashes.len() >= self.max_batch_size {
+                                            break;
                                         }
                                     }
                                 }
@@ -637,11 +667,8 @@ impl MempoolFetcher {
                         let to_bytes = tx.to.map(|to| to.as_bytes().to_vec());
                         let input_data = Some(tx.input.to_vec());
                         
-                        // Add to transaction cache
-                        if let Ok(mut cache) = self.tx_cache.lock() {
-                            let hash_hex = hex_encode(&hash_bytes);
-                            cache.insert(hash_hex, Instant::now());
-                        }
+                        // DON'T add to cache here - let the main processing loop handle caching
+                        // after it actually processes the transaction
                         
                         let tx_view = TransactionView {
                             hash: hash_bytes,
@@ -666,9 +693,6 @@ impl MempoolFetcher {
                 }
             }
         }
-        
-        // Periodically clean up the cache
-        self.prune_tx_cache();
         
         debug!("Successfully fetched {} transactions", transactions.len());
         Ok(transactions)
