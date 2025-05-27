@@ -54,7 +54,7 @@ impl PoolStateCache {
         
         // Log the update
         if !updated_addresses.is_empty() {
-            info!("Updated {} pools in state cache", updated_addresses.len());
+            debug!("Updated {} pools in state cache", updated_addresses.len());
             debug!("Updated pool addresses: {:?}", updated_addresses);
         }
         
@@ -100,6 +100,20 @@ impl PoolStateCache {
     pub fn set_eth_threshold(&mut self, threshold: f64) {
         self.eth_threshold = threshold;
         info!("Updated ETH threshold to {}", threshold);
+    }
+    
+    /// Get the number of pools currently in the cache
+    pub fn get_pool_count(&self) -> usize {
+        // Lock for reading (shared access)
+        let storage = match self.storage.read() {
+            Ok(guard) => guard,
+            Err(e) => {
+                debug!("Failed to acquire read lock on pool state cache: {}", e);
+                return 0;
+            }
+        };
+        
+        storage.len()
     }
 }
 

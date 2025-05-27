@@ -12,8 +12,10 @@
 pub mod simulator;
 pub mod state_diff;
 pub mod state_cache;
+pub mod mempool_state_cache;
 
 // Re-export key types and functions
 pub use simulator::TransactionSimulator;
 pub use state_diff::{StateDiffTracker, StateChange};
-pub use state_cache::{StateCache, AggregatedStateChange}; 
+pub use state_cache::{StateCache, AggregatedStateChange};
+pub use mempool_state_cache::*; 

@@ -14,7 +14,6 @@ pub mod db_logger;
 pub use types::*;
 pub use fetcher::*;
 pub use processor::*;
-pub use pools::*;
 pub use db_logger::*;
 
 // Re-export tx_simulator functionality 

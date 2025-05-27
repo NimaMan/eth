@@ -1,5 +1,6 @@
 use crate::mempool_processor::types::*;
-use crate::tx_simulator::state_diff::{StateDiffTracker, StateChange};
+use crate::tx_simulator::state_diff::StateDiffTracker;
+use crate::tx_simulator::MempoolStateDiff;
 use ethers::prelude::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, trace, info, warn};
@@ -11,7 +12,7 @@ use std::collections::HashMap;
 pub struct TransactionProcessor {
     filter: TransactionFilter,
     state_tracker: Option<StateDiffTracker>,
-    cached_state_changes: HashMap<String, Vec<StateChange>>,
+    cached_state_changes: HashMap<String, HashMap<String, MempoolStateDiff>>,
 }
 
 impl TransactionProcessor {
@@ -80,15 +81,14 @@ impl TransactionProcessor {
         let to_hex = hex_encode(&to_bytes);
         
         // Check for state changes if tracker is enabled
-        let mut state_changes = Vec::new();
         if let Some(tracker) = &mut self.state_tracker {
             match tracker.simulate_transaction(tx).await {
                 Ok(Some(changes)) if !changes.is_empty() => {
                     debug!("Transaction {} produced {} state changes", hash_hex, changes.len());
                     
                     // Calculate total ETH value change
-                    let total_eth_change: f64 = changes.iter()
-                        .map(|change| change.eth_value.abs())
+                    let total_eth_change: f64 = changes.values()
+                        .map(|change| change.change.abs())
                         .sum();
                     
                     if total_eth_change >= (self.filter.min_value.as_u128() as f64 / 1e18) {
@@ -97,20 +97,18 @@ impl TransactionProcessor {
                         
                         // Store state changes
                         self.cached_state_changes.insert(hash_hex.clone(), changes.clone());
-                        state_changes = changes;
                         
                         // Check for large value transfers (typical scam pattern)
-                        for change in &state_changes {
-                            if change.eth_value <= -0.1 {  // Loss of ETH can indicate scam
-                                let addr_hex = hex_encode(change.address.as_bytes());
-                                warn!("Possible suspicious activity: Address 0x{} lost {} ETH in tx {}",
-                                      addr_hex, -change.eth_value, hash_hex);
+                        for (address, change) in &changes {
+                            if change.change <= -0.1 {  // Loss of ETH can indicate scam
+                                warn!("Possible suspicious activity: Address {} lost {} ETH in tx {}",
+                                      address, -change.change, hash_hex);
                                 
                                 return Some(Alert {
                                     transaction: tx.clone(),
                                     reason: AlertReason::StateChangeValue {
-                                        eth_value: change.eth_value,
-                                        address: addr_hex,
+                                        eth_value: change.change,
+                                        address: address.clone(),
                                     },
                                     timestamp: current_timestamp(),
                                 });
@@ -170,7 +168,7 @@ impl TransactionProcessor {
     }
     
     /// Get cached state changes for a transaction
-    pub fn get_state_changes(&self, tx_hash: &str) -> Option<&Vec<StateChange>> {
+    pub fn get_state_changes(&self, tx_hash: &str) -> Option<&HashMap<String, MempoolStateDiff>> {
         self.cached_state_changes.get(tx_hash)
     }
     

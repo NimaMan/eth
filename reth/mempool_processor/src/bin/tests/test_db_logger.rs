@@ -112,6 +112,33 @@ async fn main() -> Result<()> {
         }
     }
     
+    // Test with a real token address that exists in the database
+    let real_token = "0x6Ae82F23C593b520f90822D6A0bA29ce5f7b06f8";
+    let real_pool = "0xBCac3A7cA9385F141469f2dE2bfFb1d18C7A67d8";
+    let real_block = 22561106i64;
+    
+    info!("Testing with real token address that exists in database:");
+    info!("  Real Token: {}", real_token);
+    info!("  Real Pool: {}", real_pool);
+    info!("  Real Block: {}", real_block);
+    
+    match db_logger.write_mempool_scam_prediction(
+        real_token,
+        real_pool,
+        real_block,
+        0.01,
+        0.001,
+        0.4,
+    ).await {
+        Ok(_) => {
+            info!("✅ Successfully wrote real token prediction to database!");
+        },
+        Err(e) => {
+            error!("❌ Failed to write real token prediction: {}", e);
+        }
+    }
+    
+    // Also test the original fake token to confirm it fails as expected
     match db_logger.write_mempool_scam_prediction(
         &args.token_address,
         &args.pool_address,
@@ -124,8 +151,8 @@ async fn main() -> Result<()> {
             info!("Successfully wrote prediction to database");
         },
         Err(e) => {
-            error!("Failed to write prediction to database: {}", e);
-            return Err(eyre::eyre!("Database write error: {}", e));
+            error!("Failed to write prediction: {}", e);
+            return Err(e.into());
         }
     }
     

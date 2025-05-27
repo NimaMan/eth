@@ -39,6 +39,88 @@ impl PoolSubscriber {
         self.pool_cache.clone()
     }
 
+    /// Request initial pool state from Python service via REQ/REP socket
+    async fn request_initial_pool_state(&self) -> Result<(), Box<dyn std::error::Error>> {
+        info!("Requesting initial pool state from Python service...");
+        
+        // Create REQ socket to request full pool state
+        let context = zmq::Context::new();
+        let requester = context.socket(zmq::REQ)?;
+        
+        // Connect to REP endpoint (port 5558 by default)
+        let rep_endpoint = self.zmq_endpoint.replace("5557", "5558");
+        requester.connect(&rep_endpoint)?;
+        info!("Connected to Python REP socket at {}", rep_endpoint);
+        
+        // Create request for all pools
+        let request = serde_json::json!({
+            "type": "get_all_pools"
+        });
+        
+        // Send request
+        requester.send(&request.to_string(), 0)?;
+        debug!("Sent get_all_pools request");
+        
+        // Receive response
+        let response_str = match requester.recv_string(0) {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => return Err(format!("ZMQ string conversion error: {:?}", e).into()),
+            Err(e) => return Err(format!("ZMQ recv error: {:?}", e).into()),
+        };
+        debug!("Received response from Python service");
+        
+        // Parse response
+        let response: serde_json::Value = serde_json::from_str(&response_str)?;
+        
+        if response["status"] == "success" {
+            let pool_count = response["count"].as_u64().unwrap_or(0);
+            info!("Received {} pools from Python service", pool_count);
+            
+            if let Some(pool_data) = response["data"].as_object() {
+                // Convert to our PoolUpdate format
+                let mut pools_map = std::collections::HashMap::new();
+                
+                for (address, data) in pool_data {
+                    if let Some(pool_obj) = data.as_object() {
+                        // Extract required fields with defaults
+                        let eth_reserve = pool_obj.get("eth_reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let token_address = pool_obj.get("token_address").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let block_number = pool_obj.get("block_number").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let update_time = pool_obj.get("update_time").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        
+                        let pool_update = types::PoolUpdate {
+                            eth_reserve,
+                            token_address,
+                            block_number,
+                            update_time,
+                        };
+                        
+                        pools_map.insert(address.clone(), pool_update);
+                    }
+                }
+                
+                // Update cache with initial data
+                let updated_pools = self.pool_cache.update_pools(pools_map.iter());
+                info!("Initialized cache with {} pools (above threshold: {})", 
+                     pool_count, updated_pools.len());
+                
+                // Log some sample pools for verification
+                if !updated_pools.is_empty() {
+                    info!("Sample initialized pools:");
+                    for (i, addr) in updated_pools.iter().take(5).enumerate() {
+                        if let Some(pool_state) = self.pool_cache.get_pool(addr) {
+                            info!("  {}: {} ({:.6} ETH)", i+1, addr, pool_state.eth_reserve);
+                        }
+                    }
+                }
+            }
+        } else {
+            warn!("Failed to get initial pool state: {}", response["error"].as_str().unwrap_or("Unknown error"));
+        }
+        
+        Ok(())
+    }
+
     pub async fn start_listening(&self) -> Result<(), Box<dyn std::error::Error>> {
         info!("Initializing ZMQ subscriber for pool levels.");
         let context = zmq::Context::new();
@@ -51,6 +133,11 @@ impl PoolSubscriber {
         subscriber.set_subscribe(b"")?;
         debug!("Subscribed to all messages from publisher.");
 
+        // Request initial full pool state
+        if let Err(e) = self.request_initial_pool_state().await {
+            warn!("Failed to get initial pool state: {}", e);
+        }
+
         info!("Listening for pool level updates from Python...");
         loop {
             match subscriber.recv_string(0) {
@@ -60,27 +147,16 @@ impl PoolSubscriber {
                     // Attempt to deserialize the JSON message
                     match serde_json::from_str::<PoolUpdatesMessage>(&msg_str) {
                         Ok(message) => {
-                            let pool_count = message.data.len();
-                            info!("Successfully deserialized pool update with {} pools, timestamp: {}", 
-                                  pool_count, message.timestamp);
-                            
-                            // Log some sample data (first few pools)
-                            let mut sample_count = 0;
-                            for (addr, update) in message.data.iter().take(2) {
-                                debug!("Pool {}: address {}, ETH reserve: {}, block: {}", 
-                                      sample_count, addr, update.eth_reserve, update.block_number);
-                                sample_count += 1;
-                            }
-                            if pool_count > 2 {
-                                debug!("... and {} more pools", pool_count - 2);
+                            // Only log significant events, not every update
+                            if message.data.len() > 10 {
+                                debug!("Large pool update: {} pools", message.data.len());
                             }
                             
-                            // Update the pool cache with the new data
+                            // Update the cache
                             let updated_pools = self.pool_cache.update_pools(message.data.iter());
-                            info!("Updated {} pools in cache", updated_pools.len());
                             
-                            // In the future, this is where we would trigger scam detection
-                            // if the 'trigger on new pool update' approach is used
+                            // Only log cache updates for debugging if needed
+                            debug!("Updated {} pools in cache", updated_pools.len());
                         },
                         Err(e) => {
                             warn!("Failed to parse pool update JSON: {}", e);

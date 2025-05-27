@@ -9,7 +9,7 @@
  * to ensure reliable data persistence.
  */
 
-use tokio_postgres::{NoTls, Error as PgError, Client, Config};
+use tokio_postgres::{NoTls, Error as PgError, Client};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, error, debug};
@@ -119,7 +119,7 @@ impl DbLogger {
             .expect("Time went backwards")
             .as_secs() as i32; // Using i32 for timestamp as it's an Integer in PostgreSQL
         
-        // SQL INSERT query
+        // SQL INSERT query for scam prediction
         const QUERY: &str = "
             INSERT INTO eth_db.mempool_scam_predictions (
                 token_address, pool_address, prediction_block_number,
@@ -133,8 +133,8 @@ impl DbLogger {
             token_address, pool_address, prediction_block_number
         );
         
-        // Execute the query
-        client.execute(
+        // Execute the query with proper error handling
+        match client.execute(
             QUERY,
             &[
                 &token_address,
@@ -145,10 +145,29 @@ impl DbLogger {
                 &simulated_eth_level,
                 &eth_threshold,
             ],
-        ).await?;
-        
-        debug!("Scam prediction logged successfully");
-        Ok(())
+        ).await {
+            Ok(_) => {
+                info!("🚨 SCAM ALERT LOGGED TO DATABASE: Token {} in pool {} depleted from {} to {} ETH", 
+                     token_address, pool_address, current_eth_level, simulated_eth_level);
+                Ok(())
+            },
+            Err(e) => {
+                // Check if this is a foreign key constraint error
+                if let Some(db_error) = e.as_db_error() {
+                    if db_error.code().code() == "23503" { // Foreign key violation
+                        error!("🚨 SCAM DETECTED but NOT LOGGED: Token {} not found in tokens table", token_address);
+                        error!("Pool {} depleted from {} to {} ETH - but database write failed due to missing token", 
+                              pool_address, current_eth_level, simulated_eth_level);
+                        // Return Ok to not crash the service, but log the issue prominently
+                        return Ok(());
+                    }
+                }
+                
+                // For other errors, propagate them
+                error!("Failed to log scam prediction: {}", e);
+                Err(e)
+            }
+        }
     }
     
     /// Delete test records from the database

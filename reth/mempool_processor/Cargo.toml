@@ -91,9 +91,26 @@ name = "test_scam_detection_pipeline"
 path = "src/bin/tests/test_scam_detection_pipeline.rs"
 
 [[bin]]
+name = "test_scam_detection_integration"
+path = "src/bin/tests/test_scam_detection_integration.rs"
+
+[[bin]]
+name = "test_live_pool_monitoring"
+path = "src/bin/tests/test_live_pool_monitoring.rs"
+
+[[bin]]
 name = "test_state_cache"
 path = "src/bin/tests/test_state_cache.rs"
 
 [[bin]]
 name = "test_mempool"
 path = "src/bin/tests/test_mempool.rs"
+
+
+[[bin]]
+name = "test_pool_detection"
+path = "src/bin/test_pool_detection.rs"
+
+[[bin]]
+name = "test_state_simulation"
+path = "src/bin/test_state_simulation.rs"

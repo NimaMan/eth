@@ -12,12 +12,11 @@
 use clap::Parser;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 use tokio::time;
-use tracing::{info, debug, error, warn, Level};
+use tracing::{info, error, Level};
 use std::collections::HashMap;
 use ethers::types::H256;
-use serde_json;
+use revm_primitives::alloy_primitives::{Address, keccak256};
 
 use mempool_processor::mempool_processor::fetcher::{MempoolFetcher, FetchMode};
 use mempool_processor::mempool_processor::types::TransactionView;
@@ -83,8 +82,35 @@ struct Args {
     verbose: bool,
     
     /// Log file path
-    #[arg(long, default_value = "logs/scam_detection_service.log")]
+    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/scam_detection_service.log")]
     log_file: String,
+}
+
+/// Ethereum address checksum utility
+/// Converts an address to EIP-55 checksummed format to match Python's Web3.to_checksum_address()
+fn to_checksum_address(address: Address) -> String {
+    let addr_hex = hex::encode(address.as_slice());
+    let hash = keccak256(addr_hex.as_bytes());
+    let hash_hex = hex::encode(hash.as_slice());
+    
+    let mut result = String::with_capacity(42);
+    result.push_str("0x");
+    
+    for (i, c) in addr_hex.chars().enumerate() {
+        if c.is_ascii_digit() {
+            result.push(c);
+        } else {
+            // Check if the corresponding hash character is >= 8
+            let hash_char = hash_hex.chars().nth(i).unwrap_or('0');
+            if hash_char >= '8' {
+                result.push(c.to_ascii_uppercase());
+            } else {
+                result.push(c.to_ascii_lowercase());
+            }
+        }
+    }
+    
+    result
 }
 
 #[tokio::main]
@@ -92,13 +118,13 @@ async fn main() -> eyre::Result<()> {
     // Parse command line arguments
     let args = Args::parse();
     
-    // Configure logging with a higher default level to reduce noise
-    // Only show warnings and errors by default, even in verbose mode
-    let log_level = if args.verbose { Level::WARN } else { Level::ERROR };
+    // Configure logging - use INFO level to see scam detection logs
+    let log_level = if args.verbose { Level::DEBUG } else { Level::WARN };
     
     // Create log directory if it doesn't exist
     if let Some(log_dir) = std::path::Path::new(&args.log_file).parent() {
         std::fs::create_dir_all(log_dir)?;
+        println!("Created log directory: {:?}", log_dir);
     }
     
     // Configure logging to file
@@ -107,11 +133,44 @@ async fn main() -> eyre::Result<()> {
         std::path::Path::new(&args.log_file).file_name().unwrap_or(std::ffi::OsStr::new("scam_detection_service.log"))
     );
     
-    // Use a custom filter that shows all levels for database operations
-    // but restricts other modules to the configured level
-    tracing_subscriber::fmt()
-        .with_max_level(log_level)
-        .with_writer(file_appender)
+    // Use a custom filter that shows important logs but suppresses noisy external crates
+    use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
+    
+    let filter = if args.verbose {
+        // Verbose mode: show everything
+        EnvFilter::from_default_env()
+            .add_directive("mempool_processor=debug".parse()?)
+            .add_directive("scam_detection_service=debug".parse()?)
+    } else {
+        // Production mode: only show important logs
+        EnvFilter::from_default_env()
+            .add_directive("mempool_processor=info".parse()?)
+            .add_directive("scam_detection_service=info".parse()?)
+            .add_directive("hyper=warn".parse()?)
+            .add_directive("tokio_postgres=warn".parse()?)
+            .add_directive("h2=warn".parse()?)
+            .add_directive("tower=warn".parse()?)
+            .add_directive("reqwest=warn".parse()?)
+    };
+    
+    // Custom timer that uses local time to match Python logs
+    struct LocalTimer;
+    
+    impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+        fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+            let now = chrono::Local::now();
+            write!(w, "{}", now.format("%Y-%m-%d %H:%M:%S"))
+        }
+    }
+    
+    tracing_subscriber::registry()
+        .with(fmt::layer()
+            .with_writer(file_appender)
+            .with_ansi(false)  // Disable ANSI color codes in log files
+            .with_target(false)  // Don't show the target module in logs for cleaner output
+            .with_timer(LocalTimer)  // Use local time to match Python logs
+        )
+        .with(filter)
         .init();
     
     // Log startup message
@@ -128,14 +187,14 @@ async fn main() -> eyre::Result<()> {
     // Get the pool cache from the subscriber
     let pool_cache = pool_subscriber.get_pool_cache();
     
-    // Initialize fetcher for mempool transactions
+    // Initialize fetcher for mempool transactions optimized for real-time scam detection
     info!("Initializing mempool transaction fetcher...");
     let fetcher = MempoolFetcher::with_options(
         &args.eth_rpc_url,
         5000, // cache size
         true, // use batch requests
-        100,  // max batch size
-        1000, // timeout ms
+        50,   // max batch size - reduced for faster response
+        1000, // timeout ms - optimized for 1-second real-time detection
         FetchMode::RpcBatch
     )?;
     
@@ -201,11 +260,9 @@ async fn main() -> eyre::Result<()> {
         match fetcher.get_transactions().await {
             Ok(transactions) => {
                 if !transactions.is_empty() {
-                    info!("Processing {} new transactions", transactions.len());
-                    
                     for tx in &transactions {
                         // Process each transaction
-                        process_transaction(
+                        let scams_found = process_transaction(
                             tx, 
                             &mut tracker, 
                             &mut state_cache, 
@@ -215,6 +272,7 @@ async fn main() -> eyre::Result<()> {
                         ).await;
                         
                         total_txs_processed += 1;
+                        total_scams_detected += scams_found;
                     }
                 }
             },
@@ -227,24 +285,22 @@ async fn main() -> eyre::Result<()> {
         // Check if it's time to print stats
         let elapsed = last_stats_time.elapsed();
         if elapsed >= Duration::from_secs(args.stats_interval_seconds) {
-            // Count known pools in the cache
-            let mut pools_count = 0;
+            // Get performance metrics from fetcher
+            let (success_rate, current_timeout, batch_size) = fetcher.get_performance_metrics();
             
-            // We can iterate through all keys in the pool cache, but that might be expensive
-            // For stats, just log that we're monitoring pools without an exact count
-            
-            info!("Stats: Processed {} transactions, Detected {} scams, Pool monitoring active",
+            info!("Stats: {} transactions processed, {} scams detected", 
                  total_txs_processed, total_scams_detected);
-            
+            info!("Fetcher performance: {:.2}% success rate, {}ms timeout, {} batch size", 
+                 success_rate * 100.0, current_timeout, batch_size);
             last_stats_time = Instant::now();
         }
         
-        // Small delay to prevent tight loops
-        time::sleep(Duration::from_millis(100)).await;
+        // Small delay to prevent tight loops (reduced for real-time scam detection)
+        time::sleep(Duration::from_millis(50)).await;
     }
 }
 
-// Process a single transaction
+// Process a single transaction and return number of scams detected
 async fn process_transaction(
     tx: &TransactionView,
     tracker: &mut StateDiffTracker,
@@ -252,9 +308,8 @@ async fn process_transaction(
     service: &ScamDetectionService,
     db_logger: &Arc<DbLogger>,
     pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
-) {
+) -> usize {
     let tx_hash_hex = hex::encode(&tx.hash);
-    debug!("Processing transaction: {}", tx_hash_hex);
     
     // Simulate the transaction
     let mut hash_bytes = [0u8; 32];
@@ -265,8 +320,6 @@ async fn process_transaction(
         // Simulate the transaction to get state changes
         match tracker.simulate_transaction(tx).await {
             Ok(Some(changes)) => {
-                debug!("Transaction simulation successful with {} state changes", changes.len());
-                
                 // Add to state cache
                 state_cache.add_transaction(tx_hash, tx.clone(), changes.clone());
                 
@@ -278,37 +331,34 @@ async fn process_transaction(
                     match service.process_transaction(sim_result).await {
                         Ok(alerts) => {
                             if !alerts.is_empty() {
-                                // Log when an alert is detected (keeping this visible)
-                                info!("Detected {} potential scams in transaction {}", 
-                                    alerts.len(), tx_hash_hex);
+                                // Only log urgent scam alerts
+                                info!("🚨 SCAM DETECTED: {} alerts in tx {}", alerts.len(), tx_hash_hex);
                                 
-                                // Log details about detected alerts (important DB writes)
-                                for (i, alert) in alerts.iter().enumerate() {
-                                    info!("Alert {}: Pool {} would be depleted to {} ETH (current: {} ETH)", 
-                                        i+1, 
+                                for alert in &alerts {
+                                    info!("  Pool {} depleted: {} → {} ETH", 
                                         alert.pool_address, 
-                                        alert.simulated_eth_reserve,
-                                        alert.current_eth_reserve);
+                                        alert.current_eth_reserve,
+                                        alert.simulated_eth_reserve);
                                 }
+                                return alerts.len();
                             }
                         },
                         Err(e) => {
-                            // Keep error logging visible
-                            error!("Error processing transaction for scam detection: {}", e);
+                            error!("Scam detection error: {}", e);
                         }
                     }
                 }
             },
             Ok(None) => {
-                debug!("Transaction {} simulation produced no state changes", tx_hash_hex);
+                // No state changes - silent
             },
-            Err(e) => {
-                error!("Error simulating transaction {}: {}", tx_hash_hex, e);
+            Err(_) => {
+                // Simulation failed - silent (these are common)
             }
         }
-    } else {
-        warn!("Invalid transaction hash length: {}", tx.hash.len());
     }
+    
+    0 // No scams detected
 }
 
 // Helper function to prepare a simulation result from transaction changes
@@ -330,8 +380,12 @@ fn prepare_simulation_result(
             continue;
         }
         
-        // Check if this is a known pool
-        let addr_str = format!("{:?}", change.address);
+        // Format address properly - use checksummed format to match Python
+        // Convert H160 to Address for checksum function
+        let address_bytes = change.address.as_bytes();
+        let alloy_address = Address::from_slice(address_bytes);
+        let addr_str = to_checksum_address(alloy_address);
+        
         if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
             let current_eth = pool_state.eth_reserve;
             let simulated_eth = current_eth + eth_delta;
@@ -352,7 +406,7 @@ fn prepare_simulation_result(
     // If we have affected pools, create a simulation result
     if !affected_pools.is_empty() {
         let from_addr = if !tx.from.is_empty() {
-            format!("{:?}", tx.from)
+            format!("0x{}", hex::encode(&tx.from))
         } else {
             "unknown".to_string()
         };

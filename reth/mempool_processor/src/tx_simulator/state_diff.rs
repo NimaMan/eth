@@ -23,7 +23,6 @@ use serde::{Serialize, Deserialize};
 use std::path::Path;
 use std::fs;
 use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
-use std::convert::Infallible;
 
 /// Represents a state change for an Ethereum address
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,8 +124,8 @@ impl StateDiffTracker {
         }
     }
     
-    /// Simulate a transaction and extract state changes
-    pub async fn simulate_transaction(&mut self, tx: &TransactionView) -> Result<Option<Vec<StateChange>>> {
+    /// Simulate a transaction and extract ETH balance changes (Python-compatible)
+    pub async fn simulate_transaction(&mut self, tx: &TransactionView) -> Result<Option<HashMap<String, crate::tx_simulator::MempoolStateDiff>>> {
         // Skip if no destination
         if tx.to.is_none() {
             return Ok(None);
@@ -152,20 +151,7 @@ impl StateDiffTracker {
             H256::from(hash_array)
         };
         
-        // Check if we already have this transaction in cache
-        if let Some(ref cache) = self.state_cache {
-            // Updated to handle potential error from get_state_change
-            match cache.get_state_change(tx_hash) {
-                Ok(Some(change)) => {
-                    debug!("Using cached state diff for tx: {}", hex::encode(tx_hash.as_bytes()));
-                    return Ok(Some(vec![change]));
-                }
-                Ok(None) => { /* Not in cache, proceed to simulation */ }
-                Err(e) => {
-                    warn!("Error retrieving from cache for tx {}: {}. Proceeding with simulation.", hex::encode(tx_hash.as_bytes()), e);
-                }
-            }
-        }
+        // Skip cache for now - we need to return Python-compatible format
         
         debug!("Simulating transaction: {}", hex::encode(tx_hash.as_bytes()));
         
@@ -224,12 +210,15 @@ impl StateDiffTracker {
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
             Err(e) => {
-                error!("EVM transaction error for tx {}: {:?}", hex::encode(tx_hash.as_bytes()), e);
+                // These errors are common in mempool simulation since transactions
+                // may depend on state changes from other pending transactions
+                debug!("EVM simulation failed for tx {} (expected for mempool): {:?}", hex::encode(tx_hash.as_bytes()), e);
                 return Ok(None); 
             }
         };
         
-        let mut state_changes_vec = Vec::new();
+        // Extract ETH balance changes in Python-compatible format
+        let mut eth_balance_changes = HashMap::new();
         
         match result {
             ExecutionResult::Success { gas_used, logs, .. } => {
@@ -241,76 +230,42 @@ impl StateDiffTracker {
                     
                     let balance_before = state_before.get(&eth_addr).cloned().unwrap_or_default();
                     
-                    let change_val = if balance_after > balance_before {
-                        (balance_after - balance_before).as_u128() as i128
-                    } else {
-                        -((balance_before - balance_after).as_u128() as i128)
-                    };
-
-                    if change_val != 0 {
-                        let eth_value = wei_to_eth(if change_val > 0 {
-                            U256::from(change_val as u128)
-                        } else {
-                            U256::from((-change_val) as u128)
-                        }) * if change_val < 0 { -1.0 } else { 1.0 };
+                    // Only include addresses with balance changes
+                    if balance_after != balance_before {
+                        let balance_before_eth = wei_to_eth(balance_before);
+                        let balance_after_eth = wei_to_eth(balance_after);
+                        let change_eth = balance_after_eth - balance_before_eth;
                         
-                        let mut storage_changes = HashMap::new();
+                        // Convert to checksum address like Python
+                        let checksum_address = to_checksum_address(Address::from_slice(eth_addr.as_bytes()));
                         
-                        // Extract storage changes if available
-                        // In revm 19.7.0, storage is a HashMap directly, not an Option<HashMap>
-                        if !account_state.storage.is_empty() {
-                            for (slot, val) in &account_state.storage {
-                                let slot_h256 = H256::from_slice(&slot.to_be_bytes::<32>());
-                                let original_h256 = H256::from_slice(&val.original_value.to_be_bytes::<32>());
-                                let present_h256 = H256::from_slice(&val.present_value.to_be_bytes::<32>());
-                                
-                                if original_h256 != present_h256 {
-                                    storage_changes.insert(slot_h256, (original_h256, present_h256));
-                                }
-                            }
-                        }
-                        
-                        // Create a state change record
-                        let change = StateChange {
-                            address: eth_addr,
-                            balance_before,
-                            balance_after,
-                            balance_change: change_val,
-                            eth_value,
-                            storage_changes,
-                            timestamp: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
+                        let mempool_diff = crate::tx_simulator::MempoolStateDiff {
+                            before: Some(balance_before_eth),
+                            after: Some(balance_after_eth),
+                            change: change_eth,
                         };
                         
-                        state_changes_vec.push(change.clone());
+                        debug!("ETH balance change for {}: {:.6} -> {:.6} (change: {:.6})", 
+                               &checksum_address, balance_before_eth, balance_after_eth, change_eth);
                         
-                        // Cache the state change if caching is enabled
-                        if let Some(ref cache) = self.state_cache {
-                            if let Err(e) = cache.store_state_change(tx_hash, &change) {
-                                warn!("Failed to cache state change for tx {}: {}", hex::encode(tx_hash.as_bytes()), e);
-                            }
-                        }
+                        eth_balance_changes.insert(checksum_address, mempool_diff);
                     }
-                }
-                
-                if !state_changes_vec.is_empty() {
-                    self.recent_changes.insert(tx_hash, state_changes_vec.clone());
                 }
             },
             ExecutionResult::Revert { gas_used, output } => {
-                warn!("Tx {} reverted. GasUsed: {}. Output: {:?}", hex::encode(tx_hash.as_bytes()), gas_used, output);
+                debug!("Tx {} reverted. GasUsed: {}. Output: {:?}", hex::encode(tx_hash.as_bytes()), gas_used, output);
+                return Ok(None); // No state changes for reverted transactions
             },
             ExecutionResult::Halt { reason, gas_used } => {
-                warn!("Tx {} halted: {:?}. GasUsed: {}", hex::encode(tx_hash.as_bytes()), reason, gas_used);
+                debug!("Tx {} halted: {:?}. GasUsed: {}", hex::encode(tx_hash.as_bytes()), reason, gas_used);
+                return Ok(None); // No state changes for halted transactions
             },
         }
         
-        // Now commit the state changes to the database
+        // Commit the state changes to the database
         evm.db_mut().commit(state);
         
-        Ok(if state_changes_vec.is_empty() { None } else { Some(state_changes_vec) })
+        Ok(if eth_balance_changes.is_empty() { None } else { Some(eth_balance_changes) })
     }
     
     /// Get recent state changes
@@ -341,4 +296,33 @@ pub fn u256_to_i128(value: U256) -> i128 {
 /// Helper to convert wei to ETH
 pub fn wei_to_eth(wei: U256) -> f64 {
     wei.as_u128() as f64 / 1_000_000_000_000_000_000f64
+}
+
+/// Convert address to EIP-55 checksum format (matches Python's Web3.to_checksum_address)
+pub fn to_checksum_address(address: Address) -> String {
+    use revm_primitives::alloy_primitives::keccak256;
+    
+    let addr_hex = hex::encode(address.as_slice());
+    let hash = keccak256(addr_hex.as_bytes());
+    
+    let mut result = String::with_capacity(42);
+    result.push_str("0x");
+    
+    for (i, ch) in addr_hex.chars().enumerate() {
+        if ch.is_ascii_digit() {
+            result.push(ch);
+        } else {
+            // Check if the corresponding hash byte's high nibble is >= 8
+            let hash_byte = hash[i / 2];
+            let nibble = if i % 2 == 0 { hash_byte >> 4 } else { hash_byte & 0xf };
+            
+            if nibble >= 8 {
+                result.push(ch.to_ascii_uppercase());
+            } else {
+                result.push(ch.to_ascii_lowercase());
+            }
+        }
+    }
+    
+    result
 } 

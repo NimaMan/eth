@@ -567,8 +567,8 @@ fn prepare_simulation_result(
             continue;
         }
         
-        // Check if this is a known pool
-        let addr_str = format!("{:?}", change.address);
+        // Use consistent address format - same as main service
+        let addr_str = format!("0x{:040x}", change.address);
         if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
             let current_eth = pool_state.eth_reserve;
             let simulated_eth = current_eth + eth_delta;
@@ -589,7 +589,7 @@ fn prepare_simulation_result(
     // If we have affected pools, create a simulation result
     if !affected_pools.is_empty() {
         let from_addr = if !tx.from.is_empty() {
-            format!("{:?}", tx.from)
+            format!("0x{}", hex::encode(&tx.from))
         } else {
             "unknown".to_string()
         };

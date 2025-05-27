@@ -10,7 +10,7 @@
 use crate::mempool_processor::types::*;
 use ethers::prelude::*;
 use eyre::Result;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use std::collections::HashMap;
 use std::sync::Arc;
 use hex::encode as hex_encode;

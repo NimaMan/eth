@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, debug, error, warn};
+use tracing::error;
 
 use crate::mempool_processor::db_logger::DbLogger;
 use crate::pool_subscriber::cache::PoolStateCache;
@@ -97,8 +97,6 @@ impl ScamDetectionService {
             stats.transactions_analyzed += 1;
         }
         
-        debug!("Processing transaction {} for scam detection", simulation.tx_hash);
-        
         // Run the scam detection analysis
         let alerts = self.engine.analyze_transaction(simulation);
         
@@ -136,11 +134,6 @@ impl ScamDetectionService {
     
     /// Log a scam alert to the database
     async fn log_alert_to_db(&self, alert: &ScamAlert) -> Result<(), Box<dyn std::error::Error>> {
-        info!(
-            "Logging scam alert for tx {}, from {}, pool {}, token {}", 
-            alert.tx_hash, alert.from_address, alert.pool_address, alert.token_address
-        );
-        
         // Convert detection block to i64 for PostgreSQL compatibility
         let prediction_block_number = alert.detection_block as i64;
         
@@ -154,7 +147,6 @@ impl ScamDetectionService {
             alert.eth_threshold,
         ).await?;
         
-        debug!("Successfully logged scam alert to database");
         Ok(())
     }
 }

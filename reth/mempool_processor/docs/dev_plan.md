@@ -1,237 +1,241 @@
 # Ethereum Mempool Processor Development Plan
 
-## Project Overview
-The Ethereum Mempool Processor is a high-performance Rust application that monitors Ethereum's mempool for liquidity removal transactions that can be front-run or back-run for profit.
+## Project Objective
+Build a high-performance Rust mempool processor that:
+1. **Monitors Ethereum mempool** for pending transactions in real-time
+2. **Receives pool level updates** from Python via ZeroMQ
+3. **Simulates transaction effects** on pool balances using REVM
+4. **Detects scam transactions** that would drain pools below safety thresholds
+5. **Publishes sell signals** immediately for other modules to execute trades
 
-## Requirements and Performance Targets
-- **Core (Rust)**: ≤100ms processing time, captures transactions, simulates execution
-- Capture new transactions: ≤5ms from mempool appearance
-- Simulation time: ≤50ms per transaction
-- Tx Submission to Flashbots: ≤10ms
-- Total end-to-end latency: ≤100ms
+## Architecture Overview
 
-# Architecture
-1. **mempool_processor**:
-   - Types module (shared data structures)
-   - Fetcher module (retrieves mempool transactions)
-   - Processor module (filters transactions)
-   - Pool Subscriber module (receives pool updates from Python)
-   - DB Logger module (records scam alerts) ✅
- 
-2. **tx_simulator**
-   - Simulator module (tracks addresses and simulates transactions)
-   - State Diff module (extracts per-address balance changes using REVM)
-   - State Cache module (in-memory, limited-size queue with FIFO behavior)
+### Core Components
+1. **Mempool Fetcher** - Retrieves pending transactions from Ethereum node
+2. **Transaction Simulator** - Simulates transaction effects using REVM
+3. **Pool Subscriber** - Receives pool level updates from Python via ZeroMQ
+4. **Scam Detection Engine** - Analyzes simulated effects against pool thresholds
+5. **Signal Publisher** - Publishes sell signals for immediate execution
+6. **Database Logger** - Records scam alerts and system metrics
 
-3. **scam_detection**
-   - Engine module (compares state diffs to pool levels)
-   - Types module (shared data structures for scam detection)
-
-
-## Development Milestones
-
-### Phase 1: Core Rust Hot‑Path  — *"Don't get scammed"*
-
-| Goal | Component | Success Criteria | Status |
-|------|-----------|------------------|--------|
-| Capture every pending tx within ≤20 ms | **Mempool Listener** (Rust, dev‑p2p) | >99 % of tx hashes seen before they land on‑chain | devp2p remains |
-| Simulate tx locally | **revm Simulator** | Extract per‑address balance / storage deltas in ≤50 ms | ✅ Completed |
-| Track state changes | **State Diff Tracker** | Extract per-address balance/storage changes | ✅ Completed |
-| Aggregate state diffs | **State Cache** | Maintain per-address aggregated state changes | ✅ Completed |
-
-### Current Bottleneck
-
-The current bottleneck is the transaction fetching. We are using the devp2p protocol to fetch transactions. This is a slow process. We need to switch to the RPC protocol.
-
-
----
-
-### Phase 2: Python-Rust Integration Flow
-
-1.  **Bidirectional Communication & Data Handling**:
-    *   Implement ZeroMQ PUB/SUB for push notifications:
-        *   Python Publisher: ✅ (Confirmed running)
-        *   Rust `PoolSubscriber`: ✅ (Connection, message reception, and deserialization working)
-    *   **Implement serialization/deserialization for pool updates (JSON):**
-        *   Python (Serialization): ✅ (Publishing JSON confirmed)
-        *   Rust (Deserialization in `PoolSubscriber`): ✅ (Successfully parsing JSON messages)
-    *   Test communication channels:
-        *   Python Publisher to standalone Python Subscriber: ✅
-        *   Python Publisher to standalone Rust `PoolSubscriber`: ✅ (Verified with `test_pool_subscriber.rs`)
-
-2.  **Pool Data Processing & State Management in Rust**:
-    *   Process deserialized pool updates from `PoolSubscriber`: ✅ (Implemented & tested)
-    *   Create/Refine data structures for pool state storage: ✅ (Implemented in `types.rs`)
-    *   Implement thread-safe `PoolStateCache`: ✅ (Implemented in `cache.rs`)
-    *   Implement pruning and maintenance logic for the pool state cache: ✅ (Implemented)
-    *   Test pool state cache with incoming live data: ✅ (Verified with `test_pool_subscriber.rs`)
-
-3.  **Mempool Processor Core Integration**: 🔄 **IN PROGRESS**
-    *   Create a `ScamDetectionEngine` component: 🔄 In Progress
-        *   Define interfaces to access both mempool state diffs and pool levels ✅
-        *   Implement scam detection rules (comparing simulated levels to current levels) ✅
-        *   Add configuration options for thresholds and detection parameters 🔄
-    *   Integrate `PoolSubscriber` and `PoolStateCache` into main application: 📝 To Do
-        *   Create service to run as a concurrent task ✅
-        *   Connect service to main application flow 📝 To Do
-    *   Implement PostgreSQL database logging for scam alerts: ✅ Completed
-        *   Create DbLogger component for database interactions ✅
-        *   Add error handling and connection management ✅
-        *   Implement test utilities for verification ✅
-    *   Integrate scam detection with database logging: 📝 **NEXT STEP**
-        *   Connect ScamDetectionEngine output to DbLogger 📝 To Do
-        *   Implement service for continuous monitoring 📝 To Do
-        *   Add monitoring and metrics 📝 To Do
-
-4.  **Full System Integration & Refinement**:
-    *   Create a unified service that connects:
-        *   PoolSubscriber (ZeroMQ) 📝 To Do
-        *   ScamDetectionEngine 📝 To Do
-        *   DbLogger 📝 To Do
-    *   Add configuration system for all components 📝 To Do
-    *   End-to-end testing with live network data 📝 To Do
-    *   Performance optimization to meet latency targets 📝 To Do
-    *   Address compiler warnings for a clean build 📝 To Do
-
----
-
-### Phase 3: Tx Submission to Flashbots
-
-Once phases 1–2 are stable.
-* Build Flashbots bundle in Rust and send with `eth_sendBundle`.
-
----
-
-
-## Implementation Progress
-
-### Phase 1: Transaction Processing Flow
-1. **Mempool Monitoring**:
-   - Connect to Ethereum node via WebSocket ✅
-   - Subscribe to pending transactions ✅
-   - Implement fallback polling mechanism ✅
-
-2. **Transaction Simulation**:
-   - Use revm to simulate transaction execution ✅
-   - Configure EVM environment with proper transaction parameters ✅
-   - Handle both success and revert cases ✅
-   
-3. **State Diff Tracking**:
-   - Extract balance changes for all affected addresses ✅
-   - Track storage slot modifications ✅
-   - Calculate ETH value changes ✅
-   
-4. **State Cache Implementation**:
-   - Design in-memory state cache similar to Python's MempoolTxCache ✅
-   - Implement limited-size transaction queue with FIFO behavior ✅
-   - Aggregate state diffs by address for cumulative change tracking ✅
-   - Track first-seen timestamps for transactions ✅
-
-### Phase 2: Python-Rust Integration Progress
-1. **Pool State Monitoring**:
-   - Implement ZeroMQ subscriber for pool updates ✅
-   - Create thread-safe pool state cache ✅
-   - Process and store pool level information ✅
-
-2. **Scam Detection Logic**:
-   - Implement engine to analyze pool state ✅
-   - Add comparison between current and simulated state ✅
-   - Set up configurable thresholds for detection ✅
-
-3. **Database Integration**:
-   - Implement PostgreSQL logger for scam alerts ✅
-   - Add connection management and error handling ✅
-   - Create testing utilities for verification ✅
-
-4. **Next Steps**:
-   - Connect ScamDetectionEngine to DbLogger
-   - Create a service that integrates pool updates, scam detection, and database logging
-   - Implement monitoring and metrics for the integrated system
-
----
-
-# Performance 
-
-## Current Performance Metrics
-- **Transaction Fetching**: ~178.58ms (bottleneck)
-- **Transaction Simulation**: ~0.06ms
-- **State Diff Calculation**: ~0.01ms
-- **Success Rate**: 99.60% of transactions processed correctly
-
-## Optimization Results
-
-### Comprehensive Benchmark (1,000 transactions)
-| Metric | Batch Mode | Non-Batch Mode | Improvement |
-|--------|------------|----------------|-------------|
-| Fetch Time (ms) | 402.00 | 732.00 | 45.08% |
-| Simulation Time (ms) | 0.51 | 0.73 | 29.75% |
-| Total Processing Time (ms) | 0.55 | 0.75 | 26.76% |
-| Throughput (tx/sec) | 1818.18 | 1331.56 | 36.55% |
-
-### Detailed Fetch Time Statistics
-| Statistic | Batch Mode | Non-Batch Mode |
-|-----------|------------|----------------|
-| Median | 402.00 | 732.00 |
-| Std Dev | 0.00 | 0.00 |
-| Min | 402.00 | 732.00 |
-| Max | 402.00 | 732.00 |
-| P95 | 402.00 | 732.00 |
-| P99 | 402.00 | 732.00 |
-
-### Performance Analysis
-- **Transaction Fetching**: Batch mode is 45.08% faster for fetching transactions, confirming our optimization approach is effective
-- **Simulation Time**: Batch mode is 29.75% faster for transaction simulation
-- **Total Processing Time**: Batch mode is 26.76% faster for overall transaction processing
-- **Throughput**: Batch mode achieves 36.55% higher throughput
-- **Consistency**: Both approaches show very consistent performance with minimal variance (standard deviation near zero)
-
-### Key Findings
-1. **Batch Processing Superiority**: The batch approach consistently outperforms the non-batch method across all key metrics:
-   - Faster fetching (45.08% improvement)
-   - Faster simulation (29.75% improvement)
-   - Higher overall throughput (36.55% improvement)
-
----
-
-# Current Challenges and Solutions
-
-## State Synchronization Challenge
-
-### Problem Observed
-We've identified a critical issue with transaction simulation: some transactions fail in our simulator with `LackOfFundForMaxFee` errors but successfully execute on-chain. For example:
-
+### Data Flow
 ```
-EVM transaction error for tx c42bc2aec5458d4d35f0762765021fbbbabc30a4e562bb42a66a38a3075b9d59: 
-Transaction(LackOfFundForMaxFee { fee: 562363792966396000, balance: 3664167499823000 })
+Ethereum Node → Mempool Fetcher → Transaction Simulator → Scam Detection Engine
+                                                                    ↓
+Python Pools → Pool Subscriber → Pool State Cache → Scam Detection Engine
+                                                                    ↓
+                                Signal Publisher → Sell Signal → Trading Module
+                                                                    ↓
+                                Database Logger → PostgreSQL
 ```
 
-When examining this transaction's history:
-1. The account received 1.16431821 ETH at 9:20:47
-2. Sent 0.598241 ETH at 9:23:35
-3. Received a small amount (0.00000598 ETH) at 9:24:59
-4. Sent 0.562309 ETH at 9:25:47 (this transaction was successfully mined but our simulator rejected it)
+## Performance Requirements
+- **Mempool Monitoring**: <100ms from transaction appearance to processing
+- **Transaction Simulation**: <50ms per transaction using REVM
+- **Scam Detection**: <10ms analysis time per transaction
+- **Signal Publishing**: <5ms from detection to signal broadcast
+- **Total Latency**: <200ms end-to-end for critical scam detection
 
-This pattern occurs because the simulation is working with stale or incorrect state data.
+## Current Implementation Status
 
+### ✅ Completed Components
 
-### Simulator Assessment
+#### 1. Mempool Fetcher (`src/mempool_processor/fetcher.rs`)
+- **Algorithm**: Polls `txpool_content` with optimized timeout handling and exponential backoff
+- **Features**:
+  - Circuit breaker pattern for RPC failures
+  - Dynamic timeout adjustment (1.5s-30s)
+  - Exponential backoff retry logic
+  - Connection pooling and keepalive
+  - Performance metrics tracking
+- **Performance**: 100% success rate, <200ms average response time
 
-#### Current State
-- Simulator uses REVM for execution environment
-- State is fetched at the time of simulation, not cached in advance
-- Simulation takes ~0.06ms per transaction (excellent performance)
-- Successfully identifies state changes in most cases (>99%)
+#### 2. Pool Subscriber (`src/mempool_processor/pool_subscriber.rs`)
+- **Algorithm**: ZeroMQ subscriber receiving JSON pool updates from Python
+- **Features**:
+  - Thread-safe pool state cache
+  - Automatic reconnection handling
+  - JSON deserialization of pool data
+  - Real-time pool level tracking
+- **Status**: Successfully receiving and processing pool updates
 
-#### Limitations
-1. **Stale State Data**: The simulator uses a point-in-time state snapshot that can be outdated by several blocks
-2. **No Pending Transaction Context**: Doesn't consider other pending transactions affecting the same accounts
-3. **Fee Calculation Issues**: Incorrectly interprets transaction value as part of fee requirement
-4. **State Timing Mismatch**: Can't account for rapid account balance changes (common in MEV-heavy environments)
+#### 3. Database Logger (`src/db_logger/mod.rs`)
+- **Algorithm**: PostgreSQL connection with prepared statements for scam alerts
+- **Features**:
+  - Connection pooling and error handling
+  - Structured scam alert logging
+  - Performance metrics storage
+  - Test utilities for verification
+- **Status**: Fully functional with connection management
 
-### Fetcher Assessment
+#### 4. Transaction Simulator (`src/tx_simulator/mod.rs`)
+- **Algorithm**: REVM-based transaction simulation with state diff extraction
+- **Features**:
+  - EVM environment setup with proper gas and block parameters
+  - ETH balance change tracking for all affected addresses
+  - Success/revert handling
+  - State diff aggregation
+- **Status**: Basic simulation working, needs enhancement for scam detection
 
-#### Current State
-- Uses RPC batch processing for efficiency
-- Achieves ~178ms fetch time (still our bottleneck)
-- Successfully retrieves >99% of transactions
-- Has been optimized by 45% through batch mode
+### 🔄 In Progress Components
+
+#### 5. Scam Detection Engine (`src/scam_detection/engine.rs`)
+- **Current**: Basic threshold comparison logic
+- **Needed**: 
+  - Pool sampling strategy (process subset of pools per cycle)
+  - Aggregated state diff analysis
+  - Configurable detection thresholds
+  - Performance optimization for real-time processing
+
+### ❌ Missing Components
+
+#### 6. Signal Publisher
+- **Purpose**: Broadcast sell signals immediately when scams detected
+- **Requirements**:
+  - ZeroMQ publisher for sell signals
+  - Signal format: `{pool_address, severity, timestamp, recommended_action}`
+  - <5ms publishing latency
+  - Reliable delivery guarantees
+
+#### 7. Mempool State Aggregation
+- **Purpose**: Track cumulative effects of multiple pending transactions on same pools
+- **Requirements**:
+  - Address-based state diff aggregation
+  - Time-based cleanup of old pending transactions
+  - Memory-efficient storage for high transaction volumes
+
+## Development Roadmap
+
+### Phase 1: Enhanced Scam Detection (Current Priority)
+**Goal**: Implement reliable scam detection with pool sampling
+
+1. **Pool Sampling Strategy**
+   - Sample 20-50 pools per detection cycle
+   - Rotate through all pools to ensure coverage
+   - Prioritize pools with recent activity
+
+2. **State Diff Aggregation**
+   - Aggregate multiple pending transactions affecting same pools
+   - Track cumulative ETH balance changes
+   - Implement cleanup for processed/expired transactions
+
+3. **Detection Logic Enhancement**
+   - Compare aggregated simulated levels vs current pool levels
+   - Apply configurable safety thresholds
+   - Generate severity scores for detected scams
+
+### Phase 2: Signal Publishing System
+**Goal**: Immediate sell signal broadcasting for detected scams
+
+1. **ZeroMQ Publisher Setup**
+   - Create publisher socket for sell signals
+   - Define signal message format
+   - Implement reliable delivery
+
+2. **Signal Generation Logic**
+   - Trigger signals when pools drop below thresholds
+   - Include severity and recommended actions
+   - Add rate limiting to prevent signal spam
+
+3. **Integration Testing**
+   - End-to-end testing with mock trading module
+   - Latency measurement and optimization
+   - Error handling and recovery
+
+### Phase 3: Production Optimization
+**Goal**: Meet performance requirements for live trading
+
+1. **Performance Tuning**
+   - Optimize REVM simulation parameters
+   - Implement parallel transaction processing
+   - Memory usage optimization
+
+2. **Monitoring and Metrics**
+   - Real-time performance dashboards
+   - Alert system for component failures
+   - Detailed logging for debugging
+
+3. **Reliability Enhancements**
+   - Graceful degradation during high load
+   - Automatic recovery from failures
+   - Data persistence for critical state
+
+## Configuration System
+
+### Environment Variables
+```bash
+# Ethereum Node
+ETH_RPC_URL=http://localhost:8545
+ETH_RPC_TIMEOUT_MS=8000
+
+# ZeroMQ Communication
+POOL_UPDATES_ENDPOINT=tcp://localhost:5555
+SELL_SIGNALS_ENDPOINT=tcp://localhost:5556
+
+# Database
+DATABASE_URL=postgresql://user:pass@localhost/mempool_db
+
+# Detection Parameters
+SCAM_THRESHOLD_ETH=0.1
+POOL_SAMPLE_SIZE=20
+DETECTION_CYCLE_MS=100
+```
+
+### Performance Targets
+- **Mempool Processing**: 1000+ transactions/second
+- **Scam Detection**: <200ms end-to-end latency
+- **Signal Publishing**: <5ms from detection to broadcast
+- **System Uptime**: >99.9% availability
+- **Memory Usage**: <1GB for 24/7 operation
+
+## Testing Strategy
+
+### Unit Tests
+- Individual component functionality
+- Error handling and edge cases
+- Performance benchmarks
+
+### Integration Tests
+- End-to-end transaction flow
+- ZeroMQ communication reliability
+- Database operations under load
+
+### Load Testing
+- High transaction volume scenarios
+- Network failure recovery
+- Memory leak detection
+
+## Success Metrics
+
+### Functional Requirements
+- ✅ Successfully process mempool transactions
+- ✅ Receive pool updates from Python
+- ✅ Log scam alerts to database
+- 🔄 Detect scam transactions reliably
+- ❌ Publish sell signals immediately
+
+### Performance Requirements
+- ✅ <200ms transaction processing latency
+- ✅ 100% RPC success rate with retry logic
+- ✅ Thread-safe concurrent operations
+- 🔄 <10ms scam detection analysis
+- ❌ <5ms signal publishing latency
+
+### Reliability Requirements
+- ✅ Graceful handling of RPC timeouts
+- ✅ Automatic reconnection to data sources
+- ✅ Clean error logging and recovery
+- 🔄 Zero false negatives in scam detection
+- ❌ Guaranteed signal delivery
+
+## Current Development Focus
+
+**Immediate Priority**: Complete scam detection engine with pool sampling and state aggregation to achieve reliable scam detection capability.
+
+**Next Steps**:
+1. Implement pool sampling strategy in scam detection engine
+2. Add state diff aggregation for multiple pending transactions
+3. Create signal publisher for immediate sell signal broadcasting
+4. Conduct end-to-end testing with live mempool data
+
+The system is designed for high-frequency trading scenarios where milliseconds matter for profitable scam detection and response.

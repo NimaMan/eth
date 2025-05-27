@@ -13,7 +13,7 @@ use crate::tx_simulator::state_diff::StateChange;
 use ethers::prelude::*;
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 /// Maximum number of transactions to keep in the cache
 const DEFAULT_MAX_TRANSACTIONS: usize = 100_000;
