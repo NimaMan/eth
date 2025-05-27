@@ -49,6 +49,9 @@ fastrand        = "2.0"
 # PostgreSQL Client for database logging
 tokio-postgres  = "0.7"
 
+# CSV writing for performance monitoring
+csv             = "1.3"
+
 [lib]
 name = "mempool_processor"
 path = "src/lib.rs"
