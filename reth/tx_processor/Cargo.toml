@@ -1,0 +1,81 @@
+[package]
+name    = "revm_tx_simulator"
+version = "0.1.0"
+edition = "2021"
+
+# ──────────────────────────────── Binaries ────────────────────────────────
+[[bin]]
+name = "test_revm_simulation"
+path = "src/main.rs"
+
+[[bin]]
+name = "signed_tx_simulation"
+path = "src/signed_tx_simulation.rs"
+
+# ────────────────────────────── Top-level deps ────────────────────────────
+[dependencies]
+# Revm - directly path-based to use local clone
+revm = { path = "src/revm/crates/revm", default-features = false, features = ["std", "alloydb"] }
+# Direct REVM sub-crate dependencies for explicit imports (using hyphens as per package names)
+revm-primitives = { path = "src/revm/crates/primitives", default-features = false }
+revm-database = { path = "src/revm/crates/database", default-features = false }
+revm-context = { path = "src/revm/crates/context", default-features = false }
+revm-interpreter = { path = "src/revm/crates/interpreter", default-features = false }
+revm-precompile = { path = "src/revm/crates/precompile", default-features = false }
+revm-state = { path = "src/revm/crates/state", default-features = false }
+revm-database-interface = { path = "src/revm/crates/database/interface", default-features = false }
+
+# Tokio - version from revm workspace
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+
+# --- Dependencies for signed_tx_simulation based on Reth's approach ---
+reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives", default-features = false }
+# alloy-evm = { version = "0.10.0", default-features = false } # Removed, incompatible with local REVM for FromRecoveredTx
+alloy-rlp = { version = "0.3.12", default-features = false } # For TransactionSigned::decode_enveloped (though we might use ethers rlp directly)
+
+# --- Original Alloy dependencies (for main.rs and potentially still needed by revm's alloydb) ---
+alloy-sol-types = { version = "1.1.2", default-features = false, features = ["std"] }
+alloy-eips = { version = "1.0.0", default-features = false } # revm ws dep for alloy-eips is 1.0.0
+alloy-provider = { version = "1.0.6", default-features = false, features = ["reqwest"] } # revm ws dep for alloy-provider is 1.0.6
+alloy-primitives = { version = "1.1.2", default-features = false, features = ["sha3-keccak"] } # revm ws dep for alloy-primitives is 1.1.2
+alloy-consensus  = { version = "1.0.6" } # revm ws dep for alloy-consensus is 1.0.6
+alloy-rpc-client = { version = "1.0.6", features = ["reqwest"] } # revm ws dep for alloy-rpc-client is 1.0.6
+
+# Ethers-rs dependencies (for signing the transaction initially in signed_tx_simulation)
+ethers-core = "2.0.14" # Matched to reth's ethers version for better compatibility
+ethers-signers = "2.0.14" # Matched to reth's ethers version
+
+# Other utilities
+hex = "0.4.3"
+# bytes = "1.6" # Using reth_primitives::Bytes or alloy_primitives::Bytes
+chrono = "0.4" # If any dep needs it
+url = "2.5" # For alloy-provider if RPC URL parsing needed by it
+
+# Anyhow
+anyhow = "1.0.89" # From reth workspace
+
+# Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# ───────────────────────────── Patch section ──────────────────────────────
+# These lines FORCE Cargo to pick the local paths for every internal REVM
+# crate so it never falls back to crates.io.
+[patch.crates-io]
+# Paths are relative to this Cargo.toml (revm_tx_simulator/Cargo.toml)
+# These ensure that when 'revm' (the path dep) or its local sub-crates
+# try to pull their workspace deps, they resolve to these local sub-crates.
+revm-primitives  = { path = "src/revm/crates/primitives" }
+revm-interpreter = { path = "src/revm/crates/interpreter" }
+revm-context     = { path = "src/revm/crates/context" }
+revm-inspector   = { path = "src/revm/crates/inspector" }
+revm-database    = { path = "src/revm/crates/database" }
+revm-state       = { path = "src/revm/crates/state"}
+revm-bytecode    = { path = "src/revm/crates/bytecode"}
+revm-precompile  = { path = "src/revm/crates/precompile"}
+revm-handler     = { path = "src/revm/crates/handler"}
+revm-database-interface = { path = "src/revm/crates/database/interface" }
+revm-context-interface = { path = "src/revm/crates/context/interface" }
+
+# DO NOT patch reth_primitives here; its path is absolute.
+# DO NOT patch alloy-* crates here; let them come from crates.io per versions in [dependencies].
