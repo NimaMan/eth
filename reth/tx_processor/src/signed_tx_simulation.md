@@ -299,6 +299,205 @@ match result_and_state.result {
 // }
 ```
 
+## **Extracting Detailed State Differences (REVM Native Approach)**
+
+While the basic simulation provides execution status, gas, and event logs, a crucial aspect is understanding the precise state changes a transaction induces. This includes ETH balance changes, nonce increments, code updates, and storage modifications.
+
+Instead of relying solely on parsing `trace_call`'s `stateDiff` output (which is a common approach when interacting with nodes externally, as seen in the Python example `mempool_tx_state_diff_processor.py`), we can leverage our direct integration with REVM to compare state snapshots.
+
+**Objective:** Implement a mechanism to extract detailed `AccountStateDiff` by comparing the state *before* a transaction (from `AlloyDB` at block `N-1`) with the state *after* the transaction (from the `CacheDB` after `transact_commit()`).
+
+### **Core Strategy**
+
+1.  **Snapshot "Before":** The `AlloyDB` instance, initialized to fork from block `N-1`, represents the state just before the transaction executes. We need a reference to this pre-execution database state.
+2.  **Snapshot "After":** The `CacheDB` instance, after `evm.transact_commit()` has been called, contains all the changes made by the transaction.
+3.  **Diffing:** Iterate through accounts touched by the transaction (as recorded in `CacheDB.accounts`). For each account, fetch its state from the "Before" snapshot (`AlloyDB`) and compare it with the "After" snapshot (`CacheDB`) to identify changes in balance, nonce, code, and storage.
+
+### **Proposed Data Structures (in `revm_tx_simulator_lib/src/state_diff_utils.rs`)**
+
+```rust
+use std::collections::HashMap;
+use revm_primitives::{Address as RevmAddress, U256 as RevmU256, B256 as RevmB256};
+// Potentially: use revm_interpreter::instructions::host::AccountStatus; // Or a custom enum
+
+// Enum to represent the status of an account before/after.
+// This helps in identifying created/deleted accounts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountStatusInDiff {
+    NonExistent,
+    ExistedEmpty, // Existed but no code, zero nonce, zero balance (might be simplified to Existed)
+    ExistedWithState,
+    Created, // Did not exist before, exists after
+    Deleted, // Existed before, does not exist after (selfdestruct)
+}
+
+#[derive(Debug, Clone)]
+pub struct StorageSlotDiff {
+    pub old_value: RevmU256,
+    pub new_value: RevmU256,
+}
+
+#[derive(Debug, Clone)]
+pub struct AccountStateDiff {
+    pub address: RevmAddress,
+    pub balance_before: RevmU256,
+    pub balance_after: RevmU256,
+    pub nonce_before: u64,
+    pub nonce_after: u64,
+    pub code_hash_before: Option<RevmB256>, // Option to handle account creation
+    pub code_hash_after: Option<RevmB256>,  // Option to handle selfdestruct
+    pub storage_changes: HashMap<RevmU256, StorageSlotDiff>, // slot_key -> diff
+    // Optional: Add status fields if clear how to derive them reliably
+    // pub status_before: AccountStatusInDiff,
+    // pub status_after: AccountStatusInDiff, // Could reflect if it was touched, created, etc.
+    pub storage_cleared_during_tx: bool, // Indicates if SLOAD_WARM_CLEAR_コスモス was used or storage cleared
+}
+```
+
+### **State Diff Extraction Logic (Conceptual - in `state_diff_utils.rs`)**
+
+```rust
+use revm::database::{DatabaseRef, DatabaseCommit, CacheDB, AlloyDB};
+use revm_primitives::{AccountInfo, Address as RevmAddress, U256 as RevmU256, KECCAK_EMPTY};
+use std::sync::Arc;
+use alloy_provider::DynProvider as AlloyDynProvider;
+use alloy_network::Ethereum as AlloyEthereum;
+// ... other necessary imports ...
+// use super::SimCacheDB; // Assuming SimCacheDB is defined in lib.rs or simulation_core.rs
+
+// Assuming SimCacheDB is CacheDB<revm::database::WrapDatabaseAsync<AlloyDB<AlloyEthereum, Arc<AlloyDynProvider<AlloyEthereum>>>>
+// Or more generally, CacheDB<impl DatabaseRef>
+pub type SimCacheDB = CacheDB<revm::database::WrapDatabaseAsync<AlloyDB<AlloyEthereum, Arc<AlloyDynProvider<AlloyEthereum>>>>>;
+
+
+pub async fn extract_state_diffs_from_simulation(
+    db_before_tx: &AlloyDB<AlloyEthereum, Arc<AlloyDynProvider<AlloyEthereum>>>, // State @ N-1
+    final_evm_db: &SimCacheDB,                                          // State after tx, from EVM's CacheDB
+    // Optional: tx_caller: RevmAddress // To ensure caller's pre-state is fetched if only balance/nonce changed
+) -> Result<Vec<AccountStateDiff>, anyhow::Error> {
+    let mut diffs: Vec<AccountStateDiff> = Vec::new();
+
+    // Iterate through accounts present in the final CacheDB state
+    for (address, final_account_data) in final_evm_db.accounts.iter() {
+        // 1. Fetch "Before" State from AlloyDB (at N-1)
+        // Note: basic_ref is on DatabaseRef, AlloyDB needs to be accessed correctly.
+        // If AlloyDB is directly DatabaseRef, then it's fine.
+        // If it's wrapped, you might need to access inner.
+        let initial_account_info_opt: Option<AccountInfo> = db_before_tx.basic_ref(*address).await?;
+
+        let balance_before = initial_account_info_opt.as_ref().map_or(RevmU256::ZERO, |acc| acc.balance);
+        let nonce_before = initial_account_info_opt.as_ref().map_or(0, |acc| acc.nonce);
+        let code_hash_before = initial_account_info_opt.as_ref()
+            .map_or(None, |acc| if acc.code_hash == KECCAK_EMPTY { None } else { Some(acc.code_hash) });
+
+        // 2. Get "After" State from final_account_data (from CacheDB)
+        let balance_after = final_account_data.info.balance;
+        let nonce_after = final_account_data.info.nonce;
+        let code_hash_after = if final_account_data.info.code_hash == KECCAK_EMPTY { None } else { Some(final_account_data.info.code_hash) };
+        
+        let mut storage_changes_map = HashMap::new();
+        // `final_account_data.storage` holds the *final* state of storage slots that were changed or loaded.
+        // `StorageSlot.previous_or_original_value` is key here.
+        for (slot_key, storage_slot_data) in final_account_data.storage.iter() {
+            let old_value = storage_slot_data.previous_or_original_value;
+            let new_value = storage_slot_data.present_value;
+
+            if old_value != new_value {
+                storage_changes_map.insert(*slot_key, StorageSlotDiff { old_value, new_value });
+            }
+        }
+        
+        // Only add diff if there's a meaningful change
+        if balance_before != balance_after ||
+           nonce_before != nonce_after ||
+           code_hash_before != code_hash_after ||
+           !storage_changes_map.is_empty() ||
+           final_account_data.storage_cleared 
+        {
+            diffs.push(AccountStateDiff {
+                address: *address,
+                balance_before,
+                balance_after,
+                nonce_before,
+                nonce_after,
+                code_hash_before,
+                code_hash_after,
+                storage_changes: storage_changes_map,
+                storage_cleared_during_tx: final_account_data.storage_cleared,
+            });
+        }
+    }
+    Ok(diffs)
+}
+```
+
+### **Integration into a New Example (`simulate_and_extract_diffs.rs`)**
+
+A new example file will be created: `rust/revm_tx_simulator/examples/simulate_and_extract_diffs.rs`.
+It will largely mirror `simulate_mempool_tx.rs` for fetching transactions and setting up the REVM simulation.
+
+**Key Differences in `simulate_and_extract_diffs.rs`:**
+
+1.  **Preserve Pre-State `AlloyDB`:**
+    *   Before creating the `CacheDB` for EVM execution, the `AlloyDB` instance (forked at block `N-1`) must be cloned or a separate reference kept. This instance will serve as `db_before_tx`.
+    ```rust
+    // Inside the transaction loop in simulate_and_extract_diffs.rs
+    let fork_block_id = AlloyBlockId::from(fork_block_number); // fork_block_number is N-1
+
+    // This AlloyDB is for querying the "before" state.
+    let alloy_db_before_tx = AlloyDB::<AlloyEthereum, Arc<AlloyDynProvider<AlloyEthereum>>>::new(
+        alloy_provider_dyn.clone(),
+        fork_block_id
+    );
+
+    // This AlloyDB instance will be consumed by CacheDB for execution.
+    let alloy_db_for_cache = AlloyDB::<AlloyEthereum, Arc<AlloyDynProvider<AlloyEthereum>>>::new(
+        alloy_provider_dyn.clone(),
+        fork_block_id
+    );
+    let cache_db_for_evm: SimCacheDB = CacheDB::new(WrapDatabaseAsync::new(alloy_db_for_cache).unwrap());
+    
+    // ... (setup EvmContext, build_mainnet, transact_commit as before, using cache_db_for_evm)
+    
+    let final_evm_db_ref = mainnet_evm.ctx.db(); // This is &SimCacheDB after execution
+
+    // Call state diff extraction
+    match extract_state_diffs_from_simulation(&alloy_db_before_tx, final_evm_db_ref).await {
+        Ok(state_diff_results) => {
+            // Log or process state_diff_results
+            info!("--- State Diffs for TX {:?} ---", target_tx_hash_h256);
+            for diff in state_diff_results {
+                info!("  Account: {:?}", diff.address);
+                if diff.balance_before != diff.balance_after {
+                    info!("    Balance: {} -> {} (Delta: {})", diff.balance_before, diff.balance_after, /* calculate delta */);
+                }
+                // ... log other changes ...
+            }
+        }
+        Err(e) => {
+            error!("Failed to extract state diffs: {}", e);
+        }
+    }
+    ```
+
+2.  **Call Extraction Function:** After `transact_commit()`, call the new `extract_state_diffs_from_simulation` function.
+3.  **Logging:** Implement detailed logging for the `Vec<AccountStateDiff>`.
+
+### **Advantages of this REVM-Native Approach**
+
+*   **Direct Access:** Works directly with REVM's internal data structures (`AccountInfo`, `StorageSlot`, `CacheDB`), offering a precise view of state.
+*   **No RPC `stateDiff` Parsing:** Avoids parsing the potentially complex and sometimes node-specific JSON output of `trace_call`'s `stateDiff` option.
+*   **Fine-grained Control:** Allows for custom logic in how diffs are detected and structured.
+
+### **Considerations**
+
+*   **Completeness:** Ensure all relevant fields from `AccountInfo` and `StorageSlot` are compared.
+*   **Performance:** For `AlloyDB.basic_ref()` calls, these are RPC calls. If many accounts are touched, this could be slow. However, we only query accounts that are already known to be in the `CacheDB`'s final state. The "before" state for these accounts is fetched.
+*   **`AccountStatus`:** Deriving a robust `AccountStatusInDiff` (Created, Deleted) requires careful comparison of existence before and after. `KECCAK_EMPTY` for `code_hash` and zero nonce/balance can indicate a non-existent or empty account. Self-destructed accounts might disappear from `CacheDB.accounts` or be marked specially.
+*   **`SimCacheDB` Type:** The exact type of `SimCacheDB` in `lib.rs` needs to be correctly referenced or passed generically to `extract_state_diffs_from_simulation`.
+
+This approach provides a powerful way to get detailed state changes directly from the REVM simulation.
+
 ## **Future Considerations / Improvements**
 
 *   **Dynamic `spec_id`:** Determine the `spec_id` (hardfork) based on the block's timestamp or number rather than hardcoding it.
