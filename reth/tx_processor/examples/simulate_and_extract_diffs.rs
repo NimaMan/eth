@@ -47,6 +47,7 @@ const RPC_URL: &str = "http://127.0.0.1:8545";
 const LOG_FILE_PATH_PREFIX: &str = "/home/nima/code/crypto/logs/mempool/";
 const NUM_TXS_TO_SIMULATE_FROM_BLOCK: usize = 10;
 const ERC20_TRANSFER_EVENT_SIGNATURE: &str = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ETH_TO_WEI_FACTOR_F64: f64 = 1_000_000_000_000_000_000.0_f64;
 
 // --- Helper to log SimulationOutput ---
 fn log_simulation_output(tx_label: &str, sim_output: &SimulationOutput) {
@@ -76,11 +77,18 @@ fn log_calculated_account_changes(tx_label: &str, all_changes: &HashMap<RevmAddr
 
     for (address, changes) in all_changes {
         info!("  Account: {:?}", address);
-        info!("    eth_net_change: {}", changes.eth_net_change.to_signed_string());
+        
+        // Convert eth_net_change to f64 and then to ETH
+        let eth_net_change_f64 = changes.eth_net_change.to_signed_string().parse::<f64>().unwrap_or(0.0);
+        let eth_net_change_eth = eth_net_change_f64 / ETH_TO_WEI_FACTOR_F64;
+        info!("    eth_net_change: {:.18} ETH", eth_net_change_eth);
 
         if !changes.token_net_changes.is_empty() {
             info!("    token_net_changes:");
             for (token_addr, net_change) in &changes.token_net_changes {
+                // Assuming token amounts might also be large, but their decimal places vary.
+                // For now, displaying them as raw strings. If specific decimal conversions are needed,
+                // that would require token-specific metadata.
                 info!("      Token {:?}: {}", token_addr, net_change.to_signed_string());
             }
         }
@@ -88,10 +96,12 @@ fn log_calculated_account_changes(tx_label: &str, all_changes: &HashMap<RevmAddr
         if !changes.movements.denom.in_list.is_empty() || !changes.movements.denom.out_list.is_empty() {
             info!("    eth_movements:");
             for movement in &changes.movements.denom.in_list {
-                info!("      IN:  Source: {}, Amount: {}", movement.source_identifier, movement.raw_amount);
+                let amount_eth = movement.raw_amount.to_string().parse::<f64>().unwrap_or(0.0) / ETH_TO_WEI_FACTOR_F64;
+                info!("      IN:  Source: {}, Amount: {:.18} ETH", movement.source_identifier, amount_eth);
             }
             for movement in &changes.movements.denom.out_list {
-                info!("      OUT: Source: {}, Amount: {}", movement.source_identifier, movement.raw_amount);
+                let amount_eth = movement.raw_amount.to_string().parse::<f64>().unwrap_or(0.0) / ETH_TO_WEI_FACTOR_F64;
+                info!("      OUT: Source: {}, Amount: {:.18} ETH", movement.source_identifier, amount_eth);
             }
         }
 
