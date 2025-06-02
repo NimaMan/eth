@@ -1,4 +1,3 @@
-
 use crate::mempool_processor::types::TransactionView;
 use revm_tx_simulator_lib::{
     simulation_core::{simulate_transaction, SimCacheDB, ExecutionResultType},
@@ -40,6 +39,10 @@ impl TransactionSimulator {
         let mut cfg_env = RevmCfgEnv_ctx::default();
         cfg_env.chain_id = chain_id;
         cfg_env.spec = spec_id;
+        
+        // Disable basefee validation for mempool analysis (similar to eth_estimateGas)
+        // This allows us to simulate transactions regardless of their gas price vs current basefee
+        cfg_env.disable_base_fee = true;
 
         Ok(Self {
             alloy_provider,
@@ -57,7 +60,7 @@ impl TransactionSimulator {
         
         info!("Preparing to simulate transaction hash: {:?}", hex::encode(&tx_view.hash));
 
-        let revm_tx_env = match transaction_view_to_revm_tx_env(tx_view, self.cfg_env.chain_id) {
+        let mut revm_tx_env = match transaction_view_to_revm_tx_env(tx_view, self.cfg_env.chain_id) {
             Ok(env) => env,
             Err(e) => {
                 warn!("Failed to convert TransactionView to RevmTxEnv for tx {:?}: {}. Skipping simulation.", hex::encode(&tx_view.hash), e);
@@ -86,6 +89,24 @@ impl TransactionSimulator {
 
         let mut initial_eth_balances = HashMap::new();
         let caller_address = revm_tx_env.caller;
+        
+        // Get current nonce and balance for the caller
+        let current_nonce = match self.alloy_provider.get_transaction_count(caller_address.into()).block_id(fork_block_id).await {
+            Ok(nonce) => nonce,
+            Err(e) => {
+                warn!("Failed to get current nonce for caller {}: {}", caller_address, e);
+                return Ok(None);
+            }
+        };
+        
+        // Check if transaction nonce is too high (future transaction)
+        if revm_tx_env.nonce > current_nonce {
+            debug!("Transaction nonce {} is ahead of current state nonce {}. Adjusting for simulation.", 
+                   revm_tx_env.nonce, current_nonce);
+            // Use the current nonce for simulation to see what the transaction would do if executed now
+            revm_tx_env.nonce = current_nonce;
+        }
+        
         match self.alloy_provider.get_balance(caller_address.into()).block_id(fork_block_id).await {
             Ok(bal) => {
                 initial_eth_balances.insert(caller_address, bal);
@@ -108,7 +129,7 @@ impl TransactionSimulator {
             cache_db,
         ) {
             Ok((sim_output, final_db_state)) => {
-                info!("REVM simulation successful for tx {:?}. Result: {:?}, Gas: {}", hex::encode(&tx_view.hash), sim_output.result_type, sim_output.gas_used);
+                info!("✅ REVM simulation successful for tx {:?}. Result: {:?}, Gas: {}", hex::encode(&tx_view.hash), sim_output.result_type, sim_output.gas_used);
 
                 if matches!(sim_output.result_type, ExecutionResultType::Success(_)) {
                     match generate_calculated_account_changes(
@@ -123,7 +144,7 @@ impl TransactionSimulator {
                     ).await {
                         Ok(changes) => {
                             if changes.is_empty() {
-                                info!("Simulation for tx {:?} resulted in no calculated state changes.", hex::encode(&tx_view.hash));
+                                debug!("Simulation for tx {:?} resulted in no calculated state changes.", hex::encode(&tx_view.hash));
                                 Ok(None)
                             } else {
                                 info!("Successfully generated state changes for tx {:?}, {} accounts affected.", hex::encode(&tx_view.hash), changes.len());
@@ -136,16 +157,21 @@ impl TransactionSimulator {
                         }
                     }
                 } else {
-                    info!("Transaction {:?} did not succeed (Reverted or Halted). No state changes to calculate beyond gas.", hex::encode(&tx_view.hash));
+                    debug!("Transaction {:?} did not succeed (Reverted or Halted). No state changes to calculate beyond gas.", hex::encode(&tx_view.hash));
                     Ok(None)
                 }
             },
             Err(e) => {
-                warn!("REVM simulation library failed for tx {:?}: {}", hex::encode(&tx_view.hash), e);
-                Err(eyre::eyre!(e).wrap_err(format!(
-                    "Core REVM simulation failed for transaction hash: {:?}",
-                    hex::encode(&tx_view.hash)
-                )))
+                // Log different error types at different levels
+                let error_msg = e.to_string();
+                if error_msg.contains("NonceTooHigh") || error_msg.contains("NonceTooLow") {
+                    debug!("Nonce issue for tx {:?}: {}", hex::encode(&tx_view.hash), e);
+                } else if error_msg.contains("LackOfFund") || error_msg.contains("InsufficientFunds") {
+                    debug!("Insufficient funds for tx {:?}: {}", hex::encode(&tx_view.hash), e);
+                } else {
+                    warn!("REVM simulation library failed for tx {:?}: {}", hex::encode(&tx_view.hash), e);
+                }
+                Ok(None) // Don't propagate errors, just return None for failed simulations
             }
         }
     }

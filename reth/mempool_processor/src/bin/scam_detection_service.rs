@@ -43,6 +43,7 @@ use tracing::{info, error, Level, debug, warn};
 use std::collections::HashMap;
 use ethers::types::H256;
 use revm_primitives::alloy_primitives::{Address, keccak256};
+use chrono;
 
 // REVM imports for new simulation approach
 use revm_context::BlockEnv as RevmBlockEnv;
@@ -160,10 +161,24 @@ async fn main() -> eyre::Result<()> {
         println!("Created log directory: {:?}", log_dir);
     }
     
+    // Create timestamped log filename to avoid conflicts
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M").to_string();
+    let log_path = std::path::Path::new(&args.log_file);
+    let log_dir = log_path.parent().unwrap_or(std::path::Path::new("logs"));
+    let log_stem = log_path.file_stem().unwrap_or(std::ffi::OsStr::new("scam_detection_service"));
+    let log_ext = log_path.extension().unwrap_or(std::ffi::OsStr::new("log"));
+    let timestamped_log_file = format!("{}_{}.{}", 
+                                      log_stem.to_string_lossy(), 
+                                      timestamp, 
+                                      log_ext.to_string_lossy());
+    let full_log_path = log_dir.join(timestamped_log_file);
+    
+    println!("Logging to: {:?}", full_log_path);
+    
     // Configure logging to file
-    let file_appender = tracing_appender::rolling::daily(
-        std::path::Path::new(&args.log_file).parent().unwrap_or(std::path::Path::new("logs")),
-        std::path::Path::new(&args.log_file).file_name().unwrap_or(std::ffi::OsStr::new("scam_detection_service.log"))
+    let file_appender = tracing_appender::rolling::never(
+        log_dir,
+        full_log_path.file_name().unwrap()
     );
     
     // Use a custom filter that shows important logs but suppresses noisy external crates
@@ -372,7 +387,7 @@ async fn process_transaction_with_revm(
 ) -> usize {
     let tx_hash_hex = hex::encode(&tx.hash);
     
-    // DEBUG: Log transaction details
+    // Only log transaction details for transactions that involve known pools
     let to_addr = if let Some(to_bytes) = &tx.to {
         if !to_bytes.is_empty() {
             format!("0x{}", hex::encode(to_bytes))
@@ -383,16 +398,11 @@ async fn process_transaction_with_revm(
         "None".to_string()
     };
     
-    debug!("🔍 Processing tx {}: from=0x{} to={} value={} ETH", 
-           &tx_hash_hex[..8], 
-           hex::encode(&tx.from), 
-           to_addr,
-           tx.value.as_u128() as f64 / 1e18);
-    
-    // Check if this transaction involves any known pools
+    // Check if this transaction involves any known pools before detailed logging
     let involves_pool = pool_cache.get_pool(&to_addr).is_some();
     if involves_pool {
-        info!("🎯 Transaction {} involves known pool: {}", &tx_hash_hex[..8], to_addr);
+        info!("🎯 Transaction {} involves known pool: {} (value: {:.6} ETH)", 
+              &tx_hash_hex[..8], to_addr, tx.value.as_u128() as f64 / 1e18);
     }
     
     // Simulate the transaction using REVM
@@ -401,8 +411,10 @@ async fn process_transaction_with_revm(
         hash_bytes.copy_from_slice(&tx.hash);
         let _tx_hash = H256::from(hash_bytes);
         
-        // DEBUG: Log simulation attempt
-        debug!("🧪 Simulating transaction {} with REVM", &tx_hash_hex[..8]);
+        // Only log simulation attempt for pool-related transactions
+        if involves_pool {
+            debug!("🧪 Simulating pool-related transaction {} with REVM", &tx_hash_hex[..8]);
+        }
         
         // Use REVM TransactionSimulator to get detailed state changes
         match simulator.process_transaction(tx, block_env).await {
@@ -421,7 +433,7 @@ async fn process_transaction_with_revm(
                     info!("🔬 Created simulation result for tx {} with {} affected pools", 
                           &tx_hash_hex[..8], sim_result.affected_pools.len());
                     
-                    // DEBUG: Log affected pools
+                    // Log affected pools
                     for (pool_addr, effect) in &sim_result.affected_pools {
                         info!("  🏊 Affected pool {}: {:.6} → {:.6} ETH ({:.2}% change)", 
                               pool_addr, 
@@ -444,23 +456,25 @@ async fn process_transaction_with_revm(
                                         alert.simulated_eth_reserve);
                                 }
                                 return alerts.len();
-                            } else {
-                                debug!("✅ No scam alerts for tx {}", &tx_hash_hex[..8]);
                             }
                         },
                         Err(e) => {
                             error!("❌ Scam detection error for tx {}: {}", &tx_hash_hex[..8], e);
                         }
                     }
-                } else {
-                    debug!("❌ No simulation result created for tx {} (no affected pools)", &tx_hash_hex[..8]);
                 }
             },
             Ok(None) => {
-                debug!("⚪ No state changes for tx {}", &tx_hash_hex[..8]);
+                // Only log no state changes for pool-related transactions
+                if involves_pool {
+                    debug!("⚪ No state changes for pool-related tx {}", &tx_hash_hex[..8]);
+                }
             },
             Err(e) => {
-                debug!("❌ REVM simulation failed for tx {}: {}", &tx_hash_hex[..8], e);
+                // Only log errors for pool-related transactions or unexpected errors
+                if involves_pool || !e.to_string().contains("nonce") {
+                    debug!("❌ REVM simulation failed for tx {}: {}", &tx_hash_hex[..8], e);
+                }
             }
         }
     } else {
@@ -479,8 +493,8 @@ fn prepare_simulation_result_from_revm_changes(
     let mut affected_pools = HashMap::new();
     let tx_hash_hex = hex::encode(&tx.hash);
     
-    debug!("🔧 Preparing simulation result for tx {} with {} account changes", 
-           &tx_hash_hex[..8], account_changes.len());
+    // Only log if we find pool interactions
+    let mut pool_interactions_found = false;
     
     // Extract pool effects from REVM account changes
     for (address, changes) in account_changes {
@@ -494,22 +508,19 @@ fn prepare_simulation_result_from_revm_changes(
             changes.eth_net_change.absolute_value.into_limbs()[0] as u128 as f64 / 1e18
         };
         
-        debug!("  🔍 Checking address {} (checksummed): delta = {:.6} ETH", addr_str, eth_delta);
-        
         // Skip addresses where ETH is being added (positive delta)
         if eth_delta >= 0.0 {
-            debug!("    ⬆️ Skipping positive delta (ETH being added)");
             continue;
         }
         
         // Skip very small changes (less than 0.001 ETH)
         if eth_delta.abs() < 0.001 {
-            debug!("    💸 Skipping small change ({:.6} ETH)", eth_delta);
             continue;
         }
         
         // Check if this address is a known pool (now using checksummed address)
         if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
+            pool_interactions_found = true;
             let current_eth = pool_state.eth_reserve;
             let simulated_eth = current_eth + eth_delta;
             let percentage_change = if current_eth > 0.0 {
@@ -518,7 +529,7 @@ fn prepare_simulation_result_from_revm_changes(
                 0.0
             };
             
-            info!("    🏊 Pool {} affected: {:.6} → {:.6} ETH ({:.2}% change)", 
+            debug!("🏊 Pool {} affected: {:.6} → {:.6} ETH ({:.2}% change)", 
                   addr_str, current_eth, simulated_eth, percentage_change * 100.0);
             
             let effect = PoolEffect {
@@ -530,15 +541,13 @@ fn prepare_simulation_result_from_revm_changes(
             };
             
             affected_pools.insert(addr_str, effect);
-        } else {
-            // Check both checksummed and lowercase versions for debugging
-            let addr_lower = format!("0x{}", hex::encode(address.as_slice()).to_lowercase());
-            if pool_cache.get_pool(&addr_lower).is_some() {
-                warn!("    ⚠️  Address {} found in pool cache as lowercase but not checksummed!", addr_str);
-            } else {
-                debug!("    ❌ Address {} not found in pool cache (tried both checksummed and lowercase)", addr_str);
-            }
         }
+    }
+    
+    // Only log preparation details if we found pool interactions
+    if pool_interactions_found {
+        debug!("🔧 Preparing simulation result for tx {} with {} pool interactions found", 
+               &tx_hash_hex[..8], affected_pools.len());
     }
     
     // If we have affected pools, create a simulation result
@@ -562,7 +571,6 @@ fn prepare_simulation_result_from_revm_changes(
             affected_pools,
         })
     } else {
-        debug!("❌ No affected pools found for tx {}", &tx_hash_hex[..8]);
         None
     }
 } 

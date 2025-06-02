@@ -262,10 +262,10 @@ Main Loop:
 Concurrent Pool Updates:
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
-│  pool_subscriber.start_listening() (async task)                │
+│  pool_subscriber.start_listening() (async task)                 │
 │  ├─ Receive ZeroMQ messages                                     │
 │  ├─ Parse JSON pool updates                                     │
-│  └─ Update shared PoolStateCache                               │
+│  └─ Update shared PoolStateCache                                │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -337,13 +337,3 @@ Concurrent Pool Updates:
 - **Setup Time**: 7.28ms average environment preparation  
 - **State Diff Time**: 8.84ms average account change calculation
 - **Total Processing**: 19.57ms average end-to-end
-- **Success Rate**: 96.0% successful simulations
-- **Throughput**: >50 transactions/second processing capability
-
-**Real-world Validation:**
-- Tested with 100 fresh mempool transactions
-- All transactions processed under 500ms target
-- Contract calls and simple transfers handled efficiently
-- Memory usage stable during extended operation
-
-This architecture provides real-time, accurate transaction simulation and scam detection with proven performance characteristics suitable for live mempool monitoring.

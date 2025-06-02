@@ -31,7 +31,7 @@ chrono          = { version = "0.4", features = ["serde"] }
 # Transaction simulation with REVM - Using latest stable matched pair from user research
 revm            = { path = "../revm_tx_simulator/src/revm/crates/revm", default-features = false, features = ["std", "alloydb", "asyncdb"] }
 revm-primitives = { path = "../revm_tx_simulator/src/revm/crates/primitives", default-features = false, features = ["std", "serde"] }
-revm-context    = { path = "../revm_tx_simulator/src/revm/crates/context", default-features = false }
+revm-context    = { path = "../revm_tx_simulator/src/revm/crates/context", default-features = false, features = ["optional_no_base_fee"] }
 
 # Alloy dependencies (for revm_tx_simulator_lib interaction)
 alloy-eips      = { version = "1.0.0", default-features = false }
