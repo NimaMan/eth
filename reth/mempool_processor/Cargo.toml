@@ -9,7 +9,7 @@ ethers          = { version = "2.0", features = ["ws"] }
 tokio           = { version = "1.37", features = ["full"] }
 tokio-stream    = "0.1"
 tracing         = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 clap            = { version = "4.5", features = ["derive","env"] }
 eyre            = "0.6"
@@ -26,11 +26,21 @@ url             = "2.5"
 zmq             = "0.10"
 
 # Time handling
-chrono          = "0.4"
+chrono          = { version = "0.4", features = ["serde"] }
 
 # Transaction simulation with REVM - Using latest stable matched pair from user research
-revm            = { version = "19.0.0", features = ["std", "serde"] }
-revm-primitives = "19.0.0"
+revm            = { path = "../revm_tx_simulator/src/revm/crates/revm", default-features = false, features = ["std", "alloydb", "asyncdb"] }
+revm-primitives = { path = "../revm_tx_simulator/src/revm/crates/primitives", default-features = false, features = ["std", "serde"] }
+revm-context    = { path = "../revm_tx_simulator/src/revm/crates/context", default-features = false }
+
+# Alloy dependencies (for revm_tx_simulator_lib interaction)
+alloy-eips      = { version = "1.0.0", default-features = false }
+alloy-provider  = { version = "1.0.6", default-features = false, features = ["reqwest", "ws"] }
+alloy-network   = { version = "1.0.6" }
+alloy-rpc-client = { version = "1.0.9" }
+
+# Local simulation library
+revm_tx_simulator_lib = { path = "../revm_tx_simulator", package = "revm_tx_simulator" }
 
 bytes           = "1.5"
 ethereum-types  = "0.14"
@@ -51,6 +61,7 @@ tokio-postgres  = "0.7"
 
 # CSV writing for performance monitoring
 csv             = "1.3"
+thiserror       = "1.0"
 
 [lib]
 name = "mempool_processor"
@@ -67,6 +78,11 @@ path = "src/bin/scam_detection_service.rs"
 [[bin]]
 name = "performance_monitor"
 path = "src/bin/performance_monitor.rs"
+
+# Validation testing binary
+[[bin]]
+name = "run_validation_tests"
+path = "src/bin/run_validation_tests.rs"
 
 # Test binaries
 [[bin]]
@@ -117,3 +133,19 @@ path = "src/bin/test_pool_detection.rs"
 [[bin]]
 name = "test_state_simulation"
 path = "src/bin/test_state_simulation.rs"
+
+# ───────────────────────────── Patch section (align with revm_tx_simulator) ──────────────────────────────
+[patch.crates-io]
+revm-primitives  = { path = "../revm_tx_simulator/src/revm/crates/primitives" }
+revm-context     = { path = "../revm_tx_simulator/src/revm/crates/context" }
+# Add other revm sub-crates from revm_tx_simulator's patch section as needed
+# For example:
+# revm-inspector   = { path = "../revm_tx_simulator/src/revm/crates/inspector" }
+# revm-database    = { path = "../revm_tx_simulator/src/revm/crates/database" }
+# revm-state       = { path = "../revm_tx_simulator/src/revm/crates/state"}
+# revm-bytecode    = { path = "../revm_tx_simulator/src/revm/crates/bytecode"}
+# revm-precompile  = { path = "../revm_tx_simulator/src/revm/crates/precompile"}
+# revm-handler     = { path = "../revm_tx_simulator/src/revm/crates/handler"}
+# revm-context-interface = { path = "../revm_tx_simulator/src/revm/crates/context/interface" }
+# Start with minimal necessary patches (primitives, context), add more if compilation errors indicate missing patches.
+# The core 'revm' crate itself is already path-based in [dependencies].

@@ -9,12 +9,51 @@ use zmq;
 use tracing::{info, error, debug, warn};
 use std::sync::Arc;
 use serde_json;
+use revm_primitives::alloy_primitives::{Address, keccak256};
 
 use self::types::PoolUpdatesMessage;
 use self::cache::PoolStateCache;
 
 // Default ZMQ endpoint for backward compatibility
 const DEFAULT_ZMQ_PUB_ENDPOINT: &str = "tcp://localhost:5557";
+
+/// Ethereum address checksum utility
+/// Converts an address to EIP-55 checksummed format to match our simulation results
+fn to_checksum_address_from_str(address_str: &str) -> String {
+    // Remove 0x prefix if present
+    let addr_hex = address_str.trim_start_matches("0x");
+    
+    // Parse hex string to bytes
+    if let Ok(addr_bytes) = hex::decode(addr_hex) {
+        if addr_bytes.len() == 20 {
+            let address = Address::from_slice(&addr_bytes);
+            let hash = keccak256(addr_hex.to_lowercase().as_bytes());
+            let hash_hex = hex::encode(hash.as_slice());
+            
+            let mut result = String::with_capacity(42);
+            result.push_str("0x");
+            
+            for (i, c) in addr_hex.chars().enumerate() {
+                if c.is_ascii_digit() {
+                    result.push(c);
+                } else {
+                    // Check if the corresponding hash character is >= 8
+                    let hash_char = hash_hex.chars().nth(i).unwrap_or('0');
+                    if hash_char >= '8' {
+                        result.push(c.to_ascii_uppercase());
+                    } else {
+                        result.push(c.to_ascii_lowercase());
+                    }
+                }
+            }
+            
+            return result;
+        }
+    }
+    
+    // Fallback: return original address if parsing fails
+    address_str.to_string()
+}
 
 pub struct PoolSubscriber {
     pool_cache: Arc<PoolStateCache>,
@@ -77,7 +116,7 @@ impl PoolSubscriber {
             info!("Received {} pools from Python service", pool_count);
             
             if let Some(pool_data) = response["data"].as_object() {
-                // Convert to our PoolUpdate format
+                // Convert to our PoolUpdate format with checksummed addresses
                 let mut pools_map = std::collections::HashMap::new();
                 
                 for (address, data) in pool_data {
@@ -90,12 +129,14 @@ impl PoolSubscriber {
                         
                         let pool_update = types::PoolUpdate {
                             eth_reserve,
-                            token_address,
+                            token_address: to_checksum_address_from_str(&token_address),
                             block_number,
                             update_time,
                         };
                         
-                        pools_map.insert(address.clone(), pool_update);
+                        // Store with checksummed pool address
+                        let checksummed_address = to_checksum_address_from_str(address);
+                        pools_map.insert(checksummed_address, pool_update);
                     }
                 }
                 
@@ -106,7 +147,7 @@ impl PoolSubscriber {
                 
                 // Log some sample pools for verification
                 if !updated_pools.is_empty() {
-                    info!("Sample initialized pools:");
+                    info!("Sample initialized pools (checksummed addresses):");
                     for (i, addr) in updated_pools.iter().take(5).enumerate() {
                         if let Some(pool_state) = self.pool_cache.get_pool(addr) {
                             info!("  {}: {} ({:.6} ETH)", i+1, addr, pool_state.eth_reserve);
@@ -152,8 +193,17 @@ impl PoolSubscriber {
                                 debug!("Large pool update: {} pools", message.data.len());
                             }
                             
-                            // Update the cache
-                            let updated_pools = self.pool_cache.update_pools(message.data.iter());
+                            // Checksum addresses in updates before storing
+                            let mut checksummed_updates = std::collections::HashMap::new();
+                            for (address, update) in message.data.iter() {
+                                let checksummed_address = to_checksum_address_from_str(address);
+                                let mut checksummed_update = update.clone();
+                                checksummed_update.token_address = to_checksum_address_from_str(&update.token_address);
+                                checksummed_updates.insert(checksummed_address, checksummed_update);
+                            }
+                            
+                            // Update the cache with checksummed addresses
+                            let updated_pools = self.pool_cache.update_pools(checksummed_updates.iter());
                             
                             // Only log cache updates for debugging if needed
                             debug!("Updated {} pools in cache", updated_pools.len());

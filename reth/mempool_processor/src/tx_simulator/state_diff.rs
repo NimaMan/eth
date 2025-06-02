@@ -11,15 +11,12 @@
 use crate::mempool_processor::types::*;
 use ethers::prelude::*;
 use eyre::Result;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
-use revm::{
-    primitives::{AccountInfo as RevmAccountInfo, Address, U256 as RevmU256, TransactTo, ExecutionResult, Bytes as RevmBytes, ResultAndState},
-    db::{EmptyDB, CacheDB, DatabaseCommit},
-    Evm,
-};
+use revm::primitives::Address;
 use serde::{Serialize, Deserialize};
+use serde_json::{Value, json};
 use std::path::Path;
 use std::fs;
 use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
@@ -34,6 +31,22 @@ pub struct StateChange {
     pub eth_value: f64,
     pub storage_changes: HashMap<H256, (H256, H256)>, // slot => (before, after)
     pub timestamp: u64,
+}
+
+/// Represents balance information from state diff
+#[derive(Debug, Clone)]
+struct BalanceInfo {
+    before: Option<f64>,
+    after: Option<f64>,
+    change: f64,
+}
+
+/// Represents an ETH transfer (including internal transfers)
+#[derive(Debug, Clone)]
+struct EthTransfer {
+    from: String,
+    to: String,
+    amount_eth: f64,
 }
 
 /// Tracks state changes from transaction simulations
@@ -126,20 +139,6 @@ impl StateDiffTracker {
     
     /// Simulate a transaction and extract ETH balance changes (Python-compatible)
     pub async fn simulate_transaction(&mut self, tx: &TransactionView) -> Result<Option<HashMap<String, crate::tx_simulator::MempoolStateDiff>>> {
-        // Skip if no destination
-        if tx.to.is_none() {
-            return Ok(None);
-        }
-        
-        // Convert from ethers types to REVM types
-        let from_addr = Address::from_slice(&tx.from);
-        let to_addr_opt = tx.to.as_ref().map(|to_bytes| Address::from_slice(to_bytes));
-
-        let to_revm_addr = match to_addr_opt {
-            Some(addr) => TransactTo::Call(addr),
-            None => return Ok(None), // Skip contract creations for now or handle as TransactTo::Create
-        };
-        
         let tx_hash = {
             let mut hash_array = [0u8; 32];
             if tx.hash.len() == 32 {
@@ -151,121 +150,320 @@ impl StateDiffTracker {
             H256::from(hash_array)
         };
         
-        // Skip cache for now - we need to return Python-compatible format
+        debug!("Simulating transaction with stateDiff: {}", hex::encode(tx_hash.as_bytes()));
         
-        debug!("Simulating transaction: {}", hex::encode(tx_hash.as_bytes()));
-        
-        let ethers_from_addr = H160::from_slice(&tx.from);
-        let nonce = match self.provider.get_transaction_count(ethers_from_addr, None).await {
-            Ok(n) => n.as_u64(),
-            Err(e) => {
-                error!("Failed to get nonce for {}: {}", hex::encode(&tx.from), e);
-                return Ok(None);
-            }
-        };
-        
-        let mut cache_db = CacheDB::new(EmptyDB::default());
-        let mut state_before = HashMap::new();
-
-        let accounts_to_load = vec![ethers_from_addr, tx.to.as_ref().map_or(H160::zero(), |t| H160::from_slice(t))];
-
-        for acc_h160 in accounts_to_load.iter().filter(|&&a| a != H160::zero()) {
-            let acc_balance = self.provider.get_balance(*acc_h160, None).await?;
-            let acc_nonce = self.provider.get_transaction_count(*acc_h160, None).await?.as_u64();
-            let revm_acc_info = RevmAccountInfo {
-                balance: RevmU256::from_limbs(acc_balance.0),
-                nonce: acc_nonce,
-                code_hash: Default::default(), 
-                code: None, 
-            };
-            cache_db.insert_account_info(Address::from_slice(acc_h160.as_bytes()), revm_acc_info);
-            state_before.insert(*acc_h160, acc_balance);
-        }
-
-        let mut evm = Evm::builder()
-            .with_db(cache_db)
-            .build();
-        
-        let from_addr = Address::from_slice(&tx.from);
-        let to_addr_opt = tx.to.as_ref().map(|to_bytes| Address::from_slice(to_bytes));
-        let to_revm_addr = match to_addr_opt {
-            Some(addr) => TransactTo::Call(addr),
-            None => TransactTo::Create,
-        };
-
-        let gas_limit = tx.gas_limit.map_or(3_000_000u64, |gl| gl.as_u64()); 
-        let gas_price_u256 = tx.gas_price.unwrap_or_else(|| U256::from(20_000_000_000u64));
-        let gas_price_revm = RevmU256::from_limbs(gas_price_u256.0);
-        
-        let tx_env = evm.tx_mut();
-        tx_env.caller = from_addr;
-        tx_env.transact_to = to_revm_addr;
-        tx_env.data = RevmBytes::copy_from_slice(&tx.input_data.as_ref().map_or(&[][..], |d| d.as_ref()));
-        tx_env.value = RevmU256::from_limbs(tx.value.0);
-        tx_env.gas_limit = gas_limit;
-        tx_env.gas_price = gas_price_revm;
-        tx_env.nonce = Some(nonce);
-        tx_env.access_list = Vec::new();
-        
-        let ResultAndState { result, state } = match evm.transact() {
-            Ok(res) => res,
-            Err(e) => {
-                // These errors are common in mempool simulation since transactions
-                // may depend on state changes from other pending transactions
-                debug!("EVM simulation failed for tx {} (expected for mempool): {:?}", hex::encode(tx_hash.as_bytes()), e);
-                return Ok(None); 
-            }
-        };
-        
-        // Extract ETH balance changes in Python-compatible format
-        let mut eth_balance_changes = HashMap::new();
-        
-        match result {
-            ExecutionResult::Success { gas_used, logs, .. } => {
-                debug!("Tx {} success. GasUsed: {}. Logs: {}", hex::encode(tx_hash.as_bytes()), gas_used, logs.len());
+        // Use trace_call with stateDiff to get net balance changes (like Python implementation)
+        match self.trace_call_with_state_diff(tx).await {
+            Ok(Some(state_diff)) => {
+                let mut eth_balance_changes = HashMap::new();
                 
-                for (addr_revm, account_state) in state.iter() {
-                    let eth_addr = H160::from_slice(addr_revm.as_slice());
-                    let balance_after = U256(account_state.info.balance.into_limbs());
-                    
-                    let balance_before = state_before.get(&eth_addr).cloned().unwrap_or_default();
-                    
-                    // Only include addresses with balance changes
-                    if balance_after != balance_before {
-                        let balance_before_eth = wei_to_eth(balance_before);
-                        let balance_after_eth = wei_to_eth(balance_after);
-                        let change_eth = balance_after_eth - balance_before_eth;
-                        
-                        // Convert to checksum address like Python
-                        let checksum_address = to_checksum_address(Address::from_slice(eth_addr.as_bytes()));
-                        
-                        let mempool_diff = crate::tx_simulator::MempoolStateDiff {
-                            before: Some(balance_before_eth),
-                            after: Some(balance_after_eth),
-                            change: change_eth,
-                        };
-                        
-                        debug!("ETH balance change for {}: {:.6} -> {:.6} (change: {:.6})", 
-                               &checksum_address, balance_before_eth, balance_after_eth, change_eth);
-                        
-                        eth_balance_changes.insert(checksum_address, mempool_diff);
+                // Process each address in the state diff
+                for (address, changes) in state_diff {
+                    if let Some(balance_change) = changes.get("balance") {
+                        if let Some(balance_info) = self.extract_balance_change(balance_change) {
+                            // Only include significant changes
+                            if balance_info.change.abs() >= 0.000001 {
+                                let checksum_address = to_checksum_address(Address::from_slice(&hex::decode(address.trim_start_matches("0x"))?));
+                                
+                                debug!("ETH balance change: {} = {:.6} ETH", checksum_address, balance_info.change);
+                                
+                                eth_balance_changes.insert(checksum_address, crate::tx_simulator::MempoolStateDiff {
+                                    before: balance_info.before,
+                                    after: balance_info.after,
+                                    change: balance_info.change,
+                                });
+                            }
+                        }
                     }
                 }
-            },
-            ExecutionResult::Revert { gas_used, output } => {
-                debug!("Tx {} reverted. GasUsed: {}. Output: {:?}", hex::encode(tx_hash.as_bytes()), gas_used, output);
-                return Ok(None); // No state changes for reverted transactions
-            },
-            ExecutionResult::Halt { reason, gas_used } => {
-                debug!("Tx {} halted: {:?}. GasUsed: {}", hex::encode(tx_hash.as_bytes()), reason, gas_used);
-                return Ok(None); // No state changes for halted transactions
-            },
+                
+                if eth_balance_changes.is_empty() {
+                    debug!("No significant ETH balance changes found");
+                    return Ok(None);
+                }
+                
+                Ok(Some(eth_balance_changes))
+            }
+            Ok(None) => {
+                debug!("No state diff available for transaction");
+                Ok(None)
+            }
+            Err(e) => {
+                warn!("Failed to get state diff for transaction {}: {}", hex::encode(tx_hash.as_bytes()), e);
+                Ok(None)
+            }
+        }
+    }
+    
+    /// Use debug_traceTransaction to get all ETH transfers including internal ones
+    async fn trace_call_with_state_diff(&self, tx: &TransactionView) -> Result<Option<HashMap<String, HashMap<String, Value>>>> {
+        let tx_hash = {
+            let mut hash_array = [0u8; 32];
+            if tx.hash.len() == 32 {
+                hash_array.copy_from_slice(&tx.hash);
+            } else {
+                warn!("Invalid tx hash length: {} for tx data: {:?}", tx.hash.len(), tx);
+                return Ok(None);
+            }
+            H256::from(hash_array)
+        };
+        
+        // First try to get internal transfers using debug_traceTransaction
+        match self.trace_internal_eth_transfers(tx_hash).await {
+            Ok(Some(transfers)) => {
+                if transfers.is_empty() {
+                    debug!("No internal ETH transfers found");
+                    return self.fallback_to_transaction_value(tx).await;
+                }
+                
+                // Aggregate transfers by address to get net changes
+                let mut net_changes: HashMap<String, i128> = HashMap::new();
+                
+                for transfer in &transfers {
+                    debug!("Internal ETH transfer: {} -> {} = {:.6} ETH", 
+                           transfer.from, transfer.to, transfer.amount_eth);
+                    
+                    // Sender loses ETH
+                    let sender_entry = net_changes.entry(transfer.from.clone()).or_insert(0);
+                    *sender_entry -= (transfer.amount_eth * 1e18) as i128;
+                    
+                    // Recipient gains ETH
+                    let recipient_entry = net_changes.entry(transfer.to.clone()).or_insert(0);
+                    *recipient_entry += (transfer.amount_eth * 1e18) as i128;
+                }
+                
+                // Convert net changes to state diff format
+                let mut result = HashMap::new();
+                for (address, net_change_wei) in net_changes {
+                    if net_change_wei.abs() >= 1_000_000_000_000_000 { // 0.001 ETH threshold
+                        let change_eth = net_change_wei as f64 / 1e18;
+                        
+                        let balance_change = if net_change_wei >= 0 {
+                            json!({
+                                "*": {
+                                    "from": "0x0",
+                                    "to": format!("0x{:x}", net_change_wei as u128)
+                                }
+                            })
+                        } else {
+                            json!({
+                                "*": {
+                                    "from": format!("0x{:x}", (-net_change_wei) as u128),
+                                    "to": "0x0"
+                                }
+                            })
+                        };
+                        
+                        let mut changes = HashMap::new();
+                        changes.insert("balance".to_string(), balance_change);
+                        debug!("Net ETH change: {} = {:.6} ETH", address, change_eth);
+                        result.insert(address, changes);
+                    }
+                }
+                
+                if result.is_empty() {
+                    debug!("All net changes below threshold");
+                    return Ok(None);
+                }
+                
+                Ok(Some(result))
+            }
+            Ok(None) => {
+                debug!("No trace data available, falling back to transaction value");
+                self.fallback_to_transaction_value(tx).await
+            }
+            Err(e) => {
+                warn!("Trace failed: {}, falling back to transaction value", e);
+                self.fallback_to_transaction_value(tx).await
+            }
+        }
+    }
+    
+    /// Trace internal ETH transfers using debug_traceTransaction
+    async fn trace_internal_eth_transfers(&self, tx_hash: H256) -> Result<Option<Vec<EthTransfer>>> {
+        use ethers::types::GethDebugTracingOptions;
+        
+        let trace_options = GethDebugTracingOptions {
+            disable_storage: Some(true),
+            disable_stack: Some(true),
+            enable_memory: Some(false),
+            enable_return_data: Some(false),
+            tracer: Some(ethers::types::GethDebugTracerType::JsTracer("callTracer".to_string())),
+            ..Default::default()
+        };
+        
+        match self.provider.debug_trace_transaction(tx_hash, trace_options).await {
+            Ok(trace) => {
+                let mut transfers = Vec::new();
+                let trace_json = serde_json::to_value(&trace)?;
+                self.extract_eth_transfers_from_trace(&trace_json, &mut transfers)?;
+                Ok(Some(transfers))
+            }
+            Err(e) => {
+                debug!("debug_traceTransaction failed: {}", e);
+                Ok(None)
+            }
+        }
+    }
+    
+    /// Extract ETH transfers from trace data recursively
+    fn extract_eth_transfers_from_trace(&self, trace: &Value, transfers: &mut Vec<EthTransfer>) -> Result<()> {
+        if let Some(trace_obj) = trace.as_object() {
+            // Check if this call has value transfer
+            if let (Some(from), Some(to), Some(value_str)) = (
+                trace_obj.get("from").and_then(|v| v.as_str()),
+                trace_obj.get("to").and_then(|v| v.as_str()),
+                trace_obj.get("value").and_then(|v| v.as_str())
+            ) {
+                // Parse value (hex string)
+                if let Ok(value_u256) = U256::from_str_radix(value_str.trim_start_matches("0x"), 16) {
+                    if value_u256 > U256::zero() {
+                        let amount_eth = wei_to_eth(value_u256);
+                        let from_checksum = to_checksum_address(Address::from_slice(&hex::decode(from.trim_start_matches("0x"))?));
+                        let to_checksum = to_checksum_address(Address::from_slice(&hex::decode(to.trim_start_matches("0x"))?));
+                        
+                        transfers.push(EthTransfer {
+                            from: from_checksum,
+                            to: to_checksum,
+                            amount_eth,
+                        });
+                    }
+                }
+            }
+            
+            // Recursively process calls
+            if let Some(calls) = trace_obj.get("calls").and_then(|v| v.as_array()) {
+                for call in calls {
+                    self.extract_eth_transfers_from_trace(call, transfers)?;
+                }
+            }
         }
         
-        // Commit the state changes to the database
-        evm.db_mut().commit(state);
+        Ok(())
+    }
+    
+    /// Fallback to transaction value field when tracing fails
+    async fn fallback_to_transaction_value(&self, tx: &TransactionView) -> Result<Option<HashMap<String, HashMap<String, Value>>>> {
+        if tx.value > U256::zero() {
+            let mut result = HashMap::new();
+            let transfer_amount_wei = tx.value;
+            
+            // Sender loses ETH
+            let sender_addr = to_checksum_address(Address::from_slice(&tx.from));
+            let sender_change = json!({
+                "*": {
+                    "from": format!("0x{:x}", transfer_amount_wei),
+                    "to": "0x0"
+                }
+            });
+            let mut sender_changes = HashMap::new();
+            sender_changes.insert("balance".to_string(), sender_change);
+            result.insert(sender_addr, sender_changes);
+            
+            // Recipient gains ETH
+            if let Some(to_bytes) = &tx.to {
+                let recipient_addr = to_checksum_address(Address::from_slice(to_bytes));
+                let recipient_change = json!({
+                    "*": {
+                        "from": "0x0",
+                        "to": format!("0x{:x}", transfer_amount_wei)
+                    }
+                });
+                let mut recipient_changes = HashMap::new();
+                recipient_changes.insert("balance".to_string(), recipient_change);
+                result.insert(recipient_addr, recipient_changes);
+            }
+            
+            debug!("Fallback: ETH transfer of {} wei", transfer_amount_wei);
+            Ok(Some(result))
+        } else {
+            debug!("No ETH transfer in transaction value field");
+            Ok(None)
+        }
+    }
+    
+    /// Extract ETH balance change from state diff structure (like Python implementation)
+    fn extract_balance_change(&self, balance_data: &Value) -> Option<BalanceInfo> {
+        // Handle different possible balance_data structures (matching Python logic)
         
-        Ok(if eth_balance_changes.is_empty() { None } else { Some(eth_balance_changes) })
+        // Format 1: {'*': {'from': '0x...', 'to': '0x...'}}
+        if let Some(star_obj) = balance_data.get("*").and_then(|v| v.as_object()) {
+            if let (Some(from_str), Some(to_str)) = (
+                star_obj.get("from").and_then(|v| v.as_str()),
+                star_obj.get("to").and_then(|v| v.as_str())
+            ) {
+                if let (Ok(from_val), Ok(to_val)) = (
+                    U256::from_str_radix(from_str.trim_start_matches("0x"), 16),
+                    U256::from_str_radix(to_str.trim_start_matches("0x"), 16)
+                ) {
+                    let change = if to_val >= from_val {
+                        wei_to_eth(to_val - from_val)
+                    } else {
+                        -wei_to_eth(from_val - to_val)
+                    };
+                    
+                    return Some(BalanceInfo {
+                        before: Some(wei_to_eth(from_val)),
+                        after: Some(wei_to_eth(to_val)),
+                        change,
+                    });
+                }
+            }
+        }
+        
+        // Format 2: {'+': '0x...'} (incremental change)
+        if let Some(plus_str) = balance_data.get("+").and_then(|v| v.as_str()) {
+            if let Ok(change_val) = U256::from_str_radix(plus_str.trim_start_matches("0x"), 16) {
+                if change_val > U256::zero() {
+                    return Some(BalanceInfo {
+                        before: None,
+                        after: None,
+                        change: wei_to_eth(change_val),
+                    });
+                }
+            }
+        }
+        
+        // Format 3: {'-': '0x...'} (decremental change)
+        if let Some(minus_str) = balance_data.get("-").and_then(|v| v.as_str()) {
+            if let Ok(change_val) = U256::from_str_radix(minus_str.trim_start_matches("0x"), 16) {
+                if change_val > U256::zero() {
+                    return Some(BalanceInfo {
+                        before: None,
+                        after: None,
+                        change: -wei_to_eth(change_val),
+                    });
+                }
+            }
+        }
+        
+        // Format 4: {'from': '0x...', 'to': '0x...'} (direct values)
+        if let Some(balance_obj) = balance_data.as_object() {
+            if let (Some(from_str), Some(to_str)) = (
+                balance_obj.get("from").and_then(|v| v.as_str()),
+                balance_obj.get("to").and_then(|v| v.as_str())
+            ) {
+                if let (Ok(from_val), Ok(to_val)) = (
+                    U256::from_str_radix(from_str.trim_start_matches("0x"), 16),
+                    U256::from_str_radix(to_str.trim_start_matches("0x"), 16)
+                ) {
+                    let change = if to_val >= from_val {
+                        wei_to_eth(to_val - from_val)
+                    } else {
+                        -wei_to_eth(from_val - to_val)
+                    };
+                    
+                    return Some(BalanceInfo {
+                        before: Some(wei_to_eth(from_val)),
+                        after: Some(wei_to_eth(to_val)),
+                        change,
+                    });
+                }
+            }
+        }
+        
+        debug!("Unknown balance data format: {:?}", balance_data);
+        None
     }
     
     /// Get recent state changes

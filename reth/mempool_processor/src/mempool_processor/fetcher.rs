@@ -641,8 +641,9 @@ impl MempoolFetcher {
         // Create batched requests for transaction details
         let mut transactions = Vec::with_capacity(tx_hashes.len());
         
-        // Limit batch size to avoid overloading node (reduced for faster response)
-        for chunk in tx_hashes.chunks(25) {
+        // Use dynamic batch size for optimal performance
+        let current_batch_size = *self.dynamic_batch_size.lock().unwrap();
+        for chunk in tx_hashes.chunks(current_batch_size) {
             let batch_start = Instant::now();
             
             let mut batch = Vec::with_capacity(chunk.len());

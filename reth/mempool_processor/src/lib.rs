@@ -9,6 +9,7 @@
  * - Simulating transactions to detect state changes and suspicious activity
  * - Subscribing to pool level updates from Python
  * - Detecting potential scam transactions by analyzing their effects on pools
+ * - Validation testing infrastructure for comparing Rust and Python implementations
  */
 
 pub mod mempool_processor; 
@@ -19,6 +20,9 @@ pub mod pool_subscriber;
 
 // Adding the scam detection module
 pub mod scam_detection;
+
+// Adding the validation testing module
+pub mod validation_testing;
 
 // Re-export key components if necessary, or keep them encapsulated for now
 // pub use mempool_processor::*;

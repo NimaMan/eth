@@ -1,28 +1,61 @@
 /*
  * Scam Detection Service Binary
  * 
- * This binary integrates pool state monitoring, transaction simulation,
- * scam detection, and database logging into a complete service.
+ * ALGORITHMIC DESCRIPTION:
+ * This binary provides real-time scam detection for Ethereum mempool transactions:
  * 
- * It accepts pool state updates from Python via ZeroMQ, monitors
- * the mempool for transactions, simulates them, detects potential scams,
- * and logs alerts to PostgreSQL.
+ * 1. POOL STATE MONITORING:
+ *    - ZeroMQ subscriber receives pool updates from Python service
+ *    - Maintains real-time cache of pool reserves and addresses
+ *    - Tracks ETH reserves for thousands of DeFi pools
+ * 
+ * 2. MEMPOOL TRANSACTION MONITORING:
+ *    - HTTP RPC polling for new mempool transactions (every 50ms)
+ *    - Filters and processes only new transactions to avoid duplicates
+ *    - Prioritizes transactions that interact with known pools
+ * 
+ * 3. REVM TRANSACTION SIMULATION:
+ *    - Uses validated REVM TransactionSimulator for accurate state prediction
+ *    - Simulates each transaction against current blockchain state
+ *    - Calculates precise ETH balance changes for all affected accounts
+ *    - Generates detailed account state changes using revm_tx_simulator_lib
+ * 
+ * 4. SCAM DETECTION ANALYSIS:
+ *    - Cross-references simulated state changes with pool cache
+ *    - Detects pools being drained below ETH threshold (default: 0.15 ETH)
+ *    - Identifies large percentage withdrawals (default: >50%)
+ *    - Flags suspicious transactions before they can execute
+ * 
+ * 5. ALERT PERSISTENCE:
+ *    - Logs detected scams to PostgreSQL database
+ *    - Provides detailed transaction and pool information
+ *    - Continues service operation even during database errors
+ * 
+ * This service serves the main objective of detecting and preventing DeFi pool scams
+ * by simulating transactions before they execute and identifying suspicious patterns.
  */
 
 use clap::Parser;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tracing::{info, error, Level};
+use tracing::{info, error, Level, debug, warn};
 use std::collections::HashMap;
 use ethers::types::H256;
 use revm_primitives::alloy_primitives::{Address, keccak256};
+
+// REVM imports for new simulation approach
+use revm_context::BlockEnv as RevmBlockEnv;
+use revm_primitives::hardfork::SpecId;
+use ethers::providers::{Http as EthersHttp, Middleware, Provider as EthersProvider};
+use ethers::types::{BlockId as EthersBlockId, BlockNumber as EthersBlockNumber};
+use revm_tx_simulator_lib::conversions::{ethers_to_revm_u256, ethers_to_revm_address};
 
 use mempool_processor::mempool_processor::fetcher::{MempoolFetcher, FetchMode};
 use mempool_processor::mempool_processor::types::TransactionView;
 use mempool_processor::mempool_processor::TransactionSource;
 use mempool_processor::mempool_processor::db_logger::DbLogger;
-use mempool_processor::tx_simulator::{StateDiffTracker, StateCache};
+use mempool_processor::tx_simulator::TransactionSimulator;
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::scam_detection::{
     ScamDetectionService, 
@@ -193,26 +226,37 @@ async fn main() -> eyre::Result<()> {
         &args.eth_rpc_url,
         5000, // cache size
         true, // use batch requests
-        50,   // max batch size - reduced for faster response
+        250,  // max batch size - increased for better throughput
         1000, // timeout ms - optimized for 1-second real-time detection
         FetchMode::RpcBatch
     )?;
     
-    // Create state diff tracker for transaction simulation
-    info!("Initializing state diff tracker...");
-    let provider = ethers::providers::Provider::<ethers::providers::Http>::try_from(args.eth_rpc_url.clone())?;
-    let provider = Arc::new(provider);
-    let mut tracker = StateDiffTracker::new(provider.clone(), None);
+    // Initialize REVM transaction simulator instead of old StateDiffTracker
+    info!("Initializing REVM transaction simulator...");
+    let simulator = TransactionSimulator::new(
+        &args.eth_rpc_url,
+        1, // chain_id (mainnet)
+        SpecId::CANCUN
+    ).await?;
     
-    // State cache for aggregating transaction effects
-    let mut state_cache = StateCache::new();
+    // Get current block environment for simulation
+    info!("Fetching latest block for simulation context...");
+    let provider = EthersProvider::<EthersHttp>::try_from(args.eth_rpc_url.clone())?;
+    let latest_block = provider
+        .get_block(EthersBlockId::Number(EthersBlockNumber::Latest))
+        .await?
+        .ok_or_else(|| eyre::eyre!("Failed to get latest block"))?;
     
-    // Create scam detection service
-    info!("Initializing scam detection service...");
-    let scam_config = ScamDetectionConfig {
-        eth_threshold: args.eth_threshold,
-        percentage_threshold: args.percentage_threshold,
-    };
+    let mut block_env = RevmBlockEnv::default();
+    block_env.number = ethers_to_revm_u256(latest_block.number.unwrap_or_default().as_u64().into());
+    block_env.beneficiary = latest_block.author.map_or_else(|| revm_primitives::Address::ZERO, |h160| ethers_to_revm_address(h160));
+    block_env.timestamp = ethers_to_revm_u256(latest_block.timestamp);
+    block_env.gas_limit = latest_block.gas_limit.as_u64();
+    block_env.basefee = latest_block.base_fee_per_gas.map_or(0, |bf| bf.as_u64());
+    block_env.difficulty = ethers_to_revm_u256(latest_block.difficulty);
+    block_env.prevrandao = latest_block.mix_hash.map(|h| revm_primitives::B256::from(h.0));
+    
+    info!("Block environment: #{}, basefee: {} wei", block_env.number, block_env.basefee);
     
     // Initialize database logger separately
     info!("Connecting to database...");
@@ -226,7 +270,16 @@ async fn main() -> eyre::Result<()> {
     
     let db_logger = Arc::new(db_logger);
     
-    // Create service with updated parameters
+    // Initialize scam detection service
+    info!("Initializing scam detection service...");
+    let scam_config = ScamDetectionConfig {
+        eth_threshold: args.eth_threshold,
+        percentage_threshold: args.percentage_threshold,
+    };
+    
+    info!("🎯 Scam detection thresholds: ETH < {:.3}, Percentage > {:.1}%", 
+          args.eth_threshold, args.percentage_threshold * 100.0);
+    
     let service = ScamDetectionService::new(
         pool_cache.clone(),
         db_logger.clone(),
@@ -266,11 +319,11 @@ async fn main() -> eyre::Result<()> {
                             continue;
                         }
                         
-                        // Process each transaction
-                        let scams_found = process_transaction(
+                        // Process each transaction using REVM simulation
+                        let scams_found = process_transaction_with_revm(
                             tx, 
-                            &mut tracker, 
-                            &mut state_cache, 
+                            &simulator,
+                            &block_env,
                             &service,
                             &db_logger,
                             &pool_cache
@@ -308,33 +361,75 @@ async fn main() -> eyre::Result<()> {
     }
 }
 
-// Process a single transaction and return number of scams detected
-async fn process_transaction(
+// Process a single transaction using REVM simulation and return number of scams detected
+async fn process_transaction_with_revm(
     tx: &TransactionView,
-    tracker: &mut StateDiffTracker,
-    state_cache: &mut StateCache,
+    simulator: &TransactionSimulator,
+    block_env: &RevmBlockEnv,
     service: &ScamDetectionService,
-    db_logger: &Arc<DbLogger>,
+    _db_logger: &Arc<DbLogger>,
     pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
 ) -> usize {
     let tx_hash_hex = hex::encode(&tx.hash);
     
-    // Simulate the transaction
-    let mut hash_bytes = [0u8; 32];
+    // DEBUG: Log transaction details
+    let to_addr = if let Some(to_bytes) = &tx.to {
+        if !to_bytes.is_empty() {
+            format!("0x{}", hex::encode(to_bytes))
+        } else {
+            "Empty".to_string()
+        }
+    } else {
+        "None".to_string()
+    };
+    
+    debug!("🔍 Processing tx {}: from=0x{} to={} value={} ETH", 
+           &tx_hash_hex[..8], 
+           hex::encode(&tx.from), 
+           to_addr,
+           tx.value.as_u128() as f64 / 1e18);
+    
+    // Check if this transaction involves any known pools
+    let involves_pool = pool_cache.get_pool(&to_addr).is_some();
+    if involves_pool {
+        info!("🎯 Transaction {} involves known pool: {}", &tx_hash_hex[..8], to_addr);
+    }
+    
+    // Simulate the transaction using REVM
     if tx.hash.len() == 32 {
+        let mut hash_bytes = [0u8; 32];
         hash_bytes.copy_from_slice(&tx.hash);
-        let tx_hash = H256::from(hash_bytes);
+        let _tx_hash = H256::from(hash_bytes);
         
-        // Simulate the transaction to get state changes
-        match tracker.simulate_transaction(tx).await {
-            Ok(Some(changes)) => {
-                // Skip state cache for now - it expects a different format
-                // TODO: Implement proper conversion if state cache is needed
+        // DEBUG: Log simulation attempt
+        debug!("🧪 Simulating transaction {} with REVM", &tx_hash_hex[..8]);
+        
+        // Use REVM TransactionSimulator to get detailed state changes
+        match simulator.process_transaction(tx, block_env).await {
+            Ok(Some(account_changes)) => {
+                info!("✅ REVM simulation successful for tx {}: {} accounts affected", 
+                      &tx_hash_hex[..8], account_changes.len());
                 
-                // Process for scam detection using the original HashMap format
-                let simulation = prepare_simulation_result_from_mempool_diffs(tx, &changes, pool_cache.clone());
+                // Convert REVM account changes to pool effects format
+                let simulation = prepare_simulation_result_from_revm_changes(
+                    tx, 
+                    &account_changes, 
+                    pool_cache.clone()
+                );
                 
                 if let Some(sim_result) = simulation {
+                    info!("🔬 Created simulation result for tx {} with {} affected pools", 
+                          &tx_hash_hex[..8], sim_result.affected_pools.len());
+                    
+                    // DEBUG: Log affected pools
+                    for (pool_addr, effect) in &sim_result.affected_pools {
+                        info!("  🏊 Affected pool {}: {:.6} → {:.6} ETH ({:.2}% change)", 
+                              pool_addr, 
+                              effect.current_eth_reserve,
+                              effect.simulated_eth_reserve,
+                              effect.percentage_change * 100.0);
+                    }
+                    
                     // Process simulation result with the service
                     match service.process_transaction(sim_result).await {
                         Ok(alerts) => {
@@ -343,57 +438,88 @@ async fn process_transaction(
                                 info!("🚨 SCAM DETECTED: {} alerts in tx {}", alerts.len(), tx_hash_hex);
                                 
                                 for alert in &alerts {
-                                    info!("  Pool {} depleted: {} → {} ETH", 
+                                    info!("  🚨 Pool {} depleted: {:.6} → {:.6} ETH", 
                                         alert.pool_address, 
                                         alert.current_eth_reserve,
                                         alert.simulated_eth_reserve);
                                 }
                                 return alerts.len();
+                            } else {
+                                debug!("✅ No scam alerts for tx {}", &tx_hash_hex[..8]);
                             }
                         },
                         Err(e) => {
-                            error!("Scam detection error: {}", e);
+                            error!("❌ Scam detection error for tx {}: {}", &tx_hash_hex[..8], e);
                         }
                     }
+                } else {
+                    debug!("❌ No simulation result created for tx {} (no affected pools)", &tx_hash_hex[..8]);
                 }
             },
             Ok(None) => {
-                // No state changes - silent
+                debug!("⚪ No state changes for tx {}", &tx_hash_hex[..8]);
             },
-            Err(_) => {
-                // Simulation failed - silent (these are common)
+            Err(e) => {
+                debug!("❌ REVM simulation failed for tx {}: {}", &tx_hash_hex[..8], e);
             }
         }
+    } else {
+        error!("❌ Invalid transaction hash length for tx {}", tx_hash_hex);
     }
     
     0 // No scams detected
 }
 
-// Helper function to prepare a simulation result from mempool diffs
-fn prepare_simulation_result_from_mempool_diffs(
+// Helper function to prepare a simulation result from REVM account changes
+fn prepare_simulation_result_from_revm_changes(
     tx: &TransactionView,
-    changes: &HashMap<String, mempool_processor::tx_simulator::MempoolStateDiff>,
+    account_changes: &HashMap<revm_primitives::Address, revm_tx_simulator_lib::state_diff_utils::CalculatedAccountChanges>,
     pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
 ) -> Option<SimulationResult> {
     let mut affected_pools = HashMap::new();
+    let tx_hash_hex = hex::encode(&tx.hash);
     
-    // Extract pool effects from state changes
-    for (address_str, change) in changes {
-        // Calculate ETH delta from MempoolStateDiff
-        let eth_delta = change.change;
+    debug!("🔧 Preparing simulation result for tx {} with {} account changes", 
+           &tx_hash_hex[..8], account_changes.len());
+    
+    // Extract pool effects from REVM account changes
+    for (address, changes) in account_changes {
+        // Convert REVM address to checksummed string format using our utility function
+        let addr_str = to_checksum_address(*address);
+        
+        // Calculate ETH delta from REVM account changes (using correct field name)
+        let eth_delta = if changes.eth_net_change.is_negative {
+            -(changes.eth_net_change.absolute_value.into_limbs()[0] as u128 as f64 / 1e18)
+        } else {
+            changes.eth_net_change.absolute_value.into_limbs()[0] as u128 as f64 / 1e18
+        };
+        
+        debug!("  🔍 Checking address {} (checksummed): delta = {:.6} ETH", addr_str, eth_delta);
         
         // Skip addresses where ETH is being added (positive delta)
         if eth_delta >= 0.0 {
+            debug!("    ⬆️ Skipping positive delta (ETH being added)");
             continue;
         }
         
-        // Address is already a string, just use it directly
-        let addr_str = address_str.clone();
+        // Skip very small changes (less than 0.001 ETH)
+        if eth_delta.abs() < 0.001 {
+            debug!("    💸 Skipping small change ({:.6} ETH)", eth_delta);
+            continue;
+        }
         
+        // Check if this address is a known pool (now using checksummed address)
         if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
             let current_eth = pool_state.eth_reserve;
             let simulated_eth = current_eth + eth_delta;
-            let percentage_change = eth_delta / current_eth;
+            let percentage_change = if current_eth > 0.0 {
+                eth_delta / current_eth
+            } else {
+                0.0
+            };
+            
+            info!("    🏊 Pool {} affected: {:.6} → {:.6} ETH ({:.2}% change)", 
+                  addr_str, current_eth, simulated_eth, percentage_change * 100.0);
             
             let effect = PoolEffect {
                 pool_address: addr_str.clone(),
@@ -404,6 +530,14 @@ fn prepare_simulation_result_from_mempool_diffs(
             };
             
             affected_pools.insert(addr_str, effect);
+        } else {
+            // Check both checksummed and lowercase versions for debugging
+            let addr_lower = format!("0x{}", hex::encode(address.as_slice()).to_lowercase());
+            if pool_cache.get_pool(&addr_lower).is_some() {
+                warn!("    ⚠️  Address {} found in pool cache as lowercase but not checksummed!", addr_str);
+            } else {
+                debug!("    ❌ Address {} not found in pool cache (tried both checksummed and lowercase)", addr_str);
+            }
         }
     }
     
@@ -419,12 +553,16 @@ fn prepare_simulation_result_from_mempool_diffs(
         hash_bytes.copy_from_slice(&tx.hash);
         let tx_hash = H256::from(hash_bytes);
         
+        info!("✅ Created simulation result for tx {} with {} affected pools", 
+              &tx_hash_hex[..8], affected_pools.len());
+        
         Some(SimulationResult {
             tx_hash,
             from: from_addr,
             affected_pools,
         })
     } else {
+        debug!("❌ No affected pools found for tx {}", &tx_hash_hex[..8]);
         None
     }
 } 
