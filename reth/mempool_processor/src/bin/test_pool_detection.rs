@@ -115,15 +115,14 @@ async fn main() -> eyre::Result<()> {
     
     // Initialize pool subscriber
     info!("Connecting to pool subscriber...");
-    let pool_subscriber = PoolSubscriber::with_endpoint(args.eth_threshold, &args.pool_zmq_address);
+    let mut pool_subscriber = PoolSubscriber::with_endpoint(args.eth_threshold, &args.pool_zmq_address);
     let pool_cache = pool_subscriber.get_pool_cache();
     
-    // Start pool subscriber in background
+    // Spawn pool subscriber listener
     tokio::spawn({
-        let pool_subscriber_clone = pool_subscriber;
         async move {
-            if let Err(e) = pool_subscriber_clone.start_listening().await {
-                error!("Pool subscriber failed: {}", e);
+            if let Err(e) = pool_subscriber.start_listening().await {
+                error!("Pool subscriber listener failed: {}", e);
             }
         }
     });
@@ -179,7 +178,46 @@ async fn main() -> eyre::Result<()> {
                     // Simulate transaction
                     match tracker.simulate_transaction(tx).await {
                         Ok(Some(changes)) => {
-                            let pool_effects = analyze_pool_effects(tx, &changes, &pool_cache);
+                            // Convert MempoolStateDiff to StateChange
+                            let state_changes: Vec<mempool_processor::tx_simulator::StateChange> = changes
+                                .iter()
+                                .filter_map(|(addr, diff)| {
+                                    // Parse address from string to H160
+                                    if let Ok(address_bytes) = hex::decode(addr.trim_start_matches("0x")) {
+                                        if address_bytes.len() == 20 {
+                                            let address = ethers::types::H160::from_slice(&address_bytes);
+                                            
+                                            // Convert ETH values to Wei (U256)
+                                            let balance_before = diff.before
+                                                .map(|eth| ethers::types::U256::from((eth * 1e18) as u128))
+                                                .unwrap_or_default();
+                                            let balance_after = diff.after
+                                                .map(|eth| ethers::types::U256::from((eth * 1e18) as u128))
+                                                .unwrap_or_default();
+                                            let balance_change = (diff.change * 1e18) as i128;
+                                            
+                                            Some(mempool_processor::tx_simulator::StateChange {
+                                                address,
+                                                balance_before,
+                                                balance_after,
+                                                balance_change,
+                                                eth_value: diff.change,
+                                                storage_changes: std::collections::HashMap::new(),
+                                                timestamp: std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs(),
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            
+                            let pool_effects = analyze_pool_effects(tx, &state_changes, &pool_cache);
                             
                             if !pool_effects.is_empty() {
                                 pool_affecting_count += 1;

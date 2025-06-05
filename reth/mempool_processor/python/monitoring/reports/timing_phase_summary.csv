@@ -1,0 +1,7 @@
+Phase,Mean_ms,Median_ms,P95_ms,Max_ms,Sample_Count
+Mempool Residence,3.2,1.0,9.799999999999997,12.0,5
+Pool Check,7.0,7.0,12.399999999999999,13.0,2
+REVM Simulation,9.70273556231003,3.0,17.0,1359.0,1645
+State Analysis,1.0,1.0,1.0,1.0,1
+Total Processing,9.714893617021277,3.0,17.0,1359.0,1645
+End-to-End,9.724620060790274,3.0,17.0,1359.0,1645

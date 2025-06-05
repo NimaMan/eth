@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Timing Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .dashboard {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .metric-header {
+            font-size: 0.9rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        
+        .metric-value {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .metric-unit {
+            font-size: 1rem;
+            color: #888;
+        }
+        
+        .status-good { color: #10b981; }
+        .status-warning { color: #f59e0b; }
+        .status-danger { color: #ef4444; }
+        
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .chart-wide {
+            grid-column: span 2;
+            height: 450px;
+        }
+        
+        .chart-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        
+        .chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+        }
+        
+        .chart-container canvas {
+            max-height: 100% !important;
+            max-width: 100% !important;
+        }
+        
+        .status-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .last-updated {
+            text-align: center;
+            color: white;
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .charts-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .chart-wide {
+                grid-column: span 1;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+        }
+        
+        .gauge-labels {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .gauge-label {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin: 0 5px;
+        }
+        
+        .excellent { background-color: #10b981; }
+        .good { background-color: #764ba2; }
+        .acceptable { background-color: #f59e0b; }
+        .poor { background-color: #ef4444; }
+        
+        .tps-stats {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .tps-current, .tps-peak {
+            display: inline-block;
+            margin: 0 10px;
+        }
+        
+        .pipeline-legend {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .legend-item {
+            display: inline-block;
+            margin: 0 10px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        
+        .heatmap-scale {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .scale-item {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 5px;
+            margin: 0 5px;
+        }
+        
+        .scale-excellent { background-color: #10b981; }
+        .scale-good { background-color: #764ba2; }
+        .scale-warning { background-color: #f59e0b; }
+        .scale-danger { background-color: #ef4444; }
+        
+        .timing-stats {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .timing-current, .timing-sla {
+            display: inline-block;
+            margin: 0 10px;
+            font-weight: bold;
+        }
+        
+        .timing-current span {
+            color: #667eea;
+        }
+        
+        .timing-sla span {
+            color: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🔬 Transaction Timing Dashboard</h1>
+            <p>Real-time performance monitoring for Ethereum mempool scam detection</p>
+            <div class="status-indicator"></div>
+        </div>
+        
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-header">Total Processed</div>
+                <div class="metric-value" id="totalProcessed">-</div>
+                <div class="metric-unit">transactions</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Current TPS</div>
+                <div class="metric-value" id="currentTPS">-</div>
+                <div class="metric-unit">tx/second</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Queue Time</div>
+                <div class="metric-value" id="queueTime">-</div>
+                <div class="metric-unit">ms average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Processing Time</div>
+                <div class="metric-value" id="processingTime">-</div>
+                <div class="metric-unit">ms average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">End-to-End Time</div>
+                <div class="metric-value" id="endToEndTime">-</div>
+                <div class="metric-unit">ms average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">SLA Compliance</div>
+                <div class="metric-value" id="slaCompliance">-</div>
+                <div class="metric-unit">% target: >95%</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Pool Transactions</div>
+                <div class="metric-value" id="poolTransactions">-</div>
+                <div class="metric-unit">total</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Scams Detected</div>
+                <div class="metric-value status-danger" id="scamsDetected">-</div>
+                <div class="metric-unit">🚨 alerts</div>
+            </div>
+            
+            <!-- NEW ENHANCED METRICS -->
+            <div class="metric-card">
+                <div class="metric-header">REVM Simulation</div>
+                <div class="metric-value" id="revmTime">-</div>
+                <div class="metric-unit">μs average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Pool Checks</div>
+                <div class="metric-value" id="poolCheckTime">-</div>
+                <div class="metric-unit">μs average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">State Analysis</div>
+                <div class="metric-value" id="stateAnalysisTime">-</div>
+                <div class="metric-unit">μs average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Scam Detection</div>
+                <div class="metric-value" id="scamDetectionTime">-</div>
+                <div class="metric-unit">μs average</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Mining Coverage</div>
+                <div class="metric-value" id="miningCoverage">-</div>
+                <div class="metric-unit">% tracked</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Avg Mining Time</div>
+                <div class="metric-value" id="avgMiningTime">-</div>
+                <div class="metric-unit">seconds</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">Performance Grade</div>
+                <div class="metric-value" id="performanceGrade">-</div>
+                <div class="metric-unit">category</div>
+            </div>
+            
+            <div class="metric-card">
+                <div class="metric-header">SLA Violations</div>
+                <div class="metric-value" id="slaViolations">-</div>
+                <div class="metric-unit">count</div>
+            </div>
+        </div>
+        
+        <div class="charts-container">
+            <div class="chart-card">
+                <div class="chart-title">⚡ Real-time Performance Gauge</div>
+                <div class="chart-container">
+                    <canvas id="performanceGauge"></canvas>
+                </div>
+                <div class="gauge-labels">
+                    <span class="gauge-label excellent">🚀 Excellent</span>
+                    <span class="gauge-label good">✅ Good</span>
+                    <span class="gauge-label acceptable">⚠️ Acceptable</span>
+                    <span class="gauge-label poor">🚨 Poor</span>
+                </div>
+            </div>
+            
+            <div class="chart-card">
+                <div class="chart-title">🕐 System Timing Performance</div>
+                <div class="chart-container">
+                    <canvas id="timingTrendChart"></canvas>
+                </div>
+                <div class="timing-stats">
+                    <div class="timing-current">Avg E2E: <span id="currentE2EDisplay">-</span> ms</div>
+                    <div class="timing-sla">SLA: <span id="slaDisplay">-</span>%</div>
+                </div>
+            </div>
+            
+            <div class="chart-card chart-wide">
+                <div class="chart-title">🕒 Processing Pipeline Breakdown</div>
+                <div class="chart-container">
+                    <canvas id="pipelineChart"></canvas>
+                </div>
+                <div class="pipeline-legend">
+                    <span class="legend-item"><span class="legend-color" style="background: #667eea;"></span>Queue Time</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #764ba2;"></span>Pool Check</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #f093fb;"></span>REVM Simulation</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #f5576c;"></span>State Analysis</span>
+                    <span class="legend-item"><span class="legend-color" style="background: #4facfe;"></span>Scam Detection</span>
+                </div>
+            </div>
+            
+            <div class="chart-card">
+                <div class="chart-title">🎯 SLA Performance Radar</div>
+                <div class="chart-container">
+                    <canvas id="slaHeatmap"></canvas>
+                </div>
+                <div class="heatmap-scale">
+                    <span class="scale-item scale-excellent">95-100%</span>
+                    <span class="scale-item scale-good">85-95%</span>
+                    <span class="scale-item scale-warning">70-85%</span>
+                    <span class="scale-item scale-danger">&lt;70%</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="last-updated" id="lastUpdated">
+            Last updated: -
+        </div>
+    </div>
+
+    <script>
+        // Chart configurations
+        const performanceGaugeCtx = document.getElementById('performanceGauge').getContext('2d');
+        const timingTrendChartCtx = document.getElementById('timingTrendChart').getContext('2d');
+        const pipelineChartCtx = document.getElementById('pipelineChart').getContext('2d');
+        const slaHeatmapCtx = document.getElementById('slaHeatmap').getContext('2d');
+        
+        // Real-time performance gauge
+        const performanceGauge = new Chart(performanceGaugeCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Poor', 'Acceptable', 'Good', 'Excellent'],
+                datasets: [{
+                    data: [0, 0, 0, 100],
+                    backgroundColor: ['#ef4444', '#f59e0b', '#764ba2', '#10b981'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 1.5,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                animation: {
+                    animateRotate: true,
+                    duration: 1000
+                }
+            }
+        });
+        
+        // Timing trend line chart
+        const timingTrendChart = new Chart(timingTrendChartCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'End-to-End Time',
+                    data: [],
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    borderWidth: 2
+                }, {
+                    label: 'Queue Time',
+                    data: [],
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    borderWidth: 2
+                }, {
+                    label: 'Processing Time',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 1.8,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Time (ms)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'bottom',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20,
+                            font: {
+                                size: 11
+                            }
+                        }
+                    }
+                },
+                animation: {
+                    duration: 500
+                }
+            }
+        });
+        
+        // Processing pipeline breakdown bar chart
+        const pipelineChart = new Chart(pipelineChartCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Queue', 'Pool Check', 'REVM', 'Analysis', 'Detection'],
+                datasets: [{
+                    label: 'Time (ms)',
+                    data: [0, 0, 0, 0, 0],
+                    backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe'],
+                    borderWidth: 1,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2.2,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Time (ms)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                animation: {
+                    duration: 500
+                }
+            }
+        });
+        
+        // SLA performance radar chart
+        const slaHeatmap = new Chart(slaHeatmapCtx, {
+            type: 'radar',
+            data: {
+                labels: ['SLA', 'TPS', 'Speed', 'Reliability', 'Mining'],
+                datasets: [{
+                    label: 'Performance',
+                    data: [100, 100, 100, 100, 100],
+                    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                    borderColor: 'rgba(102, 126, 234, 1)',
+                    borderWidth: 2,
+                    pointBackgroundColor: 'rgba(102, 126, 234, 1)',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 1.2,
+                scales: {
+                    r: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        angleLines: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        pointLabels: {
+                            font: {
+                                size: 11
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                animation: {
+                    duration: 500
+                }
+            }
+        });
+        
+        // Data storage for trends
+        let trendData = [];
+        const maxTrendPoints = 20;
+        
+        // Update functions
+        function updateMetrics(data) {
+            document.getElementById('totalProcessed').textContent = data.total_processed || '-';
+            
+            const currentTps = data.current_tps || 0;
+            document.getElementById('currentTPS').textContent = currentTps;
+            
+            const queueTime = parseFloat(data.avg_queue_time_ms || 0);
+            const processingTime = parseFloat(data.avg_processing_time_ms || 0);
+            const endToEndTime = parseFloat(data.avg_end_to_end_time_ms || 0);
+            const slaCompliance = parseFloat(data.sla_compliance_percentage || 100);
+            
+            document.getElementById('queueTime').textContent = queueTime.toFixed(1);
+            document.getElementById('processingTime').textContent = processingTime.toFixed(1);
+            document.getElementById('endToEndTime').textContent = endToEndTime.toFixed(1);
+            
+            // Color-code SLA compliance
+            const slaElement = document.getElementById('slaCompliance');
+            slaElement.textContent = slaCompliance.toFixed(1);
+            slaElement.className = slaCompliance >= 95 ? 'metric-value status-good' : 
+                                  slaCompliance >= 80 ? 'metric-value status-warning' : 
+                                  'metric-value status-danger';
+            
+            document.getElementById('poolTransactions').textContent = data.pool_transactions || '-';
+            document.getElementById('scamsDetected').textContent = data.scams_detected || '-';
+            
+            // === NEW ENHANCED METRICS ===
+            
+            // Detailed timing breakdowns (convert from microseconds to display units)
+            const revmTimeUs = parseFloat(data.avg_revm_simulation_time_us || 0);
+            const poolCheckTimeUs = parseFloat(data.avg_pool_check_time_us || 0);
+            const stateAnalysisTimeUs = parseFloat(data.avg_state_analysis_time_us || 0);
+            const scamDetectionTimeUs = parseFloat(data.avg_scam_detection_time_us || 0);
+            
+            document.getElementById('revmTime').textContent = revmTimeUs.toFixed(0);
+            document.getElementById('poolCheckTime').textContent = poolCheckTimeUs.toFixed(0);
+            document.getElementById('stateAnalysisTime').textContent = stateAnalysisTimeUs.toFixed(0);
+            document.getElementById('scamDetectionTime').textContent = scamDetectionTimeUs.toFixed(0);
+            
+            // Mining statistics
+            const miningCoverage = parseFloat(data.mining_coverage_percentage || 0);
+            const avgMiningTime = parseFloat(data.avg_mining_time_seconds || 0);
+            
+            document.getElementById('miningCoverage').textContent = miningCoverage.toFixed(1);
+            document.getElementById('avgMiningTime').textContent = avgMiningTime.toFixed(1);
+            
+            // Performance grade with color coding
+            const performanceGrade = data.dominant_performance_category || 'unknown';
+            const gradeElement = document.getElementById('performanceGrade');
+            gradeElement.textContent = performanceGrade;
+            gradeElement.className = performanceGrade === 'excellent' ? 'metric-value status-good' :
+                                   performanceGrade === 'good' ? 'metric-value status-good' :
+                                   performanceGrade === 'acceptable' ? 'metric-value status-warning' :
+                                   'metric-value status-danger';
+            
+            // SLA violations with color coding
+            const slaViolations = data.sla_violations || 0;
+            const violationsElement = document.getElementById('slaViolations');
+            violationsElement.textContent = slaViolations;
+            violationsElement.className = slaViolations === 0 ? 'metric-value status-good' :
+                                         slaViolations < 10 ? 'metric-value status-warning' :
+                                         'metric-value status-danger';
+            
+            // === UPDATE CHARTS ===
+            
+            // Update performance gauge based on end-to-end time
+            let performanceCategory = 0; // poor
+            if (endToEndTime <= 50) performanceCategory = 3; // excellent
+            else if (endToEndTime <= 100) performanceCategory = 2; // good
+            else if (endToEndTime <= 200) performanceCategory = 1; // acceptable
+            
+            const gaugeData = [0, 0, 0, 0];
+            gaugeData[performanceCategory] = 100;
+            
+            performanceGauge.data.datasets[0].data = gaugeData;
+            performanceGauge.update('none');
+            
+            // Update timing trend chart with time series
+            const now = new Date();
+            const timeLabel = now.toLocaleTimeString();
+            
+            trendData.push({
+                time: timeLabel,
+                tps: currentTps,
+                endToEnd: endToEndTime,
+                queue: queueTime,
+                processingTime: processingTime
+            });
+            
+            if (trendData.length > maxTrendPoints) {
+                trendData.shift();
+            }
+            
+            timingTrendChart.data.labels = trendData.map(d => d.time);
+            timingTrendChart.data.datasets[0].data = trendData.map(d => d.endToEnd);
+            timingTrendChart.data.datasets[1].data = trendData.map(d => d.queue);
+            timingTrendChart.data.datasets[2].data = trendData.map(d => d.processingTime);
+            timingTrendChart.update('none');
+            
+            // Update timing stats display
+            document.getElementById('currentE2EDisplay').textContent = endToEndTime.toFixed(1);
+            document.getElementById('slaDisplay').textContent = slaCompliance.toFixed(1);
+            
+            // Update processing pipeline breakdown
+            const pipelineData = [
+                queueTime,
+                poolCheckTimeUs / 1000, // Convert to ms
+                revmTimeUs / 1000,
+                stateAnalysisTimeUs / 1000,
+                scamDetectionTimeUs / 1000
+            ];
+            
+            pipelineChart.data.datasets[0].data = pipelineData;
+            pipelineChart.update('none');
+            
+            // Update SLA heatmap (using radar chart as fallback)
+            const slaData = [
+                slaCompliance,
+                currentTps / 10, // Scale down TPS for display
+                100 - (endToEndTime / 10), // Invert and scale timing
+                100 - slaViolations, // Invert violations
+                miningCoverage
+            ];
+            
+            slaHeatmap.data.datasets[0].data = slaData;
+            slaHeatmap.update('none');
+            
+            // Update last updated time
+            if (data.timestamp) {
+                const updateTime = new Date(data.timestamp);
+                document.getElementById('lastUpdated').textContent = 
+                    `Last updated: ${updateTime.toLocaleString()}`;
+            }
+        }
+        
+        // Fetch data from API
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('http://localhost:3001/api/summary');
+                if (response.ok) {
+                    const data = await response.json();
+                    updateMetrics(data);
+                } else {
+                    console.error('Failed to fetch metrics:', response.status);
+                }
+            } catch (error) {
+                console.error('Error fetching metrics:', error);
+            }
+        }
+        
+        // Initial load and periodic updates
+        fetchMetrics();
+        setInterval(fetchMetrics, 12000); // Update every 12 seconds
+    </script>
+</body>
+</html> 

@@ -156,7 +156,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use ethers::types::H256;
-    use crate::scam_detection::types::{PoolEffect, ScamAlertReason};
+    use crate::scam_detection::types::PoolEffect;
     use crate::pool_subscriber::types::PoolUpdate;
     
     // Helper to create a test pool cache with sample data

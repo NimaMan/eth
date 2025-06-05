@@ -13,7 +13,7 @@ use alloy_network::Ethereum as AlloyEthereum;
 use alloy_eips::BlockId as AlloyBlockId;
 
 use eyre::{Result, WrapErr};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,8 +26,8 @@ pub struct TransactionSimulator {
 impl TransactionSimulator {
     /// Create a new transaction simulator.
     pub async fn new(
-        rpc_url: &str,
-        chain_id: u64,
+        rpc_url: &str, 
+        chain_id: u64, 
         spec_id: RevmSpecId,
     ) -> Result<Self> {
         let provider_instance = ProviderBuilder::new()
@@ -58,7 +58,7 @@ impl TransactionSimulator {
         block_env: &RevmBlockEnv_ctx,
     ) -> Result<Option<HashMap<RevmAddress, CalculatedAccountChanges>>> {
         
-        info!("Preparing to simulate transaction hash: {:?}", hex::encode(&tx_view.hash));
+        debug!("Preparing to simulate transaction hash: {:?}", hex::encode(&tx_view.hash));
 
         let mut revm_tx_env = match transaction_view_to_revm_tx_env(tx_view, self.cfg_env.chain_id) {
             Ok(env) => env,
@@ -129,7 +129,8 @@ impl TransactionSimulator {
             cache_db,
         ) {
             Ok((sim_output, final_db_state)) => {
-                info!("✅ REVM simulation successful for tx {:?}. Result: {:?}, Gas: {}", hex::encode(&tx_view.hash), sim_output.result_type, sim_output.gas_used);
+                // Only log at debug level for successful simulations
+                debug!("REVM simulation successful for tx {:?}. Result: {:?}, Gas: {}", hex::encode(&tx_view.hash), sim_output.result_type, sim_output.gas_used);
 
                 if matches!(sim_output.result_type, ExecutionResultType::Success(_)) {
                     match generate_calculated_account_changes(
@@ -141,13 +142,13 @@ impl TransactionSimulator {
                         sim_output.gas_used,
                         self.alloy_provider.clone(),
                         fork_block_id,
-                    ).await {
-                        Ok(changes) => {
-                            if changes.is_empty() {
+        ).await {
+            Ok(changes) => {
+                if changes.is_empty() {
                                 debug!("Simulation for tx {:?} resulted in no calculated state changes.", hex::encode(&tx_view.hash));
-                                Ok(None)
+                    Ok(None)
                             } else {
-                                info!("Successfully generated state changes for tx {:?}, {} accounts affected.", hex::encode(&tx_view.hash), changes.len());
+                                debug!("Successfully generated state changes for tx {:?}, {} accounts affected.", hex::encode(&tx_view.hash), changes.len());
                                 Ok(Some(changes))
                             }
                         },
@@ -162,14 +163,22 @@ impl TransactionSimulator {
                 }
             },
             Err(e) => {
-                // Log different error types at different levels
+                // Only log truly unexpected errors, not normal mempool behavior
                 let error_msg = e.to_string();
-                if error_msg.contains("NonceTooHigh") || error_msg.contains("NonceTooLow") {
-                    debug!("Nonce issue for tx {:?}: {}", hex::encode(&tx_view.hash), e);
-                } else if error_msg.contains("LackOfFund") || error_msg.contains("InsufficientFunds") {
-                    debug!("Insufficient funds for tx {:?}: {}", hex::encode(&tx_view.hash), e);
+                if error_msg.contains("LackOfFund") || 
+                   error_msg.contains("InsufficientFunds") ||
+                   error_msg.contains("lack of funds") ||
+                   error_msg.contains("transaction validation error") {
+                    // These are normal in mempool - don't log them at all
+                    debug!("Insufficient funds for tx {:?} (normal mempool behavior)", hex::encode(&tx_view.hash));
+                } else if error_msg.contains("NonceTooHigh") || 
+                          error_msg.contains("NonceTooLow") ||
+                          error_msg.contains("nonce") {
+                    // Nonce issues are also normal mempool behavior
+                    debug!("Nonce issue for tx {:?} (normal mempool behavior)", hex::encode(&tx_view.hash));
                 } else {
-                    warn!("REVM simulation library failed for tx {:?}: {}", hex::encode(&tx_view.hash), e);
+                    // Only log truly unexpected simulation errors
+                    warn!("Unexpected REVM simulation error for tx {:?}: {}", hex::encode(&tx_view.hash), e);
                 }
                 Ok(None) // Don't propagate errors, just return None for failed simulations
             }

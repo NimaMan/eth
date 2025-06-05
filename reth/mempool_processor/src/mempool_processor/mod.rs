@@ -6,6 +6,7 @@
 // Our component modules
 pub mod types;
 pub mod fetcher;
+pub mod devp2p_client; // DevP2P peer-to-peer transaction fetching
 pub mod processor;
 pub mod pools;
 pub mod db_logger;

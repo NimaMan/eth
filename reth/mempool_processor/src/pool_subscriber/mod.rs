@@ -9,7 +9,7 @@ use zmq;
 use tracing::{info, error, debug, warn};
 use std::sync::Arc;
 use serde_json;
-use revm_primitives::alloy_primitives::{Address, keccak256};
+use revm_primitives::alloy_primitives::Address;
 
 use self::types::PoolUpdatesMessage;
 use self::cache::PoolStateCache;
@@ -17,42 +17,11 @@ use self::cache::PoolStateCache;
 // Default ZMQ endpoint for backward compatibility
 const DEFAULT_ZMQ_PUB_ENDPOINT: &str = "tcp://localhost:5557";
 
-/// Ethereum address checksum utility
-/// Converts an address to EIP-55 checksummed format to match our simulation results
-fn to_checksum_address_from_str(address_str: &str) -> String {
-    // Remove 0x prefix if present
-    let addr_hex = address_str.trim_start_matches("0x");
-    
-    // Parse hex string to bytes
-    if let Ok(addr_bytes) = hex::decode(addr_hex) {
-        if addr_bytes.len() == 20 {
-            let address = Address::from_slice(&addr_bytes);
-            let hash = keccak256(addr_hex.to_lowercase().as_bytes());
-            let hash_hex = hex::encode(hash.as_slice());
-            
-            let mut result = String::with_capacity(42);
-            result.push_str("0x");
-            
-            for (i, c) in addr_hex.chars().enumerate() {
-                if c.is_ascii_digit() {
-                    result.push(c);
-                } else {
-                    // Check if the corresponding hash character is >= 8
-                    let hash_char = hash_hex.chars().nth(i).unwrap_or('0');
-                    if hash_char >= '8' {
-                        result.push(c.to_ascii_uppercase());
-                    } else {
-                        result.push(c.to_ascii_lowercase());
-                    }
-                }
-            }
-            
-            return result;
-        }
-    }
-    
-    // Fallback: return original address if parsing fails
-    address_str.to_string()
+/// Address normalization utility
+/// Normalize addresses to lowercase for consistent storage and lookup
+fn normalize_address_from_str(address_str: &str) -> String {
+    let cleaned = address_str.trim_start_matches("0x").to_lowercase();
+    format!("0x{}", cleaned)
 }
 
 pub struct PoolSubscriber {
@@ -69,7 +38,7 @@ impl PoolSubscriber {
         let pool_cache = Arc::new(PoolStateCache::new(eth_threshold));
         Self { 
             pool_cache,
-            zmq_endpoint: zmq_endpoint.to_string()
+            zmq_endpoint: zmq_endpoint.to_string(),
         }
     }
     
@@ -79,10 +48,11 @@ impl PoolSubscriber {
     }
 
     /// Request initial pool state from Python service via REQ/REP socket
+    /// FAST VERSION: Uses Python values with normalized addresses for consistency
     async fn request_initial_pool_state(&self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Requesting initial pool state from Python service...");
+        info!("Requesting pool data from Python service (HIGH-PERFORMANCE MODE)...");
         
-        // Create REQ socket to request full pool state
+        // Create REQ socket to request pool data
         let context = zmq::Context::new();
         let requester = context.socket(zmq::REQ)?;
         
@@ -116,39 +86,42 @@ impl PoolSubscriber {
             info!("Received {} pools from Python service", pool_count);
             
             if let Some(pool_data) = response["data"].as_object() {
-                // Convert to our PoolUpdate format with checksummed addresses
+                // Use Python values directly with normalized addresses
                 let mut pools_map = std::collections::HashMap::new();
                 
                 for (address, data) in pool_data {
                     if let Some(pool_obj) = data.as_object() {
-                        // Extract required fields with defaults
-                        let eth_reserve = pool_obj.get("eth_reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let python_eth_reserve = pool_obj.get("eth_reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let token_address = pool_obj.get("token_address").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let block_number = pool_obj.get("block_number").and_then(|v| v.as_u64()).unwrap_or(0);
                         let update_time = pool_obj.get("update_time").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         
                         let pool_update = types::PoolUpdate {
-                            eth_reserve,
-                            token_address: to_checksum_address_from_str(&token_address),
+                            eth_reserve: python_eth_reserve,
+                            token_address: normalize_address_from_str(&token_address),
                             block_number,
                             update_time,
                         };
                         
-                        // Store with checksummed pool address
-                        let checksummed_address = to_checksum_address_from_str(address);
-                        pools_map.insert(checksummed_address, pool_update);
+                        // Store with normalized pool address (lowercase)
+                        let normalized_address = normalize_address_from_str(address);
+                        pools_map.insert(normalized_address, pool_update);
+                        
+                        if python_eth_reserve > 0.0 {
+                            debug!("✅ Pool {}: {:.6} ETH (from Python)", address, python_eth_reserve);
+                        }
                     }
                 }
                 
-                // Update cache with initial data
+                // Update cache with Python data
                 let updated_pools = self.pool_cache.update_pools(pools_map.iter());
-                info!("Initialized cache with {} pools (above threshold: {})", 
+                info!("✅ Initialized cache with {} pools using Python data (above threshold: {})", 
                      pool_count, updated_pools.len());
                 
                 // Log some sample pools for verification
                 if !updated_pools.is_empty() {
-                    info!("Sample initialized pools (checksummed addresses):");
-                    for (i, addr) in updated_pools.iter().take(5).enumerate() {
+                    info!("Sample initialized pools (normalized addresses):");
+                    for (i, addr) in updated_pools.iter().take(3).enumerate() {
                         if let Some(pool_state) = self.pool_cache.get_pool(addr) {
                             info!("  {}: {} ({:.6} ETH)", i+1, addr, pool_state.eth_reserve);
                         }
@@ -156,14 +129,15 @@ impl PoolSubscriber {
                 }
             }
         } else {
-            warn!("Failed to get initial pool state: {}", response["error"].as_str().unwrap_or("Unknown error"));
+            warn!("Failed to get pool data: {}", response["error"].as_str().unwrap_or("Unknown error"));
         }
         
         Ok(())
     }
 
-    pub async fn start_listening(&self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Initializing ZMQ subscriber for pool levels.");
+    pub async fn start_listening(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        info!("🚀 Starting HIGH-PERFORMANCE pool subscriber (using direct Python values for error identification)");
+        
         let context = zmq::Context::new();
         let subscriber = context.socket(zmq::SUB)?;
 
@@ -174,16 +148,16 @@ impl PoolSubscriber {
         subscriber.set_subscribe(b"")?;
         debug!("Subscribed to all messages from publisher.");
 
-        // Request initial full pool state
+        // Request initial pool data without corrections
         if let Err(e) = self.request_initial_pool_state().await {
             warn!("Failed to get initial pool state: {}", e);
         }
 
-        info!("Listening for pool level updates from Python...");
+        info!("🔥 HIGH-PERFORMANCE MODE: Real-time pool updates (Python values) - ready to identify pool errors");
         loop {
             match subscriber.recv_string(0) {
                 Ok(Ok(msg_str)) => {
-                    debug!("Received message from Python publisher");
+                    debug!("Received pool update message from Python publisher");
                     
                     // Attempt to deserialize the JSON message
                     match serde_json::from_str::<PoolUpdatesMessage>(&msg_str) {
@@ -193,20 +167,23 @@ impl PoolSubscriber {
                                 debug!("Large pool update: {} pools", message.data.len());
                             }
                             
-                            // Checksum addresses in updates before storing
-                            let mut checksummed_updates = std::collections::HashMap::new();
+                            // HIGH-PERFORMANCE PATH: Use Python values with normalized addresses
+                            let mut python_updates = std::collections::HashMap::new();
+                            
                             for (address, update) in message.data.iter() {
-                                let checksummed_address = to_checksum_address_from_str(address);
-                                let mut checksummed_update = update.clone();
-                                checksummed_update.token_address = to_checksum_address_from_str(&update.token_address);
-                                checksummed_updates.insert(checksummed_address, checksummed_update);
+                                let normalized_address = normalize_address_from_str(address);
+                                let mut python_update = update.clone();
+                                python_update.token_address = normalize_address_from_str(&update.token_address);
+                                
+                                // Use Python values directly with normalized addresses
+                                python_updates.insert(normalized_address, python_update);
                             }
                             
-                            // Update the cache with checksummed addresses
-                            let updated_pools = self.pool_cache.update_pools(checksummed_updates.iter());
+                            // Update the cache with Python data (LIGHTNING FAST - no blockchain calls)
+                            let updated_pools = self.pool_cache.update_pools(python_updates.iter());
                             
                             // Only log cache updates for debugging if needed
-                            debug!("Updated {} pools in cache", updated_pools.len());
+                            debug!("⚡ Updated {} pools in cache (HIGH-PERFORMANCE MODE)", updated_pools.len());
                         },
                         Err(e) => {
                             warn!("Failed to parse pool update JSON: {}", e);

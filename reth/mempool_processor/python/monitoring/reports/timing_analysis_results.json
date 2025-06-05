@@ -1,0 +1,184 @@
+{
+  "metadata": {
+    "analysis_timestamp": "2025-06-05T14:33:57.087895",
+    "data_file": "/home/nima/code/crypto/logs/mempool/transaction_timing_analysis_20250605_143056.csv",
+    "total_transactions": 1695
+  },
+  "timing_phases": {
+    "Mempool Residence": {
+      "count": 5,
+      "mean_ms": 3.2,
+      "median_ms": 1.0,
+      "std_ms": 4.919349550499538,
+      "min_ms": 1.0,
+      "max_ms": 12.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 9.799999999999997,
+      "p99_ms": 11.559999999999999,
+      "zero_count": 1690
+    },
+    "Pool Check": {
+      "count": 2,
+      "mean_ms": 7.0,
+      "median_ms": 7.0,
+      "std_ms": 8.48528137423857,
+      "min_ms": 1.0,
+      "max_ms": 13.0,
+      "p25_ms": 4.0,
+      "p75_ms": 10.0,
+      "p95_ms": 12.399999999999999,
+      "p99_ms": 12.879999999999999,
+      "zero_count": 1693
+    },
+    "REVM Simulation": {
+      "count": 1645,
+      "mean_ms": 9.70273556231003,
+      "median_ms": 3.0,
+      "std_ms": 63.73316121149908,
+      "min_ms": 1.0,
+      "max_ms": 1359.0,
+      "p25_ms": 2.0,
+      "p75_ms": 5.0,
+      "p95_ms": 17.0,
+      "p99_ms": 104.75999999999885,
+      "zero_count": 50
+    },
+    "State Analysis": {
+      "count": 1,
+      "mean_ms": 1.0,
+      "median_ms": 1.0,
+      "std_ms": NaN,
+      "min_ms": 1.0,
+      "max_ms": 1.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 1694
+    },
+    "Total Processing": {
+      "count": 1645,
+      "mean_ms": 9.714893617021277,
+      "median_ms": 3.0,
+      "std_ms": 63.73754009768978,
+      "min_ms": 1.0,
+      "max_ms": 1359.0,
+      "p25_ms": 2.0,
+      "p75_ms": 5.0,
+      "p95_ms": 17.0,
+      "p99_ms": 104.75999999999885,
+      "zero_count": 50
+    },
+    "End-to-End": {
+      "count": 1645,
+      "mean_ms": 9.724620060790274,
+      "median_ms": 3.0,
+      "std_ms": 63.73883306082661,
+      "min_ms": 1.0,
+      "max_ms": 1359.0,
+      "p25_ms": 2.0,
+      "p75_ms": 5.0,
+      "p95_ms": 17.0,
+      "p99_ms": 104.75999999999885,
+      "zero_count": 50
+    }
+  },
+  "transaction_categories": {
+    "pool_transactions": {
+      "count": 0,
+      "percentage": 0.0,
+      "avg_processing_ms": NaN
+    },
+    "scam_transactions": {
+      "count": 0,
+      "percentage": 0.0,
+      "avg_processing_ms": NaN
+    },
+    "performance_categories": {
+      "excellent": {
+        "count": 1287,
+        "percentage": 75.929203539823,
+        "avg_end_to_end_ms": 2.4483294483294484
+      },
+      "good": {
+        "count": 138,
+        "percentage": 8.141592920353983,
+        "avg_end_to_end_ms": 6.666666666666667
+      },
+      "acceptable": {
+        "count": 126,
+        "percentage": 7.433628318584071,
+        "avg_end_to_end_ms": 12.682539682539682
+      },
+      "poor": {
+        "count": 144,
+        "percentage": 8.495575221238937,
+        "avg_end_to_end_ms": 71.72222222222221
+      }
+    },
+    "sla_compliance": {
+      "violations": 270,
+      "compliance_rate": 84.070796460177,
+      "avg_violation_time_ms": 44.17037037037037
+    }
+  },
+  "bottleneck_analysis": {
+    "total_avg_time_ms": 28.300884955752213,
+    "phase_contributions": {
+      "End-to-End": {
+        "time_ms": 9.437758112094397,
+        "percentage": 33.347925786950185,
+        "rank": 1
+      },
+      "Total Processing": {
+        "time_ms": 9.428318584070796,
+        "percentage": 33.314571607254535,
+        "rank": 2
+      },
+      "REVM Simulation": {
+        "time_ms": 9.416519174041298,
+        "percentage": 33.27287888263498,
+        "rank": 3
+      },
+      "Mempool Residence": {
+        "time_ms": 0.00943952802359882,
+        "percentage": 0.03335417969564311,
+        "rank": 4
+      },
+      "Pool Check": {
+        "time_ms": 0.008259587020648967,
+        "percentage": 0.02918490723368772,
+        "rank": 5
+      },
+      "State Analysis": {
+        "time_ms": 0.0005899705014749262,
+        "percentage": 0.0020846362309776944,
+        "rank": 6
+      },
+      "Internal Queue": {
+        "time_ms": 0.0,
+        "percentage": 0.0,
+        "rank": 7
+      },
+      "Scam Detection": {
+        "time_ms": 0.0,
+        "percentage": 0.0,
+        "rank": 8
+      }
+    },
+    "primary_bottleneck": {
+      "phase": "End-to-End",
+      "percentage": 33.347925786950185,
+      "recommendation": "Profile and optimize implementation"
+    }
+  },
+  "throughput_metrics": {
+    "total_transactions": 1695,
+    "estimated_duration_min": 1.695,
+    "avg_processing_time_ms": 9.428318584070796,
+    "avg_queue_time_ms": 0.0,
+    "theoretical_max_tps": 106.06345034728741,
+    "queue_efficiency_pct": 100.0
+  }
+}
