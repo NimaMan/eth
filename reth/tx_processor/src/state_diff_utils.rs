@@ -74,6 +74,15 @@ impl SignedAmount {
     pub fn to_signed_string(&self) -> String {
         format!("{}{}", if self.is_negative { "-" } else { "" }, self.absolute_value)
     }
+
+    // Helper methods for internal transfers
+    pub fn add_positive(self, value: RevmU256) -> Self {
+        self + SignedAmount::new(value, false)
+    }
+
+    pub fn subtract_positive(self, value: RevmU256) -> Self {
+        self - SignedAmount::new(value, false)
+    }
 }
 
 impl Add for SignedAmount {

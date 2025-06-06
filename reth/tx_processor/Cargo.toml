@@ -30,7 +30,8 @@ revm-primitives = { path = "src/revm/crates/primitives", default-features = fals
 revm-state = { path = "src/revm/crates/state", default-features = false }
 # revm-database = { path = "src/revm/crates/database", default-features = false } # For CacheDB, AlloyDB if not re-exported by revm
 revm-context = { path = "src/revm/crates/context", default-features = false } # For BlockEnv, CfgEnv, TxEnv, RevmContext, Journal
-# revm-interpreter = { path = "src/revm/crates/interpreter", default-features = false } // Commented out as unused by this example now
+revm-inspector = { path = "src/revm/crates/inspector", default-features = false } # For call tracing
+revm-interpreter = { path = "src/revm/crates/interpreter", default-features = false } # For call tracer types
 # revm-bytecode = { path = "src/revm/crates/bytecode", default-features = false } # Unused by current example
 # revm-database-interface = { path = "src/revm/crates/database/interface", default-features = false, features = ["serde"] } # Unused by current example
 
@@ -64,6 +65,9 @@ ethers-providers = "2.0.14"
 hex = "0.4.3"
 chrono = "0.4"
 # url = "2.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
 
 # Anyhow
 anyhow = "1.0.89"
@@ -81,7 +85,7 @@ tracing = "0.1" # Core tracing macros
 # ───────────────────────────── Patch section ──────────────────────────────
 [patch.crates-io]
 revm-primitives  = { path = "src/revm/crates/primitives" }
-# revm-interpreter = { path = "src/revm/crates/interpreter" }
+revm-interpreter = { path = "src/revm/crates/interpreter" }
 revm-context     = { path = "src/revm/crates/context" }
 revm-inspector   = { path = "src/revm/crates/inspector" }
 revm-database    = { path = "src/revm/crates/database" }
