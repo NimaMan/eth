@@ -180,11 +180,21 @@ class TokenPosition:
         if live_token.token_data.trading_enabled_block:
             self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
             self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
-            self.static_data.pool_address = tuple(live_token.token_data.pool_addresses)[0]
-            self.static_data.pool_type = live_token.token_data.pool_info[self.static_data.pool_address]['pool_type']
-            self.static_data.currency = live_token.token_data.pool_info[self.static_data.pool_address]['denom_currency']
+            
+            # Safely handle pool addresses and pool info
+            pool_addresses = live_token.token_data.pool_addresses
+            if pool_addresses:
+                self.static_data.pool_address = pool_addresses[0]
+                
+                # Check if pool info exists for this address
+                if self.static_data.pool_address in live_token.token_data.pool_info:
+                    pool_info = live_token.token_data.pool_info[self.static_data.pool_address]
+                    self.static_data.pool_type = pool_info.get('pool_type')
+                    self.static_data.currency = pool_info.get('denom_currency')
 
-        current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(self.static_data.pool_address, 0)
+        current_price_ratio = 0
+        if self.static_data.pool_address:
+            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(self.static_data.pool_address, 0)
         roi = 0
         current_value = 0
         unrealized_profit = 0
@@ -198,7 +208,7 @@ class TokenPosition:
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
             current_price_ratio=current_price_ratio,
-            reserve=live_token.token_data.get_pool_reserve(self.static_data.pool_address),
+            reserve=live_token.token_data.get_pool_reserve(self.static_data.pool_address) if self.static_data.pool_address else 0,
             roi=roi,
             current_value=current_value,
             realized_profit=self.latest_snapshot.realized_profit,

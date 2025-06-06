@@ -266,7 +266,6 @@ class LiveBacktestEngineWithMempool:
                         if updated_tokens:
                             tasks = []
                             for strategy_name, position_manager in self.strategy_position_managers.items():
-                                # Ensure the set exists and clear it for the current block's updates
                                 if strategy_name not in self.updated_positions_by_strategy:
                                     self.updated_positions_by_strategy[strategy_name] = set()
                                 else:
@@ -316,7 +315,7 @@ class LiveBacktestEngineWithMempool:
                         if position:
                             composite_key = f"{token_address}-{pool_address}"
                             updated_positions_by_strategy[strategy_name].add(composite_key)
-
+            
             return updated_positions_dict
         except Exception as e:
             self.logger.error(f"Error updating positions for strategy {strategy_name}: {e}", exc_info=True)
@@ -327,110 +326,106 @@ class LiveBacktestEngineWithMempool:
         if not self.save_strategy_results or not self.results_writer:
             return
 
-        try:
-            if block_number is None:
-                block_number = self.live_token_processor.latest_processed_block
-            start_block = max(1, block_number - self.warmup_blocks) if self.warmup_blocks else block_number
+        for strategy_name, updated_positions in self.updated_positions_by_strategy.items():
+            if not updated_positions:
+                continue
 
-            for strategy_name, strategy_position_manager in self.strategy_position_managers.items():
-                try:
-                    strategy_params = strategy_position_manager.strategy_engine.strategy_parameters
-
-                    live_params = {
-                        **strategy_params,
-                        "mode": "LIVE",
-                        "updated_at": datetime.now().isoformat(),
-                        "current_block": block_number
-                    }
-
-                    live_strategy_name = f"LIVE_{strategy_name}"
-                    run_id = self.results_writer.create_or_update_strategy_run(
-                        strategy_name=live_strategy_name,
-                        params=live_params,
-                        start_block=start_block,
-                        end_block=block_number
+            try:
+                # Get or create a run ID for this strategy if it's the first save
+                if strategy_name not in self.strategy_run_ids:
+                    strategy_run_name = f"LIVE_{strategy_name}"
+                    strategy_params = self.strategy_engines[strategy_name].investment_strategy.to_dict()
+                    run_id = await asyncio.to_thread(
+                        self.results_writer.create_strategy_run,
+                        strategy_run_name,
+                        strategy_params,
+                        self.live_token_processor.start_block,
+                        datetime.now()
                     )
+                    self.strategy_run_ids[strategy_name] = run_id
+                    self.logger.info(f"Created new strategy run record: {strategy_run_name} (ID: {run_id})")
 
-                    if strategy_name in self.updated_positions_by_strategy and self.updated_positions_by_strategy[strategy_name]:
-                        updated_token_keys = self.updated_positions_by_strategy[strategy_name]
-                        updated_positions = {
-                            key: position for key, position in
-                            strategy_position_manager.token_positions_cache.items()
-                            if key in updated_token_keys
-                        }
-                        if updated_positions:
-                            try:
-                                self.results_writer.update_token_positions(run_id, updated_positions)
-                            except Exception as e:
-                                self.logger.error(f"Error writing position history for {live_strategy_name}: {e}", exc_info=True)
-                except Exception as e:
-                    self.logger.error(f"Error processing strategy {strategy_name} results for block {block_number}: {e}", exc_info=True)
-        except Exception as e:
-            self.logger.error(f"Error saving strategy results for block {block_number}: {e}", exc_info=True)
+                run_id = self.strategy_run_ids[strategy_name]
+                position_manager = self.strategy_position_managers[strategy_name]
+                
+                # Filter positions that need updating
+                positions_to_save = {
+                    pos_key: position_manager.open_positions[pos_key]
+                    for pos_key in updated_positions
+                    if pos_key in position_manager.open_positions
+                }
+
+                if positions_to_save:
+                    await asyncio.to_thread(
+                        self.results_writer.write_token_position_updates,
+                        run_id,
+                        block_number,
+                        positions_to_save
+                    )
+            except Exception as e:
+                self.logger.error(f"Error saving results for strategy {strategy_name}: {e}", exc_info=True)
 
     async def _update_pool_levels_from_tokens(self):
-        """Task that waits for pool update event and processes updates."""
-        self.logger.info("Starting pool ETH level monitoring task")
-
-        while not self._is_shutting_down:
-            try:
-                self.logger.debug("Pool Update Task: Waiting for _pool_update_event...")
+        """Task to update internal pool ETH levels based on token updates."""
+        self.logger.info("Starting pool ETH level update task.")
+        try:
+            while not self._is_shutting_down:
                 await self._pool_update_event.wait()
+                if self._is_shutting_down:
+                    break
                 self._pool_update_event.clear()
 
                 while not self._pool_updates_queue.empty():
                     try:
-                        result = await self._pool_updates_queue.get()
-                        block_number, updated_tokens = result
-                        await self._update_pool_levels(updated_tokens)
+                        _, updated_tokens = self._pool_updates_queue.get_nowait()
+                        if updated_tokens:
+                            await self._update_pool_levels(updated_tokens)
                         self._pool_updates_queue.task_done()
                     except asyncio.QueueEmpty:
-                        break
+                        break # Should not happen with this logic, but for safety
                     except Exception as e:
-                        self.logger.error(f"Error processing item from pool update queue: {e}", exc_info=True)
+                        self.logger.error(f"Error processing item from pool updates queue: {e}", exc_info=True)
                         if not self._pool_updates_queue.empty():
                             try:
                                 self._pool_updates_queue.task_done()
-                            except ValueError: 
-                                pass
+                            except ValueError: pass
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error updating pool levels loop: {e}", exc_info=True)
-                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger.info("Pool level update task cancelled.")
+        except Exception as e:
+            self.logger.error(f"Pool level update task failed: {e}", exc_info=True)
+        finally:
+            self.logger.info("Pool level update task finished.")
 
     async def _update_pool_levels(self, updated_tokens: Dict[str, Any]):
-        """Update ETH levels for pools of the updated tokens."""
+        """Update internal records of pool addresses and their ETH levels."""
         for token_address, token in updated_tokens.items():
-            pool_addresses = getattr(token.token_data, 'pool_addresses', None) # Use getattr for safety
-            if pool_addresses:
-                for pool_address in pool_addresses:
-                    current_block_num = getattr(token, 'latest_block_number', 'Unknown')
+            if token.has_pool:
+                for pool_address in token.pool_addresses:
+                    if pool_address not in self._pool_token_map:
+                        self._pool_token_map[pool_address] = token_address
+                    
                     try:
-                        eth_level = token.token_data.get_pool_reserve(pool_address)
-                        if eth_level is not None:
-                            eth_level_float = float(eth_level)
-                            self._pool_eth_levels[pool_address] = eth_level_float
-                            self._pool_token_map[pool_address] = token_address
-
+                        # Fetch the reserves directly from the token data object
+                        denom_reserve = token.get_pool_reserve(pool_address)
+                        if denom_reserve is not None:
+                            self._pool_eth_levels[pool_address] = denom_reserve
                     except Exception as e:
-                           self.logger.error(f"PoolUpdate-{current_block_num}: UNEXPECTED ERROR processing pool {pool_address} for token {token_address}: {e}", exc_info=True)
+                        self.logger.error(f"Could not get reserves for pool {pool_address} of token {token_address}: {e}")
 
     async def _monitor_for_scams(self):
-        """Continuously monitor the mempool for transactions that could affect token pools."""
-        self.logger.info("Starting mempool scam detection task")
-        
-        while not self._is_shutting_down:
-            try:
+        """Periodically check the mempool for potential scam transactions."""
+        self.logger.info("Starting mempool scam monitoring task.")
+        try:
+            while not self._is_shutting_down:
                 await self._check_for_scam_transactions()
                 await asyncio.sleep(self.poll_interval)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.logger.error(f"Error in scam detection loop: {e}", exc_info=True)
-                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.logger.info("Mempool scam monitoring task cancelled.")
+        except Exception as e:
+            self.logger.error(f"Mempool scam monitoring task failed: {e}", exc_info=True)
+        finally:
+            self.logger.info("Mempool scam monitoring task finished.")
 
     async def _check_for_scam_transactions(self):
         """Check for transactions in the mempool that could potentially be scams."""
@@ -440,8 +435,7 @@ class LiveBacktestEngineWithMempool:
                 return
 
             pending_diffs = {}
-            affected_pool_addresses = set()
-
+            
             all_pool_addresses = list(self._pool_eth_levels.keys())
             sample_size = min(20, len(all_pool_addresses))
             sampled_pools = all_pool_addresses[:sample_size]
@@ -451,28 +445,25 @@ class LiveBacktestEngineWithMempool:
                     state_diff = self.mempool_processor.get_address_state_diffs(pool_address)
                     if state_diff:
                         pending_diffs[pool_address] = state_diff
-                        affected_pool_addresses.add(pool_address)
-
                     await asyncio.sleep(0.05)
-
                 except Exception as e:
                     self.logger.debug(f"Scam Check: Error checking state diff for pool {pool_address}...: {str(e)}")
                     continue
-
+            
             if pending_diffs:
-                simulated_levels = self._simulate_pool_eth_levels(pending_diffs)
-                suspicious_pools = self._detect_suspicious_pools(simulated_levels, current_levels)
+                simulated_levels_with_hashes = self._simulate_pool_eth_levels(pending_diffs)
+                suspicious_pools = self._detect_suspicious_pools(simulated_levels_with_hashes, current_levels)
 
-                for pool_address, current_level, sim_level in suspicious_pools:
+                for pool_address, current_level, sim_level, tx_hash in suspicious_pools:
                     token_address = self._pool_token_map.get(pool_address, 'unknown')
                     warning_msg = (
                         f"[URGENT SCAM ALERT] PENDING tx - "
                         f"Token: {token_address}, "
-                        f"Pool: {pool_address}, Current ETH level: {current_level:.6f}, "
+                        f"Pool: {pool_address}, TxHash: {tx_hash}, "
+                        f"Current ETH level: {current_level:.6f}, "
                         f"Simulated ETH level: {sim_level:.6f}, "
                         f"Threshold: {self.eth_threshold}"
                     )
-                    # Write scam prediction to DB
                     if self.results_writer and token_address != 'unknown':
                         try:
                             prediction_block_number = self.live_token_processor.latest_processed_block
@@ -485,7 +476,6 @@ class LiveBacktestEngineWithMempool:
                                 sim_level,
                                 self.eth_threshold,
                             )
-                        
                         except Exception as e:
                             self.logger.error(f"Failed to write mempool scam prediction for token {token_address}, pool {pool_address}: {e}", exc_info=True)
                     self.logger.warning(warning_msg)
@@ -498,54 +488,75 @@ class LiveBacktestEngineWithMempool:
         """Return a copy of the current pool ETH levels."""
         return self._pool_eth_levels.copy()
 
-    def _simulate_pool_eth_levels(self, mempool_state_diffs: Dict[str, Dict]) -> Dict[str, float]:
-        """Simulate the ETH levels for pools after applying pending transactions."""
+    def _simulate_pool_eth_levels(self, mempool_state_diffs: Dict[str, Dict]) -> Dict[str, Tuple[float, str]]:
+        """
+        Simulate the ETH levels for pools and return the level and associated transaction hash.
+        """
         current_levels = self._get_current_pool_eth_levels()
-        simulated_levels = current_levels.copy()
+        simulated_levels = {pool: (level, None) for pool, level in current_levels.items()}
 
-        for address, diff in mempool_state_diffs.items():
-            if address in simulated_levels:
-                try:
-                    change = 0.0
-                    if 'change' in diff and diff['change'] is not None:
-                        change = float(diff['change'])
-                    elif 'after' in diff and diff['after'] is not None:
-                         simulated_levels[address] = float(diff['after'])
-                         continue
-                    simulated_levels[address] += change
+        for pool_address, tx_diffs in mempool_state_diffs.items():
+            if pool_address in simulated_levels and tx_diffs:
+                for tx_hash, diff_details in tx_diffs.items():
+                    if not diff_details or 'balance' not in diff_details:
+                        continue
                     
-                except (ValueError, TypeError, KeyError) as e:
-                    self.logger.error(f"Error simulating pool level for {address}: {e}, diff data: {diff}")
+                    current_level, _ = simulated_levels[pool_address]
+                    new_level = current_level 
+                    try:
+                        balance_diff = diff_details['balance']
+                        if 'change' in balance_diff:
+                            change_in_wei = int(balance_diff['change'], 16)
+                            change_in_eth = Web3.from_wei(change_in_wei, 'ether')
+                            new_level += float(change_in_eth)
+                        elif 'after' in balance_diff:
+                            new_level_in_wei = int(balance_diff['after'], 16)
+                            new_level = float(Web3.from_wei(new_level_in_wei, 'ether'))
+                        
+                        simulated_levels[pool_address] = (new_level, tx_hash)
 
+                    except (ValueError, TypeError, KeyError) as e:
+                        self.logger.error(f"Error simulating pool level for {pool_address} from tx {tx_hash}: {e}")
+        
         return simulated_levels
 
     def _detect_suspicious_pools(self,
-                                simulated_levels: Dict[str, float],
-                                current_levels: Dict[str, float]) -> List[Tuple[str, float, float]]:
-        """Detect pools whose ETH level would drop below the threshold."""
+                                 simulated_levels: Dict[str, Tuple[float, str]],
+                                 current_levels: Dict[str, float]) -> List[Tuple[str, float, float, str]]:
+        """
+        Detects pools whose ETH level would drop below the threshold.
+        Returns a list of (pool_address, current_level, simulated_level, tx_hash).
+        """
         suspicious_pools = []
         
-        for pool_address, sim_level in simulated_levels.items():
+        for pool_address, (sim_level, tx_hash) in simulated_levels.items():
             current_level = current_levels.get(pool_address, 0.0)
 
-            if isinstance(sim_level, (int, float)) and sim_level < self.eth_threshold and current_level >= self.eth_threshold:
-                suspicious_pools.append((pool_address, current_level, sim_level))
+            if tx_hash and isinstance(sim_level, (int, float)) and sim_level < self.eth_threshold and current_level >= self.eth_threshold:
+                suspicious_pools.append((pool_address, current_level, sim_level, tx_hash))
                 token_address = self._pool_token_map.get(pool_address)
                 self.logger.debug(
-                   f"Suspicious pool detected: {pool_address}  (token: {token_address}...) "
-                    f"Current: {current_level:.3f} ETH -> Simulated: {sim_level:.3f} ETH"
+                   f"Suspicious pool detected: {pool_address} (token: {token_address}...) "
+                    f"Current: {current_level:.3f} ETH -> Simulated: {sim_level:.3f} ETH by Tx: {tx_hash}"
                 )
 
         return suspicious_pools
 
     async def _schedule_pnl_writes_for_tokens(self, updated_token_addresses, block_number):
-        """Schedule PnL writes for tokens after strategy processing is complete."""
-        for token_address in updated_token_addresses:
-            try:    
-                # Schedule PnL writing in a separate thread to avoid blocking
-                await asyncio.to_thread(
-                    self.live_token_processor.live_tokens_cache._write_token_pnl, 
-                    token_address
+        """
+        Schedules the writing of PnL data for a list of tokens.
+        """
+        if not self.live_token_processor.add_pnl_to_db:
+            return
+            
+        try:
+            live_tokens = self.live_token_processor.live_tokens
+            tokens_to_write = {addr: live_tokens[addr] for addr in updated_token_addresses if addr in live_tokens}
+            
+            if tokens_to_write:
+                await self.live_token_processor.pnl_calculator.write_tokens_pnl_to_db(
+                    tokens_to_write,
+                    block_number=block_number
                 )
-            except Exception as e:
-                self.logger.error(f"Error scheduling PnL write for token {token_address}, block {block_number}: {e}")
+        except Exception as e:
+            self.logger.error(f"Error scheduling PnL writes for block {block_number}: {e}", exc_info=True)

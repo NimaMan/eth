@@ -110,7 +110,7 @@ class PoolLevelExtractor:
         if updated_pools:
             self.logger.info(
                 f"Updated {len(updated_pools)} pool levels at block {block_number}, "
-                f"total pools tracked: {len(self._pool_eth_levels)}"
+                f"total pools: {len(self._pool_eth_levels)}"
             )
             
         return updated_pools

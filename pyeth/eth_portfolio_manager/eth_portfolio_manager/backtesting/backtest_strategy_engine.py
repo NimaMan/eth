@@ -125,6 +125,10 @@ class BacktestStrategyEngine:
     def strategy_parameters(self):
         return self.investment_strategy.strategy_parameters
     
+    @property
+    def strategy_name(self):
+        return self.investment_strategy.strategy_name
+    
     def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
         """Process token updates and manage positions
             - Apply investment strategy to generate trade signals
@@ -171,7 +175,9 @@ class BacktestStrategyEngine:
           - Avoids creating an extra snapshot object.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
-            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+            current_price_ratio = 0
+            if token_position.static_data.pool_address:
+                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record entry static data
             token_position.static_data.entry_block = live_token.token_data.latest_block_number
             token_position.static_data.entry_price_ratio = current_price_ratio
@@ -199,7 +205,9 @@ class BacktestStrategyEngine:
           - Recalculates ROI and current value based on the confirmed price.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
-            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+            current_price_ratio = 0
+            if token_position.static_data.pool_address:
+                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
             token_position.static_data.entry_block = live_token.token_data.latest_block_number
@@ -227,7 +235,9 @@ class BacktestStrategyEngine:
           - Updates the latest snapshot in place to reflect the sell submission.
         """
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
-            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+            current_price_ratio = 0
+            if token_position.static_data.pool_address:
+                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record exit static data directly from the token data
             token_position.static_data.exit_block = live_token.token_data.latest_block_number
             token_position.static_data.exit_price_ratio = current_price_ratio

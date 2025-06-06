@@ -145,9 +145,9 @@ if __name__ == "__main__":
     try:
         # Run with proper signal handling
         asyncio.run(run_live_portfolio_with_mempool(
-            warmup_blocks=7200,
-            poll_interval=0.5,  # Check mempool every 0.5 seconds
-            eth_threshold=0.4  # Alert if ETH level drops below 0.05
+            warmup_blocks=1200,
+            poll_interval=0.5,
+            eth_threshold=0.4 
         ))
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt")
