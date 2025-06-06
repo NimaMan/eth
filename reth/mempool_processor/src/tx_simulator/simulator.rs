@@ -60,10 +60,12 @@ impl TransactionSimulator {
         
         debug!("Preparing to simulate transaction hash: {:?}", hex::encode(&tx_view.hash));
 
-        let mut revm_tx_env = match transaction_view_to_revm_tx_env(tx_view, self.cfg_env.chain_id) {
+        let tx_hash_hex = hex::encode(&tx_view.hash);
+        
+        let revm_tx_env = match transaction_view_to_revm_tx_env(tx_view, self.cfg_env.chain_id) {
             Ok(env) => env,
             Err(e) => {
-                warn!("Failed to convert TransactionView to RevmTxEnv for tx {:?}: {}. Skipping simulation.", hex::encode(&tx_view.hash), e);
+                warn!("Failed to convert TransactionView to RevmTxEnv for tx 0x{}: {}. Skipping simulation.", tx_hash_hex, e);
                 return Ok(None);
             }
         };
@@ -77,10 +79,18 @@ impl TransactionSimulator {
             RevmU256::ZERO
         };
 
-        let fork_block_id = if fork_block_number_u256 == RevmU256::ZERO {
+        // Safely convert U256 to u64 for block number
+        let fork_block_number_u64 = if fork_block_number_u256 > RevmU256::from(u64::MAX) {
+            warn!("Block number {} exceeds u64::MAX, using latest block", fork_block_number_u256);
+            return Ok(None);
+        } else {
+            fork_block_number_u256.to::<u64>()
+        };
+        
+        let fork_block_id = if fork_block_number_u64 == 0 {
             AlloyBlockId::latest()
         } else {
-            AlloyBlockId::from(fork_block_number_u256.into_limbs()[0])
+            AlloyBlockId::from(fork_block_number_u64)
         };
 
         let alloy_db = AlloyDB::new(self.alloy_provider.clone(), fork_block_id);
@@ -94,17 +104,17 @@ impl TransactionSimulator {
         let current_nonce = match self.alloy_provider.get_transaction_count(caller_address.into()).block_id(fork_block_id).await {
             Ok(nonce) => nonce,
             Err(e) => {
-                warn!("Failed to get current nonce for caller {}: {}", caller_address, e);
+                warn!("Failed to get current nonce for caller {} in tx 0x{}: {}", caller_address, tx_hash_hex, e);
                 return Ok(None);
             }
         };
         
         // Check if transaction nonce is too high (future transaction)
         if revm_tx_env.nonce > current_nonce {
-            debug!("Transaction nonce {} is ahead of current state nonce {}. Adjusting for simulation.", 
+            debug!("Transaction nonce {} is ahead of current state nonce {}. This is a future transaction.", 
                    revm_tx_env.nonce, current_nonce);
-            // Use the current nonce for simulation to see what the transaction would do if executed now
-            revm_tx_env.nonce = current_nonce;
+            // Don't modify the nonce - simulate as-is to get accurate results
+            // The simulation may fail with nonce error, which is expected
         }
         
         match self.alloy_provider.get_balance(caller_address.into()).block_id(fork_block_id).await {
@@ -153,8 +163,8 @@ impl TransactionSimulator {
                             }
                         },
                         Err(e) => {
-                            warn!("Failed to generate calculated state changes for tx {:?}: {}", hex::encode(&tx_view.hash), e);
-                            Err(eyre::eyre!(e).wrap_err("Failed to generate calculated state changes"))
+                            warn!("Failed to generate calculated state changes for tx 0x{}: {}", tx_hash_hex, e);
+                            Err(eyre::eyre!(e).wrap_err(format!("Failed to generate calculated state changes for tx 0x{}", tx_hash_hex)))
                         }
                     }
                 } else {

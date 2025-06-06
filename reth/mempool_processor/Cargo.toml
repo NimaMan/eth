@@ -56,6 +56,7 @@ flatbuffers     = "25"
 serde_json      = "1.0"
 hex             = "0.4"
 fastrand        = "2.0"
+tiny-keccak     = { version = "2.0", features = ["keccak"] }
 
 # PostgreSQL Client for database logging
 tokio-postgres  = "0.7"
@@ -111,6 +112,14 @@ path = "src/bin/test_simulation_engine.rs"
 [[bin]]
 name = "large_scale_validation"
 path = "src/bin/large_scale_validation.rs"
+
+[[bin]]
+name = "test_revm_basic"
+path = "src/bin/test_revm_basic.rs"
+
+[[bin]]
+name = "test_specific_tx"
+path = "src/bin/test_specific_tx.rs"
 
 # ───────────────────────────── Patch section (align with revm_tx_simulator) ──────────────────────────────
 [patch.crates-io]

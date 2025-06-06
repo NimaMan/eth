@@ -41,7 +41,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time;
 use tracing::{info, error, Level, debug, warn};
 use std::collections::HashMap;
-use ethers::types::H256;
+use ethers::types::{H256, U256};
 use revm_primitives::alloy_primitives::Address;
 use chrono;
 use std::collections::VecDeque;
@@ -146,11 +146,8 @@ struct Args {
     pool_transactions_only: bool,
 }
 
-/// Address normalization utility
-/// Instead of trying to match Python's checksumming exactly, we use lowercase for consistency
-fn normalize_address(address: Address) -> String {
-    format!("0x{:040x}", address).to_lowercase()
-}
+// Use common address normalization
+use mempool_processor::common::address::{normalize_address, to_checksum_address};
 
 /// Enhanced performance metrics for comprehensive transaction timing analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -761,8 +758,8 @@ async fn main() -> eyre::Result<()> {
     // Parse command line arguments
     let args = Args::parse();
     
-    // Configure logging - use INFO level to see scam detection logs
-    let log_level = if args.verbose { Level::DEBUG } else { Level::WARN };
+    // Configure logging - use INFO level to see important events, DEBUG for verbose mode
+    let log_level = if args.verbose { Level::DEBUG } else { Level::INFO };
     
     // Create log directory if it doesn't exist
     if let Some(log_dir) = std::path::Path::new(&args.log_file).parent() {
@@ -994,6 +991,7 @@ async fn main() -> eyre::Result<()> {
                         !args.pool_transactions_only,  // Process all unless explicitly pool-only
                         &mut performance_metrics,
                         is_warmup,
+                        &fetcher,
                         ).await;
                         
                     if scams_found > 0 {
@@ -1071,12 +1069,12 @@ async fn process_transaction_with_revm(
     let value_eth = tx.value.as_u128() as f64 / 1e18;
     let gas_price_gwei = tx.gas_price.map(|p| p.as_u128() as f64 / 1e9).unwrap_or(0.0);
     
-    // Check if this transaction involves any known pools
-    let involves_pool = pool_cache.get_pool(&to_addr).is_some();
+    // Check if this transaction directly targets any known pools (for logging)
+    let directly_targets_pool = pool_cache.get_pool(&to_addr).is_some();
     
-    if involves_pool {
-        // LOG FULL TRANSACTION DETAILS FOR POOL-RELATED TRANSACTIONS
-        info!("🎯 POOL TRANSACTION DETECTED");
+    if directly_targets_pool {
+        // LOG FULL TRANSACTION DETAILS FOR DIRECT POOL TRANSACTIONS
+        info!("🎯 DIRECT POOL TRANSACTION DETECTED");
         info!("  📋 Hash: 0x{}", tx_hash_hex);
         info!("  📤 From: {}", from_addr);
         info!("  📥 To: {}", to_addr);
@@ -1104,9 +1102,7 @@ async fn process_transaction_with_revm(
         hash_bytes.copy_from_slice(&tx.hash);
         let _tx_hash = H256::from(hash_bytes);
         
-        if involves_pool {
-            info!("  🧪 Starting REVM simulation...");
-        }
+        debug!("🧪 Starting REVM simulation for tx {}...", &tx_hash_hex[..8]);
         
         // Use REVM TransactionSimulator to get detailed state changes
         match simulator.process_transaction(tx, block_env).await {
@@ -1114,8 +1110,19 @@ async fn process_transaction_with_revm(
                 debug!("REVM simulation successful for tx {}: {} accounts affected", 
                       &tx_hash_hex[..8], account_changes.len());
                 
-                // LOG DETAILED STATE CHANGES FROM REVM
-                if involves_pool {
+                // Check if any of the affected addresses are pools  
+                let affects_pools = account_changes.keys().any(|addr| {
+                    let addr_hex = format!("0x{:040x}", addr);
+                    pool_cache.get_pool(&addr_hex).is_some()
+                });
+                
+                // LOG DETAILED STATE CHANGES FROM REVM for pool-affecting transactions
+                if affects_pools {
+                    info!("🏊‍♂️ POOL-AFFECTING TRANSACTION DETECTED via REVM simulation");
+                    info!("  📋 Hash: 0x{}", tx_hash_hex);
+                    info!("  📤 From: {}", from_addr);
+                    info!("  📥 To: {}", to_addr);
+                    info!("  💰 Value: {:.6} ETH", value_eth);
                     info!("  ✅ REVM simulation completed successfully");
                     info!("  📊 {} account(s) affected by simulation", account_changes.len());
                     
@@ -1180,18 +1187,23 @@ async fn process_transaction_with_revm(
                         }
                     }
                     
-                    // Process simulation result with the service
+                    // ALWAYS process simulation result with the scam detection service
+                    // regardless of whether the transaction directly targeted a pool
                     match service.process_transaction(sim_result).await {
                         Ok(alerts) => {
                             if !alerts.is_empty() {
                                 // Log urgent scam alerts with full transaction hash
-                                info!("🚨 SCAM DETECTED: {} alerts in tx {}", alerts.len(), tx_hash_hex);
+                                warn!("[URGENT SCAM ALERT] {} scam(s) detected in tx 0x{}", alerts.len(), tx_hash_hex);
                                 
                                 for alert in &alerts {
-                                    info!("  🚨 Pool {} depleted: {:.6} → {:.6} ETH (Full tx: {})", 
-                                        alert.pool_address, 
+                                    warn!("[URGENT SCAM ALERT] Token: {}, Pool: {}, Current ETH level: {:.6}, Simulated ETH level: {:.6}, Threshold: {:.3}, Transaction: 0x{}", 
+                                        pool_cache.get_pool(&alert.pool_address)
+                                            .map(|p| p.token_address.clone())
+                                            .unwrap_or("Unknown".to_string()),
+                                        alert.pool_address,
                                         alert.current_eth_reserve,
                                         alert.simulated_eth_reserve,
+                                        alert.eth_threshold,
                                         tx_hash_hex);
                                 }
                                 return alerts.len();
@@ -1204,14 +1216,11 @@ async fn process_transaction_with_revm(
                 }
             },
             Ok(None) => {
-                // Only log no state changes for pool-related transactions
-                if involves_pool {
-                    debug!("⚪ No state changes for pool-related tx {}", &tx_hash_hex[..8]);
-                }
+                debug!("⚪ No state changes detected for tx {}", &tx_hash_hex[..8]);
             },
             Err(e) => {
-                // Only log errors for pool-related transactions or unexpected errors
-                if involves_pool || !e.to_string().contains("nonce") {
+                // Log simulation errors (but reduce noise for common issues like nonce)
+                if !e.to_string().contains("nonce") {
                     debug!("❌ REVM simulation failed for tx {}: {}", &tx_hash_hex[..8], e);
                 }
             }
@@ -1237,20 +1246,19 @@ fn prepare_simulation_result_from_revm_changes(
     
     // Extract pool effects from REVM account changes
     for (address, changes) in account_changes {
-        // Convert REVM address to normalized lowercase format for consistent lookup
-        let addr_str = normalize_address(*address);
+        // Convert REVM address to checksummed format for consistent lookup (EIP-55 compatible with Python)
+        let addr_str = to_checksum_address(*address);
         
-        // Calculate ETH delta from REVM account changes (using correct field name)
+        // Calculate ETH delta from REVM account changes
+        // Convert U256 to string first to avoid precision loss
+        let eth_delta_wei = changes.eth_net_change.absolute_value.to_string()
+            .parse::<f64>()
+            .unwrap_or(0.0);
         let eth_delta = if changes.eth_net_change.is_negative {
-            -(changes.eth_net_change.absolute_value.into_limbs()[0] as u128 as f64 / 1e18)
+            -(eth_delta_wei / 1e18)
         } else {
-            changes.eth_net_change.absolute_value.into_limbs()[0] as u128 as f64 / 1e18
+            eth_delta_wei / 1e18
         };
-        
-        // Skip addresses where ETH is being added (positive delta)
-        if eth_delta >= 0.0 {
-            continue;
-        }
         
         // Skip very small changes (less than 0.001 ETH)
         if eth_delta.abs() < 0.001 {
@@ -1268,8 +1276,12 @@ fn prepare_simulation_result_from_revm_changes(
                 0.0
             };
             
-            debug!("🏊 Pool {} affected: {:.6} → {:.6} ETH ({:.2}% change)", 
-                  addr_str, current_eth, simulated_eth, percentage_change * 100.0);
+            // Warn if simulation results in negative ETH (shouldn't happen in a real pool)
+            if simulated_eth < 0.0 {
+                warn!("⚠️ Simulation resulted in negative ETH for pool {}: current={:.6}, delta={:.6}, simulated={:.6}",
+                      addr_str, current_eth, eth_delta, simulated_eth);
+                warn!("  This indicates either stale pool state or an issue with the simulation");
+            }
             
             let effect = PoolEffect {
                 pool_address: addr_str.clone(),
@@ -1316,19 +1328,45 @@ fn prepare_simulation_result_from_revm_changes(
 }
 
 async fn process_transactions(
-    transactions: Vec<TransactionView>,
+    mut transactions: Vec<TransactionView>,
     tx_simulator: Arc<TransactionSimulator>,
     pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
     verbose: bool,
     process_all_transactions: bool,
     performance_metrics: &mut PerformanceMetrics,
     is_warmup: bool,
+    fetcher: &MempoolFetcher,
 ) -> u32 {
     let mut scams_detected = 0;
+    
+    // Sort transactions by sender and nonce for proper ordering
+    transactions.sort_by(|a, b| {
+        // First sort by sender address
+        match a.from.cmp(&b.from) {
+            std::cmp::Ordering::Equal => {
+                // Then sort by nonce for same sender
+                let a_nonce = a.nonce.unwrap_or(U256::zero());
+                let b_nonce = b.nonce.unwrap_or(U256::zero());
+                a_nonce.cmp(&b_nonce)
+            }
+            other => other,
+        }
+    });
+    
+    if verbose && transactions.len() > 1 {
+        debug!("Sorted {} transactions by sender and nonce for proper execution order", transactions.len());
+    }
     
     for (tx_index, tx) in transactions.iter().enumerate() {
         let tx_hash_full = format!("0x{}", hex::encode(&tx.hash));
         let tx_hash_short = format!("0x{}", hex::encode(&tx.hash[..4])); // Short hash for logging
+        
+        // Mark this transaction as processed to avoid duplicates
+        fetcher.mark_transaction_processed(&tx.hash);
+        
+        if verbose {
+            debug!("Marked transaction {} as processed to prevent duplicates", tx_hash_short);
+        }
         
         // === STEP 1: Initialize timing tracker ===
         let mut timing = TransactionTiming::new(tx_hash_full.clone());
@@ -1360,9 +1398,9 @@ async fn process_transactions(
                     let mut addr_array = [0u8; 20];
                     addr_array.copy_from_slice(&addr_bytes[addr_bytes.len()-20..]);
                     let addr = Address::from(addr_array);
-                    let normalized = normalize_address(addr);
-                    let has_pool = pool_cache.get_pool(&normalized).is_some();
-                    (Some(normalized), has_pool)
+                    let checksummed = to_checksum_address(addr);
+                    let has_pool = pool_cache.get_pool(&checksummed).is_some();
+                    (Some(checksummed), has_pool)
                 } else {
                     (None, false) // Invalid address
                 }
@@ -1382,7 +1420,7 @@ async fn process_transactions(
         // === STEP 4: Early exit for non-pool transactions (unless processing all) ===
         if !is_pool_tx && !process_all_transactions {
             if verbose {
-                debug!("⏩ SKIP: {} (not pool transaction)", tx_hash_short);
+                // Skip non-pool transactions (debug logging removed for production)
             }
             
             // Finalize timing and log
@@ -1556,11 +1594,16 @@ async fn process_transactions(
                     
                     if scam_detected {
                         scams_detected += 1;
-                        error!("🚨 SCAM DETECTED in tx {}", tx_hash_full);
                         
                         for (pool_addr, effect) in &simulation_result.affected_pools {
-                            error!("  🚨 Pool {} depleted: {:.6} → {:.6} ETH", 
-                                pool_addr, effect.current_eth_reserve, effect.simulated_eth_reserve);
+                            // Match Python logging format: [URGENT SCAM ALERT] 
+                            warn!("[URGENT SCAM ALERT] Token: {}, Pool: {}, Current ETH level: {:.6}, Simulated ETH level: {:.6}, Threshold: {:.3}, Transaction: {}", 
+                                "unknown", // TODO: Get token address from pool mapping
+                                pool_addr, 
+                                effect.current_eth_reserve, 
+                                effect.simulated_eth_reserve,
+                                0.15, // ETH threshold
+                                tx_hash_full);
                         }
                     }
                 } else {
@@ -1575,7 +1618,7 @@ async fn process_transactions(
                 timing.affected_accounts_count = 0;
                 
                 if verbose {
-                    debug!("  ⚪ No state changes for pool-related tx {}", tx_hash_short);
+                    // No state changes detected (debug logging removed for production)
                 }
                 
                 // Still need to record timing for these phases
@@ -1665,12 +1708,24 @@ fn check_for_scam_patterns(simulation_result: &SimulationResult, verbose: bool) 
             return true;
         }
         
-        // Check for large percentage drains
-        if effect.simulated_eth_reserve < 0.15 && effect.percentage_change < -0.5 {
+        // Check for large percentage drains (but only if pool had reasonable liquidity to start)
+        // Skip low-liquidity pools (< 0.5 ETH) to avoid false positives
+        if effect.current_eth_reserve >= 0.5 && 
+           effect.simulated_eth_reserve < 0.15 && 
+           effect.percentage_change < -0.5 {
             if verbose {
                 info!("🚨 SCAM PATTERN: Pool {} drained from {:.6} to {:.6} ETH ({:.1}% change)", 
                       pool_address, effect.current_eth_reserve, effect.simulated_eth_reserve, 
                       effect.percentage_change * 100.0);
+            }
+            return true;
+        }
+        
+        // Also check for pools that would go negative (definitely suspicious)
+        if effect.simulated_eth_reserve < 0.0 && effect.current_eth_reserve > 0.5 {
+            if verbose {
+                info!("🚨 SCAM PATTERN: Pool {} would have negative ETH: {:.6} -> {:.6}", 
+                      pool_address, effect.current_eth_reserve, effect.simulated_eth_reserve);
             }
             return true;
         }

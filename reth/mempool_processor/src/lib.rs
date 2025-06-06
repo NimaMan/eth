@@ -12,6 +12,9 @@
  * - Validation testing infrastructure for comparing Rust and Python implementations
  */
 
+// Common utilities
+pub mod common;
+
 pub mod mempool_processor; 
 pub mod tx_simulator;
 

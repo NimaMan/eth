@@ -54,6 +54,21 @@ pub struct PoolState {
     
     /// Unix timestamp when the pool state was last updated
     pub last_updated_time: f64,
+    
+    /// System timestamp when we received this update (for staleness checks)
+    pub received_at: std::time::Instant,
+}
+
+impl PoolState {
+    /// Check if this pool state is stale (older than the specified duration)
+    pub fn is_stale(&self, max_age: std::time::Duration) -> bool {
+        self.received_at.elapsed() > max_age
+    }
+    
+    /// Get the age of this pool state
+    pub fn age(&self) -> std::time::Duration {
+        self.received_at.elapsed()
+    }
 }
 
 impl From<PoolUpdate> for PoolState {
@@ -63,6 +78,7 @@ impl From<PoolUpdate> for PoolState {
             token_address: update.token_address,
             last_updated_block: update.block_number,
             last_updated_time: update.update_time,
+            received_at: std::time::Instant::now(),
         }
     }
 } 

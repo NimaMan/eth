@@ -80,15 +80,52 @@ impl ScamDetectionEngine {
             
             // Get the current pool state from cache
             if let Some(pool_state) = self.pool_cache.get_pool(pool_address) {
-                // Calculate if this transaction would drain the pool below threshold
-                let would_deplete = effect.simulated_eth_reserve < self.config.eth_threshold;
+                // Check if pool state is fresh (less than 60 seconds old)
+                const MAX_POOL_AGE: std::time::Duration = std::time::Duration::from_secs(60);
+                if pool_state.is_stale(MAX_POOL_AGE) {
+                    warn!("Pool state for {} is stale ({:.1}s old), may produce inaccurate results", 
+                         pool_address, pool_state.age().as_secs_f64());
+                }
+                
+                // Dynamic threshold calculation based on pool size
+                let dynamic_eth_threshold = if effect.current_eth_reserve < 1.0 {
+                    // For very small pools, use percentage-based detection only
+                    0.0
+                } else if effect.current_eth_reserve < 5.0 {
+                    // For small pools, scale the threshold
+                    self.config.eth_threshold * (effect.current_eth_reserve / 5.0)
+                } else {
+                    // For larger pools, use the configured threshold
+                    self.config.eth_threshold
+                };
+                
+                // Check if pool would drop below dynamic threshold while currently above it
+                let would_drain_pool = effect.simulated_eth_reserve < dynamic_eth_threshold 
+                    && effect.current_eth_reserve >= dynamic_eth_threshold
+                    && effect.current_eth_reserve >= 0.5; // Only flag if pool had reasonable liquidity
+                
+                // Debug log for significant ETH changes in pools
+                if effect.eth_delta.abs() > 0.1 {
+                    debug!("📊 Pool {} ETH change: {:.6} → {:.6} (Δ{:.6}) | Dynamic threshold: {:.3} | Would drain: {}", 
+                           pool_address, effect.current_eth_reserve, effect.simulated_eth_reserve, 
+                           effect.eth_delta, dynamic_eth_threshold, would_drain_pool);
+                }
                 
                 // Calculate if this is a large percentage withdrawal
-                let large_withdrawal = effect.percentage_change.abs() > self.config.percentage_threshold;
+                // For small pools, be more tolerant of percentage changes
+                let percentage_threshold = if effect.current_eth_reserve < 0.5 {
+                    0.8 // 80% threshold for very small pools
+                } else if effect.current_eth_reserve < 2.0 {
+                    0.7 // 70% threshold for small pools
+                } else {
+                    self.config.percentage_threshold // Default 50% for normal pools
+                };
+                
+                let large_withdrawal = effect.percentage_change.abs() > percentage_threshold;
                 
                 // If either condition is met, create an alert
-                if would_deplete || large_withdrawal {
-                    let reason = if would_deplete {
+                if would_drain_pool || large_withdrawal {
+                    let reason = if would_drain_pool {
                         ScamAlertReason::EthReserveDepleted
                     } else {
                         ScamAlertReason::LargeEthWithdrawal

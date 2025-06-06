@@ -284,12 +284,19 @@ impl MempoolFetcher {
     pub fn mark_transaction_processed(&self, tx_hash: &[u8]) {
         if let Ok(mut cache) = self.tx_cache.lock() {
             let hash_hex = hex_encode(tx_hash);
-            cache.insert(hash_hex, Instant::now());
             
-            // Clean up cache if it's getting too large
-            if cache.len() > self.cache_capacity {
-                self.prune_tx_cache();
+            // If we're at capacity, remove the oldest entry first
+            if cache.len() >= self.cache_capacity {
+                // Find and remove the oldest entry
+                if let Some((oldest_key, _)) = cache.iter()
+                    .min_by_key(|(_, timestamp)| *timestamp)
+                    .map(|(k, v)| (k.clone(), *v)) {
+                    cache.remove(&oldest_key);
+                    trace!("Evicted oldest transaction {} from cache (LRU)", oldest_key);
+                }
             }
+            
+            cache.insert(hash_hex, Instant::now());
         }
     }
     
@@ -428,7 +435,7 @@ impl MempoolFetcher {
     
     /// Get only NEW transactions - optimized version that filters out seen transactions
     async fn get_transactions_streaming(&self) -> Result<Vec<TransactionView>> {
-        debug!("🚀 Streaming mode: Getting only NEW transactions since last poll");
+        // Streaming mode: getting only NEW transactions
         
         let start_time = Instant::now();
         
@@ -695,15 +702,20 @@ impl MempoolFetcher {
                             // Normalize hash
                             let hash = hash_str.strip_prefix("0x").unwrap_or(hash_str).to_lowercase();
                             
-                            // Only skip duplicates within this batch - don't check cache here!
+                            // Skip duplicates within this batch AND check transaction cache
                             if !seen_hashes.contains_key(&hash) {
                                 if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
-                                    tx_hashes.push(hash_bytes);
-                                    seen_hashes.insert(hash, true);
-                                    
-                                    // Check if we reached batch size limit
-                                    if tx_hashes.len() >= self.max_batch_size {
-                                        break;
+                                    // Check if we've already processed this transaction
+                                    if !self.is_transaction_processed(hash_bytes.as_bytes()) {
+                                        tx_hashes.push(hash_bytes);
+                                        seen_hashes.insert(hash, true);
+                                        
+                                        // Check if we reached batch size limit
+                                        if tx_hashes.len() >= self.max_batch_size {
+                                            break;
+                                        }
+                                    } else {
+                                        trace!("Filtered duplicate transaction in batch: 0x{}", &hash[..8]);
                                     }
                                 }
                             }
@@ -728,15 +740,20 @@ impl MempoolFetcher {
                                 // Normalize hash
                                 let hash = hash_str.strip_prefix("0x").unwrap_or(hash_str).to_lowercase();
                                 
-                                // Only skip duplicates within this batch - don't check cache here!
+                                // Skip duplicates within this batch AND check transaction cache
                                 if !seen_hashes.contains_key(&hash) {
                                     if let Ok(hash_bytes) = H256::from_str(&format!("0x{}", hash)) {
-                                        tx_hashes.push(hash_bytes);
-                                        seen_hashes.insert(hash, true);
-                                        
-                                        // Check if we reached batch size limit
-                                        if tx_hashes.len() >= self.max_batch_size {
-                                            break;
+                                        // Check if we've already processed this transaction
+                                        if !self.is_transaction_processed(hash_bytes.as_bytes()) {
+                                            tx_hashes.push(hash_bytes);
+                                            seen_hashes.insert(hash, true);
+                                            
+                                            // Check if we reached batch size limit
+                                            if tx_hashes.len() >= self.max_batch_size {
+                                                break;
+                                            }
+                                        } else {
+                                            trace!("Filtered duplicate transaction in batch (queued): 0x{}", &hash[..8]);
                                         }
                                     }
                                 }
@@ -858,6 +875,8 @@ impl MempoolFetcher {
                                                 
                                                 // No memory limit - we have 94GB RAM!
                                                 // Remove artificial batch limit
+                                            } else {
+                                                trace!("Filtered duplicate transaction: 0x{}", hex::encode(&tx_view.hash[..4]));
                                             }
                                         }
                                     }

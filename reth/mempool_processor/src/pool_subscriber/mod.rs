@@ -9,20 +9,13 @@ use zmq;
 use tracing::{info, error, debug, warn};
 use std::sync::Arc;
 use serde_json;
-use revm_primitives::alloy_primitives::Address;
+use crate::common::address::checksum_address;
 
 use self::types::PoolUpdatesMessage;
 use self::cache::PoolStateCache;
 
 // Default ZMQ endpoint for backward compatibility
 const DEFAULT_ZMQ_PUB_ENDPOINT: &str = "tcp://localhost:5557";
-
-/// Address normalization utility
-/// Normalize addresses to lowercase for consistent storage and lookup
-fn normalize_address_from_str(address_str: &str) -> String {
-    let cleaned = address_str.trim_start_matches("0x").to_lowercase();
-    format!("0x{}", cleaned)
-}
 
 pub struct PoolSubscriber {
     pool_cache: Arc<PoolStateCache>,
@@ -98,14 +91,14 @@ impl PoolSubscriber {
                         
                         let pool_update = types::PoolUpdate {
                             eth_reserve: python_eth_reserve,
-                            token_address: normalize_address_from_str(&token_address),
+                            token_address: checksum_address(&token_address),
                             block_number,
                             update_time,
                         };
                         
-                        // Store with normalized pool address (lowercase)
-                        let normalized_address = normalize_address_from_str(address);
-                        pools_map.insert(normalized_address, pool_update);
+                        // Store with checksummed pool address (EIP-55 format, compatible with Python)
+                        let checksummed_address = checksum_address(address);
+                        pools_map.insert(checksummed_address, pool_update);
                         
                         if python_eth_reserve > 0.0 {
                             debug!("✅ Pool {}: {:.6} ETH (from Python)", address, python_eth_reserve);
@@ -167,16 +160,16 @@ impl PoolSubscriber {
                                 debug!("Large pool update: {} pools", message.data.len());
                             }
                             
-                            // HIGH-PERFORMANCE PATH: Use Python values with normalized addresses
+                            // HIGH-PERFORMANCE PATH: Use Python values with checksummed addresses
                             let mut python_updates = std::collections::HashMap::new();
                             
                             for (address, update) in message.data.iter() {
-                                let normalized_address = normalize_address_from_str(address);
+                                let checksummed_address = checksum_address(address);
                                 let mut python_update = update.clone();
-                                python_update.token_address = normalize_address_from_str(&update.token_address);
+                                python_update.token_address = checksum_address(&update.token_address);
                                 
-                                // Use Python values directly with normalized addresses
-                                python_updates.insert(normalized_address, python_update);
+                                // Use Python values directly with checksummed addresses (EIP-55 compatible)
+                                python_updates.insert(checksummed_address, python_update);
                             }
                             
                             // Update the cache with Python data (LIGHTNING FAST - no blockchain calls)

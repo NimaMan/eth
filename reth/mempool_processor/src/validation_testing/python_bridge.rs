@@ -35,7 +35,7 @@ pub struct PythonBridgeConfig {
 impl Default for PythonBridgeConfig {
     fn default() -> Self {
         Self {
-            python_script_path: PathBuf::from("python/batch_validate_state_changes.py"),
+            python_script_path: PathBuf::from("python/core/batch_validate_state_changes.py"),
             conda_env: "qw".to_string(),
             timeout_seconds: 300, // 5 minutes
             reth_url: "http://localhost:8545".to_string(),

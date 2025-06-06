@@ -310,6 +310,7 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
     parser.add_argument('--output', '-o', help='Output file for JSON results')
     parser.add_argument('--rust-format', action='store_true', help='Output in Rust-compatible format')
+    parser.add_argument('--json-output', action='store_true', help='Output only JSON (for large-scale validation)')
     parser.add_argument('--use-async', action='store_true', help='Use async processing')
     
     args = parser.parse_args()
@@ -334,6 +335,12 @@ def main():
             state_changes = processed_tx.state_changes
         else:
             state_changes = getattr(processed_tx, 'state_changes', {})
+        
+        # Handle JSON-only output for large-scale validation
+        if args.json_output:
+            json_output = validator.export_for_rust_validation(processed_tx)
+            print(json_output)  # Print only JSON, no other output
+            return
             
         validator.print_state_changes(state_changes)
         

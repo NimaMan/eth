@@ -3,37 +3,44 @@ use std::sync::Arc;
 use mempool_processor::validation_testing::{BatchValidator, batch_validator::BatchValidationConfig};
 use mempool_processor::validation_testing::transaction_fetcher::FetchConfig;
 use mempool_processor::validation_testing::comparison_engine::ComparisonStatus;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 use std::fs;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     
-    info!("🚀 Starting Large-Scale Validation (50+ transactions)");
+    info!("🚀 Starting Large-Scale Validation (1000+ transactions)");
     info!("📊 Will log all non-exact matches for detailed analysis");
     
     // Connect to local Ethereum node
     let provider = Arc::new(Provider::<Http>::try_from("http://localhost:8545")?);
     
-    // Create configuration for large-scale testing
+    // Get target count from command line or default to 1000
+    let target_count: u32 = std::env::args().nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1000);
+
+    info!("🎯 Target transaction count: {}", target_count);
+
+    // Create configuration for large-scale testing (1000+ transactions)
     let config = BatchValidationConfig {
         fetch_config: FetchConfig {
-            blocks_to_scan: 25,  // Scan more blocks to get 50+ transactions
-            max_transactions_per_block: 10,
+            blocks_to_scan: 500,  // Scan many more blocks to get 1000+ transactions
+            max_transactions_per_block: 50,  // Allow more transactions per block
             min_gas_used: 21_000,  // Lower threshold to get more transactions
             require_logs: false,   // Include simple transfers too
             require_internal_txns: false,
         },
-        max_transactions: 60,  // Target 60 transactions to ensure we get 50+
+        max_transactions: target_count as usize,  // Use command line target or 1000
         save_results: true,
-        results_dir: "large_scale_validation_results".to_string(),
+        results_dir: "large_scale_validation_1000plus_results".to_string(),
         logs_dir: "/home/nima/code/crypto/logs/mempool".to_string(),
         ..Default::default()
     };
     
     // Create logs directory for non-exact matches
-    let non_exact_dir = "/home/nima/code/crypto/logs/mempool/non_exact_matches";
+    let non_exact_dir = "/home/nima/code/crypto/logs/mempool/non_exact_matches_1000plus";
     fs::create_dir_all(non_exact_dir)?;
     
     // Create batch validator
@@ -42,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🧪 Starting large-scale validation...");
     
     // Run the validation
-    let result = validator.validate_batch(60).await?;
+    let result = validator.validate_batch(target_count as usize).await?;
     
     // Analyze results for non-exact matches
     let mut exact_matches = 0;

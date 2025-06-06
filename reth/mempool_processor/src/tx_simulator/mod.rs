@@ -16,6 +16,10 @@ pub mod mempool_state_cache;
 pub mod comprehensive_state_diff;
 pub mod conversions;
 
+// Test modules
+#[cfg(test)]
+pub mod tests;
+
 // Re-export key types and functions
 pub use simulator::TransactionSimulator;
 pub use state_diff::{StateDiffTracker, StateChange};
