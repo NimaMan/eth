@@ -3,8 +3,19 @@
 // NO RPC internal transfer implementation - analyzes REVM state changes directly
 // Uses the existing working validator but removes RPC overhead
 
-use serde_json as _; // Silence unused warning
-use revm_context::ContextTr as _; // Import trait for build_mainnet
+// Silence unused crate dependency warnings
+use chrono as _;
+use ethers_signers as _;
+use hex as _;
+use reqwest as _;
+use revm_inspector as _;
+use revm_interpreter as _;
+use revm_state as _;
+use serde as _;
+use serde_json as _;
+use tracing as _;
+use tracing_appender as _;
+use tracing_subscriber as _;
 
 use anyhow::{anyhow, Result};
 use ethers_core::types::H256 as EthersH256;
@@ -30,8 +41,7 @@ use revm_primitives::{
 use revm_context::{
     BlockEnv as RevmBlockEnv_ctx, CfgEnv as RevmCfgEnv_ctx, TxEnv as RevmTxEnv_ctx, 
     TransactTo as RevmTransactTo_ctx, Context as RevmContext, Journal, 
-    result::{ExecutionResult as RevmExecutionResult},
-    ContextTr 
+    result::{ExecutionResult as RevmExecutionResult}
 };
 use revm::database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm::{MainBuilder, ExecuteCommitEvm}; 
@@ -169,7 +179,7 @@ async fn main() -> Result<()> {
     // Execute transaction using pure REVM
     match mainnet_evm.transact_commit(tx_env.clone()) {
         Ok(execution_result) => {
-            let (result_type, logs, output_data, gas_used, gas_refunded) = match execution_result {
+            let (_result_type, logs, _output_data, gas_used, _gas_refunded) = match execution_result {
                 RevmExecutionResult::Success { reason, gas_used, gas_refunded, logs, output } => {
                     eprintln!("✅ Transaction executed successfully: {:?}", reason);
                     (ExecutionResultType::Success(reason), logs, output.into_data(), gas_used, gas_refunded)
@@ -260,7 +270,7 @@ fn analyze_internal_transfers(
     // 3. ETH movements that don't match the transaction value
     
     let mut addresses_with_eth_changes = 0;
-    let mut total_eth_volume = 0.0;
+    let mut _total_eth_volume = 0.0;
     
     for (_addr, changes) in state_changes {
         let eth_change_str = changes.eth_net_change.to_signed_string();
@@ -268,7 +278,7 @@ fn analyze_internal_transfers(
         
         if eth_change_f64.abs() > 1e-12 {  // Non-zero ETH change
             addresses_with_eth_changes += 1;
-            total_eth_volume += eth_change_f64.abs();
+            _total_eth_volume += eth_change_f64.abs();
         }
     }
     

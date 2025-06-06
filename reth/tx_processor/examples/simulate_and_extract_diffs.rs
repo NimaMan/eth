@@ -1,5 +1,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// Silence unused crate dependency warnings
+use ethers_signers as _;
+use reqwest as _;
+use revm_inspector as _;
+use revm_interpreter as _;
+use revm_state as _;
+use serde as _;
+use serde_json as _;
+
 use anyhow::{anyhow, Result};
 use ethers_core::types::H256 as EthersH256;
 use ethers_providers::{Middleware, Provider as EthersProvider, Http as EthersHttp};

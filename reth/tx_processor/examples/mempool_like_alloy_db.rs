@@ -1,5 +1,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// Silence unused crate dependency warnings
+use chrono as _;
+use reqwest as _;
+use revm_inspector as _;
+use revm_interpreter as _;
+use serde as _;
+use serde_json as _;
+
 use anyhow::{anyhow, Result};
 use ethers_core::{
     types::{
@@ -53,6 +61,7 @@ type RevmAlloyCacheDB = CacheDB<WrapDatabaseAsync<AlloyDB<AlloyEthereum, Arc<All
 
 
 // Example constants
+// WARNING: This is a well-known test private key for development only - NEVER use in production
 const PRIVKEY_HEX: &str = "59c6995e998f97a5a004498123312aaab5e367d6f4e97d96b2ebe497acf7f5b1";
 const RPC_URL: &str = "http://127.0.0.1:8545"; // Your local Reth node
 const NUM_TX_TO_SIMULATE: u64 = 2; // Changed to 2 for Approve + Swap
