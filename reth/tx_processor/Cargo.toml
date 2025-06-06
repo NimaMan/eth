@@ -27,11 +27,11 @@ revm = { path = "src/revm/crates/revm", default-features = false, features = ["s
 
 # Direct REVM sub-crate dependencies (needed for direct type imports in lib or examples if not re-exported by main revm)
 revm-primitives = { path = "src/revm/crates/primitives", default-features = false, features = ["std"] }
+revm-state = { path = "src/revm/crates/state", default-features = false }
 # revm-database = { path = "src/revm/crates/database", default-features = false } # For CacheDB, AlloyDB if not re-exported by revm
 revm-context = { path = "src/revm/crates/context", default-features = false } # For BlockEnv, CfgEnv, TxEnv, RevmContext, Journal
 # revm-interpreter = { path = "src/revm/crates/interpreter", default-features = false } // Commented out as unused by this example now
 # revm-bytecode = { path = "src/revm/crates/bytecode", default-features = false } # Unused by current example
-# revm-state = { path = "src/revm/crates/state", default-features = false } # Unused by current example
 # revm-database-interface = { path = "src/revm/crates/database/interface", default-features = false, features = ["serde"] } # Unused by current example
 
 # Tokio - version from revm workspace
@@ -57,7 +57,7 @@ alloy-network = { version = "1.0.6" }
 
 # Ethers-rs dependencies
 ethers-core = "2.0.14"
-# ethers-signers = "2.0.14"
+ethers-signers = "2.0.14"
 ethers-providers = "2.0.14"
 
 # Other utilities

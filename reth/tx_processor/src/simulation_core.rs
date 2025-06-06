@@ -83,7 +83,24 @@ pub fn simulate_transaction(
             Ok((sim_output, mainnet_evm.ctx.journaled_state.database))
         }
         Err(e) => {
-            error!("REVM critical error during transact_commit: {:?}", e);
+            // Only log truly unexpected errors, not normal mempool behavior
+            let error_msg = format!("{:?}", e);
+            if error_msg.contains("LackOfFundForMaxFee") || 
+               error_msg.contains("InsufficientFunds") || 
+               error_msg.contains("lack of funds") ||
+               error_msg.contains("lack of fund") ||
+               error_msg.contains("transaction validation error") {
+                // These are normal mempool behavior - don't log them at all
+                tracing::debug!("REVM simulation failed due to insufficient funds (normal mempool behavior)");
+            } else if error_msg.contains("NonceTooHigh") || 
+                      error_msg.contains("NonceTooLow") ||
+                      error_msg.contains("nonce") {
+                // Nonce issues are also normal mempool behavior
+                tracing::debug!("REVM simulation failed due to nonce issue (normal mempool behavior)");
+            } else {
+                // Only log truly unexpected REVM errors
+                error!("Unexpected REVM error during transact_commit: {:?}", e);
+            }
             Err(anyhow!("REVM critical error during transact_commit: {}", e))
         }
     }

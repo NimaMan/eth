@@ -28,11 +28,7 @@ use revm_tx_simulator_lib::{
 use revm_primitives::{
     Address as RevmAddress, Bytes as RevmBytes, // Log as RevmLog, TxKind as RevmTxKind, // Log is used by SimulationOutput, TxKind maybe later
     B256 as RevmB256, // KECCAK_EMPTY as REVM_KECCAK_EMPTY, U256 as RevmU256, // U256 might be used by SimulationOutput or logging
-    hardfork::SpecId as RevmSpecId_primitive,
-    // ExecutionResult as RevmExecutionResult, // Moved to revm_context::result
-    // Output as RevmOutput, // Moved to revm_context::result
-    Log as RevmLog, // For SimulationOutput.logs
-    U256 as RevmU256, // For SimulationOutput fields if they use it directly or for conversions
+    hardfork::SpecId as RevmSpecId_primitive, // For SimulationOutput fields if they use it directly or for conversions
     // AccessListItem as RevmAccessListItem, // Removed from here
 };
 // use revm_state::{AccountInfo as RevmAccountInfo_state, JournaledState}; // JournaledState is used in RevmContext generic
@@ -41,7 +37,7 @@ use revm_primitives::{
 use revm_context::{
     BlockEnv as RevmBlockEnv_ctx, CfgEnv as RevmCfgEnv_ctx, TxEnv as RevmTxEnv_ctx, 
     TransactTo as RevmTransactTo_ctx, Context as RevmContext, Journal, // Added Journal from revm_context
-    result::{ExecutionResult as RevmExecutionResult, Output as RevmOutput}, // Added from revm_context::result
+    result::ExecutionResult as RevmExecutionResult, // Added from revm_context::result
     transaction::AccessListItem as RevmAccessListItem, // Added here
     ContextTr // Import ContextTr trait for .db() method
 };
