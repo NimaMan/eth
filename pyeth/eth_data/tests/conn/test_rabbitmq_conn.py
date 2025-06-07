@@ -61,6 +61,7 @@ import sys
 import asyncio
 import socket
 from datetime import datetime
+import pytest
 
 # Try to import the required libraries
 try:
@@ -72,30 +73,21 @@ except ImportError:
     sys.exit(1)
 
 # Connection parameters to test
-CONNECTION_PARAMS = [
-    {
-        "name": "Default localhost",
-        "url": "amqp://guest:guest@localhost/"
-    },
-    {
-        "name": "IP address 127.0.0.1",
-        "url": "amqp://guest:guest@127.0.0.1/"
-    },
-    {
-        "name": "Machine hostname",
-        "url": f"amqp://guest:guest@{socket.gethostname()}/"
-    },
-    {
-        "name": "Explicit port",
-        "url": "amqp://guest:guest@localhost:5672/"
-    }
+CONNECTION_URLS = [
+    "amqp://guest:guest@localhost/",
+    "amqp://guest:guest@127.0.0.1/",
+    f"amqp://guest:guest@{socket.gethostname()}/",
+    "amqp://guest:guest@localhost:5672/"
 ]
+
+HOSTS = ["localhost", "127.0.0.1", socket.gethostname()]
 
 def log(message):
     """Log a message with timestamp"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+@pytest.mark.parametrize("url", CONNECTION_URLS)
 def test_sync_connection(url):
     """Test synchronous connection using pika"""
     try:
@@ -112,20 +104,16 @@ def test_sync_connection(url):
         # If we get here, connection was successful
         log(f"✅ Synchronous connection successful to {url}")
         
-        # Create a channel and check server properties
-        channel = connection.channel()
-        server_properties = connection.server_properties
-        log(f"Connected to: {server_properties.get('product', 'Unknown')} "
-            f"version {server_properties.get('version', 'Unknown')}")
-        
         # Close the connection
         connection.close()
         return True
         
     except Exception as e:
         log(f"❌ Synchronous connection failed: {type(e).__name__}: {e}")
-        return False
+        assert False, f"Synchronous connection failed for {url}"
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", CONNECTION_URLS)
 async def test_async_connection(url):
     """Test asynchronous connection using aio_pika"""
     try:
@@ -148,8 +136,10 @@ async def test_async_connection(url):
         
     except Exception as e:
         log(f"❌ Asynchronous connection failed: {type(e).__name__}: {e}")
-        return False
+        assert False, f"Asynchronous connection failed for {url}"
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("host", HOSTS)
 async def test_network_connectivity(host, port=5672):
     """Test basic network connectivity to the host:port"""
     try:
@@ -168,34 +158,8 @@ async def test_network_connectivity(host, port=5672):
         
     except asyncio.TimeoutError:
         log(f"❌ Network connectivity to {host}:{port} timed out")
-        return False
+        assert False, f"Network connectivity to {host}:{port} timed out"
         
     except Exception as e:
         log(f"❌ Network connectivity to {host}:{port} failed: {type(e).__name__}: {e}")
-        return False
-
-async def main():
-    """Main test function"""
-    log("Starting RabbitMQ connection tests")
-    
-    # First test basic network connectivity
-    hosts = ["localhost", "127.0.0.1", socket.gethostname()]
-    log("\n=== Testing basic network connectivity ===")
-    for host in hosts:
-        await test_network_connectivity(host)
-    
-    # Test synchronous connections
-    log("\n=== Testing synchronous connections (pika) ===")
-    for params in CONNECTION_PARAMS:
-        test_sync_connection(params["url"])
-    
-    # Test asynchronous connections
-    log("\n=== Testing asynchronous connections (aio_pika) ===")
-    for params in CONNECTION_PARAMS:
-        await test_async_connection(params["url"])
-    
-    log("\nAll tests completed")
-
-if __name__ == "__main__":
-    # Run the async main function
-    asyncio.run(main())
+        assert False, f"Network connectivity to {host}:{port} failed"
