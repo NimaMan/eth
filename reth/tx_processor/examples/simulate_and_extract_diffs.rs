@@ -102,13 +102,13 @@ fn log_calculated_account_changes(tx_label: &str, all_changes: &HashMap<RevmAddr
             }
         }
 
-        if !changes.movements.denom.in_list.is_empty() || !changes.movements.denom.out_list.is_empty() {
+        if !changes.movements.eth.in_list.is_empty() || !changes.movements.eth.out_list.is_empty() {
             info!("    eth_movements:");
-            for movement in &changes.movements.denom.in_list {
+            for movement in &changes.movements.eth.in_list {
                 let amount_eth = movement.raw_amount.to_string().parse::<f64>().unwrap_or(0.0) / ETH_TO_WEI_FACTOR_F64;
                 info!("      IN:  Source: {}, Amount: {:.18} ETH", movement.source_identifier, amount_eth);
             }
-            for movement in &changes.movements.denom.out_list {
+            for movement in &changes.movements.eth.out_list {
                 let amount_eth = movement.raw_amount.to_string().parse::<f64>().unwrap_or(0.0) / ETH_TO_WEI_FACTOR_F64;
                 info!("      OUT: Source: {}, Amount: {:.18} ETH", movement.source_identifier, amount_eth);
             }
