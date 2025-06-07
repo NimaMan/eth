@@ -19,6 +19,46 @@ const ERC20_TRANSFER_EVENT_SIGNATURE_B256: RevmB256 = RevmB256::new([
     0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x16, 0x28, 0xf5, 0x5a, 0x4d, 0xf5, 0x23, 0xb3, 0xef,
 ]);
 
+// WETH contract address on Ethereum mainnet
+const WETH_ADDRESS: RevmAddress = RevmAddress::new([
+    0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e,
+    0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2
+]);
+
+// Known token addresses and their symbols
+pub fn get_token_symbol(address: &RevmAddress) -> Option<&'static str> {
+    match address.as_slice() {
+        // Stablecoins
+        [0xA0, 0xb8, 0x69, 0x91, 0xc6, 0x21, 0x8b, 0x36, 0xc1, 0xd1, 0x9D, 0x4a, 0x2e, 0x9E, 0xb0, 0xcE, 0x36, 0x06, 0xeB, 0x48] => Some("USDC"),
+        [0xdA, 0xC1, 0x7F, 0x95, 0x8D, 0x2e, 0xe5, 0x23, 0xa2, 0x20, 0x62, 0x06, 0x99, 0x45, 0x97, 0xC1, 0x3D, 0x83, 0x1e, 0xc7] => Some("USDT"),
+        [0x6B, 0x17, 0x54, 0x74, 0xE8, 0x90, 0x94, 0xC4, 0x4D, 0xa9, 0x8b, 0x95, 0x4E, 0xed, 0xeA, 0xC4, 0x95, 0x27, 0x1d, 0x0F] => Some("DAI"),
+        [0x4F, 0xab, 0xb1, 0x45, 0xd6, 0x46, 0x52, 0xa9, 0x48, 0xd7, 0x25, 0x33, 0x02, 0x3f, 0x6E, 0x7A, 0x62, 0x3C, 0x7C, 0x53] => Some("BUSD"),
+        [0x8E, 0x87, 0x0D, 0x67, 0xF6, 0x60, 0xD9, 0x5d, 0x5b, 0xe5, 0x30, 0x38, 0x0D, 0x0e, 0xC0, 0xbd, 0x38, 0x82, 0x89, 0xE1] => Some("PAX"),
+        [0x95, 0x6F, 0x47, 0xF5, 0x0A, 0x91, 0x01, 0x63, 0xD8, 0xBF, 0x95, 0x7C, 0xf5, 0x84, 0x6D, 0x57, 0x3E, 0x7f, 0x87, 0xCA] => Some("FEI"),
+        [0x85, 0x3d, 0x95, 0x5a, 0xCE, 0xf8, 0x22, 0xDb, 0x05, 0x8e, 0xb8, 0x50, 0x59, 0x11, 0xED, 0x77, 0xF1, 0x75, 0xb9, 0x9e] => Some("FRAX"),
+        [0x5f, 0x98, 0x80, 0x5A, 0x4E, 0x8b, 0xe2, 0x55, 0xa3, 0x28, 0x80, 0xFD, 0xeC, 0x7F, 0x67, 0x28, 0xC6, 0x56, 0x8b, 0xA0] => Some("LUSD"),
+        // Wrapped Tokens
+        [0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2] => Some("WETH"),
+        [0x22, 0x60, 0xFA, 0xC5, 0xE5, 0x54, 0x2a, 0x77, 0x3A, 0xa4, 0x4f, 0xBC, 0xfE, 0xDf, 0x7C, 0x19, 0x3b, 0xc2, 0xC5, 0x99] => Some("WBTC"),
+        // Other Major Tokens
+        [0x7D, 0x1A, 0xfA, 0x7B, 0x71, 0x8f, 0xb8, 0x93, 0xdB, 0x30, 0xA3, 0xaB, 0xc0, 0xCf, 0xc6, 0x08, 0xAa, 0xCf, 0xeB, 0xB0] => Some("MATIC"),
+        [0x51, 0x49, 0x10, 0x77, 0x1A, 0xF9, 0xCa, 0x65, 0x6a, 0xf8, 0x40, 0xdf, 0xf8, 0x3E, 0x82, 0x64, 0xEc, 0xF9, 0x86, 0xCA] => Some("LINK"),
+        [0x1f, 0x98, 0x40, 0xa8, 0x5d, 0x5a, 0xF5, 0xbf, 0x1D, 0x17, 0x62, 0xF9, 0x25, 0xBD, 0xAD, 0xdC, 0x42, 0x01, 0xF9, 0x84] => Some("UNI"),
+        [0x7F, 0xc6, 0x65, 0x00, 0xc8, 0x4A, 0x76, 0xAd, 0x7e, 0x9c, 0x93, 0x43, 0x7b, 0xFc, 0x5A, 0xc3, 0x3E, 0x2D, 0xDa, 0xE9] => Some("AAVE"),
+        _ => None,
+    }
+}
+
+// Get token decimals
+pub fn get_token_decimals(symbol: &str) -> u8 {
+    match symbol {
+        "USDC" | "USDT" | "EUROC" | "EURT" | "PYUSD" | "USDS" | "XAUt" | "XIDR" | "XSGD" | "XUSD" | "GYEN" => 6,
+        "WBTC" => 8,
+        "EURS" | "GUSD" | "IDRT" => 2,
+        _ => 18, // Default to 18 decimals
+    }
+}
+
 // Assuming SimCacheDB is defined in lib.rs or simulation_core.rs and re-exported
 // For now, let's use a concrete type alias here based on current usage.
 // This might need to be adjusted if SimCacheDB in lib.rs is more generic.
@@ -118,8 +158,8 @@ pub struct TokenMovement {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DenomMovement {
-    pub source_identifier: String, // e.g., "tx_value", "tx_fee", "block_reward"
+pub struct EthMovement {
+    pub source_identifier: String, // e.g., "tx_value", "tx_fee", "block_reward", "internal_0"
     pub raw_amount: RevmU256,
 }
 
@@ -130,15 +170,23 @@ pub struct TokenMovementsInOut {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DenomMovementsInOut {
-    pub in_list: Vec<DenomMovement>,
-    pub out_list: Vec<DenomMovement>,
+pub struct EthMovementsInOut {
+    pub in_list: Vec<EthMovement>,
+    pub out_list: Vec<EthMovement>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountMovements {
     pub token: HashMap<RevmAddress, TokenMovementsInOut>, // Token Address -> Movements
-    pub denom: DenomMovementsInOut, // ETH Movements
+    pub eth: EthMovementsInOut, // ETH Movements (including WETH transfers)
+}
+
+#[derive(Debug, Clone)]
+pub struct TokenInfo {
+    pub address: RevmAddress,
+    pub symbol: String,
+    pub decimals: u8,
+    pub net_change: SignedAmount,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -146,6 +194,7 @@ pub struct CalculatedAccountChanges {
     pub address: RevmAddress,
     pub eth_net_change: SignedAmount,
     pub token_net_changes: HashMap<RevmAddress, SignedAmount>, // Token Address -> Net Change
+    pub token_infos: Vec<TokenInfo>, // Enhanced token info with symbols
     pub movements: AccountMovements,
     // Optional: could add final_nonce, final_code_hash if needed later
 }
@@ -258,12 +307,12 @@ pub async fn generate_calculated_account_changes(
     // Sender pays fee and value
     if let Some(sender_changes) = all_changes.get_mut(&tx_env.caller) {
         if tx_env.value > RevmU256::ZERO {
-            sender_changes.movements.denom.out_list.push(DenomMovement {
+            sender_changes.movements.eth.out_list.push(EthMovement {
                 source_identifier: "tx_value_sent".to_string(),
                 raw_amount: tx_env.value,
             });
         }
-        sender_changes.movements.denom.out_list.push(DenomMovement {
+        sender_changes.movements.eth.out_list.push(EthMovement {
             source_identifier: "tx_fee_payment".to_string(),
             raw_amount: total_tx_fee,
         });
@@ -273,7 +322,7 @@ pub async fn generate_calculated_account_changes(
     if let RevmTransactTo_ctx::Call(to_addr) = tx_env.kind {
         if tx_env.value > RevmU256::ZERO {
             if let Some(receiver_changes) = all_changes.get_mut(&to_addr) {
-                receiver_changes.movements.denom.in_list.push(DenomMovement {
+                receiver_changes.movements.eth.in_list.push(EthMovement {
                     source_identifier: "tx_value_received".to_string(),
                     raw_amount: tx_env.value,
                 });
@@ -297,7 +346,7 @@ pub async fn generate_calculated_account_changes(
     
     if tip_to_beneficiary > RevmU256::ZERO {
         if let Some(beneficiary_changes) = all_changes.get_mut(&block_env.beneficiary) {
-            beneficiary_changes.movements.denom.in_list.push(DenomMovement {
+            beneficiary_changes.movements.eth.in_list.push(EthMovement {
                 source_identifier: "tx_fee_reward_tip".to_string(),
                 raw_amount: tip_to_beneficiary,
             });
@@ -377,26 +426,63 @@ pub async fn generate_calculated_account_changes(
                 }
                 let amount = RevmU256::from_be_bytes(amount_bytes);
 
-                let log_id_str = format!("log_{}", _log_idx); // Use _log_idx here as well
-
-                // Update for 'from' account
-                if let Some(sender_changes) = all_changes.get_mut(&from_address) {
-                    let token_movements = sender_changes.movements.token.entry(token_contract_addr).or_default();
-                    token_movements.out_list.push(TokenMovement { log_identifier: log_id_str.clone(), raw_amount: amount });
-                    
-                    let net_change = sender_changes.token_net_changes.entry(token_contract_addr).or_insert_with(SignedAmount::zero);
-                    *net_change = net_change.clone() - SignedAmount::new(amount, false); 
+                // Check if this is a WETH transfer
+                if token_contract_addr == WETH_ADDRESS {
+                    // For WETH, we treat it as a regular token
+                    // Why? Because:
+                    // 1. WETH wraps (deposit ETH) show up as internal ETH transfers via CallTracer
+                    // 2. WETH unwraps (withdraw ETH) show up as internal ETH transfers via CallTracer  
+                    // 3. WETH transfers between addresses are just token transfers
+                    // 
+                    // By treating WETH as a regular token here, we avoid double-counting
+                    // The actual ETH movements are captured by the CallTracer
                 }
+                
+                // Process all tokens (including WETH) as regular token transfers
+                {
+                    let log_id_str = format!("log_{}", _log_idx);
 
-                // Update for 'to' account
-                if let Some(receiver_changes) = all_changes.get_mut(&to_address) {
-                    let token_movements = receiver_changes.movements.token.entry(token_contract_addr).or_default();
-                    token_movements.in_list.push(TokenMovement { log_identifier: log_id_str.clone(), raw_amount: amount });
+                    // Update for 'from' account
+                    if let Some(sender_changes) = all_changes.get_mut(&from_address) {
+                        let token_movements = sender_changes.movements.token.entry(token_contract_addr).or_default();
+                        token_movements.out_list.push(TokenMovement { log_identifier: log_id_str.clone(), raw_amount: amount });
+                        
+                        let net_change = sender_changes.token_net_changes.entry(token_contract_addr).or_insert_with(SignedAmount::zero);
+                        *net_change = net_change.clone() - SignedAmount::new(amount, false); 
+                    }
 
-                    let net_change = receiver_changes.token_net_changes.entry(token_contract_addr).or_insert_with(SignedAmount::zero);
-                    *net_change = net_change.clone() + SignedAmount::new(amount, false);
+                    // Update for 'to' account
+                    if let Some(receiver_changes) = all_changes.get_mut(&to_address) {
+                        let token_movements = receiver_changes.movements.token.entry(token_contract_addr).or_default();
+                        token_movements.in_list.push(TokenMovement { log_identifier: log_id_str.clone(), raw_amount: amount });
+
+                        let net_change = receiver_changes.token_net_changes.entry(token_contract_addr).or_insert_with(SignedAmount::zero);
+                        *net_change = net_change.clone() + SignedAmount::new(amount, false);
+                    }
                 }
             }
+        }
+    }
+
+    // Populate token_infos with symbols and decimals
+    for (_, changes) in all_changes.iter_mut() {
+        for (token_addr, net_change) in &changes.token_net_changes {
+            let symbol = get_token_symbol(token_addr)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("{:?}", token_addr));
+            
+            let decimals = if let Some(sym) = get_token_symbol(token_addr) {
+                get_token_decimals(sym)
+            } else {
+                18 // Default to 18 decimals
+            };
+            
+            changes.token_infos.push(TokenInfo {
+                address: *token_addr,
+                symbol,
+                decimals,
+                net_change: net_change.clone(),
+            });
         }
     }
 

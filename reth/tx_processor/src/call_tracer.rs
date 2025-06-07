@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use revm_primitives::{Address, U256};
-use revm_context::Database;
 use revm_inspector::Inspector;
 use revm_interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome};
+use revm_interpreter::interpreter::EthInterpreter;
 
 /// Represents an internal ETH transfer from call tracing
 #[derive(Debug, Clone)]
@@ -53,11 +53,16 @@ impl CallTracer {
     }
 }
 
-impl<CTX: Database> Inspector<CTX> for CallTracer {
+impl<CTX> Inspector<CTX, EthInterpreter> for CallTracer {
     /// Called when a call to a contract is about to start
     fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        // Debug logging
+        eprintln!("🔍 CallTracer: CALL from {:?} to {:?} with value {:?} at depth {}", 
+            inputs.caller, inputs.target_address, inputs.call_value(), self.current_depth);
+        
         // Only track calls with value > 0 (ETH transfers)
         if inputs.call_value() > U256::ZERO {
+            eprintln!("💰 Recording internal transfer of {} wei", inputs.call_value());
             let call_frame = CallFrame {
                 from: inputs.caller,
                 to: inputs.target_address,

@@ -17,6 +17,9 @@ pub use state_diff_utils::{
     SimCacheDBForDiff,
     CalculatedAccountChanges,
     generate_calculated_account_changes,
+    TokenInfo,
+    get_token_symbol,
+    get_token_decimals,
     // Add other new structs if they need to be public API e.g. SignedAmount, AccountMovements etc.
     // For now, keeping them internal to state_diff_utils unless direct use is needed by examples.
 };

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use revm_primitives::{Address as RevmAddress, U256 as RevmU256};
 use crate::InternalTransfer;
-use crate::state_diff_utils::{CalculatedAccountChanges, DenomMovement};
+use crate::state_diff_utils::{CalculatedAccountChanges, EthMovement};
 use serde_json::Value;
 
 /// Add internal transfers to calculated account changes
@@ -31,7 +31,7 @@ pub fn integrate_internal_transfers(
             
             // Subtract from sender
             if let Some(sender_changes) = all_changes.get_mut(&transfer.from) {
-                sender_changes.movements.denom.out_list.push(DenomMovement {
+                sender_changes.movements.eth.out_list.push(EthMovement {
                     source_identifier: format!("internal_{}", i),
                     raw_amount: transfer.value,
                 });
@@ -40,7 +40,7 @@ pub fn integrate_internal_transfers(
             
             // Add to receiver
             if let Some(receiver_changes) = all_changes.get_mut(&transfer.to) {
-                receiver_changes.movements.denom.in_list.push(DenomMovement {
+                receiver_changes.movements.eth.in_list.push(EthMovement {
                     source_identifier: format!("internal_{}", i),
                     raw_amount: transfer.value,
                 });
