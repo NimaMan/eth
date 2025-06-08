@@ -1191,6 +1191,6 @@ impl TransactionSource for MockTransactionSource {
 }
 
 /// Helper function to encode bytes as hex string
-fn hex_encode(bytes: &[u8]) -> String {
+pub fn hex_encode(bytes: &[u8]) -> String {
     hex::encode(bytes)
 } 

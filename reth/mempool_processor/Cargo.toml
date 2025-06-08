@@ -80,6 +80,10 @@ name = "mempool_processor"
 path = "src/main.rs"
 
 [[bin]]
+name = "mempool_tracker"
+path = "src/bin/mempool_tracker.rs"
+
+[[bin]]
 name = "scam_detection_service"
 path = "src/bin/scam_detection_service.rs"
 
@@ -88,38 +92,25 @@ name = "metrics_api_server"
 path = "src/bin/metrics_api_server.rs"
 
 [[bin]]
+name = "realtime_scam_detection_service"
+path = "src/bin/realtime_scam_detection_service.rs"
+
+[[bin]]
+name = "test_live_pool_detection"
+path = "tests/test_live_pool_detection.rs"
+
+# Performance testing binaries
+[[bin]]
+name = "simple_performance_test"
+path = "tools/performance/simple_performance_test.rs"
+
+[[bin]]
+name = "mempool_performance_analyzer"
+path = "tools/performance/mempool_performance_analyzer.rs"
+
+[[bin]]
 name = "revm_performance_monitor"
-path = "src/bin/revm_performance_monitor.rs"
-
-# Validation testing binary
-[[bin]]
-name = "run_validation_tests"
-path = "src/bin/run_validation_tests.rs"
-
-# Test binaries
-[[bin]]
-name = "test_pool_detection"
-path = "src/bin/test_pool_detection.rs"
-
-[[bin]]
-name = "test_comprehensive_state_diff"
-path = "src/bin/test_comprehensive_state_diff.rs"
-
-[[bin]]
-name = "test_simulation_engine"
-path = "src/bin/test_simulation_engine.rs"
-
-[[bin]]
-name = "large_scale_validation"
-path = "src/bin/large_scale_validation.rs"
-
-[[bin]]
-name = "test_revm_basic"
-path = "src/bin/test_revm_basic.rs"
-
-[[bin]]
-name = "test_specific_tx"
-path = "src/bin/test_specific_tx.rs"
+path = "tools/performance/revm_performance_monitor.rs"
 
 # ───────────────────────────── Patch section (align with revm_tx_simulator) ──────────────────────────────
 [patch.crates-io]

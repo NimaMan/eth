@@ -1,0 +1,210 @@
+{
+  "metadata": {
+    "analysis_timestamp": "2025-06-08T13:34:43.564208",
+    "data_file": "/home/nima/code/crypto/logs/mempool/transaction_timing_analysis_20250605_205119.csv",
+    "total_transactions": 826229
+  },
+  "timing_phases": {
+    "Mempool Residence": {
+      "count": 3250,
+      "mean_ms": 1.0,
+      "median_ms": 1.0,
+      "std_ms": 0.0,
+      "min_ms": 1.0,
+      "max_ms": 1.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 822979
+    },
+    "Internal Queue": {
+      "count": 20,
+      "mean_ms": 1.0,
+      "median_ms": 1.0,
+      "std_ms": 0.0,
+      "min_ms": 1.0,
+      "max_ms": 1.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 826209
+    },
+    "Pool Check": {
+      "count": 671,
+      "mean_ms": 1.8971684053651268,
+      "median_ms": 1.0,
+      "std_ms": 3.0350943873715064,
+      "min_ms": 1.0,
+      "max_ms": 17.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 11.0,
+      "p99_ms": 14.0,
+      "zero_count": 825558
+    },
+    "REVM Simulation": {
+      "count": 724609,
+      "mean_ms": 5.395929390885291,
+      "median_ms": 2.0,
+      "std_ms": 32.096481586366615,
+      "min_ms": 1.0,
+      "max_ms": 3882.0,
+      "p25_ms": 1.0,
+      "p75_ms": 3.0,
+      "p95_ms": 9.0,
+      "p99_ms": 96.0,
+      "zero_count": 101620
+    },
+    "State Analysis": {
+      "count": 1589,
+      "mean_ms": 1.0,
+      "median_ms": 1.0,
+      "std_ms": 0.0,
+      "min_ms": 1.0,
+      "max_ms": 1.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 824640
+    },
+    "Scam Detection": {
+      "count": 27,
+      "mean_ms": 1.0,
+      "median_ms": 1.0,
+      "std_ms": 0.0,
+      "min_ms": 1.0,
+      "max_ms": 1.0,
+      "p25_ms": 1.0,
+      "p75_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 826202
+    },
+    "Total Processing": {
+      "count": 725257,
+      "mean_ms": 5.396806924993485,
+      "median_ms": 2.0,
+      "std_ms": 32.083493691008606,
+      "min_ms": 1.0,
+      "max_ms": 3882.0,
+      "p25_ms": 1.0,
+      "p75_ms": 3.0,
+      "p95_ms": 9.0,
+      "p99_ms": 96.0,
+      "zero_count": 100972
+    },
+    "End-to-End": {
+      "count": 725960,
+      "mean_ms": 5.396085183756681,
+      "median_ms": 2.0,
+      "std_ms": 32.06880880392407,
+      "min_ms": 1.0,
+      "max_ms": 3882.0,
+      "p25_ms": 1.0,
+      "p75_ms": 3.0,
+      "p95_ms": 9.0,
+      "p99_ms": 95.0,
+      "zero_count": 100269
+    }
+  },
+  "transaction_categories": {
+    "pool_transactions": {
+      "count": 128,
+      "percentage": 0.01549207302091793,
+      "avg_processing_ms": 4.3828125
+    },
+    "scam_transactions": {
+      "count": 0,
+      "percentage": 0.0,
+      "avg_processing_ms": NaN
+    },
+    "performance_categories": {
+      "excellent": {
+        "count": 807615,
+        "percentage": 97.7471136936612,
+        "avg_end_to_end_ms": 2.287748494022523
+      },
+      "good": {
+        "count": 1932,
+        "percentage": 0.23383347715948,
+        "avg_end_to_end_ms": 27.40527950310559
+      },
+      "acceptable": {
+        "count": 10845,
+        "percentage": 1.3125900930613668,
+        "avg_end_to_end_ms": 80.65846011987091
+      },
+      "poor": {
+        "count": 5837,
+        "percentage": 0.7064627361179527,
+        "avg_end_to_end_ms": 195.65427445605619
+      }
+    },
+    "sla_compliance": {
+      "violations": 16682,
+      "compliance_rate": 97.98094717082067,
+      "avg_violation_time_ms": 120.8952763457619
+    }
+  },
+  "bottleneck_analysis": {
+    "total_avg_time_ms": 14.218227634227315,
+    "phase_contributions": {
+      "End-to-End": {
+        "time_ms": 4.741230336867866,
+        "percentage": 33.34614171919977,
+        "rank": 1
+      },
+      "Total Processing": {
+        "time_ms": 4.737272596338304,
+        "percentage": 33.318306037908286,
+        "rank": 2
+      },
+      "REVM Simulation": {
+        "time_ms": 4.732270351198033,
+        "percentage": 33.28312412023924,
+        "rank": 3
+      },
+      "Mempool Residence": {
+        "time_ms": 0.003933534165467443,
+        "percentage": 0.027665432476255403,
+        "rank": 4
+      },
+      "State Analysis": {
+        "time_ms": 0.0019231956273623898,
+        "percentage": 0.013526268370698407,
+        "rank": 5
+      },
+      "Pool Check": {
+        "time_ms": 0.0015407350746584785,
+        "percentage": 0.010836337089930191,
+        "rank": 6
+      },
+      "Scam Detection": {
+        "time_ms": 3.267859152849876e-05,
+        "percentage": 0.00022983590057196792,
+        "rank": 7
+      },
+      "Internal Queue": {
+        "time_ms": 2.4206364095184264e-05,
+        "percentage": 0.00017024881523849475,
+        "rank": 8
+      }
+    },
+    "primary_bottleneck": {
+      "phase": "End-to-End",
+      "percentage": 33.34614171919977,
+      "recommendation": "Profile and optimize implementation"
+    }
+  },
+  "throughput_metrics": {
+    "total_transactions": 826229,
+    "estimated_duration_min": 826.229,
+    "avg_processing_time_ms": 4.737272596338304,
+    "avg_queue_time_ms": 2.4206364095184264e-05,
+    "theoretical_max_tps": 211.0919267708923,
+    "queue_efficiency_pct": 99.99948902580725
+  }
+}

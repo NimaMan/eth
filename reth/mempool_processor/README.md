@@ -23,31 +23,64 @@ The Ethereum Mempool Processor is designed to:
 - **State Diff Tracker**: Uses REVM to simulate transactions and extract per-address balance changes
 - **Alerts**: Publishes alerts via ZeroMQ in FlatBuffers format
 
+## Project Structure
+
+```
+mempool_processor/
+├── src/                              # Core Rust source code
+│   ├── bin/                          # Main service binaries
+│   │   ├── mempool_processor.rs      # Main mempool monitoring service
+│   │   ├── mempool_tracker.rs        # Coverage analysis binary
+│   │   ├── scam_detection_service.rs # Scam detection service
+│   │   └── metrics_api_server.rs     # Real-time metrics API
+│   └── [modules]/                    # Library modules (fetcher, processor, simulator)
+├── examples/                         # Example implementations
+│   ├── mempool_coverage_analysis/    # 53.2% coverage analysis (production-tested)
+│   └── historical_simulation.rs      # REVM historical transaction simulation
+├── tools/                           # Analysis and development tools
+│   ├── performance/                 # Performance testing tools
+│   ├── validation/                  # Transaction validation (90+ test cases)
+│   └── python/                      # Python analysis utilities
+├── tests/                           # Integration tests
+└── docs/                           # Technical documentation
+```
+
+## Documentation
+
+- **[README.md](README.md)** - Main project overview and usage
+- **[README_PRODUCTION.md](README_PRODUCTION.md)** - Production deployment guide
+- **[docs/TECHNICAL_ANALYSIS.md](docs/TECHNICAL_ANALYSIS.md)** - Detailed performance analysis and system architecture
+- **[docs/EVM.md](docs/EVM.md)** - Queue theory analysis and transaction processing patterns
+- **[examples/README.md](examples/README.md)** - Example implementations and usage
+- **[tools/README.md](tools/README.md)** - Analysis tools and utilities
+- **[tests/README.md](tests/README.md)** - Testing framework and validation tools
+
 ## Usage
 
-### Running the Mempool Processor
+### Main Services
 
+#### Mempool Coverage Analysis
+```bash
+# Run 1-hour production analysis (53.2% coverage demonstrated)
+cd examples/mempool_coverage_analysis
+./run_hourly_analysis.sh
+```
+
+#### Main Mempool Processor
 ```bash
 cargo run --bin mempool_processor -- \
-  --ws-rpc-url ws://your-ethereum-node:8546 \
-  --http-rpc-url http://your-ethereum-node:8545 \
+  --ws-rpc-url ws://127.0.0.1:8546 \
+  --http-rpc-url http://127.0.0.1:8545 \
   --threshold 100000000000000000 \
   --verbose
 ```
 
-### Testing the State Diff Tracker
-
-A standalone utility is provided to test the state diff tracking functionality:
-
+#### Scam Detection Service
 ```bash
-cargo run --bin test_state_diff -- \
-  --http-rpc-url http://your-ethereum-node:8545 \
-  --cache-dir ./cache \
-  --tx-count 5 \
-  --verbose
+cargo run --bin scam_detection_service -- \
+  --http-rpc-url http://127.0.0.1:8545 \
+  --ws-rpc-url ws://127.0.0.1:8546
 ```
-
-This will fetch recent transactions, simulate them using REVM, and display the state changes.
 
 ## State Diff Tracking
 
