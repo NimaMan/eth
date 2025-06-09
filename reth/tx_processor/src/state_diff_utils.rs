@@ -426,20 +426,32 @@ pub async fn generate_calculated_account_changes(
                 }
                 let amount = RevmU256::from_be_bytes(amount_bytes);
 
-                // Check if this is a WETH transfer
+                // Check if this is a WETH transfer - handle as ETH movement
                 if token_contract_addr == WETH_ADDRESS {
-                    // For WETH, we treat it as a regular token
-                    // Why? Because:
-                    // 1. WETH wraps (deposit ETH) show up as internal ETH transfers via CallTracer
-                    // 2. WETH unwraps (withdraw ETH) show up as internal ETH transfers via CallTracer  
-                    // 3. WETH transfers between addresses are just token transfers
-                    // 
-                    // By treating WETH as a regular token here, we avoid double-counting
-                    // The actual ETH movements are captured by the CallTracer
-                }
-                
-                // Process all tokens (including WETH) as regular token transfers
-                {
+                    // WETH transfers are tracked as ETH movements, not token movements
+                    // This matches Python behavior where WETH operations affect eth_net
+                    let log_id_str = format!("log_{}", _log_idx);
+                    
+                    // For WETH, track as ETH movement
+                    // Update sender - ETH goes out
+                    if let Some(sender_changes) = all_changes.get_mut(&from_address) {
+                        sender_changes.movements.eth.out_list.push(EthMovement {
+                            source_identifier: log_id_str.clone(),
+                            raw_amount: amount,
+                        });
+                        sender_changes.eth_net_change = sender_changes.eth_net_change.clone().subtract_positive(amount);
+                    }
+                    
+                    // Update receiver - ETH comes in
+                    if let Some(receiver_changes) = all_changes.get_mut(&to_address) {
+                        receiver_changes.movements.eth.in_list.push(EthMovement {
+                            source_identifier: log_id_str.clone(),
+                            raw_amount: amount,
+                        });
+                        receiver_changes.eth_net_change = receiver_changes.eth_net_change.clone().add_positive(amount);
+                    }
+                } else {
+                    // Process all non-WETH tokens as regular token transfers
                     let log_id_str = format!("log_{}", _log_idx);
 
                     // Update for 'from' account
@@ -486,5 +498,8 @@ pub async fn generate_calculated_account_changes(
         }
     }
 
+    // Filter out WETH contract from state changes to match Python behavior
+    all_changes.retain(|&addr, _| addr != WETH_ADDRESS);
+    
     Ok(all_changes)
 } 

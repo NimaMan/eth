@@ -10,9 +10,20 @@ pub fn integrate_internal_transfers(
     internal_transfers: &[InternalTransfer],
 ) -> HashMap<RevmAddress, CalculatedAccountChanges> {
     
+    // WETH contract address
+    const WETH_ADDRESS: RevmAddress = RevmAddress::new([
+        0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e,
+        0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2
+    ]);
+    
     // Process each internal transfer
     for (i, transfer) in internal_transfers.iter().enumerate() {
         if transfer.success && transfer.value > RevmU256::ZERO {
+            
+            // Skip internal transfers from/to WETH to match Python behavior
+            if transfer.from == WETH_ADDRESS || transfer.to == WETH_ADDRESS {
+                continue;
+            }
             
             // Ensure both addresses exist in changes map
             if !all_changes.contains_key(&transfer.from) {

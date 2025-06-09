@@ -40,6 +40,7 @@ use revm_tx_simulator_lib::{
 
 // REVM specific imports
 use revm_primitives::{
+    Address as RevmAddress,
     Bytes as RevmBytes, 
     hardfork::SpecId as RevmSpecId_primitive,
     U256 as RevmU256,
@@ -234,6 +235,10 @@ async fn main() -> Result<()> {
             // This ensures ETH movements from contract calls are properly accounted for
             state_changes = integrate_internal_transfers(state_changes, &internal_transfers);
             
+            // Filter out WETH contract to match Python behavior
+            const WETH_ADDRESS: RevmAddress = RevmAddress::new([0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2]);
+            state_changes.retain(|&addr, _| addr != WETH_ADDRESS);
+            
             eprintln!("📊 Analyzed {} logs and {} state changes", logs.len(), state_changes.len());
             eprintln!("📊 Found {} addresses with state changes", state_changes.len());
             
@@ -248,31 +253,87 @@ async fn main() -> Result<()> {
                 let eth_net_change_f64 = eth_net_change_str.parse::<f64>().unwrap_or(0.0);
                 let eth_net_change_eth = eth_net_change_f64 / ETH_TO_WEI_FACTOR_F64;
                 
-                // Calculate token changes with symbols
+                // Calculate token changes - use raw amounts like Python does
                 let mut token_changes_map = serde_json::Map::new();
                 for token_info in &changes.token_infos {
                     let token_str = token_info.net_change.to_signed_string();
                     let token_f64 = token_str.parse::<f64>().unwrap_or(0.0);
                     
-                    // Convert based on token decimals
-                    let divisor = 10_f64.powi(token_info.decimals as i32);
-                    let token_amount = token_f64 / divisor;
-                    
-                    // Only include if above threshold (0.1 for tokens)
-                    if token_amount.abs() > 0.1 {
-                        token_changes_map.insert(token_info.symbol.clone(), json!(token_amount));
+                    // Python uses raw amounts for token_net, not decimal-adjusted
+                    if token_f64.abs() > 0.0 {
+                        // Use token address as key to match Python output
+                        token_changes_map.insert(format!("{:?}", token_info.address), json!(token_f64));
                     }
                 }
                 
                 addr_changes.insert("eth_net".to_string(), json!(eth_net_change_eth));
                 addr_changes.insert("token_net".to_string(), json!(token_changes_map));
                 
-                // Add empty movements to match Python format
-                let movements = json!({
-                    "token": {"in": {}, "out": {}},
-                    "eth": {"in": {}, "out": {}}
-                });
-                addr_changes.insert("movements".to_string(), movements);
+                // Build movements from actual data
+                let mut movements = serde_json::Map::new();
+                
+                // ETH movements
+                let mut eth_movements = serde_json::Map::new();
+                let mut eth_in = serde_json::Map::new();
+                let mut eth_out = serde_json::Map::new();
+                
+                for eth_in_movement in &changes.movements.eth.in_list {
+                    let amount_str = eth_in_movement.raw_amount.to_string();
+                    let amount_f64 = amount_str.parse::<f64>().unwrap_or(0.0);
+                    let amount_eth = amount_f64 / ETH_TO_WEI_FACTOR_F64;
+                    eth_in.insert(eth_in_movement.source_identifier.clone(), json!(amount_eth));
+                }
+                
+                for eth_out_movement in &changes.movements.eth.out_list {
+                    let amount_str = eth_out_movement.raw_amount.to_string();
+                    let amount_f64 = amount_str.parse::<f64>().unwrap_or(0.0);
+                    let amount_eth = amount_f64 / ETH_TO_WEI_FACTOR_F64;
+                    eth_out.insert(eth_out_movement.source_identifier.clone(), json!(amount_eth));
+                }
+                
+                eth_movements.insert("in".to_string(), json!(eth_in));
+                eth_movements.insert("out".to_string(), json!(eth_out));
+                
+                // Token movements
+                let mut tokens_movements = serde_json::Map::new();
+                
+                for (token_addr, token_movements_inout) in &changes.movements.token {
+                    let mut token_in_out = serde_json::Map::new();
+                    let mut token_in = serde_json::Map::new();
+                    let mut token_out = serde_json::Map::new();
+                    
+                    // Get token info for this address
+                    let token_info = changes.token_infos.iter()
+                        .find(|ti| ti.address == *token_addr);
+                    
+                    let decimals = token_info.map(|ti| ti.decimals).unwrap_or(18);
+                    let divisor = 10_f64.powi(decimals as i32);
+                    
+                    for token_in_movement in &token_movements_inout.in_list {
+                        let amount_str = token_in_movement.raw_amount.to_string();
+                        let amount_f64 = amount_str.parse::<f64>().unwrap_or(0.0);
+                        let amount = amount_f64 / divisor;
+                        token_in.insert(token_in_movement.log_identifier.clone(), json!(amount));
+                    }
+                    
+                    for token_out_movement in &token_movements_inout.out_list {
+                        let amount_str = token_out_movement.raw_amount.to_string();
+                        let amount_f64 = amount_str.parse::<f64>().unwrap_or(0.0);
+                        let amount = amount_f64 / divisor;
+                        token_out.insert(token_out_movement.log_identifier.clone(), json!(amount));
+                    }
+                    
+                    token_in_out.insert("in".to_string(), json!(token_in));
+                    token_in_out.insert("out".to_string(), json!(token_out));
+                    
+                    // Use token address as key
+                    tokens_movements.insert(format!("{:?}", token_addr), json!(token_in_out));
+                }
+                
+                movements.insert("denom".to_string(), json!(eth_movements));
+                movements.insert("tokens".to_string(), json!(tokens_movements));
+                
+                addr_changes.insert("movements".to_string(), json!(movements));
                 
                 json_output.insert(format!("{:?}", address), json!(addr_changes));
             }
