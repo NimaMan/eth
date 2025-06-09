@@ -85,6 +85,13 @@ reqwest = { version = "0.11", features = ["json"] }
 
 # Reth dependencies for direct database access
 reth-ethereum = { path = "../reth/crates/ethereum/reth", features = ["node"] }  # Re-enabled to test with external REVM
+reth-db = { path = "../reth/crates/storage/db", default-features = false }
+reth-provider = { path = "../reth/crates/storage/provider", default-features = false }
+reth-chainspec = { path = "../reth/crates/chainspec", default-features = false }
+reth-primitives = { path = "../reth/crates/primitives", default-features = false }
+alloy-primitives = { version = "1.1.2", default-features = false, features = ["serde", "std", "sha3-keccak"] }
+alloy-rpc-types = { version = "1.0.6", default-features = true }
+alloy-transport-http = { version = "1.0.6", features = ["reqwest"] }
 
 # Anyhow
 # anyhow = "1.0.89" # Duplicate removed - using 1.0 above

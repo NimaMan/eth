@@ -3,6 +3,7 @@ pub mod simulation_core;
 pub mod state_diff_utils;
 pub mod call_tracer;
 pub mod internal_transfer_tracker;
+pub mod fast_path_processor;
 // pub mod tx_processor; // Disabled - needs API updates for external REVM but core simulation works
 
 // Re-export common types for easier use in examples or by other crates
@@ -28,6 +29,12 @@ pub use state_diff_utils::{
 // Re-export call tracer and internal transfer tracker
 pub use call_tracer::{CallTracer, InternalTransfer};
 pub use internal_transfer_tracker::{integrate_internal_transfers, extract_internal_transfers_from_rpc};
+
+// Re-export fast path processor
+pub use fast_path_processor::{
+    FastPathConfig, FastPathProcessor, TransactionAnalysisResult, 
+    AnalysisMethod, ConfidenceLevel, example_fast_analysis
+};
 
 // Conversion functions have been moved to src/conversions.rs
 
