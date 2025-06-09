@@ -2,7 +2,12 @@
 
 // Silence unused crate dependency warnings
 use chrono as _;
+use clap as _;
+use eyre as _;
 use reqwest as _;
+use reth_ethereum as _;
+use revm_database as _;
+use revm_handler as _;
 use revm_inspector as _;
 use revm_interpreter as _;
 use serde as _;

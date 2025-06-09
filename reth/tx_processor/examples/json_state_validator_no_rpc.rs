@@ -5,9 +5,13 @@
 
 // Silence unused crate dependency warnings
 use chrono as _;
+use clap as _;
 use ethers_signers as _;
+use eyre as _;
 use hex as _;
 use reqwest as _;
+use reth_ethereum as _;
+use revm_database as _;
 use revm_inspector as _;
 use revm_interpreter as _;
 use revm_state as _;
@@ -28,7 +32,7 @@ use serde_json::json;
 use revm_tx_simulator_lib::{
     ExecutionResultType, 
     conversions::{ethers_to_revm_address, ethers_to_revm_u256}, 
-    state_diff_utils::{CalculatedAccountChanges, generate_calculated_account_changes},
+    state_diff_utils::generate_calculated_account_changes,
     SimCacheDBForDiff,
     CallTracer,
     integrate_internal_transfers,
@@ -42,11 +46,14 @@ use revm_primitives::{
 };
 use revm_context::{
     BlockEnv as RevmBlockEnv_ctx, CfgEnv as RevmCfgEnv_ctx, TxEnv as RevmTxEnv_ctx, 
-    TransactTo as RevmTransactTo_ctx, Context as RevmContext, Journal, 
-    result::{ExecutionResult as RevmExecutionResult}
+    TransactTo as RevmTransactTo_ctx, Context as RevmContext, ContextTr, Journal
 };
+use revm_interpreter::interpreter::EthInterpreter;
+use revm_context::result::ExecutionResult as RevmExecutionResult;
 use revm::database::{AlloyDB, CacheDB, WrapDatabaseAsync};
-use revm::{MainBuilder, ExecuteCommitEvm, InspectEvm}; 
+use revm_context::Evm;
+use revm_inspector::InspectEvm;
+use revm_handler::{EthPrecompiles, instructions::EthInstructions}; 
 
 // Alloy Imports
 use alloy_eips::BlockId as AlloyBlockId;
@@ -113,8 +120,8 @@ async fn main() -> Result<()> {
     };
     
     let mut block_env = RevmBlockEnv_ctx::default();
-    block_env.number = ethers_to_revm_u256(block_number_u64.into());
-    block_env.timestamp = ethers_to_revm_u256(ethers_block.timestamp);
+    block_env.number = RevmU256::from(block_number_u64);
+    block_env.timestamp = RevmU256::from(ethers_block.timestamp.as_u64());
     block_env.beneficiary = ethers_to_revm_address(ethers_block.author.unwrap_or_default());
     if let Some(base_fee) = ethers_block.base_fee_per_gas {
         block_env.basefee = ethers_to_revm_u256(base_fee).to::<u64>();
@@ -167,25 +174,27 @@ async fn main() -> Result<()> {
     let cache_db_for_evm: SimCacheDBForDiff = CacheDB::new(WrapDatabaseAsync::new(alloy_db_for_cache).unwrap());
     
     // Create call tracer to capture internal transfers
+    // CallTracer implements Inspector trait and captures all CALL operations with non-zero value
     let call_tracer = CallTracer::new();
+    let inspector_for_inspect = call_tracer.clone();
     
-    let mut evm_context = RevmContext::<RevmBlockEnv_ctx, RevmTxEnv_ctx, RevmCfgEnv_ctx, SimCacheDBForDiff, Journal<SimCacheDBForDiff>, ()>::new(
-        cache_db_for_evm,
-        cfg_env.spec 
-    );
-    evm_context.cfg = cfg_env.clone();
-    evm_context.block = block_env.clone();
-    
-    let mut mainnet_evm = evm_context.build_mainnet_with_inspector(call_tracer);
+    // Build EVM context with the specified hardfork specification
+    let mut ctx: RevmContext<RevmBlockEnv_ctx, RevmTxEnv_ctx, RevmCfgEnv_ctx, _, Journal<_>, ()> = 
+        RevmContext::new(cache_db_for_evm, cfg_env.spec);
+    ctx.cfg = cfg_env.clone();
+    ctx.block = block_env.clone();
     
     eprintln!("🚀 Executing transaction with internal transfer tracking: {}", tx_hash_str);
     eprintln!("📋 Using spec: {:?}", cfg_env.spec);
     
-    // Execute transaction using pure REVM with inspector
-    // Use inspect_tx method which will use the built-in inspector
-    match mainnet_evm.inspect_tx(tx_env.clone()) {
-        Ok(execution_result) => {
-            let (_result_type, logs, _output_data, gas_used, _gas_refunded) = match execution_result {
+    // Create EVM with the inspector
+    let mut evm: Evm<_, CallTracer, EthInstructions<EthInterpreter, _>, EthPrecompiles> = 
+        Evm::new_with_inspector(ctx, call_tracer, Default::default(), Default::default());
+    
+    // Execute transaction with inspector (need to pass inspector even though it's in the EVM)
+    match InspectEvm::inspect(&mut evm, tx_env.clone(), inspector_for_inspect) {
+        Ok(result_and_state) => {
+            let (_result_type, logs, _output_data, gas_used, _gas_refunded) = match result_and_state {
                 RevmExecutionResult::Success { reason, gas_used, gas_refunded, logs, output } => {
                     eprintln!("✅ Transaction executed successfully: {:?}", reason);
                     (ExecutionResultType::Success(reason), logs, output.into_data(), gas_used, gas_refunded)
@@ -200,17 +209,18 @@ async fn main() -> Result<()> {
                 }
             };
             
-            // Get internal transfers from the call tracer (now owned by the EVM)
-            let internal_transfers = mainnet_evm.inspector.get_internal_transfers().to_vec();
+            // Get internal transfers from the inspector (now contains transfers from execution)
+            let internal_transfers = evm.inspector.get_internal_transfers().to_vec();
             eprintln!("📊 CallTracer captured {} internal transfers", internal_transfers.len());
             
             // Note: We don't commit the state changes to avoid nonce errors
             // The journaled state already has all the changes we need
             
             // Generate comprehensive state changes from REVM journal
-            // This captures all state changes that happened during execution
+            // This captures all balance changes, nonce updates, and storage modifications
+            // that occurred during transaction execution
             let mut state_changes = generate_calculated_account_changes(
-                &mainnet_evm.ctx.journaled_state.database,
+                evm.ctx.db(),
                 &initial_balances,
                 &logs,
                 &tx_env,
@@ -221,6 +231,7 @@ async fn main() -> Result<()> {
             ).await?;
             
             // Integrate internal transfers into state changes
+            // This ensures ETH movements from contract calls are properly accounted for
             state_changes = integrate_internal_transfers(state_changes, &internal_transfers);
             
             eprintln!("📊 Analyzed {} logs and {} state changes", logs.len(), state_changes.len());
@@ -279,22 +290,6 @@ async fn main() -> Result<()> {
     }
 }
 
-// Infer internal transfers from state changes
-fn infer_internal_transfers_from_state(
-    state_changes: &HashMap<revm_primitives::Address, CalculatedAccountChanges>,
-    _tx_env: &RevmTxEnv_ctx,
-) -> usize {
-    // Count addresses with significant ETH changes that might indicate internal transfers
-    let mut eth_movement_count: usize = 0;
-    
-    for (_addr, changes) in state_changes {
-        // Check if there are ETH movements recorded
-        if !changes.movements.eth.in_list.is_empty() || !changes.movements.eth.out_list.is_empty() {
-            eth_movement_count += 1;
-        }
-    }
-    
-    // Return the count of potential internal transfers
-    eth_movement_count.saturating_sub(2) // Subtract sender and primary recipient
-}
+// Note: infer_internal_transfers_from_state function removed as it was unused
+// CallTracer now provides direct internal transfer detection
 

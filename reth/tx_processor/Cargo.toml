@@ -17,10 +17,6 @@ path = "src/bin/revm_cli.rs"
 name = "process_single_tx"
 path = "src/bin/process_single_tx.rs"
 
-[[example]]
-name = "benchmark_tx_processor"
-path = "examples/benchmark_tx_processor.rs"
-
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
 # [[bin]]
@@ -33,20 +29,17 @@ path = "examples/benchmark_tx_processor.rs"
 
 # ────────────────────────────── Top-level deps ────────────────────────────
 [dependencies]
-# Revm - directly path-based to use local clone
-# Removed "ethersdb" feature. EthersDB comes from revm-inspector.
-revm = { path = "src/revm/crates/revm", default-features = false, features = ["std", "alloydb", "asyncdb"] }
-# revm-inspector = { path = "src/revm/crates/inspector", default-features = false, features = ["std"] } # Likely not needed directly
+# Revm - Using latest versions for best performance and features
+revm = { version = "25.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
 
-# Direct REVM sub-crate dependencies (needed for direct type imports in lib or examples if not re-exported by main revm)
-revm-primitives = { path = "src/revm/crates/primitives", default-features = false, features = ["std"] }
-revm-state = { path = "src/revm/crates/state", default-features = false }
-# revm-database = { path = "src/revm/crates/database", default-features = false } # For CacheDB, AlloyDB if not re-exported by revm
-revm-context = { path = "src/revm/crates/context", default-features = false } # For BlockEnv, CfgEnv, TxEnv, RevmContext, Journal
-revm-inspector = { path = "src/revm/crates/inspector", default-features = false } # For call tracing
-revm-interpreter = { path = "src/revm/crates/interpreter", default-features = false } # For call tracer types
-# revm-bytecode = { path = "src/revm/crates/bytecode", default-features = false } # Unused by current example
-# revm-database-interface = { path = "src/revm/crates/database/interface", default-features = false, features = ["serde"] } # Unused by current example
+# Direct REVM sub-crate dependencies (latest versions)
+revm-primitives = { version = "19.2.0", default-features = false, features = ["std"] }
+revm-state = { version = "5.0.0", default-features = false }
+revm-context = { version = "6.0.0", default-features = false } # For BlockEnv, CfgEnv, TxEnv, RevmContext, Journal
+revm-inspector = { version = "6.0.0", default-features = false } # For call tracing
+revm-interpreter = { version = "21.0.0", default-features = false } # For call tracer types
+revm-database = { version = "5.0.0", default-features = false } # For CacheDB, AlloyDB
+revm-handler = { version = "6.0.0", default-features = false } # For EthPrecompiles, EthInstructions
 
 # Tokio - version from revm workspace
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
@@ -90,6 +83,9 @@ eyre = "0.6"
 # serde_json = "1.0" # Duplicate removed - using above
 reqwest = { version = "0.11", features = ["json"] }
 
+# Reth dependencies for direct database access
+reth-ethereum = { path = "../reth/crates/ethereum/reth", features = ["node"] }  # Re-enabled to test with external REVM
+
 # Anyhow
 # anyhow = "1.0.89" # Duplicate removed - using 1.0 above
 
@@ -104,17 +100,17 @@ tracing = "0.1" # Core tracing macros
 # alloy-transport-http = { version = "1.0.6", features = ["reqwest"] }
 
 # ───────────────────────────── Patch section ──────────────────────────────
-[patch.crates-io]
-revm-primitives  = { path = "src/revm/crates/primitives" }
-revm-interpreter = { path = "src/revm/crates/interpreter" }
-revm-context     = { path = "src/revm/crates/context" }
-revm-inspector   = { path = "src/revm/crates/inspector" }
-revm-database    = { path = "src/revm/crates/database" }
-revm-state       = { path = "src/revm/crates/state"}
-revm-bytecode    = { path = "src/revm/crates/bytecode"}
-revm-precompile  = { path = "src/revm/crates/precompile"}
-revm-handler     = { path = "src/revm/crates/handler"}
-revm-context-interface = { path = "src/revm/crates/context/interface" }
+# [patch.crates-io] - Disabled to use external REVM crates
+# revm-primitives  = { path = "src/revm/crates/primitives" }
+# revm-interpreter = { path = "src/revm/crates/interpreter" }
+# revm-context     = { path = "src/revm/crates/context" }
+# revm-inspector   = { path = "src/revm/crates/inspector" }
+# revm-database    = { path = "src/revm/crates/database" }
+# revm-state       = { path = "src/revm/crates/state"}
+# revm-bytecode    = { path = "src/revm/crates/bytecode"}
+# revm-precompile  = { path = "src/revm/crates/precompile"}
+# revm-handler     = { path = "src/revm/crates/handler"}
+# revm-context-interface = { path = "src/revm/crates/context/interface" }
 
 # DO NOT patch reth_primitives here; its path is absolute.
 # DO NOT patch alloy-* crates here; let them come from crates.io per versions in [dependencies].

@@ -1,8 +1,13 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 // Silence unused crate dependency warnings
+use clap as _;
 use ethers_signers as _;
+use eyre as _;
 use reqwest as _;
+use reth_ethereum as _;
+use revm_database as _;
+use revm_handler as _;
 use revm_inspector as _;
 use revm_interpreter as _;
 use revm_state as _;
