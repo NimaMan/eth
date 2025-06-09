@@ -11,19 +11,11 @@ use std::time::Instant;
 use serde_json::json;
 use hex;
 
-// REVM imports for full simulation when needed
-use crate::{
-    ExecutionResultType, 
-    conversions::{ethers_to_revm_address, ethers_to_revm_u256}, 
-    state_diff_utils::generate_calculated_account_changes,
-    SimCacheDBForDiff,
-    CallTracer,
-    integrate_internal_transfers,
-};
+// REVM imports for full simulation when needed - only include what's actually used
+// Note: These are currently placeholders for future implementation
 
 // Minimal imports - only what we actually need
-use alloy_network::Ethereum as AlloyEthereum;
-use alloy_provider::{ProviderBuilder, DynProvider as AlloyDynProvider, Provider as AlloyProviderTrait};
+// Note: alloy imports removed as they're not currently used in the implementation
 
 const RPC_URL: &str = "http://127.0.0.1:8545";
 const ETH_TO_WEI_FACTOR_F64: f64 = 1_000_000_000_000_000_000.0_f64;
@@ -78,7 +70,6 @@ pub enum ConfidenceLevel {
 pub struct FastPathProcessor {
     config: FastPathConfig,
     ethers_provider: Arc<EthersProvider<EthersHttp>>,
-    alloy_provider: Arc<AlloyDynProvider<AlloyEthereum>>,
 }
 
 impl FastPathProcessor {
@@ -86,13 +77,9 @@ impl FastPathProcessor {
         let ethers_provider = EthersProvider::<EthersHttp>::try_from(RPC_URL)?;
         let eth_client = Arc::new(ethers_provider);
         
-        let alloy_provider_dyn: Arc<AlloyDynProvider<AlloyEthereum>> =
-            Arc::new(ProviderBuilder::new().connect(RPC_URL).await?.erased());
-        
         Ok(Self {
             config,
             ethers_provider: eth_client,
-            alloy_provider: alloy_provider_dyn,
         })
     }
 
@@ -301,16 +288,13 @@ impl FastPathProcessor {
         let receipt = receipt_opt; // May be None for pending transactions
 
         Ok(TransactionData {
-            hash: *tx_hash,
             from: tx.from,
             to: tx.to,
             value: tx.value,
             gas_price: tx.gas_price,
-            gas_limit: tx.gas,
             gas_used: receipt.as_ref().and_then(|r| r.gas_used),
             input: tx.input.0.to_vec(),
             receipt,
-            block_number: tx.block_number.map(|n| n.as_u64()),
         })
     }
 
@@ -330,16 +314,13 @@ impl FastPathProcessor {
 /// Transaction data structure for analysis
 #[derive(Debug, Clone)]
 struct TransactionData {
-    hash: EthersH256,
     from: ethers_core::types::Address,
     to: Option<ethers_core::types::Address>,
     value: ethers_core::types::U256,
     gas_price: Option<ethers_core::types::U256>,
-    gas_limit: ethers_core::types::U256,
     gas_used: Option<ethers_core::types::U256>,
     input: Vec<u8>,
     receipt: Option<ethers_core::types::TransactionReceipt>,
-    block_number: Option<u64>,
 }
 
 /// Example usage function
