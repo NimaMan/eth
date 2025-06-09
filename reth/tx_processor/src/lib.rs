@@ -3,6 +3,7 @@ pub mod simulation_core;
 pub mod state_diff_utils;
 pub mod call_tracer;
 pub mod internal_transfer_tracker;
+pub mod tx_processor;
 
 // Re-export common types for easier use in examples or by other crates
 pub use conversions::*;

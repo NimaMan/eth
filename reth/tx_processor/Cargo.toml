@@ -8,6 +8,19 @@ edition = "2021"
 name = "revm_tx_simulator_lib"
 path = "src/lib.rs"
 
+# ──────────────────────────────── CLI Binary ─────────────────────────────
+[[bin]]
+name = "revm_cli"
+path = "src/bin/revm_cli.rs"
+
+[[bin]]
+name = "process_single_tx"
+path = "src/bin/process_single_tx.rs"
+
+[[example]]
+name = "benchmark_tx_processor"
+path = "examples/benchmark_tx_processor.rs"
+
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
 # [[bin]]
@@ -38,6 +51,13 @@ revm-interpreter = { path = "src/revm/crates/interpreter", default-features = fa
 # Tokio - version from revm workspace
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
 
+# CLI dependencies
+clap = "2.34"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+hex = "0.4"
+
 # --- Dependencies for signed_tx_simulation based on Reth's approach (some still useful) ---
 # reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives", default-features = false } # Keep if needed for other examples
 # alloy-rlp = { version = "0.3.12", default-features = false } # Keep if needed
@@ -62,15 +82,16 @@ ethers-signers = "2.0.14"
 ethers-providers = "2.0.14"
 
 # Other utilities
-hex = "0.4.3"
+# hex = "0.4.3" # Duplicate removed - using 0.4 above
 chrono = "0.4"
+eyre = "0.6"
 # url = "2.5"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# serde = { version = "1.0", features = ["derive"] } # Duplicate removed - using above
+# serde_json = "1.0" # Duplicate removed - using above
 reqwest = { version = "0.11", features = ["json"] }
 
 # Anyhow
-anyhow = "1.0.89"
+# anyhow = "1.0.89" # Duplicate removed - using 1.0 above
 
 # Tracing (for example binary)
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

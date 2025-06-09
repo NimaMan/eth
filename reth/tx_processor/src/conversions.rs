@@ -1,5 +1,5 @@
-use ethers_core::types::{Address as EthersAddress, U256 as EthersU256};
-use revm_primitives::{Address as RevmAddress, U256 as RevmU256};
+use ethers_core::types::{Address as EthersAddress, U256 as EthersU256, H256};
+use revm_primitives::{Address as RevmAddress, U256 as RevmU256, B256};
 
 pub fn ethers_to_revm_u256(val: EthersU256) -> RevmU256 {
     let mut bytes = [0u8; 32];
@@ -25,6 +25,10 @@ pub fn ethers_u256_to_u64_safe(val: EthersU256) -> u64 {
 
 pub fn ethers_to_revm_address(addr: EthersAddress) -> RevmAddress {
     RevmAddress::from_slice(addr.as_bytes())
+}
+
+pub fn h256_to_b256(h: H256) -> B256 {
+    B256::from_slice(h.as_bytes())
 }
 
 // It's good practice to include tests within the module they are testing if they are unit tests.
