@@ -65,7 +65,37 @@ Output Data Length: 0
 ✅ Module successfully simulated the signed transaction!
 ```
 
-### 3. Simulate Transaction (`simulate_transaction.rs`)
+### 3. Simulate Raw Bytes (`simulate_raw_bytes.rs`)
+Shows how to simulate from raw transaction bytes without RPC lookup.
+
+```bash
+cargo run --bin simulate_raw_bytes
+```
+
+**Features:**
+- Direct simulation from transaction bytes
+- Minimal RPC usage (only for block environment)
+- Useful for mempool monitoring
+- Demonstrates byte-level transaction handling
+
+**Expected Output:**
+```
+🔧 Raw Bytes Simulation Example
+===============================
+
+📋 Simulating transaction from raw bytes
+⏳ Fetching block environment...
+🔄 Converting to REVM types...
+✅ Simulation complete!
+
+📊 Results:
+  • Status: Success(Stop)
+  • Gas Used: 21000
+  • Gas Refunded: 0
+  • Internal Transfers: 0
+```
+
+### 4. Simulate Transaction (`simulate_transaction.rs`)
 More comprehensive example with result verification.
 
 ```bash
@@ -103,7 +133,7 @@ cargo run --bin simulate_transaction -- 0x<your_tx_hash>
 ✅ Verification passed!
 ```
 
-### 4. Extract Internal Transfers (`extract_internal_transfers.rs`)
+### 5. Extract Internal Transfers (`extract_internal_transfers.rs`)
 Demonstrates concepts for extracting internal ETH transfers.
 
 ```bash
@@ -115,7 +145,7 @@ cargo run --bin extract_internal_transfers
 - Internal transfer concepts
 - CallTracer usage explanation
 
-### 5. Advanced Tracing (`advanced_tracing.rs`)
+### 6. Advanced Tracing (`advanced_tracing.rs`)
 Advanced transaction analysis including pattern detection.
 
 ```bash
@@ -171,7 +201,7 @@ cargo run --bin advanced_tracing
   • Flash loan usage detected
 ```
 
-### 6. CallTracer Usage (`call_tracer_usage.rs`)
+### 7. CallTracer Usage (`call_tracer_usage.rs`)
 Educational example explaining CallTracer concepts.
 
 ```bash
@@ -185,7 +215,7 @@ cargo run --bin call_tracer_usage
 
 **Note:** CallTracer is fully integrated into the simulation. All examples now capture internal transfers automatically during transaction execution without additional RPC calls.
 
-### 7. Uniswap Multi-hop Simulation (`uniswap_multihop_simulation.rs`)
+### 8. Uniswap Multi-hop Simulation (`uniswap_multihop_simulation.rs`)
 Analyzes complex DeFi transactions with Uniswap interactions.
 
 ```bash

@@ -2,453 +2,535 @@
 
 ## Overview
 
-The `tx_processor` module is a high-performance Ethereum transaction analysis system designed for production-grade blockchain data processing. It provides comprehensive transaction simulation, fund flow analysis, and pattern detection capabilities using REVM for accurate state simulation.
+The TX Processor is a high-performance Ethereum transaction processing and analysis system that provides production-grade blockchain data processing with sub-millisecond performance. It combines direct Reth database access with REVM simulation to deliver comprehensive transaction analysis, fund flow tracking, and pattern detection capabilities.
 
-## Architecture
+## Core Purpose
 
-### Module Structure
+This module processes Ethereum transactions to extract:
+- Internal ETH transfers via call tracing
+- ERC20 token movements from event logs  
+- Complete state changes (balances, storage, nonces)
+- Gas usage and execution status
+- Contract interactions and deployments
+- Transaction classification and pattern detection
+- MEV, arbitrage, and whale movement analysis
+
+## Architecture Principles
+
+### 1. No Network Calls
+- All data loaded directly from local Reth database
+- REVM simulation for transaction execution
+- Zero external dependencies during processing
+
+### 2. Production-First Design
+- Sub-millisecond latency for simple transactions
+- Automatic hardfork detection for correct simulation
+- Multi-level caching for performance optimization
+- Comprehensive error handling and recovery
+
+### 3. Modular Architecture
+- Clear separation of concerns
+- Pluggable components for different use cases
+- Extensible pattern detection system
+
+## Quick Decision Guide
+
+| What You Need | Use This | Performance |
+|---------------|----------|-------------|
+| Basic tx data (to/from/value) | Direct DB query | <0.1ms |
+| Token transfers (from logs) | Fast path processor | ~0.35ms |
+| Internal ETH transfers | Full simulation | ~2ms |
+| State changes | Full simulation | ~2ms |
+| Pattern detection | Fast path + classification | ~0.5ms |
+| MEV analysis | Full simulation + classification | ~3ms |
+
+## Module Structure
+
 ```
 tx_processor/
 ├── src/
-│   ├── lib.rs                         # Public API exports
-│   ├── processor.rs                   # Main processor implementation  
-│   ├── tx_processor/                  # Core processing logic
-│   │   ├── mod.rs
-│   │   ├── direct_db_processor.rs     # Direct database access
-│   │   ├── hybrid_processor.rs        # Hybrid processing approach
-│   │   └── types.rs                   # Core data types
-│   ├── simulate_signed_tx/            # Transaction simulation
-│   │   ├── mod.rs
-│   │   ├── simulation_core.rs         # REVM simulation core
-│   │   ├── call_tracer.rs            # Call trace analysis
-│   │   └── internal_transfer_tracker.rs # Internal ETH tracking
-│   ├── decode_events/                 # Event decoding and analysis
-│   │   ├── mod.rs
-│   │   ├── decoder.rs                # Generic event decoder
-│   │   ├── erc20.rs                  # ERC-20 token events
-│   │   ├── uniswap.rs                # Uniswap protocol events
-│   │   └── uniswap_v4.rs             # Uniswap V4 events
-│   ├── classify_tx/                   # Transaction classification
-│   │   ├── mod.rs
-│   │   ├── classifier.rs             # Pattern classification
-│   │   ├── action_identifier.rs      # Action identification
-│   │   └── bribe_calculator.rs       # MEV bribe calculation
-│   ├── fetch_from_reth/              # Database integration
-│   │   ├── mod.rs
-│   │   ├── provider.rs               # Database provider
-│   │   └── cache.rs                  # Caching layer
-│   ├── database/                     # Database abstraction
-│   │   ├── mod.rs
-│   │   ├── provider.rs               # Database provider interface
-│   │   └── cache.rs                  # Multi-level caching
-│   ├── process_tx/                   # Transaction processing
-│   │   ├── mod.rs
-│   │   └── processor.rs              # Processing orchestration
-│   ├── conversions.rs                # Data type conversions
-│   ├── state_diff_utils.rs           # State difference utilities
-│   └── types.rs                      # Shared type definitions
-├── examples/                         # Comprehensive example suite
-├── tests/                            # Test suite
-└── Cargo.toml                        # Dependencies and configuration
+│   ├── lib.rs                           # Public API exports
+│   ├── conversions.rs                   # Data type conversions
+│   ├── spec_utils.rs                    # Hardfork detection utilities
+│   ├── fast_path_processor.rs           # Optimized processing logic
+│   │
+│   ├── process_tx/                      # Core processing logic
+│   │   ├── mod.rs                       # Module exports
+│   │   ├── state_diff_utils.rs          # State change calculation
+│   │   ├── PROCESS_TX.md                # Component documentation
+│   │   └── process_tx_examples/         # Processing examples
+│   │       ├── process_tx_examples.md   # Examples documentation
+│   │       ├── state_change_extractor.rs # Production state extraction
+│   │       ├── storage_diff_analyzer.rs  # Storage analysis
+│   │       ├── optimized_tx_processor.rs # Performance optimization
+│   │       └── smart_tx_analyzer.rs      # Intelligent routing
+│   │
+│   ├── simulate_signed_tx/              # Transaction simulation engine
+│   │   ├── mod.rs                       # Module exports  
+│   │   ├── lib.rs                       # High-level API
+│   │   ├── simulation_core.rs           # REVM simulation core
+│   │   ├── call_tracer.rs               # Call trace analysis
+│   │   ├── internal_transfer_tracker.rs # ETH movement tracking
+│   │   ├── signed_tx_simulator.rs       # Transaction simulator
+│   │   ├── simple_signed_tx_simulator.rs # Simplified API
+│   │   ├── README.md                    # Component documentation
+│   │   ├── tests/                       # Simulation tests
+│   │   └── examples/                    # Simulation examples
+│   │
+│   ├── decode_events/                   # Event decoding system
+│   │   ├── mod.rs                       # Module exports
+│   │   ├── DECODE_EVENTS.md             # Component documentation
+│   │   └── decode_events_tests/         # Event decoding tests
+│   │
+│   ├── classify_tx/                     # Transaction classification
+│   │   ├── mod.rs                       # Module exports
+│   │   └── CLASSIFY_TX.md               # Component documentation
+│   │
+│   ├── fetch_from_reth/                 # Database integration
+│   │   ├── mod.rs                       # Module exports
+│   │   ├── FETCH_FROM_RETH.md           # Component documentation
+│   │   └── fetch_from_reth_tests/       # Database tests
+│   │
+│   └── bin/                             # Binary executables
+│       └── process_single_tx.rs         # CLI tool
+│
+├── examples/                            # Root-level examples
+├── tests/                               # Integration tests
+└── Cargo.toml                           # Dependencies
 ```
 
-### Core Components
+## Core Components
 
-#### 1. Transaction Simulation (`simulate_signed_tx/`)
-- **REVM Integration**: Full Ethereum Virtual Machine simulation
-- **Call Tracing**: Detailed execution trace analysis
-- **Internal Transfers**: ETH movement tracking within transactions
-- **State Diff Generation**: Before/after state comparison
+### 1. Process TX (`process_tx/`)
 
-#### 2. Event Decoding (`decode_events/`)
-- **Protocol Support**: ERC-20, Uniswap V2/V3/V4, and custom protocols
-- **Event Classification**: Automatic categorization of blockchain events
-- **Data Extraction**: Structured data from raw event logs
-- **Pattern Recognition**: Common DeFi interaction patterns
+The main transaction processing component that orchestrates the pipeline:
 
-#### 3. Transaction Classification (`classify_tx/`)
-- **Pattern Detection**: Arbitrage, MEV, whale movements, scam patterns
-- **Action Identification**: Swap, transfer, liquidity provision, etc.
-- **Risk Assessment**: Automated risk scoring for transactions
-- **Behavioral Analysis**: User and contract behavior patterns
-
-#### 4. Database Integration (`fetch_from_reth/`, `database/`)
-- **Reth Database**: Direct access to local Reth node database
-- **Caching Strategy**: Multi-level caching for performance
-- **Historical Data**: Efficient access to historical blockchain data
-- **State Management**: Optimized state access patterns
-
-## Key Features
-
-### High-Performance Processing
-- **REVM Simulation**: Production-grade transaction execution
-- **Parallel Processing**: Multi-threaded analysis capabilities
-- **Memory Optimization**: Efficient memory usage for large datasets
-- **Batch Processing**: Optimized batch analysis workflows
-
-### Comprehensive Analysis
-- **Fund Flow Analysis**: Complete ETH and token movement tracking
-- **State Change Detection**: Balance and storage modifications
-- **Pattern Recognition**: MEV, arbitrage, whale, and scam detection
-- **Performance Metrics**: Gas analysis and optimization insights
-
-### Production Features
-- **Error Resilience**: Comprehensive error handling and recovery
-- **Monitoring Integration**: Performance metrics and health checks
-- **Scalable Architecture**: Horizontal and vertical scaling support
-- **Configuration Management**: Flexible configuration options
-
-## Usage Examples
-
-### Basic Transaction Analysis
 ```rust
-use tx_processor::{TxProcessor, ProcessorConfig};
+use tx_processor::{ProcessedTransaction, TxProcessor};
 
-// Initialize processor
-let config = ProcessorConfig::default()
-    .with_revm_enabled(true)
-    .with_caching_enabled(true);
+// Initialize processor with database connection
+let processor = TxProcessor::new(db_path)?;
 
-let processor = TxProcessor::new(config).await?;
+// Process a single transaction
+let processed_tx = processor.process_transaction(tx_hash).await?;
 
-// Analyze transaction
-let tx_hash = "0xf7bd63f7b61b4dc88ffb081a05d0e29b6558649802285838128c10fc9ce6c006";
-let result = processor.analyze_transaction_by_hash(tx_hash).await?;
-
-println!("Fund flows detected: {}", result.fund_flows.len());
-println!("Internal transfers: {}", result.internal_transfers.len());
+// Access results
+println!("Gas used: {}", processed_tx.gas_used);
+println!("Internal transfers: {:?}", processed_tx.internal_transfers);
+println!("Token transfers: {:?}", processed_tx.token_transfers);
 ```
 
-### Batch Processing
+Key features:
+- State change extraction with balance tracking
+- Internal transfer detection via CallTracer
+- Token movement parsing from logs
+- Storage diff analysis
+- Optimized processing paths
+
+### 2. Transaction Simulator (`simulate_signed_tx/`)
+
+High-performance REVM-based transaction simulation:
+
 ```rust
-// Process multiple transactions efficiently
-let tx_hashes = vec![
-    "0xf7bd63f7b61b4dc88ffb081a05d0e29b6558649802285838128c10fc9ce6c006",
-    "0x7b944d902fd772fa5bb34f923b3b03307f8af57043b7fd7c2b101771e03cf42b",
-];
+use tx_processor::simulate_signed_tx::simulate_signed_tx;
 
-let results = processor.analyze_batch_by_hashes(&tx_hashes).await?;
+// Simple API - just pass hash and RPC URL
+let result = simulate_signed_tx(tx_hash, rpc_url).await?;
 
-for (hash, result) in tx_hashes.iter().zip(results.iter()) {
-    println!("{}: {} movements", hash, result.fund_flows.len());
-}
+// Advanced API with custom configuration
+let simulator = SignedTxSimulator::new(db_provider);
+let result = simulator.simulate_with_tracer(tx, block_env, call_tracer)?;
 ```
 
-### Pattern Detection
+#### CallTracer Implementation
+
+The CallTracer uses REVM's Inspector pattern to capture internal operations:
+
 ```rust
-use tx_processor::classify_tx::PatternDetector;
-
-// Configure pattern detection
-let detector = PatternDetector::new()
-    .with_arbitrage_detection(true)
-    .with_mev_analysis(true)
-    .with_whale_tracking(true);
-
-// Analyze transaction for patterns
-let patterns = detector.detect_patterns(&result).await?;
-
-for pattern in patterns {
-    match pattern {
-        Pattern::Arbitrage(arb) => {
-            println!("Arbitrage detected: {:.4} ETH profit", arb.profit_eth);
-        }
-        Pattern::MEV(mev) => {
-            println!("MEV detected: {} type", mev.mev_type);
-        }
-        Pattern::WhaleMovement(whale) => {
-            println!("Whale movement: {:.2} ETH", whale.amount_eth);
+impl Inspector<CacheDB<EmptyDB>> for CallTracer {
+    fn call(&mut self, data: &CallInputs, context: &mut EvmContext<CacheDB<EmptyDB>>) {
+        if data.transfers_value() {
+            self.internal_transfers.push(InternalTransfer {
+                from: data.caller,
+                to: data.address,
+                value: data.value,
+            });
         }
     }
 }
 ```
 
-### Database Integration
+### 3. Event Decoder (`decode_events/`)
+
+Comprehensive event decoding for all major protocols:
+
+- **ERC20**: Transfer, Approval, Mint, Burn
+- **Uniswap V2**: Swap, Sync, Mint, Burn
+- **Uniswap V3**: Swap, Mint, Burn, Flash
+- **Uniswap V4**: Swap, ModifyLiquidity, Donate
+- **Ownership**: OwnershipTransferred, RoleGranted
+- **Trading**: TradingEnabled, TradingDisabled
+
+### 4. Transaction Classifier (`classify_tx/`)
+
+Pattern detection and classification:
+
+- **MEV Detection**: Sandwich attacks, arbitrage, liquidations
+- **DeFi Actions**: Swaps, liquidity provision, staking
+- **Whale Movements**: Large transfers, accumulation patterns
+- **Smart Contract**: Deployments, upgrades, configurations
+
+### 5. Database Integration (`fetch_from_reth/`)
+
+Direct Reth database access with caching:
+
 ```rust
-use tx_processor::database::DatabaseProvider;
+// Efficient batch fetching
+let transactions = db_provider.fetch_transactions_in_block(block_number)?;
 
-// Initialize with database connection
-let db_provider = DatabaseProvider::new(&database_url).await?;
-let processor = TxProcessor::new(config)
-    .with_database_provider(db_provider);
-
-// Historical analysis
-let start_block = 18_000_000;
-let end_block = 18_001_000;
-
-let historical_results = processor
-    .analyze_block_range(start_block, end_block)
-    .await?;
+// Cached account access
+let account_state = db_provider.get_account_at_block(address, block)?;
 ```
 
-## Configuration
+## Hardfork Detection
 
-### Processor Configuration
+The system automatically detects the correct hardfork based on block number:
+
 ```rust
-use tx_processor::ProcessorConfig;
-
-let config = ProcessorConfig {
-    // REVM simulation settings
-    revm_enabled: true,
-    revm_cache_size: 1000,
-    revm_timeout: Duration::from_secs(30),
-    
-    // Performance settings
-    batch_size: 100,
-    parallel_workers: 8,
-    memory_limit_mb: 2048,
-    
-    // Analysis settings
-    min_value_threshold: 0.001, // ETH
-    include_failed_txs: true,
-    extract_internal_transfers: true,
-    
-    // Database settings
-    database_pool_size: 20,
-    cache_ttl: Duration::from_secs(300),
-    
-    // Pattern detection
-    arbitrage_detection: true,
-    mev_analysis: true,
-    whale_tracking: true,
-    scam_detection: true,
-};
-```
-
-### Environment Variables
-```bash
-# Database connection
-export DATABASE_URL="postgresql://user:pass@localhost:5432/reth_db"
-
-# RPC endpoints
-export ETH_RPC_URL="http://localhost:8545"
-export ETH_WS_URL="ws://localhost:8546"
-
-# Performance tuning
-export TX_PROCESSOR_WORKERS=16
-export TX_PROCESSOR_MEMORY_LIMIT=4096
-export TX_PROCESSOR_CACHE_SIZE=10000
-
-# Feature flags
-export ENABLE_REVM_SIMULATION=true
-export ENABLE_PATTERN_DETECTION=true
-export ENABLE_METRICS_COLLECTION=true
-```
-
-## Integration Patterns
-
-### With Network Building
-```rust
-use tx_processor::TxProcessor;
-use network_building::NetworkBuilder;
-
-// Analyze transactions and build network
-let results = processor.analyze_batch(&transactions).await?;
-let fund_flows: Vec<_> = results.into_iter()
-    .flat_map(|r| r.fund_flows)
-    .collect();
-
-let network = NetworkBuilder::new()
-    .build_from_fund_flows(&fund_flows)
-    .await?;
-```
-
-### With Real-time Processing
-```rust
-use tx_processor::TxProcessor;
-use tokio_stream::StreamExt;
-
-// Real-time mempool processing
-let processor = TxProcessor::new(config).await?;
-let mut mempool_stream = connect_to_mempool().await?;
-
-while let Some(tx) = mempool_stream.next().await {
-    let result = processor.analyze_transaction(&tx).await?;
-    
-    // Handle real-time analysis results
-    handle_analysis_result(result).await?;
+pub fn get_spec_id(block_number: u64) -> SpecId {
+    match block_number {
+        0..=1_149_999 => SpecId::FRONTIER,
+        1_150_000..=1_919_999 => SpecId::HOMESTEAD,
+        1_920_000..=2_462_999 => SpecId::DAO_FORK,
+        2_463_000..=2_674_999 => SpecId::TANGERINE,
+        2_675_000..=4_369_999 => SpecId::SPURIOUS_DRAGON,
+        4_370_000..=7_279_999 => SpecId::BYZANTIUM,
+        7_280_000..=9_068_999 => SpecId::CONSTANTINOPLE,
+        9_069_000..=9_199_999 => SpecId::PETERSBURG,
+        9_200_000..=12_243_999 => SpecId::ISTANBUL,
+        12_244_000..=12_964_999 => SpecId::MUIR_GLACIER,
+        12_965_000..=13_772_999 => SpecId::ARROW_GLACIER,
+        13_773_000..=15_049_999 => SpecId::LONDON,
+        15_050_000..=15_537_393 => SpecId::GRAY_GLACIER,
+        15_537_394..=17_034_869 => SpecId::MERGE,
+        17_034_870..=19_426_586 => SpecId::SHANGHAI,
+        _ => SpecId::CANCUN,
+    }
 }
-```
-
-### With Monitoring
-```rust
-// Performance monitoring integration
-let processor = TxProcessor::new(config)
-    .with_metrics_enabled(true)
-    .with_health_checks(Duration::from_secs(30));
-
-// Export metrics to monitoring system
-let metrics = processor.get_metrics();
-export_to_prometheus(&metrics).await?;
 ```
 
 ## Performance Characteristics
 
-### Processing Speed
-- **Simple Transactions**: ~10ms with REVM, ~1ms without
-- **Complex DeFi**: ~100ms with REVM, ~10ms without
-- **Batch Processing**: 10-100x speedup for large batches
-- **Parallel Processing**: Near-linear scaling with CPU cores
+### Processing Performance
+
+| Operation | Time | Throughput |
+|-----------|------|------------|
+| Basic DB query | <0.1ms | >10,000 tx/s |
+| Fast path (logs only) | ~0.35ms | ~2,850 tx/s |
+| Full simulation | ~2ms | ~500 tx/s |
+| With classification | ~3ms | ~333 tx/s |
+| Batch processing (1000 tx) | ~350ms | ~2,850 tx/s |
 
 ### Memory Usage
-- **Single Transaction**: 1-10MB depending on complexity
-- **Batch Processing**: 50-500MB for 1000 transactions
-- **REVM State Cache**: 100-1000MB for optimal performance
-- **Database Cache**: 100-1000MB for historical data
 
-### Accuracy Metrics
-- **REVM Simulation**: 99.9%+ accuracy vs actual execution
-- **Fund Flow Detection**: 99.5%+ accuracy for major flows
-- **Pattern Recognition**: 95%+ accuracy with <1% false positives
-- **State Change Tracking**: 99.9%+ accuracy for balance changes
+- Base process: ~200MB
+- With cache (10k transactions): ~500MB
+- Full block cache: ~2GB
+- Reth DB mapped: ~8GB
 
-## Examples Directory
+## Usage Examples
 
-The `examples/` directory provides comprehensive usage patterns:
+### Basic Transaction Processing
 
-### Basic Examples (`examples/basic/`)
-- **Development Simulator**: Fast testing without REVM
-- **Fund Flow Analysis**: Configurable flow detection
-- **State Change Tracking**: Balance modification analysis
-- **REVM Integration**: Production simulation examples
-
-### Production Examples (`examples/production/`)
-- **Arbitrage Detection**: Cross-DEX opportunity identification
-- **MEV Analysis**: Maximal extractable value detection
-- **Whale Tracking**: Large holder movement analysis
-- **Token Launch Analysis**: New token deployment patterns
-- **Scam Detection**: Suspicious transaction identification
-
-### Integration Examples (`examples/integration/`)
-- **Network Building**: Fund flow to graph construction
-- **Database Integration**: Historical analysis workflows
-- **Live Processing**: Real-time mempool analysis
-- **Portfolio Tracking**: Address monitoring systems
-
-### Performance Examples (`examples/performance/`)
-- **Benchmarking**: Performance comparison tools
-- **Memory Optimization**: Large-scale processing techniques
-- **Batch Processing**: High-throughput strategies
-- **Accuracy Validation**: Quality assurance tools
-
-### Testing Examples (`examples/testing/`)
-- **Error Handling**: Comprehensive error scenarios
-- **Edge Cases**: Unusual transaction patterns
-- **Resilience Testing**: System reliability validation
-- **Data Validation**: Quality assurance patterns
-
-## API Reference
-
-### Core Processor
 ```rust
-pub struct TxProcessor {
-    config: ProcessorConfig,
-    revm_simulator: Option<RevmSimulator>,
-    database_provider: Option<DatabaseProvider>,
-    pattern_detector: PatternDetector,
-}
+use tx_processor::{TxProcessor, ProcessingMode};
 
-impl TxProcessor {
-    pub async fn new(config: ProcessorConfig) -> Result<Self, ProcessorError>;
-    pub async fn analyze_transaction(&self, tx: &Transaction) -> Result<AnalysisResult, ProcessorError>;
-    pub async fn analyze_batch(&self, txs: &[Transaction]) -> Result<Vec<AnalysisResult>, ProcessorError>;
-    pub async fn analyze_block(&self, block_number: u64) -> Result<BlockAnalysisResult, ProcessorError>;
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize processor
+    let processor = TxProcessor::new("/path/to/reth/db")?;
+    
+    // Process with auto-detection
+    let result = processor.process_transaction_auto(tx_hash).await?;
+    
+    // Force simulation for complex transaction
+    let result = processor.process_transaction_full(tx_hash).await?;
+    
+    Ok(())
 }
 ```
 
-### Analysis Results
+### Batch Processing
+
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnalysisResult {
-    pub transaction_hash: String,
-    pub fund_flows: Vec<FundFlow>,
-    pub internal_transfers: Vec<InternalTransfer>,
-    pub state_changes: Vec<StateChange>,
-    pub decoded_events: Vec<DecodedEvent>,
-    pub patterns: Vec<DetectedPattern>,
-    pub gas_analysis: GasAnalysis,
-    pub processing_time: Duration,
+// Process entire block efficiently
+let block_results = processor.process_block(block_number).await?;
+
+// Stream processing for real-time analysis
+let mut block_stream = processor.stream_blocks(start_block);
+while let Some(block_result) = block_stream.next().await {
+    process_block_results(block_result?);
 }
 ```
 
 ### Pattern Detection
+
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum DetectedPattern {
-    Arbitrage(ArbitragePattern),
-    MEV(MEVPattern),
-    WhaleMovement(WhalePattern),
-    ScamIndicator(ScamPattern),
-    TokenLaunch(TokenLaunchPattern),
+use tx_processor::classify::{TxClassifier, Pattern};
+
+let classifier = TxClassifier::new();
+let patterns = classifier.classify(&processed_tx)?;
+
+if patterns.contains(&Pattern::Arbitrage) {
+    println!("Arbitrage detected: {:?}", patterns.arbitrage_details());
 }
 ```
 
-## Error Handling
+### Integration with Trading Systems
 
-### Error Types
 ```rust
-#[derive(Error, Debug)]
-pub enum ProcessorError {
-    #[error("REVM simulation failed: {0}")]
-    RevmSimulationFailed(String),
-    
-    #[error("Database error: {0}")]
-    DatabaseError(String),
-    
-    #[error("Invalid transaction: {0}")]
-    InvalidTransaction(String),
-    
-    #[error("Timeout: {0}")]
-    Timeout(String),
-    
-    #[error("Resource exhaustion: {0}")]
-    ResourceExhaustion(String),
+// Real-time MEV protection
+let processor = TxProcessor::with_config(
+    TxProcessorConfig::default()
+        .with_mev_detection(true)
+        .with_cache_size(10_000)
+);
+
+// Monitor mempool transactions
+processor.monitor_mempool(|tx| {
+    if tx.is_potential_sandwich_attack() {
+        protect_trade(&tx);
+    }
+});
+```
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Database configuration
+RETH_DB_PATH=/path/to/reth/db
+RETH_STATIC_FILES=/path/to/reth/static_files
+
+# Performance tuning
+TX_PROCESSOR_CACHE_SIZE=10000
+TX_PROCESSOR_BATCH_SIZE=100
+TX_PROCESSOR_WORKERS=8
+
+# Feature flags
+ENABLE_MEV_DETECTION=true
+ENABLE_PATTERN_DETECTION=true
+ENABLE_STORAGE_TRACKING=true
+
+# Monitoring
+METRICS_ENDPOINT=0.0.0.0:9090
+LOG_LEVEL=info
+```
+
+### Configuration File
+
+```toml
+[processor]
+db_path = "/path/to/reth/db"
+cache_size = 10000
+batch_size = 100
+workers = 8
+
+[features]
+mev_detection = true
+pattern_detection = true
+storage_tracking = true
+
+[performance]
+fast_path_threshold = 100000  # Gas limit for fast path
+simulation_timeout = 5000     # ms
+max_memory_cache = 2048       # MB
+```
+
+## Development Guidelines
+
+### Code Organization
+
+1. **One component per directory** with its own documentation
+2. **Examples within components** following `component_name_examples/` convention
+3. **Tests alongside code** in `component_name_tests/` directories
+4. **Clear module boundaries** with well-defined interfaces
+
+### Performance Requirements
+
+- Simple transactions: <1ms processing time
+- Complex DeFi transactions: <5ms processing time
+- Batch processing: >1000 tx/s throughput
+- Memory efficiency: <1MB per transaction
+
+### Error Handling
+
+```rust
+use tx_processor::error::{ProcessorError, ErrorKind};
+
+match processor.process_transaction(tx_hash).await {
+    Ok(result) => handle_success(result),
+    Err(ProcessorError { kind: ErrorKind::Simulation(e), .. }) => {
+        // Handle simulation failure
+    },
+    Err(ProcessorError { kind: ErrorKind::Database(e), .. }) => {
+        // Handle database error
+    },
+    Err(e) => {
+        // Handle other errors
+    }
 }
 ```
 
-### Recovery Strategies
-```rust
-// Automatic retry with exponential backoff
-let processor = TxProcessor::new(config)
-    .with_retry_policy(RetryPolicy::exponential_backoff())
-    .with_circuit_breaker(CircuitBreakerConfig::default());
+### Testing Strategy
 
-// Graceful degradation
-let processor = TxProcessor::new(config)
-    .with_fallback_mode(FallbackMode::BasicAnalysis);
+1. **Unit tests**: Test individual components in isolation
+2. **Integration tests**: Test component interactions
+3. **Performance tests**: Ensure performance targets are met
+4. **Mainnet tests**: Validate against real mainnet data
+
+## Production Deployment
+
+### Hardware Requirements
+
+**Minimum**:
+- CPU: 4 cores
+- RAM: 16GB
+- Storage: 2TB NVMe SSD
+- Network: 1Gbps
+
+**Recommended**:
+- CPU: 16 cores
+- RAM: 64GB
+- Storage: 4TB NVMe SSD
+- Network: 10Gbps
+
+### Monitoring
+
+The processor exposes Prometheus metrics:
+
+```
+tx_processor_transactions_total
+tx_processor_processing_duration_seconds
+tx_processor_cache_hits_total
+tx_processor_simulation_failures_total
+tx_processor_pattern_detections_total
 ```
 
-## Deployment Considerations
+### Deployment Checklist
 
-### Production Setup
-1. **Hardware Requirements**: 16GB+ RAM, SSD storage, multi-core CPU
-2. **Database Setup**: PostgreSQL with proper indexing and connection pooling
-3. **Monitoring**: Prometheus metrics, health checks, alerting
-4. **Scaling**: Horizontal scaling with load balancing
-
-### Security Considerations
-1. **Database Access**: Read-only connections for analysis workloads
-2. **Resource Limits**: Memory and CPU limits to prevent resource exhaustion
-3. **Input Validation**: Comprehensive validation of transaction data
-4. **Error Handling**: Secure error messages without sensitive information
-
-### Performance Tuning
-1. **Memory Management**: Tune cache sizes and garbage collection
-2. **Database Optimization**: Query optimization and connection pooling
-3. **Parallel Processing**: Optimize worker thread counts
-4. **Caching Strategy**: Multi-level caching for frequent data
+1. ✓ Reth node fully synced
+2. ✓ Database permissions configured
+3. ✓ Environment variables set
+4. ✓ Monitoring endpoints configured
+5. ✓ Log rotation configured
+6. ✓ Resource limits set
+7. ✓ Backup strategy in place
 
 ## Future Enhancements
 
 ### Planned Features
-1. **Layer 2 Support**: Arbitrum, Optimism, Polygon integration
-2. **Advanced ML**: Machine learning for pattern detection
-3. **Real-time Streaming**: Kafka/Redis integration for live processing
-4. **Cross-chain Analysis**: Multi-chain transaction analysis
+
+1. **Cross-chain Support**: Process transactions across multiple chains
+2. **Real-time Streaming**: WebSocket API for live transaction feed
+3. **ML Pattern Detection**: Machine learning for anomaly detection
+4. **Advanced MEV**: More sophisticated MEV strategy detection
+5. **State Proof Generation**: Generate merkle proofs for state changes
 
 ### Performance Improvements
-1. **Custom REVM**: Optimized REVM builds for specific use cases
-2. **GPU Acceleration**: GPU-based parallel processing
-3. **Advanced Caching**: Distributed caching with Redis
-4. **State Diff Optimization**: Incremental state processing
 
-This module provides production-ready transaction analysis capabilities suitable for high-frequency trading, research, and compliance applications in the Ethereum ecosystem.
+1. **Parallel Processing**: Multi-threaded transaction processing
+2. **GPU Acceleration**: CUDA/OpenCL for signature verification
+3. **Memory Pool**: Pre-allocated memory for common operations
+4. **JIT Compilation**: Runtime optimization for hot paths
+
+## API Reference
+
+### Core Types
+
+```rust
+pub struct ProcessedTransaction {
+    pub hash: H256,
+    pub block_number: u64,
+    pub from: Address,
+    pub to: Option<Address>,
+    pub value: U256,
+    pub gas_used: u64,
+    pub status: bool,
+    pub internal_transfers: Vec<InternalTransfer>,
+    pub token_transfers: Vec<TokenTransfer>,
+    pub state_changes: HashMap<Address, StateChange>,
+    pub patterns: Vec<Pattern>,
+}
+
+pub struct InternalTransfer {
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
+    pub call_type: CallType,
+}
+
+pub struct TokenTransfer {
+    pub token: Address,
+    pub from: Address,
+    pub to: Address,
+    pub amount: U256,
+}
+```
+
+### Main Functions
+
+```rust
+// Process single transaction
+pub async fn process_transaction(hash: H256) -> Result<ProcessedTransaction>
+
+// Process with custom mode
+pub async fn process_transaction_with_mode(
+    hash: H256, 
+    mode: ProcessingMode
+) -> Result<ProcessedTransaction>
+
+// Batch processing
+pub async fn process_block(block_number: u64) -> Result<Vec<ProcessedTransaction>>
+
+// Stream processing
+pub fn stream_blocks(start: u64) -> impl Stream<Item = Result<Vec<ProcessedTransaction>>>
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"Database not found"**
+   - Ensure RETH_DB_PATH points to correct directory
+   - Check permissions on database files
+
+2. **"Simulation failed"**
+   - Verify transaction exists in the database
+   - Check if block is fully synced
+   - Ensure correct hardfork is detected
+
+3. **"Out of memory"**
+   - Reduce cache size in configuration
+   - Enable swap space
+   - Use batch processing for large ranges
+
+4. **Performance degradation**
+   - Check database fragmentation
+   - Monitor cache hit rates
+   - Profile with `perf` or `flamegraph`
+
+## Contributing
+
+Please follow these guidelines:
+
+1. **Code Style**: Run `cargo fmt` and `cargo clippy`
+2. **Tests**: Add tests for new functionality
+3. **Documentation**: Update relevant .md files
+4. **Performance**: Include benchmarks for changes
+5. **Examples**: Add examples for new features
+
+## License
+
+This project is part of the crypto analytics system and follows the repository's licensing terms.

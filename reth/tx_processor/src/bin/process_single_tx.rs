@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 use revm_tx_simulator_lib::{
     simulate_transaction, ExecutionResultType, SimCacheDB,
     conversions::{ethers_to_revm_u256, ethers_to_revm_address},
+    spec_id_from_block_number,
 };
 use revm_primitives::{
     Bytes as RevmBytes, hardfork::SpecId,
@@ -94,7 +95,12 @@ async fn main() -> anyhow::Result<()> {
     
     let mut cfg_env = RevmCfgEnv::default();
     cfg_env.chain_id = 1;
-    cfg_env.spec = SpecId::SHANGHAI;
+    
+    // Automatically determine the correct spec based on block number
+    let block_num = block.number.unwrap().as_u64();
+    cfg_env.spec = spec_id_from_block_number(block_num);
+    
+    eprintln!("Debug: Block number: {}, Using spec: {:?}", block_num, cfg_env.spec);
     
     // Setup database - Use DynProvider like in the example
     use alloy_provider::{DynProvider, Provider as AlloyProviderTrait};
@@ -117,6 +123,11 @@ async fn main() -> anyhow::Result<()> {
         cfg_env,
         cache_db
     )?;
+    
+    // Debug: Print the actual result type
+    eprintln!("Debug: Simulation result type: {:?}", sim_output.result_type);
+    eprintln!("Debug: Gas used: {}", sim_output.gas_used);
+    eprintln!("Debug: Output data length: {}", sim_output.output_data.len());
     
     // Create result
     let result = ProcessedTx {

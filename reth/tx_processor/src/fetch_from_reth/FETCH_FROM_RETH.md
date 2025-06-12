@@ -8,9 +8,48 @@ The `fetch_from_reth` module provides **RPC-free data access** to Ethereum block
 
 ```
 fetch_from_reth/
-├── mod.rs           # Module exports and public interface
-├── provider.rs      # RethDataProvider trait definition
-└── db_impl.rs       # Direct database implementation
+├── fetch_from_reth.md          # This file - detailed architecture documentation
+├── mod.rs                      # Module exports and public interface
+├── provider.rs                 # RethDataProvider trait definition
+├── cache.rs                    # Transaction caching implementation
+├── db_impl.rs                  # Direct database implementation
+├── simple_db.rs               # Simplified database access
+├── fetch_from_reth_examples/   # Co-located examples
+│   ├── fetch_from_reth_examples.md # Examples overview
+│   ├── basic_usage.rs         # Getting started tutorial
+│   └── performance_optimization.rs # Advanced optimization techniques
+└── fetch_from_reth_tests/     # Co-located tests
+    ├── fetch_from_reth_tests.md # Testing documentation
+    ├── mod.rs                 # Test module exports
+    ├── unit_tests.rs          # Unit tests with mocks
+    ├── integration_tests.rs   # Real-world data patterns
+    ├── performance_tests.rs   # Throughput and latency tests
+    └── stress_tests.rs        # High-volume processing tests
+```
+
+## Quick Start
+
+### Basic Usage
+```bash
+# Run the basic usage example
+cargo run --example fetch_from_reth_basic_usage
+
+# Run performance optimization example
+cargo run --example fetch_from_reth_performance_optimization
+```
+
+### Running Tests
+```bash
+# Run all component tests
+cargo test fetch_from_reth
+
+# Run specific test categories
+cargo test fetch_from_reth::tests::unit_tests
+cargo test fetch_from_reth::tests::performance_tests
+cargo test fetch_from_reth::tests::integration_tests
+
+# Run stress tests (with --ignored flag)
+cargo test fetch_from_reth::tests::stress_tests -- --ignored
 ```
 
 ## Core Functionality
@@ -37,9 +76,35 @@ pub trait RethDataProvider: Send + Sync {
 
 ### 3. **Comprehensive Transaction Data**
 Each fetch operation retrieves:
-- **Transaction Details**: Hash, from/to addresses, value, gas, nonce, input data, receipt, logs, block
+- **Transaction Details**: Hash, from/to addresses, value, gas, nonce, input data
 - **Receipt Information**: Status, gas used, contract address, logs
 - **Block Context**: Block number, timestamp, base fee
+- **Transaction Metadata**: Position in block, transaction type
+
+### 4. **Key Imports and Dependencies**
+```rust
+// Core Reth imports for database access
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::{EthereumNode, api::NodeTypesWithDBAdapter},
+    provider::{
+        providers::{ReadOnlyConfig, BlockchainProvider, StaticFileProvider},
+        db::{open_db_read_only, DatabaseArguments, ClientVersion, DatabaseEnv},
+        AccountReader, BlockReader, HeaderProvider, ReceiptProvider, 
+        TransactionsProvider, StateProviderFactory, ProviderFactory,
+    },
+    TransactionSigned,
+};
+
+// Primitive types from Alloy
+use alloy_primitives::{Address, B256, BlockNumber, U256};
+
+// Standard library
+use std::{path::Path, sync::Arc};
+
+// Error handling
+use eyre::Result;
+```
 
 
 ## Usage Examples
@@ -47,16 +112,24 @@ Each fetch operation retrieves:
 ### Single Transaction Fetch
 ```rust
 use crate::fetch_from_reth::{RethDatabaseProvider, RethDataProvider};
-use reth_db::open_db_read_only;
-use reth_provider::ProviderFactory;
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::EthereumNode,
+    provider::providers::ReadOnlyConfig,
+};
+use alloy_primitives::B256;
 use std::path::Path;
 
-// Open read-only connection to Reth's MDBX database
+// Open read-only connection to Reth's MDBX database (recommended approach)
 let reth_datadir = Path::new("/path/to/reth/datadir");
-let db = open_db_read_only(reth_datadir.join("db"), Default::default())?;
-let factory = ProviderFactory::new(db.into(), spec.into(), static_file_provider);
+let spec = ChainSpecBuilder::mainnet().build();
+
+// Use Reth's provider factory builder for safe read-only access
+let factory = EthereumNode::provider_factory_builder()
+    .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(reth_datadir))?;
 
 let provider = RethDatabaseProvider::new(factory)?;
+let tx_hash = B256::from_str("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060")?;
 let tx_data = provider.fetch_transaction(tx_hash)?;
 
 println!("Transaction: {} in block {}", tx_data.hash, tx_data.block_number);
@@ -142,21 +215,37 @@ $RETH_DATADIR/
 
 ### Provider Factory Setup
 ```rust
-use reth_db::{open_db_read_only, DatabaseArguments};
-use reth_provider::{ProviderFactory, providers::StaticFileProvider};
-use reth_chainspec::ChainSpecBuilder;
-use std::path::Path;
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::{EthereumNode, api::NodeTypesWithDBAdapter},
+    provider::{
+        providers::{ReadOnlyConfig, StaticFileProvider},
+        db::{open_db_read_only, DatabaseArguments, ClientVersion, DatabaseEnv},
+        ProviderFactory,
+    },
+};
+use std::{path::Path, sync::Arc};
 
-pub fn create_reth_provider(datadir: &Path) -> Result<ProviderFactory<...>, RethError> {
+pub fn create_reth_provider(datadir: &Path) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>> {
+    // Method 1: Using provider factory builder (recommended)
+    let spec = ChainSpecBuilder::mainnet().build();
+    let factory = EthereumNode::provider_factory_builder()
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
+    
+    Ok(factory)
+}
+
+// Alternative method for direct database access
+pub fn create_reth_provider_manual(datadir: &Path) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>> {
     // Open read-only MDBX database
-    let db = open_db_read_only(
-        datadir.join("db"), 
-        DatabaseArguments::default()
-    )?;
+    let db = Arc::new(open_db_read_only(
+        datadir.join("db").as_path(), 
+        DatabaseArguments::new(ClientVersion::default())
+    )?);
     
     // Create static file provider for older blocks
     let static_file_provider = StaticFileProvider::read_only(
-        datadir.join("static_files"), 
+        datadir.join("static_files").as_path(), 
         true // check_consistency
     )?;
     
@@ -164,9 +253,9 @@ pub fn create_reth_provider(datadir: &Path) -> Result<ProviderFactory<...>, Reth
     let spec = ChainSpecBuilder::mainnet().build();
     
     // Create provider factory
-    let factory = ProviderFactory::new(
-        db.into(),
-        spec.into(),
+    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
+        db.clone(),
+        spec.clone(),
         static_file_provider
     );
     
@@ -178,35 +267,57 @@ pub fn create_reth_provider(datadir: &Path) -> Result<ProviderFactory<...>, Reth
 
 ### High-Level Provider APIs (Recommended)
 ```rust
+use reth_ethereum::provider::{
+    AccountReader, BlockReader, HeaderProvider, 
+    ReceiptProvider, TransactionsProvider, StateProviderFactory
+};
+use alloy_primitives::{Address, B256, BlockNumber};
+
 // Use Reth's provider abstractions for safety and performance
 let provider = factory.provider()?;
 
 // Transaction access
+let tx_hash = B256::from_str("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060")?;
 let tx = provider.transaction_by_hash(tx_hash)?;
+let (tx, meta) = provider.transaction_by_hash_with_meta(tx_hash)?;
 let receipt = provider.receipt_by_hash(tx_hash)?;
 
 // Block access  
-let block = provider.block_by_number(block_number.into())?;
-let header = provider.header_by_number(block_number)?;
+let block = provider.block(BlockNumber::from(18_000_000).into())?;
+let block = provider.block_by_hash(block_hash)?;
+let header = provider.header_by_number(18_000_000)?;
 
-// State access
-let account = provider.basic_account(&address)?;
-let storage = provider.storage(address, storage_key)?;
-let code = provider.account_code(&address)?;
+// State access at specific block
+let state_provider = provider.state_by_block_number_or_tag(BlockNumber::from(18_000_000).into())?;
+let address = Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?; // WETH
+let account = state_provider.basic_account(address)?;
+let storage_key = B256::ZERO; // Storage slot 0
+let storage = state_provider.storage(address, storage_key)?;
+let code = state_provider.account_code(address)?;
 ```
 
 ### Direct Table Access (Advanced)
 ```rust
-use reth_db_api::{tables, cursor::DbCursorRO};
+use reth_db_api::{table::Table, transaction::DbTx, cursor::DbCursorRO};
+use reth_db::tables;
 
 // For advanced users requiring direct table access
-let tx = provider.tx_ref();
+let provider = factory.provider()?;
+let tx = provider.tx_ref()?;
+
+// Access transactions table directly
 let mut cursor = tx.cursor_read::<tables::Transactions>()?;
 
-// Seek to specific transaction number
-if let Some((tx_num, tx_data)) = cursor.seek(transaction_number)? {
-    // Process transaction data directly
+// Seek to specific transaction ID (not hash)
+let tx_id = 1000u64.into();
+if let Some((found_id, tx_data)) = cursor.seek_exact(tx_id)? {
+    // Process raw transaction data
+    println!("Found transaction at ID: {:?}", found_id);
 }
+
+// Access other tables
+let mut header_cursor = tx.cursor_read::<tables::Headers>()?;
+let mut receipt_cursor = tx.cursor_read::<tables::Receipts>()?;
 ```
 
 ## Configuration
@@ -277,6 +388,75 @@ impl RethDataReader {
         Ok(transactions)
     }
 }
+```
+
+## AI Development Notes
+
+### Context Loading Strategy
+When working with this component:
+1. **Start with `mod.rs`** for public interface overview
+2. **Check `fetch_from_reth_examples/basic_usage.rs`** for usage patterns
+3. **Review `fetch_from_reth_tests/` directory** for behavior understanding
+4. **Consult this `fetch_from_reth.md`** for detailed architecture
+
+### Common Patterns
+- Database connections use `Arc<RethDatabaseProvider>` for thread safety
+- All operations return `Result<T, FetchError>` for error handling
+- Batch operations provide significant performance improvements
+- Caching is transparent and automatic
+- Real transaction hashes from mainnet are used in examples and tests
+
+### Integration Points
+This component integrates with:
+- **Database Layer**: Direct MDBX access via Reth providers
+- **Caching Layer**: Transparent transaction caching with LRU eviction
+- **Error Handling**: Comprehensive error types and recovery strategies
+- **Performance Monitoring**: Built-in statistics and metrics collection
+
+## Troubleshooting
+
+### Common Issues
+1. **Database Not Found**: Verify Reth datadir path
+   ```bash
+   # Check if Reth database exists
+   ls -la ~/.local/share/reth/mainnet/db/
+   ```
+
+2. **Permission Denied**: Ensure read access to MDBX files
+   ```bash
+   # Fix permissions if needed
+   chmod -R u+r ~/.local/share/reth/mainnet/db/
+   ```
+
+3. **Performance Issues**: Check cache configuration and batch sizes
+   ```rust
+   // Increase cache size for better performance
+   let config = CacheConfig {
+       max_size: 10_000,  // Increase from default
+       ttl: Duration::from_secs(300),
+   };
+   ```
+
+4. **Memory Usage**: Monitor virtual memory usage from MDBX mapping
+   ```bash
+   # Monitor memory usage
+   ps aux | grep tx_processor
+   pmap -x <PID> | grep -E "total|reth"
+   ```
+
+### Debug Commands
+```bash
+# Check component compilation
+cargo check -p tx_processor --lib
+
+# Run component tests with output
+cargo test fetch_from_reth -- --nocapture
+
+# Run performance benchmarks
+cargo test fetch_from_reth::tests::performance_tests -- --nocapture
+
+# Profile memory usage
+cargo test fetch_from_reth::tests::stress_tests -- --ignored --nocapture
 ```
 
 This module provides the **high-performance foundation** for the entire transaction processing pipeline, enabling direct access to Reth's blockchain data with minimal overhead and maximum reliability.

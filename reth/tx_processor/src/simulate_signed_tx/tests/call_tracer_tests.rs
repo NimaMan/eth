@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::simulate_signed_tx::call_tracer::{CallTracer, InternalTransfer, CallType, CallTrace};
+    use crate::simulate_signed_tx::call_tracer::{CallTracer, CallType, CallTrace};
     use revm_primitives::{Address, U256};
     use alloy_primitives::Bytes;
 

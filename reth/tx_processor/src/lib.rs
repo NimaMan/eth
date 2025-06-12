@@ -1,17 +1,25 @@
 pub mod conversions;
-pub mod simulation_core;
-pub mod state_diff_utils;
-pub mod call_tracer;
-pub mod internal_transfer_tracker;
+pub mod simulate_signed_tx;
+pub mod process_tx;
 pub mod fast_path_processor;
 // pub mod tx_processor; // Disabled - needs API updates for external REVM but core simulation works
 
 // Re-export common types for easier use in examples or by other crates
 pub use conversions::*;
-pub use simulation_core::{simulate_transaction, SimulationOutput, SimCacheDB, ExecutionResultType};
 
-// Re-export state diff utilities
-pub use state_diff_utils::{
+// Re-export simulate_signed_tx module types
+pub use simulate_signed_tx::{
+    simulate_transaction, simulate_transaction_with_config,
+    SimulationConfig, SimulationOutput, SimulationError,
+    BlockEnv, CallTracer, CallTrace, CallType,
+    InternalTransfer, InternalTransferTracker,
+};
+
+// For backward compatibility with old imports
+pub use simulate_signed_tx::simulation_core::{SimCacheDB, ExecutionResultType};
+
+// Re-export state diff utilities from process_tx module
+pub use process_tx::state_diff_utils::{
     AccountStatusInDiff,
     // StorageSlotDiff, // This struct is now internal to state_diff_utils or not used for summary
     AccountStateSummary, // Renamed from AccountStateDiff
@@ -26,14 +34,18 @@ pub use state_diff_utils::{
     // For now, keeping them internal to state_diff_utils unless direct use is needed by examples.
 };
 
-// Re-export call tracer and internal transfer tracker
-pub use call_tracer::{CallTracer, InternalTransfer};
-pub use internal_transfer_tracker::{integrate_internal_transfers, extract_internal_transfers_from_rpc};
-
 // Re-export fast path processor
 pub use fast_path_processor::{
     FastPathConfig, FastPathProcessor, TransactionAnalysisResult, 
     AnalysisMethod, ConfidenceLevel, example_fast_analysis
+};
+
+// Re-export spec utils from simulate_signed_tx
+pub use simulate_signed_tx::spec_utils::spec_id_from_block_number;
+
+// Re-export internal transfer integration functions
+pub use simulate_signed_tx::internal_transfer_tracker::{
+    integrate_internal_transfers
 };
 
 // Conversion functions have been moved to src/conversions.rs

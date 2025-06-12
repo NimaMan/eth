@@ -1,4 +1,4 @@
-# Optimized Transaction Processor Architecture
+# Transaction Processor
 
 ## 🎯 Overview
 
