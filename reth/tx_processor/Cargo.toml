@@ -34,6 +34,9 @@ path = "src/bin/batch_comparison_logger.rs"
 name = "simulate_by_hash"
 path = "src/simulate_signed_tx/examples/simulate_by_hash.rs"
 
+[[bin]]
+name = "simulate_from_db"
+path = "src/simulate_signed_tx/examples/simulate_from_db.rs"
 
 [[bin]]
 name = "simulate_transaction"

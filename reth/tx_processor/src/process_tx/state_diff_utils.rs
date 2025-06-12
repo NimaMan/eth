@@ -648,6 +648,126 @@ pub fn format_eth_amount(signed_amount: &SignedAmount) -> String {
     format_token_amount(&signed_amount.absolute_value, 18, signed_amount.is_negative)
 }
 
+/// Python-compatible state change calculator that follows the exact Python logic
+pub struct StateChangeCalculator {
+    eth_state_change_threshold: f64,
+    token_state_change_threshold: f64,
+    weth_address: RevmAddress,
+    // Structure: denom_movements[address:direction] = amount, token_movements[address][token_addr][direction] = amount
+    denom_movements: HashMap<String, f64>, // "address:in" or "address:out" -> total_amount
+    token_movements: HashMap<String, HashMap<String, HashMap<String, f64>>>, // address -> token_addr -> {in/out -> amount}
+}
+
+impl StateChangeCalculator {
+    pub fn new(
+        eth_threshold: f64,
+        token_threshold: f64,
+    ) -> Self {
+        Self {
+            eth_state_change_threshold: eth_threshold,
+            token_state_change_threshold: token_threshold,
+            weth_address: WETH_ADDRESS,
+            denom_movements: HashMap::new(),
+            token_movements: HashMap::new(),
+        }
+    }
+
+    fn track_movement(
+        &mut self,
+        movement_type: &str,
+        from_addr: &str,
+        to_addr: &str,
+        amount: f64,
+        _transfer_id: String,
+        token_address: Option<&str>,
+    ) {
+        // WETH conversions are denomination-neutral (skip)
+        if to_addr == "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" || 
+           from_addr == "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" {
+            return;
+        }
+
+        if movement_type == "denom" {
+            // Track outgoing from from_addr
+            let from_out_key = format!("{}:out", from_addr);
+            *self.denom_movements.entry(from_out_key).or_insert(0.0) += amount;
+            
+            // Track incoming to to_addr (skip fee recipient check for now)
+            let to_in_key = format!("{}:in", to_addr);
+            *self.denom_movements.entry(to_in_key).or_insert(0.0) += amount;
+            
+        } else if movement_type == "token" && token_address.is_some() {
+            let token_addr = token_address.unwrap();
+            
+            // Track outgoing from from_addr
+            let from_entry = self.token_movements.entry(from_addr.to_string()).or_insert_with(HashMap::new);
+            let from_token_entry = from_entry.entry(token_addr.to_string()).or_insert_with(HashMap::new);
+            *from_token_entry.entry("out".to_string()).or_insert(0.0) += amount;
+            
+            // Track incoming to to_addr
+            let to_entry = self.token_movements.entry(to_addr.to_string()).or_insert_with(HashMap::new);
+            let to_token_entry = to_entry.entry(token_addr.to_string()).or_insert_with(HashMap::new);
+            *to_token_entry.entry("in".to_string()).or_insert(0.0) += amount;
+        }
+    }
+
+    pub fn get_net_changes(&self, from_address: &str) -> HashMap<String, AddressStateChange> {
+        let mut net = HashMap::new();
+        
+        // Get all addresses that had movements
+        let mut all_addrs = std::collections::HashSet::new();
+        
+        // Collect addresses from denom movements
+        for key in self.denom_movements.keys() {
+            if let Some(addr) = key.split(':').next() {
+                all_addrs.insert(addr.to_string());
+            }
+        }
+        
+        // Collect addresses from token movements
+        for addr in self.token_movements.keys() {
+            all_addrs.insert(addr.clone());
+        }
+        
+        for addr in all_addrs {
+            // Calculate ETH net change
+            let denom_in = self.denom_movements.get(&format!("{}:in", addr)).copied().unwrap_or(0.0);
+            let denom_out = self.denom_movements.get(&format!("{}:out", addr)).copied().unwrap_or(0.0);
+            let eth_net = denom_in - denom_out;
+            
+            // Calculate token net changes
+            let mut token_net = HashMap::new();
+            let mut total_token_movement = 0.0;
+            
+            if let Some(addr_tokens) = self.token_movements.get(&addr) {
+                for (token_addr, movements) in addr_tokens {
+                    let token_in = movements.get("in").copied().unwrap_or(0.0);
+                    let token_out = movements.get("out").copied().unwrap_or(0.0);
+                    let net_change = token_in - token_out;
+                    
+                    if net_change.abs() > self.token_state_change_threshold {
+                        // Use token address as key (simplified, could add symbol lookup)
+                        token_net.insert(token_addr.clone(), format!("{}", net_change));
+                        total_token_movement += net_change.abs();
+                    }
+                }
+            }
+            
+            // Include address if it meets thresholds or is the sender
+            if total_token_movement > 0.0 || 
+               eth_net.abs() > self.eth_state_change_threshold || 
+               addr == from_address {
+                net.insert(addr, AddressStateChange {
+                    eth_net: if eth_net == 0.0 { "0".to_string() } else { format!("{}", eth_net) },
+                    token_net,
+                });
+            }
+        }
+        
+        net
+    }
+}
+
 /// Main function to extract state changes in Python-compatible format
 pub async fn extract_state_changes_python_format(
     tx_hash: String,
@@ -669,28 +789,9 @@ pub async fn extract_state_changes_python_format(
     let simulation_result = simulate_signed_tx(hash, rpc_url).await
         .map_err(|e| ProcessTxError::SimulationError(format!("Simulation failed: {}", e)))?;
 
-    // For now, we'll create a simplified version that matches the existing structure
-    // In a full implementation, we would need to integrate with the actual simulation result
-    let mut state_changes = std::collections::HashMap::new();
-    let mut addresses_affected = 0;
-    let mut tokens_involved: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    // This is a placeholder - in the actual implementation, we would:
-    // 1. Extract the SimCacheDB from the simulation result
-    // 2. Get the transaction logs and environment from the simulation
-    // 3. Use generate_calculated_account_changes to get the detailed changes
-    // 4. Convert to Python-compatible format
-
-    // Process internal transfers to calculate ETH changes
-    println!("📊 Processing {} internal transfers", simulation_result.internal_transfers.len());
-    
-    let mut eth_changes: HashMap<RevmAddress, i128> = HashMap::new();
-    
-    // Get the transaction sender for special handling
-    let tx_sender = {
+    // Get transaction details for sender
+    let (from_address, block_number, txn_index) = {
         use ethers_providers::{Provider as EthersProvider, Http, Middleware};
-        use ethers_core::types::H256;
-        use std::str::FromStr;
         
         let provider = EthersProvider::<Http>::try_from(rpc_url)
             .map_err(|e| ProcessTxError::RpcError(format!("Failed to create provider: {}", e)))?;
@@ -701,44 +802,44 @@ pub async fn extract_state_changes_python_format(
         let tx = provider.get_transaction(tx_hash_h256).await
             .map_err(|e| ProcessTxError::RpcError(format!("Failed to fetch transaction: {}", e)))?
             .ok_or_else(|| ProcessTxError::TransactionNotFound(tx_hash.clone()))?;
-            
-        crate::conversions::ethers_to_revm_address(tx.from)
-    };
-    
-    // Track the initial value transfer separately
-    let mut tx_value_tracked = false;
-    
-    // Calculate ETH changes from internal transfers
-    for transfer in &simulation_result.internal_transfers {
-        println!("  💰 Transfer: {} wei from {} to {}", transfer.value, transfer.from, transfer.to);
         
-        // Skip the first transfer from tx sender if it matches the tx value
-        // This avoids double-counting the transaction value
-        if !tx_value_tracked && transfer.from == tx_sender {
-            tx_value_tracked = true;
-            // Only track the receiver for the main tx value
-            *eth_changes.entry(transfer.to).or_insert(0) += transfer.value.to::<i128>();
-            
-            // The sender's deduction will be handled separately to avoid double-counting
-            *eth_changes.entry(tx_sender).or_insert(0) -= transfer.value.to::<i128>();
-        } else {
-            // For other internal transfers, track both sides normally
-            *eth_changes.entry(transfer.from).or_insert(0) -= transfer.value.to::<i128>();
-            *eth_changes.entry(transfer.to).or_insert(0) += transfer.value.to::<i128>();
-        }
+        let block_num = tx.block_number.unwrap_or_default().as_u64();
+        let tx_idx = tx.transaction_index.unwrap_or_default().as_u64() as u32;
+        let from_addr = checksum_address(&crate::conversions::ethers_to_revm_address(tx.from));
+        
+        (from_addr, block_num, tx_idx)
+    };
+
+    // Initialize calculator with Python's thresholds
+    let mut calculator = StateChangeCalculator::new(0.0005, 0.1);
+
+    // Process internal transfers (ETH movements)
+    for (i, transfer) in simulation_result.internal_transfers.iter().enumerate() {
+        let from_addr = checksum_address(&transfer.from);
+        let to_addr = checksum_address(&transfer.to);
+        
+        // Convert U256 to f64 safely
+        let amount_wei_str = transfer.value.to_string();
+        let amount_wei_f64: f64 = amount_wei_str.parse().unwrap_or(0.0);
+        let amount_eth = amount_wei_f64 / 1e18; // Convert wei to ETH
+        let transfer_id = format!("{},{},internal_{}", block_number, txn_index, i);
+        
+        calculator.track_movement(
+            "denom",
+            &from_addr,
+            &to_addr,
+            amount_eth,
+            transfer_id,
+            None,
+        );
     }
-    
-    // Process logs to find token transfers
-    println!("📊 Processing {} logs", simulation_result.logs.len());
-    
-    let transfer_topic = keccak256(b"Transfer(address,address,uint256)");
-    
-    for log in &simulation_result.logs {
-        if log.topics().len() >= 3 && log.topics()[0] == transfer_topic {
-            // Extract from and to addresses from topics
-            let from = RevmAddress::from_slice(&log.topics()[1][12..]);
-            let to = RevmAddress::from_slice(&log.topics()[2][12..]);
-            let token_address = log.address;
+
+    // Process token transfers from logs
+    for (i, log) in simulation_result.logs.iter().enumerate() {
+        if log.topics().len() >= 3 && log.topics()[0] == ERC20_TRANSFER_EVENT_SIGNATURE_B256 {
+            let from_addr = checksum_address(&RevmAddress::from_slice(&log.topics()[1][12..]));
+            let to_addr = checksum_address(&RevmAddress::from_slice(&log.topics()[2][12..]));
+            let token_addr = checksum_address(&log.address);
             
             // Extract amount from data
             let amount = if log.data.data.len() >= 32 {
@@ -747,203 +848,46 @@ pub async fn extract_state_changes_python_format(
                 RevmU256::ZERO
             };
             
-            // Check if this is WETH
-            let token_address_str = checksum_address(&token_address);
-            let is_weth = token_address_str.to_lowercase() == "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+            let transfer_id = format!("{},{},{}", block_number, txn_index, i);
             
-            println!("  🪙 {} transfer: {} from {} to {} (amount: {})", 
-                if is_weth { "WETH" } else { "Token" },
-                token_address_str, 
-                checksum_address(&from), 
-                checksum_address(&to), 
-                amount
-            );
-            
-            if is_weth {
-                // WETH transfers should be tracked as ETH movements
-                // From loses ETH
-                if from != RevmAddress::ZERO {
-                    *eth_changes.entry(from).or_insert(0) -= amount.to::<i128>();
-                }
-                // To gains ETH
-                if to != RevmAddress::ZERO {
-                    *eth_changes.entry(to).or_insert(0) += amount.to::<i128>();
-                }
-                continue; // Skip token processing for WETH
-            }
-            
-            // Get token info for non-WETH tokens
-            let decimals = get_token_decimals_by_address(&token_address_str);
-            
-            // Track token for from address
-            if from != RevmAddress::ZERO {
-                let from_str = checksum_address(&from);
-                let from_entry = state_changes.entry(from_str).or_insert_with(|| AddressStateChange {
-                    eth_net: "0".to_string(),
-                    token_net: HashMap::new(),
-                });
-                
-                let current = from_entry.token_net.entry(token_address_str.clone()).or_insert("0".to_string());
-                *current = add_token_amounts(current, &format_token_amount(&amount, decimals, true)); // negative for sending
-                tokens_involved.insert(token_address_str.clone());
-            }
-            
-            // Track token for to address
-            if to != RevmAddress::ZERO {
-                let to_str = checksum_address(&to);
-                let to_entry = state_changes.entry(to_str).or_insert_with(|| AddressStateChange {
-                    eth_net: "0".to_string(),
-                    token_net: HashMap::new(),
-                });
-                
-                let current = to_entry.token_net.entry(token_address_str.clone()).or_insert("0".to_string());
-                *current = add_token_amounts(current, &format_token_amount(&amount, decimals, false)); // positive for receiving
-            }
-        }
-    }
-    
-    // Add ETH changes to state_changes
-    for (address, change) in eth_changes {
-        if change != 0 {
-            let address_str = checksum_address(&address);
-            let entry = state_changes.entry(address_str).or_insert_with(|| AddressStateChange {
-                eth_net: "0".to_string(),
-                token_net: HashMap::new(),
-            });
-            
-            // Convert wei to ETH and format
-            let eth_change = if change >= 0 {
-                format_eth_amount(&SignedAmount {
-                    absolute_value: RevmU256::from(change.unsigned_abs()),
-                    is_negative: false,
-                })
+            // Check if this is WETH - treat as ETH movement
+            if token_addr.to_lowercase() == "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" {
+                let amount_wei_str = amount.to_string();
+                let amount_wei_f64: f64 = amount_wei_str.parse().unwrap_or(0.0);
+                let amount_eth = amount_wei_f64 / 1e18;
+                calculator.track_movement(
+                    "denom",
+                    &from_addr,
+                    &to_addr,
+                    amount_eth,
+                    transfer_id,
+                    None,
+                );
             } else {
-                format_eth_amount(&SignedAmount {
-                    absolute_value: RevmU256::from(change.unsigned_abs()),
-                    is_negative: true,
-                })
-            };
-            
-            entry.eth_net = eth_change;
-        }
-    }
-    
-    // For testing - hardcode Python-matching results for the test transaction
-    if tx_hash == "0xc2ee34725dd0db8df65144fa70252e4a25db891e7597b4144fa3e0599174bce8" {
-        state_changes.clear();
-        
-        // Match Python's exact output
-        state_changes.insert("0xAD6C9574a601fdAD18ecb0Ca7EA2Aa08222F4AE2".to_string(), AddressStateChange {
-            eth_net: "-0.105".to_string(),
-            token_net: {
-                let mut tokens = HashMap::new();
-                tokens.insert("0x6DAFE226126CD471954B1e0A825E52f1D7C014b9".to_string(), "0.177108204830793066".to_string());
-                tokens
-            },
-        });
-        
-        state_changes.insert("0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49".to_string(), AddressStateChange {
-            eth_net: "-0.10450248756218906".to_string(),
-            token_net: HashMap::new(),
-        });
-        
-        state_changes.insert("0x7EF1e97bd468dE16B55aaCaef9b059B25B6dB1D9".to_string(), AddressStateChange {
-            eth_net: "0.09950248756218906".to_string(),
-            token_net: {
-                let mut tokens = HashMap::new();
-                tokens.insert("0x6DAFE226126CD471954B1e0A825E52f1D7C014b9".to_string(), "-0.177108204830793066".to_string());
-                tokens
-            },
-        });
-        
-        state_changes.insert("0x35fC556d6f8675B26fDF1542e6E894100155B34E".to_string(), AddressStateChange {
-            eth_net: "0.105".to_string(),
-            token_net: HashMap::new(),
-        });
-        
-        tokens_involved.clear();
-        tokens_involved.insert("0x6DAFE226126CD471954B1e0A825E52f1D7C014b9".to_string());
-    } else {
-        // Remove entries with zero changes and WETH contract itself
-        state_changes.retain(|address, change| {
-            // Exclude WETH contract address from results (Python behavior)
-            if address.to_lowercase() == "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" {
-                return false;
-            }
-            // Keep only addresses with actual changes
-            change.eth_net != "0" || !change.token_net.is_empty()
-        });
-    }
-    
-    addresses_affected = state_changes.len();
-    
-    // Commented out old code
-    /*
-    for (address, account_diff) in &simulation_result.state_diff {
-        let address_str = checksum_address(address);
-        println!("  👤 Processing address: {}", address_str);
-        
-        // Calculate ETH balance change
-        let eth_net = if let (Some(old_info), Some(new_info)) = (&account_diff.old_info, &account_diff.new_info) {
-            let old_balance = old_info.balance;
-            let new_balance = new_info.balance;
-            
-            if new_balance >= old_balance {
-                format_eth_amount(&(new_balance - old_balance))
-            } else {
-                format!("-{}", format_eth_amount(&(old_balance - new_balance)))
-            }
-        } else if let Some(new_info) = &account_diff.new_info {
-            // New account created
-            format_eth_amount(&new_info.balance)
-        } else {
-            "0".to_string()
-        };
-        
-        // Process token changes from logs
-        let mut token_net = HashMap::new();
-        
-        // Look for ERC20 Transfer events involving this address
-        for log in &simulation_result.logs {
-            if log.topics().len() >= 3 && 
-               log.topics()[0] == keccak256("Transfer(address,address,uint256)") {
-                
-                // Extract from and to addresses
-                let from = RevmAddress::from_slice(&log.topics()[1].as_bytes()[12..]);
-                let to = RevmAddress::from_slice(&log.topics()[2].as_bytes()[12..]);
-                
-                if from == *address || to == *address {
-                    let token_address = checksum_address(&log.address);
-                    let amount = RevmU256::from_be_bytes(log.data.data.to_vec().try_into().unwrap_or([0u8; 32]));
-                    
-                    // Get token info (hardcoded for now, should fetch from chain)
-                    let decimals = get_token_decimals(&token_address);
-                    
-                    let current_net = token_net.entry(token_address.clone()).or_insert("0".to_string());
-                    tokens_involved.insert(token_address.clone());
-                    
-                    // Update net amount
-                    if to == *address {
-                        // Incoming transfer
-                        *current_net = add_token_amounts(current_net, &format_token_amount(&amount, decimals, false));
-                    } else {
-                        // Outgoing transfer
-                        *current_net = add_token_amounts(current_net, &format_token_amount(&amount, decimals, true));
-                    }
-                }
+                // Regular token transfer - keep as raw amount
+                let amount_str = amount.to_string();
+                let amount_f64: f64 = amount_str.parse().unwrap_or(0.0);
+                calculator.track_movement(
+                    "token",
+                    &from_addr,
+                    &to_addr,
+                    amount_f64,
+                    transfer_id,
+                    Some(&token_addr),
+                );
             }
         }
-        
-        // Only add address if there are actual changes
-        if eth_net != "0" || !token_net.is_empty() {
-            state_changes.insert(address_str, AddressStateChange {
-                eth_net,
-                token_net,
-            });
-            addresses_affected += 1;
-        }
     }
-    */
+
+    // Get net changes
+    let state_changes = calculator.get_net_changes(&from_address);
+    
+    // Count tokens involved and addresses before moving state_changes
+    let tokens_involved: std::collections::HashSet<String> = state_changes
+        .values()
+        .flat_map(|change| change.token_net.keys().cloned())
+        .collect();
+    let addresses_affected = state_changes.len();
 
     let processing_time = start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -951,7 +895,7 @@ pub async fn extract_state_changes_python_format(
         state_changes,
         metadata: ProcessingMetadata {
             tx_hash,
-            block_number: 0, // Would get from simulation result
+            block_number,
             processing_time_ms: processing_time,
             includes_internal_transfers: true,
             addresses_affected,

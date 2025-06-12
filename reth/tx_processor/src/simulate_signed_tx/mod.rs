@@ -2,6 +2,31 @@
 //! 
 //! This module provides comprehensive transaction simulation capabilities
 //! including internal transfer extraction, call tracing, and state changes.
+//!
+//! ## Examples
+//!
+//! ### Basic Usage
+//! ```bash
+//! # Simulate transaction fetched via RPC
+//! cargo run --bin simulate_basic_usage
+//! cargo run --bin simulate_by_hash <tx_hash>
+//! ```
+//!
+//! ### Database Integration  
+//! ```bash
+//! # Simulate transaction loaded from Reth database (hybrid approach)
+//! cargo run --bin simulate_from_db [tx_hash]
+//! ```
+//!
+//! ### Advanced Usage
+//! ```bash
+//! # Call tracing and internal transfers
+//! cargo run --bin advanced_tracing
+//! cargo run --bin extract_internal_transfers
+//! 
+//! # Raw transaction bytes
+//! cargo run --bin simulate_raw_bytes
+//! ```
 
 pub mod simulation_core;
 pub mod call_tracer;
