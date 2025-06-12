@@ -17,6 +17,40 @@ path = "src/bin/revm_cli.rs"
 name = "process_single_tx"
 path = "src/bin/process_single_tx.rs"
 
+# Examples from simulate_signed_tx that can be run as binaries
+[[bin]]
+name = "simulate_by_hash"
+path = "src/simulate_signed_tx/examples/simulate_by_hash.rs"
+
+
+[[bin]]
+name = "simulate_transaction"
+path = "src/simulate_signed_tx/examples/simulate_transaction.rs"
+
+[[bin]]
+name = "extract_internal_transfers"
+path = "src/simulate_signed_tx/examples/extract_internal_transfers.rs"
+
+[[bin]]
+name = "simulate_basic_usage"
+path = "src/simulate_signed_tx/examples/basic_usage.rs"
+
+[[bin]]
+name = "advanced_tracing"
+path = "src/simulate_signed_tx/examples/advanced_tracing.rs"
+
+[[bin]]
+name = "call_tracer_usage"
+path = "src/simulate_signed_tx/examples/call_tracer_usage.rs"
+
+[[bin]]
+name = "uniswap_multihop_simulation"
+path = "src/simulate_signed_tx/examples/uniswap_multihop_simulation.rs"
+
+[[bin]]
+name = "simulate_raw_bytes"
+path = "src/simulate_signed_tx/examples/simulate_raw_bytes.rs"
+
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
 # [[bin]]
