@@ -66,6 +66,14 @@ pub use fetch_from_reth::{
 // Re-export SharedRethDataProvider from provider submodule
 pub use fetch_from_reth::provider::SharedRethDataProvider;
 
+// Re-export optimized transaction data retrieval from fetch_from_reth
+pub use fetch_from_reth::optimized_tx_data::{
+    get_basic_transaction_data, get_smart_transaction_data, get_full_transaction_analysis,
+    TransactionDataOptions, BasicTxData, SmartTxData, FullTxData,
+    DataLevel, TransactionType, PerformanceMetrics,
+    detect_transaction_type, needs_internal_transfers, should_use_simulation,
+};
+
 // Conversion functions have been moved to src/conversions.rs
 
 #[cfg(test)]

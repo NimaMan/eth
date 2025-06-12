@@ -99,6 +99,9 @@ pub mod cache;
 pub mod provider;
 pub mod compatibility;
 
+// Optimized transaction data retrieval
+pub mod optimized_tx_data;
+
 // Re-export main types for convenience
 pub use error::{FetchError, FetchResult};
 pub use config::{RethDataConfig, CacheConfig, CompatibilityMode};

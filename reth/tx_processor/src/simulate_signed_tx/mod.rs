@@ -16,6 +16,9 @@
 //! ```bash
 //! # Simulate transaction loaded from Reth database (hybrid approach)
 //! cargo run --bin simulate_from_db [tx_hash]
+//! 
+//! # Use the new reusable simulate_signed_tx_from_db function
+//! cargo run --bin simulate_using_new_db_function [tx_hash]
 //! ```
 //!
 //! ### Advanced Usage
@@ -56,6 +59,7 @@ pub use simulation_core::{
 pub use self::lib::{
     simulate_signed_tx,
     simulate_signed_tx_bytes,
+    simulate_signed_tx_from_db,
 };
 
 // Placeholder types that need to be implemented

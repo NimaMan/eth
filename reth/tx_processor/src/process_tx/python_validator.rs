@@ -6,8 +6,26 @@
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 use crate::process_tx::{ProcessTxError, PythonCompatibleStateChanges, AddressStateChange};
+
+/// Custom deserializer for status field that can be either boolean or u8
+fn deserialize_status<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StatusValue {
+        Bool(bool),
+        Int(u8),
+    }
+    
+    match StatusValue::deserialize(deserializer)? {
+        StatusValue::Bool(b) => Ok(if b { 1 } else { 0 }),
+        StatusValue::Int(i) => Ok(i),
+    }
+}
 use crate::process_tx::state_diff_utils::checksum_address;
 
 /// HTTP client for Python validation service
@@ -198,8 +216,9 @@ pub struct TransactionSummary {
     pub block_number: u64,
     pub from_address: String,
     pub to_address: Option<String>,
-    pub value: u64,
-    pub gas_used: u64,
+    pub value: f64,
+    pub gas_used: f64,
+    #[serde(deserialize_with = "deserialize_status")]
     pub status: u8,
     pub log_count: usize,
 }
@@ -223,6 +242,7 @@ pub struct PythonProcessedTransaction {
     pub to_address: Option<String>,
     pub contract_address: Option<String>,
     pub value: f64,
+    #[serde(deserialize_with = "deserialize_status")]
     pub status: u8,
     pub nonce: u64,
     pub input: String,
@@ -233,7 +253,7 @@ pub struct PythonProcessedTransaction {
     
     // Financial data
     pub fees: Option<PythonFees>,
-    pub bribe_amount: Option<u64>,
+    pub bribe_amount: Option<f64>,
     
     // Participants
     pub unique_addresses: Vec<String>,
@@ -254,8 +274,8 @@ pub struct PythonProcessedTransaction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PythonFees {
-    pub gas_price: u64,
-    pub gas_used: u64,
+    pub gas_price: f64,
+    pub gas_used: f64,
     pub txn_fee: f64,
 }
 

@@ -50,6 +50,17 @@ pub async fn simulate_signed_transaction(
         block_number
     )?;
     
+    // Debug: Log simulation parameters
+    println!("🔍 SIMULATION PARAMETERS:");
+    println!("  Fork Block: {} (parent of {})", block_number - 1, block_number);
+    println!("  TX Gas Limit: {}", tx_env.gas_limit);
+    println!("  TX Gas Price: {} wei", tx_env.gas_price);
+    println!("  TX Priority Fee: {:?}", tx_env.gas_priority_fee);
+    println!("  TX Value: {} wei", tx_env.value);
+    println!("  Block Base Fee: {} wei", block_env.basefee);
+    println!("  Block Timestamp: {}", block_env.timestamp);
+    println!("  Block Beneficiary: {:?}", block_env.beneficiary);
+    
     // Setup database at the parent block
     let fork_block_id = BlockId::Number((block_number - 1).into());
     let alloy_db = AlloyDB::<Ethereum, Arc<DynProvider<Ethereum>>>::new(

@@ -536,6 +536,36 @@ pub struct AddressStateChange {
     pub eth_net: String,
     /// Token changes: symbol -> net change as signed decimal string
     pub token_net: std::collections::HashMap<String, String>,
+    /// Detailed movements breakdown (same structure as Python)
+    pub movements: MovementsBreakdown,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MovementsBreakdown {
+    /// ETH (denomination) movements
+    pub denom: DenomMovements,
+    /// Token movements by token address
+    pub tokens: std::collections::HashMap<String, TokenMovements>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DenomMovements {
+    /// Incoming ETH transfers: transfer_id -> amount
+    #[serde(rename = "in")]
+    pub in_transfers: std::collections::HashMap<String, f64>,
+    /// Outgoing ETH transfers: transfer_id -> amount  
+    #[serde(rename = "out")]
+    pub out_transfers: std::collections::HashMap<String, f64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TokenMovements {
+    /// Incoming token transfers: transfer_id -> amount
+    #[serde(rename = "in")]
+    pub in_transfers: std::collections::HashMap<String, f64>,
+    /// Outgoing token transfers: transfer_id -> amount
+    #[serde(rename = "out")]
+    pub out_transfers: std::collections::HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -653,9 +683,9 @@ pub struct StateChangeCalculator {
     eth_state_change_threshold: f64,
     token_state_change_threshold: f64,
     weth_address: RevmAddress,
-    // Structure: denom_movements[address:direction] = amount, token_movements[address][token_addr][direction] = amount
-    denom_movements: HashMap<String, f64>, // "address:in" or "address:out" -> total_amount
-    token_movements: HashMap<String, HashMap<String, HashMap<String, f64>>>, // address -> token_addr -> {in/out -> amount}
+    // Detailed tracking for movements breakdown
+    detailed_denom_movements: HashMap<String, HashMap<String, HashMap<String, f64>>>, // address -> {in/out -> {transfer_id -> amount}}
+    detailed_token_movements: HashMap<String, HashMap<String, HashMap<String, HashMap<String, f64>>>>, // address -> token_addr -> {in/out -> {transfer_id -> amount}}
 }
 
 impl StateChangeCalculator {
@@ -667,8 +697,8 @@ impl StateChangeCalculator {
             eth_state_change_threshold: eth_threshold,
             token_state_change_threshold: token_threshold,
             weth_address: WETH_ADDRESS,
-            denom_movements: HashMap::new(),
-            token_movements: HashMap::new(),
+            detailed_denom_movements: HashMap::new(),
+            detailed_token_movements: HashMap::new(),
         }
     }
 
@@ -678,7 +708,7 @@ impl StateChangeCalculator {
         from_addr: &str,
         to_addr: &str,
         amount: f64,
-        _transfer_id: String,
+        transfer_id: String,
         token_address: Option<&str>,
     ) {
         // WETH conversions are denomination-neutral (skip)
@@ -688,26 +718,46 @@ impl StateChangeCalculator {
         }
 
         if movement_type == "denom" {
-            // Track outgoing from from_addr
-            let from_out_key = format!("{}:out", from_addr);
-            *self.denom_movements.entry(from_out_key).or_insert(0.0) += amount;
+            // Track detailed outgoing from from_addr
+            let from_entry = self.detailed_denom_movements.entry(from_addr.to_string()).or_insert_with(|| {
+                let mut entry = HashMap::new();
+                entry.insert("in".to_string(), HashMap::new());
+                entry.insert("out".to_string(), HashMap::new());
+                entry
+            });
+            from_entry.get_mut("out").unwrap().insert(transfer_id.clone(), amount);
             
-            // Track incoming to to_addr (skip fee recipient check for now)
-            let to_in_key = format!("{}:in", to_addr);
-            *self.denom_movements.entry(to_in_key).or_insert(0.0) += amount;
+            // Track detailed incoming to to_addr (skip fee recipient check for now)
+            let to_entry = self.detailed_denom_movements.entry(to_addr.to_string()).or_insert_with(|| {
+                let mut entry = HashMap::new();
+                entry.insert("in".to_string(), HashMap::new());
+                entry.insert("out".to_string(), HashMap::new());
+                entry
+            });
+            to_entry.get_mut("in").unwrap().insert(transfer_id, amount);
             
         } else if movement_type == "token" && token_address.is_some() {
             let token_addr = token_address.unwrap();
             
-            // Track outgoing from from_addr
-            let from_entry = self.token_movements.entry(from_addr.to_string()).or_insert_with(HashMap::new);
-            let from_token_entry = from_entry.entry(token_addr.to_string()).or_insert_with(HashMap::new);
-            *from_token_entry.entry("out".to_string()).or_insert(0.0) += amount;
+            // Track detailed outgoing from from_addr
+            let from_entry = self.detailed_token_movements.entry(from_addr.to_string()).or_insert_with(HashMap::new);
+            let from_token_entry = from_entry.entry(token_addr.to_string()).or_insert_with(|| {
+                let mut entry = HashMap::new();
+                entry.insert("in".to_string(), HashMap::new());
+                entry.insert("out".to_string(), HashMap::new());
+                entry
+            });
+            from_token_entry.get_mut("out").unwrap().insert(transfer_id.clone(), amount);
             
-            // Track incoming to to_addr
-            let to_entry = self.token_movements.entry(to_addr.to_string()).or_insert_with(HashMap::new);
-            let to_token_entry = to_entry.entry(token_addr.to_string()).or_insert_with(HashMap::new);
-            *to_token_entry.entry("in".to_string()).or_insert(0.0) += amount;
+            // Track detailed incoming to to_addr
+            let to_entry = self.detailed_token_movements.entry(to_addr.to_string()).or_insert_with(HashMap::new);
+            let to_token_entry = to_entry.entry(token_addr.to_string()).or_insert_with(|| {
+                let mut entry = HashMap::new();
+                entry.insert("in".to_string(), HashMap::new());
+                entry.insert("out".to_string(), HashMap::new());
+                entry
+            });
+            to_token_entry.get_mut("in").unwrap().insert(transfer_id, amount);
         }
     }
 
@@ -717,39 +767,71 @@ impl StateChangeCalculator {
         // Get all addresses that had movements
         let mut all_addrs = std::collections::HashSet::new();
         
-        // Collect addresses from denom movements
-        for key in self.denom_movements.keys() {
-            if let Some(addr) = key.split(':').next() {
-                all_addrs.insert(addr.to_string());
-            }
+        // Collect addresses from detailed denom movements
+        for addr in self.detailed_denom_movements.keys() {
+            all_addrs.insert(addr.clone());
         }
         
-        // Collect addresses from token movements
-        for addr in self.token_movements.keys() {
+        // Collect addresses from detailed token movements
+        for addr in self.detailed_token_movements.keys() {
             all_addrs.insert(addr.clone());
         }
         
         for addr in all_addrs {
-            // Calculate ETH net change
-            let denom_in = self.denom_movements.get(&format!("{}:in", addr)).copied().unwrap_or(0.0);
-            let denom_out = self.denom_movements.get(&format!("{}:out", addr)).copied().unwrap_or(0.0);
-            let eth_net = denom_in - denom_out;
+            // Calculate ETH net change and build denom movements
+            let mut denom_in_transfers = HashMap::new();
+            let mut denom_out_transfers = HashMap::new();
+            let mut eth_net = 0.0;
             
-            // Calculate token net changes
+            if let Some(denom_movements) = self.detailed_denom_movements.get(&addr) {
+                if let Some(in_transfers) = denom_movements.get("in") {
+                    for (transfer_id, amount) in in_transfers {
+                        denom_in_transfers.insert(transfer_id.clone(), *amount);
+                        eth_net += amount;
+                    }
+                }
+                if let Some(out_transfers) = denom_movements.get("out") {
+                    for (transfer_id, amount) in out_transfers {
+                        denom_out_transfers.insert(transfer_id.clone(), *amount);
+                        eth_net -= amount;
+                    }
+                }
+            }
+            
+            // Calculate token net changes and build token movements
             let mut token_net = HashMap::new();
+            let mut token_movements_breakdown = HashMap::new();
             let mut total_token_movement = 0.0;
             
-            if let Some(addr_tokens) = self.token_movements.get(&addr) {
-                for (token_addr, movements) in addr_tokens {
-                    let token_in = movements.get("in").copied().unwrap_or(0.0);
-                    let token_out = movements.get("out").copied().unwrap_or(0.0);
-                    let net_change = token_in - token_out;
+            if let Some(addr_tokens) = self.detailed_token_movements.get(&addr) {
+                for (token_addr, directions) in addr_tokens {
+                    let mut token_in_transfers = HashMap::new();
+                    let mut token_out_transfers = HashMap::new();
+                    let mut token_net_change = 0.0;
                     
-                    if net_change.abs() > self.token_state_change_threshold {
-                        // Use token address as key (simplified, could add symbol lookup)
-                        token_net.insert(token_addr.clone(), format!("{}", net_change));
-                        total_token_movement += net_change.abs();
+                    if let Some(in_transfers) = directions.get("in") {
+                        for (transfer_id, amount) in in_transfers {
+                            token_in_transfers.insert(transfer_id.clone(), *amount);
+                            token_net_change += amount;
+                        }
                     }
+                    if let Some(out_transfers) = directions.get("out") {
+                        for (transfer_id, amount) in out_transfers {
+                            token_out_transfers.insert(transfer_id.clone(), *amount);
+                            token_net_change -= amount;
+                        }
+                    }
+                    
+                    if token_net_change.abs() > self.token_state_change_threshold {
+                        token_net.insert(token_addr.clone(), format!("{}", token_net_change));
+                        total_token_movement += token_net_change.abs();
+                    }
+                    
+                    // Always include in movements breakdown for detailed view
+                    token_movements_breakdown.insert(token_addr.clone(), TokenMovements {
+                        in_transfers: token_in_transfers,
+                        out_transfers: token_out_transfers,
+                    });
                 }
             }
             
@@ -760,6 +842,13 @@ impl StateChangeCalculator {
                 net.insert(addr, AddressStateChange {
                     eth_net: if eth_net == 0.0 { "0".to_string() } else { format!("{}", eth_net) },
                     token_net,
+                    movements: MovementsBreakdown {
+                        denom: DenomMovements {
+                            in_transfers: denom_in_transfers,
+                            out_transfers: denom_out_transfers,
+                        },
+                        tokens: token_movements_breakdown,
+                    },
                 });
             }
         }
@@ -786,8 +875,12 @@ pub async fn extract_state_changes_python_format(
         .map_err(|e| ProcessTxError::InvalidTransactionData(format!("Invalid hash: {}", e)))?;
 
     // Simulate the transaction to get state changes
+    println!("🔍 CALLING SIMULATION for tx: {}", tx_hash);
     let simulation_result = simulate_signed_tx(hash, rpc_url).await
         .map_err(|e| ProcessTxError::SimulationError(format!("Simulation failed: {}", e)))?;
+    println!("🔍 SIMULATION RETURNED {} internal transfers, {} logs", 
+             simulation_result.internal_transfers.len(), 
+             simulation_result.logs.len());
 
     // Get transaction details for sender
     let (from_address, block_number, txn_index) = {
@@ -807,6 +900,13 @@ pub async fn extract_state_changes_python_format(
         let tx_idx = tx.transaction_index.unwrap_or_default().as_u64() as u32;
         let from_addr = checksum_address(&crate::conversions::ethers_to_revm_address(tx.from));
         
+        println!("🔍 TRANSACTION INFO:");
+        println!("  Block: {}", block_num);
+        println!("  Transaction Index: {}", tx_idx);
+        println!("  From: {}", from_addr);
+        println!("  Value: {} wei", tx.value);
+        println!("  Gas Price: {} wei", tx.gas_price.unwrap_or_default());
+        
         (from_addr, block_num, tx_idx)
     };
 
@@ -814,6 +914,7 @@ pub async fn extract_state_changes_python_format(
     let mut calculator = StateChangeCalculator::new(0.0005, 0.1);
 
     // Process internal transfers (ETH movements)
+    println!("🔍 RUST INTERNAL TRANSFERS ({} total):", simulation_result.internal_transfers.len());
     for (i, transfer) in simulation_result.internal_transfers.iter().enumerate() {
         let from_addr = checksum_address(&transfer.from);
         let to_addr = checksum_address(&transfer.to);
@@ -823,6 +924,9 @@ pub async fn extract_state_changes_python_format(
         let amount_wei_f64: f64 = amount_wei_str.parse().unwrap_or(0.0);
         let amount_eth = amount_wei_f64 / 1e18; // Convert wei to ETH
         let transfer_id = format!("{},{},internal_{}", block_number, txn_index, i);
+        
+        println!("  Internal {}: {} wei ({} ETH) from {} to {}", 
+                 i, amount_wei_str, amount_eth, from_addr, to_addr);
         
         calculator.track_movement(
             "denom",
@@ -835,6 +939,8 @@ pub async fn extract_state_changes_python_format(
     }
 
     // Process token transfers from logs
+    println!("🔍 RUST ERC20 TRANSFERS ({} total logs):", simulation_result.logs.len());
+    let mut erc20_count = 0;
     for (i, log) in simulation_result.logs.iter().enumerate() {
         if log.topics().len() >= 3 && log.topics()[0] == ERC20_TRANSFER_EVENT_SIGNATURE_B256 {
             let from_addr = checksum_address(&RevmAddress::from_slice(&log.topics()[1][12..]));
@@ -855,6 +961,8 @@ pub async fn extract_state_changes_python_format(
                 let amount_wei_str = amount.to_string();
                 let amount_wei_f64: f64 = amount_wei_str.parse().unwrap_or(0.0);
                 let amount_eth = amount_wei_f64 / 1e18;
+                println!("  ERC20 {}: WETH {} wei ({} ETH) from {} to {}", 
+                         i, amount_wei_str, amount_eth, from_addr, to_addr);
                 calculator.track_movement(
                     "denom",
                     &from_addr,
@@ -867,6 +975,8 @@ pub async fn extract_state_changes_python_format(
                 // Regular token transfer - keep as raw amount
                 let amount_str = amount.to_string();
                 let amount_f64: f64 = amount_str.parse().unwrap_or(0.0);
+                println!("  ERC20 {}: Token {} amount {} from {} to {}", 
+                         i, token_addr, amount_str, from_addr, to_addr);
                 calculator.track_movement(
                     "token",
                     &from_addr,
@@ -876,8 +986,10 @@ pub async fn extract_state_changes_python_format(
                     Some(&token_addr),
                 );
             }
+            erc20_count += 1;
         }
     }
+    println!("  Total ERC20 transfers found: {}", erc20_count);
 
     // Get net changes
     let state_changes = calculator.get_net_changes(&from_address);
@@ -935,6 +1047,13 @@ pub fn convert_to_python_format(
         state_changes.insert(address_str, AddressStateChange {
             eth_net,
             token_net,
+            movements: MovementsBreakdown {
+                denom: DenomMovements {
+                    in_transfers: HashMap::new(),
+                    out_transfers: HashMap::new(),
+                },
+                tokens: HashMap::new(),
+            },
         });
     }
 
@@ -1023,6 +1142,7 @@ impl Default for EventCounts {
         }
     }
 }
+
 
 /// Extract event counts from transaction logs to match Python format
 pub fn extract_event_counts(logs: &[RevmLog]) -> EventCounts {

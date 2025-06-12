@@ -39,6 +39,10 @@ name = "simulate_from_db"
 path = "src/simulate_signed_tx/examples/simulate_from_db.rs"
 
 [[bin]]
+name = "simulate_using_new_db_function"
+path = "src/simulate_signed_tx/examples/simulate_using_new_db_function.rs"
+
+[[bin]]
 name = "simulate_transaction"
 path = "src/simulate_signed_tx/examples/simulate_transaction.rs"
 
@@ -114,6 +118,43 @@ path = "src/fetch_from_reth/examples/handle_version_mismatch.rs"
 name = "python_comparison"
 path = "src/process_tx/process_tx_examples/python_comparison.rs"
 
+[[bin]]
+name = "test_one_tx"
+path = "src/bin/test_one_tx.rs"
+
+# Optimized transaction data examples
+[[bin]]
+name = "optimized_tx_basic"
+path = "src/fetch_from_reth/optimized_tx_data/examples/basic_fast_data.rs"
+
+[[bin]]
+name = "optimized_tx_smart"
+path = "src/fetch_from_reth/optimized_tx_data/examples/smart_auto_detection.rs"
+
+[[bin]]
+name = "optimized_tx_comparison"
+path = "src/fetch_from_reth/optimized_tx_data/examples/performance_comparison.rs"
+
+[[bin]]
+name = "optimized_tx_db_connection"
+path = "src/fetch_from_reth/optimized_tx_data/examples/database_connection_optimization.rs"
+
+[[bin]]
+name = "optimized_tx_comparison_reuse"
+path = "src/fetch_from_reth/optimized_tx_data/examples/optimized_performance_comparison.rs"
+
+[[bin]]
+name = "optimized_tx_comprehensive"
+path = "src/fetch_from_reth/optimized_tx_data/examples/comprehensive_provider_optimization.rs"
+
+[[bin]]
+name = "optimized_tx_measure_1k"
+path = "src/fetch_from_reth/optimized_tx_data/examples/measure_1k_latest_performance.rs"
+
+[[bin]]
+name = "optimized_tx_measure_simple"
+path = "src/fetch_from_reth/optimized_tx_data/examples/measure_performance_simple.rs"
+
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
 # [[bin]]
@@ -178,6 +219,7 @@ eyre = "0.6"
 rand = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
 thiserror = "1.0"
+bytes = "1.5"
 
 # Reth dependencies for direct database access
 reth-ethereum = { path = "../reth/crates/ethereum/reth", features = ["node"] }  # Re-enabled to test with external REVM
