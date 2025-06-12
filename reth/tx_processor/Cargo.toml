@@ -17,6 +17,18 @@ path = "src/bin/revm_cli.rs"
 name = "process_single_tx"
 path = "src/bin/process_single_tx.rs"
 
+[[bin]]
+name = "batch_comparison"
+path = "src/bin/batch_comparison.rs"
+
+[[bin]]
+name = "test_comparison"
+path = "src/bin/test_comparison.rs"
+
+[[bin]]
+name = "batch_comparison_logger"
+path = "src/bin/batch_comparison_logger.rs"
+
 # Examples from simulate_signed_tx that can be run as binaries
 [[bin]]
 name = "simulate_by_hash"
@@ -50,6 +62,54 @@ path = "src/simulate_signed_tx/examples/uniswap_multihop_simulation.rs"
 [[bin]]
 name = "simulate_raw_bytes"
 path = "src/simulate_signed_tx/examples/simulate_raw_bytes.rs"
+
+# Examples from fetch_from_reth that can be run as binaries
+[[bin]]
+name = "fetch_from_reth_basic_usage"
+path = "src/fetch_from_reth/examples/basic_usage.rs"
+
+[[bin]]
+name = "fetch_from_reth_performance_optimization"
+path = "src/fetch_from_reth/examples/performance_optimization.rs"
+
+[[bin]]
+name = "fetch_from_reth_requested_tx"
+path = "src/fetch_from_reth/examples/fetch_requested_tx.rs"
+
+[[bin]]
+name = "fetch_from_reth_test_both"
+path = "src/fetch_from_reth/examples/test_both_transactions.rs"
+
+[[bin]]
+name = "fetch_from_reth_address_data_access"
+path = "src/fetch_from_reth/examples/address_data_access.rs"
+
+[[bin]]
+name = "fetch_from_reth_block_data_access"
+path = "src/fetch_from_reth/examples/block_data_access.rs"
+
+[[bin]]
+name = "fetch_from_reth_advanced_data_access"
+path = "src/fetch_from_reth/examples/advanced_data_access.rs"
+
+[[bin]]
+name = "fetch_specific_tx"
+path = "src/fetch_from_reth/examples/fetch_specific_tx.rs"
+
+[[bin]]
+name = "fetch_via_rpc"
+path = "src/fetch_from_reth/examples/fetch_via_rpc.rs"
+
+[[bin]]
+name = "fetch_from_reth_handle_version_mismatch"
+path = "src/fetch_from_reth/examples/handle_version_mismatch.rs"
+
+# Test binaries for auditing fetch_from_reth functionality have been completed
+
+# Examples from process_tx that can be run as binaries
+[[bin]]
+name = "python_comparison"
+path = "src/process_tx/process_tx_examples/python_comparison.rs"
 
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
@@ -110,12 +170,11 @@ ethers-providers = "2.0.14"
 
 # Other utilities
 # hex = "0.4.3" # Duplicate removed - using 0.4 above
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 eyre = "0.6"
-# url = "2.5"
-# serde = { version = "1.0", features = ["derive"] } # Duplicate removed - using above
-# serde_json = "1.0" # Duplicate removed - using above
+rand = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
+thiserror = "1.0"
 
 # Reth dependencies for direct database access
 reth-ethereum = { path = "../reth/crates/ethereum/reth", features = ["node"] }  # Re-enabled to test with external REVM
@@ -135,6 +194,19 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2" # For file-based logging
 tracing = "0.1" # Core tracing macros
 # tracing-core = "0.1" # Core tracing macros - this is a dep of tracing, not needed directly usually
+
+# Additional dependencies for fetch_from_reth module
+dirs = "5.0"  # For default data directory detection
+num_cpus = "1.16"  # For performance configuration
+alloy-consensus = { version = "1.0.6", default-features = false }  # For transaction types
+
+# Additional Reth dependencies for fetch_from_reth
+reth-primitives-traits = { path = "../reth/crates/primitives-traits", default-features = false }
+reth-storage-errors = { path = "../reth/crates/storage/errors", default-features = false }
+reth-node-types = { path = "../reth/crates/node/types", default-features = false }
+
+# Dependencies for process_tx module  
+url = "2.5"  # For URL parsing
 
 # Alloy client dependencies (ensure these are present if not pulled by alloy-provider)
 # alloy-rpc-client = { version = "1.0.6", features = ["reqwest", "ws"] }

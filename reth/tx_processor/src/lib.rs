@@ -1,7 +1,8 @@
 pub mod conversions;
 pub mod simulate_signed_tx;
 pub mod process_tx;
-pub mod fast_path_processor;
+// pub mod fast_path_processor; // Disabled due to missing file
+pub mod fetch_from_reth;
 // pub mod tx_processor; // Disabled - needs API updates for external REVM but core simulation works
 
 // Re-export common types for easier use in examples or by other crates
@@ -19,34 +20,51 @@ pub use simulate_signed_tx::{
 pub use simulate_signed_tx::simulation_core::{SimCacheDB, ExecutionResultType};
 
 // Re-export state diff utilities from process_tx module
-pub use process_tx::state_diff_utils::{
-    AccountStatusInDiff,
-    // StorageSlotDiff, // This struct is now internal to state_diff_utils or not used for summary
-    AccountStateSummary, // Renamed from AccountStateDiff
-    extract_final_touched_account_states, // Renamed function
-    SimCacheDBForDiff,
-    CalculatedAccountChanges,
-    generate_calculated_account_changes,
-    TokenInfo,
-    get_token_symbol,
-    get_token_decimals,
-    // Add other new structs if they need to be public API e.g. SignedAmount, AccountMovements etc.
-    // For now, keeping them internal to state_diff_utils unless direct use is needed by examples.
+pub use process_tx::{
+    // Python-compatible state change extraction
+    ProcessTxError,
+    PythonCompatibleStateChanges,
+    AddressStateChange,
+    ProcessingMetadata,
+    EventCounts,
+    extract_state_changes_python_format,
+    convert_to_python_format,
+    format_token_amount,
+    format_eth_amount,
+    // Python validator integration
+    PythonValidatorClient,
+    ValidationResult,
+    ValidationDifference,
+    compare_with_python,
+    batch_compare_with_python,
 };
 
 // Re-export fast path processor
-pub use fast_path_processor::{
-    FastPathConfig, FastPathProcessor, TransactionAnalysisResult, 
-    AnalysisMethod, ConfidenceLevel, example_fast_analysis
-};
+// pub use fast_path_processor::{
+//     FastPathConfig, FastPathProcessor, TransactionAnalysisResult, 
+//     AnalysisMethod, ConfidenceLevel, example_fast_analysis
+// };
 
 // Re-export spec utils from simulate_signed_tx
 pub use simulate_signed_tx::spec_utils::spec_id_from_block_number;
 
 // Re-export internal transfer integration functions
+// Temporarily disabled due to dependency on process_tx module
+/*
 pub use simulate_signed_tx::internal_transfer_tracker::{
     integrate_internal_transfers
 };
+*/
+
+// Re-export fetch_from_reth module for direct Reth database access
+pub use fetch_from_reth::{
+    RethDataProvider, RethDatabaseProvider,
+    TransactionData, RethDataConfig, CacheConfig, TransactionCache,
+    FetchError, FetchResult, CacheStats
+};
+
+// Re-export SharedRethDataProvider from provider submodule
+pub use fetch_from_reth::provider::SharedRethDataProvider;
 
 // Conversion functions have been moved to src/conversions.rs
 

@@ -46,6 +46,19 @@ pub enum FetchError {
     
     /// Internal consistency error
     ConsistencyError(String),
+    
+    /// Feature not yet implemented
+    NotImplemented(String),
+    
+    /// MDBX version mismatch error
+    VersionMismatch {
+        /// Expected version (database version)
+        expected: String,
+        /// Actual version (library version)
+        actual: String,
+        /// Error code if available
+        code: Option<i32>,
+    },
 }
 
 impl fmt::Display for FetchError {
@@ -63,6 +76,14 @@ impl fmt::Display for FetchError {
             FetchError::TimeoutError(msg) => write!(f, "Timeout error: {}", msg),
             FetchError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             FetchError::ConsistencyError(msg) => write!(f, "Consistency error: {}", msg),
+            FetchError::NotImplemented(msg) => write!(f, "Not implemented: {}", msg),
+            FetchError::VersionMismatch { expected, actual, code } => {
+                write!(f, "MDBX version mismatch: expected {}, got {}", expected, actual)?;
+                if let Some(c) = code {
+                    write!(f, " (error code: {})", c)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -128,6 +149,15 @@ impl FetchError {
     pub fn invalid_parameter(param_name: &str, reason: &str) -> Self {
         FetchError::InvalidInput(format!("Invalid parameter '{}': {}", param_name, reason))
     }
+    
+    /// Create a VersionMismatch error
+    pub fn version_mismatch(expected: &str, actual: &str, code: Option<i32>) -> Self {
+        FetchError::VersionMismatch {
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+            code,
+        }
+    }
 }
 
 /// Error classification for error handling strategies
@@ -155,6 +185,8 @@ impl FetchError {
             FetchError::NotFound(_) => ErrorCategory::Permanent,
             FetchError::ParseError(_) => ErrorCategory::Permanent,
             FetchError::ConsistencyError(_) => ErrorCategory::Permanent,
+            FetchError::NotImplemented(_) => ErrorCategory::Permanent,
+            FetchError::VersionMismatch { .. } => ErrorCategory::Permanent,
             
             // User errors - need user intervention
             FetchError::ConfigError(_) => ErrorCategory::User,

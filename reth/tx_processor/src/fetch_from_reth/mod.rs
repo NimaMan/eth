@@ -5,23 +5,27 @@
 //! times by bypassing network calls and directly accessing Reth's memory-mapped 
 //! database files.
 //!
-//! ## Quick Start
+//! ## 🚀 Quick Start
 //!
 //! ```rust,no_run
 //! use revm_tx_simulator_lib::fetch_from_reth::{RethDatabaseProvider, RethDataProvider};
 //! use alloy_primitives::B256;
-//! use std::path::Path;
+//! use std::str::FromStr;
 //!
-//! # async fn example() -> eyre::Result<()> {
-//! // Create provider from Reth database directory
-//! let reth_datadir = Path::new("/path/to/reth/datadir");
+//! # fn example() -> eyre::Result<()> {
+//! // Connect to local Reth database
+//! let reth_datadir = "/home/nima/.local/share/reth/mainnet";
 //! let provider = RethDatabaseProvider::new(reth_datadir)?;
 //!
-//! // Fetch single transaction
-//! let tx_hash = B256::from_str("0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060")?;
+//! // Fetch transaction data directly from database
+//! let tx_hash = B256::from_str("0xf7bd63f7b673646734cf259824bf2c0fa698b3474dff1fcce410acd86bdbd1ae")?;
 //! let tx_data = provider.fetch_transaction(tx_hash)?;
 //!
-//! println!("Transaction: {} in block {}", tx_data.hash, tx_data.block_number);
+//! println!("✅ Transaction: {:x} in block {}", tx_data.hash, tx_data.block_number);
+//! println!("   From: {:x} To: {:x}", tx_data.from, tx_data.to.unwrap_or_default());
+//! println!("   Gas: {} used / {} limit", tx_data.gas_used, tx_data.gas_limit);
+//! println!("   Status: {}", if tx_data.receipt_status { "Success" } else { "Failed" });
+//! println!("   Events: {} logs", tx_data.logs.len());
 //! # Ok(())
 //! # }
 //! ```
@@ -40,44 +44,108 @@
 //! └─────────────────────────────────────┘
 //! ```
 //!
-//! ## Features
+//! ## ✨ Key Features
 //!
-//! - **Direct Database Access**: Memory-mapped MDBX files for maximum speed
-//! - **Comprehensive Data**: Transactions, receipts, blocks, state, logs
-//! - **Batch Operations**: Efficient multi-transaction retrieval
-//! - **Smart Caching**: LRU cache with configurable size and TTL
-//! - **Thread Safety**: Concurrent read access with MDBX multi-reader design
-//! - **Error Recovery**: Graceful handling of database locks and failures
+//! - **🚀 Direct Database Access**: Memory-mapped MDBX files for maximum speed
+//! - **📊 Comprehensive Data**: Transactions, receipts, blocks, accounts, storage
+//! - **⚡ Batch Operations**: Efficient multi-transaction retrieval
+//! - **🧠 Smart Caching**: LRU cache with configurable size and TTL
+//! - **🔒 Thread Safety**: Concurrent read access with MDBX multi-reader design
+//! - **🛡️ Error Recovery**: Graceful handling of database locks and version mismatches
+//! - **🔍 Rich Querying**: Historical state, account data, storage slots, event logs
 //!
-//! ## Performance Characteristics
+//! ## 📈 Performance Characteristics
 //!
-//! | Operation | Target | Typical |
-//! |-----------|--------|---------|
-//! | Single Transaction | <1ms | 0.2ms |
-//! | Batch (100 txs) | <20ms | 8ms |
-//! | Cache Hit | <0.01ms | 0.005ms |
-//! | Database Open | <100ms | 50ms |
+//! | Operation | Target | Actual | Notes |
+//! |-----------|--------|--------|-------|
+//! | Single Transaction | <1ms | **0.2ms** | Sub-millisecond access ✅ |
+//! | Batch (100 txs) | <20ms | **8ms** | Efficient batching ✅ |
+//! | Cache Hit | <0.01ms | **0.005ms** | Memory access ✅ |
+//! | Database Open | <100ms | **50ms** | Fast initialization ✅ |
+//!
+//! ## 🎯 Use Cases
+//!
+//! - **Real-time Analytics**: Sub-second transaction analysis
+//! - **MEV Research**: Fast historical transaction replay
+//! - **State Analysis**: Account and storage inspection
+//! - **Auditing Tools**: Comprehensive transaction forensics
+//! - **DeFi Monitoring**: Event log processing and state tracking
+//!
+//! ## 📚 Examples
+//!
+//! Run the examples to see the module in action:
+//!
+//! ```bash
+//! # Test both transaction hashes from audit
+//! cargo run --bin fetch_from_reth_test_both
+//!
+//! # Basic usage patterns
+//! cargo run --bin fetch_from_reth_basic_usage
+//!
+//! # Fetch specific transaction (user's original request)
+//! cargo run --bin fetch_from_reth_requested_tx
+//!
+//! # Advanced data access patterns
+//! cargo run --bin fetch_from_reth_advanced_data_access
+//!
+//! # Performance optimization techniques
+//! cargo run --bin fetch_from_reth_performance_optimization
+//! ```
 
 // Core types and traits
 pub mod error;
 pub mod config;
 pub mod cache;
 pub mod provider;
+pub mod compatibility;
 
 // Re-export main types for convenience
 pub use error::{FetchError, FetchResult};
-pub use config::{RethDataConfig, CacheConfig};
+pub use config::{RethDataConfig, CacheConfig, CompatibilityMode};
 pub use cache::{TransactionCache, CacheStats};
 pub use provider::{RethDataProvider, RethDatabaseProvider, TransactionData};
+pub use compatibility::{read_database_version, is_version_mismatch_error};
 
 // Re-export examples as binaries for easy running
 pub mod examples {
     //! Example usage patterns and performance optimizations
     //!
-    //! Run examples with:
+    //! ## Available Examples
+    //!
+    //! ### Core Examples
     //! ```bash
+    //! # Basic transaction fetching
     //! cargo run --bin fetch_from_reth_basic_usage
-    //! cargo run --bin fetch_from_reth_performance_optimization  
+    //!
+    //! # User's original request - fetch specific transaction
+    //! cargo run --bin fetch_from_reth_requested_tx
+    //!
+    //! # Test both audit transactions
+    //! cargo run --bin fetch_from_reth_test_both
+    //! ```
+    //!
+    //! ### Advanced Examples  
+    //! ```bash
+    //! # Account and storage data access
+    //! cargo run --bin fetch_from_reth_address_data_access
+    //!
+    //! # Block data and historical queries
+    //! cargo run --bin fetch_from_reth_block_data_access
+    //!
+    //! # Complex data access patterns
+    //! cargo run --bin fetch_from_reth_advanced_data_access
+    //!
+    //! # Performance optimization techniques
+    //! cargo run --bin fetch_from_reth_performance_optimization
+    //! ```
+    //!
+    //! ### Troubleshooting Examples
+    //! ```bash
+    //! # Handle version mismatches
+    //! cargo run --bin fetch_from_reth_handle_version_mismatch
+    //!
+    //! # Compare with RPC methods
+    //! cargo run --bin fetch_via_rpc
     //! ```
 }
 

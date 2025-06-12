@@ -6,6 +6,19 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Compatibility mode for handling MDBX version mismatches
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompatibilityMode {
+    /// Strict mode - fail on any version mismatch
+    Strict,
+    /// Try to open with compatibility flags
+    Compatible,
+    /// Force open with minimal checks (dangerous)
+    Force,
+    /// Try multiple approaches in sequence
+    Auto,
+}
+
 /// Main configuration for Reth database access
 #[derive(Debug, Clone)]
 pub struct RethDataConfig {
@@ -26,6 +39,15 @@ pub struct RethDataConfig {
     
     /// Whether to enable performance metrics collection
     pub enable_metrics: bool,
+    
+    /// Compatibility mode for handling MDBX version mismatches
+    pub compatibility_mode: CompatibilityMode,
+    
+    /// Whether to force open database despite version mismatch
+    pub force_open: bool,
+    
+    /// Custom MDBX environment flags for compatibility
+    pub mdbx_flags: Option<u32>,
 }
 
 impl Default for RethDataConfig {
@@ -37,6 +59,9 @@ impl Default for RethDataConfig {
             check_consistency: true,   // Verify database integrity on open
             operation_timeout: Duration::from_secs(30),
             enable_metrics: false,     // Disabled by default for performance
+            compatibility_mode: CompatibilityMode::Auto,  // Auto-detect compatibility
+            force_open: false,         // Don't force by default
+            mdbx_flags: None,          // No custom flags by default
         }
     }
 }
@@ -100,6 +125,24 @@ impl RethDataConfig {
         self
     }
     
+    /// Set compatibility mode
+    pub fn with_compatibility_mode(mut self, mode: CompatibilityMode) -> Self {
+        self.compatibility_mode = mode;
+        self
+    }
+    
+    /// Enable force open mode (bypass version checks)
+    pub fn with_force_open(mut self, force: bool) -> Self {
+        self.force_open = force;
+        self
+    }
+    
+    /// Set custom MDBX environment flags
+    pub fn with_mdbx_flags(mut self, flags: u32) -> Self {
+        self.mdbx_flags = Some(flags);
+        self
+    }
+    
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
         // Check if datadir exists
@@ -118,10 +161,14 @@ impl RethDataConfig {
             return Err(format!("Database directory not found: {}", db_path.display()));
         }
         
-        // Check for MDBX files
-        let data_mdb = db_path.join("data.mdb");
+        // Check for MDBX files - Reth uses mdbx.dat
+        let data_mdb = db_path.join("mdbx.dat");
         if !data_mdb.exists() {
-            return Err(format!("MDBX data file not found: {}", data_mdb.display()));
+            // Try legacy name
+            let legacy_mdb = db_path.join("data.mdb");
+            if !legacy_mdb.exists() {
+                return Err(format!("MDBX data file not found: {} or {}", data_mdb.display(), legacy_mdb.display()));
+            }
         }
         
         // Validate timeout

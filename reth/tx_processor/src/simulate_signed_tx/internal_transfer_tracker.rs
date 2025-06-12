@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use revm_primitives::{Address as RevmAddress, U256 as RevmU256};
+// Unused imports removed - functionality not yet implemented
 use crate::simulate_signed_tx::InternalTransfer;
-use crate::process_tx::state_diff_utils::{CalculatedAccountChanges, EthMovement};
+// Temporarily disabled due to process_tx module compilation issues
+// use crate::process_tx::{CalculatedAccountChanges, state_diff_utils::EthMovement};
 
 /// Tracker for internal ETH transfers
 #[derive(Debug, Clone, Default)]
@@ -25,7 +25,9 @@ impl InternalTransferTracker {
     }
 }
 
-/// Add internal transfers to calculated account changes
+/*
+// Add internal transfers to calculated account changes  
+// Temporarily disabled due to process_tx module dependency
 pub fn integrate_internal_transfers(
     mut all_changes: HashMap<RevmAddress, CalculatedAccountChanges>,
     internal_transfers: &[InternalTransfer],
@@ -83,6 +85,7 @@ pub fn integrate_internal_transfers(
     
     all_changes
 }
+*/
 
 // DEPRECATED: Use simulate_signed_tx instead which now includes internal transfers via CallTracer
 // This RPC-based method is no longer needed as internal transfers are captured during simulation

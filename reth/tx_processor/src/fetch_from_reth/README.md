@@ -3,23 +3,61 @@
 ## Overview
 
 The `fetch_from_reth` module provides **RPC-free data access** to Ethereum blockchain data stored in a local Reth node's MDBX database. This module is critical for achieving sub-millisecond data retrieval times by bypassing network calls entirely and directly accessing Reth's memory-mapped database files.
+## Reth MDBX Database Schema
+
+### Core MDBX Tables Used
+Reth uses 26+ specialized MDBX tables for optimized blockchain data storage:
+
+#### Transaction Data:
+- `Transactions` - Raw transaction data (indexed by transaction number)
+- `TransactionHashNumbers` - Transaction hash → Transaction number mapping
+- `TransactionBlocks` - Transaction number → Block number mapping
+- `Receipts` - Transaction execution results (indexed by transaction number)
+
+#### Block Data:
+- `Headers` - Block headers (indexed by block number)
+- `CanonicalHeaders` - Block number → Header hash mapping
+- `HeaderNumbers` - Block hash → Block number mapping
+- `BlockBodyIndices` - Block number → Transaction range indices
+
+#### State Data:
+- `PlainAccountState` - Address → Account state
+- `PlainStorageState` - Address + Storage key → Storage value
+- `Bytecodes` - Code hash → Contract bytecode
+
+#### Historical Data:
+- `AccountsHistory` - Account change history for state at any block
+- `StoragesHistory` - Storage change history for state at any block
+- `AccountChangeSets` - Before/after account states for reverts
+- `StorageChangeSets` - Before/after storage states for reverts
+
+## Performance Characteristics
+
+| Operation | Target | Typical | Notes |
+|-----------|--------|---------|-------|
+| Single Transaction | <1ms | 0.2ms | Memory-mapped access |
+| Batch (100 txs) | <20ms | 8ms | Sequential MDBX reads |
+| Database Open | <100ms | 50ms | One-time mmap setup |
+| Memory Usage | Variable | ~2GB | Virtual memory mapping |
+| Concurrent Readers | Unlimited | N/A | MDBX multi-reader design |
+
+## Data Model
 
 ## Architecture
 
 ```
 fetch_from_reth/
-├── fetch_from_reth.md          # This file - detailed architecture documentation
+├── README.md          # This file - detailed architecture documentation
 ├── mod.rs                      # Module exports and public interface
 ├── provider.rs                 # RethDataProvider trait definition
 ├── cache.rs                    # Transaction caching implementation
 ├── db_impl.rs                  # Direct database implementation
-├── simple_db.rs               # Simplified database access
-├── fetch_from_reth_examples/   # Co-located examples
-│   ├── fetch_from_reth_examples.md # Examples overview
+├── examples/   # Co-located examples
+│   ├── README.md # Examples overview
 │   ├── basic_usage.rs         # Getting started tutorial
 │   └── performance_optimization.rs # Advanced optimization techniques
-└── fetch_from_reth_tests/     # Co-located tests
-    ├── fetch_from_reth_tests.md # Testing documentation
+└── tests/     # Co-located tests
+    ├── README.md # Testing documentation
     ├── mod.rs                 # Test module exports
     ├── unit_tests.rs          # Unit tests with mocks
     ├── integration_tests.rs   # Real-world data patterns
@@ -156,43 +194,6 @@ match provider.fetch_transaction(tx_hash) {
 }
 ```
 
-## Reth MDBX Database Schema
-
-### Core MDBX Tables Used
-Reth uses 26+ specialized MDBX tables for optimized blockchain data storage:
-
-#### Transaction Data:
-- `Transactions` - Raw transaction data (indexed by transaction number)
-- `TransactionHashNumbers` - Transaction hash → Transaction number mapping
-- `TransactionBlocks` - Transaction number → Block number mapping
-- `Receipts` - Transaction execution results (indexed by transaction number)
-
-#### Block Data:
-- `Headers` - Block headers (indexed by block number)
-- `CanonicalHeaders` - Block number → Header hash mapping
-- `HeaderNumbers` - Block hash → Block number mapping
-- `BlockBodyIndices` - Block number → Transaction range indices
-
-#### State Data:
-- `PlainAccountState` - Address → Account state
-- `PlainStorageState` - Address + Storage key → Storage value
-- `Bytecodes` - Code hash → Contract bytecode
-
-#### Historical Data:
-- `AccountsHistory` - Account change history for state at any block
-- `StoragesHistory` - Storage change history for state at any block
-- `AccountChangeSets` - Before/after account states for reverts
-- `StorageChangeSets` - Before/after storage states for reverts
-
-## Performance Characteristics
-
-| Operation | Target | Typical | Notes |
-|-----------|--------|---------|-------|
-| Single Transaction | <1ms | 0.2ms | Memory-mapped access |
-| Batch (100 txs) | <20ms | 8ms | Sequential MDBX reads |
-| Database Open | <100ms | 50ms | One-time mmap setup |
-| Memory Usage | Variable | ~2GB | Virtual memory mapping |
-| Concurrent Readers | Unlimited | N/A | MDBX multi-reader design |
 
 ## Reth Database Location and Setup
 
@@ -413,6 +414,73 @@ This component integrates with:
 - **Error Handling**: Comprehensive error types and recovery strategies
 - **Performance Monitoring**: Built-in statistics and metrics collection
 
+## Version Mismatch Handling
+
+When accessing a Reth database, you may encounter MDBX version mismatch errors (error code -30794). This happens when the MDBX library version used by your application differs from the version that created the database.
+
+### Quick Solutions
+
+1. **Use Auto Mode (Default)**
+   ```rust
+   // This tries multiple approaches automatically
+   let provider = RethDatabaseProvider::new("/path/to/reth/datadir")?;
+   ```
+
+2. **Use Compatibility Mode**
+   ```rust
+   let config = RethDataConfig::new("/path/to/reth/datadir")
+       .with_compatibility_mode(CompatibilityMode::Compatible);
+   let provider = RethDatabaseProvider::with_config(config)?;
+   ```
+
+3. **Force Open (Use with Caution)**
+   ```rust
+   let config = RethDataConfig::new("/path/to/reth/datadir")
+       .with_compatibility_mode(CompatibilityMode::Force)
+       .with_force_open(true);
+   let provider = RethDatabaseProvider::with_config(config)?;
+   ```
+
+### Compatibility Modes
+
+- **Strict**: Fail on any version mismatch (most safe)
+- **Compatible**: Try to open with compatibility flags
+- **Force**: Remove lock files and force open (risky)
+- **Auto**: Try multiple approaches in sequence (default)
+
+### Example: Handling Version Mismatches
+
+```rust
+use revm_tx_simulator_lib::fetch_from_reth::{
+    RethDatabaseProvider, RethDataConfig, CompatibilityMode, FetchError
+};
+
+// Try with fallback strategy
+fn open_database_with_fallback(datadir: &str) -> Result<RethDatabaseProvider, FetchError> {
+    // First try normal mode
+    if let Ok(provider) = RethDatabaseProvider::new(datadir) {
+        return Ok(provider);
+    }
+    
+    // Then try compatibility mode
+    let config = RethDataConfig::new(datadir)
+        .with_compatibility_mode(CompatibilityMode::Compatible);
+    
+    if let Ok(provider) = RethDatabaseProvider::with_config(config) {
+        return Ok(provider);
+    }
+    
+    // Last resort - force mode
+    let config = RethDataConfig::new(datadir)
+        .with_compatibility_mode(CompatibilityMode::Force)
+        .with_force_open(true);
+    
+    RethDatabaseProvider::with_config(config)
+}
+```
+
+See `examples/handle_version_mismatch.rs` for a complete example.
+
 ## Troubleshooting
 
 ### Common Issues
@@ -442,6 +510,22 @@ This component integrates with:
    # Monitor memory usage
    ps aux | grep tx_processor
    pmap -x <PID> | grep -E "total|reth"
+   ```
+
+5. **Version Mismatch (Error -30794)**: MDBX version incompatibility
+   ```bash
+   # Check if Reth is running
+   ps aux | grep reth
+   
+   # Stop Reth if needed
+   killall reth
+   
+   # Remove lock file (if safe)
+   rm ~/.local/share/reth/mainnet/db/mdbx.lck
+   
+   # Use compatibility mode in code
+   let config = RethDataConfig::new(datadir)
+       .with_compatibility_mode(CompatibilityMode::Auto);
    ```
 
 ### Debug Commands
