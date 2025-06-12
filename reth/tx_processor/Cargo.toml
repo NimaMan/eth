@@ -100,10 +100,6 @@ name = "fetch_from_reth_advanced_data_access"
 path = "src/fetch_from_reth/examples/advanced_data_access.rs"
 
 [[bin]]
-name = "fetch_specific_tx"
-path = "src/fetch_from_reth/examples/fetch_specific_tx.rs"
-
-[[bin]]
 name = "fetch_via_rpc"
 path = "src/fetch_from_reth/examples/fetch_via_rpc.rs"
 
@@ -154,6 +150,10 @@ path = "src/fetch_from_reth/optimized_tx_data/examples/measure_1k_latest_perform
 [[bin]]
 name = "optimized_tx_measure_simple"
 path = "src/fetch_from_reth/optimized_tx_data/examples/measure_performance_simple.rs"
+
+[[bin]]
+name = "optimized_tx_io_docs"
+path = "src/fetch_from_reth/optimized_tx_data/examples/complete_io_documentation_example.rs"
 
 # ──────────────────────────────── Examples ────────────────────────────────
 # Cargo will automatically find examples in the examples/ directory.
