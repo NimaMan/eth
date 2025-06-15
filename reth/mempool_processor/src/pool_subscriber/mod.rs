@@ -41,9 +41,8 @@ impl PoolSubscriber {
     }
 
     /// Request initial pool state from Python service via REQ/REP socket
-    /// FAST VERSION: Uses Python values with normalized addresses for consistency
     async fn request_initial_pool_state(&self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Requesting pool data from Python service (HIGH-PERFORMANCE MODE)...");
+        info!("Requesting pool data from Python service...");
         
         // Create REQ socket to request pool data
         let context = zmq::Context::new();
@@ -129,7 +128,7 @@ impl PoolSubscriber {
     }
 
     pub async fn start_listening(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("🚀 Starting HIGH-PERFORMANCE pool subscriber (using direct Python values for error identification)");
+        info!("🚀 Starting pool subscriber");
         
         let context = zmq::Context::new();
         let subscriber = context.socket(zmq::SUB)?;
@@ -146,7 +145,7 @@ impl PoolSubscriber {
             warn!("Failed to get initial pool state: {}", e);
         }
 
-        info!("🔥 HIGH-PERFORMANCE MODE: Real-time pool updates (Python values) - ready to identify pool errors");
+        info!("📊 Real-time pool updates active");
         loop {
             match subscriber.recv_string(0) {
                 Ok(Ok(msg_str)) => {
@@ -160,7 +159,7 @@ impl PoolSubscriber {
                                 debug!("Large pool update: {} pools", message.data.len());
                             }
                             
-                            // HIGH-PERFORMANCE PATH: Use Python values with checksummed addresses
+                            // Process updates with checksummed addresses
                             let mut python_updates = std::collections::HashMap::new();
                             
                             for (address, update) in message.data.iter() {
@@ -172,11 +171,11 @@ impl PoolSubscriber {
                                 python_updates.insert(checksummed_address, python_update);
                             }
                             
-                            // Update the cache with Python data (LIGHTNING FAST - no blockchain calls)
+                            // Update the cache with Python data
                             let updated_pools = self.pool_cache.update_pools(python_updates.iter());
                             
                             // Only log cache updates for debugging if needed
-                            debug!("⚡ Updated {} pools in cache (HIGH-PERFORMANCE MODE)", updated_pools.len());
+                            debug!("Updated {} pools in cache", updated_pools.len());
                         },
                         Err(e) => {
                             warn!("Failed to parse pool update JSON: {}", e);
