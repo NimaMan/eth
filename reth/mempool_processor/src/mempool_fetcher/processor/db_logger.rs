@@ -49,7 +49,16 @@ impl DbLogger {
     
     /// Create a new database logger with default connection parameters
     pub async fn default() -> Result<Self, PgError> {
-        Self::new("postgres", "postgres", "localhost", 5432, "eth_db").await
+        let user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
+        let password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
+        let host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
+        let port = std::env::var("DB_PORT")
+            .unwrap_or_else(|_| "5432".to_string())
+            .parse::<u16>()
+            .unwrap_or(5432);
+        let database = std::env::var("DB_NAME").unwrap_or_else(|_| "eth_db".to_string());
+        
+        Self::new(&user, &password, &host, port, &database).await
     }
     
     /// Connect to the database

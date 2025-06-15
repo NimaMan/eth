@@ -161,8 +161,9 @@ async fn main() -> Result<()> {
     };
     
     // Create log directory if it doesn't exist
-    let log_dir = "/home/nima/code/crypto/logs/mempool";
-    std::fs::create_dir_all(log_dir)?;
+    let log_dir = std::env::var("MEMPOOL_LOG_DIR")
+        .unwrap_or_else(|_| "/home/nima/code/crypto/logs/mempool".to_string());
+    std::fs::create_dir_all(&log_dir)?;
     let scam_log_path = format!("{}/scam_detections.log", log_dir);
     let timing_log_path = format!("{}/processing_times.log", log_dir);
     info!("📝 Logging scam detections to: {}", scam_log_path);
@@ -248,7 +249,7 @@ async fn main() -> Result<()> {
                             // Log to file
                             // Log timing to file
                             if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {
-                                let _ = writeln!(timing_file, "{},{},{:.2},{:.2},{:.2}",
+                                let _ = writeln!(timing_file, "{},{:?},{:.2},{:.2},{:.2}",
                                     Utc::now().to_rfc3339(),
                                     alert.tx_hash,
                                     processing_start.elapsed().as_secs_f64() * 1000.0,
@@ -258,8 +259,9 @@ async fn main() -> Result<()> {
                             }
                             
                             let timestamp: DateTime<Utc> = Utc::now();
+                            let first_seen_time = ws_tx.detection_time.elapsed().as_secs_f64() * 1000.0;
                             let log_entry = format!(
-                                "{} | SCAM DETECTED | tx: {} | type: {:?} | severity: {:?} | pool: {:?} | drain: {:.4} ETH ({:.1}%) | {}\n",
+                                "{} | SCAM DETECTED | tx: {:?} | type: {:?} | severity: {:?} | pool: {:?} | drain: {:.4} ETH ({:.1}%) | first_seen: {:.2}ms ago | {}\n",
                                 timestamp.to_rfc3339(),
                                 alert.tx_hash,
                                 alert.scam_type,
@@ -267,6 +269,7 @@ async fn main() -> Result<()> {
                                 alert.affected_pool,
                                 alert.drain_amount_eth,
                                 alert.drain_percentage,
+                                first_seen_time,
                                 alert.details
                             );
                             
@@ -312,7 +315,7 @@ async fn main() -> Result<()> {
                             // Log timing to file periodically (every 10th transaction)
                             if total_processed % 10 == 0 {
                                 if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {
-                                    let _ = writeln!(timing_file, "{},{},{:.2},{:.2},{:.2}",
+                                    let _ = writeln!(timing_file, "{},{:?},{:.2},{:.2},{:.2}",
                                         Utc::now().to_rfc3339(),
                                         tx_hash,
                                         total_time_ms,
