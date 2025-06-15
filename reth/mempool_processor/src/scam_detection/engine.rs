@@ -68,8 +68,8 @@ impl ScamDetectionEngine {
     pub fn analyze_transaction(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
         let mut alerts = Vec::new();
         
-        debug!("Analyzing tx {} from {} affecting {} pools", 
-              simulation.tx_hash, simulation.from, simulation.affected_pools.len());
+        debug!("Analyzing tx {} affecting {} pools", 
+              simulation.tx_hash, simulation.affected_pools.len());
               
         // For each affected pool, check if it would be scammed
         for (pool_address, effect) in simulation.affected_pools.iter() {
@@ -83,8 +83,9 @@ impl ScamDetectionEngine {
                 // Check if pool state is fresh (less than 60 seconds old)
                 const MAX_POOL_AGE: std::time::Duration = std::time::Duration::from_secs(60);
                 if pool_state.is_stale(MAX_POOL_AGE) {
-                    warn!("Pool state for {} is stale ({:.1}s old), may produce inaccurate results", 
+                    warn!("Pool state for {} is stale ({:.1}s old), skipping to avoid false positives", 
                          pool_address, pool_state.age().as_secs_f64());
+                    continue; // Skip stale data instead of processing it
                 }
                 
                 // Dynamic threshold calculation based on pool size
@@ -132,8 +133,8 @@ impl ScamDetectionEngine {
                     };
                     
                     let alert = ScamAlert {
-                        tx_hash: simulation.tx_hash.to_string(),
-                        from_address: simulation.from.clone(),
+                        tx_hash: simulation.tx_hash.clone(),
+                        from_address: String::new(), // Not tracked in SimulationResult anymore
                         pool_address: pool_address.clone(),
                         token_address: pool_state.token_address.clone(),
                         current_eth_reserve: effect.current_eth_reserve,
@@ -191,9 +192,10 @@ impl ScamDetectionEngine {
         }
         
         let simulation = SimulationResult {
-            tx_hash,
-            from: from_address,
+            tx_hash: format!("{:?}", tx_hash),
             affected_pools: simulation_pools,
+            simulation_successful: true,
+            error_message: None,
         };
         
         self.analyze_transaction(simulation)

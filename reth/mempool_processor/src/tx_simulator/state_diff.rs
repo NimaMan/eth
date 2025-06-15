@@ -1,23 +1,44 @@
-/*
- * State Diff Tracker Module
- * 
- * This module simulates Ethereum transactions using REVM to:
- * 1. Extract per-address balance changes from transactions
- * 2. Track storage changes to detect liquidity removal and token transfers
- * 3. Cache state changes for quick access and analysis
- * 4. Identify suspicious transactions by monitoring pool states
- */
+/// Core State Change Types and Tracking
+/// 
+/// This module defines the fundamental data structures for tracking
+/// state changes in Ethereum transactions. It provides:
+///
+/// Core Types:
+/// - StateChange: Represents balance and storage changes for an address
+/// - StateDiffTracker: Orchestrates state diff extraction from transactions
+///
+/// The types defined here are used by both simulation approaches:
+/// - REVM-based simulator for comprehensive analysis
+/// - debug_traceCall simulator for fast production use
+///
+/// These structures capture:
+/// - ETH balance changes (including gas fees)
+/// - ERC20 token balance changes via storage slots
+/// - General storage modifications
+/// - Transaction metadata for analysis
 
-use crate::mempool_processor::types::*;
+use crate::mempool_fetcher::types::*;
 use ethers::prelude::*;
 use eyre::Result;
 use tracing::{debug, info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
 use revm::primitives::Address;
+use revm_primitives;
 use serde::{Serialize, Deserialize};
 use serde_json::{Value, json};
 use std::path::Path;
+
+/// State diff for mempool transaction tracking
+#[derive(Debug, Clone)]
+pub struct MempoolStateDiff {
+    pub before: Option<f64>,  // ETH balance before (None if unknown)
+    pub after: Option<f64>,   // ETH balance after (None if unknown)
+    pub change: f64,          // Net change in ETH
+    // Extended fields for scam detection
+    pub eth_changes: HashMap<ethers::types::Address, revm_primitives::I256>,  // Address -> ETH change
+    pub token_changes: HashMap<(ethers::types::Address, ethers::types::Address), revm_primitives::I256>,  // (holder, token) -> change
+}
 use std::fs;
 use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
 
@@ -139,16 +160,17 @@ impl StateDiffTracker {
     
     /// Simulate a transaction and extract ETH balance changes (Python-compatible)
     pub async fn simulate_transaction(&mut self, tx: &TransactionView) -> Result<Option<HashMap<String, crate::tx_simulator::MempoolStateDiff>>> {
-        let tx_hash = {
-            let mut hash_array = [0u8; 32];
-            if tx.hash.len() == 32 {
-                hash_array.copy_from_slice(&tx.hash);
-            } else {
-                warn!("Invalid tx hash length: {} for tx data: {:?}", tx.hash.len(), tx);
-                return Ok(None);
-            }
-            H256::from(hash_array)
-        };
+        // Validate transaction hash
+        if tx.hash.len() != 32 {
+            return Err(eyre::eyre!(
+                "Invalid transaction hash length: expected 32 bytes, got {} bytes", 
+                tx.hash.len()
+            ));
+        }
+        
+        let mut hash_array = [0u8; 32];
+        hash_array.copy_from_slice(&tx.hash);
+        let tx_hash = H256::from(hash_array);
         
         debug!("Simulating transaction with stateDiff: {}", hex::encode(tx_hash.as_bytes()));
         
@@ -171,6 +193,8 @@ impl StateDiffTracker {
                                     before: balance_info.before,
                                     after: balance_info.after,
                                     change: balance_info.change,
+                                    eth_changes: HashMap::new(),  // Will be populated separately
+                                    token_changes: HashMap::new(),
                                 });
                             }
                         }

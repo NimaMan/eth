@@ -26,13 +26,16 @@ pub enum ScamAlertReason {
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     /// Transaction hash
-    pub tx_hash: H256,
-    
-    /// Sender address
-    pub from: String,
+    pub tx_hash: String,
     
     /// Simulation result per affected pool
     pub affected_pools: HashMap<String, PoolEffect>,
+    
+    /// Whether simulation was successful
+    pub simulation_successful: bool,
+    
+    /// Error message if simulation failed
+    pub error_message: Option<String>,
 }
 
 /// The effect a transaction would have on a specific pool

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::error;
 
-use crate::mempool_processor::db_logger::DbLogger;
+use crate::mempool_fetcher::processor::DbLogger;
 use crate::pool_subscriber::cache::PoolStateCache;
 use super::engine::{ScamDetectionEngine, ScamDetectionConfig};
 use super::types::{ScamAlert, SimulationResult};
@@ -198,9 +198,10 @@ mod tests {
         );
         
         SimulationResult {
-            tx_hash,
-            from: "0xsender".to_string(),
+            tx_hash: format!("{:?}", tx_hash),
             affected_pools,
+            simulation_successful: true,
+            error_message: None,
         }
     }
     
