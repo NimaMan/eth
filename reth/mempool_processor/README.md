@@ -135,15 +135,16 @@ pub enum SimulatorWrapper {
 }
 ```
 
-**Fast RPC Simulator:**
-- Uses `debug_traceCall` on local Reth node
+**Fast RPC Simulator (Primary):**
+- Uses `debug_traceCall` on local Reth node (~5ms per transaction)
 - State changes without network calls to external providers
 - Optimal for real-time processing (10,000+ TPS capacity)
+- No block number hardcoding - always uses latest state
 
-**REVM Simulator:**
-- Local EVM execution with complete control
-- Detailed execution traces and gas analysis
-- Perfect for complex MEV and security analysis
+**REVM Simulator (Deprecated):**
+- Previously used but removed due to hardcoded block issues
+- Was causing "pruned state" errors by using old block 18,000,000
+- Replaced entirely by debug_traceCall for better performance
 
 ### **📊 Processing Pipeline** (`processor.rs`)
 ```rust
@@ -294,6 +295,30 @@ export DB_HOST="localhost"
 export DB_NAME="eth_db" 
 export POOL_ZMQ_ADDRESS="tcp://localhost:5557"
 ```
+
+### **Transaction Timing Measurement**
+
+The system now includes comprehensive timing statistics to measure end-to-end transaction processing:
+
+```rust
+struct TimingStats {
+    total_processing_time_ms: f64,  // Cumulative processing time
+    transaction_count: u64,         // Number of transactions processed
+    min_time_ms: f64,              // Fastest transaction
+    max_time_ms: f64,              // Slowest transaction
+}
+```
+
+**Timing Points:**
+1. **Transaction Arrival**: When received from WebSocket
+2. **Simulation Start**: Before debug_traceCall RPC
+3. **Simulation Complete**: After state changes extracted
+4. **Total Processing**: Full end-to-end latency
+
+**Performance Targets:**
+- Average: <10ms per transaction
+- P95: <20ms per transaction  
+- P99: <50ms per transaction
 
 ## 🧪 Testing & Validation
 

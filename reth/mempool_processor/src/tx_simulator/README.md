@@ -1,10 +1,17 @@
 # Transaction Simulator Module
 
+## 🚨 Module Refactored (2025-06-15)
+
+**IMPORTANT CHANGES:**
+- **REVM Simulator Removed**: Was causing "pruned state" errors due to hardcoded block 18,000,000
+- **Primary Method**: Now exclusively using `debug_traceCall` RPC (~5ms per transaction)
+- **SimulatorWrapper Deprecated**: No longer needed since we only use one simulation method
+
 ## Overview
 
-The transaction simulator module provides high-performance transaction simulation capabilities for the mempool processor. It simulates pending transactions to detect state changes, token transfers, and potential scam patterns before they are included in blocks.
+The transaction simulator module provides high-performance transaction simulation using the node's `debug_traceCall` RPC method. It simulates pending transactions to detect state changes, token transfers, and potential scam patterns before they are included in blocks.
 
-**Current Status**: Using Fast RPC method for production (~5ms per transaction)
+**Current Status**: Production-ready with debug_traceCall method (~5ms per transaction)
 
 ## Table of Contents
 
