@@ -85,9 +85,16 @@ impl TimingStats {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
+    // Initialize logging with cleaner format
     tracing_subscriber::fmt()
         .with_env_filter("mempool_scam_monitor=info,mempool_processor=info")
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_file(false)
+        .with_line_number(false)
+        .with_level(true)
+        .compact()
         .init();
     
     info!("🚀 Starting Mempool Scam Monitor");
