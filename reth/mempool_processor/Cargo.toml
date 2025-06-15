@@ -29,10 +29,11 @@ zmq             = "0.10"
 # Time handling
 chrono          = { version = "0.4", features = ["serde"] }
 
-# Transaction simulation with REVM - Using latest stable matched pair from user research
-revm            = { path = "../revm_tx_simulator/src/revm/crates/revm", default-features = false, features = ["std", "alloydb", "asyncdb"] }
-revm-primitives = { path = "../revm_tx_simulator/src/revm/crates/primitives", default-features = false, features = ["std", "serde"] }
-revm-context    = { path = "../revm_tx_simulator/src/revm/crates/context", default-features = false, features = ["optional_no_base_fee"] }
+# Transaction simulation with REVM - Using crates.io versions to match revm_tx_simulator
+revm            = { version = "25.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
+revm-primitives = { version = "19.2.0", default-features = false, features = ["std", "serde"] }
+revm-context    = { version = "6.0.0", default-features = false, features = ["optional_no_base_fee"] }
+revm-database   = { version = "5.0.0", default-features = false }
 
 # Alloy dependencies (for revm_tx_simulator_lib interaction)
 alloy-eips      = { version = "1.0.0", default-features = false }
@@ -40,12 +41,26 @@ alloy-provider  = { version = "1.0.6", default-features = false, features = ["re
 alloy-network   = { version = "1.0.6" }
 alloy-rpc-client = { version = "1.0.9" }
 
-# Local simulation library
-revm_tx_simulator_lib = { path = "../revm_tx_simulator", package = "revm_tx_simulator" }
+# Revm transaction simulator from tx_processor
+revm_tx_simulator = { path = "../tx_processor" }
+
+# Reth dependencies for database access
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+
+# Reth ExEx dependencies (optional, for direct integration)
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
+reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
+reth-node-core = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
 
 bytes           = "1.5"
 ethereum-types  = "0.14"
 ethabi          = "18.0"
+lazy_static     = "1.4"
 
 # State cache with LMDB
 lmdb            = "0.8"
@@ -64,12 +79,23 @@ tokio-postgres  = "0.7"
 # CSV writing for performance monitoring
 csv             = "1.3"
 thiserror       = "1.0"
+anyhow          = "1.0"
+tempfile        = "3.8"
 
 # HTTP API server for real-time metrics
 warp            = "0.3"
 
-# DevP2P networking - for now we'll use ethers IPC client
-# The reth IPC implementation is complex and requires local reth source
+# DevP2P networking dependencies
+rlp             = "0.5"      # RLP encoding/decoding for Ethereum protocol
+secp256k1       = "0.29"     # Cryptographic operations for DevP2P
+sha3            = "0.10"     # Keccak hashing
+rand            = "0.8"      # Random number generation for handshake and simulation
+
+# WebSocket client for measurements
+tokio-tungstenite = "0.20"
+
+# Low-level socket control for optimized IPC
+libc = "0.2"
 
 [lib]
 name = "mempool_processor"
@@ -78,6 +104,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "mempool_processor"
 path = "src/main.rs"
+
+# Enable tx_processor module tests
+[features]
+default = []
+tx_processor_tests = []
+reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
 
 [[bin]]
 name = "mempool_tracker"
@@ -99,6 +131,47 @@ path = "src/bin/realtime_scam_detection_service.rs"
 name = "test_live_pool_detection"
 path = "tests/test_live_pool_detection.rs"
 
+[[bin]]
+name = "measure_mempool_timing"
+path = "src/bin/measure_mempool_timing.rs"
+
+[[bin]]
+name = "measure_full_mempool"
+path = "src/bin/measure_full_mempool.rs"
+
+[[bin]]
+name = "measure_optimized_mempool"
+path = "src/bin/measure_optimized_mempool.rs"
+
+[[bin]]
+name = "mempool_websocket_full"
+path = "src/bin/mempool_websocket_full.rs"
+
+[[bin]]
+name = "mempool_latency_benchmark"
+path = "src/bin/mempool_latency_benchmark.rs"
+
+[[bin]]
+name = "measure_streaming_performance"
+path = "src/bin/measure_streaming_performance.rs"
+
+[[bin]]
+name = "realtime_latency_validator"
+path = "src/bin/realtime_latency_validator.rs"
+
+[[bin]]
+name = "websocket_latency_test"
+path = "src/bin/websocket_latency_test.rs"
+
+[[bin]]
+name = "test_direct_integration"
+path = "src/bin/test_direct_integration.rs"
+
+[[bin]]
+name = "mempool_logger_service"
+path = "src/bin/mempool_logger_service.rs"
+
+
 # Performance testing binaries
 [[bin]]
 name = "simple_performance_test"
@@ -112,18 +185,86 @@ path = "tools/performance/mempool_performance_analyzer.rs"
 name = "revm_performance_monitor"
 path = "tools/performance/revm_performance_monitor.rs"
 
-# ───────────────────────────── Patch section (align with revm_tx_simulator) ──────────────────────────────
-[patch.crates-io]
-revm-primitives  = { path = "../revm_tx_simulator/src/revm/crates/primitives" }
-revm-context     = { path = "../revm_tx_simulator/src/revm/crates/context" }
-# Add other revm sub-crates from revm_tx_simulator's patch section as needed
-# For example:
-# revm-inspector   = { path = "../revm_tx_simulator/src/revm/crates/inspector" }
-# revm-database    = { path = "../revm_tx_simulator/src/revm/crates/database" }
-# revm-state       = { path = "../revm_tx_simulator/src/revm/crates/state"}
-# revm-bytecode    = { path = "../revm_tx_simulator/src/revm/crates/bytecode"}
-# revm-precompile  = { path = "../revm_tx_simulator/src/revm/crates/precompile"}
-# revm-handler     = { path = "../revm_tx_simulator/src/revm/crates/handler"}
-# revm-context-interface = { path = "../revm_tx_simulator/src/revm/crates/context/interface" }
-# Start with minimal necessary patches (primitives, context), add more if compilation errors indicate missing patches.
-# The core 'revm' crate itself is already path-based in [dependencies].
+[[bin]]
+name = "test_state_changes"
+path = "src/bin/test_state_changes.rs"
+
+[[bin]]
+name = "mempool_scam_monitor"
+path = "src/bin/mempool_scam_monitor.rs"
+
+# Examples
+[[example]]
+name = "detect_pool_creation"
+path = "examples/detect_pool_creation.rs"
+
+[[example]]
+name = "detect_pool_state_changes"
+path = "examples/detect_pool_state_changes.rs"
+
+[[example]]
+name = "analyze_cypher_tx"
+path = "examples/analyze_cypher_tx.rs"
+
+[[example]]
+name = "test_pool_subscriber"
+path = "examples/test_pool_subscriber.rs"
+
+[[example]]
+name = "test_mempool_processor"
+path = "examples/test_mempool_processor.rs"
+
+[[example]]
+name = "test_tx_simulator_performance"
+path = "examples/test_tx_simulator_performance.rs"
+
+[[example]]
+name = "realtime_simulation_pipeline"
+path = "examples/realtime_simulation_pipeline.rs"
+
+
+[[example]]
+name = "measure_mempool_performance"
+path = "examples/measure_mempool_performance.rs"
+
+[[example]]
+name = "test_optimized_ipc"
+path = "examples/test_optimized_ipc.rs"
+
+[[example]]
+name = "measure_simulation_latency"
+path = "src/tx_simulator/examples/measure_simulation_latency.rs"
+
+[[example]]
+name = "simple_latency_test"
+path = "examples/simple_latency_test.rs"
+
+[[example]]
+name = "fast_simulation_with_state_changes"
+path = "examples/fast_simulation_with_state_changes.rs"
+
+[[example]]
+name = "quick_simulation_test"
+path = "examples/quick_simulation_test.rs"
+
+[[example]]
+name = "actual_simulation_measurement"
+path = "examples/actual_simulation_measurement.rs"
+
+[[example]]
+name = "log_state_changes_one_minute"
+path = "src/tx_simulator/examples/log_state_changes_one_minute.rs"
+
+[[example]]
+name = "log_actual_state_changes"
+path = "src/tx_simulator/examples/log_actual_state_changes.rs"
+
+[[example]]
+name = "debug_trace_analysis"
+path = "src/tx_simulator/examples/debug_trace_analysis.rs"
+
+[[example]]
+name = "monitor_pool_state_changes"
+path = "examples/monitor_pool_state_changes.rs"
+
+# Using crates.io versions - no patches needed
