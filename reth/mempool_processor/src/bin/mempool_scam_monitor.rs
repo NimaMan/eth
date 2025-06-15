@@ -9,11 +9,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use eyre::Result;
 use tracing::{info, warn, error};
+use std::fs::OpenOptions;
+use std::io::Write;
+use chrono::{DateTime, Utc};
 
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::WebSocketClient;
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::mempool_scam_detector::{MempoolScamDetector, PoolInfo};
+use mempool_processor::mempool_fetcher::processor::DbLogger;
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
@@ -85,6 +89,25 @@ async fn main() -> Result<()> {
     // Initialize scam detector
     let mut scam_detector = MempoolScamDetector::new(http_url, 1).await?;
     
+    // Initialize database logger
+    info!("📊 Initializing database logger...");
+    let db_logger = match DbLogger::new_default().await {
+        Ok(logger) => {
+            info!("✅ Database logger connected");
+            Some(logger)
+        }
+        Err(e) => {
+            warn!("⚠️  Database logger failed to connect: {}. Continuing without DB logging.", e);
+            None
+        }
+    };
+    
+    // Create log directory if it doesn't exist
+    let log_dir = "/home/nima/code/crypto/logs/mempool";
+    std::fs::create_dir_all(log_dir)?;
+    let log_file_path = format!("{}/scam_detections.log", log_dir);
+    info!("📝 Logging scam detections to: {}", log_file_path);
+    
     // Add some pools to watch (from the pool cache)
     let pools = pool_cache_clone.get_all_pools();
     let mut watched_count = 0;
@@ -105,6 +128,7 @@ async fn main() -> Result<()> {
     
     let mut total_processed = 0u64;
     let mut total_scams = 0u64;
+    let mut current_block = latest_block.number.unwrap_or_default();
     
     // Main processing loop
     info!("🔄 Starting main processing loop...");
@@ -143,6 +167,52 @@ async fn main() -> Result<()> {
                             error!("   Drain: {:.2} ETH ({:.1}%)", 
                                 alert.drain_amount_eth, alert.drain_percentage);
                             error!("   Details: {}", alert.details);
+                            
+                            // Log to file
+                            let timestamp: DateTime<Utc> = Utc::now();
+                            let log_entry = format!(
+                                "{} | SCAM DETECTED | tx: {} | type: {:?} | severity: {:?} | pool: {:?} | drain: {:.4} ETH ({:.1}%) | {}\n",
+                                timestamp.to_rfc3339(),
+                                alert.tx_hash,
+                                alert.scam_type,
+                                alert.severity,
+                                alert.affected_pool,
+                                alert.drain_amount_eth,
+                                alert.drain_percentage,
+                                alert.details
+                            );
+                            
+                            if let Ok(mut file) = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(&log_file_path)
+                            {
+                                let _ = file.write_all(log_entry.as_bytes());
+                                let _ = file.flush();
+                            }
+                            
+                            // Log to database if available
+                            if let Some(ref logger) = db_logger {
+                                // Get the pool info to find the token address
+                                if let Some(pool_info) = scam_detector.get_pool_info(&alert.affected_pool) {
+                                    let token_address = format!("{:?}", pool_info.token0);
+                                    let pool_address = format!("{:?}", alert.affected_pool);
+                                    let block_number = current_block.as_u64() as i64;
+                                    
+                                    if let Err(e) = logger.write_mempool_scam_prediction(
+                                        &token_address,
+                                        &pool_address,
+                                        block_number,
+                                        pool_info.liquidity_eth,
+                                        pool_info.liquidity_eth - alert.drain_amount_eth,
+                                        eth_threshold,
+                                    ).await {
+                                        error!("Failed to log scam to database: {}", e);
+                                    } else {
+                                        info!("✅ Scam alert logged to database");
+                                    }
+                                }
+                            }
                         }
                         Ok(None) => {
                             // No scam detected

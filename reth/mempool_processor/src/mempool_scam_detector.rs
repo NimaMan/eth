@@ -47,11 +47,11 @@ pub struct MempoolScamDetector {
 }
 
 #[derive(Clone)]
-struct PoolInfo {
-    token0: Address,
-    token1: Address,
-    liquidity_eth: f64,  // Current ETH/WETH liquidity
-    is_honeypot: bool,
+pub struct PoolInfo {
+    pub token0: Address,
+    pub token1: Address,
+    pub liquidity_eth: f64,  // Current ETH/WETH liquidity
+    pub is_honeypot: bool,
 }
 
 impl MempoolScamDetector {
@@ -75,6 +75,11 @@ impl MempoolScamDetector {
     pub fn add_watched_pool(&mut self, pool: Address, info: PoolInfo) {
         self.watched_pools.insert(pool, info);
         info!("Added pool to scam watch: {:?}", pool);
+    }
+    
+    /// Get pool info for a given pool address
+    pub fn get_pool_info(&self, pool: &Address) -> Option<&PoolInfo> {
+        self.watched_pools.get(pool)
     }
     
     /// Analyze a mempool transaction for potential scams

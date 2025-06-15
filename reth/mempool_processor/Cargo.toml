@@ -76,6 +76,9 @@ tiny-keccak     = { version = "2.0", features = ["keccak"] }
 # PostgreSQL Client for database logging
 tokio-postgres  = "0.7"
 
+# Time handling
+chrono = "0.4"
+
 # CSV writing for performance monitoring
 csv             = "1.3"
 thiserror       = "1.0"
