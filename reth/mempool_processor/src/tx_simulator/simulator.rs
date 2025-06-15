@@ -1,7 +1,26 @@
-use crate::mempool_processor::types::TransactionView;
+/// REVM-Based Transaction Simulator
+/// 
+/// This module provides comprehensive EVM simulation using REVM (Rust EVM).
+/// It executes transactions locally with full EVM semantics, providing
+/// accurate state change detection at the cost of higher latency (~40-50ms).
+///
+/// Use Cases:
+/// - When you need 100% accurate EVM execution
+/// - When simulating complex transactions with intricate state dependencies
+/// - When debug_traceCall is not available or insufficient
+///
+/// Trade-offs:
+/// - Slower than RPC-based methods (~40-50ms vs ~5ms)
+/// - Requires local state access
+/// - More resource intensive
+///
+/// For production use with high-volume mempool monitoring, consider using
+/// DebugTraceCallSimulator instead for better performance.
+
+use crate::mempool_fetcher::types::TransactionView;
 use revm_tx_simulator_lib::{
-    simulation_core::{simulate_transaction, SimCacheDB, ExecutionResultType},
-    state_diff_utils::{generate_calculated_account_changes, CalculatedAccountChanges},
+    simulate_signed_tx::simulation_core::{simulate_transaction, SimCacheDB, ExecutionResultType},
+    process_tx::state_diff_utils::{generate_calculated_account_changes, CalculatedAccountChanges},
 };
 use crate::tx_simulator::conversions::transaction_view_to_revm_tx_env;
 

@@ -1,6 +1,6 @@
-use mempool_processor::mempool_processor::fetcher::{MempoolFetcher, FetchMode};
-use mempool_processor::mempool_processor::TransactionSource;
-use mempool_processor::tx_simulator::TransactionSimulator;
+use mempool_fetcher::mempool_fetcher::fetcher::{MempoolFetcher, FetchMode};
+use mempool_fetcher::mempool_fetcher::TransactionSource;
+use mempool_fetcher::tx_simulator::TransactionSimulator;
 use revm_context::BlockEnv as RevmBlockEnv;
 use revm_primitives::hardfork::SpecId;
 use ethers::providers::{Http as EthersHttp, Middleware, Provider as EthersProvider};

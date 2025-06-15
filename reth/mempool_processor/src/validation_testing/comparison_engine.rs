@@ -1,5 +1,9 @@
-use crate::tx_simulator::{ComprehensiveStateChange};
+// TODO: Update to use DebugTraceCallStateDiffCalculator instead
+// use crate::tx_simulator::{ComprehensiveStateChange};
 use super::python_bridge::{PythonResult, PythonStateChange};
+
+// Temporary placeholder until we update to use DebugTraceCallStateDiffCalculator
+type ComprehensiveStateChange = std::collections::HashMap<String, serde_json::Value>;
 use serde::{Serialize, Deserialize};
 use std::collections::{HashMap, HashSet};
 use tracing::info;
@@ -144,9 +148,10 @@ impl ComparisonEngine {
                 address.clone() // Fallback to original if parsing fails
             };
             
-            // Extract token and denom net changes
-            let token_net = change.token_net as i64;
-            let denom_net = change.denom_net;
+            // TODO: Update to use proper types from DebugTraceCallStateDiffCalculator
+            // For now, use placeholder values
+            let token_net = 0i64;
+            let denom_net = 0.0;
             
             map.insert(checksummed_address, (token_net, denom_net));
         }

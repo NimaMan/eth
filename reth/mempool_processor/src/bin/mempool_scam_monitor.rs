@@ -6,9 +6,9 @@
  */
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use eyre::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::{DateTime, Utc};
@@ -24,6 +24,38 @@ use ethers::providers::{Provider, Http, Middleware};
 use ethers::types::{BlockId, BlockNumber, H256};
 
 const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+
+/// Timing statistics for transaction processing
+#[derive(Default)]
+struct TimingStats {
+    total_processing_time_ms: f64,
+    transaction_count: u64,
+    min_time_ms: f64,
+    max_time_ms: f64,
+}
+
+impl TimingStats {
+    fn update(&mut self, elapsed_ms: f64) {
+        self.transaction_count += 1;
+        self.total_processing_time_ms += elapsed_ms;
+        
+        if self.transaction_count == 1 {
+            self.min_time_ms = elapsed_ms;
+            self.max_time_ms = elapsed_ms;
+        } else {
+            self.min_time_ms = self.min_time_ms.min(elapsed_ms);
+            self.max_time_ms = self.max_time_ms.max(elapsed_ms);
+        }
+    }
+    
+    fn average_ms(&self) -> f64 {
+        if self.transaction_count > 0 {
+            self.total_processing_time_ms / self.transaction_count as f64
+        } else {
+            0.0
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -91,7 +123,7 @@ async fn main() -> Result<()> {
     
     // Initialize database logger
     info!("📊 Initializing database logger...");
-    let db_logger = match DbLogger::new_default().await {
+    let db_logger = match DbLogger::default().await {
         Ok(logger) => {
             info!("✅ Database logger connected");
             Some(logger)
@@ -129,6 +161,7 @@ async fn main() -> Result<()> {
     let mut total_processed = 0u64;
     let mut total_scams = 0u64;
     let mut current_block = latest_block.number.unwrap_or_default();
+    let mut timing_stats = TimingStats::default();
     
     // Main processing loop
     info!("🔄 Starting main processing loop...");
@@ -143,6 +176,8 @@ async fn main() -> Result<()> {
         }
         
         for ws_tx in new_txs {
+            let processing_start = Instant::now();
+            
             // Parse transaction hash
             let tx_hash = match ws_tx.hash.parse::<H256>() {
                 Ok(hash) => hash,
@@ -156,6 +191,7 @@ async fn main() -> Result<()> {
             match http_provider.get_transaction(tx_hash).await {
                 Ok(Some(tx)) => {
                     // Analyze for scams
+                    let simulation_start = Instant::now();
                     match scam_detector.analyze_transaction(tx).await {
                         Ok(Some(alert)) => {
                             total_scams += 1;
@@ -167,6 +203,7 @@ async fn main() -> Result<()> {
                             error!("   Drain: {:.2} ETH ({:.1}%)", 
                                 alert.drain_amount_eth, alert.drain_percentage);
                             error!("   Details: {}", alert.details);
+                            error!("   Simulation time: {:.2}ms", simulation_start.elapsed().as_secs_f64() * 1000.0);
                             
                             // Log to file
                             let timestamp: DateTime<Utc> = Utc::now();
@@ -215,18 +252,28 @@ async fn main() -> Result<()> {
                             }
                         }
                         Ok(None) => {
-                            // No scam detected
+                            // No scam detected, log timing at debug level
+                            let elapsed = processing_start.elapsed().as_secs_f64() * 1000.0;
+                            debug!("Transaction {} processed in {:.2}ms (not a scam)", tx_hash, elapsed);
                         }
                         Err(e) => {
                             warn!("Failed to analyze transaction {}: {}", tx_hash, e);
                         }
                     }
                     
+                    // Update timing statistics
+                    let total_time_ms = processing_start.elapsed().as_secs_f64() * 1000.0;
+                    timing_stats.update(total_time_ms);
+                    
                     total_processed += 1;
                     
                     if total_processed % 100 == 0 {
                         info!("📊 Processed {} transactions, found {} scams", 
                             total_processed, total_scams);
+                        info!("⏱️  Timing stats: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                            timing_stats.average_ms(),
+                            timing_stats.min_time_ms,
+                            timing_stats.max_time_ms);
                     }
                 }
                 Ok(None) => {

@@ -1,6 +1,21 @@
-// Conversions for mempool_processor specific types to REVM types
+/// Type Conversions Between Transaction Formats
+/// 
+/// This module handles conversions between different transaction representations
+/// used across the codebase. It bridges the gap between:
+/// - mempool_processor's TransactionView format (from WebSocket/RPC)
+/// - REVM's transaction environment format (for EVM execution)
+/// - ethers-rs types (from node interactions)
+///
+/// The conversions handle edge cases like:
+/// - Missing gas limits (uses safe defaults)
+/// - Missing nonces (defaults to 0)
+/// - Large U256 values that need truncation to u128
+/// - Contract creation vs regular transactions
+///
+/// This module ensures consistent transaction handling across different
+/// simulation approaches and external interfaces.
 
-use crate::mempool_processor::types::TransactionView;
+use crate::mempool_fetcher::types::TransactionView;
 use revm_primitives::{
     Address as RevmAddress, Bytes as RevmBytes, 
     U256 as RevmU256

@@ -12,6 +12,10 @@ use serde_json::Value;
 use std::collections::{HashSet, HashMap};
 use std::time::Instant;
 
+// Import our ERC20 and DEX decoding utilities
+use mempool_fetcher::common::erc20::{decode_erc20_method, ERC20Method, format_token_amount};
+use mempool_fetcher::common::dex::{detect_dex_interaction, DexInteraction, is_dex_router};
+
 #[derive(Parser, Debug)]
 struct Args {
     /// WebSocket endpoint for real-time subscriptions
@@ -26,6 +30,9 @@ struct Args {
     /// Fallback poll interval for mempool in milliseconds (used if WebSocket fails)
     #[arg(long, env = "POLL_INTERVAL_MS", default_value = "500")]
     poll_interval_ms: u64,
+    /// Token addresses to watch (comma-separated)
+    #[arg(long, env = "WATCHED_TOKENS", default_value = "")]
+    watched_tokens: String,
     /// Verbose logging mode
     #[arg(short, long)]
     verbose: bool,
@@ -196,7 +203,8 @@ fn process_transaction(
     threshold: U256,
     zmq_pub: &zmq::Socket,
     processed_count: &Arc<AtomicUsize>,
-    seen_hashes: &mut HashSet<String>
+    seen_hashes: &mut HashSet<String>,
+    watched_tokens: &HashSet<String>,
 ) -> bool {
     // Skip if no destination
     if tx.to.is_none() {
@@ -205,7 +213,9 @@ fn process_transaction(
     }
     
     let to_bytes = tx.to.as_ref().unwrap();
+    let to_hex = hex_encode(&to_bytes);
     let hash_hex = hex_encode(&tx.hash);
+    let from_hex = hex_encode(&tx.from);
     
     // Skip if already seen
     if seen_hashes.contains(&hash_hex) {
@@ -213,6 +223,118 @@ fn process_transaction(
         return false;
     }
     
+    // Check if this is a watched token transaction or DEX interaction
+    let to_address_checksummed = format!("0x{}", to_hex);
+    let is_token_tx = watched_tokens.contains(&to_address_checksummed.to_lowercase()) || 
+                      watched_tokens.contains(&to_address_checksummed);
+    
+    // Check for DEX interactions that might affect watched tokens
+    let is_dex_tx = is_dex_router(&to_address_checksummed) && !watched_tokens.is_empty();
+    
+    if is_token_tx {
+        debug!("Detected transaction to watched token: {}", to_address_checksummed);
+        
+        // Decode ERC20 method if input data is available
+        if let Some(input_data) = &tx.input_data {
+            if let Some(method) = decode_erc20_method(input_data) {
+                match method {
+                    ERC20Method::Transfer { to, amount } => {
+                        info!("🪙 TOKEN TRANSFER detected in tx {}", hash_hex);
+                        info!("  Token: {}", to_address_checksummed);
+                        info!("  From: 0x{}", from_hex);
+                        info!("  To: {:?}", to);
+                        info!("  Amount: {} (raw: {})", format_token_amount(amount, 18), amount);
+                    },
+                    ERC20Method::Approve { spender, amount } => {
+                        info!("✅ TOKEN APPROVAL detected in tx {}", hash_hex);
+                        info!("  Token: {}", to_address_checksummed);
+                        info!("  Owner: 0x{}", from_hex);
+                        info!("  Spender: {:?}", spender);
+                        info!("  Amount: {} (raw: {})", format_token_amount(amount, 18), amount);
+                    },
+                    ERC20Method::TransferFrom { from, to, amount } => {
+                        info!("🔄 TOKEN TRANSFER FROM detected in tx {}", hash_hex);
+                        info!("  Token: {}", to_address_checksummed);
+                        info!("  From: {:?}", from);
+                        info!("  To: {:?}", to);
+                        info!("  Amount: {} (raw: {})", format_token_amount(amount, 18), amount);
+                    },
+                    _ => {
+                        debug!("Other ERC20 method detected: {:?}", method);
+                    }
+                }
+            } else {
+                debug!("Unknown method called on token contract");
+            }
+        }
+        
+        // Mark as seen and processed
+        seen_hashes.insert(hash_hex.clone());
+        
+        // Increment processed count
+        let _current = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+        
+        // For token transactions, always send alert regardless of ETH value
+        let value_u64 = tx.value.min(U256::from(u64::MAX)).as_u64();
+        let buf = create_alert_buffer(
+            &tx.hash,
+            value_u64,
+            &tx.from,
+            &to_bytes
+        );
+        
+        if let Err(e) = zmq_pub.send(&buf, 0) {
+            error!("Failed to send token transaction alert: {}", e);
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Check for DEX interactions
+    if is_dex_tx {
+        if let Some(input_data) = &tx.input_data {
+            if let Some(dex_interaction) = detect_dex_interaction(&to_address_checksummed, input_data) {
+                match &dex_interaction {
+                    DexInteraction::RouterSwap { router_address, swap_type, .. } => {
+                        info!("🔄 DEX SWAP detected in tx {}", hash_hex);
+                        info!("  Router: {:?}", router_address);
+                        info!("  Type: {:?}", swap_type);
+                        info!("  From: 0x{}", from_hex);
+                        info!("  Note: May affect watched tokens");
+                    },
+                    DexInteraction::PoolInteraction { pool_address, interaction_type } => {
+                        info!("💱 POOL INTERACTION detected in tx {}", hash_hex);
+                        info!("  Pool: {:?}", pool_address);
+                        info!("  Type: {:?}", interaction_type);
+                        info!("  From: 0x{}", from_hex);
+                    },
+                    _ => {}
+                }
+                
+                // Mark as seen and send alert for DEX interactions
+                seen_hashes.insert(hash_hex.clone());
+                let _current = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
+                
+                let value_u64 = tx.value.min(U256::from(u64::MAX)).as_u64();
+                let buf = create_alert_buffer(
+                    &tx.hash,
+                    value_u64,
+                    &tx.from,
+                    &to_bytes
+                );
+                
+                if let Err(e) = zmq_pub.send(&buf, 0) {
+                    error!("Failed to send DEX transaction alert: {}", e);
+                    return false;
+                }
+                
+                return true;
+            }
+        }
+    }
+    
+    // Original logic for non-token transactions
     // Check value threshold
     if tx.value < threshold {
         trace!("Skipping transaction below threshold: {}", hash_hex);
@@ -221,13 +343,8 @@ fn process_transaction(
     
     debug!("Processing high-value transaction: {} ({} wei)", hash_hex, tx.value);
     
-    // Handle potential integer overflow for large values
-    let value_u64 = if tx.value > U256::from(u64::MAX) {
-        warn!("Transaction value too large for u64, capping at u64::MAX: {}", tx.value);
-        u64::MAX
-    } else {
-        tx.value.as_u64()
-    };
+    // Handle potential integer overflow for large values safely
+    let value_u64 = tx.value.min(U256::from(u64::MAX)).as_u64();
     
     // Create FlatBuffer alert
     let buf_start = Instant::now();
@@ -300,6 +417,17 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::new(env_filter))
         .init();
 
+    // Parse watched tokens
+    let watched_tokens: HashSet<String> = if !args.watched_tokens.is_empty() {
+        args.watched_tokens
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
     info!("======== Ethereum Mempool Processor ========");
     info!("Version 0.1.0");
     info!("Starting with configuration:");
@@ -307,6 +435,11 @@ async fn main() -> Result<()> {
     info!("  HTTP URL: {}", args.http_rpc_url);
     info!("  Value threshold: {} wei", args.threshold);
     info!("  Poll interval: {}ms", args.poll_interval_ms);
+    info!("  Watched tokens: {}", if watched_tokens.is_empty() { 
+        "None".to_string() 
+    } else { 
+        watched_tokens.iter().cloned().collect::<Vec<_>>().join(", ") 
+    });
     info!("  Verbose mode: {}", args.verbose);
     info!("============================================");
     
@@ -377,11 +510,10 @@ async fn main() -> Result<()> {
             let http_provider_worker = http_provider.clone();
             let processed_count_clone = processed_count.clone();
             let threshold = args.threshold;
+            let watched_tokens_clone = watched_tokens.clone();
             
-            // Create a new ZMQ context and socket for the background task
-            // Since ZMQ Socket doesn't implement Clone
-            let zmq_ctx_inner = zmq::Context::new();
-            let zmq_pub_inner = zmq_ctx_inner.socket(zmq::PUB).unwrap();
+            // Create ZMQ publisher for the worker thread using the same context
+            let zmq_pub_inner = zmq_ctx.socket(zmq::PUB).unwrap();
             zmq_pub_inner.connect("ipc:///tmp/mempool_feed").unwrap();
             
             // Counter for received tx hashes
@@ -402,9 +534,6 @@ async fn main() -> Result<()> {
                 let mut skipped = 0;
                 
                 while let Some(tx_hash) = tx_receiver.recv().await {
-                    // Avoid too many concurrent requests
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    
                     match http_provider_worker.get_transaction(tx_hash).await {
                         Ok(Some(tx)) => {
                             // Convert to our format
@@ -429,11 +558,13 @@ async fn main() -> Result<()> {
                                 threshold,
                                 &zmq_pub_inner,
                                 &processed_count_clone,
-                                &mut seen
+                                &mut seen,
+                                &watched_tokens_clone
                             );
                             
                             if success {
                                 processed += 1;
+                                debug!("Successfully processed transaction {}", tx_hash);
                             } else {
                                 skipped += 1;
                             }
@@ -572,7 +703,8 @@ async fn main() -> Result<()> {
                                     args.threshold,
                                     &zmq_pub,
                                     &processed_count,
-                                    &mut seen_hashes
+                                    &mut seen_hashes,
+                                    &watched_tokens
                                 ) {
                                     processed += 1;
                                 }
@@ -583,31 +715,41 @@ async fn main() -> Result<()> {
                             debug!("No new transactions in this poll");
                         }
                         
-                        // Prune old seen hashes if it gets too large (keep last 10,000)
-                        if seen_hashes.len() > 10_000 {
+                        // Prune old seen hashes more efficiently with bounded memory
+                        const MAX_SEEN_HASHES: usize = 10_000;
+                        const PRUNE_TO_SIZE: usize = 5_000;
+                        
+                        if seen_hashes.len() > MAX_SEEN_HASHES {
                             info!("Pruning seen transaction hash set (size: {})", seen_hashes.len());
-                            let to_remove: Vec<_> = seen_hashes.iter()
-                                .take(seen_hashes.len() - 5_000)
-                                .cloned()
-                                .collect();
                             
-                            for hash in to_remove {
-                                seen_hashes.remove(&hash);
+                            // Create new set with most recent hashes only
+                            let mut new_seen = HashSet::with_capacity(PRUNE_TO_SIZE);
+                            let skip_count = seen_hashes.len() - PRUNE_TO_SIZE;
+                            
+                            for (idx, hash) in seen_hashes.iter().enumerate() {
+                                if idx >= skip_count {
+                                    new_seen.insert(hash.clone());
+                                }
                             }
                             
+                            seen_hashes = new_seen;
                             info!("Pruned seen hashes to {} entries", seen_hashes.len());
                         }
                         
-                        // Prune known_txs to avoid memory growth
-                        if known_txs.len() > 20_000 {
+                        // Prune known_txs more efficiently with bounded memory
+                        const MAX_KNOWN_TXS: usize = 20_000;
+                        const PRUNE_KNOWN_TO: usize = 10_000;
+                        
+                        if known_txs.len() > MAX_KNOWN_TXS {
                             info!("Pruning known transactions map (size: {})", known_txs.len());
-                            let hashes: Vec<_> = known_txs.keys().copied().collect();
-                            for (i, hash) in hashes.iter().enumerate() {
-                                if i < 10_000 {  // Remove oldest 10K
-                                    known_txs.remove(hash);
-                                } else {
-                                    break;
-                                }
+                            
+                            // Keep only the most recent transactions
+                            let mut sorted_hashes: Vec<_> = known_txs.keys().copied().collect();
+                            sorted_hashes.sort(); // Deterministic ordering
+                            
+                            let to_remove = sorted_hashes.len() - PRUNE_KNOWN_TO;
+                            for hash in sorted_hashes.into_iter().take(to_remove) {
+                                known_txs.remove(&hash);
                             }
                             
                             info!("Pruned known_txs to {} entries", known_txs.len());

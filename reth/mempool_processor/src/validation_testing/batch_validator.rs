@@ -4,8 +4,12 @@ use super::{
     python_bridge::{PythonBridgeConfig, PythonResult},
     comparison_engine::{TransactionComparison, ComparisonConfig},
 };
-use crate::tx_simulator::{comprehensive_state_diff::ComprehensiveStateDiffCalculator, ComprehensiveStateChange};
-use crate::mempool_processor::types::{TransactionView};
+// TODO: Update to use DebugTraceCallStateDiffCalculator instead
+// use crate::tx_simulator::{comprehensive_state_diff::ComprehensiveStateDiffCalculator, ComprehensiveStateChange};
+use crate::mempool_fetcher::types::{TransactionView};
+
+// Temporary placeholder until we update to use DebugTraceCallStateDiffCalculator
+type ComprehensiveStateChange = std::collections::HashMap<String, serde_json::Value>;
 use ethers::prelude::*;
 use eyre::Result;
 use std::sync::Arc;

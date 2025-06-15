@@ -81,6 +81,9 @@ pub struct TxProcessingConfig {
     
     /// Timeout for RPC requests
     pub rpc_timeout: Duration,
+    
+    /// List of token contract addresses to watch (in checksum format)
+    pub watched_tokens: Vec<String>,
 }
 
 /// Performance and monitoring configuration
@@ -124,6 +127,7 @@ impl Default for MempoolProcessorConfig {
                 tx_cache_max_age: Duration::from_secs(60),
                 process_all_transactions: true,
                 rpc_timeout: Duration::from_millis(2000),
+                watched_tokens: vec![],
             },
             performance: PerformanceConfig {
                 metrics_interval: Duration::from_secs(60),
@@ -162,6 +166,17 @@ impl MempoolProcessorConfig {
         if let Ok(val) = std::env::var("TX_CACHE_CAPACITY") {
             if let Ok(capacity) = val.parse::<usize>() {
                 config.tx_processing.tx_cache_capacity = capacity;
+            }
+        }
+        
+        if let Ok(val) = std::env::var("WATCHED_TOKENS") {
+            // Parse comma-separated list of token addresses
+            let tokens: Vec<String> = val.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !tokens.is_empty() {
+                config.tx_processing.watched_tokens = tokens;
             }
         }
         

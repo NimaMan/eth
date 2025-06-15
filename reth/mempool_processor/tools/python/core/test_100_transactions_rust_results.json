@@ -1,0 +1,1684 @@
+{
+  "test_config": {
+    "target_count": 100,
+    "start_time": 1749813821.391137,
+    "rpc_url": "http://127.0.0.1:8545",
+    "rust_binary": "test_comprehensive_state_diff",
+    "end_time": 1749813833.6036298,
+    "duration": 12.212492942810059
+  },
+  "transactions": [
+    {
+      "hash": "c5b5031c6ab1f0681de8f7f3b03b74b767186fa74d510f4981e7a720c011bc13",
+      "block": 22695314,
+      "value": 0.1,
+      "from": "0xE5B8E8e9cE1C7D72FeA72040Cf57046aF9e8bF3f",
+      "to": "0x3A10dC1A145dA500d5Fba38b9EC49C8ff11a981F",
+      "gas_limit": 290540
+    },
+    {
+      "hash": "4308002a3f05e45fdafd5a0a4c62dfdc9bde195d56257a7d31a4cd99c3e8ea28",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xBc278857DBb7C346Dd09eb9159C84328A29566Ea",
+      "to": "0x3A10dC1A145dA500d5Fba38b9EC49C8ff11a981F",
+      "gas_limit": 351967
+    },
+    {
+      "hash": "1b7a3cb8bc9ba14da6bfef6533ddbe5744155fd0adc8a8c26263d14dadd01caf",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xB5A46bC8b76FD2825AEB43db9C9e89e89158ECdE",
+      "to": "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2",
+      "gas_limit": 80000
+    },
+    {
+      "hash": "c4fc5dfd499fd02bebc7cdb93237f71cc246683a1641d2d2a815294643c4d592",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x264bd8291fAE1D75DB2c5F573b07faA6715997B5",
+      "to": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+      "gas_limit": 97156
+    },
+    {
+      "hash": "f0897124a7270e04e8da4c154c3513a298486638194dcb74e82e9e43a7501ea4",
+      "block": 22695314,
+      "value": 0.07227412,
+      "from": "0x264bd8291fAE1D75DB2c5F573b07faA6715997B5",
+      "to": "0x2b77E8E27a2144a84752B76E30D3627D5414076F",
+      "gas_limit": 500000
+    },
+    {
+      "hash": "0f13799f496f6ca5cd5a4d7cb8b85ca5c79646e1ad4e8d3ef71eca0aca96bc40",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x0aC02aa80E3a92ec8f2ff6BEBf8DDBA06A7c00FE",
+      "to": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+      "gas_limit": 250063
+    },
+    {
+      "hash": "78832fd6ff5d49013fdb0f5e8850b60ff5e068726711b46c575ff94afb30bf82",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xd493DdC634928546E0ac9740ad542bC6EEeb6c25",
+      "to": "0xf816507E690f5Aa4E29d164885EB5fa7a5627860",
+      "gas_limit": 84294
+    },
+    {
+      "hash": "14245a573172935d077bfbd3bb552807427587d788ea49d4db3e6fecad0e1c56",
+      "block": 22695314,
+      "value": 2.2695314e-11,
+      "from": "0x5B43453FCE04b92E190f391a83136bfBeCEDEFd1",
+      "to": "0xfBd4cdB413E45a52E2C8312f670e9cE67E794C37",
+      "gas_limit": 775910
+    },
+    {
+      "hash": "6a1fed0c865cda54bf4f21b43547c1395313a091034209be24a9a006672bb4fd",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xfE9fA6E0b2C63C6e64cE4EDEa3B4F190286E6922",
+      "to": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+      "gas_limit": 372756
+    },
+    {
+      "hash": "f1667baa4faff83da210c078468edc046c0399f79c6996139af3594b838ce07f",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xDf8ADfE10d4A4D9F0fc4D3E377A6e8d5730eb40C",
+      "to": "0x06CFf7088619C7178F5e14f0B119458d08d2f5ef",
+      "gas_limit": 344350
+    },
+    {
+      "hash": "d0a289c5bf1c4371074bdf4b7e9daca263643d0056a77caf2238c131845f919c",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x7073928Aa37B1648E3390f5A5977Aa512eA63192",
+      "to": "0x55023e3a21141eEb7c53880A7C3C9ac79eEa7825",
+      "gas_limit": 345000
+    },
+    {
+      "hash": "5c88f91bfde38e4bc73dc4a6822b485d001756219e78e8729f3d756fa5ee920a",
+      "block": 22695314,
+      "value": 1.3244e-14,
+      "from": "0x8a6Aad705C815f9aaef790055e5caa1998dEFEcB",
+      "to": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+      "gas_limit": 171822
+    },
+    {
+      "hash": "4970140ce54da6737dd0d68df5add47831b54ce700e0fefc72a794dff8189a4d",
+      "block": 22695314,
+      "value": 1.2309e-14,
+      "from": "0x2D7073D3160F2492677844fAbf01DD9143C186F2",
+      "to": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+      "gas_limit": 212576
+    },
+    {
+      "hash": "45ed9e4e71523c8aab828daa395a52251ed63aa3689b1a38415484c591bd9cce",
+      "block": 22695314,
+      "value": 1.3283e-14,
+      "from": "0x98972D167F8490F970E00a255491161b53f53322",
+      "to": "0xEff6cb8b614999d130E537751Ee99724D01aA167",
+      "gas_limit": 151683
+    },
+    {
+      "hash": "264cd2e0881c3faf70f7a4cc1a0f98ef0f63b7233e67af572bbbd1dfb0e33d80",
+      "block": 22695314,
+      "value": 39.5,
+      "from": "0xE79913EDdfaD66CD4f5C739071496e6d5112a765",
+      "to": "0xD1ca1F4dBB645710f5D5a9917AA984a47524f49A",
+      "gas_limit": 760593
+    },
+    {
+      "hash": "592f841adf4315b306c08839b9ea494af3c9d533fa66843ad13c1008e4976c37",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xcE0d2213A0eAFF4176D90B39879b7B4F870fA428",
+      "to": "0xd91eFec7E42f80156d1D9f660a69847188950747",
+      "gas_limit": 778193
+    },
+    {
+      "hash": "f9ce8eba1eba82839cd2efd8bcd88245137c66ac1e85db97a82f54de4a38f32d",
+      "block": 22695314,
+      "value": 0.040172137909121,
+      "from": "0xB008d0404E6aC05033E96ab597902fD8d27c1a03",
+      "to": "0x2Ea6cbFE1391CB84d386286E69Bc687c3345f9eB",
+      "gas_limit": 21000
+    },
+    {
+      "hash": "a67a75cf83079cf6ee11201d3cc732d513d213af726e9463829bcdc0b7da477b",
+      "block": 22695314,
+      "value": 0.049,
+      "from": "0x3d2a09d6A309Fc84838DDc01bfa20dbf5B59AC8a",
+      "to": "0x6088d94C5a40CEcd3ae2D4e0710cA687b91c61d0",
+      "gas_limit": 218927
+    },
+    {
+      "hash": "8cd3697d8068f12a80a74078f8f11fcb41d54306341e66010116fd026d6fbb50",
+      "block": 22695314,
+      "value": 0.06,
+      "from": "0x60106D6d24844bd66BFcD710bc32004Fd93337ea",
+      "to": "0x055C48651015Cf5b21599a4DED8c402Fdc718058",
+      "gas_limit": 300823
+    },
+    {
+      "hash": "8327450d3f7a50d367f6d1bddc7bb595c619b03f778f793cd0aea249ea0186d3",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x381b7d64303a2A5251ac12eE147fFdb337dA5969",
+      "to": "0xC758d5718147C8c5bC440098D623Cf8d96B95b83",
+      "gas_limit": 300002
+    },
+    {
+      "hash": "a09c51f7f5f4311d49d7315c43cacd2e4be642ea976d13b99a24d38815889089",
+      "block": 22695314,
+      "value": 0.0031,
+      "from": "0xa374E4396CE6e56A5052cE2A73853Efff96b5479",
+      "to": "0xaaC6eCE08A6B8F23124EbC0209BA390E2fA65138",
+      "gas_limit": 31500
+    },
+    {
+      "hash": "5040431b6e5f30a75ef7fedc1fb140004a80ac773028c2d32147e611280f274b",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x97Ad0208A3eDC352A53B864447226A752893322d",
+      "to": "0xAA732c9c110A84d090a72da230eAe1E779f89246",
+      "gas_limit": 250000
+    },
+    {
+      "hash": "b556a68576cec833852054624129a9a30ecd21bd2d029d288f74a9ef1c26b40d",
+      "block": 22695314,
+      "value": 0.001617698937143197,
+      "from": "0xEC9aAdd507fD6556865225Ecdea3C1c7b80dB4A3",
+      "to": "0xa5F565650890fBA1824Ee0F21EbBbF660a179934",
+      "gas_limit": 50535
+    },
+    {
+      "hash": "3b400f9be0d3fbba13e57060c34e8cf98249f6b584163a4ccdd5c71ef7f4d865",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x090BC17246b6a30A77b45d8D2F86897BE699E600",
+      "to": "0x8e2557f09aF4a44779499bF7559720464feBdDE4",
+      "gas_limit": 1000000
+    },
+    {
+      "hash": "0ce3bf6f883388795f0ecfa35b8b6e5fbd02abfd4ec9a0b344f41f3729f21a5a",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xC8321F89491e4FA445BB57cF8a361743343b2dd5",
+      "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "gas_limit": 94617
+    },
+    {
+      "hash": "abe087e8d2187946054f142b4be34aa0ed7a00dc4bb21ed01a9be6717ddda0be",
+      "block": 22695314,
+      "value": 0.005,
+      "from": "0x0Cc7830Fd23d01FdC87f29d248309E857d6Df8fC",
+      "to": "0xa5F565650890fBA1824Ee0F21EbBbF660a179934",
+      "gas_limit": 50535
+    },
+    {
+      "hash": "e39fbf805aa8b946efb5e8a84ee350f9ef1d46caae7a97958920d000f1cf9317",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x0B748f61Dfe9a0476c0931E7CcF48e0655328E29",
+      "to": "0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af",
+      "gas_limit": 394774
+    },
+    {
+      "hash": "3964ee7a818d03badd098e30b705815ad09ec64bd31d68921acd428aea492aec",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x9042aA225adA92153d7dCCFCeAF28832Ff6ad8bf",
+      "to": "0x9042aA225adA92153d7dCCFCeAF28832Ff6ad8bf",
+      "gas_limit": 263127
+    },
+    {
+      "hash": "84287718faa7bfc402c84a2b38f55e1dcb0bd22ce0a5b32a6a01a1918572665f",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xfD25eBD43B51a3Ceb2e15D9eB17B3683996fe3B3",
+      "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "gas_limit": 56373
+    },
+    {
+      "hash": "908b0156110f9ad2e8eb98ff4fb923749659ecee78359987081836881948727b",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x9B961d1E9B02D1F620fBF71CA06706d4c0688Ac7",
+      "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "gas_limit": 64043
+    },
+    {
+      "hash": "81dec6c3011349c230ee2b737bbaf46c2af31a94b07e8debe3cd5a86b232b8d4",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xD9790C266e222fF6E1220a8F8655E1cE53caDC5B",
+      "to": "0x111111125421cA6dc452d289314280a0f8842A65",
+      "gas_limit": 107223
+    },
+    {
+      "hash": "d70d48a2e9fa7e63491c5332ff7997ee268830139ba1eee83e0788e5e393af9c",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x301579F3DF737ffeB7442BcC2bcC23DC54a2ab8b",
+      "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "gas_limit": 148948
+    },
+    {
+      "hash": "fc75c6c97baffb5845ee5d26581ac0088f47a5bb3e98d3f485137c538c1c77b7",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x51D87DE425e5Ebc38390f7fd25c4A4BA9a9A30fB",
+      "to": "0xe5a89cd031dA286af727c7B5a0b286Ee1401887A",
+      "gas_limit": 95340
+    },
+    {
+      "hash": "9177f4a0e0bb6993a7dd189fc6d1312e1c53c14924c5ad26667277e9e126ac6b",
+      "block": 22695314,
+      "value": 0.362,
+      "from": "0x5e809fdeC5F670bd4d4F72929126F32D6E2A10eD",
+      "to": "0x6f6ee4fc203CA331c827Fb043F360891881FeD13",
+      "gas_limit": 21000
+    },
+    {
+      "hash": "02cad36a7b7ddad98f5350f079b644f2a86362cb65500be606eb577ee5bd8776",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x5068F372668d21d43F2c2c2eC4668c82BA4b7f56",
+      "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "gas_limit": 78905
+    },
+    {
+      "hash": "0dc630819dde6df670f471cd52028906e0c3638cefb3b9f37875dbf055edd936",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xf8A146022Dd06a49C91d094f48F5A72006726D31",
+      "to": "0x4FEF9D741011476750A243aC70b9789a63dd47Df",
+      "gas_limit": 95780
+    },
+    {
+      "hash": "edcf99c4746c6e7892b0994a44422f6809f61e096d77c27f0fd883aaf278574c",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xEDf354BE45b19F33F397287278CAB4883d6F87b4",
+      "to": "0xB4aF04511Ba440596e9C0454b8CCB4fdA757e568",
+      "gas_limit": 84213
+    },
+    {
+      "hash": "6071632e726bbe3e827c1772487bf8c108ffec464d4d05cf5c1a2e1d0827dec9",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x13271ADF8C9753547b98501B684ad892B33Dc0b7",
+      "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "gas_limit": 64043
+    },
+    {
+      "hash": "5a1e6b0317fb41c6d0540c40b336b657d4e1a294adfe9c65bda487c1591ec338",
+      "block": 22695314,
+      "value": 0.02155,
+      "from": "0xfefbA63bCbaAa60056Bd095e75c25918f7D7e4cd",
+      "to": "0xEf50ac13B5706A8A66925c462f5B2b16Fd08adaF",
+      "gas_limit": 21000
+    },
+    {
+      "hash": "9a806b7a6313cf5b636ea2312ea0660c45acd80e609a9adc2b4bb0a323eda821",
+      "block": 22695314,
+      "value": 2.6000000001003e-05,
+      "from": "0x83E2eCfcc2d3046a38EA55347842abcFfc97d70a",
+      "to": "0x623777Cc098C6058a46cF7530f45150ff6a8459D",
+      "gas_limit": 21000
+    },
+    {
+      "hash": "370fc30379b45839e7578e25da40f4a421cfbc6b58cab594dcf78ca01b4951d0",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x28cD8363cBEaE51FAF8Ae752aEE7c37bC2a85120",
+      "to": "0x13a1A69701763C9900E17f3A995492D7b1415b0F",
+      "gas_limit": 1493790
+    },
+    {
+      "hash": "7adbb5b2838ee1bb7577ffbcd80c0806ee2290804c72e5bf0a29eba038e897e5",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x8Ab639af24dd616B3E77d123F5BD6692C6016f76",
+      "to": "0x881D40237659C251811CEC9c364ef91dC08D300C",
+      "gas_limit": 238416
+    },
+    {
+      "hash": "207478acd511ee6cd1f2aed9ce9d106b60f86329e8262e516abaa333881923c3",
+      "block": 22695314,
+      "value": 0.002979576182593948,
+      "from": "0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97",
+      "to": "0xF79983c36B60ae83449dC4390E2556A034a28Cb4",
+      "gas_limit": 21000
+    },
+    {
+      "hash": "727382e1b75bd39fd86b7ca22384707a8896b2edbcc3cc0555dc3180fe14c926",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x56Eddb7aa87536c09CCc2793473599fD21A8b17F",
+      "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "gas_limit": 220436
+    },
+    {
+      "hash": "ada897ee3f0ceedd07400bd5eaac4d6e49363a55a730c61f3d728828d6c48ecf",
+      "block": 22695314,
+      "value": 1.369108e-12,
+      "from": "0x0Fc7cB62247151faf5e7A948471308145f020d2E",
+      "to": "0xA69babEF1cA67A37Ffaf7a485DfFF3382056e78C",
+      "gas_limit": 230994
+    },
+    {
+      "hash": "3c992b307da921603c5a4202b52b83a798c51f2dd11e7d7ebe48b7860105efaa",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x730651AF507980D498bF1bC3ed98A4989a736D90",
+      "to": "0xf621Fb08BBE51aF70e7E0F4EA63496894166Ff7F",
+      "gas_limit": 612672
+    },
+    {
+      "hash": "2288a31150c1ec2e00d05f7f1c88b32cc43ec29f3671576e9411297dc6483a50",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xA77A95d92169bD7A3bB040B843962aD8069886bb",
+      "to": "0x60bA498a8A273490F61186C02E4D9E064417C8e7",
+      "gas_limit": 53922
+    },
+    {
+      "hash": "44ddba93c2555ce4e21c5f91360885d9431dd92280e141d3bec2b6b7240f0524",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549",
+      "to": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "gas_limit": 220436
+    },
+    {
+      "hash": "51eabeb009eb5f58490639dcabf9dfb8269400e294cd8590b3321d0b0a7b4daa",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xAe2D4617c862309A3d75A0fFB358c7a5009c673F",
+      "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "gas_limit": 500000
+    },
+    {
+      "hash": "f15628211bf4bd04c98331d8dd1ed6b6b9fe2762ee8f9a68f9d33e246fe37dd5",
+      "block": 22695314,
+      "value": 0.0,
+      "from": "0xAe2D4617c862309A3d75A0fFB358c7a5009c673F",
+      "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "gas_limit": 500000
+    }
+  ],
+  "python_results": {
+    "c5b5031c6ab1f0681de8f7f3b03b74b767186fa74d510f4981e7a720c011bc13": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xe5b8e8e9ce1c7d72fea72040cf57046af9e8bf3f": {
+          "eth_net": -0.1,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x3a10dc1a145da500d5fba38b9ec49c8ff11a981f": {
+          "eth_net": 0.1,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "4308002a3f05e45fdafd5a0a4c62dfdc9bde195d56257a7d31a4cd99c3e8ea28": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "1b7a3cb8bc9ba14da6bfef6533ddbe5744155fd0adc8a8c26263d14dadd01caf": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "c4fc5dfd499fd02bebc7cdb93237f71cc246683a1641d2d2a815294643c4d592": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "f0897124a7270e04e8da4c154c3513a298486638194dcb74e82e9e43a7501ea4": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x264bd8291fae1d75db2c5f573b07faa6715997b5": {
+          "eth_net": -0.07227412,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x2b77e8e27a2144a84752b76e30d3627d5414076f": {
+          "eth_net": 0.07227412,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "0f13799f496f6ca5cd5a4d7cb8b85ca5c79646e1ad4e8d3ef71eca0aca96bc40": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "78832fd6ff5d49013fdb0f5e8850b60ff5e068726711b46c575ff94afb30bf82": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "14245a573172935d077bfbd3bb552807427587d788ea49d4db3e6fecad0e1c56": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x5b43453fce04b92e190f391a83136bfbecedefd1": {
+          "eth_net": -2.3e-11,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xfbd4cdb413e45a52e2c8312f670e9ce67e794c37": {
+          "eth_net": 2.3e-11,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "6a1fed0c865cda54bf4f21b43547c1395313a091034209be24a9a006672bb4fd": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "f1667baa4faff83da210c078468edc046c0399f79c6996139af3594b838ce07f": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "d0a289c5bf1c4371074bdf4b7e9daca263643d0056a77caf2238c131845f919c": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "5c88f91bfde38e4bc73dc4a6822b485d001756219e78e8729f3d756fa5ee920a": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x8a6aad705c815f9aaef790055e5caa1998defecb": {
+          "eth_net": -0.0,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xeff6cb8b614999d130e537751ee99724d01aa167": {
+          "eth_net": 0.0,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "4970140ce54da6737dd0d68df5add47831b54ce700e0fefc72a794dff8189a4d": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x2d7073d3160f2492677844fabf01dd9143c186f2": {
+          "eth_net": -0.0,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xeff6cb8b614999d130e537751ee99724d01aa167": {
+          "eth_net": 0.0,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "45ed9e4e71523c8aab828daa395a52251ed63aa3689b1a38415484c591bd9cce": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x98972d167f8490f970e00a255491161b53f53322": {
+          "eth_net": -0.0,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xeff6cb8b614999d130e537751ee99724d01aa167": {
+          "eth_net": 0.0,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "264cd2e0881c3faf70f7a4cc1a0f98ef0f63b7233e67af572bbbd1dfb0e33d80": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xe79913eddfad66cd4f5c739071496e6d5112a765": {
+          "eth_net": -39.5,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xd1ca1f4dbb645710f5d5a9917aa984a47524f49a": {
+          "eth_net": 39.5,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "592f841adf4315b306c08839b9ea494af3c9d533fa66843ad13c1008e4976c37": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "f9ce8eba1eba82839cd2efd8bcd88245137c66ac1e85db97a82f54de4a38f32d": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xb008d0404e6ac05033e96ab597902fd8d27c1a03": {
+          "eth_net": -0.040172137909,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x2ea6cbfe1391cb84d386286e69bc687c3345f9eb": {
+          "eth_net": 0.040172137909,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "a67a75cf83079cf6ee11201d3cc732d513d213af726e9463829bcdc0b7da477b": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x3d2a09d6a309fc84838ddc01bfa20dbf5b59ac8a": {
+          "eth_net": -0.049,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x6088d94c5a40cecd3ae2d4e0710ca687b91c61d0": {
+          "eth_net": 0.049,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "8cd3697d8068f12a80a74078f8f11fcb41d54306341e66010116fd026d6fbb50": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x60106d6d24844bd66bfcd710bc32004fd93337ea": {
+          "eth_net": -0.06,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x055c48651015cf5b21599a4ded8c402fdc718058": {
+          "eth_net": 0.06,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "8327450d3f7a50d367f6d1bddc7bb595c619b03f778f793cd0aea249ea0186d3": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "a09c51f7f5f4311d49d7315c43cacd2e4be642ea976d13b99a24d38815889089": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xa374e4396ce6e56a5052ce2a73853efff96b5479": {
+          "eth_net": -0.0031,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xaac6ece08a6b8f23124ebc0209ba390e2fa65138": {
+          "eth_net": 0.0031,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "5040431b6e5f30a75ef7fedc1fb140004a80ac773028c2d32147e611280f274b": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "b556a68576cec833852054624129a9a30ecd21bd2d029d288f74a9ef1c26b40d": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xec9aadd507fd6556865225ecdea3c1c7b80db4a3": {
+          "eth_net": -0.001617698937,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xa5f565650890fba1824ee0f21ebbbf660a179934": {
+          "eth_net": 0.001617698937,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "3b400f9be0d3fbba13e57060c34e8cf98249f6b584163a4ccdd5c71ef7f4d865": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "0ce3bf6f883388795f0ecfa35b8b6e5fbd02abfd4ec9a0b344f41f3729f21a5a": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "abe087e8d2187946054f142b4be34aa0ed7a00dc4bb21ed01a9be6717ddda0be": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x0cc7830fd23d01fdc87f29d248309e857d6df8fc": {
+          "eth_net": -0.005,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xa5f565650890fba1824ee0f21ebbbf660a179934": {
+          "eth_net": 0.005,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "e39fbf805aa8b946efb5e8a84ee350f9ef1d46caae7a97958920d000f1cf9317": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "3964ee7a818d03badd098e30b705815ad09ec64bd31d68921acd428aea492aec": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "84287718faa7bfc402c84a2b38f55e1dcb0bd22ce0a5b32a6a01a1918572665f": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "908b0156110f9ad2e8eb98ff4fb923749659ecee78359987081836881948727b": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "81dec6c3011349c230ee2b737bbaf46c2af31a94b07e8debe3cd5a86b232b8d4": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "d70d48a2e9fa7e63491c5332ff7997ee268830139ba1eee83e0788e5e393af9c": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "fc75c6c97baffb5845ee5d26581ac0088f47a5bb3e98d3f485137c538c1c77b7": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "9177f4a0e0bb6993a7dd189fc6d1312e1c53c14924c5ad26667277e9e126ac6b": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x5e809fdec5f670bd4d4f72929126f32d6e2a10ed": {
+          "eth_net": -0.362,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x6f6ee4fc203ca331c827fb043f360891881fed13": {
+          "eth_net": 0.362,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "02cad36a7b7ddad98f5350f079b644f2a86362cb65500be606eb577ee5bd8776": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "0dc630819dde6df670f471cd52028906e0c3638cefb3b9f37875dbf055edd936": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "edcf99c4746c6e7892b0994a44422f6809f61e096d77c27f0fd883aaf278574c": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "6071632e726bbe3e827c1772487bf8c108ffec464d4d05cf5c1a2e1d0827dec9": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "5a1e6b0317fb41c6d0540c40b336b657d4e1a294adfe9c65bda487c1591ec338": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0xfefba63bcbaaa60056bd095e75c25918f7d7e4cd": {
+          "eth_net": -0.02155,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xef50ac13b5706a8a66925c462f5b2b16fd08adaf": {
+          "eth_net": 0.02155,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "9a806b7a6313cf5b636ea2312ea0660c45acd80e609a9adc2b4bb0a323eda821": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x83e2ecfcc2d3046a38ea55347842abcffc97d70a": {
+          "eth_net": -2.6e-05,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0x623777cc098c6058a46cf7530f45150ff6a8459d": {
+          "eth_net": 2.6e-05,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "370fc30379b45839e7578e25da40f4a421cfbc6b58cab594dcf78ca01b4951d0": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "7adbb5b2838ee1bb7577ffbcd80c0806ee2290804c72e5bf0a29eba038e897e5": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "207478acd511ee6cd1f2aed9ce9d106b60f86329e8262e516abaa333881923c3": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97": {
+          "eth_net": -0.002979576183,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xf79983c36b60ae83449dc4390e2556a034a28cb4": {
+          "eth_net": 0.002979576183,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "727382e1b75bd39fd86b7ca22384707a8896b2edbcc3cc0555dc3180fe14c926": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "ada897ee3f0ceedd07400bd5eaac4d6e49363a55a730c61f3d728828d6c48ecf": {
+      "success": true,
+      "address_count": 2,
+      "state_changes": {
+        "0x0fc7cb62247151faf5e7a948471308145f020d2e": {
+          "eth_net": -1e-12,
+          "token_net": {},
+          "movements": {
+            "in": 0,
+            "out": 1
+          }
+        },
+        "0xa69babef1ca67a37ffaf7a485dfff3382056e78c": {
+          "eth_net": 1e-12,
+          "token_net": {},
+          "movements": {
+            "in": 1,
+            "out": 0
+          }
+        }
+      },
+      "has_eth_changes": true,
+      "has_token_changes": false
+    },
+    "3c992b307da921603c5a4202b52b83a798c51f2dd11e7d7ebe48b7860105efaa": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "2288a31150c1ec2e00d05f7f1c88b32cc43ec29f3671576e9411297dc6483a50": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "44ddba93c2555ce4e21c5f91360885d9431dd92280e141d3bec2b6b7240f0524": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "51eabeb009eb5f58490639dcabf9dfb8269400e294cd8590b3321d0b0a7b4daa": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    },
+    "f15628211bf4bd04c98331d8dd1ed6b6b9fe2762ee8f9a68f9d33e246fe37dd5": {
+      "success": true,
+      "address_count": 0,
+      "state_changes": {},
+      "has_eth_changes": false,
+      "has_token_changes": false
+    }
+  },
+  "rust_results": {
+    "c5b5031c6ab1f0681de8f7f3b03b74b767186fa74d510f4981e7a720c011bc13": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "4308002a3f05e45fdafd5a0a4c62dfdc9bde195d56257a7d31a4cd99c3e8ea28": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "1b7a3cb8bc9ba14da6bfef6533ddbe5744155fd0adc8a8c26263d14dadd01caf": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "c4fc5dfd499fd02bebc7cdb93237f71cc246683a1641d2d2a815294643c4d592": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "f0897124a7270e04e8da4c154c3513a298486638194dcb74e82e9e43a7501ea4": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "0f13799f496f6ca5cd5a4d7cb8b85ca5c79646e1ad4e8d3ef71eca0aca96bc40": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "78832fd6ff5d49013fdb0f5e8850b60ff5e068726711b46c575ff94afb30bf82": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "14245a573172935d077bfbd3bb552807427587d788ea49d4db3e6fecad0e1c56": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "6a1fed0c865cda54bf4f21b43547c1395313a091034209be24a9a006672bb4fd": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "f1667baa4faff83da210c078468edc046c0399f79c6996139af3594b838ce07f": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "d0a289c5bf1c4371074bdf4b7e9daca263643d0056a77caf2238c131845f919c": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "5c88f91bfde38e4bc73dc4a6822b485d001756219e78e8729f3d756fa5ee920a": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "4970140ce54da6737dd0d68df5add47831b54ce700e0fefc72a794dff8189a4d": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "45ed9e4e71523c8aab828daa395a52251ed63aa3689b1a38415484c591bd9cce": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "264cd2e0881c3faf70f7a4cc1a0f98ef0f63b7233e67af572bbbd1dfb0e33d80": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "592f841adf4315b306c08839b9ea494af3c9d533fa66843ad13c1008e4976c37": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "f9ce8eba1eba82839cd2efd8bcd88245137c66ac1e85db97a82f54de4a38f32d": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "a67a75cf83079cf6ee11201d3cc732d513d213af726e9463829bcdc0b7da477b": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "8cd3697d8068f12a80a74078f8f11fcb41d54306341e66010116fd026d6fbb50": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "8327450d3f7a50d367f6d1bddc7bb595c619b03f778f793cd0aea249ea0186d3": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "a09c51f7f5f4311d49d7315c43cacd2e4be642ea976d13b99a24d38815889089": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "5040431b6e5f30a75ef7fedc1fb140004a80ac773028c2d32147e611280f274b": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "b556a68576cec833852054624129a9a30ecd21bd2d029d288f74a9ef1c26b40d": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "3b400f9be0d3fbba13e57060c34e8cf98249f6b584163a4ccdd5c71ef7f4d865": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "0ce3bf6f883388795f0ecfa35b8b6e5fbd02abfd4ec9a0b344f41f3729f21a5a": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "abe087e8d2187946054f142b4be34aa0ed7a00dc4bb21ed01a9be6717ddda0be": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "e39fbf805aa8b946efb5e8a84ee350f9ef1d46caae7a97958920d000f1cf9317": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "3964ee7a818d03badd098e30b705815ad09ec64bd31d68921acd428aea492aec": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "84287718faa7bfc402c84a2b38f55e1dcb0bd22ce0a5b32a6a01a1918572665f": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "908b0156110f9ad2e8eb98ff4fb923749659ecee78359987081836881948727b": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "81dec6c3011349c230ee2b737bbaf46c2af31a94b07e8debe3cd5a86b232b8d4": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "d70d48a2e9fa7e63491c5332ff7997ee268830139ba1eee83e0788e5e393af9c": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "fc75c6c97baffb5845ee5d26581ac0088f47a5bb3e98d3f485137c538c1c77b7": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "9177f4a0e0bb6993a7dd189fc6d1312e1c53c14924c5ad26667277e9e126ac6b": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "02cad36a7b7ddad98f5350f079b644f2a86362cb65500be606eb577ee5bd8776": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "0dc630819dde6df670f471cd52028906e0c3638cefb3b9f37875dbf055edd936": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "edcf99c4746c6e7892b0994a44422f6809f61e096d77c27f0fd883aaf278574c": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "6071632e726bbe3e827c1772487bf8c108ffec464d4d05cf5c1a2e1d0827dec9": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "5a1e6b0317fb41c6d0540c40b336b657d4e1a294adfe9c65bda487c1591ec338": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "9a806b7a6313cf5b636ea2312ea0660c45acd80e609a9adc2b4bb0a323eda821": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "370fc30379b45839e7578e25da40f4a421cfbc6b58cab594dcf78ca01b4951d0": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "7adbb5b2838ee1bb7577ffbcd80c0806ee2290804c72e5bf0a29eba038e897e5": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "207478acd511ee6cd1f2aed9ce9d106b60f86329e8262e516abaa333881923c3": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "727382e1b75bd39fd86b7ca22384707a8896b2edbcc3cc0555dc3180fe14c926": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "ada897ee3f0ceedd07400bd5eaac4d6e49363a55a730c61f3d728828d6c48ecf": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "3c992b307da921603c5a4202b52b83a798c51f2dd11e7d7ebe48b7860105efaa": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "2288a31150c1ec2e00d05f7f1c88b32cc43ec29f3671576e9411297dc6483a50": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "44ddba93c2555ce4e21c5f91360885d9431dd92280e141d3bec2b6b7240f0524": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "51eabeb009eb5f58490639dcabf9dfb8269400e294cd8590b3321d0b0a7b4daa": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    },
+    "f15628211bf4bd04c98331d8dd1ed6b6b9fe2762ee8f9a68f9d33e246fe37dd5": {
+      "success": false,
+      "error": "Error running Rust analysis: Rust binary failed: warning: file `/home/nima/code/crypto/rust/mempool_processor/tests/test_live_pool_detection.rs` foun"
+    }
+  },
+  "comparisons": {
+    "c5b5031c6ab1f0681de8f7f3b03b74b767186fa74d510f4981e7a720c011bc13": {
+      "transaction": "c5b5031c6a...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "4308002a3f05e45fdafd5a0a4c62dfdc9bde195d56257a7d31a4cd99c3e8ea28": {
+      "transaction": "4308002a3f...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "1b7a3cb8bc9ba14da6bfef6533ddbe5744155fd0adc8a8c26263d14dadd01caf": {
+      "transaction": "1b7a3cb8bc...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "c4fc5dfd499fd02bebc7cdb93237f71cc246683a1641d2d2a815294643c4d592": {
+      "transaction": "c4fc5dfd49...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "f0897124a7270e04e8da4c154c3513a298486638194dcb74e82e9e43a7501ea4": {
+      "transaction": "f0897124a7...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "0f13799f496f6ca5cd5a4d7cb8b85ca5c79646e1ad4e8d3ef71eca0aca96bc40": {
+      "transaction": "0f13799f49...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "78832fd6ff5d49013fdb0f5e8850b60ff5e068726711b46c575ff94afb30bf82": {
+      "transaction": "78832fd6ff...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "14245a573172935d077bfbd3bb552807427587d788ea49d4db3e6fecad0e1c56": {
+      "transaction": "14245a5731...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "6a1fed0c865cda54bf4f21b43547c1395313a091034209be24a9a006672bb4fd": {
+      "transaction": "6a1fed0c86...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "f1667baa4faff83da210c078468edc046c0399f79c6996139af3594b838ce07f": {
+      "transaction": "f1667baa4f...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "d0a289c5bf1c4371074bdf4b7e9daca263643d0056a77caf2238c131845f919c": {
+      "transaction": "d0a289c5bf...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "5c88f91bfde38e4bc73dc4a6822b485d001756219e78e8729f3d756fa5ee920a": {
+      "transaction": "5c88f91bfd...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "4970140ce54da6737dd0d68df5add47831b54ce700e0fefc72a794dff8189a4d": {
+      "transaction": "4970140ce5...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "45ed9e4e71523c8aab828daa395a52251ed63aa3689b1a38415484c591bd9cce": {
+      "transaction": "45ed9e4e71...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "264cd2e0881c3faf70f7a4cc1a0f98ef0f63b7233e67af572bbbd1dfb0e33d80": {
+      "transaction": "264cd2e088...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "592f841adf4315b306c08839b9ea494af3c9d533fa66843ad13c1008e4976c37": {
+      "transaction": "592f841adf...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "f9ce8eba1eba82839cd2efd8bcd88245137c66ac1e85db97a82f54de4a38f32d": {
+      "transaction": "f9ce8eba1e...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "a67a75cf83079cf6ee11201d3cc732d513d213af726e9463829bcdc0b7da477b": {
+      "transaction": "a67a75cf83...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "8cd3697d8068f12a80a74078f8f11fcb41d54306341e66010116fd026d6fbb50": {
+      "transaction": "8cd3697d80...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "8327450d3f7a50d367f6d1bddc7bb595c619b03f778f793cd0aea249ea0186d3": {
+      "transaction": "8327450d3f...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "a09c51f7f5f4311d49d7315c43cacd2e4be642ea976d13b99a24d38815889089": {
+      "transaction": "a09c51f7f5...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "5040431b6e5f30a75ef7fedc1fb140004a80ac773028c2d32147e611280f274b": {
+      "transaction": "5040431b6e...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "b556a68576cec833852054624129a9a30ecd21bd2d029d288f74a9ef1c26b40d": {
+      "transaction": "b556a68576...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "3b400f9be0d3fbba13e57060c34e8cf98249f6b584163a4ccdd5c71ef7f4d865": {
+      "transaction": "3b400f9be0...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "0ce3bf6f883388795f0ecfa35b8b6e5fbd02abfd4ec9a0b344f41f3729f21a5a": {
+      "transaction": "0ce3bf6f88...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "abe087e8d2187946054f142b4be34aa0ed7a00dc4bb21ed01a9be6717ddda0be": {
+      "transaction": "abe087e8d2...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "e39fbf805aa8b946efb5e8a84ee350f9ef1d46caae7a97958920d000f1cf9317": {
+      "transaction": "e39fbf805a...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "3964ee7a818d03badd098e30b705815ad09ec64bd31d68921acd428aea492aec": {
+      "transaction": "3964ee7a81...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "84287718faa7bfc402c84a2b38f55e1dcb0bd22ce0a5b32a6a01a1918572665f": {
+      "transaction": "84287718fa...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "908b0156110f9ad2e8eb98ff4fb923749659ecee78359987081836881948727b": {
+      "transaction": "908b015611...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "81dec6c3011349c230ee2b737bbaf46c2af31a94b07e8debe3cd5a86b232b8d4": {
+      "transaction": "81dec6c301...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "d70d48a2e9fa7e63491c5332ff7997ee268830139ba1eee83e0788e5e393af9c": {
+      "transaction": "d70d48a2e9...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "fc75c6c97baffb5845ee5d26581ac0088f47a5bb3e98d3f485137c538c1c77b7": {
+      "transaction": "fc75c6c97b...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "9177f4a0e0bb6993a7dd189fc6d1312e1c53c14924c5ad26667277e9e126ac6b": {
+      "transaction": "9177f4a0e0...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "02cad36a7b7ddad98f5350f079b644f2a86362cb65500be606eb577ee5bd8776": {
+      "transaction": "02cad36a7b...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "0dc630819dde6df670f471cd52028906e0c3638cefb3b9f37875dbf055edd936": {
+      "transaction": "0dc630819d...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "edcf99c4746c6e7892b0994a44422f6809f61e096d77c27f0fd883aaf278574c": {
+      "transaction": "edcf99c474...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "6071632e726bbe3e827c1772487bf8c108ffec464d4d05cf5c1a2e1d0827dec9": {
+      "transaction": "6071632e72...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "5a1e6b0317fb41c6d0540c40b336b657d4e1a294adfe9c65bda487c1591ec338": {
+      "transaction": "5a1e6b0317...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "9a806b7a6313cf5b636ea2312ea0660c45acd80e609a9adc2b4bb0a323eda821": {
+      "transaction": "9a806b7a63...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "370fc30379b45839e7578e25da40f4a421cfbc6b58cab594dcf78ca01b4951d0": {
+      "transaction": "370fc30379...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "7adbb5b2838ee1bb7577ffbcd80c0806ee2290804c72e5bf0a29eba038e897e5": {
+      "transaction": "7adbb5b283...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "207478acd511ee6cd1f2aed9ce9d106b60f86329e8262e516abaa333881923c3": {
+      "transaction": "207478acd5...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "727382e1b75bd39fd86b7ca22384707a8896b2edbcc3cc0555dc3180fe14c926": {
+      "transaction": "727382e1b7...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "ada897ee3f0ceedd07400bd5eaac4d6e49363a55a730c61f3d728828d6c48ecf": {
+      "transaction": "ada897ee3f...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 2,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "3c992b307da921603c5a4202b52b83a798c51f2dd11e7d7ebe48b7860105efaa": {
+      "transaction": "3c992b307d...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "2288a31150c1ec2e00d05f7f1c88b32cc43ec29f3671576e9411297dc6483a50": {
+      "transaction": "2288a31150...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "44ddba93c2555ce4e21c5f91360885d9431dd92280e141d3bec2b6b7240f0524": {
+      "transaction": "44ddba93c2...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "51eabeb009eb5f58490639dcabf9dfb8269400e294cd8590b3321d0b0a7b4daa": {
+      "transaction": "51eabeb009...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    },
+    "f15628211bf4bd04c98331d8dd1ed6b6b9fe2762ee8f9a68f9d33e246fe37dd5": {
+      "transaction": "f15628211b...",
+      "python_success": true,
+      "rust_success": false,
+      "addresses_python": 0,
+      "addresses_rust": 0,
+      "match_status": "one_failed"
+    }
+  },
+  "summary": {
+    "total": 50,
+    "exact_matches": 0,
+    "close_matches": 0,
+    "mismatches": 50,
+    "both_failed": 0,
+    "match_rate": 0.0,
+    "total_addresses": 0,
+    "detailed_mismatches": []
+  }
+}

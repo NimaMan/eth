@@ -57,13 +57,13 @@ use ethers::providers::{Http as EthersHttp, Middleware, Provider as EthersProvid
 use ethers::types::{BlockId as EthersBlockId, BlockNumber as EthersBlockNumber};
 use revm_tx_simulator_lib::conversions::{ethers_to_revm_u256, ethers_to_revm_address};
 
-use mempool_processor::mempool_processor::fetcher::{MempoolFetcher, FetchMode};
-use mempool_processor::mempool_processor::types::TransactionView;
-use mempool_processor::mempool_processor::TransactionSource;
-use mempool_processor::mempool_processor::db_logger::DbLogger;
-use mempool_processor::tx_simulator::TransactionSimulator;
-use mempool_processor::pool_subscriber::PoolSubscriber;
-use mempool_processor::scam_detection::{
+use mempool_fetcher::mempool_fetcher::fetcher::{MempoolFetcher, FetchMode};
+use mempool_fetcher::mempool_fetcher::types::TransactionView;
+use mempool_fetcher::mempool_fetcher::TransactionSource;
+use mempool_fetcher::mempool_fetcher::db_logger::DbLogger;
+use mempool_fetcher::tx_simulator::{TransactionSimulator, FastRpcSimulator};
+use mempool_fetcher::pool_subscriber::PoolSubscriber;
+use mempool_fetcher::scam_detection::{
     ScamDetectionService, 
     SimulationResult, 
     PoolEffect,
@@ -144,10 +144,14 @@ struct Args {
     /// Only process pool transactions (legacy mode for scam detection only)
     #[arg(long)]
     pool_transactions_only: bool,
+    
+    /// Use fast RPC simulator instead of REVM (5ms vs 50ms)
+    #[arg(long)]
+    use_fast_rpc: bool,
 }
 
 // Use common address normalization
-use mempool_processor::common::address::{normalize_address, to_checksum_address};
+use mempool_fetcher::common::address::{normalize_address, to_checksum_address};
 
 /// Enhanced performance metrics for comprehensive transaction timing analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -891,7 +895,15 @@ async fn main() -> eyre::Result<()> {
         }
     }
     
-    // Initialize REVM transaction simulator instead of old StateDiffTracker
+    // Initialize fast RPC transaction simulator when enabled
+    let fast_rpc_simulator = if args.use_fast_rpc {
+        info!("🚀 Initializing Fast RPC simulator for 5ms transaction simulation!");
+        Some(Arc::new(FastRpcSimulator::new(&args.eth_rpc_url).await?))
+    } else {
+        None
+    };
+    
+    // Initialize REVM transaction simulator (keep for fallback)
     info!("Initializing REVM transaction simulator...");
     let tx_simulator = Arc::new(TransactionSimulator::new(
         &args.eth_rpc_url,
@@ -1046,11 +1058,11 @@ async fn main() -> eyre::Result<()> {
 // Process a single transaction using REVM simulation and return number of scams detected
 async fn process_transaction_with_revm(
     tx: &TransactionView,
-    simulator: &TransactionSimulator,
+    simulator: &SimulatorWrapper,
     block_env: &RevmBlockEnv,
     service: &ScamDetectionService,
     _db_logger: &Arc<DbLogger>,
-    pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
+    pool_cache: &Arc<mempool_fetcher::pool_subscriber::cache::PoolStateCache>,
 ) -> usize {
     let tx_hash_hex = hex::encode(&tx.hash);
     
@@ -1236,7 +1248,7 @@ async fn process_transaction_with_revm(
 fn prepare_simulation_result_from_revm_changes(
     tx: &TransactionView,
     account_changes: &HashMap<revm_primitives::Address, revm_tx_simulator_lib::state_diff_utils::CalculatedAccountChanges>,
-    pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
+    pool_cache: Arc<mempool_fetcher::pool_subscriber::cache::PoolStateCache>,
 ) -> Option<SimulationResult> {
     let mut affected_pools = HashMap::new();
     let tx_hash_hex = hex::encode(&tx.hash);
@@ -1329,8 +1341,8 @@ fn prepare_simulation_result_from_revm_changes(
 
 async fn process_transactions(
     mut transactions: Vec<TransactionView>,
-    tx_simulator: Arc<TransactionSimulator>,
-    pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
+    tx_simulator: Arc<SimulatorWrapper>,
+    pool_cache: Arc<mempool_fetcher::pool_subscriber::cache::PoolStateCache>,
     verbose: bool,
     process_all_transactions: bool,
     performance_metrics: &mut PerformanceMetrics,
@@ -1357,16 +1369,66 @@ async fn process_transactions(
         debug!("Sorted {} transactions by sender and nonce for proper execution order", transactions.len());
     }
     
+    // Log all mempool transactions to file for debugging
+    static MEMPOOL_LOG_FILE: std::sync::OnceLock<std::sync::Mutex<std::fs::File>> = std::sync::OnceLock::new();
+    
     for (tx_index, tx) in transactions.iter().enumerate() {
         let tx_hash_full = format!("0x{}", hex::encode(&tx.hash));
         let tx_hash_short = format!("0x{}", hex::encode(&tx.hash[..4])); // Short hash for logging
         
+        // Log transaction to mempool file
+        let mempool_file = MEMPOOL_LOG_FILE.get_or_init(|| {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let filename = format!("/home/nima/code/crypto/logs/mempool/mempool_transactions_{}.jsonl", timestamp);
+            std::sync::Mutex::new(std::fs::File::create(&filename).unwrap_or_else(|_| {
+                // Fallback to current directory if logs directory doesn't exist
+                std::fs::File::create(&format!("mempool_transactions_{}.jsonl", timestamp)).unwrap()
+            }))
+        });
+        
+        if let Ok(mut file) = mempool_file.lock() {
+            let to_addr = tx.to.as_ref().map(|addr_bytes| {
+                if addr_bytes.len() >= 20 {
+                    let mut addr_array = [0u8; 20];
+                    addr_array.copy_from_slice(&addr_bytes[addr_bytes.len()-20..]);
+                    let addr = Address::from(addr_array);
+                    to_checksum_address(addr)
+                } else {
+                    "invalid".to_string()
+                }
+            });
+            
+            let from_addr = {
+                let mut addr_array = [0u8; 20];
+                addr_array.copy_from_slice(&tx.from.as_ref()[tx.from.len()-20..]);
+                let addr = Address::from(addr_array);
+                to_checksum_address(addr)
+            };
+            
+            let mempool_tx = serde_json::json!({
+                "timestamp": current_timestamp_ms(),
+                "tx_hash": tx_hash_full,
+                "from": from_addr,
+                "to": to_addr,
+                "value": tx.value.to_string(),
+                "gas_price": tx.gas_price.map(|p| p.to_string()).unwrap_or("0".to_string()),
+                "gas_limit": tx.gas_limit.map(|g| g.as_u64()).unwrap_or(21000),
+                "input_data_len": tx.input_data.as_ref().map(|d| d.len()).unwrap_or(0),
+                "nonce": tx.nonce.map(|n| n.to_string()).unwrap_or("0".to_string())
+            });
+            
+            if let Err(e) = writeln!(file, "{}", mempool_tx) {
+                eprintln!("Failed to write to mempool log: {}", e);
+            }
+        }
+        
         // Mark this transaction as processed to avoid duplicates
         fetcher.mark_transaction_processed(&tx.hash);
         
-        if verbose {
-            debug!("Marked transaction {} as processed to prevent duplicates", tx_hash_short);
-        }
+        // Mark as processed (debug log removed for cleaner output)
         
         // === STEP 1: Initialize timing tracker ===
         let mut timing = TransactionTiming::new(tx_hash_full.clone());
@@ -1384,9 +1446,7 @@ async fn process_transactions(
         // === STEP 2: Start processing ===
         timing.start_processing();
         
-        if verbose {
-            info!("🔄 PROCESSING TX: {} ({})", tx_hash_short, tx_hash_full);
-        }
+        // Processing transaction (verbose logging controlled by --verbose flag)
         
         // === STEP 3: Pool address check ===
         timing.start_pool_check();
@@ -1432,36 +1492,7 @@ async fn process_transactions(
                 info!("⏱️  TIMING [{}]: {}", tx_hash_short, timing.summary());
             }
             
-            // === STEP 11: Real-time event logging for frontend ===
-            if verbose {
-                info!("📊 EVENT LOG [{}]:", tx_hash_short);
-                info!("  📥 Mempool Arrival:    {}ms", timing.mempool_arrival_timestamp_ms);
-                info!("  🚪 Queue Entry:        {}ms (+{:.1}ms)", 
-                      timing.queue_entry_timestamp_ms,
-                      timing.mempool_residence_time_us as f64 / 1000.0);
-                info!("  🔄 Processing Start:   {}ms (+{:.1}ms)", 
-                      timing.processing_start_timestamp_ms,
-                      timing.internal_queue_time_us as f64 / 1000.0);
-                info!("  🔍 Pool Check:         {}ms - {}ms ({:.1}ms)", 
-                      timing.pool_check_start_timestamp_ms,
-                      timing.pool_check_end_timestamp_ms,
-                      timing.pool_check_time_us as f64 / 1000.0);
-                info!("  🧪 REVM Simulation:    {}ms - {}ms ({:.1}ms)", 
-                      timing.revm_simulation_start_timestamp_ms,
-                      timing.revm_simulation_end_timestamp_ms,
-                      timing.revm_simulation_time_us as f64 / 1000.0);
-                info!("  📊 State Analysis:     {}ms - {}ms ({:.1}ms)", 
-                      timing.state_analysis_start_timestamp_ms,
-                      timing.state_analysis_end_timestamp_ms,
-                      timing.state_analysis_time_us as f64 / 1000.0);
-                info!("  🚨 Scam Detection:     {}ms - {}ms ({:.1}ms)", 
-                      timing.scam_detection_start_timestamp_ms,
-                      timing.scam_detection_end_timestamp_ms,
-                      timing.scam_detection_time_us as f64 / 1000.0);
-                info!("  ✅ Processing End:     {}ms", timing.processing_end_timestamp_ms);
-                info!("  🎯 End-to-End Total:   {:.1}ms", timing.end_to_end_time_us as f64 / 1000.0);
-                info!("  ⏳ Mining:             Analyzed by Python post-processing");
-            }
+            // Detailed timing logs removed for cleaner output
             continue;
         }
         

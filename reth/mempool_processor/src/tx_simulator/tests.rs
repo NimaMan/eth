@@ -6,8 +6,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::TransactionSimulator;
-    use crate::mempool_processor::types::TransactionView;
-    use crate::mempool_processor::fetcher::MempoolFetcher;
+    use crate::mempool_fetcher::types::TransactionView;
+    use crate::mempool_fetcher::fetcher::MempoolFetcher;
     use ethers::providers::{Http, Provider};
     use ethers::types::{U256, Bytes};
     use std::sync::Arc;
@@ -349,8 +349,8 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::super::TransactionSimulator;
-    use crate::mempool_processor::types::TransactionView;
-    use crate::mempool_processor::fetcher::MempoolFetcher;
+    use crate::mempool_fetcher::types::TransactionView;
+    use crate::mempool_fetcher::fetcher::MempoolFetcher;
     use ethers::providers::{Http, Provider};
     use ethers::types::{U256, Bytes};
     use std::sync::Arc;
@@ -367,7 +367,7 @@ mod integration_tests {
         // This test would fetch real transactions from mempool and test simulation
         // Ignored by default since it requires network access
         
-        use crate::mempool_processor::fetcher::MempoolFetcher;
+        use crate::mempool_fetcher::fetcher::MempoolFetcher;
         
         let fetcher = MempoolFetcher::new(
             "http://localhost:8545",

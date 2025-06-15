@@ -8,7 +8,7 @@
  * 4. Providing fast access to accumulated state changes
  */
 
-use crate::mempool_processor::types::TransactionView;
+use crate::mempool_fetcher::types::TransactionView;
 use crate::tx_simulator::state_diff::StateChange;
 use ethers::prelude::*;
 use std::collections::{HashMap, VecDeque};

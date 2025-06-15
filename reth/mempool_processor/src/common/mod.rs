@@ -2,6 +2,8 @@
 
 pub mod address;
 pub mod config;
+pub mod erc20;
+pub mod dex;
 
 pub use address::{normalize_address, to_checksum_address, checksum_address};
 pub use config::MempoolProcessorConfig;

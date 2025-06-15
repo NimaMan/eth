@@ -1,38 +1,33 @@
 /*
- * Real-time Scam Detection Service with True Mempool Arrival Tracking
+ * Real-time Scam Detection Service
  * 
- * This service uses WebSocket subscriptions to track actual mempool arrival times
- * and measure true end-to-end latency from transaction broadcast to detection.
+ * This service monitors the Ethereum mempool for potential scam transactions,
+ * particularly focusing on liquidity pool drains and rug pulls.
  */
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use clap::Parser;
 use eyre::Result;
 use tracing::{info, warn, error, debug, Level};
 use tokio::time;
+use chrono::Local;
 
 // Mempool processor imports
-use mempool_processor::mempool_processor::realtime_fetcher::{RealtimeMempoolFetcher, TimestampedTransaction};
-use mempool_processor::mempool_processor::TransactionSource;
-use mempool_processor::tx_simulator::TransactionSimulator;
+use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::scam_detection::{ScamDetectionService, ScamDetectionConfig};
+use mempool_processor::mempool_fetcher::processor::DbLogger;
+use mempool_processor::tx_simulator::{
+    DebugTraceCallStateDiffCalculator,
+    DebugTraceCallSimulator
+};
 use mempool_processor::common::address::to_checksum_address;
 
-// REVM imports
-use revm_context::BlockEnv as RevmBlockEnv;
-use revm_primitives::hardfork::SpecId;
+// Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
-use ethers::types::{BlockId, BlockNumber, Address};
-use mempool_processor::mempool_processor::db_logger::DbLogger;
-use mempool_processor::scam_detection::{SimulationResult, PoolEffect};
-use revm_tx_simulator_lib::state_diff_utils::CalculatedAccountChanges;
-
-// For hex encoding
-use hex;
+use ethers::types::{BlockId, BlockNumber, Address, H256, U256};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -79,133 +74,6 @@ struct Args {
     /// Log file path
     #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/realtime_scam_detection.log")]
     log_file: String,
-    
-    /// Process all transactions (not just pool transactions)
-    #[arg(long)]
-    process_all: bool,
-}
-
-/// Performance metrics with real arrival tracking
-struct RealTimeMetrics {
-    total_processed: AtomicU64,
-    total_discovery_latency_ms: AtomicU64,
-    total_processing_latency_ms: AtomicU64,
-    max_discovery_latency_ms: AtomicU64,
-    max_processing_latency_ms: AtomicU64,
-}
-
-impl RealTimeMetrics {
-    fn new() -> Self {
-        Self {
-            total_processed: AtomicU64::new(0),
-            total_discovery_latency_ms: AtomicU64::new(0),
-            total_processing_latency_ms: AtomicU64::new(0),
-            max_discovery_latency_ms: AtomicU64::new(0),
-            max_processing_latency_ms: AtomicU64::new(0),
-        }
-    }
-    
-    fn record_transaction(&self, discovery_latency_ms: u64, processing_latency_ms: u64) {
-        self.total_processed.fetch_add(1, Ordering::Relaxed);
-        self.total_discovery_latency_ms.fetch_add(discovery_latency_ms, Ordering::Relaxed);
-        self.total_processing_latency_ms.fetch_add(processing_latency_ms, Ordering::Relaxed);
-        
-        // Update max values
-        self.max_discovery_latency_ms.fetch_max(discovery_latency_ms, Ordering::Relaxed);
-        self.max_processing_latency_ms.fetch_max(processing_latency_ms, Ordering::Relaxed);
-    }
-    
-    fn report(&self) {
-        let total = self.total_processed.load(Ordering::Relaxed);
-        if total == 0 {
-            return;
-        }
-        
-        let avg_discovery = self.total_discovery_latency_ms.load(Ordering::Relaxed) as f64 / total as f64;
-        let avg_processing = self.total_processing_latency_ms.load(Ordering::Relaxed) as f64 / total as f64;
-        let max_discovery = self.max_discovery_latency_ms.load(Ordering::Relaxed);
-        let max_processing = self.max_processing_latency_ms.load(Ordering::Relaxed);
-        
-        info!("📊 REAL-TIME PERFORMANCE METRICS");
-        info!("  Total transactions: {}", total);
-        info!("  Discovery latency (WebSocket notification → fetch complete):");
-        info!("    Average: {:.1}ms", avg_discovery);
-        info!("    Maximum: {}ms", max_discovery);
-        info!("  Processing latency (fetch complete → state extraction):");
-        info!("    Average: {:.1}ms", avg_processing);
-        info!("    Maximum: {}ms", max_processing);
-        info!("  TRUE END-TO-END (upper bound on mempool → detection):");
-        info!("    Average: {:.1}ms", avg_discovery + avg_processing);
-        info!("    Maximum: {}ms", max_discovery + max_processing);
-    }
-}
-
-fn current_timestamp_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-// Helper function to prepare simulation result from REVM changes
-fn prepare_simulation_result_from_revm_changes(
-    tx: &mempool_processor::mempool_processor::types::TransactionView,
-    account_changes: &HashMap<revm_primitives::Address, revm_tx_simulator_lib::state_diff_utils::CalculatedAccountChanges>,
-    pool_cache: Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
-) -> Option<SimulationResult> {
-    let mut affected_pools = HashMap::new();
-    let tx_hash_hex = hex::encode(&tx.hash);
-    
-    for (address, changes) in account_changes {
-        let addr_str = to_checksum_address(*address);
-        
-        // Calculate ETH delta
-        let eth_delta_wei = changes.eth_net_change.absolute_value.to_string()
-            .parse::<f64>()
-            .unwrap_or(0.0);
-        let eth_delta = if changes.eth_net_change.is_negative {
-            -(eth_delta_wei / 1e18)
-        } else {
-            eth_delta_wei / 1e18
-        };
-        
-        // Skip small changes
-        if eth_delta.abs() < 0.001 {
-            continue;
-        }
-        
-        // Check if this is a pool
-        if let Some(pool_state) = pool_cache.get_pool(&addr_str) {
-            let current_eth = pool_state.eth_reserve;
-            let simulated_eth = current_eth + eth_delta;
-            let percentage_change = if current_eth > 0.0 {
-                eth_delta / current_eth
-            } else {
-                0.0
-            };
-            
-            let effect = PoolEffect {
-                pool_address: addr_str.clone(),
-                current_eth_reserve: current_eth,
-                simulated_eth_reserve: simulated_eth,
-                eth_delta,
-                percentage_change,
-            };
-            
-            affected_pools.insert(addr_str, effect);
-        }
-    }
-    
-    if affected_pools.is_empty() {
-        None
-    } else {
-        Some(SimulationResult {
-            tx_hash: tx_hash_hex,
-            affected_pools,
-            simulation_successful: true,
-            error_message: None,
-        })
-    }
 }
 
 #[tokio::main]
@@ -230,48 +98,45 @@ async fn main() -> Result<()> {
         .init();
     
     info!("🚀 Starting Real-time Scam Detection Service");
-    info!("   ⚡ Using WebSocket subscriptions for TRUE mempool arrival tracking");
-    info!("   🎯 Goal: Measure actual end-to-end latency from broadcast to detection");
+    info!("   🎯 ETH threshold: {} ETH", args.eth_threshold);
+    info!("   📊 Percentage threshold: {}%", args.percentage_threshold * 100.0);
     
-    // Initialize real-time mempool fetcher
-    info!("📡 Initializing real-time mempool fetcher...");
-    let mut fetcher = RealtimeMempoolFetcher::new(
-        &args.eth_rpc_url,
-        &args.eth_ws_url,
-        50000, // cache size
-    ).await?;
+    // Initialize HTTP provider
+    info!("📡 Connecting to Ethereum node...");
+    let http_provider = Arc::new(Provider::<Http>::try_from(&args.eth_rpc_url)?);
     
-    // Start WebSocket subscription
-    fetcher.start().await?;
-    info!("✅ WebSocket subscription active - receiving real-time notifications");
-    
-    // Initialize REVM simulator
-    info!("🧪 Initializing REVM transaction simulator...");
-    let tx_simulator = Arc::new(TransactionSimulator::new(
-        &args.eth_rpc_url,
-        1, // mainnet
-        SpecId::CANCUN
-    ).await?);
-    
-    // Get current block environment
-    let provider = Provider::<Http>::try_from(&args.eth_rpc_url)?;
-    let latest_block = provider
+    // Get current block
+    let latest_block = http_provider
         .get_block(BlockId::Number(BlockNumber::Latest))
         .await?
         .ok_or_else(|| eyre::eyre!("Failed to get latest block"))?;
     
-    let mut block_env = RevmBlockEnv::default();
-    block_env.number = latest_block.number.unwrap_or_default().as_u64().into();
-    block_env.timestamp = latest_block.timestamp.as_u64().into();
-    block_env.basefee = latest_block.base_fee_per_gas.unwrap_or_default().as_u64();
+    info!("📦 Current block: #{}", latest_block.number.unwrap_or_default());
     
-    info!("📦 Current block: #{}", block_env.number);
+    // Initialize WebSocket client
+    info!("🔌 Initializing WebSocket client...");
+    let mut ws_client = WebSocketClient::new(&args.eth_ws_url, &args.eth_rpc_url).await?;
+    ws_client.subscribe_to_new_transactions().await?;
+    info!("✅ WebSocket subscription active");
     
-    // Initialize pool cache
-    info!("🏊 Initializing pool cache...");
-    let pool_subscriber = PoolSubscriber::new(&args.pool_zmq_address)?;
-    let pool_cache = pool_subscriber.get_cache();
-    pool_subscriber.start_update_loop();
+    // Initialize pool subscriber
+    info!("🏊 Initializing pool subscriber...");
+    let mut pool_subscriber = PoolSubscriber::with_endpoint(args.eth_threshold, &args.pool_zmq_address);
+    let pool_cache = pool_subscriber.get_pool_cache();
+    
+    // Start pool subscriber in background
+    let pool_cache_clone = pool_cache.clone();
+    tokio::spawn(async move {
+        info!("Starting pool subscriber listener...");
+        if let Err(e) = pool_subscriber.start_listening().await {
+            error!("Pool subscriber failed: {}", e);
+        }
+    });
+    
+    // Give pool subscriber time to initialize
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let pool_count = pool_cache_clone.get_pool_count();
+    info!("📊 Monitoring {} pools", pool_count);
     
     // Initialize database logger
     info!("💾 Connecting to database...");
@@ -290,141 +155,209 @@ async fn main() -> Result<()> {
     };
     
     let scam_service = ScamDetectionService::new(
-        pool_cache.clone(),
+        pool_cache_clone.clone(),
         db_logger.clone(),
         scam_config,
     );
     
-    info!("🛡️ Scam detection thresholds: ETH < {:.3}, Percentage > {:.1}%", 
-          args.eth_threshold, args.percentage_threshold * 100.0);
+    info!("🛡️ Scam detection service initialized");
+    
+    // Initialize state diff calculator
+    let state_calculator = DebugTraceCallStateDiffCalculator::default();
     
     // Performance metrics
-    let metrics = Arc::new(RealTimeMetrics::new());
-    let metrics_reporter = metrics.clone();
-    
-    // Spawn metrics reporter
-    tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(30));
-        loop {
-            interval.tick().await;
-            metrics_reporter.report();
-        }
-    });
+    let mut total_processed = 0u64;
+    let mut total_scams = 0u64;
+    let mut last_report = Instant::now();
     
     // Main processing loop
     info!("🔄 Starting main processing loop...");
-    let mut total_scams = 0;
-    let mut last_block_update = Instant::now();
     
     loop {
-        // Update block environment periodically
-        if last_block_update.elapsed() > Duration::from_secs(12) {
-            if let Ok(Some(new_block)) = provider.get_block(BlockId::Number(BlockNumber::Latest)).await {
-                block_env.number = new_block.number.unwrap_or_default().as_u64().into();
-                block_env.timestamp = new_block.timestamp.as_u64().into();
-                block_env.basefee = new_block.base_fee_per_gas.unwrap_or_default().as_u64();
-                last_block_update = Instant::now();
-                debug!("Updated block environment to #{}", block_env.number);
-            }
-        }
+        // Get new transactions from WebSocket
+        let new_txs = ws_client.get_new_transactions().await;
         
-        // Get new transactions with timestamps
-        let timestamped_txs = fetcher.get_timestamped_transactions().await;
-        
-        if timestamped_txs.is_empty() {
+        if new_txs.is_empty() {
             // Small sleep to avoid busy waiting
             time::sleep(Duration::from_millis(10)).await;
             continue;
         }
         
-        info!("⚡ Processing {} new transactions from WebSocket", timestamped_txs.len());
-        
-        for timestamped_tx in timestamped_txs {
-            let processing_start = current_timestamp_ms();
-            let tx_hash = hex::encode(&timestamped_tx.transaction.hash);
+        for ws_tx in new_txs {
+            let start_time = Instant::now();
             
-            // Calculate discovery latency
-            let discovery_latency_ms = processing_start.saturating_sub(timestamped_tx.discovery_timestamp_ms);
-            
-            // Check if it's a pool transaction
-            let to_address = if let Some(to_bytes) = &timestamped_tx.transaction.to {
-                if to_bytes.len() >= 20 {
-                    let mut addr_array = [0u8; 20];
-                    addr_array.copy_from_slice(&to_bytes[to_bytes.len()-20..]);
-                    let addr = Address::from(addr_array);
-                    Some(to_checksum_address(addr))
-                } else {
-                    None
+            // Parse transaction hash
+            let tx_hash = match ws_tx.hash.parse::<H256>() {
+                Ok(hash) => hash,
+                Err(e) => {
+                    warn!("Invalid transaction hash {}: {}", ws_tx.hash, e);
+                    continue;
                 }
-            } else {
-                None
             };
             
-            let is_pool_tx = to_address.as_ref()
-                .map(|addr| pool_cache.get_pool(addr).is_some())
-                .unwrap_or(false);
-            
-            // Skip non-pool transactions unless --process-all
-            if !is_pool_tx && !args.process_all {
-                continue;
-            }
-            
-            // Process with REVM
-            match tx_simulator.process_transaction(&timestamped_tx.transaction, &block_env).await {
-                Ok(Some(account_changes)) => {
-                    let processing_end = current_timestamp_ms();
-                    let processing_latency_ms = processing_end - processing_start;
+            // Fetch full transaction
+            match http_provider.get_transaction(tx_hash).await {
+                Ok(Some(tx)) => {
+                    // Check if transaction involves any pools
+                    let to_address = if let Some(to) = tx.to {
+                        Some(to_checksum_address(to))
+                    } else {
+                        None
+                    };
                     
-                    // Record metrics
-                    metrics.record_transaction(discovery_latency_ms, processing_latency_ms);
+                    let from_address = to_checksum_address(tx.from);
                     
-                    if args.verbose {
-                        info!("✅ Processed {} in {}ms (discovery: {}ms, processing: {}ms)",
-                              &tx_hash[..8], 
-                              discovery_latency_ms + processing_latency_ms,
-                              discovery_latency_ms,
-                              processing_latency_ms);
-                        info!("   Estimated mempool arrival: {} (upper bound)",
-                              timestamped_tx.estimated_mempool_arrival_ms);
-                        info!("   WebSocket notification: {}",
-                              timestamped_tx.discovery_timestamp_ms);
-                        info!("   Processing complete: {}", processing_end);
-                        info!("   Accounts affected: {}", account_changes.len());
+                    // Quick check if this might involve a pool
+                    let might_involve_pool = if let Some(ref to_addr) = to_address {
+                        pool_cache_clone.get_pool(to_addr).is_some() ||
+                        is_known_router(&to_addr)
+                    } else {
+                        false
+                    };
+                    
+                    if !might_involve_pool {
+                        continue;
                     }
                     
-                    // Check for scams
-                    let simulation = prepare_simulation_result_from_revm_changes(
-                        &timestamped_tx.transaction,
-                        &account_changes,
-                        pool_cache.clone()
-                    );
-                    
-                    if let Some(sim_result) = simulation {
-                        match scam_service.process_transaction(sim_result).await {
-                            Ok(alerts) => {
-                                if !alerts.is_empty() {
-                                    total_scams += alerts.len();
-                                    error!("🚨 SCAM DETECTED in {} ({}ms from mempool arrival)",
-                                           tx_hash,
-                                           discovery_latency_ms + processing_latency_ms);
-                                    for alert in alerts {
-                                        error!("   {}", alert.message);
+                    // Use debug_traceCall to get state changes
+                    match state_calculator.trace_transaction(&tx, &http_provider).await {
+                        Ok(trace_result) => {
+                            let mut affected_pools = HashMap::new();
+                            
+                            // Check ETH transfers
+                            for transfer in &trace_result.eth_transfers {
+                                check_pool_impact(
+                                    &transfer.from,
+                                    &transfer.to,
+                                    transfer.amount,
+                                    true, // is_eth
+                                    &pool_cache_clone,
+                                    &mut affected_pools
+                                );
+                            }
+                            
+                            // Check ERC20 transfers
+                            for transfer in &trace_result.erc20_transfers {
+                                check_pool_impact(
+                                    &transfer.from,
+                                    &transfer.to,
+                                    transfer.amount,
+                                    false, // is_token
+                                    &pool_cache_clone,
+                                    &mut affected_pools
+                                );
+                            }
+                            
+                            // If pools are affected, check for scams
+                            if !affected_pools.is_empty() {
+                                let simulation_result = mempool_processor::scam_detection::SimulationResult {
+                                    tx_hash: format!("{:?}", tx_hash),
+                                    affected_pools,
+                                    simulation_successful: true,
+                                    error_message: None,
+                                };
+                                
+                                match scam_service.process_transaction(simulation_result).await {
+                                    Ok(alerts) => {
+                                        if !alerts.is_empty() {
+                                            total_scams += alerts.len() as u64;
+                                            for alert in alerts {
+                                                error!("🚨 SCAM DETECTED: {}", alert.tx_hash);
+                                                error!("   Pool: {}", alert.pool_address);
+                                                error!("   Current ETH: {:.4}", alert.current_eth_reserve);
+                                                error!("   After TX: {:.4}", alert.simulated_eth_reserve);
+                                                error!("   Drain: {:.2}%", 
+                                                    (1.0 - alert.simulated_eth_reserve / alert.current_eth_reserve) * 100.0);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Scam detection error: {}", e);
                                     }
                                 }
                             }
-                            Err(e) => {
-                                error!("Scam detection error: {}", e);
-                            }
+                            
+                            total_processed += 1;
+                            let elapsed = start_time.elapsed();
+                            
+                            debug!("Processed {} in {:?}", tx_hash, elapsed);
+                        }
+                        Err(e) => {
+                            debug!("Failed to trace transaction {}: {}", tx_hash, e);
                         }
                     }
                 }
                 Ok(None) => {
-                    debug!("No state changes for {}", &tx_hash[..8]);
+                    debug!("Transaction {} not found", tx_hash);
                 }
                 Err(e) => {
-                    warn!("Failed to simulate {}: {}", &tx_hash[..8], e);
+                    warn!("Failed to fetch transaction {}: {}", tx_hash, e);
                 }
             }
         }
+        
+        // Report statistics periodically
+        if last_report.elapsed() > Duration::from_secs(30) {
+            info!("📊 Statistics:");
+            info!("   Transactions processed: {}", total_processed);
+            info!("   Scams detected: {}", total_scams);
+            info!("   Pools monitored: {}", pool_cache_clone.get_pool_count());
+            last_report = Instant::now();
+        }
+    }
+}
+
+/// Check if an address is a known DEX router
+fn is_known_router(address: &str) -> bool {
+    matches!(address,
+        "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D" | // Uniswap V2 Router
+        "0xE592427A0AEce92De3Edee1F18E0157C05861564" | // Uniswap V3 Router
+        "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"   // Uniswap Universal Router
+    )
+}
+
+/// Check if a transfer affects a pool and calculate the impact
+fn check_pool_impact(
+    from: &str,
+    to: &str,
+    amount: f64,
+    is_eth: bool,
+    pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
+    affected_pools: &mut HashMap<String, mempool_processor::scam_detection::PoolEffect>,
+) {
+    // Check if sender is a pool
+    if let Some(pool_state) = pool_cache.get_pool(from) {
+        let current_reserve = if is_eth { pool_state.eth_reserve } else { pool_state.token_reserve };
+        let simulated_reserve = current_reserve - amount;
+        let percentage_change = -amount / current_reserve;
+        
+        affected_pools.insert(
+            from.to_string(),
+            mempool_processor::scam_detection::PoolEffect {
+                pool_address: from.to_string(),
+                current_eth_reserve: current_reserve,
+                simulated_eth_reserve: simulated_reserve,
+                eth_delta: -amount,
+                percentage_change,
+            }
+        );
+    }
+    
+    // Check if receiver is a pool
+    if let Some(pool_state) = pool_cache.get_pool(to) {
+        let current_reserve = if is_eth { pool_state.eth_reserve } else { pool_state.token_reserve };
+        let simulated_reserve = current_reserve + amount;
+        let percentage_change = amount / current_reserve;
+        
+        affected_pools.insert(
+            to.to_string(),
+            mempool_processor::scam_detection::PoolEffect {
+                pool_address: to.to_string(),
+                current_eth_reserve: current_reserve,
+                simulated_eth_reserve: simulated_reserve,
+                eth_delta: amount,
+                percentage_change,
+            }
+        );
     }
 }

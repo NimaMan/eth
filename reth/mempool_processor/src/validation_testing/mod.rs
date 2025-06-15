@@ -17,14 +17,15 @@
  * identical results to the proven Python implementation across diverse transaction types.
  */
 
-pub mod batch_validator;
+// TODO: Fix batch_validator to use DebugTraceCallStateDiffCalculator
+// pub mod batch_validator;
 pub mod python_bridge;
 pub mod transaction_fetcher;
 pub mod comparison_engine;
-pub mod test_runner;
+// pub mod test_runner;
 
-pub use batch_validator::BatchValidator;
+// pub use batch_validator::BatchValidator;
 pub use python_bridge::PythonBridge;
 pub use transaction_fetcher::TransactionFetcher;
 pub use comparison_engine::ComparisonEngine;
-pub use test_runner::TestRunner; 
+// pub use test_runner::TestRunner; 

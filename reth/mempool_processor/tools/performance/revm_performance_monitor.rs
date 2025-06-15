@@ -50,10 +50,10 @@ use alloy_provider::{ProviderBuilder, Provider as AlloyProviderTrait, DynProvide
 use alloy_network::Ethereum as AlloyEthereum;
 
 // Local imports
-use mempool_processor::mempool_processor::fetcher::MempoolFetcher;
-use mempool_processor::mempool_processor::types::TransactionView;
-use mempool_processor::mempool_processor::TransactionSource;
-use mempool_processor::tx_simulator::conversions::transaction_view_to_revm_tx_env;
+use mempool_fetcher::mempool_fetcher::fetcher::MempoolFetcher;
+use mempool_fetcher::mempool_fetcher::types::TransactionView;
+use mempool_fetcher::mempool_fetcher::TransactionSource;
+use mempool_fetcher::tx_simulator::conversions::transaction_view_to_revm_tx_env;
 
 // revm_tx_simulator_lib imports
 use revm_tx_simulator_lib::simulation_core::{simulate_transaction, SimCacheDB, ExecutionResultType};

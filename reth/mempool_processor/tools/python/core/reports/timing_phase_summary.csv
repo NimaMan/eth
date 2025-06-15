@@ -1,9 +1,7 @@
 Phase,Mean_ms,Median_ms,P95_ms,Max_ms,Sample_Count
-Mempool Residence,1.0,1.0,1.0,1.0,3250
-Internal Queue,1.0,1.0,1.0,1.0,20
-Pool Check,1.8971684053651268,1.0,11.0,17.0,671
-REVM Simulation,5.395929390885291,2.0,9.0,3882.0,724609
-State Analysis,1.0,1.0,1.0,1.0,1589
-Scam Detection,1.0,1.0,1.0,1.0,27
-Total Processing,5.396806924993485,2.0,9.0,3882.0,725257
-End-to-End,5.396085183756681,2.0,9.0,3882.0,725960
+Mempool Residence,1.0,1.0,1.0,1.0,12
+Pool Check,1.0,1.0,1.0,1.0,39
+REVM Simulation,4.052664974619289,2.0,16.0,72.0,1576
+State Analysis,1.0,1.0,1.0,1.0,45
+Total Processing,4.131281407035176,2.0,16.0,72.0,1592
+End-to-End,4.133626097867001,2.0,16.0,72.0,1594

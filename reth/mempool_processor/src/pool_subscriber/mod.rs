@@ -5,6 +5,9 @@
 pub mod types;
 pub mod cache;
 
+#[cfg(test)]
+mod tests;
+
 use zmq;
 use tracing::{info, error, debug, warn};
 use std::sync::Arc;

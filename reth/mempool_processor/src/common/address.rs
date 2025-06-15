@@ -35,7 +35,13 @@ pub fn checksum_address(address_str: &str) -> String {
     for (i, char) in padded_address.chars().enumerate() {
         if char.is_ascii_hexdigit() && char.is_ascii_alphabetic() {
             // For letters a-f, check if corresponding hash bit is set
-            let hash_byte = hash[i / 2];
+            let hash_index = i / 2;
+            if hash_index >= hash.len() {
+                // Safety check - shouldn't happen with valid addresses
+                checksummed.push(char);
+                continue;
+            }
+            let hash_byte = hash[hash_index];
             let hash_nibble = if i % 2 == 0 { hash_byte >> 4 } else { hash_byte & 0x0f };
             
             if hash_nibble >= 8 {

@@ -1,12 +1,12 @@
 {
   "metadata": {
-    "analysis_timestamp": "2025-06-08T13:34:43.564208",
-    "data_file": "/home/nima/code/crypto/logs/mempool/transaction_timing_analysis_20250605_205119.csv",
-    "total_transactions": 826229
+    "analysis_timestamp": "2025-06-09T15:04:56.489079",
+    "data_file": "/home/nima/code/crypto/logs/mempool/transaction_timing_analysis_20250609_150131.csv",
+    "total_transactions": 1625
   },
   "timing_phases": {
     "Mempool Residence": {
-      "count": 3250,
+      "count": 12,
       "mean_ms": 1.0,
       "median_ms": 1.0,
       "std_ms": 0.0,
@@ -16,49 +16,36 @@
       "p75_ms": 1.0,
       "p95_ms": 1.0,
       "p99_ms": 1.0,
-      "zero_count": 822979
-    },
-    "Internal Queue": {
-      "count": 20,
-      "mean_ms": 1.0,
-      "median_ms": 1.0,
-      "std_ms": 0.0,
-      "min_ms": 1.0,
-      "max_ms": 1.0,
-      "p25_ms": 1.0,
-      "p75_ms": 1.0,
-      "p95_ms": 1.0,
-      "p99_ms": 1.0,
-      "zero_count": 826209
+      "zero_count": 1613
     },
     "Pool Check": {
-      "count": 671,
-      "mean_ms": 1.8971684053651268,
+      "count": 39,
+      "mean_ms": 1.0,
       "median_ms": 1.0,
-      "std_ms": 3.0350943873715064,
+      "std_ms": 0.0,
       "min_ms": 1.0,
-      "max_ms": 17.0,
+      "max_ms": 1.0,
       "p25_ms": 1.0,
       "p75_ms": 1.0,
-      "p95_ms": 11.0,
-      "p99_ms": 14.0,
-      "zero_count": 825558
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "zero_count": 1586
     },
     "REVM Simulation": {
-      "count": 724609,
-      "mean_ms": 5.395929390885291,
+      "count": 1576,
+      "mean_ms": 4.052664974619289,
       "median_ms": 2.0,
-      "std_ms": 32.096481586366615,
+      "std_ms": 5.746752226029,
       "min_ms": 1.0,
-      "max_ms": 3882.0,
+      "max_ms": 72.0,
       "p25_ms": 1.0,
-      "p75_ms": 3.0,
-      "p95_ms": 9.0,
-      "p99_ms": 96.0,
-      "zero_count": 101620
+      "p75_ms": 5.0,
+      "p95_ms": 16.0,
+      "p99_ms": 25.25,
+      "zero_count": 49
     },
     "State Analysis": {
-      "count": 1589,
+      "count": 45,
       "mean_ms": 1.0,
       "median_ms": 1.0,
       "std_ms": 0.0,
@@ -68,53 +55,40 @@
       "p75_ms": 1.0,
       "p95_ms": 1.0,
       "p99_ms": 1.0,
-      "zero_count": 824640
-    },
-    "Scam Detection": {
-      "count": 27,
-      "mean_ms": 1.0,
-      "median_ms": 1.0,
-      "std_ms": 0.0,
-      "min_ms": 1.0,
-      "max_ms": 1.0,
-      "p25_ms": 1.0,
-      "p75_ms": 1.0,
-      "p95_ms": 1.0,
-      "p99_ms": 1.0,
-      "zero_count": 826202
+      "zero_count": 1580
     },
     "Total Processing": {
-      "count": 725257,
-      "mean_ms": 5.396806924993485,
+      "count": 1592,
+      "mean_ms": 4.131281407035176,
       "median_ms": 2.0,
-      "std_ms": 32.083493691008606,
+      "std_ms": 5.7720997264425815,
       "min_ms": 1.0,
-      "max_ms": 3882.0,
+      "max_ms": 72.0,
       "p25_ms": 1.0,
-      "p75_ms": 3.0,
-      "p95_ms": 9.0,
-      "p99_ms": 96.0,
-      "zero_count": 100972
+      "p75_ms": 5.0,
+      "p95_ms": 16.0,
+      "p99_ms": 25.089999999999918,
+      "zero_count": 33
     },
     "End-to-End": {
-      "count": 725960,
-      "mean_ms": 5.396085183756681,
+      "count": 1594,
+      "mean_ms": 4.133626097867001,
       "median_ms": 2.0,
-      "std_ms": 32.06880880392407,
+      "std_ms": 5.769833973441191,
       "min_ms": 1.0,
-      "max_ms": 3882.0,
+      "max_ms": 72.0,
       "p25_ms": 1.0,
-      "p75_ms": 3.0,
-      "p95_ms": 9.0,
-      "p99_ms": 95.0,
-      "zero_count": 100269
+      "p75_ms": 5.0,
+      "p95_ms": 16.0,
+      "p99_ms": 25.069999999999936,
+      "zero_count": 31
     }
   },
   "transaction_categories": {
     "pool_transactions": {
-      "count": 128,
-      "percentage": 0.01549207302091793,
-      "avg_processing_ms": 4.3828125
+      "count": 0,
+      "percentage": 0.0,
+      "avg_processing_ms": NaN
     },
     "scam_transactions": {
       "count": 0,
@@ -123,88 +97,88 @@
     },
     "performance_categories": {
       "excellent": {
-        "count": 807615,
-        "percentage": 97.7471136936612,
-        "avg_end_to_end_ms": 2.287748494022523
+        "count": 1273,
+        "percentage": 78.33846153846153,
+        "avg_end_to_end_ms": 1.8153967007069913
       },
       "good": {
-        "count": 1932,
-        "percentage": 0.23383347715948,
-        "avg_end_to_end_ms": 27.40527950310559
+        "count": 161,
+        "percentage": 9.907692307692308,
+        "avg_end_to_end_ms": 7.0186335403726705
       },
       "acceptable": {
-        "count": 10845,
-        "percentage": 1.3125900930613668,
-        "avg_end_to_end_ms": 80.65846011987091
+        "count": 103,
+        "percentage": 6.338461538461539,
+        "avg_end_to_end_ms": 11.271844660194175
       },
       "poor": {
-        "count": 5837,
-        "percentage": 0.7064627361179527,
-        "avg_end_to_end_ms": 195.65427445605619
+        "count": 88,
+        "percentage": 5.415384615384616,
+        "avg_end_to_end_ms": 22.579545454545457
       }
     },
     "sla_compliance": {
-      "violations": 16682,
-      "compliance_rate": 97.98094717082067,
-      "avg_violation_time_ms": 120.8952763457619
+      "violations": 191,
+      "compliance_rate": 88.24615384615385,
+      "avg_violation_time_ms": 16.481675392670155
     }
   },
   "bottleneck_analysis": {
-    "total_avg_time_ms": 14.218227634227315,
+    "total_avg_time_ms": 12.091692307692309,
     "phase_contributions": {
       "End-to-End": {
-        "time_ms": 4.741230336867866,
-        "percentage": 33.34614171919977,
+        "time_ms": 4.054769230769231,
+        "percentage": 33.53351315588579,
         "rank": 1
       },
       "Total Processing": {
-        "time_ms": 4.737272596338304,
-        "percentage": 33.318306037908286,
+        "time_ms": 4.047384615384615,
+        "percentage": 33.47244134561555,
         "rank": 2
       },
       "REVM Simulation": {
-        "time_ms": 4.732270351198033,
-        "percentage": 33.28312412023924,
+        "time_ms": 3.9304615384615387,
+        "percentage": 32.505471016336706,
         "rank": 3
       },
-      "Mempool Residence": {
-        "time_ms": 0.003933534165467443,
-        "percentage": 0.027665432476255403,
+      "State Analysis": {
+        "time_ms": 0.027692307692307693,
+        "percentage": 0.22901928851341036,
         "rank": 4
       },
-      "State Analysis": {
-        "time_ms": 0.0019231956273623898,
-        "percentage": 0.013526268370698407,
+      "Pool Check": {
+        "time_ms": 0.024,
+        "percentage": 0.19848338337828897,
         "rank": 5
       },
-      "Pool Check": {
-        "time_ms": 0.0015407350746584785,
-        "percentage": 0.010836337089930191,
+      "Mempool Residence": {
+        "time_ms": 0.007384615384615385,
+        "percentage": 0.06107181027024276,
         "rank": 6
       },
-      "Scam Detection": {
-        "time_ms": 3.267859152849876e-05,
-        "percentage": 0.00022983590057196792,
+      "Internal Queue": {
+        "time_ms": 0.0,
+        "percentage": 0.0,
         "rank": 7
       },
-      "Internal Queue": {
-        "time_ms": 2.4206364095184264e-05,
-        "percentage": 0.00017024881523849475,
+      "Scam Detection": {
+        "time_ms": 0.0,
+        "percentage": 0.0,
         "rank": 8
       }
     },
     "primary_bottleneck": {
       "phase": "End-to-End",
-      "percentage": 33.34614171919977,
+      "percentage": 33.53351315588579,
       "recommendation": "Profile and optimize implementation"
     }
   },
   "throughput_metrics": {
-    "total_transactions": 826229,
-    "estimated_duration_min": 826.229,
-    "avg_processing_time_ms": 4.737272596338304,
-    "avg_queue_time_ms": 2.4206364095184264e-05,
-    "theoretical_max_tps": 211.0919267708923,
-    "queue_efficiency_pct": 99.99948902580725
+    "total_transactions": 1625,
+    "estimated_duration_min": 1.625,
+    "avg_processing_time_ms": 4.047384615384615,
+    "avg_queue_time_ms": 0.0,
+    "theoretical_max_tps": 247.07313364755967,
+    "queue_efficiency_pct": 100.0
   }
 }

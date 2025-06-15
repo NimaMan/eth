@@ -5,11 +5,11 @@ use ethers::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use eyre::Result;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
+use ethers::providers::{Provider, Http};
 
-use crate::tx_simulator::{SimulatorWrapper, DebugTraceCallStateDiffCalculator, DebugTraceCallSimulator};
+use crate::tx_simulator::DebugTraceCallSimulator;
 use crate::mempool_fetcher::types::TransactionView;
-use revm_context::BlockEnv;
 
 #[derive(Debug, Clone)]
 pub struct ScamAlert {
@@ -41,9 +41,10 @@ pub enum ScamType {
 }
 
 pub struct MempoolScamDetector {
-    simulator: SimulatorWrapper,
     watched_pools: HashMap<Address, PoolInfo>,
     weth_address: Address,
+    provider: Arc<Provider<Http>>,
+    rpc_url: String,
 }
 
 #[derive(Clone)]
@@ -55,19 +56,15 @@ pub struct PoolInfo {
 }
 
 impl MempoolScamDetector {
-    pub async fn new(rpc_url: &str, chain_id: u64) -> Result<Self> {
-        let simulator = SimulatorWrapper::new_revm(
-            rpc_url, 
-            chain_id, 
-            revm_primitives::hardfork::SpecId::LONDON
-        ).await?;
-        
+    pub async fn new(rpc_url: &str, _chain_id: u64) -> Result<Self> {
+        let provider = Arc::new(Provider::<Http>::try_from(rpc_url)?);
         let weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?;
         
         Ok(Self {
-            simulator,
             watched_pools: HashMap::new(),
             weth_address,
+            provider,
+            rpc_url: rpc_url.to_string(),
         })
     }
     
@@ -96,26 +93,14 @@ impl MempoolScamDetector {
         
         debug!("Analyzing potentially suspicious transaction: {:?}", tx.hash);
         
-        // Simulate the transaction
+        // Convert to TransactionView for simulator
         let tx_view = self.convert_to_tx_view(&tx);
-        let block_env = self.get_current_block_env().await?;
-        
-        // Get simulation result with logs
-        let sim_result = match self.simulator.process_transaction(&tx_view, &block_env).await? {
-            Some(result) => result,
-            None => {
-                debug!("Transaction simulation failed or reverted");
-                return Ok(None);
-            }
-        };
-        
-        // Extract logs from simulation
-        let logs = self.extract_logs_from_simulation(&sim_result);
         
         // Use DebugTraceCallSimulator to get state changes
-        let debug_simulator = DebugTraceCallSimulator::new(self.simulator.get_rpc_url()).await?;
+        let debug_simulator = DebugTraceCallSimulator::new(&self.rpc_url).await?;
         
-        match debug_simulator.process_transaction(&tx_view, &block_env).await {
+        // Note: DebugTraceCallSimulator doesn't need block_env, it uses "latest"
+        match debug_simulator.process_transaction(&tx_view, &Default::default()).await {
             Ok(Some(state_changes)) => {
                 // Convert HashMap<Address, CalculatedAccountChanges> to our MempoolStateDiff format
                 let mut eth_changes = std::collections::HashMap::new();
@@ -309,25 +294,21 @@ impl MempoolScamDetector {
         }
     }
     
-    /// Get current block environment for simulation
-    async fn get_current_block_env(&self) -> Result<BlockEnv> {
-        // Simplified - in production would get from chain
-        Ok(BlockEnv {
-            number: revm_primitives::U256::from(18_000_000u64),
-            timestamp: revm_primitives::U256::from(1_700_000_000u64),
-            gas_limit: 30_000_000u64,
-            ..Default::default()
-        })
-    }
-    
-    /// Extract logs from simulation result (placeholder)
-    fn extract_logs_from_simulation(
-        &self, 
-        _sim_result: &HashMap<revm_primitives::Address, revm_tx_simulator_lib::process_tx::state_diff_utils::CalculatedAccountChanges>
-    ) -> Vec<Log> {
-        // TODO: Extract actual logs from simulation
-        // For now, return empty - would need to enhance simulator to capture logs
-        vec![]
+    /// Get current block information
+    async fn get_current_block(&self) -> Result<(u64, u64)> {
+        use ethers::types::{BlockNumber, BlockId};
+        
+        let block = self.provider
+            .get_block(BlockId::Number(BlockNumber::Latest))
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to get latest block"))?;
+        
+        let block_number = block.number
+            .ok_or_else(|| eyre::eyre!("Block has no number"))?
+            .as_u64();
+        let timestamp = block.timestamp.as_u64();
+        
+        Ok((block_number, timestamp))
     }
 }
 
