@@ -29,28 +29,54 @@ const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 #[derive(Default)]
 struct TimingStats {
     total_processing_time_ms: f64,
+    total_websocket_latency_ms: f64,
+    total_simulation_time_ms: f64,
     transaction_count: u64,
     min_time_ms: f64,
     max_time_ms: f64,
+    min_websocket_ms: f64,
+    max_websocket_ms: f64,
 }
 
 impl TimingStats {
-    fn update(&mut self, elapsed_ms: f64) {
+    fn update(&mut self, elapsed_ms: f64, websocket_ms: f64, simulation_ms: f64) {
         self.transaction_count += 1;
         self.total_processing_time_ms += elapsed_ms;
+        self.total_websocket_latency_ms += websocket_ms;
+        self.total_simulation_time_ms += simulation_ms;
         
         if self.transaction_count == 1 {
             self.min_time_ms = elapsed_ms;
             self.max_time_ms = elapsed_ms;
+            self.min_websocket_ms = websocket_ms;
+            self.max_websocket_ms = websocket_ms;
         } else {
             self.min_time_ms = self.min_time_ms.min(elapsed_ms);
             self.max_time_ms = self.max_time_ms.max(elapsed_ms);
+            self.min_websocket_ms = self.min_websocket_ms.min(websocket_ms);
+            self.max_websocket_ms = self.max_websocket_ms.max(websocket_ms);
         }
     }
     
     fn average_ms(&self) -> f64 {
         if self.transaction_count > 0 {
             self.total_processing_time_ms / self.transaction_count as f64
+        } else {
+            0.0
+        }
+    }
+    
+    fn average_websocket_ms(&self) -> f64 {
+        if self.transaction_count > 0 {
+            self.total_websocket_latency_ms / self.transaction_count as f64
+        } else {
+            0.0
+        }
+    }
+    
+    fn average_simulation_ms(&self) -> f64 {
+        if self.transaction_count > 0 {
+            self.total_simulation_time_ms / self.transaction_count as f64
         } else {
             0.0
         }
@@ -137,8 +163,18 @@ async fn main() -> Result<()> {
     // Create log directory if it doesn't exist
     let log_dir = "/home/nima/code/crypto/logs/mempool";
     std::fs::create_dir_all(log_dir)?;
-    let log_file_path = format!("{}/scam_detections.log", log_dir);
-    info!("📝 Logging scam detections to: {}", log_file_path);
+    let scam_log_path = format!("{}/scam_detections.log", log_dir);
+    let timing_log_path = format!("{}/processing_times.log", log_dir);
+    info!("📝 Logging scam detections to: {}", scam_log_path);
+    info!("⏱️  Logging timing stats to: {}", timing_log_path);
+    
+    // Create timing log file and write header
+    let mut timing_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&timing_log_path)?;
+    writeln!(timing_file, "\n=== Mempool Scam Monitor Started at {} ===", Utc::now().to_rfc3339())?;
+    writeln!(timing_file, "timestamp,tx_hash,total_ms,simulation_ms,websocket_latency_ms")?;
     
     // Add some pools to watch (from the pool cache)
     let pools = pool_cache_clone.get_all_pools();
@@ -177,6 +213,7 @@ async fn main() -> Result<()> {
         
         for ws_tx in new_txs {
             let processing_start = Instant::now();
+            let websocket_latency_ms = ws_tx.latency_ms;
             
             // Parse transaction hash
             let tx_hash = match ws_tx.hash.parse::<H256>() {
@@ -203,9 +240,23 @@ async fn main() -> Result<()> {
                             error!("   Drain: {:.2} ETH ({:.1}%)", 
                                 alert.drain_amount_eth, alert.drain_percentage);
                             error!("   Details: {}", alert.details);
-                            error!("   Simulation time: {:.2}ms", simulation_start.elapsed().as_secs_f64() * 1000.0);
+                            let simulation_time_ms = simulation_start.elapsed().as_secs_f64() * 1000.0;
+                            error!("   Simulation time: {:.2}ms", simulation_time_ms);
+                            error!("   WebSocket latency: {:.2}ms", websocket_latency_ms);
+                            error!("   Total end-to-end: {:.2}ms", processing_start.elapsed().as_secs_f64() * 1000.0);
                             
                             // Log to file
+                            // Log timing to file
+                            if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {
+                                let _ = writeln!(timing_file, "{},{},{:.2},{:.2},{:.2}",
+                                    Utc::now().to_rfc3339(),
+                                    alert.tx_hash,
+                                    processing_start.elapsed().as_secs_f64() * 1000.0,
+                                    simulation_time_ms,
+                                    websocket_latency_ms
+                                );
+                            }
+                            
                             let timestamp: DateTime<Utc> = Utc::now();
                             let log_entry = format!(
                                 "{} | SCAM DETECTED | tx: {} | type: {:?} | severity: {:?} | pool: {:?} | drain: {:.4} ETH ({:.1}%) | {}\n",
@@ -222,7 +273,7 @@ async fn main() -> Result<()> {
                             if let Ok(mut file) = OpenOptions::new()
                                 .create(true)
                                 .append(true)
-                                .open(&log_file_path)
+                                .open(&scam_log_path)
                             {
                                 let _ = file.write_all(log_entry.as_bytes());
                                 let _ = file.flush();
@@ -253,8 +304,23 @@ async fn main() -> Result<()> {
                         }
                         Ok(None) => {
                             // No scam detected, log timing at debug level
-                            let elapsed = processing_start.elapsed().as_secs_f64() * 1000.0;
-                            debug!("Transaction {} processed in {:.2}ms (not a scam)", tx_hash, elapsed);
+                            let total_time_ms = processing_start.elapsed().as_secs_f64() * 1000.0;
+                            let simulation_time_ms = simulation_start.elapsed().as_secs_f64() * 1000.0;
+                            debug!("Transaction {} processed in {:.2}ms (simulation: {:.2}ms, websocket: {:.2}ms)", 
+                                tx_hash, total_time_ms, simulation_time_ms, websocket_latency_ms);
+                            
+                            // Log timing to file periodically (every 10th transaction)
+                            if total_processed % 10 == 0 {
+                                if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {
+                                    let _ = writeln!(timing_file, "{},{},{:.2},{:.2},{:.2}",
+                                        Utc::now().to_rfc3339(),
+                                        tx_hash,
+                                        total_time_ms,
+                                        simulation_time_ms,
+                                        websocket_latency_ms
+                                    );
+                                }
+                            }
                         }
                         Err(e) => {
                             warn!("Failed to analyze transaction {}: {}", tx_hash, e);
@@ -263,17 +329,35 @@ async fn main() -> Result<()> {
                     
                     // Update timing statistics
                     let total_time_ms = processing_start.elapsed().as_secs_f64() * 1000.0;
-                    timing_stats.update(total_time_ms);
+                    let simulation_time_ms = simulation_start.elapsed().as_secs_f64() * 1000.0;
+                    timing_stats.update(total_time_ms, websocket_latency_ms, simulation_time_ms);
                     
                     total_processed += 1;
                     
                     if total_processed % 100 == 0 {
                         info!("📊 Processed {} transactions, found {} scams", 
                             total_processed, total_scams);
-                        info!("⏱️  Timing stats: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                        info!("⏱️  Processing time: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
                             timing_stats.average_ms(),
                             timing_stats.min_time_ms,
                             timing_stats.max_time_ms);
+                        
+                        // Get WebSocket stats
+                        let ws_stats = ws_client.get_stats().await;
+                        info!("🌐 WebSocket latency: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                            ws_stats.avg_latency_ms,
+                            ws_stats.min_latency_ms.unwrap_or(0.0),
+                            ws_stats.max_latency_ms.unwrap_or(0.0));
+                        
+                        // Log summary to timing file
+                        if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {
+                            let _ = writeln!(timing_file, "\n[Summary at {}] Processed: {}, Processing avg: {:.2}ms, WebSocket avg: {:.2}ms",
+                                Utc::now().to_rfc3339(),
+                                total_processed,
+                                timing_stats.average_ms(),
+                                ws_stats.avg_latency_ms
+                            );
+                        }
                     }
                 }
                 Ok(None) => {
