@@ -10,5 +10,3 @@ pub mod signal_engine;
 pub mod validation_testing;
 pub mod common;
 
-// Additional modules
-pub mod mempool_scam_detector;
