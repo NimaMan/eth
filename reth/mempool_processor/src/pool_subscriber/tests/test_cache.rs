@@ -22,6 +22,7 @@ mod cache_tests {
             "0xTestPool123".to_string(),
             PoolUpdate {
                 eth_reserve: 5.0,
+                token_reserve: 10000.0,
                 token_address: "0xTestToken".to_string(),
                 block_number: 1000000,
                 update_time: 1234567890.0,

@@ -131,6 +131,7 @@ mod tests {
         let pool_address = "0x1234567890abcdef1234567890abcdef12345678".to_string();
         let pool_update = PoolUpdate {
             eth_reserve: 5.0,
+            token_reserve: 10000.0,
             token_address: "0xabcdef1234567890abcdef1234567890abcdef12".to_string(),
             block_number: 12345,
             update_time: 1626000000.0,
@@ -148,6 +149,7 @@ mod tests {
         
         let pool_state = pool_state.unwrap();
         assert_eq!(pool_state.eth_reserve, 5.0);
+        assert_eq!(pool_state.token_reserve, 10000.0);
         assert_eq!(pool_state.token_address, "0xabcdef1234567890abcdef1234567890abcdef12");
         assert_eq!(pool_state.last_updated_block, 12345);
     }

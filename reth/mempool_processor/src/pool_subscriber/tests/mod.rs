@@ -21,6 +21,7 @@ fn test_pool_state_cache_basic_operations() {
     let pool_address = "0x1234567890abcdef1234567890abcdef12345678";
     let pool_update = PoolUpdate {
         eth_reserve: 5.5,
+        token_reserve: 10000.0,
         token_address: "0xabcdef1234567890abcdef1234567890abcdef12".to_string(),
         block_number: 12345678,
         update_time: 1234567890.0,
@@ -98,6 +99,7 @@ fn test_pool_state_cache_concurrent_access() {
 fn test_pool_state_staleness() {
     let update = PoolUpdate {
         eth_reserve: 10.0,
+        token_reserve: 20000.0,
         token_address: "0xtoken".to_string(),
         block_number: 12345678,
         update_time: 1234567890.0,
@@ -171,18 +173,21 @@ fn test_eth_threshold_filtering() {
     let pool_updates = vec![
         ("0xpool1", PoolUpdate {
             eth_reserve: 0.5, // Below threshold
+            token_reserve: 1000.0,
             token_address: "0xtoken1".to_string(),
             block_number: 1,
             update_time: 1.0,
         }),
         ("0xpool2", PoolUpdate {
             eth_reserve: 1.5, // Above threshold
+            token_reserve: 3000.0,
             token_address: "0xtoken2".to_string(),
             block_number: 2,
             update_time: 2.0,
         }),
         ("0xpool3", PoolUpdate {
             eth_reserve: 10.0, // Well above threshold
+            token_reserve: 20000.0,
             token_address: "0xtoken3".to_string(),
             block_number: 3,
             update_time: 3.0,
@@ -282,6 +287,7 @@ fn test_req_rep_request_format() {
 fn test_pool_update_to_state_conversion() {
     let update = PoolUpdate {
         eth_reserve: 42.0,
+        token_reserve: 84000.0,
         token_address: "0xMyToken".to_string(),
         block_number: 12345,
         update_time: 1625000000.0,

@@ -87,12 +87,14 @@ impl PoolSubscriber {
                 for (address, data) in pool_data {
                     if let Some(pool_obj) = data.as_object() {
                         let python_eth_reserve = pool_obj.get("eth_reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let python_token_reserve = pool_obj.get("token_reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let token_address = pool_obj.get("token_address").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let block_number = pool_obj.get("block_number").and_then(|v| v.as_u64()).unwrap_or(0);
                         let update_time = pool_obj.get("update_time").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         
                         let pool_update = types::PoolUpdate {
                             eth_reserve: python_eth_reserve,
+                            token_reserve: python_token_reserve,
                             token_address: checksum_address(&token_address),
                             block_number,
                             update_time,

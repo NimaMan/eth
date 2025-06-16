@@ -12,6 +12,9 @@ pub struct PoolUpdate {
     /// Current ETH reserve level in the pool
     pub eth_reserve: f64,
     
+    /// Current token reserve level in the pool
+    pub token_reserve: f64,
+    
     /// Address of the token in this pool
     pub token_address: String,
     
@@ -46,6 +49,9 @@ pub struct PoolState {
     /// Current ETH reserve level in the pool
     pub eth_reserve: f64,
     
+    /// Current token reserve level in the pool
+    pub token_reserve: f64,
+    
     /// Address of the token in this pool
     pub token_address: String,
     
@@ -75,6 +81,7 @@ impl From<PoolUpdate> for PoolState {
     fn from(update: PoolUpdate) -> Self {
         Self {
             eth_reserve: update.eth_reserve,
+            token_reserve: update.token_reserve,
             token_address: update.token_address,
             last_updated_block: update.block_number,
             last_updated_time: update.update_time,
