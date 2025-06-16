@@ -1,9 +1,10 @@
-/// Fast RPC Simulation with State Changes
+/// Debug TraceCall Transaction Simulation
 /// 
-/// Fetches transactions from mempool, simulates with Fast RPC,
-/// and calculates address state changes
+/// Demonstrates using debug_traceCall RPC method to simulate pending transactions
+/// and extract state changes (ETH and token balance changes per address).
+/// This is the production method used in the main mempool processor.
 ///
-/// Run with: cargo run --example fast_simulation_with_state_changes
+/// Run with: cargo run --example debug_tracecall_simulation
 
 use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
 use mempool_processor::tx_simulator::SimulatorWrapper;
@@ -18,11 +19,12 @@ use revm_context::BlockEnv;
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
-        .with_env_filter("mempool_processor=info,fast_simulation=info")
+        .with_env_filter("mempool_processor=info,debug_tracecall_simulation=info")
         .init();
 
-    info!("🚀 Fast RPC Transaction Simulation with State Changes");
+    info!("🚀 Debug TraceCall Transaction Simulation");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    info!("Using debug_traceCall method for ~5ms simulation performance");
     
     let ws_url = "ws://127.0.0.1:8546";
     let http_url = "http://127.0.0.1:8545";
@@ -50,9 +52,9 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
     
-    // Initialize Fast RPC simulator
-    info!("Initializing Fast RPC simulator...");
-    let simulator = SimulatorWrapper::new_fast_rpc(http_url).await?;
+    // Initialize debug_traceCall simulator
+    info!("Initializing debug_traceCall simulator...");
+    let simulator = SimulatorWrapper::new_debug_tracecall(http_url).await?;
     
     // Connect to mempool
     info!("Connecting to mempool via WebSocket...");
@@ -124,7 +126,7 @@ async fn main() -> Result<()> {
                                             break; 
                                         }
                                         
-                                        let addr_str = format!("0x{}", hex::encode(address.as_ref()));
+                                        let addr_str = format!("0x{}", hex::encode(address.as_slice()));
                                         info!("  Address {}: {}", i+1, &addr_str[..10]);
                                         
                                         // Show ETH balance change if any

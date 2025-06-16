@@ -297,10 +297,10 @@ impl DecisionEngine {
 pub type ScamDetectionConfig = DecisionConfig;
 pub type ScamDetectionEngine = DecisionEngine;
 
-impl ScamDetectionEngine {
-    /// Legacy method for backward compatibility
-    pub fn analyze_transaction(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
-        let events = DecisionEngine::analyze_transaction(self, simulation);
+impl DecisionEngine {
+    /// Legacy method for backward compatibility - returns only scam alerts
+    pub fn analyze_transaction_legacy(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
+        let events = self.analyze_transaction(simulation);
         
         // Convert MarketEvents to legacy ScamAlerts (only for actual scams)
         events.into_iter()
@@ -328,15 +328,16 @@ impl ScamDetectionEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pool_subscriber::{PoolUpdate, PoolState};
+    use crate::pool_subscriber::types::PoolUpdate;
     
     #[test]
     fn test_scam_detection() {
         // Create a mock pool cache
-        let cache = Arc::new(PoolStateCache::new());
+        let cache = Arc::new(PoolStateCache::new(0.1));
         
         // Add test pool
-        cache.update_pool(
+        let mut updates = HashMap::new();
+        updates.insert(
             "0x1234567890abcdef1234567890abcdef12345678".to_string(),
             PoolUpdate {
                 eth_reserve: 10.0,
@@ -346,6 +347,7 @@ mod tests {
                 update_time: 1626000000.0,
             }
         );
+        cache.update_pools(updates.iter());
         
         // Create engine
         let engine = DecisionEngine::with_pool_cache(cache);
@@ -382,9 +384,10 @@ mod tests {
     
     #[test]
     fn test_liquidity_warning() {
-        let cache = Arc::new(PoolStateCache::new());
+        let cache = Arc::new(PoolStateCache::new(0.1));
         
-        cache.update_pool(
+        let mut updates = HashMap::new();
+        updates.insert(
             "0x2234567890abcdef1234567890abcdef12345678".to_string(),
             PoolUpdate {
                 eth_reserve: 50.0,
@@ -394,6 +397,7 @@ mod tests {
                 update_time: 1626000000.0,
             }
         );
+        cache.update_pools(updates.iter());
         
         let engine = DecisionEngine::with_pool_cache(cache);
         
@@ -428,9 +432,10 @@ mod tests {
     
     #[test]
     fn test_token_supply_alert() {
-        let cache = Arc::new(PoolStateCache::new());
+        let cache = Arc::new(PoolStateCache::new(0.1));
         
-        cache.update_pool(
+        let mut updates = HashMap::new();
+        updates.insert(
             "0x3334567890abcdef1234567890abcdef12345678".to_string(),
             PoolUpdate {
                 eth_reserve: 20.0,
@@ -440,6 +445,7 @@ mod tests {
                 update_time: 1626000000.0,
             }
         );
+        cache.update_pools(updates.iter());
         
         let engine = DecisionEngine::with_pool_cache(cache);
         

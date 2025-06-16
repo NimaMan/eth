@@ -1,7 +1,7 @@
 /// Simple WebSocket Latency Test
 /// Tests WebSocket streaming performance for <10ms requirement validation
 
-use mempool_processor::mempool_fetcher::websocket_fetcher::{WebSocketFetcher, TimestampedTransaction};
+use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, error};
 
@@ -51,7 +51,7 @@ async fn test_websocket_latency(
     info!("🔄 Initializing WebSocket fetcher...");
     
     // Create WebSocket fetcher
-    let fetcher = WebSocketFetcher::new(ws_url, http_url).await?;
+    let fetcher = WebSocketClient::new(ws_url, http_url).await?;
     
     // Start full capture
     fetcher.start_full_capture().await?;

@@ -231,10 +231,10 @@ impl DecisionService {
 pub type ScamDetectionService = DecisionService;
 pub type ScamDetectionConfig = DecisionConfig;
 
-impl ScamDetectionService {
+impl DecisionService {
     /// Legacy method for backward compatibility
-    pub async fn process_transaction(&self, simulation: SimulationResult) -> Result<Vec<super::types::ScamAlert>, Box<dyn std::error::Error>> {
-        let events = DecisionService::process_transaction(self, simulation).await?;
+    pub async fn process_transaction_legacy(&self, simulation: SimulationResult) -> Result<Vec<super::types::ScamAlert>, Box<dyn std::error::Error>> {
+        let events = self.process_transaction(simulation).await?;
         
         // Convert only ScamAlert events to legacy format
         Ok(events.into_iter()

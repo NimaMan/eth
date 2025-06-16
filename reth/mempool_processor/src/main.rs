@@ -13,8 +13,8 @@ use std::collections::{HashSet, HashMap};
 use std::time::Instant;
 
 // Import our ERC20 and DEX decoding utilities
-use mempool_fetcher::common::erc20::{decode_erc20_method, ERC20Method, format_token_amount};
-use mempool_fetcher::common::dex::{detect_dex_interaction, DexInteraction, is_dex_router};
+use mempool_processor::common::erc20::{decode_erc20_method, ERC20Method, format_token_amount};
+use mempool_processor::common::dex::{detect_dex_interaction, DexInteraction, is_dex_router};
 
 #[derive(Parser, Debug)]
 struct Args {

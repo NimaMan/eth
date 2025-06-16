@@ -7,7 +7,7 @@
 mod tests {
     use super::super::TransactionSimulator;
     use crate::mempool_fetcher::types::TransactionView;
-    use crate::mempool_fetcher::fetcher::MempoolFetcher;
+    use ethers::providers::Middleware;
     use ethers::providers::{Http, Provider};
     use ethers::types::{U256, Bytes};
     use std::sync::Arc;
@@ -142,7 +142,7 @@ mod tests {
             
             let block_env = revm_context::BlockEnv {
                 number: latest_block.number.unwrap_or_default().into(),
-                coinbase: latest_block.author.unwrap_or_default().into(),
+                beneficiary: latest_block.author.unwrap_or_default().into(),
                 timestamp: latest_block.timestamp.into(),
                 gas_limit: latest_block.gas_limit.into(),
                 basefee: latest_block.base_fee_per_gas.unwrap_or_default().into(),
@@ -176,7 +176,7 @@ mod tests {
                             .find(|(k, _)| k.to_lowercase() == addr_lower)
                             .map(|(_, v)| v) {
                             
-                            if let Some(eth_change) = changes.eth_balance_change {
+                            if let Some(eth_change) = changes.eth_net_change {
                                 println!("   💰 Address {}: {} wei change", 
                                         expected_addr, eth_change);
                                 
@@ -201,7 +201,7 @@ mod tests {
                     for (address, changes) in &account_changes {
                         println!("      - {}: ETH: {:?}, Storage: {} changes", 
                                 address, 
-                                changes.eth_balance_change,
+                                changes.eth_net_change,
                                 changes.storage_changes.len());
                     }
                     
@@ -267,7 +267,7 @@ mod tests {
                 
                 let block_env = revm_context::BlockEnv {
                     number: latest_block.number.unwrap_or_default().into(),
-                    coinbase: latest_block.author.unwrap_or_default().into(),
+                    beneficiary: latest_block.author.unwrap_or_default().into(),
                     timestamp: latest_block.timestamp.into(),
                     gas_limit: latest_block.gas_limit.into(),
                     basefee: latest_block.base_fee_per_gas.unwrap_or_default().into(),
@@ -282,7 +282,7 @@ mod tests {
                         
                         // Look for significant ETH changes
                         for (address, changes) in account_changes.iter() {
-                            if let Some(eth_change) = changes.eth_balance_change {
+                            if let Some(eth_change) = changes.eth_net_change {
                                 if eth_change.abs() > 10000000000000000i64 { // > 0.01 ETH
                                     println!("   💰 Significant ETH change in {}: {} wei", 
                                             address, eth_change);
@@ -350,7 +350,7 @@ mod tests {
 mod integration_tests {
     use super::super::TransactionSimulator;
     use crate::mempool_fetcher::types::TransactionView;
-    use crate::mempool_fetcher::fetcher::MempoolFetcher;
+    use ethers::providers::Middleware;
     use ethers::providers::{Http, Provider};
     use ethers::types::{U256, Bytes};
     use std::sync::Arc;
@@ -367,16 +367,12 @@ mod integration_tests {
         // This test would fetch real transactions from mempool and test simulation
         // Ignored by default since it requires network access
         
-        use crate::mempool_fetcher::fetcher::MempoolFetcher;
+        use mempool_processor::mempool_fetcher::WebSocketClient;
         
-        let fetcher = MempoolFetcher::new(
+        let fetcher = WebSocketClient::new(
+            "ws://localhost:8546",
             "http://localhost:8545",
-            None,
-            false,
-            false,
-            100,
-            2000,
-        );
+        ).await?;
         
         let transactions = fetcher.get_transactions().await.expect("Failed to get transactions");
         println!("Fetched {} transactions from mempool", transactions.len());
@@ -405,7 +401,7 @@ mod integration_tests {
             
             let block_env = revm_context::BlockEnv {
                 number: latest_block.number.unwrap_or_default().into(),
-                coinbase: latest_block.author.unwrap_or_default().into(),
+                beneficiary: latest_block.author.unwrap_or_default().into(),
                 timestamp: latest_block.timestamp.into(),
                 gas_limit: latest_block.gas_limit.into(),
                 basefee: latest_block.base_fee_per_gas.unwrap_or_default().into(),

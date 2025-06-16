@@ -32,5 +32,4 @@ pub use processor::{TransactionProcessor, PoolTracker, DbLogger};
 // Re-export tx_simulator functionality 
 pub use crate::tx_simulator::*;
 
-#[cfg(test)]
-mod tests;
+// Tests are in the individual submodules

@@ -6,7 +6,7 @@ pub mod types;
 pub mod cache;
 
 #[cfg(test)]
-mod tests;
+pub mod tests;
 
 use zmq;
 use tracing::{info, error, debug, warn};
@@ -209,7 +209,7 @@ impl PoolSubscriber {
 
 // Basic test function to ensure the module structure is sound
 #[cfg(test)]
-mod tests {
+mod basic_tests {
     use super::*;
 
     #[test]

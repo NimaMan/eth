@@ -267,9 +267,9 @@ async fn main() -> Result<()> {
     }
     
     // Display final results
-    let final_stats = stats.read().await.clone();
-    let final_metrics = all_metrics.read().await.clone();
-    display_results(&final_stats, &final_metrics).await;
+    let final_stats = stats.read().await;
+    let final_metrics = all_metrics.read().await;
+    display_results(&*final_stats, &*final_metrics).await;
     
     Ok(())
 }

@@ -115,9 +115,6 @@ reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
 name = "mempool_tracker"
 path = "src/bin/mempool_tracker.rs"
 
-[[bin]]
-name = "scam_detection_service"
-path = "src/bin/scam_detection_service.rs"
 
 [[bin]]
 name = "metrics_api_server"
@@ -127,9 +124,6 @@ path = "src/bin/metrics_api_server.rs"
 name = "realtime_scam_detection_service"
 path = "src/bin/realtime_scam_detection_service.rs"
 
-[[bin]]
-name = "test_live_pool_detection"
-path = "tests/test_live_pool_detection.rs"
 
 [[bin]]
 name = "measure_mempool_timing"
@@ -167,9 +161,6 @@ path = "src/bin/websocket_latency_test.rs"
 name = "test_direct_integration"
 path = "src/bin/test_direct_integration.rs"
 
-[[bin]]
-name = "mempool_logger_service"
-path = "src/bin/mempool_logger_service.rs"
 
 
 # Performance testing binaries
@@ -203,24 +194,12 @@ name = "detect_pool_state_changes"
 path = "examples/detect_pool_state_changes.rs"
 
 [[example]]
-name = "analyze_cypher_tx"
-path = "examples/analyze_cypher_tx.rs"
-
-[[example]]
 name = "test_pool_subscriber"
 path = "examples/test_pool_subscriber.rs"
 
 [[example]]
-name = "test_mempool_processor"
-path = "examples/test_mempool_processor.rs"
-
-[[example]]
-name = "test_tx_simulator_performance"
-path = "examples/test_tx_simulator_performance.rs"
-
-[[example]]
-name = "realtime_simulation_pipeline"
-path = "examples/realtime_simulation_pipeline.rs"
+name = "monitor_pool_state_changes"
+path = "examples/monitor_pool_state_changes.rs"
 
 
 [[example]]
@@ -231,17 +210,14 @@ path = "examples/measure_mempool_performance.rs"
 name = "test_optimized_ipc"
 path = "examples/test_optimized_ipc.rs"
 
-[[example]]
-name = "measure_simulation_latency"
-path = "src/tx_simulator/examples/measure_simulation_latency.rs"
 
 [[example]]
 name = "simple_latency_test"
 path = "examples/simple_latency_test.rs"
 
 [[example]]
-name = "fast_simulation_with_state_changes"
-path = "examples/fast_simulation_with_state_changes.rs"
+name = "debug_tracecall_simulation"
+path = "examples/debug_tracecall_simulation.rs"
 
 [[example]]
 name = "quick_simulation_test"
@@ -250,21 +226,5 @@ path = "examples/quick_simulation_test.rs"
 [[example]]
 name = "actual_simulation_measurement"
 path = "examples/actual_simulation_measurement.rs"
-
-[[example]]
-name = "log_state_changes_one_minute"
-path = "src/tx_simulator/examples/log_state_changes_one_minute.rs"
-
-[[example]]
-name = "log_actual_state_changes"
-path = "src/tx_simulator/examples/log_actual_state_changes.rs"
-
-[[example]]
-name = "debug_trace_analysis"
-path = "src/tx_simulator/examples/debug_trace_analysis.rs"
-
-[[example]]
-name = "monitor_pool_state_changes"
-path = "examples/monitor_pool_state_changes.rs"
 
 # Using crates.io versions - no patches needed

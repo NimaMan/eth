@@ -1,50 +1,56 @@
-/// Example: Detect Uniswap V2 Pool Creation from Transaction
+/// Example: Detect Liquidity Pool Creation from Transaction
 /// 
 /// This example demonstrates how to:
 /// 1. Take a transaction hash as input
-/// 2. Detect if the transaction creates a new Uniswap V2 pool
+/// 2. Detect if the transaction creates a new liquidity pool
 /// 3. Extract pool details (token addresses, initial reserves)
-/// 4. Analyze the state changes involved
+/// 4. Show which DEX protocol was used
 /// 
 /// Run with:
 /// ```
 /// cargo run --example detect_pool_creation -- <TX_HASH>
 /// ```
+///
+/// Example transactions:
+/// - Uniswap V2: 0x...
+/// - Uniswap V3: 0x...
 
 use ethers::prelude::*;
-use mempool_processor::state_change_detector::StateChangeDetector;
-use mempool_processor::mempool_fetcher::pools::{PoolTracker, PoolState, PoolType};
+use ethers::utils::format_units;
 use std::env;
 use std::sync::Arc;
 use tracing::{info, warn, error};
 use tracing_subscriber;
 use eyre::Result;
 
-// Uniswap V2 Factory address on mainnet
+// Known factory addresses
 const UNISWAP_V2_FACTORY: &str = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f";
+const UNISWAP_V3_FACTORY: &str = "0x1F98431c8aD98523631AE4a59f267346ea31F984";
+const SUSHISWAP_FACTORY: &str = "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac";
 
-// PairCreated event signature
-// event PairCreated(address indexed token0, address indexed token1, address pair, uint);
-const PAIR_CREATED_TOPIC: &str = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9";
+// Event signatures
+const PAIR_CREATED_TOPIC: &str = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"; // V2
+const POOL_CREATED_TOPIC: &str = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"; // V3
 
 #[derive(Debug)]
-struct PoolCreationDetails {
+struct PoolCreation {
+    factory: String,
     pool_address: Address,
     token0: Address,
     token1: Address,
-    pair_index: U256,
-    creator: Address,
-    block_number: U64,
+    dex_type: String,
+    fee_tier: Option<u32>, // For V3 pools
+    block_number: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt()
-        .with_env_filter("detect_pool_creation=info,mempool_processor=info")
+        .with_env_filter("detect_pool_creation=info")
         .init();
 
-    // Get transaction hash from command line
+    // Parse command line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         error!("Usage: {} <TRANSACTION_HASH>", args[0]);
@@ -70,243 +76,198 @@ async fn main() -> Result<()> {
     info!("Transaction from: {:?}", tx.from);
     info!("Transaction to: {:?}", tx.to);
     info!("Block number: {:?}", receipt.block_number);
+    info!("Gas used: {:?}", receipt.gas_used);
     
-    // Check if this transaction interacts with Uniswap V2 Factory
-    let factory_address = UNISWAP_V2_FACTORY.parse::<Address>()?;
+    // Parse event topics
     let pair_created_topic = H256::from_slice(&hex::decode(PAIR_CREATED_TOPIC.trim_start_matches("0x"))?);
+    let pool_created_topic = H256::from_slice(&hex::decode(POOL_CREATED_TOPIC.trim_start_matches("0x"))?);
     
-    // Look for PairCreated events
+    // Look for pool creation events
     let mut pool_creations = Vec::new();
     
     for log in &receipt.logs {
-        // Check if this is a PairCreated event from the Uniswap V2 Factory
-        if log.address == factory_address && 
+        // Check Uniswap V2 PairCreated
+        if log.address == UNISWAP_V2_FACTORY.parse::<Address>()? && 
            log.topics.len() >= 3 && 
            log.topics[0] == pair_created_topic {
             
-            info!("🎉 Found PairCreated event!");
-            
-            // Extract event data
-            // topics[1] = token0 (indexed)
-            // topics[2] = token1 (indexed)
-            // data = pair address (20 bytes) + pair index (uint256)
+            info!("🎉 Found Uniswap V2 PairCreated event!");
             
             let token0 = Address::from_slice(&log.topics[1].as_bytes()[12..]);
             let token1 = Address::from_slice(&log.topics[2].as_bytes()[12..]);
             
-            // Parse data field
+            // Parse pool address from data
             if log.data.len() >= 32 {
                 let pool_address = Address::from_slice(&log.data[12..32]);
-                let pair_index = if log.data.len() >= 64 {
-                    U256::from_big_endian(&log.data[32..64])
-                } else {
-                    U256::zero()
-                };
                 
-                let creation = PoolCreationDetails {
+                pool_creations.push(PoolCreation {
+                    factory: "Uniswap V2".to_string(),
                     pool_address,
                     token0,
                     token1,
-                    pair_index,
-                    creator: tx.from,
-                    block_number: receipt.block_number.unwrap_or_default(),
-                };
+                    dex_type: "UniswapV2".to_string(),
+                    fee_tier: None,
+                    block_number: receipt.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+        
+        // Check Uniswap V3 PoolCreated
+        if log.address == UNISWAP_V3_FACTORY.parse::<Address>()? && 
+           log.topics.len() >= 3 && 
+           log.topics[0] == pool_created_topic {
+            
+            info!("🎉 Found Uniswap V3 PoolCreated event!");
+            
+            let token0 = Address::from_slice(&log.topics[1].as_bytes()[12..]);
+            let token1 = Address::from_slice(&log.topics[2].as_bytes()[12..]);
+            let fee = U256::from_big_endian(&log.topics[3].as_bytes()).as_u32();
+            
+            // Parse pool address from data
+            if log.data.len() >= 32 {
+                let pool_address = Address::from_slice(&log.data[12..32]);
                 
-                pool_creations.push(creation);
+                pool_creations.push(PoolCreation {
+                    factory: "Uniswap V3".to_string(),
+                    pool_address,
+                    token0,
+                    token1,
+                    dex_type: "UniswapV3".to_string(),
+                    fee_tier: Some(fee),
+                    block_number: receipt.block_number.unwrap().as_u64(),
+                });
+            }
+        }
+        
+        // Check SushiSwap (same as V2)
+        if log.address == SUSHISWAP_FACTORY.parse::<Address>()? && 
+           log.topics.len() >= 3 && 
+           log.topics[0] == pair_created_topic {
+            
+            info!("🎉 Found SushiSwap PairCreated event!");
+            
+            let token0 = Address::from_slice(&log.topics[1].as_bytes()[12..]);
+            let token1 = Address::from_slice(&log.topics[2].as_bytes()[12..]);
+            
+            if log.data.len() >= 32 {
+                let pool_address = Address::from_slice(&log.data[12..32]);
+                
+                pool_creations.push(PoolCreation {
+                    factory: "SushiSwap".to_string(),
+                    pool_address,
+                    token0,
+                    token1,
+                    dex_type: "SushiSwap".to_string(),
+                    fee_tier: None,
+                    block_number: receipt.block_number.unwrap().as_u64(),
+                });
             }
         }
     }
     
+    // Display results
     if pool_creations.is_empty() {
-        info!("❌ No pool creation detected in this transaction");
+        warn!("❌ No pool creation events found in this transaction");
+        info!("This transaction may not create a liquidity pool, or uses a different DEX");
+    } else {
+        info!("\n📊 Pool Creation Summary:");
+        info!("========================");
         
-        // Check if transaction even went to the factory
-        if tx.to == Some(factory_address) {
-            info!("Transaction was sent to Uniswap V2 Factory but no PairCreated event found");
-            info!("Possible reasons:");
-            info!("  - Pool already exists for this token pair");
-            info!("  - Transaction reverted");
-            info!("  - Invalid token addresses");
-        }
-        
-        return Ok(());
-    }
-    
-    // Analyze each pool creation
-    for (idx, creation) in pool_creations.iter().enumerate() {
-        info!("\n📊 Pool Creation #{}", idx + 1);
-        info!("  Pool Address: {:?}", creation.pool_address);
-        info!("  Token 0: {:?}", creation.token0);
-        info!("  Token 1: {:?}", creation.token1);
-        info!("  Pair Index: {}", creation.pair_index);
-        info!("  Created by: {:?}", creation.creator);
-        
-        // Get token details
-        if let Ok(token0_name) = get_token_symbol(&provider, creation.token0).await {
-            info!("  Token 0 Symbol: {}", token0_name);
-        }
-        
-        if let Ok(token1_name) = get_token_symbol(&provider, creation.token1).await {
-            info!("  Token 1 Symbol: {}", token1_name);
-        }
-        
-        // Analyze state changes for this pool
-        info!("\n🔄 Analyzing state changes...");
-        
-        // Initialize state change detector
-        let detector = StateChangeDetector::new((*provider).clone())?;
-        
-        // Get state changes for the pool and tokens
-        let watched_addresses = vec![
-            creation.pool_address,
-            creation.token0,
-            creation.token1,
-            creation.creator,
-        ];
-        
-        match detector.extract_comprehensive_state_changes(
-            tx_hash,
-            &watched_addresses,
-        ).await {
-            Ok(state_changes) => {
-                info!("State changes detected:");
-                
-                // Show ETH changes
-                if !state_changes.eth_changes.is_empty() {
-                    info!("\n💰 ETH Changes:");
-                    for change in &state_changes.eth_changes {
-                        info!("  Address: {:?}", change.address);
-                        info!("  Change: {} ETH", 
-                              format_ether_value(change.change));
-                    }
-                }
-                
-                // Show token changes
-                if !state_changes.token_changes.is_empty() {
-                    info!("\n🪙 Token Changes:");
-                    for change in &state_changes.token_changes {
-                        info!("  Address: {:?}", change.address);
-                        info!("  Token: {:?}", change.token);
-                        info!("  Before: {}", change.balance_before);
-                        info!("  After: {}", change.balance_after);
-                        info!("  Change: {}", change.change);
-                    }
-                }
-                
-                // Check for initial liquidity
-                let pool_token_changes: Vec<_> = state_changes.token_changes.iter()
-                    .filter(|c| c.address == creation.pool_address)
-                    .collect();
-                    
-                if pool_token_changes.len() >= 2 {
-                    info!("\n💧 Initial Liquidity Added:");
-                    for change in &pool_token_changes {
-                        if change.token == creation.token0 {
-                            info!("  Token 0 Reserve: {}", change.balance_after);
-                        } else if change.token == creation.token1 {
-                            info!("  Token 1 Reserve: {}", change.balance_after);
-                        }
-                    }
+        for (i, pool) in pool_creations.iter().enumerate() {
+            info!("\nPool #{}", i + 1);
+            info!("  DEX: {}", pool.factory);
+            info!("  Pool Address: {:?}", pool.pool_address);
+            info!("  Token 0: {:?}", pool.token0);
+            info!("  Token 1: {:?}", pool.token1);
+            if let Some(fee) = pool.fee_tier {
+                info!("  Fee Tier: {}bps ({}%)", fee / 100, fee as f64 / 10000.0);
+            }
+            info!("  Block: {}", pool.block_number);
+            
+            // Get token information
+            info!("\n  Token Details:");
+            if let Ok(name0) = get_token_name(&provider, pool.token0).await {
+                info!("    Token 0 Name: {}", name0);
+            }
+            if let Ok(symbol0) = get_token_symbol(&provider, pool.token0).await {
+                info!("    Token 0 Symbol: {}", symbol0);
+            }
+            if let Ok(name1) = get_token_name(&provider, pool.token1).await {
+                info!("    Token 1 Name: {}", name1);
+            }
+            if let Ok(symbol1) = get_token_symbol(&provider, pool.token1).await {
+                info!("    Token 1 Symbol: {}", symbol1);
+            }
+            
+            // Try to get initial reserves (for V2 pools)
+            if pool.dex_type != "UniswapV3" {
+                if let Ok((reserve0, reserve1)) = get_initial_reserves(&provider, pool.pool_address).await {
+                    info!("\n  Initial Reserves:");
+                    info!("    Token 0: {}", format_units(reserve0, 18)?);
+                    info!("    Token 1: {}", format_units(reserve1, 18)?);
                 }
             }
-            Err(e) => {
-                warn!("Failed to extract state changes: {}", e);
-            }
-        }
-        
-        // Create PoolTracker and register the new pool
-        let pool_tracker = PoolTracker::new(0.01); // 0.01 ETH minimum
-        
-        // Get initial reserves (would need to query the pool contract)
-        info!("\n📈 Registering pool in tracker...");
-        
-        let pool_state = PoolState {
-            pool_address: creation.pool_address,
-            token0_address: creation.token0,
-            token1_address: creation.token1,
-            reserve0: U256::zero(), // Would need to query actual reserves
-            reserve1: U256::zero(), // Would need to query actual reserves
-            total_supply: U256::zero(),
-            block_number: creation.block_number.as_u64(),
-            timestamp: 0, // Would need block timestamp
-            pool_type: PoolType::UniswapV2,
-        };
-        
-        if pool_tracker.register_pool(pool_state) {
-            info!("✅ Pool registered successfully!");
-        } else {
-            info!("⚠️  Pool registration failed (might be below liquidity threshold)");
         }
     }
-    
-    info!("\n✨ Analysis complete!");
-    info!("Found {} pool creation(s) in transaction", pool_creations.len());
     
     Ok(())
 }
 
-/// Helper function to get token symbol
-async fn get_token_symbol(provider: &Provider<Http>, token_address: Address) -> Result<String> {
-    // ERC20 symbol() function selector
-    let symbol_selector = ethers::abi::Function {
-        name: "symbol".to_string(),
-        inputs: vec![],
-        outputs: vec![ethers::abi::Param {
-            name: "".to_string(),
-            kind: ethers::abi::ParamType::String,
-            internal_type: None,
-        }],
-        constant: None,
-        state_mutability: ethers::abi::StateMutability::View,
-    };
+// Helper functions to get token information
+async fn get_token_name(provider: &Provider<Http>, token_address: Address) -> Result<String> {
+    let name_sig = "0x06fdde03"; // name()
+    let tx = TransactionRequest::new()
+        .to(token_address)
+        .data(hex::decode(name_sig)?);
     
-    let data = symbol_selector.encode_input(&[])?;
+    let result = provider.call(&tx.into(), None).await?;
     
-    let tx = ethers::types::transaction::eip2718::TypedTransaction::Legacy(
-        ethers::types::TransactionRequest::new()
-            .to(token_address)
-            .data(data)
-    );
-    
-    match provider.call(&tx, None).await {
-        Ok(result) => {
-            if let Ok(decoded) = symbol_selector.decode_output(&result) {
-                if let Some(ethers::abi::Token::String(symbol)) = decoded.get(0) {
-                    return Ok(symbol.clone());
-                }
-            }
-            Ok("UNKNOWN".to_string())
+    // Parse the result (assuming standard ERC20 encoding)
+    if result.len() >= 96 {
+        let length = U256::from(&result[64..96]).as_usize();
+        if result.len() >= 96 + length {
+            let name_bytes = &result[96..96 + length];
+            return Ok(String::from_utf8_lossy(name_bytes).to_string());
         }
-        Err(_) => Ok("UNKNOWN".to_string()),
     }
+    
+    Err(eyre::eyre!("Failed to decode token name"))
 }
 
-/// Helper function to format ETH values
-fn format_ether_value(value: I256) -> String {
-    let is_negative = value < I256::zero();
-    let abs_value = if is_negative { -value } else { value };
+async fn get_token_symbol(provider: &Provider<Http>, token_address: Address) -> Result<String> {
+    let symbol_sig = "0x95d89b41"; // symbol()
+    let tx = TransactionRequest::new()
+        .to(token_address)
+        .data(hex::decode(symbol_sig)?);
     
-    // Convert to ETH (divide by 10^18)
-    let eth_value = abs_value.as_u128() as f64 / 1e18;
+    let result = provider.call(&tx.into(), None).await?;
     
-    if is_negative {
-        format!("-{:.6}", eth_value)
-    } else {
-        format!("+{:.6}", eth_value)
+    // Parse the result
+    if result.len() >= 96 {
+        let length = U256::from(&result[64..96]).as_usize();
+        if result.len() >= 96 + length {
+            let symbol_bytes = &result[96..96 + length];
+            return Ok(String::from_utf8_lossy(symbol_bytes).to_string());
+        }
     }
+    
+    Err(eyre::eyre!("Failed to decode token symbol"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+async fn get_initial_reserves(provider: &Provider<Http>, pool_address: Address) -> Result<(U256, U256)> {
+    let reserves_sig = "0x0902f1ac"; // getReserves()
+    let tx = TransactionRequest::new()
+        .to(pool_address)
+        .data(hex::decode(reserves_sig)?);
     
-    #[test]
-    fn test_pair_created_topic() {
-        // Verify the PairCreated event topic is correct
-        let expected = H256::from_slice(
-            &ethers::core::utils::keccak256("PairCreated(address,address,address,uint256)")
-        );
-        let actual = H256::from_slice(&hex::decode(PAIR_CREATED_TOPIC.trim_start_matches("0x")).unwrap());
-        assert_eq!(expected, actual);
+    let result = provider.call(&tx.into(), None).await?;
+    
+    // Parse reserves (first 64 bytes)
+    if result.len() >= 64 {
+        let reserve0 = U256::from(&result[0..32]);
+        let reserve1 = U256::from(&result[32..64]);
+        return Ok((reserve0, reserve1));
     }
+    
+    Err(eyre::eyre!("Failed to get reserves"))
 }

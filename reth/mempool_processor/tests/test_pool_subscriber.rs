@@ -2,7 +2,7 @@
 /// 
 /// Run with: cargo test --test test_pool_subscriber -- --nocapture
 
-use mempool_fetcher::pool_subscriber::{PoolSubscriber, types::*, cache::PoolStateCache};
+use mempool_processor::pool_subscriber::{PoolSubscriber, types::*, cache::PoolStateCache};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

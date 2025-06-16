@@ -5,7 +5,7 @@
 ///
 /// Run with: cargo test -p mempool_processor test_pool_subscriber_integration -- --nocapture
 
-use mempool_fetcher::pool_subscriber::{PoolSubscriber, types::*};
+use mempool_processor::pool_subscriber::{PoolSubscriber, types::*};
 use std::time::Duration;
 use tokio::time::{timeout, sleep};
 use zmq;

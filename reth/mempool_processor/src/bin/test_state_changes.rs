@@ -1,7 +1,7 @@
 // Test program to demonstrate state change detection for a specific transaction
 use ethers::prelude::*;
 use eyre::Result;
-use mempool_fetcher::state_change_detector::{StateChangeDetector, analyze_transaction_state_changes};
+use mempool_processor::state_change_detector::{StateChangeDetector, analyze_transaction_state_changes};
 
 #[tokio::main]
 async fn main() -> Result<()> {

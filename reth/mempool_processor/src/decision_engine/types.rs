@@ -7,7 +7,7 @@ use ethers::types::H256;
 use serde::{Serialize, Deserialize};
 
 /// Types of market events detected by the decision engine
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventType {
     /// Critical liquidity drain (rugpull)
     ScamAlert,

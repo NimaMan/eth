@@ -73,6 +73,20 @@ struct Args {
     log_file: String,
 }
 
+/// Convert ethers Transaction to TransactionView
+fn convert_ethers_to_transaction_view(tx: &ethers::types::Transaction) -> TransactionView {
+    TransactionView {
+        hash: tx.hash.as_bytes().to_vec(),
+        from: tx.from.as_bytes().to_vec(),
+        to: tx.to.map(|addr| addr.as_bytes().to_vec()),
+        value: tx.value,
+        gas_price: tx.gas_price,
+        gas_limit: Some(tx.gas),
+        nonce: Some(tx.nonce),
+        input_data: Some(tx.input.to_vec()),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -232,7 +246,10 @@ async fn main() -> Result<()> {
                                 if pool_cache_clone.get_pool(&address_str).is_some() {
                                     // Calculate ETH impact
                                     if changes.eth_net_change.absolute_value > revm_primitives::U256::ZERO {
-                                        let eth_amount = changes.eth_net_change.absolute_value.as_u128() as f64 / 1e18;
+                                        let eth_amount = changes.eth_net_change.absolute_value
+                                            .to_string()
+                                            .parse::<u128>()
+                                            .unwrap_or(0) as f64 / 1e18;
                                         let is_outgoing = changes.eth_net_change.is_negative;
                                         
                                         if is_outgoing {
@@ -251,7 +268,10 @@ async fn main() -> Result<()> {
                                     // Calculate token impacts
                                     for (token_addr, token_change) in &changes.token_net_changes {
                                         if token_change.absolute_value > revm_primitives::U256::ZERO {
-                                            let token_amount = token_change.absolute_value.as_u128() as f64;
+                                            let token_amount = token_change.absolute_value
+                                                .to_string()
+                                                .parse::<u128>()
+                                                .unwrap_or(0) as f64;
                                             let is_outgoing = token_change.is_negative;
                                             
                                             if is_outgoing {
