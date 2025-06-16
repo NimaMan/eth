@@ -126,8 +126,8 @@ async fn main() -> Result<()> {
     
     // Initialize WebSocket client
     info!("🔌 Initializing WebSocket client...");
-    let mut ws_client = WebSocketClient::new(&args.eth_ws_url, &args.eth_rpc_url).await?;
-    ws_client.subscribe_to_new_transactions().await?;
+    let mut ws_client = WebSocketClient::new(&args.eth_ws_url, &args.eth_rpc_url)?;
+    ws_client.start_monitoring().await?;
     info!("✅ WebSocket subscription active");
     
     // Initialize pool subscriber
@@ -159,10 +159,20 @@ async fn main() -> Result<()> {
         &args.db_name
     ).await?);
     
-    // Initialize scam detection service
+    // Initialize decision engine service
     let scam_config = ScamDetectionConfig {
-        eth_threshold: args.eth_threshold,
-        percentage_threshold: args.percentage_threshold,
+        thresholds: mempool_processor::decision_engine::DecisionThresholds {
+            eth_threshold: args.eth_threshold,
+            scam_drain_percent: args.percentage_threshold,
+            warning_drain_percent: 0.2,         // 20%
+            supply_increase_percent: 0.1,       // 10%
+            volume_spike_multiplier: 5.0,       // 5x average
+            price_impact_percent: 0.15,         // 15%
+            small_pool_max_eth: 5.0,
+            medium_pool_max_eth: 50.0,
+        },
+        enable_ml_scoring: false,
+        min_confidence: 0.7,
     };
     
     let scam_service = ScamDetectionService::new(
@@ -186,7 +196,14 @@ async fn main() -> Result<()> {
     
     loop {
         // Get new transactions from WebSocket
-        let new_txs = ws_client.get_new_transactions().await;
+        let new_txs = match ws_client.get_transactions(100).await {
+            Ok(txs) => txs,
+            Err(e) => {
+                warn!("Failed to get transactions: {}", e);
+                time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+        };
         
         if new_txs.is_empty() {
             // Small sleep to avoid busy waiting
@@ -201,7 +218,7 @@ async fn main() -> Result<()> {
             let tx_hash = match ws_tx.hash.parse::<H256>() {
                 Ok(hash) => hash,
                 Err(e) => {
-                    warn!("Invalid transaction hash {}: {}", ws_tx.hash, e);
+                    warn!("Invalid transaction hash: {}", e);
                     continue;
                 }
             };
@@ -211,12 +228,12 @@ async fn main() -> Result<()> {
                 Ok(Some(tx)) => {
                     // Check if transaction involves any pools
                     let to_address = if let Some(to) = tx.to {
-                        Some(to_checksum_address(to))
+                        Some(format!("{:?}", to))
                     } else {
                         None
                     };
                     
-                    let from_address = to_checksum_address(tx.from);
+                    let from_address = format!("{:?}", tx.from);
                     
                     // Quick check if this might involve a pool
                     let might_involve_pool = if let Some(ref to_addr) = to_address {
@@ -240,7 +257,7 @@ async fn main() -> Result<()> {
                             
                             // Process state changes for each address
                             for (address, changes) in &state_changes {
-                                let address_str = to_checksum_address(ethers::types::Address::from_slice(address.as_bytes()));
+                                let address_str = format!("0x{:040x}", address);
                                 
                                 // Check if this address is a pool
                                 if pool_cache_clone.get_pool(&address_str).is_some() {
@@ -304,12 +321,13 @@ async fn main() -> Result<()> {
                                         if !alerts.is_empty() {
                                             total_scams += alerts.len() as u64;
                                             for alert in alerts {
-                                                error!("🚨 SCAM DETECTED: {}", alert.tx_hash);
+                                                error!("🚨 {:?} DETECTED: {}", alert.event_type, alert.tx_hash);
                                                 error!("   Pool: {}", alert.pool_address);
-                                                error!("   Current ETH: {:.4}", alert.current_eth_reserve);
-                                                error!("   After TX: {:.4}", alert.simulated_eth_reserve);
-                                                error!("   Drain: {:.2}%", 
-                                                    (1.0 - alert.simulated_eth_reserve / alert.current_eth_reserve) * 100.0);
+                                                error!("   Token: {}", alert.token_address);
+                                                error!("   Severity: {:?}", alert.severity);
+                                                error!("   Confidence: {:.2}", alert.confidence);
+                                                error!("   ETH Impact: {:.4} ETH ({:.1}%)", alert.metrics.eth_change, alert.metrics.eth_percent * 100.0);
+                                                error!("   Details: {}", alert.details);
                                             }
                                         }
                                     }
@@ -380,9 +398,12 @@ fn check_pool_impact(
             from.to_string(),
             mempool_processor::decision_engine::PoolEffect {
                 pool_address: from.to_string(),
-                current_eth_reserve: current_reserve,
-                simulated_eth_reserve: simulated_reserve,
-                eth_delta: -amount,
+                current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
+                simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
+                current_token_reserve: if !is_eth { current_reserve } else { pool_state.token_reserve },
+                simulated_token_reserve: if !is_eth { simulated_reserve } else { pool_state.token_reserve },
+                eth_delta: if is_eth { -amount } else { 0.0 },
+                token_delta: if !is_eth { -amount } else { 0.0 },
                 percentage_change,
             }
         );
@@ -398,9 +419,12 @@ fn check_pool_impact(
             to.to_string(),
             mempool_processor::decision_engine::PoolEffect {
                 pool_address: to.to_string(),
-                current_eth_reserve: current_reserve,
-                simulated_eth_reserve: simulated_reserve,
-                eth_delta: amount,
+                current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
+                simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
+                current_token_reserve: if !is_eth { current_reserve } else { pool_state.token_reserve },
+                simulated_token_reserve: if !is_eth { simulated_reserve } else { pool_state.token_reserve },
+                eth_delta: if is_eth { amount } else { 0.0 },
+                token_delta: if !is_eth { amount } else { 0.0 },
                 percentage_change,
             }
         );
