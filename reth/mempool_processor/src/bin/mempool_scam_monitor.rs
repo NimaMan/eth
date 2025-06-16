@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
     let ws_url = "ws://127.0.0.1:8546";
     let http_url = "http://127.0.0.1:8545";
     let zmq_url = "tcp://localhost:5557";
-    let eth_threshold = 0.01;
+    let eth_threshold = 0.4;
     
     // Initialize HTTP provider
     info!("📡 Connecting to Ethereum node...");
@@ -171,8 +171,11 @@ async fn main() -> Result<()> {
     let log_dir = std::env::var("MEMPOOL_LOG_DIR")
         .unwrap_or_else(|_| "/home/nima/code/crypto/logs/mempool".to_string());
     std::fs::create_dir_all(&log_dir)?;
-    let scam_log_path = format!("{}/scam_detections.log", log_dir);
-    let timing_log_path = format!("{}/processing_times.log", log_dir);
+    
+    // Add timestamp to log filenames
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+    let scam_log_path = format!("{}/scam_detections_{}.log", log_dir, timestamp);
+    let timing_log_path = format!("{}/processing_times_{}.log", log_dir, timestamp);
     info!("📝 Logging scam detections to: {}", scam_log_path);
     info!("⏱️  Logging timing stats to: {}", timing_log_path);
     
@@ -184,11 +187,12 @@ async fn main() -> Result<()> {
     writeln!(timing_file, "\n=== Mempool Scam Monitor Started at {} ===", Utc::now().to_rfc3339())?;
     writeln!(timing_file, "timestamp,tx_hash,total_ms,simulation_ms,websocket_latency_ms")?;
     
-    // Add some pools to watch (from the pool cache)
+    // Add all pools to watch (from the pool cache)
     let pools = pool_cache_clone.get_all_pools();
     let mut watched_count = 0;
-    for (pool_address, pool_state) in pools.iter().take(10) { // Watch first 10 pools
-        if pool_state.eth_reserve > eth_threshold {
+    for (pool_address, pool_state) in pools.iter() { // Watch ALL pools
+        // Watch pools that COULD drop below threshold (not just those above it)
+        if pool_state.eth_reserve > eth_threshold * 0.1 { // Watch if > 10% of threshold
             let pool_info = PoolInfo {
                 token0: pool_state.token_address.parse()?,
                 token1: WETH_ADDRESS.parse()?,
@@ -344,20 +348,16 @@ async fn main() -> Result<()> {
                     
                     total_processed += 1;
                     
-                    if total_processed % 100 == 0 {
-                        info!("📊 Processed {} transactions, found {} scams", 
-                            total_processed, total_scams);
-                        info!("⏱️  Processing time: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
+                    if total_processed % 1000 == 0 {
+                        // Get WebSocket stats
+                        let ws_stats = ws_client.get_stats().await;
+                        info!("📊 {} transactions | Found {} scams | WebSocket latency: {:.2}ms | End-to-end processing: avg={:.2}ms, min={:.2}ms, max={:.2}ms", 
+                            total_processed, 
+                            total_scams,
+                            ws_stats.avg_latency_ms,
                             timing_stats.average_ms(),
                             timing_stats.min_time_ms,
                             timing_stats.max_time_ms);
-                        
-                        // Get WebSocket stats
-                        let ws_stats = ws_client.get_stats().await;
-                        info!("🌐 WebSocket latency: avg={:.2}ms, min={:.2}ms, max={:.2}ms",
-                            ws_stats.avg_latency_ms,
-                            ws_stats.min_latency_ms.unwrap_or(0.0),
-                            ws_stats.max_latency_ms.unwrap_or(0.0));
                         
                         // Log summary to timing file
                         if let Ok(mut timing_file) = OpenOptions::new().append(true).open(&timing_log_path) {

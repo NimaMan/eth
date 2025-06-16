@@ -102,6 +102,7 @@ impl MempoolScamDetector {
         // Note: DebugTraceCallSimulator doesn't need block_env, it uses "latest"
         match debug_simulator.process_transaction(&tx_view, &Default::default()).await {
             Ok(Some(state_changes)) => {
+                debug!("Got state changes for {} addresses", state_changes.len());
                 // Convert HashMap<Address, CalculatedAccountChanges> to our MempoolStateDiff format
                 let mut eth_changes = std::collections::HashMap::new();
                 let mut token_changes = std::collections::HashMap::new();
@@ -188,6 +189,8 @@ impl MempoolScamDetector {
                 
                 // Significant drain detected
                 if drain_percentage > 20.0 {
+                    info!("Potential scam detected! Pool {} drained {:.2} ETH ({:.1}%)", 
+                         pool_addr, drain_amount, drain_percentage);
                     // Find who received the funds
                     let mut recipients = Vec::new();
                     for (addr, change) in &state_diff.eth_changes {
@@ -262,20 +265,34 @@ impl MempoolScamDetector {
     }
     
     /// Check if transaction might affect a pool (simplified)
-    fn might_affect_pool(&self, tx: &Transaction, pool: Address) -> bool {
-        // Check if transaction is to a router that might interact with pool
-        let routers = [
-            "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2
-            "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Uniswap V3
+    fn might_affect_pool(&self, tx: &Transaction, _pool: Address) -> bool {
+        // Check if transaction is to a router or other DeFi contract that might interact with pools
+        let defi_contracts = [
+            "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2 Router
+            "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Uniswap V3 Router
+            "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45", // Uniswap V3 Router 2
+            "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F", // SushiSwap Router
+            "0x1111111254EEB25477B68fb85Ed929f73A960582", // 1inch v5
+            "0xDef1C0ded9bec7F1a1670819833240f027b25EfF", // 0x Exchange Proxy
         ];
         
         if let Some(to) = tx.to {
-            routers.iter().any(|&router| {
-                to == router.parse::<Address>().unwrap_or_default()
-            })
-        } else {
-            false
+            // Check if it's a known DeFi contract
+            if defi_contracts.iter().any(|&contract| {
+                to == contract.parse::<Address>().unwrap_or_default()
+            }) {
+                return true;
+            }
+            
+            // Also analyze if transaction has significant value or gas
+            // High value/gas transactions are more likely to be DeFi interactions
+            if tx.value > U256::from(0) || tx.gas > U256::from(100000) {
+                return true;
+            }
         }
+        
+        // Contract deployments might create new pools
+        tx.to.is_none()
     }
     
     /// Convert ethers Transaction to our TransactionView

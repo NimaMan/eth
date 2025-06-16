@@ -19,10 +19,7 @@ use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::scam_detection::{ScamDetectionService, ScamDetectionConfig};
 use mempool_processor::mempool_fetcher::processor::DbLogger;
-use mempool_processor::tx_simulator::{
-    DebugTraceCallStateDiffCalculator,
-    DebugTraceCallSimulator
-};
+use mempool_processor::tx_simulator::DebugTraceCallSimulator;
 use mempool_processor::common::address::to_checksum_address;
 
 // Ethers imports
@@ -162,8 +159,8 @@ async fn main() -> Result<()> {
     
     info!("🛡️ Scam detection service initialized");
     
-    // Initialize state diff calculator
-    let state_calculator = DebugTraceCallStateDiffCalculator::default();
+    // Initialize transaction simulator
+    let tx_simulator = DebugTraceCallSimulator::new(&args.eth_rpc_url).await?;
     
     // Performance metrics
     let mut total_processed = 0u64;
@@ -219,33 +216,58 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     
+                    // Convert ethers transaction to TransactionView for the simulator
+                    let tx_view = convert_ethers_to_transaction_view(&tx);
+                    
                     // Use debug_traceCall to get state changes
-                    match state_calculator.trace_transaction(&tx, &http_provider).await {
-                        Ok(trace_result) => {
+                    match tx_simulator.process_transaction(&tx_view, &Default::default()).await {
+                        Ok(Some(state_changes)) => {
                             let mut affected_pools = HashMap::new();
                             
-                            // Check ETH transfers
-                            for transfer in &trace_result.eth_transfers {
-                                check_pool_impact(
-                                    &transfer.from,
-                                    &transfer.to,
-                                    transfer.amount,
-                                    true, // is_eth
-                                    &pool_cache_clone,
-                                    &mut affected_pools
-                                );
-                            }
-                            
-                            // Check ERC20 transfers
-                            for transfer in &trace_result.erc20_transfers {
-                                check_pool_impact(
-                                    &transfer.from,
-                                    &transfer.to,
-                                    transfer.amount,
-                                    false, // is_token
-                                    &pool_cache_clone,
-                                    &mut affected_pools
-                                );
+                            // Process state changes for each address
+                            for (address, changes) in &state_changes {
+                                let address_str = to_checksum_address(ethers::types::Address::from_slice(address.as_bytes()));
+                                
+                                // Check if this address is a pool
+                                if pool_cache_clone.get_pool(&address_str).is_some() {
+                                    // Calculate ETH impact
+                                    if changes.eth_net_change.absolute_value > revm_primitives::U256::ZERO {
+                                        let eth_amount = changes.eth_net_change.absolute_value.as_u128() as f64 / 1e18;
+                                        let is_outgoing = changes.eth_net_change.is_negative;
+                                        
+                                        if is_outgoing {
+                                            // ETH leaving the pool
+                                            check_pool_impact(
+                                                &address_str,
+                                                &"external",
+                                                eth_amount,
+                                                true, // is_eth
+                                                &pool_cache_clone,
+                                                &mut affected_pools
+                                            );
+                                        }
+                                    }
+                                    
+                                    // Calculate token impacts
+                                    for (token_addr, token_change) in &changes.token_net_changes {
+                                        if token_change.absolute_value > revm_primitives::U256::ZERO {
+                                            let token_amount = token_change.absolute_value.as_u128() as f64;
+                                            let is_outgoing = token_change.is_negative;
+                                            
+                                            if is_outgoing {
+                                                // Tokens leaving the pool
+                                                check_pool_impact(
+                                                    &address_str,
+                                                    &"external",
+                                                    token_amount,
+                                                    false, // is_eth
+                                                    &pool_cache_clone,
+                                                    &mut affected_pools
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             
                             // If pools are affected, check for scams
@@ -282,8 +304,11 @@ async fn main() -> Result<()> {
                             
                             debug!("Processed {} in {:?}", tx_hash, elapsed);
                         }
+                        Ok(None) => {
+                            debug!("No state changes detected for transaction {}", tx_hash);
+                        }
                         Err(e) => {
-                            debug!("Failed to trace transaction {}: {}", tx_hash, e);
+                            debug!("Failed to simulate transaction {}: {}", tx_hash, e);
                         }
                     }
                 }

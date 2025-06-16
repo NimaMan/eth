@@ -220,6 +220,7 @@ mod tests {
             "0x1234567890abcdef1234567890abcdef12345678".to_string(),
             PoolUpdate {
                 eth_reserve: 10.0,
+                token_reserve: 20000.0,
                 token_address: "0xtoken1".to_string(),
                 block_number: 12345,
                 update_time: 1626000000.0,
@@ -231,6 +232,7 @@ mod tests {
             "0x2234567890abcdef1234567890abcdef12345678".to_string(),
             PoolUpdate {
                 eth_reserve: 0.1,
+                token_reserve: 200.0,
                 token_address: "0xtoken2".to_string(),
                 block_number: 12345,
                 update_time: 1626000000.0,
