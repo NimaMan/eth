@@ -246,7 +246,7 @@ impl MempoolScamDetector {
         let severity = match drain_percentage {
             x if x > 80.0 => ScamSeverity::Critical,
             x if x > 50.0 => ScamSeverity::High,
-            x if x > 20.0 => ScamSeverity::Medium,
+            x if x > 25.0 => ScamSeverity::Medium,
             _ => ScamSeverity::Low,
         };
         
@@ -274,6 +274,9 @@ impl MempoolScamDetector {
             "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F", // SushiSwap Router
             "0x1111111254EEB25477B68fb85Ed929f73A960582", // 1inch v5
             "0xDef1C0ded9bec7F1a1670819833240f027b25EfF", // 0x Exchange Proxy
+            "0x3328F7f4A1D1C57c35df56bBf0c9dCAFCA309C49", //Banana Gun: Router 2
+            "0x4B8c0A0df725750aeb948816B4dffeCD32ee9008", // Maestro Router
+            "0x80a64c6D7f12C47B7c66c5B4E20E72bc1FCd5d9e", // Maestro Router 2
         ];
         
         if let Some(to) = tx.to {

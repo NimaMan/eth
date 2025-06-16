@@ -11,5 +11,4 @@ pub mod validation_testing;
 pub mod common;
 
 // Additional modules
-pub mod state_change_detector;
 pub mod mempool_scam_detector;

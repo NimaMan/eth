@@ -1,8 +1,8 @@
 /*
- * Real-time Scam Detection Service
+ * Mempool Signal Detection Service
  * 
- * This service monitors the Ethereum mempool for potential scam transactions,
- * particularly focusing on liquidity pool drains and rug pulls.
+ * This service monitors the Ethereum mempool for market signals including
+ * scams, liquidity changes, and other trading opportunities.
  */
 
 use std::sync::Arc;
@@ -61,7 +61,7 @@ struct Args {
     eth_threshold: f64,
     
     /// Percentage threshold for scam detection
-    #[arg(long, default_value = "0.95")]
+    #[arg(long, default_value = "0.5")]
     percentage_threshold: f64,
     
     /// Enable verbose logging
@@ -69,7 +69,7 @@ struct Args {
     verbose: bool,
     
     /// Log file path
-    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/realtime_scam_detection.log")]
+    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/mempool_signal_detection.log")]
     log_file: String,
 }
 
@@ -99,16 +99,25 @@ async fn main() -> Result<()> {
         std::fs::create_dir_all(log_dir)?;
     }
     
-    // Configure logging
+    // Configure logging with file output (no ANSI colors)
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
+    
+    let file_appender = tracing_appender::rolling::never(
+        std::path::Path::new(&args.log_file).parent().unwrap_or(std::path::Path::new(".")),
+        std::path::Path::new(&args.log_file).file_name().unwrap_or(std::ffi::OsStr::new("service.log"))
+    );
+    
     tracing_subscriber::fmt()
         .with_max_level(log_level)
         .with_target(false)
         .with_thread_ids(true)
         .with_file(true)
         .with_line_number(true)
+        .with_ansi(false) // Disable ANSI colors for cleaner log files
+        .with_writer(file_appender.and(std::io::stdout))
         .init();
     
-    info!("🚀 Starting Real-time Scam Detection Service");
+    info!("🚀 Starting Mempool Signal Detection Service");
     info!("   🎯 ETH threshold: {} ETH", args.eth_threshold);
     info!("   📊 Percentage threshold: {}%", args.percentage_threshold * 100.0);
     
@@ -188,7 +197,8 @@ async fn main() -> Result<()> {
     
     // Performance metrics
     let mut total_processed = 0u64;
-    let mut total_scams = 0u64;
+    let mut total_events = 0u64;
+    let mut events_by_type = HashMap::<String, u64>::new();
     let mut last_report = Instant::now();
     
     // Main processing loop
@@ -226,31 +236,10 @@ async fn main() -> Result<()> {
             // Fetch full transaction
             match http_provider.get_transaction(tx_hash).await {
                 Ok(Some(tx)) => {
-                    // Check if transaction involves any pools
-                    let to_address = if let Some(to) = tx.to {
-                        Some(format!("{:?}", to))
-                    } else {
-                        None
-                    };
-                    
-                    let from_address = format!("{:?}", tx.from);
-                    
-                    // Quick check if this might involve a pool
-                    let might_involve_pool = if let Some(ref to_addr) = to_address {
-                        pool_cache_clone.get_pool(to_addr).is_some() ||
-                        is_known_router(&to_addr)
-                    } else {
-                        false
-                    };
-                    
-                    if !might_involve_pool {
-                        continue;
-                    }
-                    
                     // Convert ethers transaction to TransactionView for the simulator
                     let tx_view = convert_ethers_to_transaction_view(&tx);
                     
-                    // Use debug_traceCall to get state changes
+                    // Use debug_traceCall to get state changes - simulate ALL transactions
                     match tx_simulator.process_transaction(&tx_view, &Default::default()).await {
                         Ok(Some(state_changes)) => {
                             let mut affected_pools = HashMap::new();
@@ -317,17 +306,27 @@ async fn main() -> Result<()> {
                                 };
                                 
                                 match scam_service.process_transaction(simulation_result).await {
-                                    Ok(alerts) => {
-                                        if !alerts.is_empty() {
-                                            total_scams += alerts.len() as u64;
-                                            for alert in alerts {
-                                                error!("🚨 {:?} DETECTED: {}", alert.event_type, alert.tx_hash);
-                                                error!("   Pool: {}", alert.pool_address);
-                                                error!("   Token: {}", alert.token_address);
-                                                error!("   Severity: {:?}", alert.severity);
-                                                error!("   Confidence: {:.2}", alert.confidence);
-                                                error!("   ETH Impact: {:.4} ETH ({:.1}%)", alert.metrics.eth_change, alert.metrics.eth_percent * 100.0);
-                                                error!("   Details: {}", alert.details);
+                                    Ok(events) => {
+                                        if !events.is_empty() {
+                                            total_events += events.len() as u64;
+                                            for event in events {
+                                                let event_type_str = format!("{:?}", event.event_type);
+                                                *events_by_type.entry(event_type_str.clone()).or_insert(0) += 1;
+                                                
+                                                let level = match event.severity {
+                                                    mempool_processor::signal_engine::Severity::Critical => "🚨",
+                                                    mempool_processor::signal_engine::Severity::High => "⚠️",
+                                                    mempool_processor::signal_engine::Severity::Medium => "📊",
+                                                    mempool_processor::signal_engine::Severity::Low => "ℹ️",
+                                                };
+                                                
+                                                error!("{} {:?} DETECTED: {}", level, event.event_type, event.tx_hash);
+                                                error!("   Pool: {}", event.pool_address);
+                                                error!("   Token: {}", event.token_address);
+                                                error!("   Severity: {:?}", event.severity);
+                                                error!("   Confidence: {:.2}", event.confidence);
+                                                error!("   ETH Impact: {:.4} ETH ({:.1}%)", event.metrics.eth_change, event.metrics.eth_percent * 100.0);
+                                                error!("   Details: {}", event.details);
                                             }
                                         }
                                     }
@@ -363,21 +362,16 @@ async fn main() -> Result<()> {
         if last_report.elapsed() > Duration::from_secs(30) {
             info!("📊 Statistics:");
             info!("   Transactions processed: {}", total_processed);
-            info!("   Scams detected: {}", total_scams);
+            info!("   Total market events: {}", total_events);
+            for (event_type, count) in &events_by_type {
+                info!("   - {}: {}", event_type, count);
+            }
             info!("   Pools monitored: {}", pool_cache_clone.get_pool_count());
             last_report = Instant::now();
         }
     }
 }
 
-/// Check if an address is a known DEX router
-fn is_known_router(address: &str) -> bool {
-    matches!(address,
-        "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D" | // Uniswap V2 Router
-        "0xE592427A0AEce92De3Edee1F18E0157C05861564" | // Uniswap V3 Router
-        "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"   // Uniswap Universal Router
-    )
-}
 
 /// Check if a transfer affects a pool and calculate the impact
 fn check_pool_impact(

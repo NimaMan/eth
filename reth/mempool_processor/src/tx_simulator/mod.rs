@@ -15,7 +15,7 @@ pub mod debug_tracecall_simulator;             // Fast RPC-based simulator
 pub mod debug_tracecall_state_diff_calculator; // State diff calculator with WETH=ETH logic
 
 // State tracking and analysis
-pub mod state_diff;                            // Core state change types
+pub mod state_diff_types;                      // Core state change type definitions only
 
 // Legacy components (to be removed)
 pub mod simulator;                              // REVM-based full EVM simulator (DEPRECATED)
@@ -30,7 +30,7 @@ pub mod tests;
 // Re-export key types and functions
 pub use debug_tracecall_simulator::DebugTraceCallSimulator;
 pub use debug_tracecall_state_diff_calculator::DebugTraceCallStateDiffCalculator;
-pub use state_diff::{StateDiffTracker, StateChange, MempoolStateDiff};
+pub use state_diff_types::{StateDiffTracker, StateChange, MempoolStateDiff};
 
 // Legacy exports (to be removed)
 pub use simulator::TransactionSimulator;

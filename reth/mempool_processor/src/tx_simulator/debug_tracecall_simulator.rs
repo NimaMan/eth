@@ -4,6 +4,10 @@
 /// the node's debug_traceCall RPC method. It's the recommended approach for
 /// production mempool monitoring due to its superior performance (~5ms).
 ///
+/// IMPORTANT: This simulator returns RAW state changes - it does NOT treat WETH
+/// and ETH as the same. WETH transfers are tracked as ERC20 token changes.
+/// Use debug_tracecall_state_diff_calculator if you need WETH=ETH logic.
+///
 /// Key Features:
 /// - 10x faster than REVM-based simulation (~5ms vs ~40-50ms)
 /// - Uses node's existing state and execution engine

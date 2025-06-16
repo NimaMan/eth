@@ -121,8 +121,8 @@ name = "metrics_api_server"
 path = "src/bin/metrics_api_server.rs"
 
 [[bin]]
-name = "realtime_scam_detection_service"
-path = "src/bin/realtime_scam_detection_service.rs"
+name = "mempool_signal_detection"
+path = "src/bin/mempool_signal_detection.rs"
 
 
 [[bin]]
