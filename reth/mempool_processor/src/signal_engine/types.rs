@@ -1,27 +1,27 @@
-// decision_engine/types.rs
+// signal_engine/types.rs
 //
-// Type definitions for market event detection and decision engine.
+// Type definitions for market signal detection and signal engine.
 
 use std::collections::HashMap;
 use ethers::types::H256;
 use serde::{Serialize, Deserialize};
 
-/// Types of market events detected by the decision engine
+/// Types of market events detected by the signal engine
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventType {
-    /// Critical liquidity drain (rugpull)
+    /// Critical scam/rugpull detected
     ScamAlert,
     
-    /// Significant liquidity change (20-50%)
+    /// Significant liquidity change warning
     LiquidityWarning,
     
-    /// Abnormal token supply increase
+    /// Token supply anomaly (potential hidden mint)
     TokenSupplyAlert,
     
-    /// Trading volume spike
+    /// Unusual volume spike
     VolumeSpike,
     
-    /// Large price impact detected
+    /// Large price impact event
     PriceImpact,
 }
 
@@ -31,17 +31,17 @@ pub enum Severity {
     /// Immediate action required
     Critical,
     
-    /// Important, requires monitoring
+    /// High priority monitoring
     High,
     
-    /// Noteworthy, potential opportunity
+    /// Medium priority alert
     Medium,
     
     /// Informational only
     Low,
 }
 
-/// Unified market event structure
+/// A detected market event with full context
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketEvent {
     /// Type of event detected
@@ -53,10 +53,10 @@ pub struct MarketEvent {
     /// Confidence score (0.0 - 1.0)
     pub confidence: f64,
     
-    /// Transaction hash
+    /// Transaction hash that would cause this event
     pub tx_hash: String,
     
-    /// Pool address affected
+    /// Affected pool address
     pub pool_address: String,
     
     /// Token address
@@ -158,43 +158,31 @@ pub enum ScamAlertReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScamAlert {
     pub tx_hash: String,
-    pub from_address: String,
     pub pool_address: String,
-    pub token_address: String,
     pub current_eth_reserve: f64,
     pub simulated_eth_reserve: f64,
-    pub reason: ScamAlertReason,
-    pub eth_threshold: f64,
-    pub detection_block: u64,
+    pub percentage_drain: f64,
     pub detection_time: f64,
+    pub detection_block: u64,
+    pub reason: ScamAlertReason,
 }
 
 impl From<ScamAlert> for MarketEvent {
     fn from(alert: ScamAlert) -> Self {
         let eth_change = alert.simulated_eth_reserve - alert.current_eth_reserve;
-        let eth_percent = (eth_change / alert.current_eth_reserve) * 100.0;
-        
-        let (event_type, severity) = match alert.reason {
-            ScamAlertReason::EthReserveDepleted | ScamAlertReason::KnownScamPattern => {
-                (EventType::ScamAlert, Severity::Critical)
-            }
-            ScamAlertReason::LargeEthWithdrawal => {
-                if eth_percent.abs() > 50.0 {
-                    (EventType::ScamAlert, Severity::Critical)
-                } else {
-                    (EventType::LiquidityWarning, Severity::High)
-                }
-            }
-            ScamAlertReason::Other => (EventType::LiquidityWarning, Severity::Medium),
-        };
+        let eth_percent = eth_change / alert.current_eth_reserve;
         
         MarketEvent {
-            event_type,
-            severity,
-            confidence: 0.95, // High confidence for legacy alerts
+            event_type: EventType::ScamAlert,
+            severity: if alert.percentage_drain > 0.9 { 
+                Severity::Critical 
+            } else { 
+                Severity::High 
+            },
+            confidence: 0.95, // Legacy alerts had high confidence
             tx_hash: alert.tx_hash,
             pool_address: alert.pool_address,
-            token_address: alert.token_address,
+            token_address: String::new(), // Not tracked in legacy
             metrics: EventMetrics {
                 eth_change,
                 eth_percent,
@@ -211,9 +199,9 @@ impl From<ScamAlert> for MarketEvent {
     }
 }
 
-/// Configuration thresholds for the decision engine
+/// Configuration thresholds for the signal engine
 #[derive(Debug, Clone)]
-pub struct DecisionThresholds {
+pub struct SignalThresholds {
     /// Minimum ETH reserve threshold (in ETH)
     pub eth_threshold: f64,
     
@@ -237,7 +225,7 @@ pub struct DecisionThresholds {
     pub medium_pool_max_eth: f64,
 }
 
-impl Default for DecisionThresholds {
+impl Default for SignalThresholds {
     fn default() -> Self {
         Self {
             eth_threshold: 0.1,
@@ -267,3 +255,6 @@ pub struct PoolStatistics {
     /// Last update timestamp
     pub last_updated: f64,
 }
+
+// Type aliases for backward compatibility
+pub type DecisionThresholds = SignalThresholds;

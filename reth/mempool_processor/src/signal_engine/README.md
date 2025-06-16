@@ -1,8 +1,8 @@
-# Decision Engine Module
+# Signal Engine Module
 
 ## Overview
 
-The Decision Engine is the brain of the mempool processor, analyzing simulated transaction effects to detect market events, risks, and opportunities in real-time. It categorizes pool state changes into actionable signals for automated trading systems.
+The Signal Engine is the brain of the mempool processor, analyzing simulated transaction effects to detect market signals, risks, and opportunities in real-time. It categorizes pool state changes into actionable signals for automated trading systems.
 
 ## Purpose
 
@@ -19,7 +19,7 @@ Transaction Simulation Results
          │
          ▼
 ┌─────────────────────────┐
-│   Decision Engine       │
+│   Signal Engine         │
 ├─────────────────────────┤
 │                         │
 │  1. State Analysis      │──── Compare simulated vs current state
@@ -216,19 +216,19 @@ Factors affecting confidence:
 
 ### Creating the Engine
 ```rust
-use mempool_processor::decision_engine::{DecisionEngine, DecisionConfig};
+use mempool_processor::signal_engine::{SignalEngine, SignalConfig};
 
 // Default configuration
-let engine = DecisionEngine::new(pool_cache);
+let engine = SignalEngine::new(pool_cache);
 
 // Custom configuration
-let config = DecisionConfig {
+let config = SignalConfig {
     scam_threshold: 0.4,        // 40% drain
     warning_threshold: 0.15,    // 15% change
     min_pool_eth: 0.1,         // Ignore tiny pools
     enable_ml_scoring: true,    // Use ML confidence
 };
-let engine = DecisionEngine::with_config(pool_cache, config);
+let engine = SignalEngine::with_config(pool_cache, config);
 ```
 
 ### Processing Transactions
@@ -323,14 +323,14 @@ min_confidence = 0.7
 ## Monitoring & Debugging
 
 ### Metrics Exposed
-- `decision_engine_events_total{type, severity}`
-- `decision_engine_processing_time_ms`
-- `decision_engine_confidence_score{type}`
-- `decision_engine_false_positives{type}`
+- `signal_engine_events_total{type, severity}`
+- `signal_engine_processing_time_ms`
+- `signal_engine_confidence_score{type}`
+- `signal_engine_false_positives{type}`
 
 ### Debug Logging
 ```bash
-RUST_LOG=mempool_processor::decision_engine=debug cargo run
+RUST_LOG=mempool_processor::signal_engine=debug cargo run
 ```
 
 ## Future Enhancements

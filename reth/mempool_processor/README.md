@@ -19,7 +19,7 @@ A high-performance Rust system for real-time mempool monitoring, transaction sim
 │  │                                    │ TX Stream                                  │
 │  │                                    ▼                                            │
 │  │                           ┌─────────────────┐         ┌──────────────────┐     │
-│  └─ HTTP RPC :8545  ────────►│  TX Simulator   │────────►│ Decision Engine  │     │
+│  └─ HTTP RPC :8545  ────────►│  TX Simulator   │────────►│ Signal Engine    │     │
 │     └─ debug_traceCall       │ (State Changes) │         │ (Market Events)  │     │
 │                              └─────────────────┘         └─────┬────────────┘     │
 │                                                                 │                  │
@@ -235,7 +235,7 @@ INSERT INTO mempool_market_events (
 - Thread-safe in-memory cache
 - Maintains state for ~2000 active pools
 
-### 4. **Decision Engine** (`src/decision_engine/`)
+### 4. **Signal Engine** (`src/signal_engine/`)
 - Multi-threshold market event detection
 - Dynamic threshold adjustment based on pool size
 - Confidence scoring based on data quality
@@ -318,7 +318,7 @@ cargo run --example test_tx_simulator
 cargo run --bin websocket_latency_test
 
 # Test decision engine thresholds
-cargo test decision_engine -- --nocapture
+cargo test signal_engine -- --nocapture
 ```
 
 ## 🚨 Production Deployment
@@ -437,7 +437,7 @@ grep "End-to-end" /var/log/mempool/processing_times_*.log | \
 RUST_LOG=debug cargo run --bin mempool_scam_monitor
 
 # Trace specific module
-RUST_LOG=mempool_processor::decision_engine=trace cargo run
+RUST_LOG=mempool_processor::signal_engine=trace cargo run
 
 # Performance profiling
 cargo build --release --features profiling

@@ -1,9 +1,9 @@
 /*
- * Decision Service
+ * Signal Service
  *
- * This module implements a service that connects the DecisionEngine with the DbLogger
- * and ZMQ publisher to create a complete market event detection and distribution pipeline.
- * It processes simulated transactions, analyzes them for various market events, logs alerts
+ * This module implements a service that connects the SignalEngine with the DbLogger
+ * and ZMQ publisher to create a complete market signal detection and distribution pipeline.
+ * It processes simulated transactions, analyzes them for various market signals, logs alerts
  * to the database, and publishes signals for automated trading systems.
  */
 
@@ -15,13 +15,13 @@ use serde_json;
 
 use crate::mempool_fetcher::processor::DbLogger;
 use crate::pool_subscriber::cache::PoolStateCache;
-use super::engine::{DecisionEngine, DecisionConfig};
+use super::engine::{SignalEngine, SignalConfig};
 use super::types::{MarketEvent, SimulationResult, EventType, Severity};
 
-/// Service that integrates market event detection with database logging and signal publishing
-pub struct DecisionService {
-    /// The decision engine
-    engine: DecisionEngine,
+/// Service that integrates market signal detection with database logging and signal publishing
+pub struct SignalService {
+    /// The signal engine
+    engine: SignalEngine,
     
     /// Database logger for persisting market events
     db_logger: Arc<DbLogger>,
@@ -55,14 +55,14 @@ pub struct ServiceStats {
     pub zmq_errors: u64,
 }
 
-impl DecisionService {
-    /// Create a new DecisionService with the specified components
+impl SignalService {
+    /// Create a new SignalService with the specified components
     pub fn new(
         pool_cache: Arc<PoolStateCache>,
         db_logger: Arc<DbLogger>,
-        config: DecisionConfig,
+        config: SignalConfig,
     ) -> Self {
-        let engine = DecisionEngine::new(pool_cache, config);
+        let engine = SignalEngine::new(pool_cache, config);
         
         Self {
             engine,
@@ -72,14 +72,14 @@ impl DecisionService {
         }
     }
     
-    /// Create a new DecisionService with ZMQ publisher
+    /// Create a new SignalService with ZMQ publisher
     pub fn with_zmq_publisher(
         pool_cache: Arc<PoolStateCache>,
         db_logger: Arc<DbLogger>,
-        config: DecisionConfig,
+        config: SignalConfig,
         zmq_endpoint: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let engine = DecisionEngine::new(pool_cache, config);
+        let engine = SignalEngine::new(pool_cache, config);
         
         // Create ZMQ publisher socket
         let context = zmq::Context::new();
@@ -96,7 +96,7 @@ impl DecisionService {
         })
     }
     
-    /// Create a new DecisionService with default configuration
+    /// Create a new SignalService with default configuration
     pub async fn with_defaults(
         pool_cache: Arc<PoolStateCache>,
         db_host: &str,
@@ -228,10 +228,12 @@ impl DecisionService {
 }
 
 // Legacy compatibility layer
-pub type ScamDetectionService = DecisionService;
-pub type ScamDetectionConfig = DecisionConfig;
+pub type ScamDetectionService = SignalService;
+pub type ScamDetectionConfig = SignalConfig;
+pub type DecisionService = SignalService;
+pub type DecisionConfig = SignalConfig;
 
-impl DecisionService {
+impl SignalService {
     /// Legacy method for backward compatibility
     pub async fn process_transaction_legacy(&self, simulation: SimulationResult) -> Result<Vec<super::types::ScamAlert>, Box<dyn std::error::Error>> {
         let events = self.process_transaction(simulation).await?;
@@ -241,15 +243,13 @@ impl DecisionService {
             .filter(|e| e.event_type == EventType::ScamAlert)
             .map(|event| super::types::ScamAlert {
                 tx_hash: event.tx_hash,
-                from_address: "0x0000000000000000000000000000000000000000".to_string(),
                 pool_address: event.pool_address,
-                token_address: event.token_address,
                 current_eth_reserve: event.metrics.new_eth_reserve - event.metrics.eth_change,
                 simulated_eth_reserve: event.metrics.new_eth_reserve,
-                reason: super::types::ScamAlertReason::LargeEthWithdrawal,
-                eth_threshold: 0.1,
-                detection_block: event.block_number,
+                percentage_drain: event.metrics.eth_percent.abs(),
                 detection_time: event.detection_time,
+                detection_block: event.block_number,
+                reason: super::types::ScamAlertReason::LargeEthWithdrawal,
             })
             .collect())
     }
@@ -260,7 +260,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use ethers::types::H256;
-    use crate::decision_engine::types::PoolEffect;
+    use crate::signal_engine::types::PoolEffect;
     use crate::pool_subscriber::types::PoolUpdate;
     
     // Helper to create a test pool cache with sample data

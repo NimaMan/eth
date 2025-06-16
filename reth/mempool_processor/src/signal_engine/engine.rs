@@ -1,7 +1,7 @@
-// decision_engine/engine.rs
+// signal_engine/engine.rs
 //
-// Implementation of the market decision engine that analyzes simulated
-// transaction effects to detect various market events and opportunities.
+// Implementation of the market signal engine that analyzes simulated
+// transaction effects to detect various market signals and opportunities.
 //
 // Algorithm:
 // 1. Receive a simulated transaction and its predicted state changes
@@ -23,14 +23,14 @@ use ethers::types::H256;
 use crate::pool_subscriber::cache::PoolStateCache;
 use super::types::{
     MarketEvent, EventType, Severity, EventMetrics, SimulationResult, PoolEffect,
-    DecisionThresholds, ScamAlert, ScamAlertReason
+    SignalThresholds, ScamAlert, ScamAlertReason
 };
 
-/// Configurable parameters for the decision engine
+/// Configurable parameters for the signal engine
 #[derive(Debug, Clone)]
-pub struct DecisionConfig {
+pub struct SignalConfig {
     /// Thresholds for different event types
-    pub thresholds: DecisionThresholds,
+    pub thresholds: SignalThresholds,
     
     /// Enable machine learning confidence scoring
     pub enable_ml_scoring: bool,
@@ -39,32 +39,32 @@ pub struct DecisionConfig {
     pub min_confidence: f64,
 }
 
-impl Default for DecisionConfig {
+impl Default for SignalConfig {
     fn default() -> Self {
         Self {
-            thresholds: DecisionThresholds::default(),
+            thresholds: SignalThresholds::default(),
             enable_ml_scoring: false,
             min_confidence: 0.7,
         }
     }
 }
 
-/// The DecisionEngine analyzes simulated transaction effects to detect
-/// market events, risks, and opportunities.
-pub struct DecisionEngine {
+/// The SignalEngine analyzes simulated transaction effects to detect
+/// market signals, risks, and opportunities.
+pub struct SignalEngine {
     /// The pool state cache provides current reserves
     pool_cache: Arc<PoolStateCache>,
     
     /// Configuration parameters
-    config: DecisionConfig,
+    config: SignalConfig,
     
     /// Historical accuracy tracking (for confidence scoring)
     accuracy_tracker: HashMap<EventType, f64>,
 }
 
-impl DecisionEngine {
-    /// Create a new DecisionEngine with the specified pool cache and config
-    pub fn new(pool_cache: Arc<PoolStateCache>, config: DecisionConfig) -> Self {
+impl SignalEngine {
+    /// Create a new SignalEngine with the specified pool cache and config
+    pub fn new(pool_cache: Arc<PoolStateCache>, config: SignalConfig) -> Self {
         let mut accuracy_tracker = HashMap::new();
         // Initialize with default accuracy scores
         accuracy_tracker.insert(EventType::ScamAlert, 0.95);
@@ -80,9 +80,9 @@ impl DecisionEngine {
         }
     }
     
-    /// Create a new DecisionEngine with default config
+    /// Create a new SignalEngine with default config
     pub fn with_pool_cache(pool_cache: Arc<PoolStateCache>) -> Self {
-        Self::new(pool_cache, DecisionConfig::default())
+        Self::new(pool_cache, SignalConfig::default())
     }
     
     /// Analyze a simulated transaction to detect market events
@@ -294,10 +294,12 @@ impl DecisionEngine {
 }
 
 // Legacy compatibility layer
-pub type ScamDetectionConfig = DecisionConfig;
-pub type ScamDetectionEngine = DecisionEngine;
+pub type ScamDetectionConfig = SignalConfig;
+pub type ScamDetectionEngine = SignalEngine;
+pub type DecisionConfig = SignalConfig;
+pub type DecisionEngine = SignalEngine;
 
-impl DecisionEngine {
+impl SignalEngine {
     /// Legacy method for backward compatibility - returns only scam alerts
     pub fn analyze_transaction_legacy(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
         let events = self.analyze_transaction(simulation);
@@ -307,19 +309,17 @@ impl DecisionEngine {
             .filter(|e| e.event_type == EventType::ScamAlert)
             .map(|event| ScamAlert {
                 tx_hash: event.tx_hash,
-                from_address: "0x0000000000000000000000000000000000000000".to_string(), // Not available
                 pool_address: event.pool_address,
-                token_address: event.token_address,
                 current_eth_reserve: event.metrics.new_eth_reserve - event.metrics.eth_change,
                 simulated_eth_reserve: event.metrics.new_eth_reserve,
+                percentage_drain: event.metrics.eth_percent.abs(),
+                detection_time: event.detection_time,
+                detection_block: event.block_number,
                 reason: if event.metrics.new_eth_reserve < self.config.thresholds.eth_threshold {
                     ScamAlertReason::EthReserveDepleted
                 } else {
                     ScamAlertReason::LargeEthWithdrawal
                 },
-                eth_threshold: self.config.thresholds.eth_threshold,
-                detection_block: event.block_number,
-                detection_time: event.detection_time,
             })
             .collect()
     }

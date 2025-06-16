@@ -17,7 +17,7 @@ use chrono::Local;
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
-use mempool_processor::decision_engine::{ScamDetectionService, ScamDetectionConfig};
+use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig};
 use mempool_processor::mempool_fetcher::processor::DbLogger;
 use mempool_processor::tx_simulator::DebugTraceCallSimulator;
 use mempool_processor::common::address::to_checksum_address;
@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
     
     // Initialize decision engine service
     let scam_config = ScamDetectionConfig {
-        thresholds: mempool_processor::decision_engine::DecisionThresholds {
+        thresholds: mempool_processor::signal_engine::SignalThresholds {
             eth_threshold: args.eth_threshold,
             scam_drain_percent: args.percentage_threshold,
             warning_drain_percent: 0.2,         // 20%
@@ -309,7 +309,7 @@ async fn main() -> Result<()> {
                             
                             // If pools are affected, check for scams
                             if !affected_pools.is_empty() {
-                                let simulation_result = mempool_processor::decision_engine::SimulationResult {
+                                let simulation_result = mempool_processor::signal_engine::SimulationResult {
                                     tx_hash: format!("{:?}", tx_hash),
                                     affected_pools,
                                     simulation_successful: true,
@@ -386,7 +386,7 @@ fn check_pool_impact(
     amount: f64,
     is_eth: bool,
     pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
-    affected_pools: &mut HashMap<String, mempool_processor::decision_engine::PoolEffect>,
+    affected_pools: &mut HashMap<String, mempool_processor::signal_engine::PoolEffect>,
 ) {
     // Check if sender is a pool
     if let Some(pool_state) = pool_cache.get_pool(from) {
@@ -396,7 +396,7 @@ fn check_pool_impact(
         
         affected_pools.insert(
             from.to_string(),
-            mempool_processor::decision_engine::PoolEffect {
+            mempool_processor::signal_engine::PoolEffect {
                 pool_address: from.to_string(),
                 current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
                 simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
@@ -417,7 +417,7 @@ fn check_pool_impact(
         
         affected_pools.insert(
             to.to_string(),
-            mempool_processor::decision_engine::PoolEffect {
+            mempool_processor::signal_engine::PoolEffect {
                 pool_address: to.to_string(),
                 current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
                 simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
