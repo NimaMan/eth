@@ -25,6 +25,7 @@ fn test_pool_state_cache_operations() {
     let pool1_addr = "0x1234567890abcdef1234567890abcdef12345678".to_string();
     let pool1_update = PoolUpdate {
         eth_reserve: 5.5,
+        token_reserve: 10000.0,
         token_address: "0xTokenAAA".to_string(),
         block_number: 12345678,
         update_time: 1234567890.0,
@@ -35,6 +36,7 @@ fn test_pool_state_cache_operations() {
     let pool2_addr = "0xfedcba0987654321fedcba0987654321fedcba09".to_string();
     let pool2_update = PoolUpdate {
         eth_reserve: 0.05,
+        token_reserve: 100.0,
         token_address: "0xTokenBBB".to_string(),
         block_number: 12345679,
         update_time: 1234567891.0,
@@ -81,6 +83,7 @@ fn test_pool_state_staleness() {
     
     let update = PoolUpdate {
         eth_reserve: 10.0,
+        token_reserve: 20000.0,
         token_address: "0xTokenCCC".to_string(),
         block_number: 12345680,
         update_time: 1234567892.0,
@@ -158,6 +161,7 @@ fn test_concurrent_cache_access() {
             let pool_addr = format!("0xPool{:038}", i);
             let update = PoolUpdate {
                 eth_reserve: (i + 1) as f64,
+                token_reserve: (i + 1) as f64 * 1000.0,
                 token_address: format!("0xToken{}", i),
                 block_number: 1000000 + i as u64,
                 update_time: 1234567890.0 + i as f64,
