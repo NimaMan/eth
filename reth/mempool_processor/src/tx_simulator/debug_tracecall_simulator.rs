@@ -17,14 +17,19 @@
 /// This is the production choice for real-time mempool analysis where
 /// speed is critical and the node's trace data is sufficient.
 
-use ethers::types::{Transaction, H256, U256};
+use ethers::types::{Transaction, H256, U256, Address as EthersAddress};
 use ethers::providers::{Http, Provider, Middleware};
 use eyre::Result;
 use std::collections::HashMap;
+use std::str::FromStr;
 use revm_primitives::Address as RevmAddress;
-use revm_tx_simulator_lib::process_tx::state_diff_utils::CalculatedAccountChanges;
+use revm_tx_simulator_lib::process_tx::state_diff_utils::{CalculatedAccountChanges, SignedAmount, AccountMovements};
 use crate::mempool_fetcher::types::TransactionView;
+use crate::tx_simulator::debug_tracecall_state_diff_calculator::{
+    DebugTraceCallStateDiffCalculator, EthTransfer, Erc20Transfer
+};
 use revm_context::BlockEnv;
+use hex;
 
 /// debug_traceCall-based transaction simulator
 /// Achieves ~5ms simulation time using debug_traceCall
@@ -66,9 +71,182 @@ impl DebugTraceCallSimulator {
             (call_request, "latest", serde_json::json!({"tracer": "callTracer", "tracerConfig": {"withLog": true}}))
         ).await?;
         
-        // For now, return empty - in production, this would parse logs and calculate state changes
-        // using DebugTraceCallStateDiffCalculator
-        Ok(None)
+        // Check if the trace was successful
+        if let Some(error) = trace_result.get("error") {
+            // Only log actual simulation failures, not expected reverts
+            let error_str = error.as_str().unwrap_or("");
+            if !error_str.contains("execution reverted") && 
+               !error_str.contains("out of gas") && 
+               !error_str.contains("insufficient funds") {
+                tracing::warn!("Transaction trace failed: {}", error);
+            }
+            return Ok(None);
+        }
+        
+        // Parse logs from trace result
+        let mut eth_transfers = Vec::new();
+        let mut erc20_transfers = Vec::new();
+        
+        // Helper function to parse logs from any level of the trace
+        fn parse_logs_recursive(
+            trace: &serde_json::Value,
+            eth_transfers: &mut Vec<EthTransfer>,
+            erc20_transfers: &mut Vec<Erc20Transfer>,
+            depth: u32,
+        ) {
+            // Parse logs at this level for ERC20 transfers
+            if let Some(logs) = trace.get("logs").and_then(|l| l.as_array()) {
+                let transfer_topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+                
+                for (log_index, log_entry) in logs.iter().enumerate() {
+                    if let (Some(topics), Some(data), Some(address)) = (
+                        log_entry.get("topics").and_then(|t| t.as_array()),
+                        log_entry.get("data").and_then(|d| d.as_str()),
+                        log_entry.get("address").and_then(|a| a.as_str())
+                    ) {
+                        if topics.len() >= 3 && topics[0].as_str().unwrap_or("") == transfer_topic {
+                            let from_hex = topics[1].as_str().unwrap_or("0x0000000000000000000000000000000000000000");
+                            let to_hex = topics[2].as_str().unwrap_or("0x0000000000000000000000000000000000000000");
+                            
+                            // Parse addresses from topic (last 40 chars)
+                            let from_addr: EthersAddress = format!("0x{}", &from_hex[26..]).parse().unwrap_or_default();
+                            let to_addr: EthersAddress = format!("0x{}", &to_hex[26..]).parse().unwrap_or_default();
+                            let token_addr: EthersAddress = address.parse().unwrap_or_default();
+                            
+                            if let Ok(amount_bytes) = hex::decode(data.trim_start_matches("0x")) {
+                                let amount_raw = U256::from_big_endian(&amount_bytes);
+                                
+                                erc20_transfers.push(Erc20Transfer {
+                                    token_address: token_addr,
+                                    from_address: from_addr,
+                                    to_address: to_addr,
+                                    amount: amount_raw.as_u128() as f64,
+                                    log_index: (depth * 1000 + log_index as u32) as u64,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check for ETH transfers in this call
+            if let (Some(from), Some(to), Some(value)) = (
+                trace.get("from").and_then(|f| f.as_str()),
+                trace.get("to").and_then(|t| t.as_str()),
+                trace.get("value").and_then(|v| v.as_str())
+            ) {
+                if let (Ok(from_addr), Ok(to_addr)) = (from.parse::<EthersAddress>(), to.parse::<EthersAddress>()) {
+                    if let Ok(value_u256) = U256::from_str_radix(value.trim_start_matches("0x"), 16) {
+                        if !value_u256.is_zero() {
+                            let value_eth = value_u256.as_u128() as f64 / 1e18;
+                            eth_transfers.push(EthTransfer {
+                                from_address: from_addr,
+                                to_address: to_addr,
+                                amount: value_eth,
+                                log_index: Some(999990 + depth as u64),
+                                depth: Some(depth as u64),
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // Recursively parse internal calls
+            if let Some(calls) = trace.get("calls").and_then(|c| c.as_array()) {
+                for call in calls {
+                    parse_logs_recursive(call, eth_transfers, erc20_transfers, depth + 1);
+                }
+            }
+        }
+        
+        // Add top-level value transfer if any
+        if !tx.value.is_zero() {
+            let value_eth = tx.value.as_u128() as f64 / 1e18;
+            if let Some(to_addr) = tx.to {
+                eth_transfers.push(EthTransfer {
+                    from_address: tx.from,
+                    to_address: to_addr,
+                    amount: value_eth,
+                    log_index: Some(999998),
+                    depth: Some(0),
+                });
+            }
+        }
+        
+        // Parse all logs and transfers recursively
+        parse_logs_recursive(&trace_result, &mut eth_transfers, &mut erc20_transfers, 0);
+        
+        // Use state calculator to process transfers
+        let mut calculator = DebugTraceCallStateDiffCalculator::default();
+        
+        // Get current block number (using dummy value for mempool tx)
+        let block_number = self.provider.get_block_number().await?.as_u64();
+        
+        let address_changes = calculator.calculate_state_changes_from_transfers(
+            tx.from,
+            block_number,
+            0, // tx index
+            &eth_transfers,
+            &erc20_transfers,
+        )?;
+        
+        // Convert from AddressStateChange to CalculatedAccountChanges format
+        let mut state_changes = HashMap::new();
+        
+        for (addr, changes) in address_changes {
+            // Convert ethers Address to revm Address
+            let revm_addr = RevmAddress::from_slice(addr.as_bytes());
+            
+            // Convert ETH changes
+            let eth_net_change = if changes.eth_net < 0.0 {
+                SignedAmount {
+                    absolute_value: revm_primitives::U256::from(((-changes.eth_net * 1e18) as u128)),
+                    is_negative: true,
+                }
+            } else {
+                SignedAmount {
+                    absolute_value: revm_primitives::U256::from(((changes.eth_net * 1e18) as u128)),
+                    is_negative: false,
+                }
+            };
+            
+            // Convert token changes - we need to handle the string keys
+            let mut token_net_changes = HashMap::new();
+            for (token_key, amount) in changes.token_net {
+                // Try to parse as address, skip if it's a symbol
+                if let Ok(token_addr) = token_key.parse::<EthersAddress>() {
+                    let revm_token_addr = RevmAddress::from_slice(token_addr.as_bytes());
+                    let signed_amount = if amount < 0.0 {
+                        SignedAmount {
+                            absolute_value: revm_primitives::U256::from(((-amount) as u128)),
+                            is_negative: true,
+                        }
+                    } else {
+                        SignedAmount {
+                            absolute_value: revm_primitives::U256::from((amount as u128)),
+                            is_negative: false,
+                        }
+                    };
+                    token_net_changes.insert(revm_token_addr, signed_amount);
+                }
+            }
+            
+            let account_changes = CalculatedAccountChanges {
+                address: revm_addr,
+                eth_net_change,
+                token_net_changes,
+                token_infos: Vec::new(),
+                movements: AccountMovements::default(),
+            };
+            
+            state_changes.insert(revm_addr, account_changes);
+        }
+        
+        if state_changes.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(state_changes))
+        }
     }
 }
 
