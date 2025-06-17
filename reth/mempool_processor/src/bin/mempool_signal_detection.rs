@@ -454,7 +454,7 @@ async fn main() -> Result<()> {
                     debug!("Transaction {} not found", tx_hash);
                 }
                 Err(e) => {
-                    warn!("Failed to fetch transaction {}: {}", tx_hash, e);
+                    debug!("Failed to fetch transaction {}: {}", tx_hash, e);
                 }
             }
         }

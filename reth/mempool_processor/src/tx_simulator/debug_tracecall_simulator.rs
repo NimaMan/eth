@@ -78,13 +78,10 @@ impl DebugTraceCallSimulator {
         
         // Check if the trace was successful
         if let Some(error) = trace_result.get("error") {
-            // Only log actual simulation failures, not expected reverts
+            // Don't log transaction failures - these are expected for invalid transactions
+            // Only debug log for our own debugging if needed
             let error_str = error.as_str().unwrap_or("");
-            if !error_str.contains("execution reverted") && 
-               !error_str.contains("out of gas") && 
-               !error_str.contains("insufficient funds") {
-                tracing::warn!("Transaction trace failed: {}", error);
-            }
+            tracing::debug!("Transaction would fail on-chain: {}", error_str);
             return Ok(None);
         }
         
