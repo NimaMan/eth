@@ -427,14 +427,19 @@ async fn main() -> Result<()> {
                                 processing_times_ms.remove(0);
                             }
                             
-                            // Log processing time for transactions that affected pools
+                            // Report brief statistics every 1000 transactions
+                            if total_processed % 1000 == 0 {
+                                let avg_time = processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64;
+                                info!("Milestone: {} transactions processed | Avg: {:.2}ms | Pools affected: {} ({:.1}%) | Events: {}", 
+                                     total_processed, avg_time, pool_affected_count,
+                                     (pool_affected_count as f64 / total_processed as f64 * 100.0), total_events);
+                            }
+                            
+                            // Track processing time for transactions that affected pools
                             if pools_affected > 0 {
                                 pool_affected_count += 1;
-                                info!("Processed tx {} in {:.2}ms - {} pools affected", 
-                                     tx_hash, processing_time_ms, pools_affected);
-                            } else {
-                                debug!("Processed tx {} in {:.2}ms - no pools affected", 
-                                      tx_hash, processing_time_ms);
+                                debug!("Processed tx {} in {:.2}ms - {} pools affected", 
+                                      tx_hash, processing_time_ms, pools_affected);
                             }
                         }
                         Ok(None) => {
@@ -454,8 +459,8 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Report statistics periodically
-        if last_report.elapsed() > Duration::from_secs(30) {
+        // Report detailed statistics periodically
+        if last_report.elapsed() > Duration::from_secs(300) {  // Every 5 minutes
             info!("📊 Performance Statistics:");
             info!("   Transactions processed: {}", total_processed);
             info!("   Transactions affecting pools: {} ({:.1}%)", 
