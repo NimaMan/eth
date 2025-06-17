@@ -12,7 +12,9 @@ use clap::Parser;
 use eyre::Result;
 use tracing::{info, warn, error, debug, Level};
 use tokio::time;
+use tokio::sync::Mutex;
 use chrono::Local;
+use std::io::Write;
 
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::{WebSocketClient, TransactionView};
@@ -103,14 +105,34 @@ async fn main() -> Result<()> {
     use tracing_subscriber::fmt::writer::MakeWriterExt;
     use tracing_subscriber::EnvFilter;
     
-    // Add timestamp to log file name
+    // Add timestamp to log file names
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let log_file_with_timestamp = args.log_file.replace(".log", &format!("_{}.log", timestamp));
     
+    // Create separate log files for scams and market events
+    let log_dir = std::path::Path::new(&args.log_file).parent().unwrap_or(std::path::Path::new("."));
+    let scam_log_file = log_dir.join(format!("scam_alerts_{}.log", timestamp));
+    let market_log_file = log_dir.join(format!("market_events_{}.log", timestamp));
+    
+    // Main log file appender
     let file_appender = tracing_appender::rolling::never(
         std::path::Path::new(&log_file_with_timestamp).parent().unwrap_or(std::path::Path::new(".")),
         std::path::Path::new(&log_file_with_timestamp).file_name().unwrap_or(std::ffi::OsStr::new("service.log"))
     );
+    
+    // Create file handles for scam and market event logging
+    let scam_file = Arc::new(Mutex::new(std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&scam_log_file)?));
+    
+    let market_file = Arc::new(Mutex::new(std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&market_log_file)?));
+    
+    info!("📝 Logging scams to: {}", scam_log_file.display());
+    info!("📊 Logging market events to: {}", market_log_file.display());
     
     // Filter out noisy debug logs from hyper
     let filter = EnvFilter::new(
@@ -205,6 +227,10 @@ async fn main() -> Result<()> {
     
     // Initialize transaction simulator
     let tx_simulator = DebugTraceCallSimulator::new(&args.eth_rpc_url).await?;
+    
+    // Get the scam and market file handles from earlier
+    let scam_file = scam_file.clone();
+    let market_file = market_file.clone();
     
     // Performance metrics
     let mut total_processed = 0u64;
@@ -345,6 +371,37 @@ async fn main() -> Result<()> {
                                                 info!("   New ETH: {:.6} ETH", event.metrics.new_eth_reserve);
                                                 info!("   ETH Lost: {:.6} ETH", -event.metrics.eth_change);
                                                 info!("   Details: {}", event.details);
+                                                
+                                                // Write to appropriate separate log file
+                                                let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                                                let log_entry = format!(
+                                                    "[{}] {} {:?} | TX: {} | Pool: {} | Token: {} | ETH: {:.6} -> {:.6} ({:.2}% loss) | Lost: {:.6} ETH | {}\n",
+                                                    timestamp,
+                                                    level,
+                                                    event.event_type,
+                                                    event.tx_hash,
+                                                    event.pool_address,
+                                                    event.token_address,
+                                                    event.metrics.new_eth_reserve - event.metrics.eth_change,
+                                                    event.metrics.new_eth_reserve,
+                                                    event.metrics.eth_percent * 100.0,
+                                                    -event.metrics.eth_change,
+                                                    event.details
+                                                );
+                                                
+                                                // Write to scam log if it's a scam alert
+                                                if event.event_type == mempool_processor::signal_engine::EventType::ScamAlert {
+                                                    let mut file = scam_file.lock().await;
+                                                    let _ = file.write_all(log_entry.as_bytes());
+                                                    let _ = file.flush();
+                                                }
+                                                
+                                                // Always write to market events log
+                                                {
+                                                    let mut file = market_file.lock().await;
+                                                    let _ = file.write_all(log_entry.as_bytes());
+                                                    let _ = file.flush();
+                                                }
                                             }
                                         }
                                     }
