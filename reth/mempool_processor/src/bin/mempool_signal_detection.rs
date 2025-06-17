@@ -233,8 +233,8 @@ async fn main() -> Result<()> {
     let scam_file = scam_file.clone();
     let market_file = market_file.clone();
     
-    // Initialize performance tracker (log every 50 transactions)
-    let performance_tracker = Arc::new(PerformanceTracker::new(1000, 50));
+    // Initialize performance tracker (log every 50 transactions, keep only last 50 in memory)
+    let performance_tracker = Arc::new(PerformanceTracker::new_optimized(50));
     info!("📊 Performance tracking enabled (logging every 50 transactions)");
     
     // Performance metrics

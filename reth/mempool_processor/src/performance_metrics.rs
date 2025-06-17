@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{info, debug};
+use tracing::info;
 
 /// Performance metrics for transaction processing
 #[derive(Debug, Clone)]
@@ -112,6 +112,12 @@ impl PerformanceTracker {
         }
     }
     
+    /// Create a performance tracker optimized for logging every N transactions
+    pub fn new_optimized(log_frequency: usize) -> Self {
+        // Only keep the last log_frequency transactions in memory
+        Self::new(log_frequency, log_frequency)
+    }
+    
     /// Start tracking a new transaction
     pub async fn start_transaction(&self, tx_hash: String) -> Arc<RwLock<TransactionTiming>> {
         let timing = Arc::new(RwLock::new(TransactionTiming::new(tx_hash)));
@@ -147,6 +153,8 @@ impl PerformanceTracker {
         
         // Update the timing in our collection
         let completed_timing = timing.read().await.clone();
+        
+        
         let mut timings = self.recent_timings.write().await;
         
         // Find and update the timing entry
@@ -211,27 +219,15 @@ impl PerformanceTracker {
         
         let tx_count = *self.tx_counter.read().await;
         
-        // Log performance metrics
-        info!("🚀 PERFORMANCE METRICS (last {} transactions)", completed.len());
-        info!("📊 Total transactions processed: {}", tx_count);
-        info!("⏱️  Queue Time (Reth arrival → Processing start):");
-        info!("    Mean: {:.3}ms, Max: {:.3}ms", queue_mean, queue_max);
-        info!("⚡ Processing Time (Start → End):");
-        info!("    Mean: {:.3}ms, Max: {:.3}ms", processing_mean, processing_max);
-        info!("📈 Total Time (Reth arrival → Processing end):");
-        info!("    Mean: {:.3}ms, Max: {:.3}ms", total_mean, total_max);
-        
-        // Log detailed timing for debugging if verbose
-        debug!("Detailed timings for last 5 transactions:");
-        for (i, timing) in completed.iter().rev().take(5).enumerate() {
-            debug!("  [{}] TX {}: Queue: {:.3}ms, Process: {:.3}ms, Total: {:.3}ms",
-                i + 1,
-                &timing.tx_hash[..8],
-                timing.queue_time_ms(),
-                timing.processing_time_ms().unwrap_or(0.0),
-                timing.total_time_ms().unwrap_or(0.0)
-            );
-        }
+        // Log performance metrics in a single line for efficiency
+        info!("📊 PERF [{}tx]: Queue: {:.1}ms avg, {:.1}ms max | Process: {:.1}ms avg, {:.1}ms max | Total: {}", 
+            completed.len(),
+            queue_mean, 
+            queue_max,
+            processing_mean, 
+            processing_max,
+            tx_count
+        );
     }
     
     /// Get current performance statistics
