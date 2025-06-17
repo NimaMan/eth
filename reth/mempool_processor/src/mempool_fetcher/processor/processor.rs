@@ -1,5 +1,5 @@
 use crate::mempool_fetcher::types::*;
-use crate::tx_simulator::state_diff::StateDiffTracker;
+use crate::tx_simulator::state_diff_types::StateDiffTracker;
 use crate::tx_simulator::MempoolStateDiff;
 use ethers::prelude::*;
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -69,7 +69,7 @@ struct Args {
     verbose: bool,
     
     /// Log file path
-    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/mempool_signal_detection.log")]
+    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/signal_engine_service.log")]
     log_file: String,
 }
 
@@ -101,14 +101,25 @@ async fn main() -> Result<()> {
     
     // Configure logging with file output (no ANSI colors)
     use tracing_subscriber::fmt::writer::MakeWriterExt;
+    use tracing_subscriber::EnvFilter;
+    
+    // Add timestamp to log file name
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let log_file_with_timestamp = args.log_file.replace(".log", &format!("_{}.log", timestamp));
     
     let file_appender = tracing_appender::rolling::never(
-        std::path::Path::new(&args.log_file).parent().unwrap_or(std::path::Path::new(".")),
-        std::path::Path::new(&args.log_file).file_name().unwrap_or(std::ffi::OsStr::new("service.log"))
+        std::path::Path::new(&log_file_with_timestamp).parent().unwrap_or(std::path::Path::new(".")),
+        std::path::Path::new(&log_file_with_timestamp).file_name().unwrap_or(std::ffi::OsStr::new("service.log"))
+    );
+    
+    // Filter out noisy debug logs from hyper
+    let filter = EnvFilter::new(
+        format!("mempool_processor={},hyper=warn,reqwest=warn", 
+                if args.verbose { "debug" } else { "info" })
     );
     
     tracing_subscriber::fmt()
-        .with_max_level(log_level)
+        .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(true)
         .with_file(true)
@@ -245,53 +256,55 @@ async fn main() -> Result<()> {
                             let mut affected_pools = HashMap::new();
                             
                             // Process state changes for each address
-                            for (address, changes) in &state_changes {
-                                let address_str = format!("0x{:040x}", address);
+                            for (address_str, changes) in &state_changes {
+                                // address_str is now already checksummed from the simulator
                                 
                                 // Check if this address is a pool
-                                if pool_cache_clone.get_pool(&address_str).is_some() {
-                                    // Calculate ETH impact
-                                    if changes.eth_net_change.absolute_value > revm_primitives::U256::ZERO {
-                                        let eth_amount = changes.eth_net_change.absolute_value
-                                            .to_string()
+                                if let Some(pool_state) = pool_cache_clone.get_pool(address_str) {
+                                    // Calculate ETH delta (positive or negative)
+                                    let eth_delta = if changes.eth_net_change.is_negative {
+                                        -(changes.eth_net_change.absolute_value.to_string()
                                             .parse::<u128>()
-                                            .unwrap_or(0) as f64 / 1e18;
-                                        let is_outgoing = changes.eth_net_change.is_negative;
-                                        
-                                        if is_outgoing {
-                                            // ETH leaving the pool
-                                            check_pool_impact(
-                                                &address_str,
-                                                &"external",
-                                                eth_amount,
-                                                true, // is_eth
-                                                &pool_cache_clone,
-                                                &mut affected_pools
-                                            );
-                                        }
+                                            .unwrap_or(0) as f64 / 1e18)
+                                    } else {
+                                        changes.eth_net_change.absolute_value.to_string()
+                                            .parse::<u128>()
+                                            .unwrap_or(0) as f64 / 1e18
+                                    };
+                                    
+                                    // Skip very small changes (less than 0.001 ETH)
+                                    if eth_delta.abs() < 0.001 {
+                                        continue;
                                     }
                                     
-                                    // Calculate token impacts
-                                    for (token_addr, token_change) in &changes.token_net_changes {
-                                        if token_change.absolute_value > revm_primitives::U256::ZERO {
-                                            let token_amount = token_change.absolute_value
-                                                .to_string()
-                                                .parse::<u128>()
-                                                .unwrap_or(0) as f64;
-                                            let is_outgoing = token_change.is_negative;
-                                            
-                                            if is_outgoing {
-                                                // Tokens leaving the pool
-                                                check_pool_impact(
-                                                    &address_str,
-                                                    &"external",
-                                                    token_amount,
-                                                    false, // is_eth
-                                                    &pool_cache_clone,
-                                                    &mut affected_pools
-                                                );
-                                            }
-                                        }
+                                    // For scam detection, we're primarily interested in ETH leaving pools
+                                    // But we need to track all changes for comprehensive market events
+                                    let current_eth = pool_state.eth_reserve;
+                                    let simulated_eth = current_eth + eth_delta;
+                                    let percentage_change = if current_eth > 0.0 {
+                                        eth_delta / current_eth
+                                    } else {
+                                        0.0
+                                    };
+                                    
+                                    // Process significant changes (> 1% or any negative change)
+                                    if percentage_change.abs() > 0.01 || eth_delta < 0.0 {
+                                        debug!("Pool {} affected: {:.6} → {:.6} ETH ({:.2}% change)", 
+                                              address_str, current_eth, simulated_eth, percentage_change * 100.0);
+                                        
+                                        // For now, focus on ETH changes (token tracking can be added later)
+                                        let effect = mempool_processor::signal_engine::PoolEffect {
+                                            pool_address: address_str.clone(),
+                                            current_eth_reserve: current_eth,
+                                            simulated_eth_reserve: simulated_eth,
+                                            current_token_reserve: pool_state.token_reserve,
+                                            simulated_token_reserve: pool_state.token_reserve, // Not tracking token changes yet
+                                            eth_delta,
+                                            token_delta: 0.0,
+                                            percentage_change,
+                                        };
+                                        
+                                        affected_pools.insert(address_str.clone(), effect);
                                     }
                                 }
                             }
@@ -320,13 +333,18 @@ async fn main() -> Result<()> {
                                                     mempool_processor::signal_engine::Severity::Low => "ℹ️",
                                                 };
                                                 
-                                                error!("{} {:?} DETECTED: {}", level, event.event_type, event.tx_hash);
-                                                error!("   Pool: {}", event.pool_address);
-                                                error!("   Token: {}", event.token_address);
-                                                error!("   Severity: {:?}", event.severity);
-                                                error!("   Confidence: {:.2}", event.confidence);
-                                                error!("   ETH Impact: {:.4} ETH ({:.1}%)", event.metrics.eth_change, event.metrics.eth_percent * 100.0);
-                                                error!("   Details: {}", event.details);
+                                                // Use info! for better visibility in logs
+                                                info!("{} {:?} DETECTED:", level, event.event_type);
+                                                info!("   Transaction Hash: {}", event.tx_hash);
+                                                info!("   Pool Address: {}", event.pool_address);
+                                                info!("   Token Address: {}", event.token_address);
+                                                info!("   Severity: {:?}", event.severity);
+                                                info!("   Confidence: {:.2}", event.confidence);
+                                                info!("   ETH Impact: {:.4} ETH ({:.1}%)", event.metrics.eth_change, event.metrics.eth_percent * 100.0);
+                                                info!("   Current ETH: {:.6} ETH", event.metrics.new_eth_reserve - event.metrics.eth_change);
+                                                info!("   New ETH: {:.6} ETH", event.metrics.new_eth_reserve);
+                                                info!("   ETH Lost: {:.6} ETH", -event.metrics.eth_change);
+                                                info!("   Details: {}", event.details);
                                             }
                                         }
                                     }
@@ -373,54 +391,3 @@ async fn main() -> Result<()> {
 }
 
 
-/// Check if a transfer affects a pool and calculate the impact
-fn check_pool_impact(
-    from: &str,
-    to: &str,
-    amount: f64,
-    is_eth: bool,
-    pool_cache: &Arc<mempool_processor::pool_subscriber::cache::PoolStateCache>,
-    affected_pools: &mut HashMap<String, mempool_processor::signal_engine::PoolEffect>,
-) {
-    // Check if sender is a pool
-    if let Some(pool_state) = pool_cache.get_pool(from) {
-        let current_reserve = if is_eth { pool_state.eth_reserve } else { pool_state.token_reserve };
-        let simulated_reserve = current_reserve - amount;
-        let percentage_change = -amount / current_reserve;
-        
-        affected_pools.insert(
-            from.to_string(),
-            mempool_processor::signal_engine::PoolEffect {
-                pool_address: from.to_string(),
-                current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
-                simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
-                current_token_reserve: if !is_eth { current_reserve } else { pool_state.token_reserve },
-                simulated_token_reserve: if !is_eth { simulated_reserve } else { pool_state.token_reserve },
-                eth_delta: if is_eth { -amount } else { 0.0 },
-                token_delta: if !is_eth { -amount } else { 0.0 },
-                percentage_change,
-            }
-        );
-    }
-    
-    // Check if receiver is a pool
-    if let Some(pool_state) = pool_cache.get_pool(to) {
-        let current_reserve = if is_eth { pool_state.eth_reserve } else { pool_state.token_reserve };
-        let simulated_reserve = current_reserve + amount;
-        let percentage_change = amount / current_reserve;
-        
-        affected_pools.insert(
-            to.to_string(),
-            mempool_processor::signal_engine::PoolEffect {
-                pool_address: to.to_string(),
-                current_eth_reserve: if is_eth { current_reserve } else { pool_state.eth_reserve },
-                simulated_eth_reserve: if is_eth { simulated_reserve } else { pool_state.eth_reserve },
-                current_token_reserve: if !is_eth { current_reserve } else { pool_state.token_reserve },
-                simulated_token_reserve: if !is_eth { simulated_reserve } else { pool_state.token_reserve },
-                eth_delta: if is_eth { amount } else { 0.0 },
-                token_delta: if !is_eth { amount } else { 0.0 },
-                percentage_change,
-            }
-        );
-    }
-}

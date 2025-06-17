@@ -97,15 +97,9 @@ impl SignalEngine {
         for (pool_address, effect) in simulation.affected_pools.iter() {
             // Get the current pool state from cache
             if let Some(pool_state) = self.pool_cache.get_pool(pool_address) {
-                // Check data freshness
-                const MAX_POOL_AGE: std::time::Duration = std::time::Duration::from_secs(60);
-                let data_freshness_score = if pool_state.is_stale(MAX_POOL_AGE) {
-                    let age = pool_state.age().as_secs_f64();
-                    warn!("Pool state for {} is stale ({:.1}s old)", pool_address, age);
-                    0.8 - (age / 300.0).min(0.3) // Decreasing score up to 0.5
-                } else {
-                    1.0
-                };
+                // Data freshness score - pools are updated when transactions affect them
+                // No need to warn about "stale" data since Python updates on-demand
+                let data_freshness_score = 1.0;
                 
                 // Update effect with current token reserve
                 let mut updated_effect = effect.clone();

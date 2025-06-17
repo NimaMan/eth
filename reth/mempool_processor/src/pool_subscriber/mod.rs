@@ -104,9 +104,7 @@ impl PoolSubscriber {
                         let checksummed_address = checksum_address(address);
                         pools_map.insert(checksummed_address, pool_update);
                         
-                        if python_eth_reserve > 0.0 {
-                            debug!("✅ Pool {}: {:.6} ETH (from Python)", address, python_eth_reserve);
-                        }
+                        // Remove verbose logging of individual pools
                     }
                 }
                 

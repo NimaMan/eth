@@ -32,6 +32,7 @@ use crate::mempool_fetcher::types::TransactionView;
 use crate::tx_simulator::debug_tracecall_state_diff_calculator::{
     DebugTraceCallStateDiffCalculator, EthTransfer, Erc20Transfer
 };
+use crate::common::address::checksum_address;
 use revm_context::BlockEnv;
 use hex;
 
@@ -50,12 +51,12 @@ impl DebugTraceCallSimulator {
         })
     }
     
-    /// Process a transaction and return account changes in the same format as REVM simulator
+    /// Process a transaction and return account changes with checksummed addresses as keys
     pub async fn process_transaction(
         &self,
         tx_view: &TransactionView,
         _block_env: &BlockEnv, // Not needed for RPC simulation
-    ) -> Result<Option<HashMap<RevmAddress, CalculatedAccountChanges>>> {
+    ) -> Result<Option<HashMap<String, CalculatedAccountChanges>>> {
         // Convert TransactionView to ethers Transaction for RPC call
         let tx = convert_transaction_view_to_ethers(tx_view)?;
         
@@ -195,11 +196,14 @@ impl DebugTraceCallSimulator {
         )?;
         
         // Convert from AddressStateChange to CalculatedAccountChanges format
-        let mut state_changes = HashMap::new();
+        let mut state_changes: HashMap<String, CalculatedAccountChanges> = HashMap::new();
         
         for (addr, changes) in address_changes {
             // Convert ethers Address to revm Address
             let revm_addr = RevmAddress::from_slice(addr.as_bytes());
+            // Convert to checksummed address for pool cache compatibility
+            let addr_hex = format!("0x{}", hex::encode(addr.as_bytes()));
+            let addr_checksummed = checksum_address(&addr_hex);
             
             // Convert ETH changes
             let eth_net_change = if changes.eth_net < 0.0 {
@@ -243,7 +247,7 @@ impl DebugTraceCallSimulator {
                 movements: AccountMovements::default(),
             };
             
-            state_changes.insert(revm_addr, account_changes);
+            state_changes.insert(addr_checksummed, account_changes);
         }
         
         if state_changes.is_empty() {

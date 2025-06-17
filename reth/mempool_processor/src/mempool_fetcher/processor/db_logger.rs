@@ -111,6 +111,28 @@ impl DbLogger {
         simulated_eth_level: f64,
         eth_threshold: f64,
     ) -> Result<(), PgError> {
+        self.write_mempool_scam_prediction_with_tx(
+            token_address,
+            pool_address,
+            prediction_block_number,
+            current_eth_level,
+            simulated_eth_level,
+            eth_threshold,
+            None,
+        ).await
+    }
+    
+    /// Writes a mempool scam prediction to the database with optional transaction hash
+    pub async fn write_mempool_scam_prediction_with_tx(
+        &self,
+        token_address: &str,
+        pool_address: &str,
+        prediction_block_number: i64,
+        current_eth_level: f64,
+        simulated_eth_level: f64,
+        eth_threshold: f64,
+        tx_hash: Option<&str>,
+    ) -> Result<(), PgError> {
         let mut client_guard = self.client.lock().await;
         
         // Ensure we have a connection
@@ -156,18 +178,53 @@ impl DbLogger {
             ],
         ).await {
             Ok(_) => {
-                info!("🚨 SCAM ALERT LOGGED TO DATABASE: Token {} in pool {} depleted from {} to {} ETH", 
-                     token_address, pool_address, current_eth_level, simulated_eth_level);
+                // Log the full scam details when successfully written to database
+                info!("🚨 SCAM DETECTED AND LOGGED TO DATABASE:");
+                if let Some(tx) = tx_hash {
+                    info!("   Transaction Hash: {}", tx);
+                }
+                info!("   Token Address: {}", token_address);
+                info!("   Pool Address: {}", pool_address);
+                info!("   Block Number: {}", prediction_block_number);
+                info!("   ETH Drained: {} -> {} ETH ({:.2}% loss)", 
+                     current_eth_level, simulated_eth_level, 
+                     ((current_eth_level - simulated_eth_level) / current_eth_level * 100.0));
+                info!("   Amount Lost: {:.6} ETH", current_eth_level - simulated_eth_level);
+                info!("   Database Status: Successfully logged");
+                
+                // Also log in a parseable format for external tools
+                info!("SCAM_ALERT|{}|{}|{}|{}|{}|{}|LOGGED",
+                     tx_hash.unwrap_or("NO_TX_HASH"),
+                     token_address, pool_address, prediction_block_number,
+                     current_eth_level, simulated_eth_level);
+                     
                 Ok(())
             },
             Err(e) => {
                 // Check if this is a foreign key constraint error
                 if let Some(db_error) = e.as_db_error() {
                     if db_error.code().code() == "23503" { // Foreign key violation
-                        error!("🚨 SCAM DETECTED but NOT LOGGED: Token {} not found in tokens table", token_address);
-                        error!("Pool {} depleted from {} to {} ETH - but database write failed due to missing token", 
-                              pool_address, current_eth_level, simulated_eth_level);
-                        // Return Ok to not crash the service, but log the issue prominently
+                        // Log the full scam details even if database write fails
+                        error!("🚨 SCAM DETECTED (NOT IN DB - Token Missing):");
+                        if let Some(tx) = tx_hash {
+                            error!("   Transaction Hash: {}", tx);
+                        }
+                        error!("   Token Address: {}", token_address);
+                        error!("   Pool Address: {}", pool_address);
+                        error!("   Block Number: {}", prediction_block_number);
+                        error!("   ETH Drained: {} -> {} ETH ({:.2}% loss)", 
+                              current_eth_level, simulated_eth_level, 
+                              ((current_eth_level - simulated_eth_level) / current_eth_level * 100.0));
+                        error!("   Amount Lost: {:.6} ETH", current_eth_level - simulated_eth_level);
+                        error!("   Database Status: Write failed - token not in database");
+                        
+                        // Still try to log important info that doesn't require the token
+                        info!("SCAM_ALERT|{}|{}|{}|{}|{}|{}|MISSING_TOKEN",
+                             tx_hash.unwrap_or("NO_TX_HASH"),
+                             token_address, pool_address, prediction_block_number,
+                             current_eth_level, simulated_eth_level);
+                        
+                        // Return Ok to not crash the service
                         return Ok(());
                     }
                 }

@@ -192,13 +192,17 @@ impl SignalService {
             let prediction_block_number = event.block_number as i64;
             let current_eth = event.metrics.new_eth_reserve - event.metrics.eth_change;
             
-            self.db_logger.write_mempool_scam_prediction(
+            // Log the transaction hash along with the scam alert
+            info!("Processing scam alert for tx: {}", event.tx_hash);
+            
+            self.db_logger.write_mempool_scam_prediction_with_tx(
                 &event.token_address,
                 &event.pool_address,
                 prediction_block_number,
                 current_eth,
                 event.metrics.new_eth_reserve,
                 0.1, // Default threshold
+                Some(&event.tx_hash),
             ).await?;
         }
         
