@@ -23,6 +23,7 @@ use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig
 use mempool_processor::mempool_fetcher::processor::DbLogger;
 use mempool_processor::tx_simulator::DebugTraceCallSimulator;
 use mempool_processor::common::address::to_checksum_address;
+use mempool_processor::performance_metrics::PerformanceTracker;
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     
     // Initialize logging
-    let log_level = if args.verbose { Level::DEBUG } else { Level::INFO };
+    let _log_level = if args.verbose { Level::DEBUG } else { Level::INFO };
     
     // Create log directory if needed
     if let Some(log_dir) = std::path::Path::new(&args.log_file).parent() {
@@ -168,7 +169,7 @@ async fn main() -> Result<()> {
     
     // Initialize WebSocket client
     info!("🔌 Initializing WebSocket client...");
-    let mut ws_client = WebSocketClient::new(&args.eth_ws_url, &args.eth_rpc_url)?;
+    let ws_client = WebSocketClient::new(&args.eth_ws_url, &args.eth_rpc_url)?;
     ws_client.start_monitoring().await?;
     info!("✅ WebSocket subscription active");
     
@@ -232,6 +233,10 @@ async fn main() -> Result<()> {
     let scam_file = scam_file.clone();
     let market_file = market_file.clone();
     
+    // Initialize performance tracker (log every 50 transactions)
+    let performance_tracker = Arc::new(PerformanceTracker::new(1000, 50));
+    info!("📊 Performance tracking enabled (logging every 50 transactions)");
+    
     // Performance metrics
     let mut total_processed = 0u64;
     let mut total_events = 0u64;
@@ -261,6 +266,15 @@ async fn main() -> Result<()> {
         }
         
         for ws_tx in new_txs {
+            // Start performance tracking for this transaction using WebSocket arrival time
+            let tx_timing = performance_tracker.start_transaction_with_arrival(
+                ws_tx.hash.clone(), 
+                ws_tx.arrival_time
+            ).await;
+            
+            // Mark when we start processing (after receiving from mempool)
+            tx_timing.write().await.mark_processing_start();
+            
             let start_time = Instant::now();
             
             // Parse transaction hash
@@ -268,6 +282,8 @@ async fn main() -> Result<()> {
                 Ok(hash) => hash,
                 Err(e) => {
                     warn!("Invalid transaction hash: {}", e);
+                    // Complete tracking even on error
+                    performance_tracker.complete_transaction(tx_timing).await;
                     continue;
                 }
             };
@@ -418,6 +434,9 @@ async fn main() -> Result<()> {
                             total_processed += 1;
                             let elapsed = start_time.elapsed();
                             
+                            // Complete performance tracking
+                            performance_tracker.complete_transaction(tx_timing.clone()).await;
+                            
                             // Track processing time
                             let processing_time_ms = elapsed.as_secs_f64() * 1000.0;
                             processing_times_ms.push(processing_time_ms);
@@ -444,17 +463,25 @@ async fn main() -> Result<()> {
                         }
                         Ok(None) => {
                             debug!("No state changes detected for transaction {}", tx_hash);
+                            // Complete tracking even when no state changes
+                            performance_tracker.complete_transaction(tx_timing.clone()).await;
                         }
                         Err(e) => {
                             debug!("Failed to simulate transaction {}: {}", tx_hash, e);
+                            // Complete tracking even on simulation error
+                            performance_tracker.complete_transaction(tx_timing.clone()).await;
                         }
                     }
                 }
                 Ok(None) => {
                     debug!("Transaction {} not found", tx_hash);
+                    // Complete tracking even when transaction not found
+                    performance_tracker.complete_transaction(tx_timing).await;
                 }
                 Err(e) => {
                     warn!("Failed to fetch transaction {}: {}", tx_hash, e);
+                    // Complete tracking even on fetch error
+                    performance_tracker.complete_transaction(tx_timing).await;
                 }
             }
         }

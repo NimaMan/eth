@@ -227,4 +227,8 @@ path = "examples/quick_simulation_test.rs"
 name = "actual_simulation_measurement"
 path = "examples/actual_simulation_measurement.rs"
 
+[[example]]
+name = "performance_demo"
+path = "examples/performance_demo.rs"
+
 # Using crates.io versions - no patches needed
