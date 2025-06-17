@@ -261,7 +261,8 @@ async fn main() -> Result<()> {
         }
         
         for ws_tx in new_txs {
-            let start_time = Instant::now();
+            // Use arrival time from WebSocket to track true end-to-end latency
+            let start_time = ws_tx.arrival_time;
             
             // Parse transaction hash
             let tx_hash = match ws_tx.hash.parse::<H256>() {
@@ -428,10 +429,11 @@ async fn main() -> Result<()> {
                             }
                             
                             // Report brief statistics every 1000 transactions
-                            if total_processed % 1000 == 0 {
+                            if total_processed % 1000 == 0 && !processing_times_ms.is_empty() {
                                 let avg_time = processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64;
-                                info!("Milestone: {} transactions processed | Avg: {:.2}ms | Pools affected: {} ({:.1}%) | Events: {}", 
-                                     total_processed, avg_time, pool_affected_count,
+                                let max_time = processing_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                                info!("Milestone: {} transactions | End-to-end latency - Avg: {:.2}ms, Max: {:.2}ms | Pools affected: {} ({:.1}%) | Events: {}", 
+                                     total_processed, avg_time, max_time, pool_affected_count,
                                      (pool_affected_count as f64 / total_processed as f64 * 100.0), total_events);
                             }
                             
