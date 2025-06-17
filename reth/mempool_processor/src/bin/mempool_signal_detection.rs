@@ -237,6 +237,8 @@ async fn main() -> Result<()> {
     let mut total_events = 0u64;
     let mut events_by_type = HashMap::<String, u64>::new();
     let mut last_report = Instant::now();
+    let mut processing_times_ms: Vec<f64> = Vec::new();
+    let mut pool_affected_count = 0u64;
     
     // Main processing loop
     info!("🔄 Starting main processing loop...");
@@ -335,6 +337,8 @@ async fn main() -> Result<()> {
                                 }
                             }
                             
+                            let pools_affected = affected_pools.len();
+                            
                             // If pools are affected, check for scams
                             if !affected_pools.is_empty() {
                                 let simulation_result = mempool_processor::signal_engine::SimulationResult {
@@ -414,7 +418,24 @@ async fn main() -> Result<()> {
                             total_processed += 1;
                             let elapsed = start_time.elapsed();
                             
-                            debug!("Processed {} in {:?}", tx_hash, elapsed);
+                            // Track processing time
+                            let processing_time_ms = elapsed.as_secs_f64() * 1000.0;
+                            processing_times_ms.push(processing_time_ms);
+                            
+                            // Keep only last 1000 measurements to avoid memory growth
+                            if processing_times_ms.len() > 1000 {
+                                processing_times_ms.remove(0);
+                            }
+                            
+                            // Log processing time for transactions that affected pools
+                            if pools_affected > 0 {
+                                pool_affected_count += 1;
+                                info!("Processed tx {} in {:.2}ms - {} pools affected", 
+                                     tx_hash, processing_time_ms, pools_affected);
+                            } else {
+                                debug!("Processed tx {} in {:.2}ms - no pools affected", 
+                                      tx_hash, processing_time_ms);
+                            }
                         }
                         Ok(None) => {
                             debug!("No state changes detected for transaction {}", tx_hash);
@@ -435,11 +456,28 @@ async fn main() -> Result<()> {
         
         // Report statistics periodically
         if last_report.elapsed() > Duration::from_secs(30) {
-            info!("📊 Statistics:");
+            info!("📊 Performance Statistics:");
             info!("   Transactions processed: {}", total_processed);
-            info!("   Total market events: {}", total_events);
+            info!("   Transactions affecting pools: {} ({:.1}%)", 
+                  pool_affected_count, 
+                  (pool_affected_count as f64 / total_processed as f64 * 100.0));
+            
+            // Calculate timing statistics
+            if !processing_times_ms.is_empty() {
+                let avg_time = processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64;
+                let min_time = processing_times_ms.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max_time = processing_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                
+                info!("   Processing times:");
+                info!("     - Average: {:.2}ms per transaction", avg_time);
+                info!("     - Min: {:.2}ms", min_time);
+                info!("     - Max: {:.2}ms", max_time);
+                info!("     - Transactions/second: {:.0}", 1000.0 / avg_time);
+            }
+            
+            info!("   Market events detected: {}", total_events);
             for (event_type, count) in &events_by_type {
-                info!("   - {}: {}", event_type, count);
+                info!("     - {}: {}", event_type, count);
             }
             info!("   Pools monitored: {}", pool_cache_clone.get_pool_count());
             last_report = Instant::now();

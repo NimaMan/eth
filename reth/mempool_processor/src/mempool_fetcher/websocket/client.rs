@@ -217,7 +217,7 @@ impl WebSocketClient {
                                 // Log progress
                                 if count % 1000 == 0 {
                                     let stats_snapshot = stats.read().await;
-                                    info!("WebSocket: {} transactions, avg latency: {:.2}ms", 
+                                    info!("WebSocket: {} transactions received, avg parsing time: {:.2}ms", 
                                           count, stats_snapshot.avg_latency_ms);
                                 }
                             }
