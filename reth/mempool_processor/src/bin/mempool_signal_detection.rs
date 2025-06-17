@@ -238,14 +238,15 @@ async fn main() -> Result<()> {
     let mut events_by_type = HashMap::<String, u64>::new();
     let mut last_report = Instant::now();
     let mut processing_times_ms: Vec<f64> = Vec::new();
+    let mut queue_wait_times_ms: Vec<f64> = Vec::new();
     let mut pool_affected_count = 0u64;
     
     // Main processing loop
     info!("🔄 Starting main processing loop...");
     
     loop {
-        // Get new transactions from WebSocket
-        let new_txs = match ws_client.get_transactions(100).await {
+        // Get new transactions from WebSocket (smaller batch for lower latency)
+        let new_txs = match ws_client.get_transactions(10).await {
             Ok(txs) => txs,
             Err(e) => {
                 warn!("Failed to get transactions: {}", e);
@@ -365,8 +366,11 @@ async fn main() -> Result<()> {
                                                 };
                                                 
                                                 // Use info! for better visibility in logs
+                                                let queue_wait_ms = (Instant::now().duration_since(ws_tx.arrival_time)).as_secs_f64() * 1000.0;
                                                 info!("{} {:?} DETECTED:", level, event.event_type);
                                                 info!("   Transaction Hash: {}", event.tx_hash);
+                                                info!("   Arrival Time: {} (queued {:.2}ms)", 
+                                                     chrono::Utc::now().format("%H:%M:%S%.3f"), queue_wait_ms);
                                                 info!("   Pool Address: {}", event.pool_address);
                                                 info!("   Token Address: {}", event.token_address);
                                                 info!("   Severity: {:?}", event.severity);
@@ -419,29 +423,47 @@ async fn main() -> Result<()> {
                             total_processed += 1;
                             let elapsed = start_time.elapsed();
                             
-                            // Track processing time
+                            // Track processing time and queue wait time
                             let processing_time_ms = elapsed.as_secs_f64() * 1000.0;
+                            let queue_wait_ms = (start_time.duration_since(ws_tx.arrival_time)).as_secs_f64() * 1000.0;
+                            
                             processing_times_ms.push(processing_time_ms);
+                            queue_wait_times_ms.push(queue_wait_ms);
                             
                             // Keep only last 1000 measurements to avoid memory growth
                             if processing_times_ms.len() > 1000 {
                                 processing_times_ms.remove(0);
                             }
+                            if queue_wait_times_ms.len() > 1000 {
+                                queue_wait_times_ms.remove(0);
+                            }
                             
                             // Report brief statistics every 1000 transactions
                             if total_processed % 1000 == 0 && !processing_times_ms.is_empty() {
-                                let avg_time = processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64;
-                                let max_time = processing_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-                                info!("Milestone: {} transactions | End-to-end latency - Avg: {:.2}ms, Max: {:.2}ms | Pools affected: {} ({:.1}%) | Events: {}", 
-                                     total_processed, avg_time, max_time, pool_affected_count,
-                                     (pool_affected_count as f64 / total_processed as f64 * 100.0), total_events);
+                                let avg_process_time = processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64;
+                                let max_process_time = processing_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                                let avg_queue_wait = queue_wait_times_ms.iter().sum::<f64>() / queue_wait_times_ms.len() as f64;
+                                let max_queue_wait = queue_wait_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                                let queue_depth = ws_client.get_queue_depth();
+                                
+                                info!("📊 Milestone: {} transactions processed", total_processed);
+                                info!("   Queue: {} pending | Wait time - Avg: {:.2}ms, Max: {:.2}ms", 
+                                     queue_depth, avg_queue_wait, max_queue_wait);
+                                info!("   Processing time - Avg: {:.2}ms, Max: {:.2}ms", 
+                                     avg_process_time, max_process_time);
+                                info!("   Pools affected: {} ({:.1}%) | Events detected: {}", 
+                                     pool_affected_count, 
+                                     (pool_affected_count as f64 / total_processed as f64 * 100.0), 
+                                     total_events);
                             }
                             
                             // Track processing time for transactions that affected pools
                             if pools_affected > 0 {
                                 pool_affected_count += 1;
-                                debug!("Processed tx {} in {:.2}ms - {} pools affected", 
-                                      tx_hash, processing_time_ms, pools_affected);
+                                // Calculate queue wait time
+                                let queue_wait_ms = (start_time.duration_since(ws_tx.arrival_time)).as_secs_f64() * 1000.0;
+                                info!("Processed tx {} | Queue wait: {:.2}ms | Processing: {:.2}ms | {} pools affected", 
+                                     tx_hash, queue_wait_ms, processing_time_ms, pools_affected);
                             }
                         }
                         Ok(None) => {

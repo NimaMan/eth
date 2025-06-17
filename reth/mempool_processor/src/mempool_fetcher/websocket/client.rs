@@ -84,7 +84,8 @@ pub struct WebSocketStats {
 impl WebSocketClient {
     /// Create new WebSocket client
     pub fn new(ws_url: &str, http_url: &str) -> Result<Self> {
-        let (tx_sender, tx_receiver) = mpsc::channel(10000);
+        // Use much larger buffer to prevent dropping transactions
+        let (tx_sender, tx_receiver) = mpsc::channel(1000000);
         
         Ok(Self {
             ws_url: ws_url.to_string(),
@@ -210,8 +211,19 @@ impl WebSocketClient {
                                 }
                                 
                                 // Send transaction
-                                if let Err(e) = tx_sender.try_send(ws_tx) {
-                                    warn!("Channel full, dropping transaction: {}", e);
+                                match tx_sender.try_send(ws_tx) {
+                                    Ok(_) => {
+                                        // Log queue depth periodically
+                                        if count % 100 == 0 {
+                                            let queue_len = tx_sender.max_capacity() - tx_sender.capacity();
+                                            if queue_len > 1000 {
+                                                warn!("WebSocket queue depth: {} transactions", queue_len);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("CRITICAL: Channel full, dropping transaction: {} (this should never happen!)", e);
+                                    }
                                 }
                                 
                                 // Log progress
@@ -253,6 +265,11 @@ impl WebSocketClient {
         }
         
         Ok(transactions)
+    }
+    
+    /// Get approximate queue depth (may be slightly off due to race conditions)
+    pub fn get_queue_depth(&self) -> usize {
+        self.tx_sender.max_capacity() - self.tx_sender.capacity()
     }
     
     /// Get performance statistics
