@@ -31,6 +31,22 @@ pub struct TransactionView {
     pub input_data: Option<Vec<u8>>,
 }
 
+impl TransactionView {
+    /// Convert from ethers Transaction to TransactionView
+    pub fn from_ethers_transaction(tx: &ethers::types::Transaction) -> Self {
+        Self {
+            hash: tx.hash.as_bytes().to_vec(),
+            from: tx.from.as_bytes().to_vec(),
+            to: tx.to.map(|addr| addr.as_bytes().to_vec()),
+            value: tx.value,
+            gas_price: tx.gas_price,
+            gas_limit: Some(tx.gas),
+            nonce: Some(tx.nonce),
+            input_data: if tx.input.is_empty() { None } else { Some(tx.input.to_vec()) },
+        }
+    }
+}
+
 /// Criteria for filtering interesting transactions
 #[derive(Clone, Debug)]
 pub struct TransactionFilter {
