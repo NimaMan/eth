@@ -1,0 +1,83 @@
+[package]
+name = "embedded_reth_mempool"
+version = "0.1.0"
+edition = "2021"
+
+# Disable default binary since main.rs is an example
+[[bin]]
+name = "embedded_reth_mempool"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.37", features = ["full"] }
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9"
+eyre = "0.6"
+
+# Reth public crates we use - exact versions from v1.3.12
+reth-chainspec = "1.3.12"
+reth-discv4 = "1.3.12"
+reth-network = "1.3.12"
+reth-transaction-pool = { version = "1.3.12", features = ["test-utils"] }
+reth-tasks = "1.3.12"
+reth-primitives = "1.3.12"
+reth-provider = { version = "1.3.12", features = ["test-utils"] }
+
+# Additional dependencies for our extensions
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
+async-stream = "0.3"
+alloy-primitives = "0.8"
+alloy-consensus = { version = "0.14.0", default-features = false }
+alloy-provider = { version = "0.14.0", features = ["ws"] }
+alloy-rpc-types = "0.14.0"
+alloy-transport-ws = "0.14.0"
+tokio-stream = "0.1"
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+secp256k1 = "0.29"
+hex = "0.4"
+
+[patch.crates-io]
+# Patch all reth crates to use local checkout
+reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
+reth-discv4 = { path = "/home/nima/code/crypto/rust/reth/crates/net/discv4" }
+reth-network = { path = "/home/nima/code/crypto/rust/reth/crates/net/network" }
+reth-transaction-pool = { path = "/home/nima/code/crypto/rust/reth/crates/transaction-pool", features = ["test-utils"] }
+reth-tasks = { path = "/home/nima/code/crypto/rust/reth/crates/tasks" }
+reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives" }
+reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider", features = ["test-utils"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bin]]
+name = "embedded_demo"
+path = "src/main_simple.rs"
+
+[[bin]]
+name = "verify_signed_tx"
+path = "src/verify_signed_tx.rs"
+
+[[bin]]
+name = "verify_100_txs"
+path = "src/verify_100_txs.rs"
+
+[[bin]]
+name = "precise_timing_measurement"
+path = "src/precise_timing_measurement.rs"
+
+[[example]]
+name = "integration_demo"
+path = "src/main.rs"
+
+[[example]]
+name = "simple_usage"
+path = "examples/simple_usage.rs"
+
+[features]
+default = []
