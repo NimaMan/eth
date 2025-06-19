@@ -15,7 +15,7 @@ This audit identifies critical gaps and risks in the ETH Kartal system design th
 **Evidence**: 
 - Mempool processor logs show detection working: `IPC: 0.761ms`
 - No ZMQ publisher implementation in mempool processor codebase
-- ETH Kartal configured to listen on `tcp://localhost:5558`
+- ETH Kartal configured to listen on `tcp://localhost:5559`
 
 **Recommendation**: 
 1. Add `AlertPublisher` to mempool processor signal engine
