@@ -624,8 +624,8 @@ async fn main() -> Result<()> {
                     }
                     
                         
-                    // Log timing for every 100th transaction to see the breakdown
-                    if total_processed % 100 == 0 {
+                    // Log timing for every 1000th transaction to see the breakdown
+                    if total_processed % 1000 == 0 {
                         info!("📊 TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
                               &format!("{:?}", tx.hash)[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
@@ -671,8 +671,8 @@ async fn main() -> Result<()> {
                 }
             }
             
-            // Report brief statistics every 10 transactions for better visibility
-            if total_processed % 10 == 0 && total_processed > 0 {
+            // Report brief statistics every 1000 transactions for better visibility
+            if total_processed % 1000 == 0 && total_processed > 0 {
                 
                 let avg_time = if !processing_times_ms.is_empty() {
                     processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64
