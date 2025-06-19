@@ -72,6 +72,7 @@ tail -f /home/nima/code/crypto/logs/mempool/scam_alerts_full_tx_*.log
 
 ## 📁 Project Structure
 
+### Core Modules (Active)
 ```
 src/
 ├── bin/
@@ -79,27 +80,54 @@ src/
 │   ├── mempool_tracker.rs                       # Basic tracking tool
 │   └── metrics_api_server.rs                    # HTTP metrics API
 │
-├── signal_engine/        # Scam detection algorithms
-│   ├── engine.rs        # Core detection logic
-│   ├── service.rs       # Service wrapper
-│   └── types.rs         # Event types
+├── signal_engine/        # Market event and scam detection
+│   ├── engine.rs        # Core detection algorithms
+│   ├── service.rs       # Service wrapper with DB integration
+│   └── types.rs         # Event types (ScamAlert, LiquidityWarning, etc.)
 │
-├── tx_simulator/         # Transaction simulation
-│   ├── debug_tracecall_simulator.rs      # Fast RPC simulator
-│   └── debug_tracecall_state_diff_calculator.rs
+├── tx_simulator/         # Transaction simulation using debug_traceCall
+│   ├── debug_tracecall_simulator.rs             # Fast production simulator
+│   ├── debug_tracecall_state_diff_calculator.rs # State change analysis
+│   └── state_diff_types.rs                      # Core types
 │
-├── pool_subscriber/      # Pool state tracking
-│   ├── cache.rs         # In-memory pool cache
-│   └── types.rs         # Pool update types
+├── pool_subscriber/      # Real-time pool state via ZeroMQ
+│   ├── cache.rs         # In-memory pool state cache
+│   ├── types.rs         # Pool update structures
+│   └── tests/           # Unit tests
 │
 ├── database/            # PostgreSQL integration
-│   └── scam_prediction_writer.rs
+│   └── scam_prediction_writer.rs  # Writes scam detections to DB
 │
-├── mempool_fetcher/     # Transaction detection
-│   ├── ipc_ipc_variants/full_tx_client.rs  # Full TX IPC
-│   └── processor/       # TX processing logic
+├── mempool_fetcher/     # Transaction detection methods
+│   ├── ipc_ipc/         # IPC subscription + fetch
+│   ├── ipc_ipc_variants/
+│   │   └── full_tx_client.rs     # Main active IPC implementation
+│   ├── websocket/       # WebSocket client (unused)
+│   └── processor/       # Transaction processing
+│       ├── processor.rs # Transaction processor
+│       ├── pools.rs     # Pool tracking
+│       └── scam_prediction_writer.rs
 │
 └── common/              # Shared utilities
+    ├── address.rs       # Address utilities
+    ├── constants.rs     # System constants
+    └── types.rs         # Common types
+```
+
+### Module Status
+- ✅ **Active**: signal_engine, tx_simulator, pool_subscriber, database, common
+- ✅ **Partial**: mempool_fetcher (only IPC variants used)
+- ❌ **Removed**: DevP2P, validation_testing, 9 broken binaries
+
+### Dependencies
+```
+mempool_signal_detection_full_tx_ipc
+├── signal_engine (scam detection)
+├── tx_simulator (debug_traceCall)
+├── pool_subscriber (ZeroMQ updates)
+├── database (PostgreSQL writer)
+├── mempool_fetcher/ipc_ipc_variants (Full TX IPC)
+└── common (utilities)
 ```
 
 ## 🔧 Configuration
