@@ -7,18 +7,50 @@ ETH Kartal is an automated trading protection system that responds to scam detec
 ## Overview
 
 ETH Kartal integrates with the mempool processor's scam detection system to:
-- Receive real-time alerts about potential scams
-- Analyze market conditions and decide on protective strategies
-- Execute trades to protect users from losses
-- Monitor execution and track performance
+- Receive real-time alerts about potential scams via ZMQ
+- Track token positions and balances
+- Make intelligent decisions based on severity and drain percentage
+- Execute protective trades through Uniswap V2
+- Monitor execution with timeout protection
 
 ## Architecture
 
 ```
-Mempool Processor → ZMQ → Alert Processor → Strategy Engine → TX Executor
-                                               ↓
-                                         Risk Manager → Circuit Breaker
+┌─────────────────────┐     ZMQ     ┌──────────────────┐
+│ Mempool Processor   │─────5559────▶│  Alert Receiver  │
+│ (Scam Detection)    │              └──────┬───────────┘
+└─────────────────────┘                     │
+                                           ▼
+                                    ┌──────────────────┐
+                                    │ Decision Engine  │◀──┐
+                                    └──────┬───────────┘   │
+                                           │               │
+                      ┌────────────────────┼────────────┐  │
+                      ▼                    ▼            ▼  │
+              ┌──────────────┐    ┌──────────────┐    ┌───┴──────────┐
+              │   Monitor    │    │ Partial Sell │    │Position Track│
+              └──────────────┘    └──────┬───────┘    └──────────────┘
+                                         │                    
+                                         ▼                    
+                                  ┌──────────────────────────────┐
+                                  │   Transaction Builder         │
+                                  │   (Uniswap V2 Router)        │
+                                  └──────────────────────────────┘
 ```
+
+## Current Implementation Status
+
+### ✅ Phase 1 & 2 Complete
+- **Alert Reception**: ZMQ subscriber with dedicated thread
+- **Position Tracking**: ERC20 balance monitoring with 60s cache
+- **Decision Engine**: Multi-tier response based on drain severity
+- **Transaction Building**: Uniswap V2 integration with approval handling
+- **Execution**: Full transaction lifecycle with monitoring
+
+### 🚧 Upcoming Phases
+- Phase 3: Risk & Safety (circuit breakers, daily limits)
+- Phase 4: Performance (<200ms validation)
+- Phase 5: Production Hardening
 
 ## Quick Start
 
@@ -28,39 +60,59 @@ Mempool Processor → ZMQ → Alert Processor → Strategy Engine → TX Executo
 - Mempool processor with ZMQ publisher enabled
 - Development wallet with ETH for gas
 
-### Development Setup
+### Running ETH Kartal
 
-1. Clone and navigate to the project:
+1. Build the project:
 ```bash
-cd /home/nima/code/crypto/rust/eth_kartal
+cargo build --release
 ```
 
-2. Set up environment:
+2. Run with basic configuration:
 ```bash
-export ETH_KARTAL_PRIVATE_KEY_DEV="0x..." # Your dev wallet key
+# Requires wallet address at minimum
+./target/release/kartal --wallet-address 0xYOUR_WALLET_ADDRESS
+
+# With full configuration
+./target/release/kartal \
+  --wallet-address 0xYOUR_WALLET \
+  --rpc-url http://localhost:8545 \
+  --alert-endpoint tcp://localhost:5559 \
+  --slippage 0.05 \
+  --test-mode  # For testing without real trades
 ```
 
-3. Start development environment:
+3. Using environment variables:
 ```bash
-./scripts/start_dev.sh
+export WALLET_ADDRESS=0xYOUR_WALLET
+export ETH_RPC_URL=http://localhost:8545
+export ALERT_ZMQ_ENDPOINT=tcp://localhost:5559
+export RUST_LOG=info
+
+./target/release/kartal
 ```
 
-### Configuration
+### Decision Logic
 
-See `config/README.md` for detailed configuration options. Key files:
-- `config/dev.toml` - Development settings
-- `config/prod.toml` - Production settings
+The system uses a multi-tier response strategy based on severity and drain percentage:
+
+| Severity | Drain % | Action | Sell % | Description |
+|----------|---------|--------|---------|-------------|
+| Critical | ≥80% | Emergency Sell | 100% | Immediate full position exit |
+| High | ≥50% | Partial Sell | 75% | Reduce exposure significantly |
+| Medium | ≥25% | Small Sell | 25% | Take profits, reduce risk |
+| Any | <25% | Monitor | 0% | Watch for further changes |
+
+Additional factors:
+- **Confidence threshold**: Minimum 80% confidence to act
+- **Value threshold**: Minimum 0.01 ETH position value
+- **Slippage protection**: Default 5% max price impact
 
 ## Modules
 
-- **alert_processor/** - Receives alerts from mempool processor
-- **strategy/** - Decides how to respond to alerts
-- **tx_executor/** - Builds and submits transactions
-- **risk/** - Manages position limits and safety controls
-- **wallet/** - Handles key management and signing
-- **common/** - Shared types and utilities
-
-Each module has its own README with detailed documentation.
+- **alert_processor/** - ZMQ alert reception with dedicated thread
+- **strategy/** - Decision engine with configurable thresholds
+- **tx_executor/** - Uniswap V2 transaction builder
+- **wallet/** - Position tracking with balance caching
 
 ## Development
 
