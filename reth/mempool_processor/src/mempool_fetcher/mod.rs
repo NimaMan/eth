@@ -7,7 +7,6 @@
 /// - IPC-IPC: 1.2ms - Unix socket subscription + fetch (current implementation)
 /// - IPC-IPC Variants: Various - Legacy IPC implementations (basic, full, batch)
 /// - WebSocket: 1-50ms - WebSocket subscription + HTTP/IPC fetch
-/// - DevP2P: <10ms target - Direct P2P protocol (in development)
 /// - Direct Reth: <1ms target - ExEx integration (requires custom build)
 /// 
 /// HTTP RPC is NOT supported due to fatal limitations (only 7% coverage)
@@ -19,7 +18,6 @@ pub mod types;
 pub mod ipc_ipc;           // IPC subscription + IPC fetch (1.2ms baseline - current implementation)
 pub mod ipc_ipc_variants;  // IPC subscription + IPC fetch (legacy variants: basic, full, batch)
 pub mod websocket;         // WebSocket streaming
-pub mod devp2p;            // Direct P2P protocol
 
 // Processing components
 pub mod processor;      // Transaction processing logic
@@ -29,7 +27,6 @@ pub use types::*;
 pub use ipc_ipc::{IpcIpcMeasurementClient, TransactionLatencyMeasurement, MeasurementConfig};
 // Basic IpcClient removed due to poor performance
 pub use websocket::WebSocketClient;
-pub use devp2p::DevP2pClient;
 pub use processor::{TransactionProcessor, PoolTracker, ScamPredictionWriter};
 
 // Re-export tx_simulator functionality 
