@@ -5,6 +5,9 @@
 pub mod types;
 pub mod cache;
 
+// Re-export commonly used types
+pub use cache::PoolStateCache;
+
 #[cfg(test)]
 pub mod tests;
 
@@ -15,7 +18,6 @@ use serde_json;
 use crate::common::address::checksum_address;
 
 use self::types::PoolUpdatesMessage;
-use self::cache::PoolStateCache;
 
 // Default ZMQ endpoint for backward compatibility
 const DEFAULT_ZMQ_PUB_ENDPOINT: &str = "tcp://localhost:5557";

@@ -4,8 +4,9 @@
 /// each with different performance characteristics and use cases.
 /// 
 /// Available methods:
-/// - IPC Socket: 20μs-300ms - Unix socket connection to local Reth
-/// - WebSocket: 1-50ms - Standard method with full coverage
+/// - IPC-IPC: 1.2ms - Unix socket subscription + fetch (current implementation)
+/// - IPC-IPC Variants: Various - Legacy IPC implementations (basic, full, batch)
+/// - WebSocket: 1-50ms - WebSocket subscription + HTTP/IPC fetch
 /// - DevP2P: <10ms target - Direct P2P protocol (in development)
 /// - Direct Reth: <1ms target - ExEx integration (requires custom build)
 /// 
@@ -15,16 +16,18 @@
 pub mod types;
 
 // Detection methods (each in its own directory)
-pub mod ipc_socket;     // Unix domain socket connection
-pub mod websocket;      // WebSocket streaming
-pub mod devp2p;         // Direct P2P protocol
+pub mod ipc_ipc;           // IPC subscription + IPC fetch (1.2ms baseline - current implementation)
+pub mod ipc_ipc_variants;  // IPC subscription + IPC fetch (legacy variants: basic, full, batch)
+pub mod websocket;         // WebSocket streaming
+pub mod devp2p;            // Direct P2P protocol
 
 // Processing components
 pub mod processor;      // Transaction processing logic
 
 // Re-export main types for convenience
 pub use types::*;
-pub use ipc_socket::IpcClient;
+pub use ipc_ipc::{IpcIpcMeasurementClient, TransactionLatencyMeasurement, MeasurementConfig};
+// Basic IpcClient removed due to poor performance
 pub use websocket::WebSocketClient;
 pub use devp2p::DevP2pClient;
 pub use processor::{TransactionProcessor, PoolTracker, DbLogger};

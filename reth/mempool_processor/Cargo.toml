@@ -94,6 +94,9 @@ rand            = "0.8"      # Random number generation for handshake and simula
 # WebSocket client for measurements
 tokio-tungstenite = "0.20"
 
+# CPU count detection for parallel processing
+num_cpus = "1.16"
+
 # Low-level socket control for optimized IPC
 libc = "0.2"
 
