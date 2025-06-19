@@ -30,7 +30,7 @@ pub use ipc_ipc::{IpcIpcMeasurementClient, TransactionLatencyMeasurement, Measur
 // Basic IpcClient removed due to poor performance
 pub use websocket::WebSocketClient;
 pub use devp2p::DevP2pClient;
-pub use processor::{TransactionProcessor, PoolTracker, DbLogger};
+pub use processor::{TransactionProcessor, PoolTracker, ScamPredictionWriter};
 
 // Re-export tx_simulator functionality 
 pub use crate::tx_simulator::*;

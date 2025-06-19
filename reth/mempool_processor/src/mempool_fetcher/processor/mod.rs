@@ -5,8 +5,8 @@
 
 pub mod processor;
 pub mod pools;
-pub mod db_logger;
+pub mod scam_prediction_writer;
 
 pub use processor::*;
 pub use pools::*;
-pub use db_logger::*;
+pub use scam_prediction_writer::*;

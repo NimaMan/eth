@@ -251,17 +251,22 @@ async fn main() -> Result<()> {
     };
     info!("📊 Monitoring {} pools", pool_count);
     
-    // Initialize database logger - DISABLED FOR NOW
-    info!("⚠️ Database logger disabled for testing - using dummy logger");
+    // Initialize scam prediction writer
+    info!("💾 Initializing scam prediction writer...");
     
-    // Create a dummy DbLogger that does nothing
-    struct DummyDbLogger;
-    impl DummyDbLogger {
-        async fn log_market_event(&self, _: mempool_processor::signal_engine::MarketEvent) -> Result<()> {
-            Ok(())
-        }
-    }
-    let db_logger = Arc::new(DummyDbLogger);
+    use mempool_processor::mempool_fetcher::processor::ScamPredictionWriter;
+    
+    // Try to create real ScamPredictionWriter with actual database parameters
+    let db_writer = Arc::new(
+        ScamPredictionWriter::new(
+            &args.db_user,
+            &args.db_password, 
+            &args.db_host,
+            args.db_port,
+            &args.db_name
+        ).await?
+    );
+    info!("✅ Scam prediction writer initialized");
     
     // Initialize decision engine service
     let scam_config = ScamDetectionConfig {
@@ -280,7 +285,11 @@ async fn main() -> Result<()> {
     };
     
     info!("Creating scam detection service...");
-    
+    let scam_service = ScamDetectionService::new(
+        pool_cache_clone.clone(),
+        db_writer.clone(),
+        scam_config,
+    );
     info!("🛡️ Scam detection service initialized");
     
     // Initialize transaction simulator
@@ -477,16 +486,10 @@ async fn main() -> Result<()> {
                         };
                         
                         let scam_start = Instant::now();
-                        // Simulate scam detection with a small delay
-                        tokio::time::sleep(Duration::from_micros(50)).await;
-                        let scam_elapsed = scam_start.elapsed().as_secs_f64() * 1000.0;
-                        scam_detection_times_ms.push(scam_elapsed);
-                        let events: Vec<mempool_processor::signal_engine::MarketEvent> = vec![];
-                        
-                        // match scam_service.process_transaction(simulation_result).await {
-                        //     Ok(events) => {
-                        //         let scam_elapsed = scam_start.elapsed().as_secs_f64() * 1000.0;
-                        //         scam_detection_times_ms.push(scam_elapsed);
+                        match scam_service.process_transaction(simulation_result).await {
+                            Ok(events) => {
+                                let scam_elapsed = scam_start.elapsed().as_secs_f64() * 1000.0;
+                                scam_detection_times_ms.push(scam_elapsed);
                         if !events.is_empty() {
                                     total_events += events.len() as u64;
                                     for event in events {
@@ -546,6 +549,11 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                 }
+                            }
+                            Err(e) => {
+                                error!("Scam detection error: {}", e);
+                            }
+                        }
                     }
                     
                     total_processed += 1;

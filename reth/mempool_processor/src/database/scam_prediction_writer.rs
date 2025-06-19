@@ -1,11 +1,11 @@
 /*
- * PostgreSQL Database Logger
+ * PostgreSQL Scam Prediction Writer
  *
- * This module provides functionality to log scam detection results to a PostgreSQL database.
+ * This module provides functionality to write scam detection results to a PostgreSQL database.
  * It implements connection management and query execution for storing mempool scam predictions
  * in the eth_db.mempool_scam_predictions table.
  *
- * The logger handles database connection pooling, error handling, and transaction management
+ * The writer handles database connection pooling, error handling, and transaction management
  * to ensure reliable data persistence.
  */
 
@@ -16,13 +16,13 @@ use tracing::{info, error, debug};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
-pub struct DbLogger {
+pub struct ScamPredictionWriter {
     client: Arc<Mutex<Option<Client>>>,
     connection_string: String,
 }
 
-impl DbLogger {
-    /// Create a new database logger with the provided connection information
+impl ScamPredictionWriter {
+    /// Create a new scam prediction writer with the provided connection information
     pub async fn new(
         user: &str,
         password: &str,
@@ -30,24 +30,31 @@ impl DbLogger {
         port: u16,
         dbname: &str,
     ) -> Result<Self, PgError> {
+        info!("ScamPredictionWriter::new() called with host={}, port={}, dbname={}", host, port, dbname);
+        
         let connection_string = format!(
             "postgresql://{}:{}@{}:{}/{}?application_name=mempool_processor",
             user, password, host, port, dbname
         );
+        info!("ScamPredictionWriter::new() - connection string prepared");
         
-        let logger = DbLogger {
+        let logger = ScamPredictionWriter {
             client: Arc::new(Mutex::new(None)),
             connection_string,
         };
+        info!("ScamPredictionWriter::new() - writer struct created");
         
         // Initialize connection
+        info!("ScamPredictionWriter::new() - calling connect()...");
         logger.connect().await?;
+        info!("ScamPredictionWriter::new() - connect() returned successfully");
         
-        info!("Database logger initialized successfully");
+        info!("Scam prediction writer initialized successfully");
+        info!("ScamPredictionWriter::new() - returning writer instance");
         Ok(logger)
     }
     
-    /// Create a new database logger with default connection parameters
+    /// Create a new scam prediction writer with default connection parameters
     pub async fn default() -> Result<Self, PgError> {
         let user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
         let password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
@@ -63,25 +70,39 @@ impl DbLogger {
     
     /// Connect to the database
     async fn connect(&self) -> Result<(), PgError> {
+        info!("connect() called - acquiring lock...");
         let mut client_lock = self.client.lock().await;
+        info!("connect() - lock acquired");
         
         // Only connect if not already connected
         if client_lock.is_none() {
+            info!("connect() - attempting to connect to database...");
             debug!("Connecting to database: {}", self.connection_string);
             
+            info!("connect() - calling tokio_postgres::connect...");
             let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
+            info!("connect() - tokio_postgres::connect returned successfully");
             
             // Spawn the connection handler in the background
+            info!("connect() - spawning connection handler...");
             tokio::spawn(async move {
+                info!("Connection handler task started");
                 if let Err(e) = connection.await {
                     error!("Database connection error: {}", e);
+                } else {
+                    info!("Connection handler completed successfully");
                 }
             });
+            info!("connect() - connection handler spawned");
             
             *client_lock = Some(client);
             debug!("Database connection established");
+            info!("connect() - client stored, connection established");
+        } else {
+            info!("connect() - already connected, skipping");
         }
         
+        info!("connect() - releasing lock and returning Ok");
         Ok(())
     }
     
@@ -298,15 +319,15 @@ mod tests {
     use tokio::runtime::Runtime;
     
     #[test]
-    fn test_db_logger_creation() {
+    fn test_scam_prediction_writer_creation() {
         let rt = Runtime::new().unwrap();
         
         // This test doesn't actually connect to a database
-        // It just checks that the logger can be created without errors
-        let logger = rt.block_on(async {
-            DbLogger::new("test_user", "test_password", "test_host", 5432, "test_db").await
+        // It just checks that the writer can be created without errors
+        let writer = rt.block_on(async {
+            ScamPredictionWriter::new("test_user", "test_password", "test_host", 5432, "test_db").await
         });
         
-        assert!(logger.is_ok());
+        assert!(writer.is_ok());
     }
 } 
