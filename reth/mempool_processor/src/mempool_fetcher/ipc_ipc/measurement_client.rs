@@ -11,7 +11,7 @@ use tokio::net::UnixStream;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use serde_json::{json, Value};
 use ethers::types::Transaction;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use eyre::Result;
 use chrono::Utc;
 

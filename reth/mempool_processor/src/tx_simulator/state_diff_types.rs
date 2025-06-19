@@ -27,7 +27,7 @@ use revm::primitives::Address;
 use revm_primitives;
 use serde::{Serialize, Deserialize};
 use serde_json::{Value, json};
-use std::path::Path;
+// use std::path::Path; // Removed with LMDB cache
 
 /// State diff for mempool transaction tracking
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ pub struct MempoolStateDiff {
     pub eth_changes: HashMap<ethers::types::Address, revm_primitives::I256>,  // Address -> ETH change
     pub token_changes: HashMap<(ethers::types::Address, ethers::types::Address), revm_primitives::I256>,  // (holder, token) -> change
 }
-use std::fs;
+// use std::fs; // Removed with LMDB cache
 // Commented out - LMDB cache not actively used
 // use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
 

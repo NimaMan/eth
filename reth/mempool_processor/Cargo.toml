@@ -121,41 +121,6 @@ path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
 
 
 
-[[bin]]
-name = "measure_mempool_timing"
-path = "src/bin/measure_mempool_timing.rs"
-
-[[bin]]
-name = "measure_full_mempool"
-path = "src/bin/measure_full_mempool.rs"
-
-[[bin]]
-name = "measure_optimized_mempool"
-path = "src/bin/measure_optimized_mempool.rs"
-
-[[bin]]
-name = "mempool_websocket_full"
-path = "src/bin/mempool_websocket_full.rs"
-
-[[bin]]
-name = "mempool_latency_benchmark"
-path = "src/bin/mempool_latency_benchmark.rs"
-
-[[bin]]
-name = "measure_streaming_performance"
-path = "src/bin/measure_streaming_performance.rs"
-
-[[bin]]
-name = "realtime_latency_validator"
-path = "src/bin/realtime_latency_validator.rs"
-
-[[bin]]
-name = "websocket_latency_test"
-path = "src/bin/websocket_latency_test.rs"
-
-[[bin]]
-name = "test_direct_integration"
-path = "src/bin/test_direct_integration.rs"
 
 
 
@@ -172,13 +137,6 @@ path = "tools/performance/mempool_performance_analyzer.rs"
 name = "revm_performance_monitor"
 path = "tools/performance/revm_performance_monitor.rs"
 
-[[bin]]
-name = "test_state_changes"
-path = "src/bin/test_state_changes.rs"
-
-[[bin]]
-name = "mempool_scam_monitor"
-path = "src/bin/mempool_scam_monitor.rs"
 
 # Examples
 [[example]]

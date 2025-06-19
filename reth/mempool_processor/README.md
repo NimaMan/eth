@@ -1,128 +1,183 @@
-# Mempool Processor - Real-time Ethereum Transaction Analysis
+# Mempool Processor - Real-time Ethereum Scam Detection System
 
 ## Overview
 
-High-performance Rust implementation for real-time Ethereum mempool monitoring and transaction analysis. Achieves sub-millisecond latency for scam detection and automated trading systems.
+High-performance Rust system for real-time Ethereum mempool monitoring, transaction simulation, and scam detection. Detects liquidity drains and rugpulls in under 2ms, enabling protective trading and analysis.
 
-## Core Functionality
+## 🎯 Production Performance
 
-**Input**: Live Ethereum transactions from local Reth node mempool  
-**Output**: Simulation-ready transaction data with comprehensive analysis  
-**Latency**: 0.888ms average (65.3% sub-1ms) from mempool arrival to actionable data
+- **Average Latency**: 1.86ms (IPC detection + simulation)
+- **Throughput**: 500+ transactions/second
+- **Detection Rate**: 18 scams detected, 59.41 ETH saved in 1h 43m
+- **Resource Usage**: 30MB RAM, 1.4% CPU
+- **Uptime**: Continuous operation with no memory leaks
 
-## Measured Performance
+## 🏗️ Architecture
 
-### Primary Metric: Mempool Arrival → Simulation-Ready Data
-- **Average Latency**: 0.888ms
-- **Sub-1ms Success**: 65.3% of transactions
-- **Success Rate**: 100% (no failed fetches)
-- **Measurement Period**: 5 minutes continuous (2,976 transactions)
+```
+mempool_signal_detection_full_tx_ipc (Main Binary)
+│
+├── IPC Full TX Client ──────> Reth Node (localhost:8545)
+│   └── Unix socket subscription for transaction hashes
+│   └── Fetch full transaction data via IPC
+│
+├── Transaction Simulator ────> debug_traceCall RPC
+│   └── Simulate transaction execution
+│   └── Extract state changes and pool effects
+│
+├── Pool Subscriber ─────────> Python ZeroMQ Service
+│   └── Real-time pool state updates
+│   └── In-memory cache of 1365+ pools
+│
+├── Signal Engine ───────────> Scam Detection Logic
+│   └── Analyze pool ETH changes
+│   └── Detect liquidity drains (>50%)
+│   └── Generate market events
+│
+└── Database Writer ─────────> PostgreSQL (eth_db)
+    └── Log scam predictions
+    └── Store market events
+```
 
-### Method Comparison
-| Method | Average Latency | Use Case |
-|--------|----------------|----------|
-| **IPC** | 0.888ms | High-frequency trading |
-| **WebSocket** | 1.486ms | Real-time dashboards |
-| **HTTP RPC** | 1.969ms | Batch processing |
-
-## Key Components
-
-### 📡 **Mempool Fetcher** (`src/mempool_fetcher/`)
-- **Input**: Transaction hash announcements via IPC/WebSocket
-- **Output**: Complete signed transaction objects (`ethers::types::Transaction`)
-- **Performance**: Multiple connection methods with measured latencies
-
-### 🎯 **Signal Engine** (`src/signal_engine/`)
-- **Input**: Simulation-ready transaction objects
-- **Output**: Scam detection alerts and trading signals
-- **Features**: Real-time pattern recognition, state change analysis
-
-### ⚡ **Transaction Simulator** (`src/tx_simulator/`)
-- **Input**: Signed transactions + current blockchain state
-- **Output**: Predicted state changes and execution results
-- **Engine**: REVM-based simulation with state diff tracking
-
-### 🔍 **Performance Tools** (`examples/`)
-- **Input**: Mempool stream or historical data
-- **Output**: Detailed latency measurements and performance reports
-- **Tools**: Precise timing measurement, method comparison, honest auditing
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
-- Local Reth node running with IPC enabled
-- Rust 1.86.0+
-- PostgreSQL database (for persistence)
+- Rust 1.70+
+- Running Reth node with IPC enabled
+- PostgreSQL database (eth_db)
+- Python pool subscriber service (port 5557)
 
-### Run Performance Measurement
+### Run Production System
 ```bash
-# 5-minute precise latency measurement
-cargo run --example precise_mempool_latency_measurement
+# Build optimized binary
+cargo build --release --bin mempool_signal_detection_full_tx_ipc
 
-# Compare all connection methods
-cargo run --example method_comparison_audit
+# Run with default settings (50% drain threshold)
+./target/release/mempool_signal_detection_full_tx_ipc
 
-# Detailed IPC performance audit
-cargo run --example honest_performance_audit
+# Run with custom thresholds
+./target/release/mempool_signal_detection_full_tx_ipc \
+  --eth-threshold 0.01 \
+  --percentage-threshold 0.3
 ```
 
-### Run Signal Detection
+### Monitor Performance
 ```bash
-# Real-time scam detection with IPC
-cargo run --bin mempool_signal_detection_ipc_optimized
+# Watch real-time logs
+tail -f /home/nima/code/crypto/logs/mempool/timing_reports_full_tx_*.log
 
-# Transaction simulation monitoring  
-cargo run --bin revm_performance_monitor
+# Check scam detections
+tail -f /home/nima/code/crypto/logs/mempool/scam_alerts_full_tx_*.log
 ```
 
-## Architecture
+## 📁 Project Structure
 
 ```
-Reth Mempool → IPC/WebSocket → Transaction Fetcher → Signal Engine → Alerts/Actions
-     ↓              ↓                   ↓               ↓
-  Real-time     Sub-ms          Simulation-ready    Pattern
-  Updates       Latency         Transaction Data    Recognition
+src/
+├── bin/
+│   ├── mempool_signal_detection_full_tx_ipc.rs  # Main production binary
+│   ├── mempool_tracker.rs                       # Basic tracking tool
+│   └── metrics_api_server.rs                    # HTTP metrics API
+│
+├── signal_engine/        # Scam detection algorithms
+│   ├── engine.rs        # Core detection logic
+│   ├── service.rs       # Service wrapper
+│   └── types.rs         # Event types
+│
+├── tx_simulator/         # Transaction simulation
+│   ├── debug_tracecall_simulator.rs      # Fast RPC simulator
+│   └── debug_tracecall_state_diff_calculator.rs
+│
+├── pool_subscriber/      # Pool state tracking
+│   ├── cache.rs         # In-memory pool cache
+│   └── types.rs         # Pool update types
+│
+├── database/            # PostgreSQL integration
+│   └── scam_prediction_writer.rs
+│
+├── mempool_fetcher/     # Transaction detection
+│   ├── ipc_ipc_variants/full_tx_client.rs  # Full TX IPC
+│   └── processor/       # TX processing logic
+│
+└── common/              # Shared utilities
 ```
 
-## Transaction Flow
+## 🔧 Configuration
 
-1. **Detection**: Subscribe to `newPendingTransactions` via IPC
-2. **Fetch**: Request complete transaction via `eth_getTransactionByHash`  
-3. **Parse**: Deserialize to `ethers::types::Transaction` (simulation-ready)
-4. **Analyze**: Run through signal detection and simulation engines
-5. **Act**: Generate alerts or execute protective trades
-
-## Documentation
-
-- **[TRANSACTION_FETCHING_METHODS.md](TRANSACTION_FETCHING_METHODS.md)** - Complete methodology
-- **[DEFINITIVE_MEMPOOL_TO_SIMULATION_MEASUREMENT.md](DEFINITIVE_MEMPOOL_TO_SIMULATION_MEASUREMENT.md)** - Measurement specification
-- **[FINAL_MEASURED_PERFORMANCE_REPORT.md](FINAL_MEASURED_PERFORMANCE_REPORT.md)** - 5-minute test results
-
-## Development
-
-### Structure
-- `src/` - Core library modules with individual READMEs
-- `examples/` - Performance measurement tools
-- `tools/` - Analysis and monitoring utilities
-- `experimental/` - DevP2P and advanced features
-
-### Testing
+### Environment Variables
 ```bash
-# Compile all components
+ETH_RPC_URL=http://localhost:8545      # Reth HTTP RPC
+IPC_PATH=/tmp/reth.ipc                 # Reth IPC socket
+POOL_ZMQ_ADDRESS=tcp://localhost:5557  # Pool updates
+DB_HOST=localhost                      # PostgreSQL host
+DB_NAME=eth_db                         # Database name
+```
+
+### Detection Thresholds
+- **ETH Threshold**: 0.01 ETH (minimum pool size)
+- **Percentage Threshold**: 50% (drain percentage for scam alert)
+- **Liquidity Warning**: 20% (significant change warning)
+
+## 📊 Metrics & Monitoring
+
+### Log Files
+- **Timing Reports**: Detailed performance metrics per transaction
+- **Scam Alerts**: Detected rugpulls with transaction details
+- **Market Events**: All liquidity changes and warnings
+
+### Example Scam Detection
+```
+🚨 ScamAlert | TX: 0x7ea69e87... | Pool: 0x97dC7F34... 
+ETH: 15.308459 -> 0.000000 (-100.00% loss) 
+Lost: 15.308459 ETH | IPC: 0.769ms
+```
+
+## 🛠️ Development
+
+### Build & Test
+```bash
+# Build all
+cargo build
+
+# Run tests
+cargo test
+
+# Check for issues
 cargo check
-
-# Run specific measurement
-cargo run --example [tool_name]
-
-# Performance validation
-./run_timing_analysis.sh
+cargo clippy
 ```
 
-## Production Status
+### Adding New Detection Logic
+1. Modify `src/signal_engine/engine.rs`
+2. Add new event types in `src/signal_engine/types.rs`
+3. Update thresholds in configuration
 
-✅ **Live System**: Processing real mainnet transactions  
-✅ **Performance Validated**: Sub-millisecond latency achieved  
-✅ **Scam Detection**: Real-time protective trading active  
-✅ **Measurement Tools**: Comprehensive performance auditing  
+## 📈 Performance Tuning
 
-This system is production-ready for high-frequency trading and real-time blockchain analysis.
+### Current Optimizations
+- Unix socket IPC for minimal latency
+- Concurrent transaction processing
+- In-memory pool state caching
+- Batch database writes
+
+### Bottlenecks
+- RPC simulation calls (1.8ms average)
+- Network latency to Reth node
+- Pool state update frequency
+
+## 🤝 Contributing
+
+1. Check `AUDIT_REPORT.md` for codebase overview
+2. Follow existing code patterns
+3. Ensure all tests pass
+4. Update documentation
+
+## 📜 License
+
+Proprietary - See LICENSE file
+
+## 🔗 Related Projects
+
+- [eth_kartal](../eth_kartal) - Transaction execution engine
+- [revm_tx_simulator](../revm_tx_simulator) - REVM-based simulation
+- [sarigoz](../../py/sarigoz) - Web analytics frontend

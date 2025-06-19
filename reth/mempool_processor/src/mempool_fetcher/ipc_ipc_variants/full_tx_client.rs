@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncBufReadExt, BufReader};
 use serde_json::{Value, json};
 use tracing::{info, debug, error, warn};
 use eyre::{Result, eyre};
-use ethers::types::{Transaction, H256, U256};
+use ethers::types::Transaction;
 
 use crate::mempool_fetcher::types::TransactionView;
 
