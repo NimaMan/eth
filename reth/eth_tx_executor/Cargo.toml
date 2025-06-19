@@ -38,29 +38,20 @@ thiserror = "1.0"
 # Utilities
 hex = "0.4"
 chrono = "0.4"
+toml = "0.7"
 
 [dev-dependencies]
 mockall = "0.11"
 
-# Note: Binary targets commented out since files don't exist yet
-# Uncomment when the files are created
+[[bin]]
+name = "kartal"
+path = "src/bin/kartal.rs"
+
+# Additional binaries to be added as implemented
+# [[bin]]
+# name = "alert_monitor"
+# path = "src/bin/alert_monitor.rs"
 # 
 # [[bin]]
-# name = "kartal_monitor"
-# path = "src/bin/monitor.rs"
-# 
-# [[bin]]
-# name = "kartal_responder"
-# path = "src/bin/responder.rs"
-# 
-# [[bin]]
-# name = "kartal"
-# path = "src/bin/main.rs"
-# 
-# [[bin]]
-# name = "test_components"
-# path = "src/bin/test_components.rs"
-# 
-# [[bin]]
-# name = "test"
-# path = "src/bin/test.rs"
+# name = "tx_simulator"
+# path = "src/bin/tx_simulator.rs"

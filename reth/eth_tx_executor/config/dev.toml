@@ -1,0 +1,78 @@
+# ETH Kartal Development Configuration
+
+[system]
+environment = "development"
+log_level = "debug"
+log_file = "./logs/kartal_dev.log"
+metrics_port = 9090
+healthcheck_port = 8080
+
+[alerts]
+zmq_endpoint = "tcp://localhost:5558"
+queue_size = 1000
+processing_threads = 2
+reconnect_interval_secs = 5
+
+[wallet]
+type = "local"
+private_key_env = "ETH_KARTAL_PRIVATE_KEY_DEV"
+max_gas_price_gwei = 100
+
+[strategies]
+enable_emergency_sell = true
+enable_partial_exit = true
+enable_arbitrage = false
+enable_liquidity_provision = false
+
+[strategies.thresholds]
+emergency_sell_loss_percent = 80
+partial_exit_loss_percent = 50
+min_pool_size_eth = 0.1          # Lower for testing
+min_profit_eth = 0.01            # Lower for testing
+
+[strategies.slippage]
+emergency_max_slippage = 0.50    # More lenient for testing
+high_priority_slippage = 0.30
+normal_slippage = 0.10
+
+[risk]
+max_position_eth = 1.0           # Limited for safety
+max_daily_loss_eth = 0.5
+max_consecutive_failures = 10    # More lenient for testing
+circuit_breaker_enabled = true
+
+[risk.position_limits]
+max_percent_of_pool = 0.10       # 10% for testing
+concentration_limit = 0.50       # 50% for testing
+max_tokens_held = 5
+
+[risk.circuit_breaker]
+cooldown_seconds = 60            # 1 minute for testing
+emergency_shutdown_loss_eth = 1.0
+
+[execution]
+simulation_required = true
+max_gas_limit = 3000000
+gas_price_multiplier = 1.5
+use_flashbots = false            # Disabled for local testing
+use_mev_protection = false
+
+[execution.rpcs]
+primary = "http://localhost:8545"
+fallback = []
+
+[routers]
+# Mainnet addresses - use with fork for testing
+uniswap_v2 = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+uniswap_v3 = "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+sushiswap = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+
+[monitoring]
+enable_metrics = true
+enable_alerts = false            # No external alerts in dev
+performance_log_interval_secs = 10
+
+[monitoring.alerts]
+critical_loss_eth = 0.1
+high_slippage_percent = 20
+low_success_rate = 0.5
