@@ -27,7 +27,7 @@ use revm::primitives::Address;
 use revm_primitives;
 use serde::{Serialize, Deserialize};
 use serde_json::{Value, json};
-use std::path::Path;
+// use std::path::Path; // Removed with LMDB cache
 
 /// State diff for mempool transaction tracking
 #[derive(Debug, Clone)]
@@ -39,8 +39,9 @@ pub struct MempoolStateDiff {
     pub eth_changes: HashMap<ethers::types::Address, revm_primitives::I256>,  // Address -> ETH change
     pub token_changes: HashMap<(ethers::types::Address, ethers::types::Address), revm_primitives::I256>,  // (holder, token) -> change
 }
-use std::fs;
-use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
+// use std::fs; // Removed with LMDB cache
+// Commented out - LMDB cache not actively used
+// use lmdb::{Environment, Database as LmdbDatabase, DatabaseFlags, WriteFlags, Transaction as LmdbTransaction};
 
 /// Represents a state change for an Ethereum address
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,86 +75,89 @@ struct EthTransfer {
 #[derive(Debug)]
 pub struct StateDiffTracker {
     provider: Arc<Provider<Http>>,
-    state_cache: Option<StateCache>,
+    // state_cache: Option<StateCache>, // Commented out - LMDB cache not actively used
     recent_changes: HashMap<H256, Vec<StateChange>>, // tx_hash => state changes
 }
 
-/// Cache for state changes using LMDB
-#[derive(Debug)]
-pub struct StateCache {
-    env: Environment,
-    db: LmdbDatabase,
-}
+// Commented out - LMDB cache not actively used
+// /// Cache for state changes using LMDB
+// #[derive(Debug)]
+// pub struct StateCache {
+//     env: Environment,
+//     db: LmdbDatabase,
+// }
 
-impl StateCache {
-    /// Create a new state cache at the specified path
-    pub fn new(path: &str) -> Result<Self> {
-        // Create directory if it doesn't exist
-        let path = Path::new(path);
-        if !path.exists() {
-            fs::create_dir_all(path)?;
-        }
-        
-        // Initialize LMDB environment
-        let env = Environment::new()
-            .set_map_size(1024 * 1024 * 1024) // 1GB
-            .set_max_dbs(10)
-            .open(path)?;
-        
-        // Open database
-        let db = env.create_db(Some("state_changes"), DatabaseFlags::empty())?;
-        
-        Ok(Self { env, db })
-    }
-    
-    /// Store a state change in the cache
-    pub fn store_state_change(&self, tx_hash: H256, state_change: &StateChange) -> Result<()> {
-        let tx_hash_bytes = tx_hash.as_bytes();
-        let data = serde_json::to_vec(state_change)?;
-        
-        let mut txn = self.env.begin_rw_txn()?;
-        txn.put(self.db, &tx_hash_bytes, &data, WriteFlags::empty())?;
-        txn.commit()?;
-        
-        Ok(())
-    }
-    
-    /// Retrieve a state change from the cache
-    pub fn get_state_change(&self, tx_hash: H256) -> Result<Option<StateChange>> {
-        let tx_hash_bytes = tx_hash.as_bytes();
-        let txn = self.env.begin_ro_txn()?;
-        
-        match txn.get(self.db, &tx_hash_bytes) {
-            Ok(data) => {
-                let state_change: StateChange = serde_json::from_slice(data)?;
-                Ok(Some(state_change))
-            },
-            // Use specific LmdbError if possible, or a generic catch
-            Err(lmdb::Error::NotFound) => Ok(None),
-            Err(e) => Err(eyre::Report::from(e)), 
-        }
-    }
-}
+// Commented out - LMDB cache not actively used
+// impl StateCache {
+//     /// Create a new state cache at the specified path
+//     pub fn new(path: &str) -> Result<Self> {
+//         // Create directory if it doesn't exist
+//         let path = Path::new(path);
+//         if !path.exists() {
+//             fs::create_dir_all(path)?;
+//         }
+//         
+//         // Initialize LMDB environment
+//         let env = Environment::new()
+//             .set_map_size(1024 * 1024 * 1024) // 1GB
+//             .set_max_dbs(10)
+//             .open(path)?;
+//         
+//         // Open database
+//         let db = env.create_db(Some("state_changes"), DatabaseFlags::empty())?;
+//         
+//         Ok(Self { env, db })
+//     }
+//     
+//     /// Store a state change in the cache
+//     pub fn store_state_change(&self, tx_hash: H256, state_change: &StateChange) -> Result<()> {
+//         let tx_hash_bytes = tx_hash.as_bytes();
+//         let data = serde_json::to_vec(state_change)?;
+//         
+//         let mut txn = self.env.begin_rw_txn()?;
+//         txn.put(self.db, &tx_hash_bytes, &data, WriteFlags::empty())?;
+//         txn.commit()?;
+//         
+//         Ok(())
+//     }
+//     
+//     /// Retrieve a state change from the cache
+//     pub fn get_state_change(&self, tx_hash: H256) -> Result<Option<StateChange>> {
+//         let tx_hash_bytes = tx_hash.as_bytes();
+//         let txn = self.env.begin_ro_txn()?;
+//         
+//         match txn.get(self.db, &tx_hash_bytes) {
+//             Ok(data) => {
+//                 let state_change: StateChange = serde_json::from_slice(data)?;
+//                 Ok(Some(state_change))
+//             },
+//             // Use specific LmdbError if possible, or a generic catch
+//             Err(lmdb::Error::NotFound) => Ok(None),
+//             Err(e) => Err(eyre::Report::from(e)), 
+//         }
+//     }
+// }
 
 impl StateDiffTracker {
     /// Create a new state diff tracker
-    pub fn new(provider: Arc<Provider<Http>>, cache_path: Option<&str>) -> Self {
-        let state_cache = cache_path
-            .and_then(|path| match StateCache::new(path) {
-                Ok(cache) => Some(cache),
-                Err(e) => {
-                    warn!("Failed to initialize state cache at {}: {}", path, e);
-                    None
-                }
-            });
+    pub fn new(provider: Arc<Provider<Http>>, _cache_path: Option<&str>) -> Self {
+        // LMDB cache removed - not actively used
+        // let state_cache = cache_path
+        //     .and_then(|path| match StateCache::new(path) {
+        //         Ok(cache) => Some(cache),
+        //         Err(e) => {
+        //             warn!("Failed to initialize state cache at {}: {}", path, e);
+        //             None
+        //         }
+        //     });
         
-        if state_cache.is_some() {
-            info!("State cache initialized at {:?}", cache_path.unwrap_or("in-memory only (no path provided)"));
-        }
+        // if state_cache.is_some() {
+        //     info!("State cache initialized at {:?}", cache_path.unwrap_or("in-memory only (no path provided)"));
+        // }
         
         Self {
             provider,
-            state_cache,
+            // state_cache,
             recent_changes: HashMap::new(),
         }
     }

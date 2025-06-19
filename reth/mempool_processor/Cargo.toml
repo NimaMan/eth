@@ -62,12 +62,7 @@ ethereum-types  = "0.14"
 ethabi          = "18.0"
 lazy_static     = "1.4"
 
-# State cache with LMDB
-lmdb            = "0.8"
 serde           = { version = "1.0", features = ["derive"] }
-
-# FlatBuffers schema compiler + runtime
-flatbuffers     = "25"
 serde_json      = "1.0"
 hex             = "0.4"
 fastrand        = "2.0"
@@ -85,14 +80,14 @@ tempfile        = "3.8"
 # HTTP API server for real-time metrics
 warp            = "0.3"
 
-# DevP2P networking dependencies
-rlp             = "0.5"      # RLP encoding/decoding for Ethereum protocol
-secp256k1       = "0.29"     # Cryptographic operations for DevP2P
-sha3            = "0.10"     # Keccak hashing
-rand            = "0.8"      # Random number generation for handshake and simulation
+# Random number generation for simulation
+rand            = "0.8"
 
 # WebSocket client for measurements
 tokio-tungstenite = "0.20"
+
+# CPU count detection for parallel processing
+num_cpus = "1.16"
 
 # Low-level socket control for optimized IPC
 libc = "0.2"
@@ -121,45 +116,11 @@ name = "metrics_api_server"
 path = "src/bin/metrics_api_server.rs"
 
 [[bin]]
-name = "mempool_signal_detection"
-path = "src/bin/mempool_signal_detection.rs"
+name = "mempool_signal_detection_full_tx_ipc"
+path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
 
 
-[[bin]]
-name = "measure_mempool_timing"
-path = "src/bin/measure_mempool_timing.rs"
 
-[[bin]]
-name = "measure_full_mempool"
-path = "src/bin/measure_full_mempool.rs"
-
-[[bin]]
-name = "measure_optimized_mempool"
-path = "src/bin/measure_optimized_mempool.rs"
-
-[[bin]]
-name = "mempool_websocket_full"
-path = "src/bin/mempool_websocket_full.rs"
-
-[[bin]]
-name = "mempool_latency_benchmark"
-path = "src/bin/mempool_latency_benchmark.rs"
-
-[[bin]]
-name = "measure_streaming_performance"
-path = "src/bin/measure_streaming_performance.rs"
-
-[[bin]]
-name = "realtime_latency_validator"
-path = "src/bin/realtime_latency_validator.rs"
-
-[[bin]]
-name = "websocket_latency_test"
-path = "src/bin/websocket_latency_test.rs"
-
-[[bin]]
-name = "test_direct_integration"
-path = "src/bin/test_direct_integration.rs"
 
 
 
@@ -176,13 +137,6 @@ path = "tools/performance/mempool_performance_analyzer.rs"
 name = "revm_performance_monitor"
 path = "tools/performance/revm_performance_monitor.rs"
 
-[[bin]]
-name = "test_state_changes"
-path = "src/bin/test_state_changes.rs"
-
-[[bin]]
-name = "mempool_scam_monitor"
-path = "src/bin/mempool_scam_monitor.rs"
 
 # Examples
 [[example]]

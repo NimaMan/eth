@@ -1,7 +1,7 @@
 /*
  * Signal Service
  *
- * This module implements a service that connects the SignalEngine with the DbLogger
+ * This module implements a service that connects the SignalEngine with the ScamPredictionWriter
  * and ZMQ publisher to create a complete market signal detection and distribution pipeline.
  * It processes simulated transactions, analyzes them for various market signals, logs alerts
  * to the database, and publishes signals for automated trading systems.
@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, debug};
 use serde_json;
 
-use crate::mempool_fetcher::processor::DbLogger;
+use crate::mempool_fetcher::processor::ScamPredictionWriter;
 use crate::pool_subscriber::cache::PoolStateCache;
 use super::engine::{SignalEngine, SignalConfig};
 use super::types::{MarketEvent, SimulationResult, EventType, Severity};
@@ -23,8 +23,8 @@ pub struct SignalService {
     /// The signal engine
     engine: SignalEngine,
     
-    /// Database logger for persisting market events
-    db_logger: Arc<DbLogger>,
+    /// Database writer for persisting scam predictions
+    db_writer: Arc<ScamPredictionWriter>,
     
     /// ZMQ publisher for real-time signals (optional)
     zmq_publisher: Option<Arc<zmq::Socket>>,
@@ -59,14 +59,14 @@ impl SignalService {
     /// Create a new SignalService with the specified components
     pub fn new(
         pool_cache: Arc<PoolStateCache>,
-        db_logger: Arc<DbLogger>,
+        db_writer: Arc<ScamPredictionWriter>,
         config: SignalConfig,
     ) -> Self {
         let engine = SignalEngine::new(pool_cache, config);
         
         Self {
             engine,
-            db_logger,
+            db_writer,
             zmq_publisher: None,
             stats: Arc::new(Mutex::new(ServiceStats::default())),
         }
@@ -75,7 +75,7 @@ impl SignalService {
     /// Create a new SignalService with ZMQ publisher
     pub fn with_zmq_publisher(
         pool_cache: Arc<PoolStateCache>,
-        db_logger: Arc<DbLogger>,
+        db_writer: Arc<ScamPredictionWriter>,
         config: SignalConfig,
         zmq_endpoint: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -90,7 +90,7 @@ impl SignalService {
         
         Ok(Self {
             engine,
-            db_logger,
+            db_writer,
             zmq_publisher: Some(Arc::new(publisher)),
             stats: Arc::new(Mutex::new(ServiceStats::default())),
         })
@@ -105,8 +105,8 @@ impl SignalService {
         db_user: &str,
         db_password: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Create DB logger with provided connection parameters
-        let db_logger = DbLogger::new(
+        // Create scam prediction writer with provided connection parameters
+        let db_writer = ScamPredictionWriter::new(
             db_user,
             db_password,
             db_host,
@@ -116,7 +116,7 @@ impl SignalService {
         
         Ok(Self::new(
             pool_cache,
-            Arc::new(db_logger),
+            Arc::new(db_writer),
             DecisionConfig::default(),
         ))
     }
@@ -195,7 +195,7 @@ impl SignalService {
             // Log the transaction hash along with the scam alert
             info!("Processing scam alert for tx: {}", event.tx_hash);
             
-            self.db_logger.write_mempool_scam_prediction_with_tx(
+            self.db_writer.write_mempool_scam_prediction_with_tx(
                 &event.token_address,
                 &event.pool_address,
                 prediction_block_number,

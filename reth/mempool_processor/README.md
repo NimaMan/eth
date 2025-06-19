@@ -1,465 +1,211 @@
-# Mempool Processor - Real-time Ethereum Market Decision Engine
+# Mempool Processor - Real-time Ethereum Scam Detection System
 
-A high-performance Rust system for real-time mempool monitoring, transaction simulation, and market event detection on Ethereum. This module processes pending transactions to identify market opportunities, risks, and anomalies before they are confirmed on-chain.
+## Overview
 
-## 🏗️ System Architecture
+High-performance Rust system for real-time Ethereum mempool monitoring, transaction simulation, and scam detection. Detects liquidity drains and rugpulls in under 2ms, enabling protective trading and analysis.
+
+## 🎯 Production Performance
+
+- **Average Latency**: 1.86ms (IPC detection + simulation)
+- **Throughput**: 500+ transactions/second
+- **Detection Rate**: 18 scams detected, 59.41 ETH saved in 1h 43m
+- **Resource Usage**: 30MB RAM, 1.4% CPU
+- **Uptime**: Continuous operation with no memory leaks
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                           MEMPOOL PROCESSOR DATA FLOW                                │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  INPUTS                          PROCESSING                         OUTPUTS         │
-│  ──────                          ──────────                         ───────         │
-│                                                                                     │
-│  Reth Node                   ┌─────────────────┐                                  │
-│  ├─ WebSocket :8546  ───────►│ Mempool Fetcher │                                  │
-│  │  └─ Pending TXs           │  (WebSocket)    │                                  │
-│  │                           └────────┬─────────┘                                  │
-│  │                                    │ TX Stream                                  │
-│  │                                    ▼                                            │
-│  │                           ┌─────────────────┐         ┌──────────────────┐     │
-│  └─ HTTP RPC :8545  ────────►│  TX Simulator   │────────►│ Signal Engine    │     │
-│     └─ debug_traceCall       │ (State Changes) │         │ (Market Events)  │     │
-│                              └─────────────────┘         └─────┬────────────┘     │
-│                                                                 │                  │
-│  Python Services                    ┌──────────────────┐       │ Events           │
-│  ├─ Pool Publisher  ────────────────┤ Pool Subscriber  │───────┘                  │
-│  │  ├─ PUB :5557                   │  (Pool Cache)    │                          │
-│  │  └─ REP :5558                   └──────────────────┘                          │
-│  │                                                                                │
-│  └─ Live Block Processor                                   ┌─────────────────┐    │
-│     └─ Pool State Updates                                  │   PostgreSQL    │    │
-│                                                           │   Database      │    │
-│                                                           └─────────────────┘    │
-│                                                                    ▲             │
-│                                                                    │             │
-│                                     ┌──────────────────────────────┼─────────┐   │
-│                                     │         OUTPUT CHANNELS      │         │   │
-│                                     ├──────────────────────────────┴─────────┤   │
-│                                     │                                        │   │
-│                                     │  1. Log Files (timestamped)           │   │
-│                                     │     └─ /logs/mempool/*.log            │   │
-│                                     │                                        │   │
-│                                     │  2. Database Records                   │   │
-│                                     │     └─ mempool_market_events table    │   │
-│                                     │                                        │   │
-│                                     │  3. ZMQ Publisher :5559 ──────────────┼───►│ eth_kartal
-│                                     │     └─ Market event signals           │   │ (Action Engine)
-│                                     │                                        │   │
-│                                     └────────────────────────────────────────┘   │
-│                                                                                  │
-└──────────────────────────────────────────────────────────────────────────────────┘
+mempool_signal_detection_full_tx_ipc (Main Binary)
+│
+├── IPC Full TX Client ──────> Reth Node (localhost:8545)
+│   └── Unix socket subscription for transaction hashes
+│   └── Fetch full transaction data via IPC
+│
+├── Transaction Simulator ────> debug_traceCall RPC
+│   └── Simulate transaction execution
+│   └── Extract state changes and pool effects
+│
+├── Pool Subscriber ─────────> Python ZeroMQ Service
+│   └── Real-time pool state updates
+│   └── In-memory cache of 1365+ pools
+│
+├── Signal Engine ───────────> Scam Detection Logic
+│   └── Analyze pool ETH changes
+│   └── Detect liquidity drains (>50%)
+│   └── Generate market events
+│
+└── Database Writer ─────────> PostgreSQL (eth_db)
+    └── Log scam predictions
+    └── Store market events
 ```
-
-## 📊 Data Flow Details
-
-### 1. Transaction Input Pipeline
-```
-WebSocket Connection (ws://127.0.0.1:8546)
-    ↓
-Pending Transaction Stream (10μs latency)
-    ↓
-Transaction Queue (10,000 buffer)
-    ↓
-Batch Processing (up to 100 TXs)
-```
-
-### 2. Simulation & Analysis Pipeline
-```
-Transaction Batch
-    ↓
-Concurrent debug_traceCall (~5ms per TX)
-    ↓
-State Change Extraction (ETH & Token transfers)
-    ↓
-Pool Impact Calculation
-    ↓
-Decision Engine Analysis
-    ↓
-Categorized Market Events
-```
-
-### 3. Market Event Categories
-
-| Event Type | Trigger Condition | Severity | Action |
-|------------|------------------|----------|---------|
-| **ScamAlert** | Liquidity drain > 50% | Critical | Immediate action required |
-| **LiquidityWarning** | Liquidity change 20-50% | High | Monitor closely |
-| **TokenSupplyAlert** | Supply increase > 10% | High | Possible hidden mint |
-| **VolumeSpike** | Volume > 5x average | Medium | Market manipulation check |
-| **PriceImpact** | Price change > 15% | Medium | Arbitrage opportunity |
 
 ## 🚀 Quick Start
 
-```bash
-# 1. Ensure services are running
-# - Reth node with WebSocket and debug API
-# - PostgreSQL database
-# - Python pool publisher
+### Prerequisites
+- Rust 1.70+
+- Running Reth node with IPC enabled
+- PostgreSQL database (eth_db)
+- Python pool subscriber service (port 5557)
 
-# 2. Set up environment (optional - defaults provided)
-export MEMPOOL_LOG_DIR="/home/nima/code/crypto/logs/mempool"
-export DB_USER="postgres"
-export DB_PASSWORD="postgres"
-export DB_HOST="localhost"
-export DB_PORT="5432"
-export DB_NAME="eth_db"
-
-# 3. Run the market monitor
-cargo run --release --bin mempool_scam_monitor
-
-# 4. View real-time events
-tail -f $MEMPOOL_LOG_DIR/market_events_*.log
-```
-
-## 📁 Input/Output Specifications
-
-### Inputs
-
-#### 1. WebSocket Pending Transactions
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "eth_subscription",
-  "params": {
-    "subscription": "0x1234...",
-    "result": {
-      "hash": "0xabc123...",
-      "from": "0xSender...",
-      "to": "0xContract...",
-      "value": "0x1234",
-      "gas": "0x5678"
-    }
-  }
-}
-```
-
-#### 2. Pool State Updates (ZMQ)
-```json
-{
-  "type": "pool_updates",
-  "timestamp": 1234567890.123,
-  "data": {
-    "0xPoolAddress": {
-      "eth_reserve": 123.456,
-      "token_reserve": 250000.0,
-      "token_address": "0xToken...",
-      "block_number": 12345678,
-      "update_time": 1234567890.123
-    }
-  }
-}
-```
-
-#### 3. debug_traceCall Response
-```json
-{
-  "from": "0xSender",
-  "to": "0xPool",
-  "value": "0x0",
-  "logs": [
-    {
-      "address": "0xToken",
-      "topics": ["0xTransferTopic", "0xFrom", "0xTo"],
-      "data": "0xAmount"
-    }
-  ]
-}
-```
-
-### Outputs
-
-#### 1. Market Event Signal (ZMQ Publisher :5559)
-```json
-{
-  "event_type": "liquidity_warning",
-  "severity": "high",
-  "confidence": 0.95,
-  "tx_hash": "0xabc123...",
-  "pool": "0xPoolAddress",
-  "token": "0xTokenAddress",
-  "metrics": {
-    "eth_change": -30.5,
-    "eth_percent": -25.3,
-    "token_change": 0,
-    "token_percent": 0,
-    "new_eth_reserve": 92.5,
-    "new_token_reserve": 250000.0
-  },
-  "detection_time": 1234567890.123,
-  "block_number": 12345678
-}
-```
-
-#### 2. Log File Entry
-```
-2025-06-16T12:34:56.789Z | LIQUIDITY_WARNING | HIGH | tx: 0xabc... | pool: 0xdef... | ETH: -30.5 (-25.3%) | Token: 0 (0%) | confidence: 0.95 | latency: 2.3ms
-```
-
-#### 3. Database Record
-```sql
--- Table: mempool_market_events
-INSERT INTO mempool_market_events (
-    event_type,
-    severity,
-    tx_hash,
-    pool_address,
-    token_address,
-    eth_change,
-    token_change,
-    confidence,
-    detection_time,
-    metrics_json
-) VALUES (...);
-```
-
-## 🔧 Components
-
-### 1. **Mempool Fetcher** (`src/mempool_fetcher/`)
-- WebSocket connection to local Reth node
-- Sub-millisecond transaction detection (avg 10μs)
-- 10,000 transaction buffer for burst handling
-- Real-time latency tracking
-- Concurrent batch processing
-
-### 2. **Transaction Simulator** (`src/tx_simulator/`)
-- Uses `debug_traceCall` RPC for fast simulation (~5ms)
-- Extracts ETH and token balance changes
-- Calculates net position changes per address
-- Identifies pool interactions and DEX operations
-
-### 3. **Pool Subscriber** (`src/pool_subscriber/`)
-- ZeroMQ integration with Python pool publisher
-- Real-time pool state updates (ETH & token reserves)
-- Thread-safe in-memory cache
-- Maintains state for ~2000 active pools
-
-### 4. **Signal Engine** (`src/signal_engine/`)
-- Multi-threshold market event detection
-- Dynamic threshold adjustment based on pool size
-- Confidence scoring based on data quality
-- Categorized event generation
-
-## 📈 Performance Metrics
-
-Based on production monitoring:
-
-| Metric | Average | Min | Max | Target |
-|--------|---------|-----|-----|---------|
-| **WebSocket Latency** | 0.01ms | 0.00ms | 0.06ms | <1ms |
-| **TX Processing** | 2.29ms | 0.05ms | 20ms* | <10ms |
-| **State Simulation** | 5ms | 3ms | 15ms | <10ms |
-| **Event Detection** | 0.1ms | 0.05ms | 0.5ms | <1ms |
-| **End-to-End** | 7.4ms | 3.1ms | 35ms | <20ms |
-
-*Outliers excluded, typical performance shown
-
-## 🛠️ Configuration
-
-### Required Services
-```bash
-# 1. Reth node with WebSocket and debug API
-reth node \
-  --http --http.api eth,net,web3,debug \
-  --ws --ws.api eth,net,web3,debug \
-  --ws.port 8546
-
-# 2. PostgreSQL database
-psql -U postgres -c "CREATE DATABASE eth_db;"
-psql -U postgres -d eth_db -c "
-CREATE TABLE mempool_market_events (
-    id SERIAL PRIMARY KEY,
-    event_type VARCHAR(50),
-    severity VARCHAR(20),
-    tx_hash VARCHAR(66),
-    pool_address VARCHAR(42),
-    token_address VARCHAR(42),
-    eth_change DECIMAL,
-    token_change DECIMAL,
-    confidence DECIMAL,
-    detection_time TIMESTAMP,
-    metrics_json JSONB
-);"
-
-# 3. Python pool publisher (separate repo)
-cd /home/nima/code/crypto/py/eth_token
-python -m eth_token.services.pool_level_publisher
-```
-
-### Environment Variables
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MEMPOOL_LOG_DIR` | `/home/nima/code/crypto/logs/mempool` | Log file directory |
-| `DB_USER` | `postgres` | PostgreSQL username |
-| `DB_PASSWORD` | `postgres` | PostgreSQL password |
-| `DB_HOST` | `localhost` | Database host |
-| `DB_PORT` | `5432` | Database port |
-| `DB_NAME` | `eth_db` | Database name |
-| `ETH_RPC_URL` | `http://127.0.0.1:8545` | Ethereum RPC endpoint |
-| `ETH_WS_URL` | `ws://127.0.0.1:8546` | Ethereum WebSocket endpoint |
-| `ZMQ_POOL_SUB` | `tcp://localhost:5557` | Pool updates subscriber |
-| `ZMQ_POOL_REQ` | `tcp://localhost:5558` | Pool data request |
-| `ZMQ_EVENT_PUB` | `tcp://localhost:5559` | Market events publisher |
-
-## 🧪 Testing
-
-```bash
-# Run unit tests
-cargo test
-
-# Run integration test with pool subscriber
-cargo run --example test_pool_subscriber
-
-# Test transaction simulation
-cargo run --example test_tx_simulator
-
-# Monitor WebSocket performance
-cargo run --bin websocket_latency_test
-
-# Test decision engine thresholds
-cargo test signal_engine -- --nocapture
-```
-
-## 🚨 Production Deployment
-
-### System Requirements
-- 4+ CPU cores (8 recommended)
-- 8GB RAM minimum (16GB recommended)
-- SSD storage for logs
-- Local Reth node with <50ms latency
-- Network: 1Gbps+ for mempool traffic
-
-### Deployment Steps
+### Run Production System
 ```bash
 # Build optimized binary
-cargo build --release --bin mempool_scam_monitor
+cargo build --release --bin mempool_signal_detection_full_tx_ipc
 
-# Create systemd service
-sudo tee /etc/systemd/system/mempool-monitor.service << EOF
-[Unit]
-Description=Mempool Market Monitor
-After=network.target postgresql.service
+# Run with default settings (50% drain threshold)
+./target/release/mempool_signal_detection_full_tx_ipc
 
-[Service]
-Type=simple
-User=eth
-Environment="RUST_LOG=info"
-Environment="MEMPOOL_LOG_DIR=/var/log/mempool"
-ExecStart=/usr/local/bin/mempool_scam_monitor
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Enable and start
-sudo systemctl enable mempool-monitor
-sudo systemctl start mempool-monitor
+# Run with custom thresholds
+./target/release/mempool_signal_detection_full_tx_ipc \
+  --eth-threshold 0.01 \
+  --percentage-threshold 0.3
 ```
 
-### Monitoring
+### Monitor Performance
 ```bash
-# Check service status
-sudo systemctl status mempool-monitor
+# Watch real-time logs
+tail -f /home/nima/code/crypto/logs/mempool/timing_reports_full_tx_*.log
 
-# View logs
-journalctl -u mempool-monitor -f
-
-# Check event detection
-tail -f /var/log/mempool/market_events_*.log
-
-# Database queries
-psql -U postgres -d eth_db -c "
-SELECT event_type, COUNT(*), AVG(confidence) 
-FROM mempool_market_events 
-WHERE detection_time > NOW() - INTERVAL '1 hour'
-GROUP BY event_type;"
-
-# Performance metrics
-grep "End-to-end" /var/log/mempool/processing_times_*.log | \
-  awk -F',' '{sum+=$3; count++} END {print "Avg:", sum/count, "ms"}'
+# Check scam detections
+tail -f /home/nima/code/crypto/logs/mempool/scam_alerts_full_tx_*.log
 ```
 
-## ⚡ Performance Optimizations
+## 📁 Project Structure
 
-1. **Parallel Processing**
-   - Concurrent `debug_traceCall` for multiple transactions
-   - Batch WebSocket message processing
-   - Lock-free pool cache reads
+### Core Modules (Active)
+```
+src/
+├── bin/
+│   ├── mempool_signal_detection_full_tx_ipc.rs  # Main production binary
+│   ├── mempool_tracker.rs                       # Basic tracking tool
+│   └── metrics_api_server.rs                    # HTTP metrics API
+│
+├── signal_engine/        # Market event and scam detection
+│   ├── engine.rs        # Core detection algorithms
+│   ├── service.rs       # Service wrapper with DB integration
+│   └── types.rs         # Event types (ScamAlert, LiquidityWarning, etc.)
+│
+├── tx_simulator/         # Transaction simulation using debug_traceCall
+│   ├── debug_tracecall_simulator.rs             # Fast production simulator
+│   ├── debug_tracecall_state_diff_calculator.rs # State change analysis
+│   └── state_diff_types.rs                      # Core types
+│
+├── pool_subscriber/      # Real-time pool state via ZeroMQ
+│   ├── cache.rs         # In-memory pool state cache
+│   ├── types.rs         # Pool update structures
+│   └── tests/           # Unit tests
+│
+├── database/            # PostgreSQL integration
+│   └── scam_prediction_writer.rs  # Writes scam detections to DB
+│
+├── mempool_fetcher/     # Transaction detection methods
+│   ├── ipc_ipc/         # IPC subscription + fetch
+│   ├── ipc_ipc_variants/
+│   │   └── full_tx_client.rs     # Main active IPC implementation
+│   ├── websocket/       # WebSocket client (unused)
+│   └── processor/       # Transaction processing
+│       ├── processor.rs # Transaction processor
+│       ├── pools.rs     # Pool tracking
+│       └── scam_prediction_writer.rs
+│
+└── common/              # Shared utilities
+    ├── address.rs       # Address utilities
+    ├── constants.rs     # System constants
+    └── types.rs         # Common types
+```
 
-2. **Smart Filtering**
-   - Only simulate transactions to DEX/DeFi contracts
-   - Skip low-value transactions (<0.01 ETH)
-   - Priority queue for high-value TXs
+### Module Status
+- ✅ **Active**: signal_engine, tx_simulator, pool_subscriber, database, common
+- ✅ **Partial**: mempool_fetcher (only IPC variants used)
+- ❌ **Removed**: DevP2P, validation_testing, 9 broken binaries
 
-3. **Caching Strategy**
-   - In-memory pool state cache (2000 pools)
-   - 60-second staleness threshold
-   - Lazy eviction of inactive pools
+### Dependencies
+```
+mempool_signal_detection_full_tx_ipc
+├── signal_engine (scam detection)
+├── tx_simulator (debug_traceCall)
+├── pool_subscriber (ZeroMQ updates)
+├── database (PostgreSQL writer)
+├── mempool_fetcher/ipc_ipc_variants (Full TX IPC)
+└── common (utilities)
+```
 
-4. **Resource Management**
-   - Connection pooling for RPC calls
-   - Bounded transaction queue (10k max)
-   - Automatic log rotation
+## 🔧 Configuration
 
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **"State pruned" errors**
-   ```bash
-   # Ensure Reth has full state
-   reth db stats
-   # If pruned, resync with: --full
-   ```
-
-2. **High latency spikes**
-   ```bash
-   # Check Reth performance
-   curl -X POST http://127.0.0.1:8545 \
-     -H "Content-Type: application/json" \
-     -d '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}'
-   ```
-
-3. **No events detected**
-   ```bash
-   # Verify pool subscriber connection
-   nc -zv localhost 5557
-   # Check pool count
-   grep "Pool count" /var/log/mempool/mempool_monitor.log
-   ```
-
-### Debug Commands
+### Environment Variables
 ```bash
-# Enable debug logging
-RUST_LOG=debug cargo run --bin mempool_scam_monitor
-
-# Trace specific module
-RUST_LOG=mempool_processor::signal_engine=trace cargo run
-
-# Performance profiling
-cargo build --release --features profiling
-perf record -g target/release/mempool_scam_monitor
-perf report
+ETH_RPC_URL=http://localhost:8545      # Reth HTTP RPC
+IPC_PATH=/tmp/reth.ipc                 # Reth IPC socket
+POOL_ZMQ_ADDRESS=tcp://localhost:5557  # Pool updates
+DB_HOST=localhost                      # PostgreSQL host
+DB_NAME=eth_db                         # Database name
 ```
 
-## 📚 Additional Documentation
+### Detection Thresholds
+- **ETH Threshold**: 0.01 ETH (minimum pool size)
+- **Percentage Threshold**: 50% (drain percentage for scam alert)
+- **Liquidity Warning**: 20% (significant change warning)
 
-- Architecture Details: `docs/ARCHITECTURE.md`
-- API Reference: `cargo doc --open`
-- Performance Analysis: `docs/PERFORMANCE.md`
-- Integration Guide: `docs/INTEGRATION.md`
+## 📊 Metrics & Monitoring
 
-## 🔄 Recent Updates
+### Log Files
+- **Timing Reports**: Detailed performance metrics per transaction
+- **Scam Alerts**: Detected rugpulls with transaction details
+- **Market Events**: All liquidity changes and warnings
 
-- **2025-06-16**: Refactored to Decision Engine with multiple event types
-- **2025-06-16**: Added token reserve tracking and supply monitoring
-- **2025-06-16**: Implemented ZMQ publisher for eth_kartal integration
-- **2025-06-15**: Removed REVM, switched to debug_traceCall
-- **2025-06-15**: Added comprehensive timing measurements
+### Example Scam Detection
+```
+🚨 ScamAlert | TX: 0x7ea69e87... | Pool: 0x97dC7F34... 
+ETH: 15.308459 -> 0.000000 (-100.00% loss) 
+Lost: 15.308459 ETH | IPC: 0.769ms
+```
 
----
+## 🛠️ Development
 
-**Production Status**: ✅ ACTIVE - Processing mainnet transactions with multi-category market event detection.
+### Build & Test
+```bash
+# Build all
+cargo build
+
+# Run tests
+cargo test
+
+# Check for issues
+cargo check
+cargo clippy
+```
+
+### Adding New Detection Logic
+1. Modify `src/signal_engine/engine.rs`
+2. Add new event types in `src/signal_engine/types.rs`
+3. Update thresholds in configuration
+
+## 📈 Performance Tuning
+
+### Current Optimizations
+- Unix socket IPC for minimal latency
+- Concurrent transaction processing
+- In-memory pool state caching
+- Batch database writes
+
+### Bottlenecks
+- RPC simulation calls (1.8ms average)
+- Network latency to Reth node
+- Pool state update frequency
+
+## 🤝 Contributing
+
+1. Check `AUDIT_REPORT.md` for codebase overview
+2. Follow existing code patterns
+3. Ensure all tests pass
+4. Update documentation
+
+## 📜 License
+
+Proprietary - See LICENSE file
+
+## 🔗 Related Projects
+
+- [eth_kartal](../eth_kartal) - Transaction execution engine
+- [revm_tx_simulator](../revm_tx_simulator) - REVM-based simulation
+- [sarigoz](../../py/sarigoz) - Web analytics frontend
