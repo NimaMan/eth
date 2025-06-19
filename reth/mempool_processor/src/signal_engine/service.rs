@@ -224,6 +224,7 @@ impl SignalService {
                    EventType::TokenSupplyAlert => "SUPPLY",
                    EventType::VolumeSpike => "VOLUME",
                    EventType::PriceImpact => "PRICE",
+                   EventType::LargeTrade => "TRADE",
                },
                event.pool_address);
         

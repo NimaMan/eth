@@ -168,9 +168,11 @@ impl SignalEngine {
                         token_percent: (effect.token_delta / effect.current_token_reserve) * 100.0,
                         new_eth_reserve,
                         new_token_reserve: effect.simulated_token_reserve,
+                        token_symbol: String::new(),
                         extra: HashMap::new(),
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
+                    timestamp: chrono::Utc::now().timestamp() as u64,
                     block_number: 0, // TODO: Get from provider
                     details: format!("Critical liquidity drain: {:.2}% of pool ETH removed", eth_drain_percent),
                 });
@@ -209,9 +211,11 @@ impl SignalEngine {
                         token_percent: (effect.token_delta / effect.current_token_reserve) * 100.0,
                         new_eth_reserve: effect.simulated_eth_reserve,
                         new_token_reserve: effect.simulated_token_reserve,
+                        token_symbol: String::new(),
                         extra: HashMap::new(),
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
+                    timestamp: chrono::Utc::now().timestamp() as u64,
                     block_number: 0,
                     details: format!("Significant liquidity change: {:.2}%", eth_change_percent),
                 });
@@ -259,6 +263,7 @@ impl SignalEngine {
                         token_percent: token_increase_percent,
                         new_eth_reserve: effect.simulated_eth_reserve,
                         new_token_reserve: effect.simulated_token_reserve,
+                        token_symbol: String::new(),
                         extra: {
                             let mut extra = HashMap::new();
                             extra.insert("suspicious".to_string(), serde_json::json!(is_suspicious));
@@ -266,6 +271,7 @@ impl SignalEngine {
                         },
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
+                    timestamp: chrono::Utc::now().timestamp() as u64,
                     block_number: 0,
                     details: format!("Abnormal token supply increase: {:.2}%{}", 
                                    token_increase_percent,

@@ -20,7 +20,7 @@ use std::io::Write;
 use mempool_processor::mempool_fetcher::ipc_ipc_variants::{FullTxIpcClient, FullIpcTransaction};
 use mempool_processor::mempool_fetcher::TransactionView;
 use mempool_processor::pool_subscriber::PoolSubscriber;
-use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig};
+use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
 use mempool_processor::tx_simulator::DebugTraceCallSimulator;
 use mempool_processor::common::address::to_checksum_address;
 
@@ -73,6 +73,14 @@ struct Args {
     /// Log file path
     #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool/signal_engine_full_tx_ipc.log")]
     log_file: String,
+    
+    /// Enable ZMQ alert publisher
+    #[arg(long, env = "ENABLE_PUBLISHER")]
+    enable_publisher: bool,
+    
+    /// ZMQ publisher endpoint
+    #[arg(long, env = "ALERT_ZMQ_ADDRESS", default_value = "tcp://*:5559")]
+    alert_zmq_address: String,
 }
 
 /// Convert Full TX IPC transaction to TransactionView
@@ -291,6 +299,25 @@ async fn main() -> Result<()> {
         scam_config,
     );
     info!("🛡️ Scam detection service initialized");
+    
+    // Initialize alert publisher if enabled
+    let alert_publisher = if args.enable_publisher {
+        info!("📢 Initializing ZMQ alert publisher on {}", args.alert_zmq_address);
+        match AlertPublisher::new(&args.alert_zmq_address) {
+            Ok(publisher) => {
+                info!("✅ Alert publisher initialized successfully");
+                Some(Arc::new(Mutex::new(publisher)))
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize alert publisher: {}", e);
+                error!("   Continuing without alert publishing");
+                None
+            }
+        }
+    } else {
+        info!("ℹ️ Alert publishing disabled");
+        None
+    };
     
     // Initialize transaction simulator
     info!("🔧 Creating transaction simulator with RPC URL: {}", &args.eth_rpc_url);
@@ -546,6 +573,18 @@ async fn main() -> Result<()> {
                                             let mut file = market_file.lock().await;
                                             let _ = file.write_all(log_entry.as_bytes());
                                             let _ = file.flush();
+                                        }
+                                        
+                                        // Publish alert via ZMQ if enabled
+                                        if let Some(ref publisher) = alert_publisher {
+                                            let event_clone = event.clone();
+                                            let publisher_clone = publisher.clone();
+                                            tokio::spawn(async move {
+                                                let mut pub_guard = publisher_clone.lock().await;
+                                                if let Err(e) = pub_guard.publish_event(&event_clone) {
+                                                    error!("Failed to publish alert: {}", e);
+                                                }
+                                            });
                                         }
                                     }
                                 }

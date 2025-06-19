@@ -6,11 +6,13 @@
 pub mod types;
 pub mod engine;
 pub mod service;
+pub mod publisher;
 
 // Re-export key types
 pub use types::*;
 pub use engine::{SignalEngine, SignalConfig};
 pub use service::{SignalService, ServiceStats};
+pub use publisher::{AlertPublisher, AlertMessage};
 
 // Keep legacy naming for backward compatibility during migration
 pub use engine::SignalEngine as ScamDetectionEngine;

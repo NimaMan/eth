@@ -23,6 +23,9 @@ pub enum EventType {
     
     /// Large price impact event
     PriceImpact,
+    
+    /// Large trade detected
+    LargeTrade,
 }
 
 /// Severity levels for market events
@@ -68,6 +71,9 @@ pub struct MarketEvent {
     /// Unix timestamp of detection
     pub detection_time: f64,
     
+    /// Unix timestamp in seconds (for AlertMessage compatibility)
+    pub timestamp: u64,
+    
     /// Block number when detected
     pub block_number: u64,
     
@@ -76,7 +82,7 @@ pub struct MarketEvent {
 }
 
 /// Event-specific metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EventMetrics {
     /// ETH change (negative for withdrawals)
     pub eth_change: f64,
@@ -95,6 +101,9 @@ pub struct EventMetrics {
     
     /// New token reserve after transaction
     pub new_token_reserve: f64,
+    
+    /// Token symbol
+    pub token_symbol: String,
     
     /// Additional event-specific data
     #[serde(flatten)]
@@ -190,9 +199,11 @@ impl From<ScamAlert> for MarketEvent {
                 token_percent: 0.0,
                 new_eth_reserve: alert.simulated_eth_reserve,
                 new_token_reserve: 0.0,
+                token_symbol: String::new(),
                 extra: HashMap::new(),
             },
             detection_time: alert.detection_time,
+            timestamp: alert.detection_time as u64,
             block_number: alert.detection_block,
             details: format!("Legacy scam alert: {:?}", alert.reason),
         }

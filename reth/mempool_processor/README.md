@@ -34,6 +34,11 @@ mempool_signal_detection_full_tx_ipc (Main Binary)
 │   └── Detect liquidity drains (>50%)
 │   └── Generate market events
 │
+├── Alert Publisher ─────────> ZeroMQ (tcp://localhost:5558)
+│   └── Broadcast critical events
+│   └── Enable automated response
+│   └── Non-blocking message queue
+│
 └── Database Writer ─────────> PostgreSQL (eth_db)
     └── Log scam predictions
     └── Store market events
@@ -59,6 +64,11 @@ cargo build --release --bin mempool_signal_detection_full_tx_ipc
 ./target/release/mempool_signal_detection_full_tx_ipc \
   --eth-threshold 0.01 \
   --percentage-threshold 0.3
+
+# Enable ZMQ alert publishing for ETH Kartal integration
+./target/release/mempool_signal_detection_full_tx_ipc \
+  --enable-publisher \
+  --alert-zmq-address "tcp://*:5559"
 ```
 
 ### Monitor Performance
@@ -83,6 +93,7 @@ src/
 ├── signal_engine/        # Market event and scam detection
 │   ├── engine.rs        # Core detection algorithms
 │   ├── service.rs       # Service wrapper with DB integration
+│   ├── publisher.rs     # ZMQ alert publisher for external systems
 │   └── types.rs         # Event types (ScamAlert, LiquidityWarning, etc.)
 │
 ├── tx_simulator/         # Transaction simulation using debug_traceCall
@@ -136,7 +147,9 @@ mempool_signal_detection_full_tx_ipc
 ```bash
 ETH_RPC_URL=http://localhost:8545      # Reth HTTP RPC
 IPC_PATH=/tmp/reth.ipc                 # Reth IPC socket
-POOL_ZMQ_ADDRESS=tcp://localhost:5557  # Pool updates
+POOL_ZMQ_ADDRESS=tcp://localhost:5557  # Pool updates (from Python)
+ALERT_ZMQ_ADDRESS=tcp://localhost:5559 # Alert publishing (optional)
+ENABLE_PUBLISHER=true                  # Enable alert publishing (optional)
 DB_HOST=localhost                      # PostgreSQL host
 DB_NAME=eth_db                         # Database name
 ```
@@ -145,6 +158,84 @@ DB_NAME=eth_db                         # Database name
 - **ETH Threshold**: 0.01 ETH (minimum pool size)
 - **Percentage Threshold**: 50% (drain percentage for scam alert)
 - **Liquidity Warning**: 20% (significant change warning)
+
+## 📡 Real-time Signal Publishing (ZMQ)
+
+The system includes ZMQ publisher functionality for broadcasting high-severity events to execution bots and other processes. The ZMQ publisher is integrated into the main binary and can be activated with command-line flags.
+
+### Activating ZMQ Publisher
+
+The publisher is already integrated! Simply run with the `--enable-publisher` flag:
+
+```bash
+# Run with ZMQ alert publishing enabled
+./target/release/mempool_signal_detection_full_tx_ipc \
+  --enable-publisher \
+  --alert-zmq-address "tcp://*:5559"
+
+# Or set environment variables
+export ENABLE_PUBLISHER=true
+export ALERT_ZMQ_ADDRESS="tcp://*:5559"
+./target/release/mempool_signal_detection_full_tx_ipc
+```
+
+### Implementation Details
+
+The ZMQ publisher is implemented through:
+- **AlertPublisher** module (`src/signal_engine/publisher.rs`) 
+- Automatically publishes events with `Severity::High` or above
+- Non-blocking send to prevent pipeline delays
+- Converts MarketEvent to AlertMessage format with all context
+
+### Published Event Format
+
+High-severity events are published as JSON:
+```json
+{
+  "event_type": "ScamAlert",
+  "severity": "Critical",
+  "tx_hash": "0x123...",
+  "pool_address": "0xabc...",
+  "token_address": "0xdef...",
+  "block_number": 19234567,
+  "detection_time": 1705123456789,
+  "metrics": {
+    "eth_change": -15.5,
+    "eth_percent": -95.0,
+    "new_eth_reserve": 0.8,
+    "token_change": 0.0
+  }
+}
+```
+
+### Subscribing to Signals
+
+Example Python subscriber:
+```python
+import zmq
+import json
+
+context = zmq.Context()
+subscriber = context.socket(zmq.SUB)
+subscriber.connect("tcp://localhost:5559")
+subscriber.setsockopt_string(zmq.SUBSCRIBE, "")
+
+while True:
+    message = subscriber.recv_string()
+    event = json.loads(message)
+    if event["event_type"] == "ScamAlert":
+        print(f"🚨 SCAM DETECTED: {event['tx_hash']}")
+        # Execute protective transaction
+```
+
+### Event Types Published
+- **ScamAlert**: Pool drains >50% (Critical severity)
+- **LiquidityWarning**: Significant liquidity changes >20%
+- **VolumeSpike**: Unusual trading volume
+- **TokenSupplyAlert**: Supply manipulation detected
+- **PriceImpact**: Large price movements
+
+Only events with `Severity::High` or above are published via ZMQ.
 
 ## 📊 Metrics & Monitoring
 
