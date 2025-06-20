@@ -115,8 +115,8 @@ from datetime import datetime
 from enum import Enum
 
 from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
-from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token
+from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
 
 
@@ -125,7 +125,7 @@ class LiveTokenPositionManager:
     def __init__(self, investment_strategy: BaseStrategy):
         self.investment_strategy = investment_strategy()
         
-    async def process_token_updates(self, updated_token: LiveERC20Token, current_position: TokenPositionData) -> TokenPositionData:
+    async def process_token_updates(self, updated_token: ERC20Token, current_position: TokenPositionData) -> TokenPositionData:
         """Process token updates and manage positions
             - Update position state form the token data
             - Apply investment strategy to generate trade signals
@@ -147,7 +147,7 @@ class LiveTokenPositionManager:
             
         return updated_position
     
-    def _update_position_state(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def _update_position_state(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state based on current position and the token data
         
         State Updates by Position State:
@@ -188,7 +188,7 @@ class LiveTokenPositionManager:
         # Then update based on current position state
         return self._update_position_from_token_data(position, token)
     
-    def _update_scammed_position(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def _update_scammed_position(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state to scammed
         
         Actions:
@@ -211,7 +211,7 @@ class LiveTokenPositionManager:
         
         return position
     
-    def _update_position_from_token_data(self, position: TokenPositionData, token: LiveERC20Token):
+    def _update_position_from_token_data(self, position: TokenPositionData, token: ERC20Token):
         """Update position state based on current position and the token data
         
         Updates by Position State:
@@ -249,7 +249,7 @@ class LiveTokenPositionManager:
                 
         return position
     
-    def _update_position_from_signal(self, signal: TradingDecision, position: TokenPositionData, token: LiveERC20Token):
+    def _update_position_from_signal(self, signal: TradingDecision, position: TokenPositionData, token: ERC20Token):
         """Update position state based on current position and the signal
             - if the signal is set to submit buy, then the position state is set to BUY_SUBMITTED
             - if the signal is set to submit sell, then the position state is set to SELL_SUBMITTED
@@ -270,7 +270,7 @@ class LiveTokenPositionManager:
         
         return position
     
-    def update_submit_buy(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_submit_buy(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state when submitting a buy order
         
         State Transition: INIT -> BUY_SUBMITTED
@@ -309,7 +309,7 @@ class LiveTokenPositionManager:
             
         return position
 
-    def update_confirm_buy(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_confirm_buy(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state when buy order is confirmed
         
         State Transition: BUY_SUBMITTED -> BUY_CONFIRMED
@@ -340,7 +340,7 @@ class LiveTokenPositionManager:
             
         return position
 
-    def update_submit_sell(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_submit_sell(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state when submitting a sell order
         
         State Transition: BUY_CONFIRMED -> SELL_SUBMITTED
@@ -371,7 +371,7 @@ class LiveTokenPositionManager:
             
         return position
 
-    def update_confirm_sell(self, position: TokenPositionData, token: LiveERC20Token) -> TokenPositionData:
+    def update_confirm_sell(self, position: TokenPositionData, token: ERC20Token) -> TokenPositionData:
         """Update position state when sell order is confirmed
         
         State Transition: SELL_SUBMITTED -> SELL_CONFIRMED

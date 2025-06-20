@@ -1,5 +1,5 @@
 """
-PoolLevelPublisher: Publish pool level updates to the Rust mempool processor.
+TokenInfoPublisher: Publish token and pool information updates to the Rust mempool processor.
 
 Objective:
 ---------
@@ -10,7 +10,7 @@ Objective:
 
 This component is responsible for establishing the data bridge between the
 Python token processing pipeline and the Rust mempool processor for scam
-detection.
+detection and trading decisions.
 """
 
 import asyncio
@@ -19,14 +19,12 @@ import zmq.asyncio
 import json
 import time
 from typing import Dict, Any, Optional, Set, List
-import threading
-import logging
 from eth_portfolio_manager.utils.logger import get_logger
 
 
-class PoolLevelPublisher:
+class TokenInfoPublisher:
     """
-    Publishes pool level updates to the Rust mempool processor.
+    Publishes token and pool information updates to the Rust mempool processor.
     
     This class provides both:
     1. A PUB/SUB interface for pushing updates as they occur
@@ -38,18 +36,24 @@ class PoolLevelPublisher:
         pub_endpoint: str = "tcp://*:5557",
         rep_endpoint: str = "tcp://*:5558",
         logger=None,
+        max_pools: int = 2000,
+        min_eth_threshold: float = 0.05,
     ):
         """
-        Initialize the pool level publisher.
+        Initialize the token info publisher.
         
         Args:
             pub_endpoint: ZMQ PUB socket endpoint for pushing updates
             rep_endpoint: ZMQ REP socket endpoint for responding to requests
             logger: Optional logger instance
+            max_pools: Maximum number of pools to maintain (default 2000)
+            min_eth_threshold: Minimum ETH reserve to keep pool when at capacity (default 0.05)
         """
-        self.logger = logger or get_logger("pool_level_publisher")
+        self.logger = logger or get_logger("token_info_publisher")
         self.pub_endpoint = pub_endpoint
         self.rep_endpoint = rep_endpoint
+        self.max_pools = max_pools
+        self.min_eth_threshold = min_eth_threshold
         
         # ZMQ context and sockets
         self._context: Optional[zmq.asyncio.Context] = None
@@ -69,7 +73,7 @@ class PoolLevelPublisher:
         if self._is_running:
             return
             
-        self.logger.info(f"Starting pool level publisher")
+        self.logger.info(f"Starting token info publisher")
         self._is_running = True
         
         # Initialize ZMQ
@@ -99,7 +103,7 @@ class PoolLevelPublisher:
         if not self._is_running:
             return
             
-        self.logger.info("Stopping pool level publisher")
+        self.logger.info("Stopping token info publisher")
         self._is_running = False
         
         # Cancel tasks
@@ -124,11 +128,11 @@ class PoolLevelPublisher:
             self._context.term()
             self._context = None
             
-        self.logger.info("Pool level publisher stopped")
+        self.logger.info("Token info publisher stopped")
     
-    async def update_pool_levels(self, updated_pools: Dict[str, Dict[str, Any]]):
+    async def update_token_info(self, updated_pools: Dict[str, Dict[str, Any]]):
         """
-        Update pool levels and publish changes.
+        Update token information and publish changes.
         
         Args:
             updated_pools: Dict of pool address to pool data
@@ -141,15 +145,64 @@ class PoolLevelPublisher:
             async with self._lock:
                 self._pool_data.update(updated_pools)
                 
+                # Check if we need to cleanup low-liquidity pools
+                if len(self._pool_data) > self.max_pools:
+                    await self._cleanup_low_liquidity_pools()
+                
             # Publish updates
             await self._publish_updates(updated_pools)
             
         except Exception as e:
-            self.logger.error(f"Error updating pool levels: {e}")
+            self.logger.error(f"Error updating token info: {e}")
+    
+    async def _cleanup_low_liquidity_pools(self):
+        """
+        Remove pools with low or zero ETH reserves when we exceed max_pools limit.
+        
+        This method is called when the pool count exceeds max_pools.
+        It sorts pools by ETH reserve and removes the ones with the lowest liquidity.
+        """
+        current_count = len(self._pool_data)
+        pools_to_remove = current_count - self.max_pools
+        
+        if pools_to_remove <= 0:
+            return
+            
+        self.logger.info(f"Pool count ({current_count}) exceeds limit ({self.max_pools}). "
+                         f"Removing {pools_to_remove} low-liquidity pools.")
+        
+        # Sort pools by ETH reserve (ascending)
+        sorted_pools = sorted(
+            self._pool_data.items(),
+            key=lambda x: x[1].get('eth_reserve', 0)
+        )
+        
+        # Remove pools with lowest ETH reserves
+        removed_count = 0
+        removed_pools = []
+        
+        for pool_addr, pool_data in sorted_pools:
+            eth_reserve = pool_data.get('eth_reserve', 0)
+            
+            # Always remove pools below threshold, or remove enough to get under limit
+            if eth_reserve < self.min_eth_threshold or removed_count < pools_to_remove:
+                del self._pool_data[pool_addr]
+                removed_pools.append((pool_addr, eth_reserve))
+                removed_count += 1
+                
+                # Stop if we've removed enough pools and remaining pools are above threshold
+                if removed_count >= pools_to_remove and eth_reserve >= self.min_eth_threshold:
+                    break
+        
+        # Log summary of removed pools
+        if removed_pools:
+            self.logger.info(f"Removed {len(removed_pools)} pools. "
+                            f"Lowest removed: {removed_pools[0][1]:.4f} ETH, "
+                            f"Highest removed: {removed_pools[-1][1]:.4f} ETH")
     
     async def _publish_updates(self, updated_pools: Dict[str, Dict[str, Any]]):
         """
-        Publish pool updates to subscribers.
+        Publish token and pool updates to subscribers.
         
         Args:
             updated_pools: Dict of pool address to pool data
@@ -159,8 +212,15 @@ class PoolLevelPublisher:
             
         try:
             # Create a message with all updates
+            # Ensure V4 pools have proper identification
+            for pool_addr, pool_data in updated_pools.items():
+                if pool_data.get('pool_type') == 'V4' and 'pool_id' in pool_data:
+                    # Add pool_id at top level for easier access
+                    pool_data['v4_pool_id'] = pool_data['pool_id']
+                    pool_data['v4_pool_manager'] = pool_data.get('pool_manager', '0x000000000004444c5dc75cb358380d2e3de08a90')
+            
             message = {
-                'type': 'pool_updates',
+                'type': 'token_updates',
                 'timestamp': time.time(),
                 'data': updated_pools
             }
@@ -169,14 +229,14 @@ class PoolLevelPublisher:
             json_data = json.dumps(message)
             await self._pub_socket.send_string(json_data)
             
-            self.logger.debug(f"Published {len(updated_pools)} pool updates")
+            self.logger.debug(f"Published {len(updated_pools)} token updates")
             
         except Exception as e:
-            self.logger.error(f"Error publishing pool updates: {e}")
+            self.logger.error(f"Error publishing token updates: {e}")
     
     async def _handle_requests(self):
-        """Handle REQ/REP requests for pool data."""
-        self.logger.info("Starting pool data request handler")
+        """Handle REQ/REP requests for token and pool data."""
+        self.logger.info("Starting token data request handler")
         
         while self._is_running:
             try:
@@ -193,7 +253,7 @@ class PoolLevelPublisher:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self.logger.error(f"Error handling pool data request: {e}")
+                self.logger.error(f"Error handling token data request: {e}")
                 
                 # Send error response if socket is still available
                 if self._rep_socket:
@@ -208,11 +268,11 @@ class PoolLevelPublisher:
                 # Brief pause to avoid tight loop on persistent errors
                 await asyncio.sleep(0.1)
                 
-        self.logger.info("Pool data request handler stopped")
+        self.logger.info("Token data request handler stopped")
     
     async def _process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process a client request for pool data.
+        Process a client request for token and pool data.
         
         Args:
             request: Dict with request parameters
@@ -270,6 +330,36 @@ class PoolLevelPublisher:
                 'status': 'success',
                 'count': len(batch_data),
                 'data': batch_data
+            }
+            
+        elif request_type == 'get_pool_stats':
+            # Get statistics about the pool cache
+            async with self._lock:
+                pool_count = len(self._pool_data)
+                if pool_count > 0:
+                    eth_reserves = [p.get('eth_reserve', 0) for p in self._pool_data.values()]
+                    total_eth = sum(eth_reserves)
+                    avg_eth = total_eth / pool_count
+                    min_eth = min(eth_reserves)
+                    max_eth = max(eth_reserves)
+                    below_threshold = sum(1 for eth in eth_reserves if eth < self.min_eth_threshold)
+                else:
+                    total_eth = avg_eth = min_eth = max_eth = 0
+                    below_threshold = 0
+                
+            return {
+                'status': 'success',
+                'stats': {
+                    'pool_count': pool_count,
+                    'max_pools': self.max_pools,
+                    'total_eth_locked': total_eth,
+                    'average_eth_per_pool': avg_eth,
+                    'min_eth_reserve': min_eth,
+                    'max_eth_reserve': max_eth,
+                    'pools_below_threshold': below_threshold,
+                    'eth_threshold': self.min_eth_threshold,
+                    'capacity_used_percent': (pool_count / self.max_pools * 100) if self.max_pools > 0 else 0
+                }
             }
             
         else:

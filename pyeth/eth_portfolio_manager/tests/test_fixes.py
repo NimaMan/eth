@@ -8,24 +8,24 @@ from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestS
 from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_portfolio_manager.core.token_position import TokenPosition
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from typing import Optional
 
 # Create a mock strategy to test BacktestStrategyEngine
 class MockStrategy(BaseStrategy):
-    def analyze_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         return None
     
-    def handle_init_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         return None
     
-    def handle_buy_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         return None
     
-    def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         return None
     
-    def handle_sell_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         return None
 
 def test_backtest_strategy_engine_has_strategy_name():

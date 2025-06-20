@@ -359,7 +359,6 @@ class LiveBacktestEngineWithMempool:
                     await asyncio.to_thread(
                         self.results_writer.write_token_position_updates,
                         run_id,
-                        block_number,
                         positions_to_save
                     )
             except Exception as e:
@@ -550,13 +549,11 @@ class LiveBacktestEngineWithMempool:
             return
             
         try:
-            live_tokens = self.live_token_processor.live_tokens
-            tokens_to_write = {addr: live_tokens[addr] for addr in updated_token_addresses if addr in live_tokens}
-            
-            if tokens_to_write:
-                await self.live_token_processor.pnl_calculator.write_tokens_pnl_to_db(
-                    tokens_to_write,
-                    block_number=block_number
-                )
+            for token_address in updated_token_addresses:
+                try:    
+                    # Write PnL data directly (the method is already thread-safe)
+                    self.live_token_processor.live_tokens_cache._write_token_pnl(token_address)
+                except Exception as e:
+                    self.logger.error(f"Error scheduling PnL write for token {token_address}: {e}")
         except Exception as e:
             self.logger.error(f"Error scheduling PnL writes for block {block_number}: {e}", exc_info=True)

@@ -112,7 +112,7 @@ Implementation Notes:
 from typing import Dict, List 
 
 from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
 
@@ -129,7 +129,7 @@ class BacktestStrategyEngine:
     def strategy_name(self):
         return self.investment_strategy.strategy_name
     
-    def process_updated_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> TokenPosition:
+    def process_updated_token(self, live_token: ERC20Token, token_position: TokenPosition) -> TokenPosition:
         """Process token updates and manage positions
             - Apply investment strategy to generate trade signals
             - Update position data based on trade signals
@@ -142,7 +142,7 @@ class BacktestStrategyEngine:
             
         return token_position
     
-    def _update_position_from_signal(self, signal: TradeSignal, token_position: TokenPosition, live_token: LiveERC20Token):
+    def _update_position_from_signal(self, signal: TradeSignal, token_position: TokenPosition, live_token: ERC20Token):
         """Update position state based on current position and the signal
             - if the signal is set to submit buy, then the position state is set to BUY_SUBMITTED
             - if the signal is set to submit sell, then the position state is set to SELL_SUBMITTED
@@ -163,7 +163,7 @@ class BacktestStrategyEngine:
         
         return token_position
     
-    def update_submit_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
+    def update_submit_buy(self, token_position: TokenPosition, live_token: ERC20Token) -> TokenPosition:
         """
         Update position state when submitting a buy order using token information directly.
         
@@ -194,7 +194,7 @@ class BacktestStrategyEngine:
 
         return token_position
 
-    def update_confirm_buy(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
+    def update_confirm_buy(self, token_position: TokenPosition, live_token: ERC20Token) -> TokenPosition:
         """
         Update position state when buy order is confirmed using token data directly.
         
@@ -224,7 +224,7 @@ class BacktestStrategyEngine:
             
         return token_position
 
-    def update_submit_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
+    def update_submit_sell(self, token_position: TokenPosition, live_token: ERC20Token) -> TokenPosition:
         """
         Update position state when submitting a sell order using token information directly.
         
@@ -254,7 +254,7 @@ class BacktestStrategyEngine:
 
         return token_position
 
-    def update_confirm_sell(self, token_position: TokenPosition, live_token: LiveERC20Token) -> TokenPosition:
+    def update_confirm_sell(self, token_position: TokenPosition, live_token: ERC20Token) -> TokenPosition:
         """Update position state when sell order is confirmed
         
         State Transition: SELL_SUBMITTED -> SELL_CONFIRMED

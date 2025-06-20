@@ -61,34 +61,34 @@ Required Methods:
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal
 from eth_portfolio_manager.core.token_position import TokenPosition
 
 
 class BaseStrategy(ABC):
    @abstractmethod
-   def analyze_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
       """Main entry point for token analysis and signal generation"""
       pass
 
    @abstractmethod
-   def handle_init_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
       """Handle INIT state and evaluate buy conditions"""
       pass
 
    @abstractmethod
-   def handle_buy_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
       """Handle BUY_SUBMITTED state and confirm entries"""
       pass
 
    @abstractmethod
-   def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
       """Handle BUY_CONFIRMED state and evaluate sell conditions"""
       pass
 
    @abstractmethod
-   def handle_sell_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
       """Handle SELL_SUBMITTED state and confirm exits"""
       pass
 

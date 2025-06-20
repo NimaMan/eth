@@ -41,8 +41,8 @@ Configuration:
 from typing import Optional
 from dataclasses import dataclass
 
-from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token
+from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
 
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
@@ -70,7 +70,7 @@ class MarketTracker(BaseStrategy):
             "position_size_eth": self.config.position_size_eth,
         }
     
-    def analyze_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """
         Analyze token and generate trading signals based on current position state
         
@@ -88,7 +88,7 @@ class MarketTracker(BaseStrategy):
         # No signals for other states - we just hold positions indefinitely
         return None
 
-    def handle_init_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
         if live_token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
             return TradeSignal(
@@ -99,7 +99,7 @@ class MarketTracker(BaseStrategy):
             )
         return None
 
-    def handle_buy_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
             token_address=live_token.token_data.contract_address,
@@ -108,12 +108,12 @@ class MarketTracker(BaseStrategy):
             strategy_name=self.strategy_name,
         )
 
-    def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_CONFIRMED state: No action, just hold indefinitely"""
         # No sell signals - we're just tracking market performance
         return None
 
-    def handle_sell_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle SELL_SUBMITTED state: Not used in this strategy"""
         # This state should never be reached in this strategy
         return None 

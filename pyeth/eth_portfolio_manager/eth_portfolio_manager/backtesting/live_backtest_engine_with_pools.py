@@ -94,8 +94,8 @@ This system implements a hybrid Python-Rust architecture with separation of conc
 ---------------
 - **LiveBlockTokenProcessor**: Processes new blocks and extracts token updates
 - **StrategyPositionManager**: Manages and updates strategy positions
-- **PoolLevelExtractor**: Extracts and maintains pool ETH reserve levels
-- **PoolLevelPublisher**: Publishes pool levels to the Rust component
+- **TokenInfoExtractor**: Extracts and maintains token and pool information
+- **TokenInfoPublisher**: Publishes token information to the Rust component
 
 This version separates concerns:
 - Python side focuses on confirmed block processing and pool level tracking
@@ -110,8 +110,8 @@ from eth_portfolio_manager.core.strategy_position_manager import StrategyPositio
 from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestStrategyEngine
 from eth_portfolio_manager.db.live_token_position_results_writer import LiveResultsWriter
 from eth_portfolio_manager.utils.logger import get_logger
-from eth_portfolio_manager.pool_level.pool_level_extractor import PoolLevelExtractor
-from eth_portfolio_manager.pool_level.pool_level_publisher import PoolLevelPublisher
+from eth_portfolio_manager.publishers.token_info_extractor import TokenInfoExtractor
+from eth_portfolio_manager.publishers.token_info_publisher import TokenInfoPublisher
 
 
 class LiveBacktestEngineWithPools:
@@ -129,8 +129,22 @@ class LiveBacktestEngineWithPools:
         add_pnl_to_db=True,
         zmq_pub_endpoint="tcp://*:5557",
         zmq_rep_endpoint="tcp://*:5558",
+        max_pools=2000,
+        min_eth_threshold=0.01,
     ):
-        """Initialize the live execution engine with pool tracking."""
+        """Initialize the live execution engine with pool tracking.
+        
+        Args:
+            config: Configuration object with strategies
+            logger: Optional logger instance
+            warmup_blocks: Number of blocks to process before starting strategy
+            save_strategy_results: Whether to save results to database
+            add_pnl_to_db: Whether to add PnL data to database
+            zmq_pub_endpoint: ZeroMQ publisher endpoint
+            zmq_rep_endpoint: ZeroMQ reply endpoint
+            max_pools: Maximum number of pools to track (default 2000)
+            min_eth_threshold: Minimum ETH reserve to keep pool when at capacity (default 0.01)
+        """
         self.logger = logger or get_logger("portfolio_live_pools")
         self.config = config
         self.warmup_blocks = warmup_blocks
@@ -158,12 +172,14 @@ class LiveBacktestEngineWithPools:
             self.results_writer = LiveResultsWriter(logger=self.logger)
             self.strategy_run_ids = {}
 
-        # Pool level tracking components
-        self.pool_level_extractor = PoolLevelExtractor(logger=self.logger)
-        self.pool_level_publisher = PoolLevelPublisher(
+        # Token info tracking components
+        self.token_info_extractor = TokenInfoExtractor(logger=self.logger)
+        self.token_info_publisher = TokenInfoPublisher(
             pub_endpoint=zmq_pub_endpoint,
             rep_endpoint=zmq_rep_endpoint,
-            logger=self.logger
+            logger=self.logger,
+            max_pools=max_pools,
+            min_eth_threshold=min_eth_threshold
         )
 
         # Runtime state
@@ -184,10 +200,10 @@ class LiveBacktestEngineWithPools:
         self.token_processor_task = asyncio.create_task(self.live_token_processor.start())
         self.logger.info("Token processor started")
 
-        # Start the pool level publisher
-        self.logger.info("Starting pool level publisher...")
-        await self.pool_level_publisher.start()
-        self.logger.info("Pool level publisher started")
+        # Start the token info publisher
+        self.logger.info("Starting token info publisher...")
+        await self.token_info_publisher.start()
+        self.logger.info("Token info publisher started")
 
         # Start the main token processing task
         self.logger.info("Starting main token processing task...")
@@ -199,12 +215,12 @@ class LiveBacktestEngineWithPools:
         self.logger.info("Stopping live engine...")
         self._is_shutting_down = True
 
-        # Stop the pool level publisher
+        # Stop the token info publisher
         try:
-            await self.pool_level_publisher.stop()
-            self.logger.info("Pool level publisher stopped.")
+            await self.token_info_publisher.stop()
+            self.logger.info("Token info publisher stopped.")
         except Exception as e:
-            self.logger.error(f"Error stopping pool level publisher: {e}", exc_info=True)
+            self.logger.error(f"Error stopping token info publisher: {e}", exc_info=True)
 
         # Stop the token processor
         try:
@@ -274,13 +290,13 @@ class LiveBacktestEngineWithPools:
                                 ))
                             await asyncio.gather(*tasks)
                             
-                            # Update pool levels
-                            updated_pools = await self.pool_level_extractor.update_pool_levels(
+                            # Update token info
+                            updated_pools = await self.token_info_extractor.update_token_info(
                                 updated_tokens, block_number
                             )
                             
-                            # Publish updated pool levels to Rust
-                            await self.pool_level_publisher.update_pool_levels(updated_pools)
+                            # Publish updated token info to Rust
+                            await self.token_info_publisher.update_token_info(updated_pools)
                             
                             # Save Strategy Results
                             if self.save_strategy_results and self.results_writer:
@@ -384,13 +400,13 @@ class LiveBacktestEngineWithPools:
                     
     def get_pool_level(self, pool_address):
         """Get the current ETH level for a specific pool."""
-        return self.pool_level_extractor.get_pool_level(pool_address)
+        return self.token_info_extractor.get_pool_level(pool_address)
         
     def get_all_pool_levels(self):
         """Get all current pool ETH levels."""
-        return self.pool_level_extractor.get_all_pool_levels()
+        return self.token_info_extractor.get_all_pool_levels()
         
     def get_pool_token(self, pool_address):
         """Get the token address associated with a pool."""
-        pool_data = self.pool_level_extractor.get_pool_data(pool_address)
+        pool_data = self.token_info_extractor.get_pool_data(pool_address)
         return pool_data['token_address'] if pool_data else None 

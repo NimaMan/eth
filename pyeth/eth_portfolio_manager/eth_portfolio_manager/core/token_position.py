@@ -64,8 +64,8 @@ Usage Guidelines:
 """
 
 from typing import Optional, List, Tuple, Dict, Any
-from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token
+from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
 from eth_portfolio_manager.core.data_models import TokenPositionStaticData, TokenPositionDynamicSnapshot, TokenPositionState
 
 
@@ -95,7 +95,7 @@ class TokenPosition:
         self.add_entry_snapshot()
     
     @classmethod
-    def create_from_token(cls, live_token: LiveERC20Token) -> "TokenPosition":
+    def create_from_token(cls, live_token: ERC20Token) -> "TokenPosition":
         """
         Factory method to create a new TokenPosition aggregate from a token update.
 
@@ -164,7 +164,7 @@ class TokenPosition:
             return self.dynamic_history[-1]
         return None
     
-    def update_from_token_data(self, live_token: LiveERC20Token) -> None:
+    def update_from_token_data(self, live_token: ERC20Token) -> None:
         """
         Updates the token position with live token data from the new block. It:
         1. Creates a new snapshot with updated metrics
@@ -181,14 +181,15 @@ class TokenPosition:
             self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
             self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
             
-            # Safely handle pool addresses and pool info
+            # Safely handle pool addresses and pool info using new API
             pool_addresses = live_token.token_data.pool_addresses
             if pool_addresses:
                 self.static_data.pool_address = pool_addresses[0]
                 
-                # Check if pool info exists for this address
-                if self.static_data.pool_address in live_token.token_data.pool_info:
-                    pool_info = live_token.token_data.pool_info[self.static_data.pool_address]
+                # Use get_pool_info_dict() for compatibility with new PoolManager
+                pool_info_dict = live_token.token_data.get_pool_info_dict()
+                if self.static_data.pool_address in pool_info_dict:
+                    pool_info = pool_info_dict[self.static_data.pool_address]
                     self.static_data.pool_type = pool_info.get('pool_type')
                     self.static_data.currency = pool_info.get('denom_currency')
 
@@ -230,7 +231,7 @@ class TokenPosition:
         
         self.add_snapshot(new_snapshot)
     
-    def update_scammed_position(self, live_token: LiveERC20Token) -> None:
+    def update_scammed_position(self, live_token: ERC20Token) -> None:
         """
         Marks the token position as SCAMMED and updates relevant metrics.        
         """

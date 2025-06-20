@@ -48,7 +48,9 @@ class LivePortfolioServiceWithPools:
                  save_strategy_results=True,
                  add_pnl_to_db=True,
                  zmq_pub_endpoint="tcp://*:5557",
-                 zmq_rep_endpoint="tcp://*:5558"):
+                 zmq_rep_endpoint="tcp://*:5558",
+                 max_pools=2000,
+                 min_eth_threshold=0.01):
         self.logger = logger
         self.engine = LiveBacktestEngineWithPools(
             config=config,
@@ -57,7 +59,9 @@ class LivePortfolioServiceWithPools:
             save_strategy_results=save_strategy_results,
             add_pnl_to_db=add_pnl_to_db,
             zmq_pub_endpoint=zmq_pub_endpoint,
-            zmq_rep_endpoint=zmq_rep_endpoint
+            zmq_rep_endpoint=zmq_rep_endpoint,
+            max_pools=max_pools,
+            min_eth_threshold=min_eth_threshold
         )
         self._shutdown_event = asyncio.Event()
         self._is_shutting_down = False
@@ -127,7 +131,9 @@ async def run_live_portfolio_with_pools(
     save_strategy_results=True,
     add_pnl_to_db=True,
     zmq_pub_endpoint="tcp://*:5557",
-    zmq_rep_endpoint="tcp://*:5558"
+    zmq_rep_endpoint="tcp://*:5558",
+    max_pools=2000,
+    min_eth_threshold=0.01
 ):
     """Run the live portfolio monitoring service with pool level tracking"""
     start_time = time.time()
@@ -147,6 +153,7 @@ async def run_live_portfolio_with_pools(
         logger.info(f"Warming up from block {warmup_start_block}")
         logger.info(f"ZMQ PUB endpoint: {zmq_pub_endpoint}")
         logger.info(f"ZMQ REP endpoint: {zmq_rep_endpoint}")
+        logger.info(f"Max pools: {max_pools}, Min ETH threshold: {min_eth_threshold}")
     except Exception as e:
         logger.warning(f"Could not fetch blockchain information: {e}")
         logger.info("Continuing anyway as the LiveBlockTokenProcessor will handle connections")
@@ -162,7 +169,9 @@ async def run_live_portfolio_with_pools(
         save_strategy_results=save_strategy_results,
         add_pnl_to_db=add_pnl_to_db,
         zmq_pub_endpoint=zmq_pub_endpoint,
-        zmq_rep_endpoint=zmq_rep_endpoint
+        zmq_rep_endpoint=zmq_rep_endpoint,
+        max_pools=max_pools,
+        min_eth_threshold=min_eth_threshold
     )
     
     # Start service
@@ -179,11 +188,16 @@ if __name__ == "__main__":
     zmq_pub_endpoint = "tcp://*:5557"
     zmq_rep_endpoint = "tcp://*:5558"
         
+    max_pools = 2000  # Maximum number of pools to track
+    min_eth_threshold = 0.01  # Minimum ETH reserve (0.01 ETH)
+    
     asyncio.run(run_live_portfolio_with_pools(
             warmup_blocks=warmup_blocks,
             save_strategy_results=save_strategy_results,
             add_pnl_to_db=add_pnl_to_db,
             zmq_pub_endpoint=zmq_pub_endpoint,
-            zmq_rep_endpoint=zmq_rep_endpoint
+            zmq_rep_endpoint=zmq_rep_endpoint,
+            max_pools=max_pools,
+            min_eth_threshold=min_eth_threshold
     ))
     

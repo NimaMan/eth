@@ -57,8 +57,8 @@ Configuration:
 from typing import Optional
 from dataclasses import dataclass
 
-from eth_token.live_erc20_token.live_token import LiveERC20Token
-from eth_token.live_erc20_token.data.live_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token
+from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
 
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
@@ -84,7 +84,7 @@ class BuyAll(BaseStrategy):
             "profit_target_x": self.config.profit_target_x,
         }
     
-    def analyze_token(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """
         Analyze token and generate trading signals based on current position state
         
@@ -107,7 +107,7 @@ class BuyAll(BaseStrategy):
         
         return None
 
-    def handle_init_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
         if live_token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
             return TradeSignal(
@@ -118,7 +118,7 @@ class BuyAll(BaseStrategy):
             )
         return None
 
-    def handle_buy_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
             token_address=live_token.token_data.contract_address,
@@ -127,7 +127,7 @@ class BuyAll(BaseStrategy):
             strategy_name=self.strategy_parameters["strategy_name"],
         )
 
-    def handle_buy_confirmed_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_CONFIRMED state: Submit sell if price target reached"""
         if token_position.latest_snapshot.roi >= self.config.profit_target_x:
             return TradeSignal(
@@ -138,7 +138,7 @@ class BuyAll(BaseStrategy):
             )
         return None
 
-    def handle_sell_submitted_state(self, live_token: LiveERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
         """Handle SELL_SUBMITTED state: Confirm sell on next update"""
         return TradeSignal(
             token_address=live_token.token_data.contract_address,

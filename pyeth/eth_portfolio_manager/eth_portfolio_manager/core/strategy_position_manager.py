@@ -27,7 +27,7 @@ import asyncio
 from typing import Dict, List, Optional, Tuple
 
 from eth_portfolio_manager.core.token_position import TokenPosition
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.core.token_positions_cache import TokenPositionsCache
 from eth_portfolio_manager.utils.logger import get_logger
 
@@ -39,11 +39,11 @@ class StrategyPositionManager:
       self.strategy_engine = strategy_engine
       self.semaphore = asyncio.Semaphore(value=max_concurrency)  # concurrency limit
    
-   def create_position(self, live_token: LiveERC20Token) -> TokenPosition:
+   def create_position(self, live_token: ERC20Token) -> TokenPosition:
       """Create a new position for a token"""
       return TokenPosition.create_from_token(live_token)
 
-   async def process_single_token(self, live_token: LiveERC20Token) -> Tuple[str, Dict[str, Optional[TokenPosition]]]:
+   async def process_single_token(self, live_token: ERC20Token) -> Tuple[str, Dict[str, Optional[TokenPosition]]]:
       """
       Process updates for a single token for every pool where it is active.
       This method uses the composite key (token_address:pool_address) in the cache.
@@ -74,7 +74,7 @@ class StrategyPositionManager:
          # Return token address with an empty result if error occurs.
          return token_address, {}
 
-   async def update_updated_tokens_positions(self, updated_tokens: Dict[str, LiveERC20Token]) -> Dict[str, Dict[str, TokenPosition]]:
+   async def update_updated_tokens_positions(self, updated_tokens: Dict[str, ERC20Token]) -> Dict[str, Dict[str, TokenPosition]]:
          """
          Process token updates in backtest mode concurrently.
          Returns a mapping from token address to a dict mapping pool_address -> TokenPosition.

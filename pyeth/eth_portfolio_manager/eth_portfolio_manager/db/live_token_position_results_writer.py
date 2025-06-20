@@ -84,6 +84,13 @@ class LiveResultsWriter:
             
             return run_id
     
+    def create_strategy_run(self, strategy_name, params, start_block, created_at):
+        """
+        Create a new strategy run (wrapper for create_or_update_strategy_run).
+        """
+        # Use current block as end_block for initial creation
+        return self.create_or_update_strategy_run(strategy_name, params, start_block, start_block)
+    
     def update_token_positions(self, run_id, token_positions):
         """
         Efficiently updates token positions, performing inserts for new tokens
