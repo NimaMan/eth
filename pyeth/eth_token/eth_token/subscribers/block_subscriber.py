@@ -133,8 +133,6 @@ class BlockSubscriber():
         try:
             async with message.process():
                 block_data = orjson.loads(message.body.decode())
-                block_number = block_data[0].get("block_number")
-                self.logger.info(f"Processing block {block_number} immediately")
                 
                 # Process block immediately
                 if self.callback:

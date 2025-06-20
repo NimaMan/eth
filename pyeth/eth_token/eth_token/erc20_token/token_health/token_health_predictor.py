@@ -18,7 +18,7 @@ Objective:
 from typing import Dict, Set, Optional, List
 from dataclasses import dataclass, asdict
 from collections import OrderedDict
-from eth_token.live_erc20_token.token_health.volume_analyzer import VolumeAnalyzer
+from eth_token.erc20_token.token_health.volume_analyzer import VolumeAnalyzer
 
 
 @dataclass

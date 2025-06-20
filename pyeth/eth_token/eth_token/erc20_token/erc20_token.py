@@ -1,13 +1,13 @@
 from typing import Any, Dict
 import pandas as pd
-from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
-from eth_token.live_erc20_token.network.live_token_network import LiveTokenNetwork
-from eth_token.live_erc20_token.token_health.token_health_predictor import TokenHealthPredictor
-from eth_token.live_erc20_token.data.token_approval_sync_data import UniV2PairSyncData, ERC20TokenApprovalData
+from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
+from eth_token.erc20_token.network.token_network import LiveTokenNetwork
+from eth_token.erc20_token.token_health.token_health_predictor import TokenHealthPredictor
+from eth_token.erc20_token.data.pair_sync_info import UniV2PairSyncInfo
 from eth_token.utils.logger import get_logger
 
 
-class LiveERC20Token:
+class ERC20Token:
     """
     This class contains all the data and information of a token.
 
@@ -18,9 +18,9 @@ class LiveERC20Token:
     """
 
     def __init__(self, contract_address, logger=None):
-        self.logger = logger or get_logger(name="live_token", log_folder="token_manager")   
+        self.logger = logger or get_logger(name="erc20_token", log_folder="token_manager")   
         self.contract_address = contract_address
-        self.token_data = LiveTokenData(contract_address=contract_address)
+        self.token_data = ERC20TokenData(contract_address=contract_address, logger=self.logger)
         self.token_network = LiveTokenNetwork(live_token=self, logger=self.logger)
         self.token_health_predictor = TokenHealthPredictor()
 
@@ -61,28 +61,6 @@ class LiveERC20Token:
             return (self.token_data.latest_block_number - self.token_data.trading_enabled_block) / 300
         return (self.token_data.latest_block_timestamp - self.token_data.trading_enabled_timestamp) / 3600
 
-    def _sort_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Sort the dataframe"""
-        if not df.empty:
-            df = df.sort_values(by=['block_number', 'txn_index', 'log_index']).reset_index(drop=True)
-            df = df.set_index('txn_hash')
-        return df
-    
-    @property
-    def erc20_transfer_df(self):
-        """Get the transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.token_data.erc20_transfers))
-
-    @property
-    def eth_transfer_df(self):
-        """Get the ETH transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.token_data.eth_transfers))
-    
-    @property
-    def liquidity_token_transfer_df(self):
-        """Get the liquidity token transfer dataframe"""
-        return self._sort_df(pd.DataFrame(self.token_data.liquidity_token_transfers))
-
     @property
     def liquidity_token_mint_df(self):
         """Get the liquidity token mint dataframe"""
@@ -101,21 +79,6 @@ class LiveERC20Token:
      
         return self._sort_df(lock_df)
 
-    @property
-    def sync_data(self):
-        """Get the sync data"""
-        return UniV2PairSyncData(self.token_data.univ2_syncs)
-
-    @property
-    def price_df(self):
-        """Get the price dataframe"""
-        return UniV2PairSyncData(self.token_data.univ2_syncs).to_dataframe()
-    
-    @property
-    def approval_df(self):
-        """Get the approval dataframe"""
-        return ERC20TokenApprovalData(self.token_data.approvals).to_dataframe()
-    
     @property
     def metrics(self) -> Dict[str, Any]:
         """Get metrics with performance logging"""

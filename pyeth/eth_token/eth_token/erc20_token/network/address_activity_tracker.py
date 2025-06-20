@@ -1,7 +1,6 @@
-
 import numpy as np
 from collections import defaultdict
-from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
+from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
 
 # ignore warnings
 import warnings
@@ -15,7 +14,7 @@ class UserTokenActivityTracker:
                  entry_index=None,
                  entry_log_index=None, 
                  latest_block=None,
-                 token_data:LiveTokenData=None,
+                 token_data:ERC20TokenData=None,
                  address=None,
                  address_type=None,
                  is_fee_source=None,
@@ -118,11 +117,16 @@ class UserTokenActivityTracker:
     
     @property
     def token_latest_price(self):
-        # TODO: Handle multiple pools
-        if not self.token_data.pool_addresses:
-            return 0
-        pool_address = self.token_data.pool_addresses[0]
-        return self.token_data.pool_prices[pool_address][-1]
+        """
+        Gets the most reliable, liquidity-weighted price for the token.
+        
+        This delegates the "best price" logic to the PoolReservePriceTracker,
+        which selects the price from the pool with the highest reserves.
+        """
+        if self.token_data and self.token_data.reserve_tracker:
+            best_price = self.token_data.reserve_tracker.get_best_price()
+            return best_price if best_price is not None else 0.0
+        return 0.0
     
     @property
     def token_balance(self):

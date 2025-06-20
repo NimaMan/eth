@@ -58,7 +58,7 @@ import pandas as pd
 from collections import Counter
 from typing import List, Set, Dict, Optional
 from dataclasses import dataclass
-from eth_token.live_erc20_token.data.live_token_data import LiveTokenData
+from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
 
 
 @dataclass
@@ -77,7 +77,7 @@ class SubgraphMetrics:
     
 
 class NetworkSubgraphAnalyzer:
-    def __init__(self, graph: nx.DiGraph, token_data: LiveTokenData, degree_threshold: int = 10, frequency_threshold: float = 0.3):
+    def __init__(self, graph: nx.DiGraph, token_data: ERC20TokenData, degree_threshold: int = 10, frequency_threshold: float = 0.3):
         """
         Initialize component analyzer with original and simplified graphs.
         

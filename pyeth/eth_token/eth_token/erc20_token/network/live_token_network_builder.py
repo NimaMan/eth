@@ -3,7 +3,7 @@ import networkx as nx
 from networkx.readwrite import json_graph
 
 from eth_block_processor.txn.processed_tx_state_diff_calculator import ProcessedTxStateDiffCalculator
-from eth_token.live_erc20_token.network.user_activity_tracker import UserTokenActivityTracker
+from eth_token.erc20_token.network.address_activity_tracker import UserTokenActivityTracker
 
 
 class LiveTokenNetworkBuilder:
@@ -79,17 +79,21 @@ class LiveTokenNetworkBuilder:
         
         # Update movements
         movements = state_changes['movements']
-        # Add token movements
-        for transfer_id, amount in movements['token']['in'].items():
-            user_activity.token_in_dict[transfer_id] = amount
-        for transfer_id, amount in movements['token']['out'].items():
-            user_activity.token_out_dict[transfer_id] = amount
+        
+        # Add token movements (movements['tokens'][token_address]['in'/'out'])
+        if 'tokens' in movements:
+            for token_address, token_movements in movements['tokens'].items():
+                for transfer_id, amount in token_movements.get('in', {}).items():
+                    user_activity.token_in_dict[transfer_id] = amount
+                for transfer_id, amount in token_movements.get('out', {}).items():
+                    user_activity.token_out_dict[transfer_id] = amount
             
-        # Add denomination movements
-        for transfer_id, amount in movements['denom']['in'].items():
-            user_activity.denom_in_dict[transfer_id] = amount
-        for transfer_id, amount in movements['denom']['out'].items():
-            user_activity.denom_out_dict[transfer_id] = amount
+        # Add denomination movements (ETH)
+        if 'denom' in movements:
+            for transfer_id, amount in movements['denom'].get('in', {}).items():
+                user_activity.denom_in_dict[transfer_id] = amount
+            for transfer_id, amount in movements['denom'].get('out', {}).items():
+                user_activity.denom_out_dict[transfer_id] = amount
     
     def update_from_transaction(self, txn_dict: dict):
         """Process transaction and update network with significant changes"""

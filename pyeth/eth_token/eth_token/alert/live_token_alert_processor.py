@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import asyncio
 
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.utils.logger import get_logger
 
 
@@ -62,7 +62,7 @@ class AlertProcessor:
             self.logger = get_logger(name="tokens", log_folder="alert")
         self.processed_alerts: Set[str] = set()
         
-    async def process_block_updates(self, block_number: int, updated_tokens: Dict[str, LiveERC20Token]):
+    async def process_block_updates(self, block_number: int, updated_tokens: Dict[str, ERC20Token]):
         """Process token updates from a new block and generate alerts"""
         alerts = []
         
@@ -87,7 +87,7 @@ class AlertProcessor:
         if alerts:
             await self.send_alert(alerts)
     
-    def _check_bribe_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_bribe_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for bribe alerts"""
         if token.bribe_amount > 0.5:
             return [
@@ -103,31 +103,31 @@ class AlertProcessor:
             ]
         return []
     
-    def _check_price_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_price_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for suspicious price movements"""
         alerts = []
         # Add price manipulation detection logic
         return alerts
 
-    def _check_liquidity_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_liquidity_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for significant liquidity changes"""
         alerts = []
         # Add liquidity monitoring logic
         return alerts
     
-    def _check_volume_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_volume_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for unusual trading volume"""
         alerts = []
         # Add volume analysis logic
         return alerts
     
-    def _check_ownership_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_ownership_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for ownership changes and contract modifications"""
         alerts = []
         # Add ownership monitoring logic
         return alerts
     
-    def _check_scam_alerts(self, token: LiveERC20Token) -> List[TokenAlert]:
+    def _check_scam_alerts(self, token: ERC20Token) -> List[TokenAlert]:
         """Check for potential scam indicators"""
         alerts = []
         if token.is_scam:

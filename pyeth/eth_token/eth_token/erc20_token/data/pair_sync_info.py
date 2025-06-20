@@ -1,6 +1,10 @@
 import pandas as pd
 from typing import Optional, Dict, Any
 
+# Constants for block range filtering
+MIN_UINT256 = 0
+MAX_UINT256 = 2**256 - 1
+
 
 class UniV2PairSyncInfo:
     """

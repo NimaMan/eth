@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, Set, Dict
 from collections import OrderedDict, defaultdict
 from eth_token.alert.base_alert import BaseAlert
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.utils.logger import get_logger
 
 
@@ -27,7 +27,7 @@ class ScamAlert(BaseAlert):
         # Track all alerts per token: token_address -> OrderedDict[txn_hash -> alert_data]
         self._token_alerts: Dict[str, OrderedDict[str, ScamAlertData]] = defaultdict(OrderedDict)
         
-    def _is_alert(self, live_erc20_token: LiveERC20Token) -> bool:
+    def _is_alert(self, live_erc20_token: ERC20Token) -> bool:
         """Check if token has been flagged for scam activity"""
         assessment = live_erc20_token.latest_token_assessment
         if not assessment:
@@ -47,7 +47,7 @@ class ScamAlert(BaseAlert):
             
         return False
         
-    def create_alert(self, live_erc20_token: LiveERC20Token) -> ScamAlertData:
+    def create_alert(self, live_erc20_token: ERC20Token) -> ScamAlertData:
         assessment = live_erc20_token.latest_token_assessment
         scam_data = assessment.get('scam_assessment', {})
         
@@ -60,7 +60,7 @@ class ScamAlert(BaseAlert):
             involved_addresses=scam_data.get('involved_addresses', set()),
         )
 
-    async def process_token(self, live_erc20_token: LiveERC20Token) -> List[ScamAlertData]:
+    async def process_token(self, live_erc20_token: ERC20Token) -> List[ScamAlertData]:
         if self._is_alert(live_erc20_token):
             alert_data = self.create_alert(live_erc20_token)
             self.send_alert(alert_data)

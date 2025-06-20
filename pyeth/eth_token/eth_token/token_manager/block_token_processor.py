@@ -17,7 +17,7 @@ from typing import Dict, List, Set
 from collections import OrderedDict
 from tqdm import tqdm
 from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.utils.logger import get_logger
 
@@ -28,9 +28,10 @@ class BlockTokenProcessor:
         # Token tracking
         self.add_pnl_to_db = add_pnl_to_db
         self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
-        self.updated_tokens: Dict[str, LiveERC20Token] = {}
+        self.updated_tokens: Dict[str, ERC20Token] = {}
         self.processed_blocks: Dict[int, bool] = OrderedDict()
         self.latest_processed_block = 0
+        self.start_block = None  # Track the first block we process
 
         # Introduce concurrency semaphore
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
@@ -54,6 +55,10 @@ class BlockTokenProcessor:
 
             tasks.append(asyncio.create_task(sem_task()))
         await asyncio.gather(*tasks)
+
+        # Set start_block on first block processed
+        if self.start_block is None:
+            self.start_block = block_number
 
         self.processed_blocks[block_number] = True # Mark the block as processed
         return block_number
@@ -88,7 +93,7 @@ class BlockTokenProcessor:
         new_token_address = transaction['contract_address']
         if new_token_address not in self.live_tokens_cache:
             try:
-                token = LiveERC20Token(new_token_address)
+                token = ERC20Token(new_token_address)
                 token.update_from_transaction(transaction)
                 
                 self.live_tokens_cache[new_token_address] = token
@@ -99,7 +104,7 @@ class BlockTokenProcessor:
             except Exception as e:
                 self.logger.error(f"{self.__class__.__name__} Failed to create token {new_token_address} at txn {transaction.get('hash')}: {e}")
 
-    async def _update_token(self, token: LiveERC20Token, transaction: Dict, token_address: str):
+    async def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""
         try:
             await token.update_from_transaction_async(transaction)

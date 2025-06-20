@@ -1,8 +1,8 @@
 
 import numpy as np
 import pandas as pd
-from eth_token.live_erc20_token.network.live_token_network_builder import LiveTokenNetworkBuilder
-from eth_token.live_erc20_token.network.subgraph_analyzer import NetworkSubgraphAnalyzer
+from eth_token.erc20_token.network.token_network_builder import LiveTokenNetworkBuilder
+from eth_token.erc20_token.network.subgraph_analyzer import NetworkSubgraphAnalyzer
 
 
 class LiveTokenNetwork(LiveTokenNetworkBuilder):

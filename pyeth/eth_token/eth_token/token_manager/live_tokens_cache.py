@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from collections import OrderedDict
 from typing import Optional, Dict, List
 from threading import Lock
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 
 
 @dataclass
 class CacheEntry:
-    token: 'LiveERC20Token'
+    token: 'ERC20Token'
     timestamp: float
     token_status: str
 
@@ -63,7 +63,7 @@ class LiveTokensCache:
         with self._lock:
             return tuple(self.cache.keys())
     
-    def get_cached_tokens(self) -> Dict[str, 'LiveERC20Token']:
+    def get_cached_tokens(self) -> Dict[str, 'ERC20Token']:
         """Get a dictionary of cached tokens"""
         with self._lock:
             return {
@@ -72,7 +72,7 @@ class LiveTokensCache:
                 if entry.token is not None  # Ensure token exists
             }
         
-    def get_active_tokens(self) -> Dict[str, 'LiveERC20Token']:
+    def get_active_tokens(self) -> Dict[str, 'ERC20Token']:
         """Get dictionary of active tokens"""
         with self._lock:
             active_tokens = {}
@@ -92,9 +92,9 @@ class LiveTokensCache:
             self.log(f"{__name__}: Error getting item {item}: {str(e)}")
             raise e
 
-    def __setitem__(self, key: str, value: 'LiveERC20Token'):
+    def __setitem__(self, key: str, value: 'ERC20Token'):
         """Set attribute in token_data"""
-        assert isinstance(value, LiveERC20Token), "Value must be a LiveERC20Token instance"
+        assert isinstance(value, ERC20Token), "Value must be a LiveERC20Token instance"
         with self._lock:
             try:    
                 if len(self.cache) >= self.max_size:

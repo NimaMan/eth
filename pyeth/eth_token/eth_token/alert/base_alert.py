@@ -1,7 +1,7 @@
 from typing import Any, List, Dict, Optional
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 
 
 class AlertPriority(IntEnum):
@@ -18,14 +18,14 @@ class BaseAlert(ABC):
         self.priority = AlertPriority.LOW
 
     @abstractmethod
-    async def process_token(self, live_erc20_token: LiveERC20Token):
+    async def process_token(self, live_erc20_token: ERC20Token):
         """
         Process a single token to generate alerts, and send them to the alert system
         """
         pass
 
     @abstractmethod
-    def create_alert(self, live_erc20_token: LiveERC20Token):
+    def create_alert(self, live_erc20_token: ERC20Token):
         """Create alert data from token"""
         pass
 
@@ -35,6 +35,6 @@ class BaseAlert(ABC):
         pass
 
     @abstractmethod
-    def _is_alert(self, live_erc20_token: LiveERC20Token) -> bool:
+    def _is_alert(self, live_erc20_token: ERC20Token) -> bool:
         """Helper method to detect if the event is an alert"""
         pass

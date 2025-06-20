@@ -23,7 +23,7 @@ Future Alert Types (TODO):
 
 import aio_pika
 from typing import Dict, Any
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 import orjson
 
 from eth_token.utils.logger import get_logger
@@ -77,7 +77,7 @@ class TokenAlertPublisher:
         except Exception as e:
             logger.error(f"Error disconnecting from RabbitMQ: {e}")
 
-    def check_bribe_alert(self, live_token: LiveERC20Token) -> Dict[str, Any]:
+    def check_bribe_alert(self, live_token: ERC20Token) -> Dict[str, Any]:
         """Check if transaction contains bribe patterns"""
         bribe_amount = live_token.total_bribe_amount        
         if bribe_amount >= self.bribe_threshold:
@@ -115,7 +115,7 @@ class TokenAlertPublisher:
             logger.error(f"Error publishing alert: {e}")
             return False
 
-    async def process_token(self, live_token: LiveERC20Token):
+    async def process_token(self, live_token: ERC20Token):
         """Process transaction for all alert types"""
         try:
             # Check for bribe alert

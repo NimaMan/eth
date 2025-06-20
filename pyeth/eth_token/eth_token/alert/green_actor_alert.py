@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Set, Tuple
 from eth_token.alert.base_alert import BaseAlert
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.utils.logger import get_logger
 
 
@@ -24,7 +24,7 @@ class GreenActorAlert(BaseAlert):
         super().__init__()
         self._last_alerts = {}  # Store last alert per token
         
-    def _is_alert(self, live_erc20_token: LiveERC20Token) -> Tuple[bool, str]:
+    def _is_alert(self, live_erc20_token: ERC20Token) -> Tuple[bool, str]:
         """
         Check if transaction involves legitimate green actor trading
         Returns:
@@ -47,7 +47,7 @@ class GreenActorAlert(BaseAlert):
             
         return True, "Swap"    
         
-    def create_alert(self, live_erc20_token: LiveERC20Token, action: str) -> GreenActorAlertData:
+    def create_alert(self, live_erc20_token: ERC20Token, action: str) -> GreenActorAlertData:
         assessment = live_erc20_token.latest_token_assessment
         green_assessment = assessment.get('green_assessment', {})
         green_actors_dict = green_assessment.get('green_actors', {})
@@ -64,7 +64,7 @@ class GreenActorAlert(BaseAlert):
             action=action,
         )
 
-    async def process_token(self, live_erc20_token: LiveERC20Token) -> List[GreenActorAlertData]:
+    async def process_token(self, live_erc20_token: ERC20Token) -> List[GreenActorAlertData]:
         is_alert, action = self._is_alert(live_erc20_token)
         
         if is_alert:

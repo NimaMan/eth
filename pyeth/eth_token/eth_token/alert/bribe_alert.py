@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List
 
 from eth_token.alert.base_alert import BaseAlert
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.alert.config import bribe_threshold
 from eth_token.utils.logger import get_logger
 
@@ -23,7 +23,7 @@ class BribeAlert(BaseAlert):
         self._last_alert_blocks = {}  # Track last alert block per token
         self.logger = get_logger("tokens_bribe", log_folder="alert")
         
-    def _is_alert(self, live_erc20_token: LiveERC20Token) -> tuple[bool, float]:
+    def _is_alert(self, live_erc20_token: ERC20Token) -> tuple[bool, float]:
         bribe_amount = live_erc20_token.token_data.total_bribe_amount
         token_address = live_erc20_token.contract_address
         current_block = live_erc20_token.token_data.latest_block_number
@@ -49,7 +49,7 @@ class BribeAlert(BaseAlert):
         self.logger.debug(f"New alert triggered for {token_address} at block {current_block} with value {bribe_amount}")
         return True, bribe_amount
         
-    async def process_token(self, live_erc20_token: LiveERC20Token) -> List[BribeAlertData]:
+    async def process_token(self, live_erc20_token: ERC20Token) -> List[BribeAlertData]:
         """Process a token to detect potential bribe events"""
         is_bribe, bribe_value = self._is_alert(live_erc20_token)
         if is_bribe:
@@ -58,7 +58,7 @@ class BribeAlert(BaseAlert):
             return [alert_data]
         return []
     
-    def create_alert(self, live_erc20_token: LiveERC20Token, bribe_value: float) -> BribeAlertData:
+    def create_alert(self, live_erc20_token: ERC20Token, bribe_value: float) -> BribeAlertData:
         """Create a bribe alert from token data"""
         return BribeAlertData(
             block_number=live_erc20_token.token_data.latest_block_number,

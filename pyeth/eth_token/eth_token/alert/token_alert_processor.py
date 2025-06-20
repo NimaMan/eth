@@ -16,7 +16,7 @@ from eth_token.utils.logger import get_logger
 from eth_token.alert.bribe_alert import BribeAlert
 from eth_token.alert.green_actor_alert import GreenActorAlert
 from eth_token.alert.scam_alert import ScamAlert
-from eth_token.live_erc20_token.live_token import LiveERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token
 
 
 ALERT_PROCESSORS = {
@@ -33,7 +33,7 @@ class TokenAlertProcessor:
         self.rabbitmq_url = rabbitmq_url
         self.alert_processors = ALERT_PROCESSORS
 
-    async def process_single_alert(self, alert_type: str, processor, live_erc20_token: LiveERC20Token):
+    async def process_single_alert(self, alert_type: str, processor, live_erc20_token: ERC20Token):
         """Process a single alert type asynchronously"""
         try:
             alerts = await processor.process_token(live_erc20_token)
@@ -44,7 +44,7 @@ class TokenAlertProcessor:
             self.logger.error(f"{__name__}: Error processing {alert_type} alert for token {live_erc20_token.contract_address}: {str(e)}")
             return []
 
-    async def process_token(self, live_erc20_token: LiveERC20Token):
+    async def process_token(self, live_erc20_token: ERC20Token):
         """
         Process a token through all alert processors concurrently
         
@@ -83,7 +83,7 @@ class UpdateLiveTokenAlertProcessor:
         self.logger = logger or get_logger(name="tokens_manager", log_folder="tokens_live")
         self.token_alert_processor = TokenAlertProcessor(rabbitmq_url=rabbitmq_url, logger=self.logger)
 
-    async def process_block_token_updates(self, updated_tokens: Dict[str, LiveERC20Token], block_number: int):
+    async def process_block_token_updates(self, updated_tokens: Dict[str, ERC20Token], block_number: int):
         """Process list of token dictionaries concurrently"""
         try:
             start_time = time.time()
