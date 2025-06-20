@@ -1,5 +1,5 @@
 # Portfolio Manager Architecture
-**Objective**: A production-ready Ethereum portfolio management system that tracks token positions across multiple DEX pools, executes investment strategies in real-time, and maintains comprehensive position state in a PostgreSQL database.
+**Objective**: A production-ready Ethereum portfolio management system that tracks token positions across multiple DEX pools, executes investment strategies in real-time, publishes token information to external systems, and maintains comprehensive position state in a PostgreSQL database.
 
 ## Overview
 The Portfolio Manager is a comprehensive system for managing cryptocurrency trading positions across multiple tokens and liquidity pools. It provides:
@@ -11,6 +11,7 @@ The Portfolio Manager is a comprehensive system for managing cryptocurrency trad
 - **Database persistence** for historical analysis
 - **Performance metrics** calculation and tracking
 - **Scam protection** through integrated detection systems
+- **Token information publishing** via ZeroMQ to external systems (e.g., Rust mempool processor)
 
 ## Core Responsibilities
 1. **Multi-Pool Position Management**
@@ -37,6 +38,66 @@ The Portfolio Manager is a comprehensive system for managing cryptocurrency trad
    - Efficient database queries with proper indexing
    - Memory-efficient data structures
 
+5. **Token Information Publishing**
+   - Extract critical token and pool data from updates
+   - Publish via ZeroMQ PUB/SUB (port 5557) and REQ/REP (port 5558)
+   - Enable external systems to query current state
+   - Support high-frequency updates with minimal latency
+
+
+## Live Processing Pipeline
+
+The live portfolio manager implements a complete pipeline for processing blockchain data in real-time:
+
+### Pipeline Overview
+```
+Ethereum Node → Block Processor → Token Processor → Portfolio Manager → Database & Publishers
+```
+
+### Detailed Pipeline Stages
+
+1. **Block Reception & Processing**
+   - `BlockSubscriber` connects to Ethereum node WebSocket
+   - Receives new blocks in real-time
+   - Extracts all transactions and logs
+
+2. **Token Event Detection**
+   - `LiveBlockTokenProcessor` identifies token-related events:
+     - Pool creation (Uniswap V2/V3/V4)
+     - Liquidity additions/removals
+     - Swap transactions
+     - Price updates
+   - Creates/updates `LiveToken` objects with current state
+
+3. **Token Update Queue**
+   - Updates placed in `unprocessed_token_updates` priority queue
+   - `new_updates_event` signals availability of new data
+   - Enables asynchronous processing by multiple consumers
+
+4. **Strategy Execution**
+   - `LiveBacktestEngineWithPools` processes token updates:
+     - Routes to configured strategies (e.g., MarketTracker, BuyAll)
+     - `StrategyPositionManager` updates positions per strategy
+     - Generates trading signals based on strategy logic
+
+5. **Database Persistence**
+   - Strategy positions saved to `token_positions` table
+   - Historical snapshots stored for analysis
+   - PnL calculations written asynchronously
+
+6. **Token Information Publishing**
+   - `TokenInfoExtractor` extracts pool reserves and token data
+   - `TokenInfoPublisher` publishes via ZeroMQ:
+     - PUB socket (5557): Real-time updates stream
+     - REP socket (5558): Request/reply for state queries
+   - Enables external systems (Rust mempool processor) to monitor state
+
+### Configuration Parameters
+- `warmup_blocks`: Historical blocks to process before live (default: 10000)
+- `save_strategy_results`: Persist strategy results to database (default: True)
+- `add_pnl_to_db`: Write PnL calculations to database (default: True)
+- `max_pools`: Maximum pools to track per publisher (default: 2000)
+- `min_eth_threshold`: Minimum ETH reserve for pool tracking (default: 0.01)
 
 ## Architecture Components
 
@@ -85,7 +146,14 @@ Pluggable strategy system:
 - **Custom Strategies**: Extend base class with custom logic
 - **Signals**: BUY, SELL, HOLD with associated metadata
 
-### 6. Database Layer
+### 6. Publishers Module
+Real-time data distribution:
+- **TokenInfoExtractor**: Extracts token and pool state from updates
+- **TokenInfoPublisher**: Publishes via ZeroMQ to external systems
+- **Published Data**: Pool reserves, tax rates, trading status, limits
+- **Communication**: PUB/SUB for streaming, REQ/REP for queries
+
+### 7. Database Layer
 PostgreSQL with optimized schema:
 - **strategy_runs**: Strategy execution metadata
 - **token_positions**: Current position state with JSONB storage
@@ -218,23 +286,31 @@ class TokenPositionDynamicSnapshot:
 
 ### Flow A: Confirmed Block Processing
 
-1. **Block Arrival**: BlockSubscriber receives new block
+1. **Block Arrival**: BlockSubscriber receives new block from Ethereum node
 2. **Block Processing**: 
    - LiveBlockTokenProcessor.process_block_live() called
+   - Parses all transactions and logs in the block
    - Updates LiveTokensCache with new token states
-   - Identifies updated tokens
+   - Identifies which tokens have changed
 3. **Update Queueing**:
-   - Puts updates onto unprocessed_token_updates queue
-   - Sets new_updates_event
-4. **Main Engine Processing**:
-   - Gets updates from queue
-   - Executes strategies for each updated token
-   - Triggers pool level updates
-   - Saves strategy results to database
-   - Schedules PnL writes
-5. **Pool Level Updates**:
-   - Updates internal pool ETH levels
-   - Critical for mempool monitoring
+   - Creates tuple: (block_number, updated_tokens_dict)
+   - Puts updates onto unprocessed_token_updates priority queue
+   - Sets new_updates_event to notify waiting consumers
+4. **Main Engine Processing** (LiveBacktestEngineWithPools):
+   - Waits for new_updates_event signal
+   - Gets updates from unprocessed_token_updates queue
+   - For each updated token:
+     - Routes to all configured strategies
+     - Updates positions based on strategy signals
+     - Extracts token/pool information
+5. **Information Publishing**:
+   - TokenInfoExtractor processes updated tokens
+   - Extracts pool reserves, tax rates, trading status
+   - TokenInfoPublisher sends updates via ZeroMQ
+6. **Database Operations**:
+   - Strategy results saved if configured
+   - PnL calculations written asynchronously
+   - Position snapshots stored for analysis
 
 ### Flow B: Mempool Monitoring (Concurrent)
 
@@ -254,6 +330,8 @@ class TokenPositionDynamicSnapshot:
 5. **PnL Writing**: Token PnL data written after all critical operations
 
 ## Detailed Data Flow
+
+The portfolio manager processes live blockchain data through a multi-stage pipeline that enables real-time position tracking, strategy execution, and information publishing to external systems.
 
 ### 1. Block Processing & Token Detection
 ```
@@ -347,14 +425,41 @@ PostgreSQL Storage
 - Supports new PoolManager architecture
 
 ### 2. Blockchain Data Sources
-- **Block Processor**: Real-time block data
-- **Token Processor**: Token state updates
-- **Mempool Monitor**: Scam detection signals
+- **Block Processor**: Real-time block data via WebSocket
+- **Token Processor**: Token state updates from LiveTokensCache
+- **Mempool Monitor**: Scam detection signals (when integrated)
 
 ### 3. External Systems
-- **Rust Services**: Via ZeroMQ for pool data
-- **Web Interface**: Portfolio monitoring UI
-- **Analytics**: Performance reporting
+- **Rust Mempool Processor**: 
+  - Receives token/pool updates via ZeroMQ PUB (port 5557)
+  - Can query current state via ZeroMQ REP (port 5558)
+  - Uses data for transaction impact assessment
+- **Web Interface**: Portfolio monitoring UI (Sarigoz)
+- **Analytics**: Performance reporting and backtesting
+
+### 4. ZeroMQ Communication Protocol
+```python
+# PUB/SUB Updates (port 5557)
+{
+    "type": "pool_updates",
+    "timestamp": 1234567890,
+    "data": {
+        "0xPoolAddress": {
+            "token_address": "0xTokenAddress",
+            "pool_type": "V2",
+            "eth_reserve": 125.5,
+            "token_reserve": 1000000.0,
+            "buy_tax": 0.05,
+            "sell_tax": 0.05,
+            "trading_enabled": true
+        }
+    }
+}
+
+# REQ/REP Queries (port 5558)
+Request: {"type": "get_pool", "pool_address": "0x..."}
+Response: {"status": "success", "data": {...pool_data...}}
+```
 
 ## Performance Considerations
 
@@ -553,14 +658,27 @@ CREATE INDEX idx_token_pool_strategy ON token_position_snapshots(token_address, 
 
 ### Running Live Portfolio Manager
 ```bash
-# Basic live monitoring
+# Live monitoring with token information publishing
 python scripts/live/run_live_portfolio.py
 
-# With mempool integration
+# With mempool integration (if available)
 python scripts/live/run_live_portfolio_with_mempool.py
+```
 
-# With pool level tracking
-python scripts/live/run_live_portfolio_with_pools.py
+The `run_live_portfolio.py` script:
+- Connects to local Ethereum node at `http://127.0.0.1:8545`
+- Processes blocks starting from `current_block - warmup_blocks`
+- Runs configured strategies (default: MarketTracker)
+- Publishes token/pool updates via ZeroMQ (PUB: 5557, REP: 5558)
+- Optionally saves strategy results and PnL to database
+
+Configuration in script:
+```python
+warmup_blocks = 1200              # Process last 1200 blocks on startup
+save_strategy_results = False     # Don't persist to DB by default
+add_pnl_to_db = False            # Don't write PnL by default
+max_pools = 2000                 # Track up to 2000 pools
+min_eth_threshold = 0.01         # Only track pools with > 0.01 ETH
 ```
 
 ### Running Backtest
@@ -591,6 +709,18 @@ positions = session.query(TokenPosition).filter_by(
 metrics = session.query(TokenPositionSnapshotORM).filter(
     TokenPositionSnapshotORM.snapshot_timestamp >= start_date
 ).all()
+```
+
+### Verification Tools
+```bash
+# Verify pool level publishing is working
+python scripts/server/verify_pool_levels.py
+
+# This tool:
+# - Connects to ZeroMQ publishers
+# - Monitors real-time updates
+# - Compares published data with blockchain
+# - Reports any discrepancies
 ```
 
 ## Monitoring & Observability
