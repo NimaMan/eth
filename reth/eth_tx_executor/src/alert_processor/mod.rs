@@ -1,10 +1,9 @@
 //! Alert Processor Module
 //! 
-//! Receives and processes scam detection alerts from the mempool processor
-//! via ZeroMQ messaging.
+//! Receives and processes execution alerts via high-performance messaging
 
 pub mod receiver;
 pub mod types;
 
 pub use receiver::{AlertReceiver, ReceiverConfig};
-pub use types::{AlertMessage, ScamAlert, Severity, EventType};
+pub use types::{Alert, Action, ExecutionParams, Priority};

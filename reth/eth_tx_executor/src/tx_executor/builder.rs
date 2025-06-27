@@ -200,16 +200,6 @@ impl TransactionBuilder {
         Ok(data)
     }
     
-    /// Build a flash loan arbitrage transaction (advanced)
-    pub async fn build_flash_loan_arbitrage(
-        &self,
-        _token: Address,
-        _amount: U256,
-        _profit_target: U256,
-    ) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
-        // TODO: Implement flash loan arbitrage
-        Err("Flash loan arbitrage not yet implemented".into())
-    }
     
     /// Get the provider
     pub fn provider(&self) -> &Arc<Provider<Http>> {

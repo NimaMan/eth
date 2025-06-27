@@ -1,60 +1,58 @@
-//! ETH Kartal - Main executable
-//!
-//! Automated trading protection system that responds to scam alerts
+//! ETH Kartal - High-Performance Transaction Executor
+//! 
+//! Alert → Execution pipeline with sub-200ms target latency
 
 use clap::Parser;
 use eth_kartal::{
-    alert_processor::{AlertReceiver, ReceiverConfig},
-    strategy::{DecisionEngine, DecisionConfig, TradingDecision},
-    tx_executor::TransactionBuilder,
-    wallet::PositionTracker,
+    alert_processor::{AlertReceiver, ReceiverConfig, Alert},
+    tx_executor::{TransactionExecutor, ExecutorConfig},
+    wallet::read_password,
 };
-use ethers::prelude::*;
-use ethers::abi::Token;
-use ethers::types::transaction::eip2718::TypedTransaction;
-use std::sync::Arc;
+use std::time::Instant;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tracing::{info, warn, error};
-use tracing_subscriber::EnvFilter;
+use tracing::{info, error};
+use tracing_subscriber::{EnvFilter, fmt};
+use secrecy::Secret;
 
+/// CLI arguments
 #[derive(Parser, Debug)]
-#[command(name = "eth_kartal")]
-#[command(about = "Automated trading protection system")]
+#[command(author, version, about, long_about = None)]
 struct Args {
-    /// Ethereum RPC URL
-    #[arg(long, env = "ETH_RPC_URL", default_value = "http://localhost:8545")]
+    /// Path to keystore file
+    #[arg(long, env = "ETH_KEYSTORE_PATH")]
+    keystore_path: PathBuf,
+    
+    /// RPC endpoint URL
+    #[arg(long, default_value = "http://127.0.0.1:8545", env = "ETH_RPC_URL")]
     rpc_url: String,
     
-    /// ZMQ endpoint for alerts
-    #[arg(long, env = "ALERT_ZMQ_ENDPOINT", default_value = "tcp://localhost:5559")]
+    /// Chain ID (1 for mainnet)
+    #[arg(long, default_value = "1", env = "ETH_CHAIN_ID")]
+    chain_id: u64,
+    
+    /// ZMQ alert endpoint
+    #[arg(long, default_value = "tcp://localhost:5559", env = "ALERT_ENDPOINT")]
     alert_endpoint: String,
     
-    /// Wallet address to protect
-    #[arg(long, env = "WALLET_ADDRESS")]
-    wallet_address: String,
+    /// Enable flashbots for critical alerts
+    #[arg(long, env = "FLASHBOTS_ENABLED")]
+    flashbots: bool,
     
-    /// Router address for swaps
-    #[arg(long, env = "ROUTER_ADDRESS", default_value = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")]
-    router_address: String,
+    /// Flashbots RPC endpoint
+    #[arg(long, env = "FLASHBOTS_RPC")]
+    flashbots_rpc: Option<String>,
     
-    /// Slippage tolerance (0.05 = 5%)
-    #[arg(long, env = "SLIPPAGE_TOLERANCE", default_value = "0.05")]
-    slippage: f64,
+    /// Reth WebSocket URL for mempool monitoring
+    #[arg(long, default_value = "ws://127.0.0.1:8546", env = "RETH_WS_URL")]
+    reth_ws_url: String,
     
-    /// Emergency threshold (% drain)
-    #[arg(long, default_value = "80")]
-    emergency_threshold: f64,
-    
-    /// Partial sell threshold (% drain)
-    #[arg(long, default_value = "50")]
-    partial_threshold: f64,
-    
-    /// Test mode (no real trades)
+    /// Test mode (simulates transactions)
     #[arg(long)]
     test_mode: bool,
     
     /// Log level
-    #[arg(long, env = "RUST_LOG", default_value = "info")]
+    #[arg(long, default_value = "info", env = "RUST_LOG")]
     log_level: String,
 }
 
@@ -63,312 +61,155 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     
     // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(&args.log_level))
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(&args.log_level));
+    
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
         .init();
     
-    info!("🦅 ETH Kartal starting...");
-    info!("Wallet: {}", args.wallet_address);
+    info!("Starting ETH Kartal Transaction Executor");
     info!("RPC: {}", args.rpc_url);
-    info!("Alerts: {}", args.alert_endpoint);
+    info!("Chain ID: {}", args.chain_id);
+    info!("Alert endpoint: {}", args.alert_endpoint);
     info!("Test mode: {}", args.test_mode);
     
-    // Parse addresses
-    let wallet_address: Address = args.wallet_address.parse()?;
-    let router_address: Address = args.router_address.parse()?;
-    
-    // Create provider
-    let provider = Arc::new(Provider::<Http>::try_from(&args.rpc_url)?);
-    
-    // Create position tracker
-    let position_tracker = Arc::new(PositionTracker::new(
-        provider.clone(),
-        wallet_address,
-    )?);
-    
-    // Check ETH balance
-    let eth_balance = position_tracker.update_eth_balance().await?;
-    if eth_balance == U256::zero() {
-        warn!("⚠️  No ETH balance for gas!");
-    }
-    
-    // Create decision engine
-    let decision_config = DecisionConfig {
-        emergency_threshold: args.emergency_threshold,
-        partial_threshold: args.partial_threshold,
-        test_mode: args.test_mode,
-        ..Default::default()
+    // Create executor
+    let executor_config = ExecutorConfig {
+        keystore_path: args.keystore_path.clone(),
+        chain_id: args.chain_id,
+        rpc_url: args.rpc_url.clone(),
+        flashbots_enabled: args.flashbots,
+        flashbots_rpc: args.flashbots_rpc,
+        reth_ws_url: args.reth_ws_url,
     };
-    let decision_engine = Arc::new(DecisionEngine::new(
-        decision_config,
-        position_tracker.clone(),
-    ));
     
-    // Create transaction builder
-    let tx_builder = Arc::new(TransactionBuilder::new(
-        provider.clone(),
-        router_address,
-        wallet_address,
-        args.slippage,
-    ));
+    let executor = TransactionExecutor::new(executor_config).await?;
+    info!("Transaction executor initialized");
+    
+    // Prompt for password to unlock wallet
+    let password = read_password("Enter keystore password: ")?;
+    executor.unlock_wallet(password).await?;
+    info!("Wallet unlocked successfully");
     
     // Create alert channel
-    let (alert_tx, mut alert_rx) = mpsc::channel(100);
+    let (alert_tx, mut alert_rx) = mpsc::channel::<Alert>(100);
     
-    // Create and start alert receiver
+    // Create alert receiver
     let receiver_config = ReceiverConfig {
         endpoint: args.alert_endpoint,
         ..Default::default()
     };
-    let mut alert_receiver = AlertReceiver::new(receiver_config, alert_tx);
-    alert_receiver.start()?;
     
-    info!("✅ System initialized, waiting for alerts...");
+    let receiver = AlertReceiver::new(receiver_config, alert_tx);
     
-    // Main alert processing loop
+    // Start alert receiver in background
+    let receiver_handle = tokio::spawn(async move {
+        receiver.run().await;
+    });
+    
+    info!("Alert receiver started");
+    
+    // Execution metrics
+    let mut total_alerts = 0u64;
+    let mut successful_executions = 0u64;
+    let mut failed_executions = 0u64;
+    let mut total_latency_ms = 0u64;
+    
+    // Main execution loop
     while let Some(alert) = alert_rx.recv().await {
-        // Process alert in separate task to avoid blocking
-        let decision_engine = decision_engine.clone();
-        let tx_builder = tx_builder.clone();
-        let test_mode = args.test_mode;
+        total_alerts += 1;
+        let start_time = Instant::now();
         
-        tokio::spawn(async move {
-            match process_alert(alert, decision_engine, tx_builder, test_mode).await {
-                Ok(_) => {},
-                Err(e) => error!("Failed to process alert: {}", e),
-            }
-        });
-    }
-    
-    warn!("Alert channel closed, shutting down");
-    Ok(())
-}
-
-/// Process a single alert
-async fn process_alert(
-    alert: eth_kartal::alert_processor::ScamAlert,
-    decision_engine: Arc<DecisionEngine>,
-    tx_builder: Arc<TransactionBuilder>,
-    test_mode: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Make decision
-    let decision = decision_engine.process_alert(&alert).await?;
-    
-    // Execute decision
-    match decision {
-        TradingDecision::EmergencySell { token, amount, reason } => {
-            error!("🚨 EMERGENCY SELL: {} - {}", token, reason);
-            
-            if test_mode {
-                warn!("TEST MODE: Would sell {} tokens", amount);
-            } else {
-                // Execute emergency sell
-                execute_trade(tx_builder, token, amount, true).await?;
-            }
-        }
-        TradingDecision::PartialSell { token, amount, percentage, reason } => {
-            warn!("⚠️  PARTIAL SELL: {} ({:.1}%) - {}", token, percentage, reason);
-            
-            if test_mode {
-                warn!("TEST MODE: Would sell {} tokens", amount);
-            } else {
-                // Execute partial sell
-                execute_trade(tx_builder, token, amount, false).await?;
-            }
-        }
-        TradingDecision::Monitor { token, reason } => {
-            info!("👁️  MONITORING: {} - {}", token, reason);
-        }
-        TradingDecision::Skip { token, reason } => {
-            info!("⏭️  SKIPPING: {} - {}", token, reason);
-        }
-    }
-    
-    Ok(())
-}
-
-/// Execute a trade (emergency or partial sell)
-async fn execute_trade(
-    tx_builder: Arc<TransactionBuilder>,
-    token: Address,
-    amount: U256,
-    is_emergency: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let start_time = std::time::Instant::now();
-    
-    // Step 1: Check token approval
-    info!("Checking token approval for {}", token);
-    let provider = tx_builder.provider().clone();
-    let router = tx_builder.router_address();
-    let wallet = tx_builder.wallet_address();
-    
-    // Get current allowance (simplified - in production use proper ABI)
-    let allowance = get_token_allowance(&provider, token, wallet, router).await?;
-    
-    if allowance < amount {
-        info!("Setting token approval for {} tokens", amount);
-        let approval_tx = tx_builder.build_token_approval(token, router, U256::MAX)?;
+        info!("Received alert: {} for token {}", alert.id, alert.token_address);
         
-        // Send approval transaction
-        let pending_tx = provider.send_transaction(approval_tx, None).await?;
-        let receipt = pending_tx.await?;
-        
-        if let Some(receipt) = receipt {
-            info!("Approval tx confirmed: {:?}", receipt.transaction_hash);
-        } else {
-            return Err("Approval transaction failed".into());
-        }
-    }
-    
-    // Step 2: Get expected output and calculate minimum
-    let expected_eth = estimate_token_to_eth(&provider, router, token, amount).await?;
-    let min_eth_out = tx_builder.calculate_min_output(expected_eth);
-    
-    info!(
-        "Expected ETH output: {}, minimum: {}", 
-        ethers::utils::format_ether(expected_eth),
-        ethers::utils::format_ether(min_eth_out)
-    );
-    
-    // Step 3: Build swap transaction
-    let swap_tx = if is_emergency {
-        tx_builder.build_emergency_sell(token, amount, min_eth_out).await?
-    } else {
-        tx_builder.build_partial_sell(token, amount, min_eth_out, None).await?
-    };
-    
-    // Step 4: Submit with appropriate priority
-    let priority_fee = if is_emergency {
-        U256::from(10_000_000_000u64) // 10 gwei for emergency
-    } else {
-        U256::from(2_000_000_000u64) // 2 gwei for normal
-    };
-    
-    // For TypedTransaction, we need to set gas fees differently based on transaction type
-    let swap_tx = match swap_tx {
-        TypedTransaction::Eip1559(mut tx) => {
-            tx.max_priority_fee_per_gas = Some(priority_fee);
-            tx.max_fee_per_gas = Some(priority_fee * 2);
-            TypedTransaction::Eip1559(tx)
-        }
-        TypedTransaction::Legacy(mut tx) => {
-            tx.gas_price = Some(priority_fee + U256::from(20_000_000_000u64)); // Base fee + priority
-            TypedTransaction::Legacy(tx)
-        }
-        _ => swap_tx, // Other types unchanged
-    };
-    
-    info!("Submitting swap transaction with {} gwei priority", priority_fee / 1_000_000_000);
-    let pending_tx = provider.send_transaction(swap_tx, None).await?;
-    
-    // Step 5: Monitor execution
-    let tx_hash = pending_tx.tx_hash();
-    info!("Swap transaction submitted: {:?}", tx_hash);
-    
-    match tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        pending_tx
-    ).await {
-        Ok(Ok(Some(receipt))) => {
-            let elapsed = start_time.elapsed();
-            info!(
-                "✅ Trade executed successfully in {:.2}s - Gas used: {}", 
-                elapsed.as_secs_f64(),
-                receipt.gas_used.unwrap_or_default()
+        // Execute alert
+        let result = if args.test_mode {
+            info!("TEST MODE: Would execute {} action for {} tokens",
+                match alert.action {
+                    eth_kartal::alert_processor::Action::Sell => "SELL",
+                    eth_kartal::alert_processor::Action::Buy => "BUY",
+                    _ => "OTHER",
+                },
+                alert.params.amount
             );
             
-            if receipt.status == Some(U64::from(0)) {
-                error!("❌ Transaction reverted!");
-                return Err("Transaction reverted".into());
+            // Simulate execution
+            eth_kartal::tx_executor::ExecutionResult {
+                alert_id: alert.id,
+                tx_hash: Some(ethers::types::H256::random()),
+                success: true,
+                error: None,
+                metrics: eth_kartal::tx_executor::ExecutionMetrics {
+                    alert_to_start_ms: 5,
+                    position_check_ms: 15,
+                    gas_ranking_ms: 25,
+                    price_quote_ms: 20,
+                    tx_build_ms: 10,
+                    tx_submit_ms: 15,
+                    total_ms: 90,
+                },
             }
+        } else {
+            executor.execute_alert(alert).await
+        };
+        
+        let latency = start_time.elapsed().as_millis() as u64;
+        total_latency_ms += latency;
+        
+        if result.success {
+            successful_executions += 1;
+            info!("✅ Execution successful: {:?} in {}ms", 
+                result.tx_hash, result.metrics.total_ms);
+            
+            // Log detailed metrics
+            info!("  Alert→Start: {}ms", result.metrics.alert_to_start_ms);
+            info!("  Position check: {}ms", result.metrics.position_check_ms);
+            info!("  Gas ranking: {}ms", result.metrics.gas_ranking_ms);
+            info!("  Price quote: {}ms", result.metrics.price_quote_ms);
+            info!("  TX build: {}ms", result.metrics.tx_build_ms);
+            info!("  TX submit: {}ms", result.metrics.tx_submit_ms);
+        } else {
+            failed_executions += 1;
+            error!("❌ Execution failed: {} in {}ms", 
+                result.error.as_ref().unwrap_or(&"Unknown error".to_string()),
+                latency);
         }
-        Ok(Ok(None)) => {
-            error!("❌ Transaction disappeared");
-            return Err("Transaction disappeared".into());
-        }
-        Ok(Err(e)) => {
-            error!("❌ Transaction failed: {}", e);
-            return Err(e.into());
-        }
-        Err(_) => {
-            error!("❌ Transaction timeout after 60 seconds");
-            return Err("Transaction timeout".into());
+        
+        // Print running statistics
+        if total_alerts % 10 == 0 {
+            let avg_latency = total_latency_ms / total_alerts;
+            let success_rate = (successful_executions as f64 / total_alerts as f64) * 100.0;
+            
+            info!("📊 Statistics: {} alerts, {:.1}% success rate, {}ms avg latency",
+                total_alerts, success_rate, avg_latency);
         }
     }
+    
+    // Wait for receiver to finish
+    receiver_handle.await?;
     
     Ok(())
 }
 
-/// Get token allowance (simplified version)
-async fn get_token_allowance(
-    provider: &Provider<Http>,
-    token: Address,
-    owner: Address,
-    spender: Address,
-) -> Result<U256, Box<dyn std::error::Error>> {
-    // ERC20 allowance function
-    let data = encode_function_data(
-        "allowance(address,address)",
-        &[Token::Address(owner), Token::Address(spender)]
-    )?;
+/// Create a test alert for development
+#[allow(dead_code)]
+fn create_test_alert() -> Alert {
+    use eth_kartal::alert_processor::{Action, ExecutionParams, Priority};
     
-    let tx = TransactionRequest::new()
-        .to(token)
-        .data(data);
-    
-    let result = provider.call(&tx.into(), None).await?;
-    
-    // Decode uint256 result
-    if result.len() >= 32 {
-        Ok(U256::from_big_endian(&result[..32]))
-    } else {
-        Ok(U256::zero())
+    Alert {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: chrono::Utc::now().timestamp() as u64,
+        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse().unwrap(), // USDC
+        pool_address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse().unwrap(), // USDC/WETH V2
+        action: Action::Sell,
+        params: ExecutionParams {
+            amount: ethers::types::U256::from(1000_000_000), // 1000 USDC
+            slippage: 0.05,
+            max_gas_price: None,
+            deadline_seconds: 300,
+            priority: Priority::High,
+        },
     }
-}
-
-/// Estimate token to ETH swap output
-async fn estimate_token_to_eth(
-    provider: &Provider<Http>,
-    router: Address,
-    token: Address,
-    amount: U256,
-) -> Result<U256, Box<dyn std::error::Error>> {
-    use eth_kartal::tx_executor::routers;
-    
-    // getAmountsOut function
-    let path = vec![token, *routers::WETH];
-    let data = encode_function_data(
-        "getAmountsOut(uint256,address[])",
-        &[
-            Token::Uint(amount),
-            Token::Array(path.iter().map(|&a| Token::Address(a)).collect()),
-        ]
-    )?;
-    
-    let tx = TransactionRequest::new()
-        .to(router)
-        .data(data);
-    
-    let result = provider.call(&tx.into(), None).await?;
-    
-    // Decode uint256[] result - ETH amount is second element
-    if result.len() >= 64 {
-        Ok(U256::from_big_endian(&result[32..64]))
-    } else {
-        Err("Invalid getAmountsOut response".into())
-    }
-}
-
-/// Encode function call data
-fn encode_function_data(
-    signature: &str,
-    params: &[Token],
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let selector = &ethers::utils::keccak256(signature.as_bytes())[0..4];
-    let encoded_params = ethers::abi::encode(params);
-    
-    let mut data = selector.to_vec();
-    data.extend_from_slice(&encoded_params);
-    
-    Ok(data)
 }

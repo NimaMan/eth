@@ -15,10 +15,15 @@ revm = { version = "3.3.0", features = ["std", "serde", "ethersdb"] }
 # Async runtime
 tokio = { version = "1.28", features = ["full"] }
 tokio-stream = "0.1"
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# HTTP client for data integration
+reqwest = { version = "0.11", features = ["json"] }
+futures-util = "0.3"
 
 # Database
 tokio-postgres = "0.7"
@@ -40,14 +45,27 @@ hex = "0.4"
 chrono = "0.4"
 toml = "0.7"
 lazy_static = "1.4"
+uuid = { version = "1.0", features = ["v4"] }
+
+# Security - New dependencies for secure key management
+eth-keystore = "0.5"  # Ethereum keystore encryption/decryption
+zeroize = { version = "1.6", features = ["derive"] }  # Secure memory clearing
+secrecy = "0.8"  # Secret value wrapper
+rpassword = "7.2"  # Secure password input
+rand = "0.8"  # Random number generation for keystore
 
 [dev-dependencies]
 mockall = "0.11"
 tokio-test = "0.4"
+tempfile = "3.8"  # For testing keystore files
 
 [[bin]]
 name = "kartal"
 path = "src/bin/kartal.rs"
+
+[[bin]]
+name = "keystore_manager"
+path = "src/bin/keystore_manager.rs"
 
 # Additional binaries to be added as implemented
 # [[bin]]

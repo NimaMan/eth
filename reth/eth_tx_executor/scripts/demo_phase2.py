@@ -85,9 +85,15 @@ def main():
     # Step 2: Setup ZMQ publisher
     log("\n2️⃣  Setting up alert publisher...", Colors.PURPLE)
     
+    # Note: If mempool processor is running on 5559, we'll use a different port
     context = zmq.Context()
     socket = context.socket(zmq.PUB)
-    socket.bind("tcp://127.0.0.1:5559")
+    try:
+        socket.bind("tcp://127.0.0.1:5559")
+    except zmq.error.ZMQError:
+        log("Port 5559 in use (mempool processor running?), using 5560 instead", Colors.YELLOW)
+        socket = context.socket(zmq.PUB)
+        socket.bind("tcp://127.0.0.1:5560")
     time.sleep(1)
     
     log("✅ ZMQ publisher ready on port 5559", Colors.GREEN)

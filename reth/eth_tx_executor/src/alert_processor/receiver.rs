@@ -1,6 +1,6 @@
-//! ZMQ Alert Receiver
+//! High-performance alert receiver
 //!
-//! Connects to mempool processor and receives scam alerts in real-time
+//! Receives execution alerts via ZMQ for ultra-low latency
 
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
@@ -8,7 +8,7 @@ use zmq::Context;
 use std::thread;
 use std::time::Duration;
 
-use super::types::{AlertMessage, ScamAlert};
+use super::types::Alert;
 
 /// Alert receiver configuration
 #[derive(Debug, Clone)]
@@ -25,8 +25,8 @@ impl Default for ReceiverConfig {
     fn default() -> Self {
         Self {
             endpoint: "tcp://localhost:5559".to_string(),
-            timeout_ms: 5000,
-            reconnect_delay: Duration::from_secs(5),
+            timeout_ms: 1000, // Reduced from 5000ms for lower latency
+            reconnect_delay: Duration::from_secs(1), // Faster reconnect
         }
     }
 }
@@ -34,210 +34,125 @@ impl Default for ReceiverConfig {
 /// ZMQ Alert Receiver
 pub struct AlertReceiver {
     config: ReceiverConfig,
-    tx: mpsc::Sender<ScamAlert>,
-    running: bool,
+    tx: mpsc::Sender<Alert>,
 }
 
 impl AlertReceiver {
     /// Create new alert receiver
-    pub fn new(config: ReceiverConfig, tx: mpsc::Sender<ScamAlert>) -> Self {
-        Self {
-            config,
-            tx,
-            running: false,
-        }
+    pub fn new(config: ReceiverConfig, tx: mpsc::Sender<Alert>) -> Self {
+        Self { config, tx }
     }
     
-    /// Start receiving alerts in a dedicated thread
-    pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.running {
-            return Err("Receiver already running".into());
-        }
-        
-        self.running = true;
+    /// Run the receiver loop
+    pub async fn run(&self) {
         let config = self.config.clone();
         let tx = self.tx.clone();
-        let running = self.running;
         
-        // Spawn dedicated thread for ZMQ (it doesn't play well with tokio)
+        // Run ZMQ in dedicated thread for performance
         thread::spawn(move || {
-            if let Err(e) = Self::receiver_loop(config, tx, running) {
-                error!("Alert receiver error: {}", e);
+            if let Err(e) = Self::zmq_loop(config, tx) {
+                error!("ZMQ receiver error: {}", e);
             }
         });
         
-        info!("Alert receiver started on {}", self.config.endpoint);
-        Ok(())
-    }
-    
-    /// Stop the receiver
-    pub fn stop(&mut self) {
-        self.running = false;
-        info!("Alert receiver stopping");
-    }
-    
-    /// Main receiver loop (runs in dedicated thread)
-    fn receiver_loop(
-        config: ReceiverConfig,
-        tx: mpsc::Sender<ScamAlert>,
-        mut running: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut attempts = 0;
-        
-        while running {
-            match Self::connect_and_receive(&config, &tx, &mut running) {
-                Ok(_) => {
-                    info!("Alert receiver disconnected gracefully");
-                    break;
-                }
-                Err(e) => {
-                    attempts += 1;
-                    error!("Alert receiver error (attempt {}): {}", attempts, e);
-                    
-                    if running {
-                        info!("Reconnecting in {:?}...", config.reconnect_delay);
-                        thread::sleep(config.reconnect_delay);
-                    }
-                }
-            }
+        // Keep async task alive
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
         }
-        
-        Ok(())
     }
     
-    /// Connect to ZMQ and receive messages
-    fn connect_and_receive(
-        config: &ReceiverConfig,
-        tx: &mpsc::Sender<ScamAlert>,
-        running: &mut bool,
+    /// ZMQ receive loop
+    fn zmq_loop(
+        config: ReceiverConfig,
+        tx: mpsc::Sender<Alert>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Create ZMQ context and socket
-        let context = Context::new();
-        let socket = context.socket(zmq::SUB)?;
+        let ctx = Context::new();
         
-        // Configure socket
-        socket.set_rcvtimeo(config.timeout_ms)?;
-        socket.set_linger(0)?; // Don't wait on close
-        
-        // Connect and subscribe to all messages
-        info!("Connecting to {}", config.endpoint);
-        socket.connect(&config.endpoint)?;
-        socket.set_subscribe(b"")?;
-        
-        info!("✅ Connected to alert publisher");
-        
-        let mut alerts_received = 0;
-        let mut last_alert_time = std::time::Instant::now();
-        
-        // Receive loop
-        while *running {
-            match socket.recv_string(0) {
-                Ok(Ok(message)) => {
-                    alerts_received += 1;
-                    let gap = last_alert_time.elapsed();
-                    last_alert_time = std::time::Instant::now();
-                    
-                    debug!("Received alert {} (gap: {:?})", alerts_received, gap);
-                    
-                    // Parse and process alert
-                    match serde_json::from_str::<AlertMessage>(&message) {
-                        Ok(alert_msg) => {
-                            match ScamAlert::from_alert_message(alert_msg) {
-                                Ok(alert) => {
-                                    let is_emergency = alert.is_emergency();
-                                    let drain_amount = alert.eth_drain_amount();
-                                    
-                                    // Log based on severity
-                                    if is_emergency {
-                                        error!("🚨 EMERGENCY SCAM: {} - {:.2} ETH drain ({:.1}%)", 
-                                            alert.token_symbol, drain_amount, alert.eth_change_percent);
-                                    } else if alert.requires_action {
-                                        warn!("⚠️  SCAM DETECTED: {} - {:.2} ETH drain ({:.1}%)", 
-                                            alert.token_symbol, drain_amount, alert.eth_change_percent);
-                                    } else {
-                                        info!("ℹ️  Market event: {} - {:.1}% change", 
-                                            alert.token_symbol, alert.eth_change_percent);
-                                    }
-                                    
-                                    // Send to strategy engine
-                                    if let Err(e) = tx.blocking_send(alert) {
-                                        error!("Failed to send alert to strategy engine: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to parse alert: {}", e);
+        loop {
+            info!("Connecting to alert endpoint: {}", config.endpoint);
+            
+            let subscriber = ctx.socket(zmq::SUB)?;
+            subscriber.set_rcvtimeo(config.timeout_ms)?;
+            subscriber.set_linger(0)?; // Don't wait on close
+            subscriber.connect(&config.endpoint)?;
+            subscriber.set_subscribe(b"")?; // Subscribe to all messages
+            
+            info!("Connected to alert stream");
+            
+            loop {
+                match subscriber.recv_msg(0) {
+                    Ok(msg) => {
+                        let data = msg.as_str().unwrap_or("");
+                        debug!("Received alert data: {} bytes", data.len());
+                        
+                        match serde_json::from_str::<Alert>(data) {
+                            Ok(alert) => {
+                                info!("Alert received: {} for token {}", 
+                                    alert.id, alert.token_address);
+                                
+                                // Send alert to executor
+                                if let Err(e) = tx.blocking_send(alert) {
+                                    error!("Failed to send alert: {}", e);
                                 }
                             }
+                            Err(e) => {
+                                error!("Failed to parse alert: {}", e);
+                                debug!("Raw data: {}", data);
+                            }
                         }
-                        Err(e) => {
-                            warn!("Failed to deserialize alert message: {}", e);
-                            debug!("Raw message: {}", message);
+                    }
+                    Err(e) => {
+                        if e == zmq::Error::EAGAIN {
+                            // Timeout - normal behavior
+                            debug!("No alerts received (timeout)");
+                        } else {
+                            error!("Receive error: {}", e);
+                            break; // Reconnect
                         }
                     }
                 }
-                Ok(Err(e)) => {
-                    error!("Invalid UTF-8 in message: {:?}", e);
-                }
-                Err(zmq::Error::EAGAIN) => {
-                    // Timeout - normal, check if we should continue
-                    debug!("No alerts for {} seconds", config.timeout_ms / 1000);
-                }
-                Err(e) => {
-                    error!("ZMQ receive error: {}", e);
-                    return Err(Box::new(e));
-                }
             }
+            
+            warn!("Disconnected, reconnecting in {:?}", config.reconnect_delay);
+            thread::sleep(config.reconnect_delay);
         }
-        
-        info!("Alert receiver shutting down (received {} alerts)", alerts_received);
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alert_processor::{Action, ExecutionParams, Priority};
     
     #[test]
-    fn test_receiver_config_default() {
-        let config = ReceiverConfig::default();
-        assert_eq!(config.endpoint, "tcp://localhost:5559");
-        assert_eq!(config.timeout_ms, 5000);
+    fn test_alert_parsing() {
+        let json = r#"{
+            "id": "test-123",
+            "timestamp": 1234567890,
+            "token_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "pool_address": "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
+            "action": "Sell",
+            "params": {
+                "amount": "1000000000",
+                "slippage": 0.05,
+                "max_gas_price": null,
+                "deadline_seconds": 300,
+                "priority": "High"
+            }
+        }"#;
+        
+        let alert: Alert = serde_json::from_str(json).unwrap();
+        assert_eq!(alert.id, "test-123");
+        assert_eq!(alert.timestamp, 1234567890);
     }
     
     #[tokio::test]
-    async fn test_alert_parsing() {
-        let alert_json = r#"{
-            "alert_id": "test_123",
-            "timestamp": 1234567890,
-            "severity": "Critical",
-            "event_type": "ScamAlert",
-            "tx_hash": "0x1234567890123456789012345678901234567890123456789012345678901234",
-            "detected_latency_us": 1000,
-            "pool_address": "0x1234567890123456789012345678901234567890",
-            "pool_version": "V2",
-            "token_address": "0x0987654321098765432109876543210987654321",
-            "token_symbol": "SCAM",
-            "token_decimals": 18,
-            "current_eth_reserve": 100.0,
-            "simulated_eth_reserve": 5.0,
-            "eth_change_amount": -95.0,
-            "eth_change_percent": -95.0,
-            "current_price": 1000.0,
-            "simulated_price": 100.0,
-            "price_impact_percent": -90.0,
-            "confidence_score": 0.95,
-            "gas_price_gwei": 30.0,
-            "details": "Critical drain detected"
-        }"#;
+    async fn test_receiver_creation() {
+        let (tx, _rx) = mpsc::channel(10);
+        let config = ReceiverConfig::default();
+        let receiver = AlertReceiver::new(config, tx);
         
-        let alert_msg: AlertMessage = serde_json::from_str(alert_json).unwrap();
-        let scam_alert = ScamAlert::from_alert_message(alert_msg).unwrap();
-        
-        assert_eq!(scam_alert.token_symbol, "SCAM");
-        assert_eq!(scam_alert.eth_change_percent, -95.0);
-        assert!(scam_alert.is_emergency());
-        assert!(scam_alert.requires_action);
-        assert_eq!(scam_alert.eth_drain_amount(), 95.0);
+        // Verify receiver was created
+        assert_eq!(receiver.config.timeout_ms, 1000);
     }
 }

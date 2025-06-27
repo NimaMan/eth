@@ -1,16 +1,17 @@
-//! ETH Kartal - Automated Trading Protection System
+//! ETH Kartal - High-Performance Transaction Execution Engine
 //! 
-//! A high-performance system for protecting users from scam transactions
-//! by executing protective trades in response to real-time alerts.
+//! Ultra-fast transaction execution system for Ethereum mainnet
+//! designed for sub-200ms alert-to-execution latency.
 
 pub mod alert_processor;
 pub mod common;
+pub mod pools;
+pub mod ranking;
 pub mod risk;
-pub mod strategy;
 pub mod tx_executor;
 pub mod wallet;
 
 // Re-export commonly used types
-// pub use alert_processor::{ScamAlert, AlertReceiver};
-// pub use strategy::{Strategy, DecisionEngine};
-// pub use tx_executor::TransactionExecutor;
+pub use alert_processor::{Alert, AlertReceiver};
+pub use ranking::{TransactionRankingSystem, RankingResult};
+pub use tx_executor::TransactionExecutor;

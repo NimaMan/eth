@@ -1,13 +1,13 @@
 //! Risk Management Module
 //! 
-//! Provides safety controls, position management, and circuit breakers
-//! to prevent losses from system errors or adverse market conditions.
+//! Provides circuit breakers, loss limits, and MEV protection
 
-// Module exports will be added as implementation progresses
-// pub mod position_manager;
-// pub mod circuit_breaker;
-// pub mod metrics;
+pub mod manager;
+pub mod mev_protection;
+pub mod circuit_breaker;
+pub mod simulation;
 
-// pub use position_manager::PositionManager;
-// pub use circuit_breaker::{CircuitBreaker, CircuitState};
-// pub use metrics::RiskMetrics;
+pub use manager::{RiskManager, RiskConfig, RiskDecision};
+pub use mev_protection::{MEVProtector, MEVStrategy, PriorityConfig};
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerState};
+pub use simulation::{SimulationEngine, SimulationMode, SimulationResult};

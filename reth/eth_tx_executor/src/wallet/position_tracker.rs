@@ -23,8 +23,6 @@ pub struct TokenPosition {
     pub balance: U256,
     /// Balance in human-readable format
     pub balance_formatted: f64,
-    /// Approximate value in ETH
-    pub value_eth: f64,
     /// Last update timestamp
     pub last_updated: u64,
 }
@@ -119,7 +117,6 @@ impl PositionTracker {
             decimals,
             balance,
             balance_formatted,
-            value_eth: 0.0, // TODO: Calculate from price oracle
             last_updated: chrono::Utc::now().timestamp() as u64,
         };
         
@@ -237,7 +234,6 @@ mod tests {
             decimals: 18,
             balance: U256::from(1000),
             balance_formatted: 0.001,
-            value_eth: 0.01,
             last_updated: chrono::Utc::now().timestamp() as u64,
         };
         
