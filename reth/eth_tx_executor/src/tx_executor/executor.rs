@@ -3,6 +3,7 @@
 //! Executes transactions with detailed latency tracking
 
 use crate::alert_processor::{Alert, Action, Priority};
+use crate::flashbots::{FlashbotsClient, FlashbotsConfig, BundleBuilder, RelayEndpoint};
 use crate::pools::{PoolFactory, SwapParams};
 use crate::ranking::{TransactionRankingSystem, ExecutionPath};
 use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::path::PathBuf;
 use tokio::sync::RwLock;
-use tracing::{info, error, instrument};
+use tracing::{info, error, warn, instrument};
 
 /// Executor configuration
 #[derive(Debug, Clone)]
@@ -81,6 +82,8 @@ pub struct TransactionExecutor {
     nonce: Arc<RwLock<U256>>,
     /// Configuration
     config: ExecutorConfig,
+    /// Flashbots client (optional)
+    flashbots_client: Option<Arc<FlashbotsClient>>,
 }
 
 impl TransactionExecutor {
@@ -110,6 +113,34 @@ impl TransactionExecutor {
         let current_nonce = provider.get_transaction_count(wallet_address, None).await?;
         let nonce = Arc::new(RwLock::new(current_nonce));
         
+        // Initialize Flashbots client if enabled
+        let flashbots_client = if config.flashbots_enabled {
+            let flashbots_config = FlashbotsConfig {
+                relay_endpoints: vec![
+                    RelayEndpoint::Flashbots,
+                    // Add more relays as needed
+                ],
+                signer: Arc::new(crate::flashbots::BundleSigner::random()), // Should use proper key
+                timeout: std::time::Duration::from_secs(5),
+                simulate_before_submit: true,
+                max_retries: 3,
+                retry_delay: std::time::Duration::from_millis(100),
+            };
+            
+            match FlashbotsClient::new(flashbots_config, provider.clone()) {
+                Ok(client) => {
+                    info!("Flashbots client initialized");
+                    Some(Arc::new(client))
+                }
+                Err(e) => {
+                    error!("Failed to initialize Flashbots client: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
         Ok(Self {
             provider,
             wallet,
@@ -118,6 +149,7 @@ impl TransactionExecutor {
             ranking_system,
             nonce,
             config,
+            flashbots_client,
         })
     }
     
@@ -399,19 +431,99 @@ impl TransactionExecutor {
                 Ok(pending_tx.tx_hash())
             }
             ExecutionPath::FlashbotsBundle { max_block_number: _ } => {
-                // TODO: Implement Flashbots submission
-                info!("Flashbots submission not yet implemented, falling back to public mempool");
-                let signature = self.wallet.sign_transaction(&tx).await?;
-                let raw_tx = tx.rlp_signed(&signature);
-                let pending_tx = self.provider.send_raw_transaction(raw_tx).await?;
-                Ok(pending_tx.tx_hash())
+                // Use Flashbots for critical transactions
+                if let Some(flashbots) = &self.flashbots_client {
+                    info!("Submitting transaction via Flashbots");
+                    
+                    // Sign transaction
+                    let signature = self.wallet.sign_transaction(&tx).await?;
+                    let signed_tx = tx.rlp_signed(&signature);
+                    
+                    // Get current block
+                    let current_block = self.provider.get_block_number().await?.as_u64();
+                    let target_block = current_block + 1; // Next block
+                    
+                    // Build bundle
+                    let bundle = BundleBuilder::new()
+                        .add_transaction(signed_tx.clone())
+                        .block_number(target_block)
+                        .time_window(12) // 12 seconds (1 block time)
+                        .protect_transaction(tx.hash(&signature))
+                        .build()?;
+                    
+                    // Submit bundle
+                    match flashbots.submit_bundle(bundle).await? {
+                        crate::flashbots::BundleResult::Included { block_hash, .. } => {
+                            info!("Bundle included via Flashbots in block {:?}", block_hash);
+                            Ok(tx.hash(&signature))
+                        }
+                        crate::flashbots::BundleResult::NotIncluded { reason } => {
+                            warn!("Flashbots bundle not included: {:?}, falling back to public mempool", reason);
+                            // Fallback to public mempool
+                            let pending_tx = self.provider.send_raw_transaction(signed_tx).await?;
+                            Ok(pending_tx.tx_hash())
+                        }
+                        crate::flashbots::BundleResult::Failed { error } => {
+                            error!("Flashbots submission failed: {}", error);
+                            return Err(error.into());
+                        }
+                    }
+                } else {
+                    warn!("Flashbots requested but not available, using public mempool");
+                    let signature = self.wallet.sign_transaction(&tx).await?;
+                    let raw_tx = tx.rlp_signed(&signature);
+                    let pending_tx = self.provider.send_raw_transaction(raw_tx).await?;
+                    Ok(pending_tx.tx_hash())
+                }
             }
-            ExecutionPath::MultiPath { timeout_ms: _ } => {
-                // Try public mempool first, fallback to Flashbots
+            ExecutionPath::MultiPath { timeout_ms } => {
+                // Try public mempool first with timeout, then Flashbots
                 let signature = self.wallet.sign_transaction(&tx).await?;
                 let raw_tx = tx.rlp_signed(&signature);
-                let pending_tx = self.provider.send_raw_transaction(raw_tx).await?;
-                Ok(pending_tx.tx_hash())
+                
+                // Try public submission with timeout
+                let submit_future = self.provider.send_raw_transaction(raw_tx.clone());
+                let timeout = tokio::time::Duration::from_millis(*timeout_ms);
+                
+                match tokio::time::timeout(timeout, submit_future).await {
+                    Ok(Ok(pending_tx)) => Ok(pending_tx.tx_hash()),
+                    Ok(Err(e)) => {
+                        warn!("Public submission failed: {}, trying Flashbots", e);
+                        // Try Flashbots as fallback
+                        if let Some(flashbots) = &self.flashbots_client {
+                            let current_block = self.provider.get_block_number().await?.as_u64();
+                            let bundle = BundleBuilder::new()
+                                .add_transaction(raw_tx.clone())
+                                .block_number(current_block + 1)
+                                .build()?;
+                            
+                            match flashbots.submit_bundle(bundle).await? {
+                                crate::flashbots::BundleResult::Included { .. } => Ok(tx.hash(&signature)),
+                                _ => Err("Both public and Flashbots submission failed".into()),
+                            }
+                        } else {
+                            Err(e.into())
+                        }
+                    }
+                    Err(_) => {
+                        warn!("Public submission timed out, trying Flashbots");
+                        // Timeout - try Flashbots
+                        if let Some(flashbots) = &self.flashbots_client {
+                            let current_block = self.provider.get_block_number().await?.as_u64();
+                            let bundle = BundleBuilder::new()
+                                .add_transaction(raw_tx.clone())
+                                .block_number(current_block + 1)
+                                .build()?;
+                            
+                            match flashbots.submit_bundle(bundle).await? {
+                                crate::flashbots::BundleResult::Included { .. } => Ok(tx.hash(&signature)),
+                                _ => Err("Both public and Flashbots submission failed".into()),
+                            }
+                        } else {
+                            Err("Public submission timed out and Flashbots not available".into())
+                        }
+                    }
+                }
             }
         }
     }

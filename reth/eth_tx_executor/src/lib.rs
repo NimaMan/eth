@@ -5,6 +5,7 @@
 
 pub mod alert_processor;
 pub mod common;
+pub mod flashbots;
 pub mod pools;
 pub mod ranking;
 pub mod risk;
