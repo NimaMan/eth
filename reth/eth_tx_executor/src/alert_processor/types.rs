@@ -27,18 +27,8 @@ pub struct Alert {
     pub params: ExecutionParams,
 }
 
-/// Action to execute
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Action {
-    /// Sell tokens immediately
-    Sell,
-    /// Buy tokens immediately
-    Buy,
-    /// Add liquidity
-    AddLiquidity,
-    /// Remove liquidity
-    RemoveLiquidity,
-}
+// Re-export Action from common module
+pub use crate::common::Action;
 
 /// Parameters for execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,16 +49,8 @@ pub struct ExecutionParams {
     pub priority: Priority,
 }
 
-/// Execution priority
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum Priority {
-    /// Ultra-high priority - use flashbots, high gas
-    Critical,
-    /// High priority - elevated gas
-    High,
-    /// Normal priority - standard gas
-    Normal,
-}
+// Re-export Priority from common module
+pub use crate::common::Priority;
 
 impl Alert {
     /// Calculate deadline timestamp

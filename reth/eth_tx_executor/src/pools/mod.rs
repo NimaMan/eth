@@ -12,33 +12,9 @@ pub mod uniswap_v2;
 // Future: pub mod uniswap_v3;
 // Future: pub mod uniswap_v4;
 
-/// Result type for pool operations
-pub type PoolResult<T> = Result<T, PoolError>;
-
-/// Pool-specific errors
-#[derive(Debug, thiserror::Error)]
-pub enum PoolError {
-    #[error("Insufficient liquidity: required {required}, available {available}")]
-    InsufficientLiquidity { required: U256, available: U256 },
-    
-    #[error("Slippage exceeded: expected {expected}, got {actual}")]
-    SlippageExceeded { expected: U256, actual: U256 },
-    
-    #[error("Pool not found: {address}")]
-    PoolNotFound { address: Address },
-    
-    #[error("Invalid pool state: {reason}")]
-    InvalidPoolState { reason: String },
-    
-    #[error("Transaction failed: {reason}")]
-    TransactionFailed { reason: String },
-    
-    #[error("RPC error: {0}")]
-    RpcError(#[from] ProviderError),
-    
-    #[error("Contract error: {0}")]
-    ContractError(#[from] ContractError<Provider<Http>>),
-}
+// Use the common error types
+use crate::common::errors::PoolError;
+pub type PoolResult<T> = crate::common::Result<T>;
 
 /// Swap parameters common to all pool types
 #[derive(Debug, Clone)]

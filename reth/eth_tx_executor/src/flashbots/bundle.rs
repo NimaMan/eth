@@ -199,7 +199,7 @@ impl BundleBuilder {
 }
 
 /// Helper to extract transaction value from signed transaction
-pub fn extract_transaction_value(signed_tx: &Bytes) -> Result<U256, Box<dyn std::error::Error>> {
+pub fn extract_transaction_value(_signed_tx: &Bytes) -> Result<U256, Box<dyn std::error::Error>> {
     // Decode RLP to get transaction value
     // This is simplified - in production would properly decode transaction type
     Ok(U256::zero()) // Placeholder

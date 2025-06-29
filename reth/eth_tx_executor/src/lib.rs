@@ -5,8 +5,10 @@
 
 pub mod alert_processor;
 pub mod common;
+pub mod config;
 pub mod flashbots;
 pub mod pools;
+pub mod protocols;
 pub mod ranking;
 pub mod risk;
 pub mod tx_executor;
@@ -14,5 +16,8 @@ pub mod wallet;
 
 // Re-export commonly used types
 pub use alert_processor::{Alert, AlertReceiver};
+pub use common::{KartalError, Result};
+pub use config::Config;
+pub use protocols::ProtocolRegistry;
 pub use ranking::{TransactionRankingSystem, RankingResult};
 pub use tx_executor::TransactionExecutor;

@@ -85,7 +85,9 @@ impl UniswapV2Pool {
         // Verify pool exists
         let code = provider.get_code(pool_address, None).await?;
         if code.is_empty() {
-            return Err(PoolError::PoolNotFound { address: pool_address });
+            return Err(crate::common::errors::KartalError::Pool(
+                PoolError::PoolNotFound { address: pool_address }
+            ));
         }
         
         let (token0, token1) = Self::sort_tokens(token_a, token_b);
@@ -104,7 +106,9 @@ impl UniswapV2Pool {
         
         // Uniswap V2 init code hash
         let init_code_hash = hex::decode("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f")
-            .map_err(|_| PoolError::InvalidPoolState { reason: "Invalid init code hash".to_string() })?;
+            .map_err(|_| crate::common::errors::KartalError::Pool(
+                PoolError::InvalidPoolState { reason: "Invalid init code hash".to_string() }
+            ))?;
         
         // Compute CREATE2 address
         let salt = ethers::utils::keccak256(encode(&[
@@ -217,16 +221,20 @@ impl Pool for UniswapV2Pool {
         } else if token_in == pool.token1 {
             (reserve1, reserve0)
         } else {
-            return Err(PoolError::InvalidPoolState {
-                reason: "Token not in pool".to_string(),
-            });
+            return Err(crate::common::errors::KartalError::Pool(
+                PoolError::InvalidPoolState {
+                    reason: "Token not in pool".to_string(),
+                }
+            ));
         };
         
         if reserve_in.is_zero() || reserve_out.is_zero() {
-            return Err(PoolError::InsufficientLiquidity {
-                required: amount_in,
-                available: U256::zero(),
-            });
+            return Err(crate::common::errors::KartalError::Pool(
+                PoolError::InsufficientLiquidity {
+                    required: amount_in,
+                    available: U256::zero(),
+                }
+            ));
         }
         
         Ok(Self::calculate_amount_out(amount_in, reserve_in, reserve_out))
@@ -308,9 +316,11 @@ impl Pool for UniswapV2Pool {
     async fn execute_swap(&self, _params: SwapParams) -> PoolResult<SwapResult> {
         // This would be implemented by the transaction executor
         // Pool only builds the transaction
-        Err(PoolError::TransactionFailed {
-            reason: "Execute swap should be called through TransactionExecutor".to_string(),
-        })
+        Err(crate::common::errors::KartalError::Execution(
+            crate::common::errors::ExecutionError::TransactionFailed {
+                reason: "Execute swap should be called through TransactionExecutor".to_string(),
+            }
+        ))
     }
     
     #[instrument(skip(self, params))]
