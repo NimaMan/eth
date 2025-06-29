@@ -2,7 +2,7 @@
 //! 
 //! Executes transactions with detailed latency tracking
 
-use crate::alert_processor::{Alert, Action};
+use crate::alert_processor::{Alert, Action, Priority};
 use crate::pools::{PoolFactory, SwapParams};
 use crate::ranking::{TransactionRankingSystem, ExecutionPath};
 use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
@@ -332,18 +332,28 @@ impl TransactionExecutor {
         // 5. Build transaction
         let mut tx = pool.build_swap_tx(swap_params).await?;
         
-        // Set value for ETH purchase (need to send ETH with transaction)
-        tx.set_value(eth_to_spend);
+        // Note: For ETH swaps, the value is already set in build_swap_tx
+        // Only override if not already set
+        if tx.value().is_none() || tx.value() == Some(&U256::zero()) {
+            tx.set_value(eth_to_spend);
+        }
         
         // Set optimal gas price from ranking system
         tx.set_gas_price(ranking_result.optimal_gas_price);
         
+        // Set gas limit for optimal performance
+        // For critical alerts, use pre-calculated safe gas limit to avoid estimation delay
+        let gas_limit = if alert.params.priority == Priority::Critical {
+            U256::from(300_000) // Safe gas limit for ETH->token swaps
+        } else {
+            // For non-critical, we can afford the ~10ms to estimate
+            self.provider.estimate_gas(&tx, None).await.unwrap_or(U256::from(250_000))
+        };
+        tx.set_gas(gas_limit);
+        
         // Set nonce
         let nonce = self.get_next_nonce().await;
         tx.set_nonce(nonce);
-        
-        // Set from address
-        tx.set_from(self.wallet.address());
         
         // Set from address
         tx.set_from(self.wallet.address());

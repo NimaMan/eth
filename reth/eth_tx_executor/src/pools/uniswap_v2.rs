@@ -18,6 +18,29 @@ pub mod addresses {
     }
 }
 
+/// Pre-computed function selectors for optimal performance
+mod selectors {
+    lazy_static::lazy_static! {
+        // swapExactETHForTokens(uint256,address[],address,uint256)
+        pub static ref SWAP_ETH_FOR_TOKENS: [u8; 4] = {
+            let hash = ethers::utils::keccak256("swapExactETHForTokens(uint256,address[],address,uint256)");
+            [hash[0], hash[1], hash[2], hash[3]]
+        };
+        
+        // swapExactTokensForETH(uint256,uint256,address[],address,uint256)
+        pub static ref SWAP_TOKENS_FOR_ETH: [u8; 4] = {
+            let hash = ethers::utils::keccak256("swapExactTokensForETH(uint256,uint256,address[],address,uint256)");
+            [hash[0], hash[1], hash[2], hash[3]]
+        };
+        
+        // swapExactTokensForTokens(uint256,uint256,address[],address,uint256)
+        pub static ref SWAP_TOKENS_FOR_TOKENS: [u8; 4] = {
+            let hash = ethers::utils::keccak256("swapExactTokensForTokens(uint256,uint256,address[],address,uint256)");
+            [hash[0], hash[1], hash[2], hash[3]]
+        };
+    }
+}
+
 /// Uniswap V2 pool instance
 pub struct UniswapV2Pool {
     address: Address,
@@ -197,23 +220,55 @@ impl Pool for UniswapV2Pool {
     
     #[instrument(skip(self, params))]
     async fn build_swap_tx(&self, params: SwapParams) -> PoolResult<TypedTransaction> {
-        // For Uniswap V2, we use the router
+        // Check if this is an ETH -> Token swap (buying tokens with ETH)
+        let is_eth_input = params.token_in == *addresses::WETH;
+        
+        // For ETH input swaps, we use swapExactETHForTokens
+        if is_eth_input {
+            debug!("Building ETH -> Token swap transaction");
+            
+            // Path for ETH input is just [WETH, token_out]
+            let path = vec![*addresses::WETH, params.token_out];
+            let path_tokens: Vec<Token> = path.iter().map(|&addr| Token::Address(addr)).collect();
+            
+            // Use pre-computed selector for performance
+            let function_selector = &selectors::SWAP_ETH_FOR_TOKENS[..];
+            
+            let encoded_params = encode(&[
+                Token::Uint(params.amount_out_min),  // amountOutMin
+                Token::Array(path_tokens),            // path
+                Token::Address(params.recipient),     // to
+                Token::Uint(params.deadline),         // deadline
+            ]);
+            
+            let mut data = function_selector.to_vec();
+            data.extend_from_slice(&encoded_params);
+            
+            // CRITICAL: For ETH swaps, we don't send amount_in as parameter
+            // Instead, it's sent as msg.value in the transaction
+            let tx = TransactionRequest::new()
+                .to(*addresses::ROUTER)
+                .data(data)
+                .from(params.recipient)
+                .value(params.amount_in);  // ETH value sent with transaction
+            
+            return Ok(tx.into());
+        }
+        
+        // For token -> token or token -> ETH swaps
         let path = if params.token_out == *addresses::WETH {
             vec![params.token_in, *addresses::WETH]
-        } else if params.token_in == *addresses::WETH {
-            vec![*addresses::WETH, params.token_out]
         } else {
-            vec![params.token_in, *addresses::WETH, params.token_out]
+            // Direct path if pool exists, otherwise through WETH
+            vec![params.token_in, params.token_out]
         };
         
-        // Build swapExactTokensForTokens or swapExactTokensForETH
-        let (function_sig, _is_eth_out) = if params.token_out == *addresses::WETH {
-            ("swapExactTokensForETH(uint256,uint256,address[],address,uint256)", true)
+        // Use pre-computed selectors for performance
+        let function_selector = if params.token_out == *addresses::WETH {
+            &selectors::SWAP_TOKENS_FOR_ETH[..]
         } else {
-            ("swapExactTokensForTokens(uint256,uint256,address[],address,uint256)", false)
+            &selectors::SWAP_TOKENS_FOR_TOKENS[..]
         };
-        
-        let function_selector = &ethers::utils::keccak256(function_sig.as_bytes())[0..4];
         
         let path_tokens: Vec<Token> = path.iter().map(|&addr| Token::Address(addr)).collect();
         

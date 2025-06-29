@@ -60,7 +60,7 @@ pub struct ExecutionParams {
 }
 
 /// Execution priority
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum Priority {
     /// Ultra-high priority - use flashbots, high gas
     Critical,
