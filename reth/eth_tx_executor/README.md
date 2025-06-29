@@ -152,12 +152,81 @@ Recent performance test results:
 - **MEV Protection**: Gas optimization and Flashbots integration
 - **Circuit Breakers**: Automatic disable on repeated failures
 
-## 📋 TODO
+## 🚨 Security Audit & Production Readiness Roadmap
+
+### Critical Security Issues (Must Fix Before Production)
+
+#### 1. **Wallet Security** 🔴
+- **Issue**: `signer()` method exposes full private key via clone
+- **Risk**: Any code can access and exfiltrate private keys
+- **Fix**: Remove method or return signing interface only
+
+#### 2. **Nonce Management** 🔴
+- **Issue**: Nonce increments on failure, breaking all future transactions
+- **Risk**: One failed transaction causes cascade failure
+- **Fix**: Only increment after successful submission
+
+#### 3. **No Auto-Lock** 🔴
+- **Issue**: Wallet stays unlocked indefinitely
+- **Risk**: Memory dumps could contain private keys
+- **Fix**: Implement timeout-based auto-lock
+
+#### 4. **No Graceful Shutdown** 🟡
+- **Issue**: No signal handling, wallet never locks on exit
+- **Risk**: Sensitive data remains in memory
+- **Fix**: Handle SIGTERM/SIGINT, lock wallet on shutdown
+
+#### 5. **ZMQ Receiver Issues** 🟡
+- **Issue**: Infinite loop, no shutdown mechanism, blocking send
+- **Risk**: Cannot stop service cleanly, potential deadlock
+- **Fix**: Add shutdown channel, use try_send
+
+#### 6. **Integer Math Precision** 🟡
+- **Issue**: Using integer division for ETH calculations
+- **Risk**: Loss of precision in financial calculations
+- **Fix**: Use proper decimal arithmetic
+
+#### 7. **Risk Manager Disconnected** 🟡
+- **Issue**: Risk manager exists but not integrated with main
+- **Risk**: No actual risk controls in production
+- **Fix**: Wire risk manager into execution flow
+
+### Production Readiness Checklist
+
+#### Phase 1: Critical Security (3-4 days)
+- [ ] Fix wallet cloning vulnerability
+- [ ] Implement proper nonce management with recovery
+- [ ] Add wallet auto-lock with configurable timeout
+- [ ] Add graceful shutdown with cleanup
+- [ ] Fix ZMQ receiver lifecycle management
+- [ ] Replace f64 with proper decimal types for money
+
+#### Phase 2: Integration & Testing (2-3 days)
+- [ ] Connect risk manager to main execution flow
+- [ ] Add comprehensive error recovery
+- [ ] Implement transaction retry logic
+- [ ] Add integration tests with real Reth node
+- [ ] Performance validation with real mempool data
+
+#### Phase 3: Production Features (1-2 weeks)
+- [ ] Hardware wallet support (Ledger/Trezor)
+- [ ] Multi-signature wallet support
+- [ ] Advanced nonce management with queue
+- [ ] Monitoring and alerting integration
+- [ ] Audit logging for all transactions
+- [ ] Rate limiting and DDoS protection
+
+### Estimated Timeline
+- **Current Status**: NOT production ready ❌
+- **Minimum Safe Deployment**: 1 week (Phase 1 + 2)
+- **Full Production Ready**: 3 weeks (all phases)
+
+## 📋 Feature TODO
 
 ### High Priority
-- [ ] Implement buy transaction logic
-- [ ] Add Flashbots submission support
-- [ ] Complete common module with shared types
+- [x] Implement buy transaction logic ✅
+- [x] Add Flashbots submission support ✅
+- [x] Complete common module with shared types ✅
 
 ### Medium Priority  
 - [ ] Add Uniswap V3 pool support
