@@ -4,7 +4,6 @@
 //! ensuring consistent error handling and reporting.
 
 use ethers::prelude::*;
-use std::fmt;
 use thiserror::Error;
 
 /// Main error type for the entire eth_kartal system

@@ -3,9 +3,9 @@
 //! Ensures our protective transactions execute before detected scam transactions
 //! by implementing various frontrunning and priority strategies
 
-use ethers::types::{U256, H256, Transaction, Address};
+use ethers::types::{U256, H256};
 use std::collections::HashMap;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use crate::alert_processor::Alert;
 
 /// MEV protection strategies

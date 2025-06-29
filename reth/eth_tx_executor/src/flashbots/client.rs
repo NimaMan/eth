@@ -1,11 +1,11 @@
 //! Flashbots relay client for bundle submission
 
 use ethers::prelude::*;
-use reqwest::{Client, header};
+use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, info, warn, error, instrument};
+use tracing::{info, warn, error, instrument};
 
 use super::bundle::Bundle;
 use super::signer::BundleSigner;
@@ -265,7 +265,7 @@ impl FlashbotsClient {
     async fn wait_for_inclusion(
         &self,
         target_block: u64,
-        submissions: Vec<(&str, H256)>,
+        _submissions: Vec<(&str, H256)>,
     ) -> Result<BundleResult, Box<dyn std::error::Error>> {
         let start_time = std::time::Instant::now();
         let timeout = Duration::from_secs(30); // Wait up to 30 seconds
@@ -290,7 +290,7 @@ impl FlashbotsClient {
                 
                 // Check if any of our transactions are in the block
                 // In production, would check all bundle transactions
-                let tx_hashes: Vec<H256> = block.transactions.iter().map(|tx| tx.hash()).collect();
+                let _tx_hashes: Vec<H256> = block.transactions.iter().map(|tx| tx.hash()).collect();
                 
                 // For now, assume not included
                 return Ok(BundleResult::NotIncluded {

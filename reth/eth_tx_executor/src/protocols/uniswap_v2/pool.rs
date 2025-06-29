@@ -7,7 +7,7 @@ use ethers::prelude::*;
 use ethers::abi::{encode, Token};
 use ethers::types::transaction::eip2718::TypedTransaction;
 use std::sync::Arc;
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use super::{addresses, constants, selectors};
 

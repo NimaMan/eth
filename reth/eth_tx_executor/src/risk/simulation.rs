@@ -2,9 +2,9 @@
 //!
 //! Provides safe testing environment for strategy validation without real transactions
 
-use ethers::types::{Address, U256, H256};
+use ethers::types::{Address, H256};
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
+use tracing::info;
 use crate::alert_processor::Alert;
 
 /// Simulation mode configuration

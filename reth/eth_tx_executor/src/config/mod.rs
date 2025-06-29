@@ -3,7 +3,7 @@
 //! Handles loading configuration from environment variables, TOML files,
 //! and provides validation and type-safe access to all settings.
 
-use crate::common::{Result, errors::ConfigError};
+use crate::common::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use ethers::types::Address;

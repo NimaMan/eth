@@ -2,7 +2,6 @@
 
 use super::Config;
 use crate::common::{Result, errors::ConfigError};
-use std::path::Path;
 
 /// Configuration validator
 pub struct ConfigValidator;

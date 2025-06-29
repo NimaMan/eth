@@ -73,11 +73,16 @@ impl UniswapV2Pool {
         // Known mainnet pool addresses (temporary hardcode for testing)
         let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap();
         let usdc: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse().unwrap();
-        let known_pool: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse().unwrap();
+        let usdt: Address = "0xdAC17F958D2ee523a2206206994597C13D831ec7".parse().unwrap();
+        let weth_usdc_pool: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse().unwrap();
+        let weth_usdt_pool: Address = "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852".parse().unwrap();
         
         let pool_address = if (token_a == weth && token_b == usdc) || (token_a == usdc && token_b == weth) {
-            debug!("Using known WETH/USDC pool address: {:?}", known_pool);
-            known_pool
+            debug!("Using known WETH/USDC pool address: {:?}", weth_usdc_pool);
+            weth_usdc_pool
+        } else if (token_a == weth && token_b == usdt) || (token_a == usdt && token_b == weth) {
+            debug!("Using known WETH/USDT pool address: {:?}", weth_usdt_pool);
+            weth_usdt_pool
         } else {
             pool_address
         };

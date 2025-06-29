@@ -2,7 +2,7 @@
 //!
 //! Implements circuit breaker pattern for transaction execution safety
 
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, error};
 
 /// Circuit breaker states

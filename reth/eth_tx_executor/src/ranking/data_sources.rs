@@ -5,12 +5,12 @@
 
 use ethers::prelude::*;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info, warn};
 
 /// Integrates live data sources for gas optimization
 pub struct LiveDataIntegrator {
@@ -72,7 +72,7 @@ struct BlockGasAnalysis {
 
 /// Gas price trends over time
 #[derive(Debug, Default, Clone)]
-struct GasPriceTrends {
+pub struct GasPriceTrends {
     /// Average gas price change per minute
     pub price_velocity: f64,
     /// Volatility measure (standard deviation)
@@ -83,7 +83,7 @@ struct GasPriceTrends {
 
 /// MEV activity patterns
 #[derive(Debug, Default, Clone)]
-struct MevPatterns {
+pub struct MevPatterns {
     /// Average MEV transaction gas premium
     pub avg_mev_premium: U256,
     /// MEV transaction frequency (per block)

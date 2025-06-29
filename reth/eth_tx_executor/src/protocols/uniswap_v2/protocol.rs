@@ -81,7 +81,7 @@ impl DexProtocol for UniswapV2Protocol {
         }
     }
     
-    async fn get_active_pools(&self, limit: usize) -> Result<Vec<Box<dyn DexPool>>> {
+    async fn get_active_pools(&self, _limit: usize) -> Result<Vec<Box<dyn DexPool>>> {
         // For V2, we don't have an easy way to enumerate all pools
         // In production, this would query events or use a subgraph
         tracing::warn!("get_active_pools not fully implemented for UniswapV2");

@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use super::{MempoolStats, GasPercentiles, CongestionLevel};
 
 /// Tracks pending transactions in real-time
