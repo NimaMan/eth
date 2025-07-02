@@ -10,6 +10,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Deserialize)]
 pub struct PoolUpdate {
     /// Current ETH reserve level in the pool
+    #[serde(alias = "denom_reserve")]
     pub eth_reserve: f64,
     
     /// Current token reserve level in the pool
@@ -19,9 +20,11 @@ pub struct PoolUpdate {
     pub token_address: String,
     
     /// Ethereum block number when this pool data was observed
+    #[serde(alias = "latest_block_number")]
     pub block_number: u64,
     
     /// Unix timestamp when the update was processed
+    #[serde(default)]
     pub update_time: f64,
 }
 
