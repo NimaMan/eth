@@ -83,6 +83,27 @@ struct Args {
     alert_zmq_address: String,
 }
 
+/// Check if transaction is a liquidity removal based on function signature
+fn is_liquidity_removal(input_data: &Option<Vec<u8>>) -> Option<&'static str> {
+    if let Some(data) = input_data {
+        if data.len() >= 4 {
+            let selector = hex::encode(&data[0..4]);
+            match selector.as_str() {
+                "02751cec" => Some("removeLiquidityETH"),
+                "baa2abde" => Some("removeLiquidity"),
+                "af2979eb" => Some("removeLiquidityETHSupportingFeeOnTransferTokens"),
+                "5b0d5984" => Some("removeLiquidityETHWithPermit"),
+                "ded9382a" => Some("removeLiquidityETHWithPermitSupportingFeeOnTransferTokens"),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Convert Ultra-Fast transaction to TransactionView
 fn convert_ultra_fast_to_transaction_view(tx: &UltraFastTransaction) -> Result<TransactionView> {
     // Parse transaction data from JSON
@@ -212,11 +233,12 @@ async fn main() -> Result<()> {
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let log_file_with_timestamp = args.log_file.replace(".log", &format!("_{}.log", timestamp));
     
-    // Create separate log files for scams, market events, and timing reports
+    // Create separate log files for scams, market events, timing reports, and liquidity removals
     let log_dir = std::path::Path::new(&args.log_file).parent().unwrap_or(std::path::Path::new("."));
     let scam_log_file = log_dir.join(format!("scam_alerts_full_tx_{}.log", timestamp));
     let market_log_file = log_dir.join(format!("market_events_full_tx_{}.log", timestamp));
     let timing_log_file = log_dir.join(format!("timing_reports_full_tx_{}.log", timestamp));
+    let liquidity_removal_log_file = log_dir.join(format!("liquidity_removals_full_tx_{}.log", timestamp));
     
     // Create file handles for scam and market event logging
     let scam_file = Arc::new(Mutex::new(std::fs::OpenOptions::new()
@@ -234,6 +256,11 @@ async fn main() -> Result<()> {
         .append(true)
         .open(&timing_log_file)?));
     
+    let liquidity_removal_file = Arc::new(Mutex::new(std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&liquidity_removal_log_file)?));
+    
     tracing_subscriber::fmt()
         .with_target(false)
         .init();
@@ -241,6 +268,7 @@ async fn main() -> Result<()> {
     info!("📝 Main timing log: {}", log_file_with_timestamp);
     info!("📝 Logging scams to: {}", scam_log_file.display());
     info!("📊 Logging market events to: {}", market_log_file.display());
+    info!("💧 Logging liquidity removals to: {}", liquidity_removal_log_file.display());
     
     info!("🚀 Starting Mempool Signal Detection Service - Full TX IPC Version");
     info!("   ⚡ Using Full TX IPC for 1.040ms average latency");
@@ -476,6 +504,31 @@ async fn main() -> Result<()> {
                     continue;
                 }
             };
+            
+            // Check for liquidity removal
+            if let Some(removal_type) = is_liquidity_removal(&tx_view.input_data) {
+                let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let log_entry = format!(
+                    "[{}] 💧 {} | TX: {} | From: {} | To: {} | Value: {:.6} ETH | Gas: {} | IPC: {:.3}ms\n",
+                    timestamp,
+                    removal_type,
+                    tx_view.hash,
+                    tx_view.from.map(|a| format!("{:?}", a)).unwrap_or_else(|| "Unknown".to_string()),
+                    tx_view.to.map(|a| format!("{:?}", a)).unwrap_or_else(|| "Unknown".to_string()),
+                    tx_view.value.to_string().parse::<u128>().unwrap_or(0) as f64 / 1e18,
+                    tx_view.gas,
+                    detection_latency_ms
+                );
+                
+                // Write to liquidity removal log file
+                {
+                    let mut file = liquidity_removal_file.lock().await;
+                    let _ = file.write_all(log_entry.as_bytes());
+                    let _ = file.flush();
+                }
+                
+                info!("💧 {} detected in tx {}", removal_type, tx_view.hash);
+            }
             
             // Use debug_traceCall to get state changes - simulate ALL transactions
             let sim_start = Instant::now();
