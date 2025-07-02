@@ -75,22 +75,12 @@ tokio-postgres  = "0.7"
 csv             = "1.3"
 thiserror       = "1.0"
 anyhow          = "1.0"
-tempfile        = "3.8"
 
 # HTTP API server for real-time metrics
 warp            = "0.3"
 
-# Random number generation for simulation
-rand            = "0.8"
-
 # WebSocket client for measurements
 tokio-tungstenite = "0.20"
-
-# CPU count detection for parallel processing
-num_cpus = "1.16"
-
-# Low-level socket control for optimized IPC
-libc = "0.2"
 
 [lib]
 name = "mempool_processor"
@@ -119,9 +109,6 @@ path = "src/bin/metrics_api_server.rs"
 name = "mempool_signal_detection_full_tx_ipc"
 path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
 
-[[bin]]
-name = "mempool_processor_full_tx"
-path = "src/bin/mempool_processor_full_tx.rs"
 
 [[bin]]
 name = "mempool_full_tx_client"
@@ -132,18 +119,6 @@ path = "src/bin/mempool_full_tx_client.rs"
 
 
 
-# Performance testing binaries
-[[bin]]
-name = "simple_performance_test"
-path = "tools/performance/simple_performance_test.rs"
-
-[[bin]]
-name = "mempool_performance_analyzer"
-path = "tools/performance/mempool_performance_analyzer.rs"
-
-[[bin]]
-name = "revm_performance_monitor"
-path = "tools/performance/revm_performance_monitor.rs"
 
 
 # Examples

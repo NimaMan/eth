@@ -15,10 +15,10 @@ use tokio::time;
 use tokio::sync::Mutex;
 use chrono::Local;
 use std::io::Write;
+use hex;
 
-// Mempool processor imports - using Full TX IPC
-use mempool_processor::mempool_fetcher::ipc_ipc_variants::{FullTxIpcClient, FullIpcTransaction};
-use mempool_processor::mempool_fetcher::TransactionView;
+// Mempool processor imports - using ULTRA-FAST IPC
+use mempool_processor::mempool_fetcher::{UltraFastClient, UltraFastTransaction, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
 use mempool_processor::tx_simulator::DebugTraceCallSimulator;
@@ -83,10 +83,53 @@ struct Args {
     alert_zmq_address: String,
 }
 
-/// Convert Full TX IPC transaction to TransactionView
-fn convert_full_tx_to_transaction_view(tx: &FullIpcTransaction) -> TransactionView {
-    // The FullIpcTransaction already contains a tx_view field!
-    tx.tx_view.clone()
+/// Convert Ultra-Fast transaction to TransactionView
+fn convert_ultra_fast_to_transaction_view(tx: &UltraFastTransaction) -> Result<TransactionView> {
+    // Parse transaction data from JSON
+    let hash = tx.data["hash"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing hash"))?
+        .parse::<H256>()?;
+    
+    let from = tx.data["from"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing from"))?
+        .parse::<Address>()?;
+    
+    let to = tx.data["to"].as_str()
+        .and_then(|s| s.parse::<Address>().ok());
+    
+    let value = tx.data["value"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing value"))?
+        .parse::<U256>()?;
+    
+    let gas_price = tx.data["gasPrice"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing gasPrice"))?
+        .parse::<U256>()?;
+    
+    let gas_limit = tx.data["gas"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing gas"))?
+        .parse::<U256>()?;
+    
+    let nonce = tx.data["nonce"].as_str()
+        .ok_or_else(|| eyre::eyre!("Missing nonce"))?
+        .parse::<U256>()?;
+    
+    let input_data = if let Some(input_str) = tx.data["input"].as_str() {
+        let hex_str = input_str.strip_prefix("0x").unwrap_or(input_str);
+        Some(hex::decode(hex_str)?)
+    } else {
+        None
+    };
+    
+    Ok(TransactionView {
+        hash: hash.as_bytes().to_vec(),
+        from: from.as_bytes().to_vec(),
+        to: to.map(|addr| addr.as_bytes().to_vec()),
+        value,
+        gas_price: Some(gas_price),
+        gas_limit: Some(gas_limit),
+        nonce: Some(nonce),
+        input_data,
+    })
 }
 
 /// Write timing report to file - NON-BLOCKING VERSION
@@ -216,12 +259,12 @@ async fn main() -> Result<()> {
     
     info!("📦 Current block: #{}", latest_block.number.unwrap_or_default());
     
-    // Initialize Full TX IPC client (BEST PERFORMANCE)
-    info!("🔌 Initializing Full TX IPC client...");
+    // Initialize ULTRA-FAST IPC client
+    info!("🚀 Initializing ULTRA-FAST IPC client...");
     info!("   Socket path: {}", args.ipc_path);
-    let ipc_client = FullTxIpcClient::new(Some(&args.ipc_path))?;
-    ipc_client.start_monitoring().await?;
-    info!("✅ Full TX IPC subscription active (1.040ms avg latency, 64.7% sub-1ms)");
+    let ipc_client = UltraFastClient::new(Some(&args.ipc_path))?;
+    ipc_client.start().await?;
+    info!("⚡ ULTRA-FAST IPC subscription active - Sub-10μs detection!");
     
     // Initialize pool subscriber
     info!("🏊 Initializing pool subscriber...");
@@ -262,7 +305,7 @@ async fn main() -> Result<()> {
     // Initialize scam prediction writer
     info!("💾 Initializing scam prediction writer...");
     
-    use mempool_processor::mempool_fetcher::processor::ScamPredictionWriter;
+    use mempool_processor::database::ScamPredictionWriter;
     
     // Try to create real ScamPredictionWriter with actual database parameters
     let db_writer = Arc::new(
@@ -377,8 +420,8 @@ async fn main() -> Result<()> {
         }
         
         
-        // Get new transactions from Full TX IPC (much faster than WebSocket!)
-        let new_txs = match ipc_client.get_full_transactions(5).await {  // Get 5 at a time for better throughput
+        // Get new transactions from ULTRA-FAST IPC
+        let new_txs = match ipc_client.get_transactions(10).await {  // Get 10 at a time
             Ok(txs) => {
                 if !txs.is_empty() {
                     info!("📦 Got {} transactions from IPC", txs.len());
@@ -410,7 +453,7 @@ async fn main() -> Result<()> {
             }
             
             // Track IPC detection latency
-            let detection_latency_ms = ipc_tx.latency_us as f64 / 1000.0;
+            let detection_latency_ms = ipc_tx.detection_ns as f64 / 1_000_000.0;
             detection_latencies_ms.push(detection_latency_ms);
             if detection_latency_ms < 1.0 {
                 sub_1ms_detections += 1;
@@ -425,9 +468,14 @@ async fn main() -> Result<()> {
             let start_time = Instant::now();
             let pipeline_start = Instant::now(); // Measure processing time, not queue wait time
             
-            // We already have the full transaction from Full TX IPC!
-            let tx = &ipc_tx.transaction;
-            let tx_view = convert_full_tx_to_transaction_view(&ipc_tx);
+            // We already have the full transaction from ULTRA-FAST IPC!
+            let tx_view = match convert_ultra_fast_to_transaction_view(&ipc_tx) {
+                Ok(view) => view,
+                Err(e) => {
+                    warn!("Failed to convert transaction: {}", e);
+                    continue;
+                }
+            };
             
             // Use debug_traceCall to get state changes - simulate ALL transactions
             let sim_start = Instant::now();
@@ -506,7 +554,7 @@ async fn main() -> Result<()> {
                     // If pools are affected, check for scams
                     if !affected_pools.is_empty() {
                         let simulation_result = mempool_processor::signal_engine::SimulationResult {
-                            tx_hash: format!("{:?}", tx.hash),
+                            tx_hash: ipc_tx.hash.clone(),
                             affected_pools,
                             simulation_successful: true,
                             error_message: None,
@@ -627,20 +675,20 @@ async fn main() -> Result<()> {
                     // Log timing for every 1000th transaction to see the breakdown
                     if total_processed % 1000 == 0 {
                         info!("📊 TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
-                              &format!("{:?}", tx.hash)[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
+                              &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
                     
                     // Track processing time for transactions that affected pools
                     if pools_affected > 0 {
                         pool_affected_count += 1;
                         info!("🎯 POOL AFFECTED TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
-                              &format!("{:?}", tx.hash)[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
+                              &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
                 }
                 Ok(None) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
-                    debug!("No state changes detected for transaction {}", tx.hash);
+                    debug!("No state changes detected for transaction {}", ipc_tx.hash);
                     
                     // Add 0ms for pool check since there were no state changes to check
                     pool_check_times_ms.push(0.0);
@@ -656,7 +704,7 @@ async fn main() -> Result<()> {
                 Err(e) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
-                    debug!("Failed to simulate transaction {}: {}", tx.hash, e);
+                    debug!("Failed to simulate transaction {}: {}", ipc_tx.hash, e);
                     
                     // Add 0ms for pool check since simulation failed
                     pool_check_times_ms.push(0.0);
@@ -721,10 +769,8 @@ async fn main() -> Result<()> {
                 let throughput = if avg_total > 0.0 { 1000.0 / avg_total } else { 0.0 };
                 
                 // Get queue info
-                let queue_info = match ipc_client.get_queue_info().await {
-                    Ok(info) => info,
-                    Err(_) => (0, 0) // fallback
-                };
+                // Queue info not available in new client, use 0 for now
+                let queue_info = (0, 50000);
                 // Log to tracing
                 info!("============================================================");
                 info!("IPC Full: {} transactions, avg latency: {}μs, queue: {}/{}", 

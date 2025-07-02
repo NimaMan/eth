@@ -1,6 +1,0 @@
-✅ Connected to Ethereum node: http://localhost:8545
-📊 Latest block: 22695269
-🔍 Fetching transaction data for: 0xe5181fa68238975fd88b8bdaeb418d81d2cbabb7414d3822ce3c915146958ec0
-📦 Transaction found in block: 22695269
-🧮 Processing transaction with state change calculation...
-❌ Error: float() argument must be a string or a real number, not 'dict'

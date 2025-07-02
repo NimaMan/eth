@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, debug};
 use serde_json;
 
-use crate::mempool_fetcher::processor::ScamPredictionWriter;
+use crate::database::ScamPredictionWriter;
 use crate::pool_subscriber::cache::PoolStateCache;
 use super::engine::{SignalEngine, SignalConfig};
 use super::types::{MarketEvent, SimulationResult, EventType, Severity};
