@@ -11,3 +11,6 @@ pub mod common;
 pub mod performance_metrics;
 pub mod database;
 
+// Re-export commonly used types
+pub use mempool_fetcher::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
+

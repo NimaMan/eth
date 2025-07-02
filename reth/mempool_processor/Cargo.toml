@@ -119,6 +119,14 @@ path = "src/bin/metrics_api_server.rs"
 name = "mempool_signal_detection_full_tx_ipc"
 path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
 
+[[bin]]
+name = "mempool_processor_full_tx"
+path = "src/bin/mempool_processor_full_tx.rs"
+
+[[bin]]
+name = "mempool_full_tx_client"
+path = "src/bin/mempool_full_tx_client.rs"
+
 
 
 

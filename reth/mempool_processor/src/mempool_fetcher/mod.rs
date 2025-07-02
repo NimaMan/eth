@@ -14,6 +14,9 @@
 // Core types used by all methods
 pub mod types;
 
+// Primary full transaction IPC client - no RPC fallback needed
+pub mod full_transaction_ipc_client;
+
 // Detection methods (each in its own directory)
 pub mod ipc_ipc;           // IPC subscription + IPC fetch (1.2ms baseline - current implementation)
 pub mod ipc_ipc_variants;  // IPC subscription + IPC fetch (legacy variants: basic, full, batch)
@@ -24,6 +27,7 @@ pub mod processor;      // Transaction processing logic
 
 // Re-export main types for convenience
 pub use types::*;
+pub use full_transaction_ipc_client::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
 pub use ipc_ipc::{IpcIpcMeasurementClient, TransactionLatencyMeasurement, MeasurementConfig};
 // Basic IpcClient removed due to poor performance
 pub use websocket::WebSocketClient;
