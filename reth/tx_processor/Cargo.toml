@@ -272,3 +272,6 @@ url = "2.5"  # For URL parsing
 
 # DO NOT patch reth_primitives here; its path is absolute.
 # DO NOT patch alloy-* crates here; let them come from crates.io per versions in [dependencies].
+[[bin]]
+name = "simulate_mempool_tx"
+path = "src/simulate_signed_tx/examples/simulate_mempool_tx.rs"
