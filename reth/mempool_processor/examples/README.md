@@ -4,6 +4,25 @@ This directory contains examples demonstrating various features and capabilities
 
 ## Examples Overview
 
+### Mempool Fetching Examples
+
+#### **mempool_fetcher/nonblocking_ipc_1k_demo.rs** ⚡
+**Purpose**: Demonstrates NonBlockingIpcClient by collecting 1,000 transactions with microsecond latency.
+- **Latency**: 2-7μs detection time
+- **Output**: Timestamps logged to `/home/nima/code/crypto/logs/mempool/nonblocking_ipc_1k_demo.log`
+- **Usage**: `cargo run --example nonblocking_ipc_1k_demo --release`
+
+#### **test_new_full_tx_ipc.rs**
+**Purpose**: Tests FullTransactionIpcClient performance over 10 seconds.
+- **Latency**: ~1ms average
+- **Features**: Reconnection logic, detailed statistics
+- **Usage**: `cargo run --example test_new_full_tx_ipc`
+
+#### **validate_full_tx_data.rs**
+**Purpose**: Validates completeness of full transaction data from IPC.
+- **Functionality**: Checks all transaction fields are present
+- **Usage**: `cargo run --example validate_full_tx_data`
+
 ### 1. **actual_simulation_measurement.rs**
 **Purpose**: Measures actual transaction simulation performance using real mempool data.
 - **Input**: Connects to local Ethereum node (WebSocket + HTTP RPC)

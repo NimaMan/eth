@@ -6,18 +6,18 @@ use serde_json::{Value, json};
 use tracing::{info, debug, error};
 use eyre::{Result, eyre};
 
-/// Ultra-fast transaction detection using non-blocking reads
+/// Transaction received via non-blocking IPC
 #[derive(Debug, Clone)]
-pub struct UltraFastTransaction {
+pub struct NonBlockingTransaction {
     pub hash: String,
     pub data: Value,
     pub detection_ns: u64,
 }
 
-pub struct UltraFastClient {
+pub struct NonBlockingIpcClient {
     socket_path: String,
-    tx_sender: mpsc::Sender<UltraFastTransaction>,
-    tx_receiver: Arc<Mutex<mpsc::Receiver<UltraFastTransaction>>>,
+    tx_sender: mpsc::Sender<NonBlockingTransaction>,
+    tx_receiver: Arc<Mutex<mpsc::Receiver<NonBlockingTransaction>>>,
     stats: Arc<RwLock<Stats>>,
 }
 
@@ -29,7 +29,7 @@ pub struct Stats {
     pub sub_10us: u64,
 }
 
-impl UltraFastClient {
+impl NonBlockingIpcClient {
     pub fn new(socket_path: Option<&str>) -> Result<Self> {
         let socket_path = socket_path.unwrap_or("/tmp/reth.ipc").to_string();
         let (tx_sender, tx_receiver) = mpsc::channel(50000);
@@ -87,7 +87,7 @@ impl UltraFastClient {
         let stats = self.stats.clone();
         
         tokio::spawn(async move {
-            if let Err(e) = Self::ultra_fast_monitor(stream, tx_sender, stats).await {
+            if let Err(e) = Self::monitor_nonblocking(stream, tx_sender, stats).await {
                 error!("Monitor error: {}", e);
             }
         });
@@ -95,9 +95,9 @@ impl UltraFastClient {
         Ok(())
     }
     
-    async fn ultra_fast_monitor(
+    async fn monitor_nonblocking(
         stream: UnixStream,
-        tx_sender: mpsc::Sender<UltraFastTransaction>,
+        tx_sender: mpsc::Sender<NonBlockingTransaction>,
         stats: Arc<RwLock<Stats>>,
     ) -> Result<()> {
         use tokio::io::AsyncReadExt;
@@ -151,7 +151,7 @@ impl UltraFastClient {
                                                       &hash[..10], detection_ns, detection_ns / 1000);
                                             }
                                             
-                                            let tx = UltraFastTransaction {
+                                            let tx = NonBlockingTransaction {
                                                 hash,
                                                 data: result.clone(),
                                                 detection_ns,
@@ -184,7 +184,7 @@ impl UltraFastClient {
         Ok(())
     }
     
-    pub async fn get_transactions(&self, max: usize) -> Result<Vec<UltraFastTransaction>> {
+    pub async fn get_transactions(&self, max: usize) -> Result<Vec<NonBlockingTransaction>> {
         let mut receiver = self.tx_receiver.lock().await;
         let mut txs = Vec::with_capacity(max);
         

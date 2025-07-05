@@ -8,7 +8,7 @@ This module provides direct IPC (Inter-Process Communication) connection to a lo
 
 ## Components
 
-### 1. **UltraFastClient** (`ultra_fast_client.rs`) - PRODUCTION 🚀
+### 1. **NonBlockingIpcClient** (`nonblocking_ipc_client.rs`) - PRODUCTION 🚀
 - **Latency**: 2-7 microseconds (μs)
 - **Method**: Non-blocking socket reads with streaming JSON parser
 - **Throughput**: 150-703 transactions/second sustained
@@ -42,7 +42,7 @@ Common types shared across the codebase:
 
 | Client | Avg Latency | P99 Latency | Method |
 |--------|-------------|-------------|---------|
-| UltraFastClient | 5μs | 18μs | Non-blocking `try_read` |
+| NonBlockingIpcClient | 5μs | 18μs | Non-blocking `try_read` |
 | FullTransactionIpcClient | 1ms | 5ms | Async buffered reader |
 | WebSocket (removed) | 28ms | 100ms | HTTP/WebSocket |
 | RPC polling (removed) | 100ms+ | 500ms+ | HTTP RPC |
@@ -51,9 +51,9 @@ Common types shared across the codebase:
 
 ### Production Usage (Signal Detection)
 ```rust
-use mempool_processor::mempool_fetcher::{UltraFastClient, UltraFastTransaction};
+use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction};
 
-let client = UltraFastClient::new(Some("/tmp/reth.ipc"))?;
+let client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
 client.start().await?;
 
 while let Some(tx) = client.get_transaction().await? {
@@ -88,7 +88,7 @@ Both clients use Ethereum JSON-RPC subscription:
 
 The `true` parameter requests full transaction objects instead of just hashes.
 
-### Socket Optimization (UltraFastClient)
+### Socket Optimization (NonBlockingIpcClient)
 - Non-blocking mode: `socket.set_nonblocking(true)`
 - Large buffers: 64KB read, 1MB pending
 - Minimal allocations: Reuses buffers
@@ -97,17 +97,17 @@ The `true` parameter requests full transaction objects instead of just hashes.
 ### Data Flow
 1. Transaction enters Reth mempool
 2. Reth writes notification to IPC socket
-3. UltraFastClient reads with `try_read()` (2-7μs)
+3. NonBlockingIpcClient reads with `try_read()` (2-7μs)
 4. JSON parsed and transaction extracted
 5. Transaction sent via mpsc channel
 6. Signal detection processes transaction
 
 ## Why Two Clients?
 
-1. **UltraFastClient**: Optimized for absolute minimum latency in production
+1. **NonBlockingIpcClient**: Optimized for absolute minimum latency in production
 2. **FullTransactionIpcClient**: More features (reconnection, detailed stats) for monitoring
 
-In production, always use UltraFastClient for signal detection.
+In production, always use NonBlockingIpcClient for signal detection.
 
 ## Removed Components
 

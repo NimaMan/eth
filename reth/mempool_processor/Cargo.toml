@@ -127,41 +127,27 @@ name = "detect_pool_creation"
 path = "examples/detect_pool_creation.rs"
 
 [[example]]
-name = "detect_pool_state_changes"
-path = "examples/detect_pool_state_changes.rs"
-
-[[example]]
 name = "test_pool_subscriber"
 path = "examples/test_pool_subscriber.rs"
 
 [[example]]
-name = "monitor_pool_state_changes"
-path = "examples/monitor_pool_state_changes.rs"
-
-
-[[example]]
-name = "measure_mempool_performance"
-path = "examples/measure_mempool_performance.rs"
-
-[[example]]
-name = "test_optimized_ipc"
-path = "examples/test_optimized_ipc.rs"
-
-
-[[example]]
-name = "simple_latency_test"
-path = "examples/simple_latency_test.rs"
-
-[[example]]
-name = "debug_tracecall_simulation"
-path = "examples/debug_tracecall_simulation.rs"
-
-[[example]]
-name = "quick_simulation_test"
-path = "examples/quick_simulation_test.rs"
-
-[[example]]
 name = "actual_simulation_measurement"
 path = "examples/actual_simulation_measurement.rs"
+
+[[example]]
+name = "precise_mempool_latency_measurement"
+path = "examples/precise_mempool_latency_measurement.rs"
+
+[[example]]
+name = "test_new_full_tx_ipc"
+path = "examples/test_new_full_tx_ipc.rs"
+
+[[example]]
+name = "validate_full_tx_data"
+path = "examples/validate_full_tx_data.rs"
+
+[[example]]
+name = "nonblocking_ipc_1k_demo"
+path = "examples/mempool_fetcher/nonblocking_ipc_1k_demo.rs"
 
 # Using crates.io versions - no patches needed
