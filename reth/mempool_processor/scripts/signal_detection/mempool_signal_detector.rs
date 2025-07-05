@@ -21,12 +21,16 @@ use hex;
 use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
-use mempool_processor::tx_simulator::DebugTraceCallSimulator;
+use mempool_processor::tx_simulator::RethDirectTxSimulator;
 use mempool_processor::common::address::to_checksum_address;
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
 use ethers::types::{BlockId, BlockNumber, Address, H256, U256};
+
+// REVM imports for direct Reth simulation
+use revm_context::BlockEnv;
+use revm_primitives;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -287,6 +291,19 @@ async fn main() -> Result<()> {
     
     info!("📦 Current block: #{}", latest_block.number.unwrap_or_default());
     
+    // Create block environment for direct Reth simulation
+    let block_env = BlockEnv {
+        number: revm_primitives::U256::from(latest_block.number.unwrap_or_default().as_u64()),
+        timestamp: revm_primitives::U256::from(latest_block.timestamp.as_u64()),
+        gas_limit: latest_block.gas_limit.as_u64(),
+        basefee: latest_block.base_fee_per_gas.unwrap_or_default().as_u64(),
+        difficulty: revm_primitives::U256::from_limbs(latest_block.difficulty.into_limbs()),
+        beneficiary: revm_primitives::Address::from_slice(&latest_block.author.unwrap_or_default().0),
+        prevrandao: latest_block.mix_hash.map(|h| revm_primitives::B256::from_slice(&h.0)),
+        blob_excess_gas_and_price: None,
+    };
+    info!("⚡ Block environment created for direct simulation");
+    
     // Initialize non-blocking IPC client
     info!("🚀 Initializing non-blocking IPC client...");
     info!("   Socket path: {}", args.ipc_path);
@@ -390,11 +407,13 @@ async fn main() -> Result<()> {
         None
     };
     
-    // Initialize transaction simulator
-    info!("🔧 Creating transaction simulator with RPC URL: {}", &args.eth_rpc_url);
+    // Initialize direct Reth transaction simulator
+    info!("⚡ Creating direct Reth transaction simulator - 2x faster than RPC!");
+    let reth_datadir = "/home/nima/.reth/mainnet";
+    info!("🔧 Reth datadir: {}", reth_datadir);
     let tx_simulator = match tokio::time::timeout(
         Duration::from_secs(10),
-        DebugTraceCallSimulator::new(&args.eth_rpc_url)
+        RethDirectTxSimulator::new(reth_datadir)
     ).await {
         Ok(Ok(simulator)) => {
             info!("✅ Transaction simulator initialized successfully");
@@ -545,7 +564,7 @@ async fn main() -> Result<()> {
             let sim_start = Instant::now();
             match time::timeout(
                 Duration::from_millis(250),
-                tx_simulator.process_transaction(&tx_view, &Default::default())
+                tx_simulator.process_transaction(&tx_view, &block_env)
             ).await {
                 Ok(Ok(Some(state_changes))) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;

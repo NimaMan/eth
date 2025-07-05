@@ -189,4 +189,12 @@ path = "examples/signed_tx_simulation/direct_reth_mempool_simulation.rs"
 name = "direct_reth_1k_benchmark"
 path = "examples/signed_tx_simulation/direct_reth_1k_benchmark.rs"
 
+[[example]]
+name = "direct_reth_state_change_detection"
+path = "examples/signed_tx_simulation/direct_reth_state_change_detection.rs"
+
+[[example]]
+name = "direct_reth_basic_state_changes"
+path = "examples/signed_tx_simulation/direct_reth_basic_state_changes.rs"
+
 # Using crates.io versions - no patches needed

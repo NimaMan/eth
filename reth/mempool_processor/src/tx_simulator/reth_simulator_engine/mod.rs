@@ -9,6 +9,10 @@
 
 pub mod simulator;
 pub mod tx_converter;
+pub mod state_change_extractor;
+pub mod simulator_with_state_changes;
 
 pub use simulator::{RethDirectSimulator, SimulationResult};
 pub use tx_converter::mempool_tx_to_reth_signed;
+pub use state_change_extractor::StateChangeExtractor;
+pub use simulator_with_state_changes::RethDirectSimulatorWithStateChanges;
