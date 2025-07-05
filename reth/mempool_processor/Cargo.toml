@@ -126,9 +126,6 @@ path = "src/bin/mempool_full_tx_client.rs"
 name = "detect_pool_creation"
 path = "examples/detect_pool_creation.rs"
 
-[[example]]
-name = "test_pool_subscriber"
-path = "examples/pool_detection/test_pool_subscriber.rs"
 
 [[example]]
 name = "actual_simulation_measurement"
@@ -146,5 +143,17 @@ path = "examples/mempool_fetcher/mempool_fetcher_performance_monitor.rs"
 [[example]]
 name = "verify_new_transactions_only"
 path = "examples/mempool_fetcher/verify_new_transactions_only.rs"
+
+[[example]]
+name = "pool_detection_monitor"
+path = "examples/pool_detection/pool_detection_monitor.rs"
+
+[[example]]
+name = "test_function_signature_detection"
+path = "examples/signal_detection/test_function_signature_detection.rs"
+
+[[example]]
+name = "monitor_liquidity_removals"
+path = "examples/signal_detection/monitor_liquidity_removals.rs"
 
 # Using crates.io versions - no patches needed
