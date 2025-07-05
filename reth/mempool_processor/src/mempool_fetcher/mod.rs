@@ -17,14 +17,10 @@ pub mod ultra_fast_client;
 // Legacy full transaction client (backup)
 pub mod full_transaction_ipc_client;
 
-// Processing components
-pub mod processor;      // Transaction processing logic
-
 // Re-export main types for convenience
 pub use types::*;
 pub use ultra_fast_client::{UltraFastClient, UltraFastTransaction};
 pub use full_transaction_ipc_client::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
-pub use processor::{TransactionProcessor, PoolTracker};
 
 // Re-export tx_simulator functionality 
 pub use crate::tx_simulator::*;
