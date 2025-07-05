@@ -1,68 +1,35 @@
 # Mempool Fetcher Examples
 
-This folder contains examples and monitoring tools for the mempool fetcher module.
+## Primary Performance Monitor
 
-## Production Monitoring (NonBlockingIpcClient - 2-7μs latency)
+**`mempool_fetcher_performance_monitor.rs`** - The ONLY monitoring tool you need
 
-### Core Monitoring Tools
-- **`mempool_queue_monitor.rs`** - Real-time queue dynamics monitoring
-  - Tracks mempool size, arrival rates, detection rates
-  - Calculates latency percentiles (P50, P95, P99)
-  - Logs to CSV for analysis
+### What it measures:
+1. **IMMEDIATE detection**: Are we getting transactions within microseconds? (Target: <10μs)
+2. **COMPLETE data**: Do we get all transaction fields in the first notification?
+3. **LONG-TERM stability**: Does performance degrade over hours/days?
 
-- **`mempool_health_monitor.rs`** - Advanced health monitoring
-  - Tracks transaction detection vs block inclusion timing
-  - Identifies missed transactions
-  - Measures system coverage and performance
-
-- **`long_term_health_test.rs`** - Extended performance tracking
-  - Runs for hours/days to identify degradation
-  - Logs detailed metrics to CSV
-  - Tracks memory usage and stability
-
-### Validation & Testing
-- **`verify_new_transactions_only.rs`** - Critical behavior validation
-  - Confirms we only receive NEW transactions
-  - Validates subscription semantics
-  - Essential for understanding system behavior
-
-- **`nonblocking_ipc_1k_demo.rs`** - Quick performance demo
-  - Collects 1,000 transactions
-  - Shows latency distribution
-  - Good for quick system checks
-
-### Alternative Approaches
-- **`precise_mempool_latency_measurement.rs`** - Different methodology
-  - Uses subscription + individual fetches
-  - Provides complementary insights
-  - Different measurement approach
-
-## Legacy Examples (FullTransactionIpcClient - ~1ms latency)
-
-These examples test the legacy client, kept for reference:
-- **`test_new_full_tx_ipc.rs`** - Legacy client performance test
-- **`validate_full_tx_data.rs`** - Legacy client data validation
-
-## Running Examples
-
+### Run it:
 ```bash
-# Monitor queue dynamics
-cargo run --example mempool_queue_monitor --release
-
-# Run health monitoring
-cargo run --example mempool_health_monitor --release
-
-# Validate behavior
-cargo run --example verify_new_transactions_only --release
-
-# Quick performance check
-cargo run --example nonblocking_ipc_1k_demo --release
+cargo run --example mempool_fetcher_performance_monitor --release
 ```
 
-## Key Metrics
+### Output:
+- Logs to `/home/nima/code/crypto/logs/mempool/performance_YYYYMMDD_HHMMSS.csv`
+- Shows real-time warnings for high latency (>50μs) or incomplete data
+- Prints performance summary every 5 minutes
+- Checks for degradation every hour
 
-Our production NonBlockingIpcClient achieves:
-- **Average latency**: 2-7μs
-- **P99 latency**: <20μs
-- **Throughput**: 150-700 tx/s
-- **Coverage**: 100% of new transactions entering mempool
+## Other Examples
+
+**`nonblocking_ipc_1k_demo.rs`** - Quick test that collects 1,000 transactions
+
+**`verify_new_transactions_only.rs`** - Validates we only get NEW transactions (not existing mempool)
+
+## Production Stats
+
+Our NonBlockingIpcClient achieves:
+- **Average latency**: 5-7μs
+- **Target**: <10μs for 95%+ of transactions
+- **Data completeness**: 100% (all fields in first notification)
+- **Long-term stability**: No degradation over days of running
