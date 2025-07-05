@@ -3,11 +3,11 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::net::UnixStream;
 use serde_json::{Value, json};
-use tracing::{info, debug, error};
+use tracing::{info, error};
 use eyre::{Result, eyre};
 
 /// Transaction received via non-blocking IPC
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NonBlockingTransaction {
     pub hash: String,
     pub data: Value,
@@ -21,7 +21,7 @@ pub struct NonBlockingIpcClient {
     stats: Arc<RwLock<Stats>>,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct Stats {
     pub total: u64,
     pub sub_1ms: u64,
@@ -215,3 +215,11 @@ impl NonBlockingIpcClient {
 }
 
 use std::io::Read;
+
+impl std::fmt::Debug for NonBlockingIpcClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NonBlockingIpcClient")
+            .field("socket_path", &self.socket_path)
+            .finish()
+    }
+}

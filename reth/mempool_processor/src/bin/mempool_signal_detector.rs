@@ -17,8 +17,8 @@ use chrono::Local;
 use std::io::Write;
 use hex;
 
-// Mempool processor imports - using non-blocking IPC
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction, TransactionView};
+// Mempool processor imports - using ULTRA-FAST IPC
+use mempool_processor::mempool_fetcher::{UltraFastClient, UltraFastTransaction, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
 use mempool_processor::tx_simulator::DebugTraceCallSimulator;

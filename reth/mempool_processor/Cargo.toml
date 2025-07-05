@@ -128,7 +128,7 @@ path = "examples/detect_pool_creation.rs"
 
 [[example]]
 name = "test_pool_subscriber"
-path = "examples/test_pool_subscriber.rs"
+path = "examples/pool_detection/test_pool_subscriber.rs"
 
 [[example]]
 name = "actual_simulation_measurement"
@@ -136,18 +136,34 @@ path = "examples/actual_simulation_measurement.rs"
 
 [[example]]
 name = "precise_mempool_latency_measurement"
-path = "examples/precise_mempool_latency_measurement.rs"
+path = "examples/mempool_fetcher/precise_mempool_latency_measurement.rs"
 
 [[example]]
 name = "test_new_full_tx_ipc"
-path = "examples/test_new_full_tx_ipc.rs"
+path = "examples/mempool_fetcher/test_new_full_tx_ipc.rs"
 
 [[example]]
 name = "validate_full_tx_data"
-path = "examples/validate_full_tx_data.rs"
+path = "examples/mempool_fetcher/validate_full_tx_data.rs"
 
 [[example]]
 name = "nonblocking_ipc_1k_demo"
 path = "examples/mempool_fetcher/nonblocking_ipc_1k_demo.rs"
+
+[[example]]
+name = "mempool_health_monitor"
+path = "examples/mempool_fetcher/mempool_health_monitor.rs"
+
+[[example]]
+name = "long_term_health_test"
+path = "examples/mempool_fetcher/long_term_health_test.rs"
+
+[[example]]
+name = "mempool_queue_monitor"
+path = "examples/mempool_fetcher/mempool_queue_monitor.rs"
+
+[[example]]
+name = "verify_new_transactions_only"
+path = "examples/mempool_fetcher/verify_new_transactions_only.rs"
 
 # Using crates.io versions - no patches needed

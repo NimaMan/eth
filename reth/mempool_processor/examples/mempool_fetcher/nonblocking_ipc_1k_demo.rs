@@ -9,7 +9,7 @@ use std::time::Instant;
 use std::fs::File;
 use std::io::Write;
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
-use tracing::{info, error};
+use tracing::info;
 use tracing_subscriber;
 use chrono::Local;
 
@@ -42,6 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while tx_count < 1000 {
         // Get batch of transactions
         let transactions = client.get_transactions(100).await?;
+        let is_empty = transactions.is_empty();
         
         for tx in transactions {
             let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.6f");
@@ -51,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 log_file,
                 "{},{},{},{}",
                 timestamp,
-                &tx.hash[..10],
+                tx.hash,
                 tx.detection_ns,
                 tx.detection_ns / 1000
             )?;
@@ -73,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         
         // Brief pause if no transactions
-        if transactions.is_empty() {
+        if is_empty {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
