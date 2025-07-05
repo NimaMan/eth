@@ -6,7 +6,6 @@ use eth_kartal::wallet::{SecureWallet, SecureWalletConfig, read_password};
 use ethers::prelude::*;
 use std::env;
 use std::path::PathBuf;
-use secrecy::Secret;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SecureWalletConfig {
         keystore_path: keystore_path.clone(),
         chain_id: 1, // mainnet
+        auto_lock_timeout: Some(std::time::Duration::from_secs(300)), // 5 minutes
     };
     
     let wallet = SecureWallet::from_keystore(config).await?;

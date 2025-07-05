@@ -4,6 +4,7 @@
 //! Perfect for testing swap logic with KARTAL_KILIT wallet
 
 use eth_kartal::pools::{PoolFactory, SwapParams};
+use eth_kartal::common::validation::{validate_slippage, MIN_SLIPPAGE_PERCENT, MAX_SLIPPAGE_PERCENT, DEFAULT_SLIPPAGE_PERCENT};
 use ethers::prelude::*;
 use ethers::utils::{format_units, parse_ether, parse_units};
 use std::sync::Arc;
@@ -38,14 +39,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Simulation Mode: Direct pool quotes without executing transactions");
     
     println!("\n📊 Available Simulations:");
-    println!("1. Swap 0.05 ETH → USDC");
+    println!("1. Swap 0.05 ETH → USDC (test slippage validation)");
     println!("2. Swap 0.05 ETH → USDT");
     println!("3. Swap 100 USDC → ETH");
     println!("4. Custom swap");
-    println!("5. Exit");
+    println!("5. Test extreme slippage values");
+    println!("6. Exit");
     
     loop {
-        println!("\nSelect option (1-5): ");
+        println!("\nSelect option (1-6): ");
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         
@@ -54,7 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "2" => simulate_eth_to_usdt(&pool_factory, &provider).await?,
             "3" => simulate_usdc_to_eth(&pool_factory, &provider).await?,
             "4" => simulate_custom_swap(&pool_factory, &provider).await?,
-            "5" => break,
+            "5" => test_slippage_validation().await?,
+            "6" => break,
             _ => println!("Invalid option"),
         }
     }
@@ -62,12 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Simulate ETH → USDC swap
+/// Simulate ETH → USDC swap with slippage testing
 async fn simulate_eth_to_usdc(
     pool_factory: &PoolFactory,
     provider: &Arc<Provider<Http>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("\n🔄 Simulating: 0.05 ETH → USDC");
+    println!("\n🔄 Simulating: 0.05 ETH → USDC (with slippage validation testing)");
     
     let eth_amount = parse_ether("0.05")?;
     
@@ -91,6 +94,23 @@ async fn simulate_eth_to_usdc(
     let price = usdc_out_human.parse::<f64>()? / 0.05;
     println!("Implied ETH Price: ${:.2} USDC", price);
     
+    // Test different slippage values
+    println!("\n🔬 Testing Slippage Validation:");
+    let test_slippages = vec![0.001, 0.01, 0.03, 0.05, 0.10, 0.15]; // 0.1%, 1%, 3%, 5%, 10%, 15%
+    
+    for slippage in test_slippages {
+        print!("Slippage {:.1}%: ", slippage * 100.0);
+        match validate_slippage(slippage) {
+            Ok(validated) => {
+                let min_out = apply_slippage(usdc_out, validated);
+                println!("✅ Valid → Min output: {} USDC", format_units(min_out, 6)?);
+            }
+            Err(e) => {
+                println!("❌ Invalid → {}", e);
+            }
+        }
+    }
+    
     // Simulate transaction cost
     let gas_price = provider.get_gas_price().await?;
     let estimated_gas = U256::from(200_000); // Typical swap gas
@@ -102,18 +122,19 @@ async fn simulate_eth_to_usdc(
     println!("Estimated Gas: {}", estimated_gas);
     println!("Total Cost: {} ETH", gas_cost_eth);
     
-    // Build swap params (for demonstration)
+    // Build swap params with validated slippage
+    let validated_slippage = validate_slippage(DEFAULT_SLIPPAGE_PERCENT / 100.0)?;
     let swap_params = SwapParams {
         token_in: WETH.parse()?,
         token_out: USDC.parse()?,
         amount_in: eth_amount,
-        amount_out_min: apply_slippage(usdc_out, 0.01), // 1% slippage
+        amount_out_min: apply_slippage(usdc_out, validated_slippage),
         recipient: KARTAL_WALLET.parse()?,
         deadline: current_timestamp() + 300, // 5 minutes
     };
     
-    println!("\n📝 Swap Parameters:");
-    println!("Min Output (1% slippage): {} USDC", format_units(swap_params.amount_out_min, 6)?);
+    println!("\n📝 Swap Parameters (with validated {}% slippage):", DEFAULT_SLIPPAGE_PERCENT);
+    println!("Min Output: {} USDC", format_units(swap_params.amount_out_min, 6)?);
     println!("Deadline: {} seconds from now", 300);
     
     println!("\n✅ SIMULATION COMPLETE - No transaction sent");
@@ -163,7 +184,7 @@ async fn simulate_usdc_to_eth(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🔄 Simulating: 100 USDC → ETH");
     
-    let usdc_amount = parse_units("100", 6)?; // 100 USDC
+    let usdc_amount = parse_units("100", 6)?.into(); // 100 USDC
     
     // Find pool
     let pool = pool_factory.find_best_pool(
@@ -224,7 +245,7 @@ async fn simulate_custom_swap(
     println!("Enter amount to swap: ");
     let mut amount_str = String::new();
     std::io::stdin().read_line(&mut amount_str)?;
-    let amount: U256 = parse_units(amount_str.trim(), decimals_in)?;
+    let amount: U256 = parse_units(amount_str.trim(), decimals_in)?.into();
     
     // Find pool and get quote
     let pool = pool_factory.find_best_pool(
@@ -262,4 +283,111 @@ fn current_timestamp() -> U256 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs())
+}
+
+/// Test extreme slippage values to verify validation
+async fn test_slippage_validation() -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔬 Comprehensive Slippage Validation Testing");
+    println!("Testing boundary conditions and edge cases");
+    println!("Validation range: {:.1}% - {:.1}%", MIN_SLIPPAGE_PERCENT, MAX_SLIPPAGE_PERCENT);
+    
+    // Test cases: (input_value, description, expected_result)
+    let test_cases = vec![
+        (0.0001, "0.01% (way too low)", false),
+        (0.0005, "0.05% (still too low)", false),
+        (0.001, "0.1% (minimum valid)", true),
+        (0.005, "0.5% (low but valid)", true),
+        (0.01, "1% (typical low)", true),
+        (0.03, "3% (default)", true),
+        (0.05, "5% (typical high)", true),
+        (0.10, "10% (maximum valid)", true),
+        (0.11, "11% (too high)", false),
+        (0.15, "15% (way too high)", false),
+        (0.50, "50% (extreme)", false),
+        (1.0, "100% (impossible)", false),
+        (-0.01, "Negative slippage", false),
+        (1.5, "150% (impossible)", false),
+    ];
+    
+    println!("\n📊 Test Results:");
+    println!("{:<15} {:<20} {:<10} {:<30}", "Input", "Description", "Expected", "Result");
+    println!("{:-<75}", "");
+    
+    let mut passed = 0;
+    let total = test_cases.len();
+    
+    for (input, description, should_pass) in test_cases {
+        let result = validate_slippage(input);
+        let actual_pass = result.is_ok();
+        let status = if actual_pass == should_pass {
+            passed += 1;
+            "✅ PASS"
+        } else {
+            "❌ FAIL"
+        };
+        
+        let result_text = match result {
+            Ok(validated) => format!("Valid: {:.4}", validated),
+            Err(e) => format!("Error: {}", e.to_string().chars().take(25).collect::<String>()),
+        };
+        
+        println!("{:<15} {:<20} {:<10} {:<30} {}", 
+                format!("{:.1}%", input * 100.0), 
+                description, 
+                if should_pass { "PASS" } else { "FAIL" },
+                result_text,
+                status);
+    }
+    
+    println!("{:-<75}", "");
+    println!("Test Summary: {}/{} tests passed ({:.1}%)", 
+             passed, total, (passed as f64 / total as f64) * 100.0);
+    
+    if passed == total {
+        println!("🎉 All slippage validation tests PASSED!");
+        println!("\n💡 Key Takeaways:");
+        println!("  • Minimum slippage: {:.1}% (protects against failed trades)", MIN_SLIPPAGE_PERCENT);
+        println!("  • Maximum slippage: {:.1}% (protects against excessive losses)", MAX_SLIPPAGE_PERCENT);
+        println!("  • Default slippage: {:.1}% (balanced protection)", DEFAULT_SLIPPAGE_PERCENT);
+        println!("  • Validation prevents dangerous slippage settings");
+    } else {
+        println!("⚠️  Some validation tests failed - check implementation!");
+    }
+    
+    // Interactive slippage testing
+    println!("\n🎮 Interactive Slippage Testing");
+    println!("Enter custom slippage values to test (or 'done' to finish):");
+    
+    loop {
+        println!("\nEnter slippage percentage (e.g., 2.5 for 2.5%): ");
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+        
+        if input.to_lowercase() == "done" {
+            break;
+        }
+        
+        match input.parse::<f64>() {
+            Ok(percentage) => {
+                let decimal = percentage / 100.0;
+                match validate_slippage(decimal) {
+                    Ok(validated) => {
+                        println!("✅ Valid slippage: {:.1}% → normalized to {:.6}", 
+                                percentage, validated);
+                        println!("   This would be safe to use in production trading");
+                    }
+                    Err(e) => {
+                        println!("❌ Invalid slippage: {}", e);
+                        println!("   This would be rejected by eth_kartal risk management");
+                    }
+                }
+            }
+            Err(_) => {
+                println!("❌ Invalid input - please enter a number");
+            }
+        }
+    }
+    
+    Ok(())
 }

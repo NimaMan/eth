@@ -9,6 +9,7 @@ use ethers::types::{Address, U256};
 use ethers::providers::Middleware;
 use std::time::Instant;
 use std::str::FromStr;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,12 +21,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Test configuration
     let config = ExecutorConfig {
-        private_key: "0x1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+        keystore_path: PathBuf::from("test_keystore.json"),
         chain_id: 1,
         rpc_url: "http://127.0.0.1:8545".to_string(),
         flashbots_enabled: false,
         flashbots_rpc: None,
         reth_ws_url: "ws://127.0.0.1:8546".to_string(),
+        risk_config: eth_kartal::risk::RiskConfig::default(),
     };
     
     // Test Scenario 1: Sell Transaction (should fail on balance check)

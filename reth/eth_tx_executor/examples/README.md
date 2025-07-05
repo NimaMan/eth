@@ -1,266 +1,266 @@
-# ETH Kartal Simulation Examples
+# ETH Kartal Examples
 
-This directory contains comprehensive simulation tools for testing ETH Kartal's capabilities without executing real transactions. All simulations use the secure wallet implementation and connect to your local Reth node.
+Comprehensive examples demonstrating key functionality of the eth_kartal transaction execution engine.
 
-## 🎯 Purpose
+## Core Examples
 
-These simulators allow you to:
-- Test trading strategies without risking real funds
-- Verify transaction parameters and gas costs
-- Practice emergency scenarios
-- Validate the secure wallet implementation
-- Analyze arbitrage opportunities
-- Optimize gas usage strategies
+### **`signal_to_tx_demo.rs`** - Complete Signal Processing
+Demonstrates the full alert-to-execution pipeline:
+- ZMQ alert processing
+- Risk assessment and validation  
+- Gas optimization
+- MEV-protected execution
+- Trade logging
 
-## 🛠️ Available Simulators
-
-### 1. **Simple Swap Simulator** (`simple_swap_simulator.rs`)
-The most basic simulator - demonstrates ETH to USDC swaps with clear output.
-
-**What it does:**
-- Simulates swapping 0.05 ETH to USDC
-- Shows expected output amounts
-- Estimates gas costs
-- Calculates slippage protection
-- NO real transactions sent
-
-**Run it:**
 ```bash
-cargo run --example simple_swap_simulator
+cargo run --example signal_to_tx_demo
 ```
 
-### 2. **Swap Simulator** (`swap_simulator.rs`)
-Interactive swap simulator with multiple options and custom amounts.
+### **`secure_wallet_demo.rs`** - Wallet Management
+Shows secure keystore management:
+- Keystore creation and loading
+- Secure password handling
+- Auto-lock functionality
+- Transaction signing
 
-**What it does:**
-- Interactive menu for different swap pairs
-- Supports ETH→USDC, ETH→USDT, USDC→ETH
-- Custom swap amounts
-- Real-time pool selection
-- Detailed gas analysis
+```bash
+cargo run --example secure_wallet_demo
+```
 
-**Run it:**
+### **`swap_simulator.rs`** - Interactive Trading
+Interactive swap simulation with real pool data:
+- Multiple token pairs
+- Real-time quotes
+- Slippage configuration
+- Gas optimization
+
 ```bash
 cargo run --example swap_simulator
 ```
 
-### 3. **Secure Wallet Swap Simulator** (`secure_wallet_swap_simulator.rs`)
-Advanced simulator using the encrypted keystore wallet.
+### **`flashbots_demo.rs`** - MEV Protection
+Demonstrates Flashbots integration:
+- Bundle building
+- Private mempool submission
+- MEV protection strategies
+- Fallback mechanisms
 
-**What it does:**
-- Uses your encrypted keystore (not plain text private key)
-- Requires password to unlock
-- Simulates various swap scenarios
-- Emergency sell simulation
-- Arbitrage opportunity detection
-
-**Setup required:**
 ```bash
-# First create a keystore from KARTAL_KILIT
-cargo run --bin keystore_manager -- create
+cargo run --example flashbots_demo
+```
 
-# Then run the simulator
+## Advanced Examples
+
+### **`accurate_performance_test.rs`** - Performance Analysis
+Measures actual execution performance:
+- End-to-end latency testing
+- Component timing breakdown
+- Throughput measurement
+- SLA compliance verification
+
+```bash
+cargo run --release --example accurate_performance_test
+```
+
+### **`secure_wallet_swap_simulator.rs`** - Production Simulation
+Combines secure wallet with swap execution:
+- Keystore-based authentication
+- Real transaction building
+- Risk management integration
+- Comprehensive logging
+
+```bash
 cargo run --example secure_wallet_swap_simulator
 ```
 
-**Features:**
-- 0.05 ETH → USDC swap simulation
-- 0.1 ETH → USDT swap simulation  
-- Emergency sell (all ETH → USDC)
-- Three-hop arbitrage simulation (ETH→USDC→USDT→ETH)
+### **`mock_flashbots_relay.rs`** - Testing Infrastructure
+Mock Flashbots relay for testing:
+- Bundle simulation
+- Local testing without mainnet
+- Integration test support
 
-### 4. **Transfer Simulator** (`transfer_simulator.rs`)
-Simulates ETH and token transfers with gas optimization analysis.
-
-**What it does:**
-- ETH transfer simulation with gas estimation
-- ERC20 token transfer simulation
-- Batch transfer analysis (multiple recipients)
-- Gas optimization strategies
-- Network condition analysis
-
-**Run it:**
 ```bash
-cargo run --example transfer_simulator
+cargo run --example mock_flashbots_relay
 ```
 
-**Features:**
-- Real balance checking
-- Insufficient balance detection
-- Gas price comparison (slow/normal/fast/instant)
-- Best times to transfer analysis
+## Testing Examples
 
-### 5. **Portfolio Simulator** (`portfolio_simulator.rs`)
-Complete portfolio management simulation with risk controls.
+### **`test_bundle_building.rs`** - Bundle Construction
+Tests Flashbots bundle building:
+- Transaction ordering
+- Bundle validation
+- Tip calculation
+- Bundle hash generation
 
-**What it does:**
-- Virtual portfolio tracking
-- Buy/sell signal simulation
-- Portfolio rebalancing
-- Risk limit testing
-- P&L calculation
+### **`test_e2e_flashbots_flow.rs`** - End-to-End Testing
+Complete Flashbots integration test:
+- Bundle submission
+- Confirmation tracking
+- Error handling
+- Fallback scenarios
 
-**Run it:**
+### **`secure_wallet_working.rs`** - Wallet Verification
+Verifies wallet functionality:
+- Keystore integrity
+- Signing correctness
+- Security features
+
+## Prerequisites
+
+All examples require:
+
+### **Environment Setup**
 ```bash
-cargo run --example portfolio_simulator
+# Set required environment variables
+export ETH_RPC_URL="http://127.0.0.1:8545"
+export ETH_KEYSTORE_PATH="/path/to/your/keystore.json"
+
+# Optional for database integration
+export DATABASE_URL="postgres://user:pass@localhost/eth_db"
 ```
 
-**Starting portfolio:**
-- 5 ETH
-- 10,000 USDC
-- 5,000 USDT
-
-**Features:**
-- Simulate buy signals (e.g., SHIB purchase)
-- Emergency sell simulation
-- Portfolio rebalancing to target allocations
-- Risk limit scenarios (position size, loss limits, etc.)
-
-## 🔐 Security Features
-
-All simulators incorporate our secure wallet implementation:
-- **Encrypted keystores** - No plain text private keys
-- **Password protection** - Wallet unlocking required
-- **Automatic locking** - Wallet locks after use
-- **No real transactions** - Everything is simulated
-
-## 📊 What Gets Simulated
-
-### Transaction Details
-- Input/output amounts
-- Exchange rates
-- Gas prices and limits
-- Total transaction costs
-- Slippage calculations
-
-### Market Conditions  
-- Current gas prices from your Reth node
-- Pool liquidity checks
-- Price impact analysis
-- Network congestion estimates
-
-### Risk Factors
-- Insufficient balance scenarios
-- High slippage warnings
-- Gas spike protection
-- Failed transaction handling
-
-## 🚀 Quick Start
-
-1. **Ensure Reth node is running:**
+### **Local Reth Node**
+Most examples work best with a local Reth node for fast, reliable RPC access:
 ```bash
-ps aux | grep reth
+# Start Reth node
+reth node --http --http.port 8545 --ws --ws.port 8546
 ```
 
-2. **Check KARTAL_KILIT environment variable:**
+### **Test Keystore**
+Create a test keystore for examples:
 ```bash
-echo $KARTAL_KILIT
+cargo run --bin keystore_manager create --output test_keystore.json --chain-id 1
 ```
 
-3. **Create secure keystore (if needed):**
+## Usage Patterns
+
+### **Basic Simulation**
+For learning and testing without real transactions:
 ```bash
-cargo run --bin keystore_manager -- create
+# Safe simulation mode
+cargo run --example swap_simulator
 ```
 
-4. **Run any simulator:**
+### **Performance Testing**
+For measuring and optimizing system performance:
 ```bash
-# Simple demo
-cargo run --example simple_swap_simulator
+# Performance benchmarking
+cargo run --release --example accurate_performance_test
+```
 
-# Interactive with secure wallet
+### **Integration Testing**
+For testing with real infrastructure:
+```bash
+# Full integration test
+export ETH_KEYSTORE_PATH="/path/to/test/keystore.json"
 cargo run --example secure_wallet_swap_simulator
 ```
 
-## 🧪 Test Mode vs Simulation
-
-### Simulators (This Directory)
-- Standalone programs for testing specific scenarios
-- No alert processing
-- Direct function calls
-- Perfect for development and testing
-
-### Test Mode (`--test-mode` flag)
-- Full system running in simulation mode
-- Processes real alerts without executing
-- Complete execution flow testing
-- Use for system integration testing
-
+### **MEV Protection Testing**
+For testing Flashbots integration:
 ```bash
-# Run full system in test mode
-cargo run --bin kartal -- --test-mode
+# Flashbots testing
+cargo run --example flashbots_demo
 ```
 
-## 📈 Example Output
+## Example Output
 
+### Signal Processing (`signal_to_tx_demo.rs`)
 ```
-=== Simple ETH → USDC Swap Simulator ===
-
-Simulating swap of 0.05 ETH to USDC...
-
-Current block: 18976543
-
-📊 Swap Simulation Results:
-═══════════════════════════
-Input:    0.05 ETH
-Output:   ~125.00 USDC
-Pool:     Uniswap V2 WETH/USDC
-Address:  0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc
-
-⛽ Gas Estimation:
-══════════════════
-Gas Price: 15.23 gwei
-Gas Limit: 200000
-Total Cost: 0.003046 ETH
-
-✅ SIMULATION COMPLETE
-══════════════════════
-This was a simulation only - no transaction was sent!
-No gas was spent, no funds were moved.
+🚀 ETH Kartal Signal Processing Demo
+📡 Starting ZMQ alert receiver on tcp://127.0.0.1:5555
+📨 Alert received: buy_signal_001 | Token: 0xA0b8... | Action: BUY
+⚖️ Risk decision: ALLOW | Alert: buy_signal_001 | Original: 500000000000000000
+📤 Transaction submitted: 0x1a2b... | Alert: buy_signal_001 | Path: FlashbotsBundle  
+✅ Execution successful: 0x1a2b... | Latency: 187ms
+  📊 Performance breakdown:
+    • Alert→Start: 1ms
+    • Position check: 12ms
+    • Gas ranking: 8ms
+    • Price quote: 15ms
+    • TX build: 6ms
+    • TX submit: 145ms
 ```
 
-## 🛡️ Safety Guarantees
+### Performance Testing (`accurate_performance_test.rs`)
+```
+🔬 ETH Kartal Performance Analysis
+📊 Test Configuration:
+  • Signal count: 100
+  • Target latency: <200ms
+  • SLA threshold: 95%
 
-1. **No real transactions** - All simulators only read from the blockchain
-2. **No wallet modifications** - Your funds remain untouched
-3. **No approvals needed** - No token permissions required
-4. **Local node only** - Uses your local Reth node (127.0.0.1:8545)
+📈 Results:
+  • Mean latency: 142ms
+  • 95th percentile: 186ms
+  • 99th percentile: 234ms
+  • SLA compliance: 97.2%
+  • Theoretical TPS: 187,611
 
-## 🔧 Customization
+✅ Performance targets met!
+```
 
-To modify simulation parameters, edit the constants in each file:
-- Token addresses
-- Swap amounts  
-- Slippage tolerances
-- Gas estimates
+### Secure Wallet (`secure_wallet_demo.rs`)
+```
+🔐 ETH Kartal Secure Wallet Demo
+📂 Loading keystore: /path/to/keystore.json
+🔓 Wallet unlocked for address: 0xYourAddress...
+🔒 Wallet auto-locked after 5 minutes
+✅ Security features verified
+```
 
-## 📝 Best Practices
+## Development Tips
 
-1. Always run simulations before implementing new strategies
-2. Test edge cases (insufficient balance, high slippage, etc.)
-3. Verify gas estimates match current network conditions
-4. Use secure wallet simulator for production-like testing
-5. Compare simulation results with actual transactions
+### **Adding New Examples**
+1. Create new `.rs` file in `examples/` directory
+2. Follow naming pattern: `feature_description.rs`
+3. Add comprehensive documentation
+4. Include error handling and logging
+5. Update this README
 
-## 🐛 Troubleshooting
+### **Example Structure**
+```rust
+//! Example: Feature Description
+//! 
+//! Demonstrates specific functionality with clear explanations
 
-**"Keystore not found"**
-- Run `cargo run --bin keystore_manager -- create`
+use eth_kartal::*;
+use tracing::info;
 
-**"Failed to connect to node"**
-- Ensure Reth is running on 127.0.0.1:8545
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+    
+    info!("🚀 ETH Kartal Example: Feature Description");
+    
+    // Example implementation
+    
+    Ok(())
+}
+```
 
-**"Insufficient balance"**
-- Normal in simulation - shows the check is working
+### **Testing Examples**
+```bash
+# Test all examples compile
+cargo check --examples
 
-**Compilation errors**
-- Run `cargo check` to see detailed errors
-- Ensure all dependencies are up to date
+# Run specific example
+cargo run --example example_name
 
-## 🚨 Important Notes
+# Run with logging
+RUST_LOG=debug cargo run --example example_name
+```
 
-- These are **SIMULATORS ONLY** - no real transactions
-- Always verify addresses before using in production
-- Gas estimates may vary from actual execution
-- Pool states change rapidly - results are snapshots
+## Integration with Main System
 
-Use these simulators to safely explore ETH Kartal's capabilities!
+These examples demonstrate components that integrate with the main eth_kartal system:
+
+- **Alert Processing** → Real-time signal handling
+- **Risk Management** → Position and loss protection  
+- **Gas Optimization** → Mempool analysis and gas pricing
+- **MEV Protection** → Flashbots bundle submission
+- **Secure Wallet** → Encrypted key management
+- **Trade Logging** → Comprehensive audit trails
+
+Each example can be used as a starting point for building production integrations or for understanding system capabilities.

@@ -5,9 +5,8 @@
 
 use eth_kartal::{
     Config,
-    Alert, AlertReceiver, 
-    TransactionExecutor,
-    ProtocolRegistry,
+    Alert,
+    pools::PoolFactory,
     common::{Action, Priority, Result},
 };
 use ethers::prelude::*;
@@ -35,9 +34,9 @@ async fn main() -> Result<()> {
     let provider = Arc::new(provider);
     println!("   ✓ Connected to Ethereum node");
     
-    // Initialize protocol registry
-    let protocol_registry = ProtocolRegistry::new(provider.clone());
-    println!("   ✓ Protocol registry initialized");
+    // Initialize pool factory
+    let pool_factory = PoolFactory::new(provider.clone());
+    println!("   ✓ Pool factory initialized");
     
     // Step 3: Simulate Signal Reception
     println!("\n📡 Step 3: Simulating Incoming Signal");
@@ -61,12 +60,11 @@ async fn main() -> Result<()> {
     let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap();
     let amount_in = ethers::utils::parse_ether("0.05").unwrap();
     
-    match protocol_registry.find_best_pool(weth, signal.token_address, amount_in).await {
-        Ok((pool, quote)) => {
-            println!("   ✓ Found pool: {} ({})", pool.info().address, pool.info().protocol);
-            println!("   ✓ Expected output: {} tokens", quote.amount_out);
-            println!("   ✓ Price impact: {:.2}%", quote.price_impact);
-            println!("   ✓ Gas estimate: {}", quote.gas_estimate);
+    match pool_factory.find_best_pool(weth, signal.token_address).await {
+        Ok(pool) => {
+            println!("   ✓ Found pool: {} ({})", pool.address(), pool.protocol());
+            let quote = pool.get_amount_out(amount_in, weth).await.unwrap();
+            println!("   ✓ Expected output: {} tokens", quote);
         }
         Err(e) => {
             println!("   ❌ No suitable pool found: {}", e);

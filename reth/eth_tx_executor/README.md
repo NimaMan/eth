@@ -1,254 +1,313 @@
-# eth_kartal 🛡️
+# ETH Kartal - High-Performance Transaction Execution Engine
 
-**High-Performance Ethereum Transaction Execution Engine**
+Ultra-fast transaction execution system for Ethereum mainnet designed for sub-200ms alert-to-execution latency in automated trading and MEV protection scenarios.
 
-A sub-200ms transaction execution system designed for scam protection and automated trading on Ethereum. Built for speed, reliability, and MEV protection.
+## 🎯 Purpose
 
-## 🎯 Mission
+ETH Kartal executes trading signals with minimal latency by:
+- Processing incoming alerts from mempool monitoring systems
+- Applying risk management and position limits
+- Executing trades through optimal gas pricing and MEV protection
+- Providing comprehensive audit trails and performance metrics
 
-Execute protective transactions faster than malicious actors by:
-- Processing real-time scam detection alerts
-- Optimizing gas prices for mempool positioning  
-- Executing transactions within 200ms of alert receipt
-- Protecting against MEV attacks and front-running
+## 📊 Signal Format
 
-## ⚡ Performance Metrics
-
-- **Target Latency**: <200ms alert-to-execution
-- **Measured Performance**: ~90ms total execution time
-- **Initialization**: 48ms (one-time cost)
-- **Mempool Positioning**: Top 1-5% based on priority
-
-## 🏗️ Architecture
-
-```
-ZMQ Alerts → Alert Processor → Transaction Executor
-                                      ↓
-           Gas Optimizer ← Position Calculator ← Mempool Tracker
-                  ↓                                   ↓
-           Risk Manager → Pool Factory → DEX Pools
-                                      ↓
-                              RPC Submission → Ethereum
-```
-
-## 📁 Module Overview
-
-| Module | Purpose | Status | Lines |
-|--------|---------|--------|-------|
-| `alert_processor/` | ZMQ alert reception & parsing | ✅ Complete | ~280 |
-| `tx_executor/` | Transaction building & execution | 🟡 Sell only | ~520 |
-| `ranking/` | Gas optimization & mempool analysis | ✅ Complete | ~1,200 |
-| `pools/` | DEX protocol abstractions | 🟡 V2 only | ~400 |
-| `wallet/` | Position tracking & balances | ✅ Complete | ~300 |
-| `risk/` | Circuit breakers & safety | ✅ Complete | ~1,700 |
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-```bash
-# Reth node running locally
-reth node --http --ws --http.api eth,net,web3 --ws.api eth,net,web3
-
-# Environment setup
-export PRIVATE_KEY="0x..." 
-export RPC_URL="http://127.0.0.1:8545"
-export RETH_WS_URL="ws://127.0.0.1:8546"
+### Input Signal Structure
+```json
+{
+  "id": "alert_12345",
+  "action": "BUY" | "SELL",
+  "token_address": "0x...",
+  "pool_address": "0x...",
+  "timestamp": 1699123456,
+  "params": {
+    "amount": "1000000000000000000",  // Amount in wei or U256::MAX for "all"
+    "slippage": 0.03,                 // 3% slippage (0.001-0.10 range)
+    "priority": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
+    "deadline_seconds": 60,
+    "mev_protected": true
+  }
+}
 ```
 
-### Build & Test
+### Example Trading Signals
 
-```bash
-# Build the project
-cargo build --release
+**Buy Signal (ETH → Token)**
+```json
+{
+  "id": "buy_signal_001",
+  "action": "BUY", 
+  "token_address": "0xA0b86a33E6417aFb8D3c5C61308B6fCFa36C6a00b",
+  "pool_address": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+  "timestamp": 1699123456,
+  "params": {
+    "amount": "500000000000000000",  // 0.5 ETH
+    "slippage": 0.025,               // 2.5%
+    "priority": "HIGH",
+    "deadline_seconds": 30,
+    "mev_protected": true
+  }
+}
+```
 
-# Run performance test
-cargo run --example performance_test
+**Sell Signal (Token → ETH)**
+```json
+{
+  "id": "sell_signal_002", 
+  "action": "SELL",
+  "token_address": "0xA0b86a33E6417aFb8D3c5C61308B6fCFa36C6a00b",
+  "pool_address": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+  "timestamp": 1699123457,
+  "params": {
+    "amount": "18446744073709551615", // U256::MAX = sell all tokens
+    "slippage": 0.05,                 // 5%
+    "priority": "CRITICAL",
+    "deadline_seconds": 15,
+    "mev_protected": true
+  }
+}
+```
 
-# Run the main executor
-cargo run --bin kartal
+## ⚡ Execution Flow
+
+```
+Alert Received → Input Validation → Risk Assessment → Pool Query → Gas Optimization → Transaction Build → MEV Protection → Execution → Logging
+     ~1ms           ~2ms              ~5ms            ~15ms         ~10ms              ~8ms           ~50ms         ~100ms      ~5ms
+```
+
+### Detailed Execution Steps
+
+1. **Alert Processing** (`~1ms`)
+   - ZMQ message received and parsed
+   - Signal ID generated for tracking
+   - Alert logged to database
+
+2. **Input Validation** (`~2ms`)
+   - Token/pool address validation
+   - Slippage bounds checking (0.1% - 10%)
+   - Amount and deadline validation
+
+3. **Risk Assessment** (`~5ms`)
+   - Position limit checks
+   - Daily loss limit validation
+   - Token blacklist verification
+   - Dynamic risk scoring
+
+4. **Pool Interaction** (`~15ms`)
+   - Pool reserves fetched
+   - Amount out calculated
+   - Slippage applied to minimum output
+
+5. **Gas Optimization** (`~10ms`)
+   - Mempool analysis for optimal gas price
+   - Position prediction for target block
+   - Execution path selection (Public/Flashbots/Multi)
+
+6. **Transaction Building** (`~8ms`)
+   - Swap parameters constructed
+   - Transaction built with optimal gas
+   - Nonce reserved from manager
+
+7. **MEV Protection** (`~50ms`)
+   - Flashbots bundle creation (if enabled)
+   - Bundle simulation and submission
+   - Fallback to public mempool if needed
+
+8. **Execution** (`~100ms`)
+   - Transaction signed with secure wallet
+   - Submitted via optimal execution path
+   - Nonce tracking updated
+
+9. **Result Logging** (`~5ms`)
+   - Execution outcome recorded
+   - Performance metrics logged
+   - Database updated with final status
+
+### Success Path
+```
+✅ Alert → ✅ Validation → ✅ Risk OK → ✅ Pool Found → ✅ Gas Optimal → ✅ TX Built → ✅ Submitted → ✅ Confirmed
+```
+
+### Failure Paths
+```
+❌ Invalid Token → Validation Error → Early Exit
+❌ Risk Block   → Risk Rejection → Early Exit  
+❌ No Liquidity → Pool Error → Early Exit
+❌ High Gas     → Gas Failure → Retry/Exit
+❌ TX Revert    → Execution Failure → Logged
 ```
 
 ## 🔧 Configuration
 
-Key configuration via environment variables:
-
+### Environment Variables
 ```bash
-# Execution
-PRIVATE_KEY="0x..."              # Wallet private key
-RPC_URL="http://127.0.0.1:8545"  # Ethereum RPC endpoint
-RETH_WS_URL="ws://127.0.0.1:8546" # WebSocket for mempool
+# Required
+ETH_KEYSTORE_PATH="/path/to/keystore.json"
+ETH_RPC_URL="http://127.0.0.1:8545"
 
-# Alerts
-ZMQ_ENDPOINT="tcp://localhost:5559" # Alert source
-
-# Risk Management  
-MAX_DAILY_LOSS="1000000000000000000" # 1 ETH in wei
-CIRCUIT_BREAKER_THRESHOLD="5"        # Max failures before halt
+# Optional
+DATABASE_URL="postgres://user:pass@localhost/eth_db"
+ETH_CHAIN_ID="1"
+ALERT_ENDPOINT="tcp://127.0.0.1:5555"
+FLASHBOTS_ENABLED="true"
 ```
 
-## 📊 Current Capabilities
+### Risk Configuration
+```toml
+[risk]
+max_position_usd = 10000.0
+max_daily_loss_usd = 1000.0
+max_slippage_percent = 10.0
+emergency_stop = false
 
-### ✅ Implemented
-- **Alert Processing**: ZMQ subscription with automatic reconnection
-- **Sell Transactions**: Complete Uniswap V2 sell execution
-- **Gas Optimization**: Dynamic pricing based on mempool analysis
-- **Position Tracking**: Real-time token balance management
-- **Risk Management**: Circuit breakers and loss limits
-- **Performance Metrics**: Detailed execution timing
+[gas]
+max_gas_price_gwei = 100
+target_block_position = 3
+mempool_timeout_ms = 5000
+```
 
-### 🟡 Partial
-- **DEX Support**: Uniswap V2 only (V3/V4 planned)
-- **Transaction Types**: Sell only (buy implementation needed)
-- **MEV Protection**: Public mempool only (Flashbots planned)
+## 🚀 Usage
 
-### ❌ Planned
-- **Flashbots Integration**: Private mempool submission
-- **Multi-Protocol DEX**: V3, V4, SushiSwap support
-- **Advanced Analytics**: Historical performance tracking
+### Command Line Interface
+```bash
+# Production trading
+./kartal --keystore-path /path/to/keystore.json --rpc-url http://127.0.0.1:8545
+
+# Test mode (simulation only)
+./kartal --test-mode --keystore-path /path/to/keystore.json
+
+# With custom alert endpoint
+./kartal --alert-endpoint tcp://127.0.0.1:5556 --keystore-path /path/to/keystore.json
+```
+
+### Programmatic Usage
+```rust
+use eth_kartal::{TransactionExecutor, ExecutorConfig, Alert};
+
+let config = ExecutorConfig {
+    keystore_path: "/path/to/keystore.json".into(),
+    chain_id: 1,
+    rpc_url: "http://127.0.0.1:8545".to_string(),
+    flashbots_enabled: true,
+    // ...
+};
+
+let executor = TransactionExecutor::new(config).await?;
+let result = executor.execute_alert(alert).await;
+```
+
+## 📈 Performance Metrics
+
+### Latency Targets
+- **Total execution**: < 200ms (95th percentile)
+- **Alert to start**: < 5ms
+- **Risk assessment**: < 10ms
+- **Gas optimization**: < 15ms
+- **Transaction build**: < 10ms
+- **Network submission**: < 150ms
+
+### Throughput Capacity
+- **Theoretical**: 187,611 TPS (based on internal processing)
+- **Network limited**: ~50 TPS (Ethereum block gas limit)
+- **Practical**: 10-20 TPS (considering gas competition)
+
+## 🛡️ Security Features
+
+### Wallet Security
+- **Encrypted keystores** with secure password handling
+- **Auto-lock** functionality after 5 minutes of inactivity
+- **Memory protection** with secure key clearing
+- **Access control** with unlock verification
+
+### Risk Management
+- **Position limits** to prevent overexposure
+- **Daily loss limits** with automatic halt
+- **Token blacklisting** for known scam tokens
+- **Circuit breakers** for unusual market conditions
+
+### MEV Protection
+- **Flashbots integration** for private mempool submission
+- **Bundle protection** against front-running
+- **Dynamic execution paths** based on market conditions
+- **Sandwich attack prevention**
+
+## 📋 Module Documentation
+
+Each module contains detailed documentation:
+
+- [`alert_processor/`](src/alert_processor/README.md) - Signal ingestion and parsing
+- [`common/`](src/common/README.md) - Shared types and utilities
+- [`config/`](src/config/README.md) - Configuration management
+- [`flashbots/`](src/flashbots/README.md) - MEV protection and private pools
+- [`logging/`](src/logging/README.md) - Trade logging and audit trails
+- [`pools/`](src/pools/README.md) - DEX pool abstractions
+- [`ranking/`](src/ranking/README.md) - Gas optimization and mempool analysis
+- [`risk/`](src/risk/README.md) - Risk management and circuit breakers
+- [`tx_executor/`](src/tx_executor/README.md) - Transaction execution engine
+- [`wallet/`](src/wallet/README.md) - Secure wallet management
+
+## 🔍 Monitoring & Debugging
+
+### Logs Output
+```
+2024-01-15T10:30:15Z INFO  📨 Alert received: buy_signal_001 | Token: 0xA0b8... | Action: BUY | Amount: 500000000000000000 | Priority: HIGH
+2024-01-15T10:30:15Z INFO  ⚖️ Risk decision: ALLOW | Alert: buy_signal_001 | Original: 500000000000000000 | Final: 500000000000000000
+2024-01-15T10:30:15Z INFO  📤 Transaction submitted: 0x1a2b... | Alert: buy_signal_001 | Nonce: 42 | Gas: 25000000000 | Path: FlashbotsBundle
+2024-01-15T10:30:15Z INFO  ✅ Execution successful: 0x1a2b... | Alert: buy_signal_001 | Latency: 187ms
+2024-01-15T10:30:15Z INFO    📊 Performance breakdown:
+2024-01-15T10:30:15Z INFO      • Alert→Start: 1ms
+2024-01-15T10:30:15Z INFO      • Position check: 12ms
+2024-01-15T10:30:15Z INFO      • Gas ranking: 8ms
+2024-01-15T10:30:15Z INFO      • Price quote: 15ms
+2024-01-15T10:30:15Z INFO      • TX build: 6ms
+2024-01-15T10:30:15Z INFO      • TX submit: 145ms
+```
+
+### Database Schema
+Execution data is stored in PostgreSQL tables:
+- `trade_signals` - Signal tracking with status state machine  
+- `executions` - Detailed performance metrics
+- `wallets` - Wallet configuration and stats
 
 ## 🧪 Testing
 
-### Performance Test
 ```bash
-cargo run --example performance_test
-```
-Validates complete alert→execution pipeline with timing metrics.
-
-### Unit Tests
-```bash
+# Run all tests
 cargo test
+
+# Run specific module tests  
+cargo test tx_executor
+
+# Run with logging
+RUST_LOG=debug cargo test
+
+# Performance benchmarks
+cargo test --release --test benchmarks
 ```
-Tests individual components and integration points.
 
-## 📈 Performance Analysis
+## 📦 Dependencies
 
-Recent performance test results:
-- **Executor Initialization**: 48ms
-- **Alert Processing**: <1ms  
-- **Position Check**: 1ms
-- **Gas Ranking**: <1ms
-- **Price Quote**: <1ms
-- **TX Build**: <1ms
-- **TX Submit**: <1ms
-- **Total**: ~90ms (target: <200ms) ✅
+### Core Dependencies
+- `ethers` - Ethereum interaction
+- `tokio` - Async runtime
+- `sqlx` - Database connectivity
+- `serde` - Serialization
+- `tracing` - Structured logging
 
-## 🛠️ Development
+### Security Dependencies
+- `eth-keystore` - Encrypted key management
+- `secrecy` - Secret value protection  
+- `zeroize` - Secure memory clearing
 
-### Adding New DEX Support
-1. Implement the `Pool` trait in `src/pools/`
-2. Add factory methods in `PoolFactory`
-3. Update router logic for protocol selection
+## 🔗 Integration
 
-### Adding New Alert Types
-1. Extend `Action` enum in `alert_processor/types.rs`
-2. Add execution logic in `tx_executor/executor.rs`
-3. Update risk management rules if needed
-
-## 🔐 Security Considerations
-
-- **Private Key Management**: Never commit keys to repository
-- **Risk Limits**: Automatic halt on excessive losses
-- **MEV Protection**: Gas optimization and Flashbots integration
-- **Circuit Breakers**: Automatic disable on repeated failures
-
-## 🚨 Security Audit & Production Readiness Roadmap
-
-### Critical Security Issues (Must Fix Before Production)
-
-#### 1. **Wallet Security** 🔴
-- **Issue**: `signer()` method exposes full private key via clone
-- **Risk**: Any code can access and exfiltrate private keys
-- **Fix**: Remove method or return signing interface only
-
-#### 2. **Nonce Management** 🔴
-- **Issue**: Nonce increments on failure, breaking all future transactions
-- **Risk**: One failed transaction causes cascade failure
-- **Fix**: Only increment after successful submission
-
-#### 3. **No Auto-Lock** 🔴
-- **Issue**: Wallet stays unlocked indefinitely
-- **Risk**: Memory dumps could contain private keys
-- **Fix**: Implement timeout-based auto-lock
-
-#### 4. **No Graceful Shutdown** 🟡
-- **Issue**: No signal handling, wallet never locks on exit
-- **Risk**: Sensitive data remains in memory
-- **Fix**: Handle SIGTERM/SIGINT, lock wallet on shutdown
-
-#### 5. **ZMQ Receiver Issues** 🟡
-- **Issue**: Infinite loop, no shutdown mechanism, blocking send
-- **Risk**: Cannot stop service cleanly, potential deadlock
-- **Fix**: Add shutdown channel, use try_send
-
-#### 6. **Integer Math Precision** 🟡
-- **Issue**: Using integer division for ETH calculations
-- **Risk**: Loss of precision in financial calculations
-- **Fix**: Use proper decimal arithmetic
-
-#### 7. **Risk Manager Disconnected** 🟡
-- **Issue**: Risk manager exists but not integrated with main
-- **Risk**: No actual risk controls in production
-- **Fix**: Wire risk manager into execution flow
-
-### Production Readiness Checklist
-
-#### Phase 1: Critical Security (3-4 days)
-- [ ] Fix wallet cloning vulnerability
-- [ ] Implement proper nonce management with recovery
-- [ ] Add wallet auto-lock with configurable timeout
-- [ ] Add graceful shutdown with cleanup
-- [ ] Fix ZMQ receiver lifecycle management
-- [ ] Replace f64 with proper decimal types for money
-
-#### Phase 2: Integration & Testing (2-3 days)
-- [ ] Connect risk manager to main execution flow
-- [ ] Add comprehensive error recovery
-- [ ] Implement transaction retry logic
-- [ ] Add integration tests with real Reth node
-- [ ] Performance validation with real mempool data
-
-#### Phase 3: Production Features (1-2 weeks)
-- [ ] Hardware wallet support (Ledger/Trezor)
-- [ ] Multi-signature wallet support
-- [ ] Advanced nonce management with queue
-- [ ] Monitoring and alerting integration
-- [ ] Audit logging for all transactions
-- [ ] Rate limiting and DDoS protection
-
-### Estimated Timeline
-- **Current Status**: NOT production ready ❌
-- **Minimum Safe Deployment**: 1 week (Phase 1 + 2)
-- **Full Production Ready**: 3 weeks (all phases)
-
-## 📋 Feature TODO
-
-### High Priority
-- [x] Implement buy transaction logic ✅
-- [x] Add Flashbots submission support ✅
-- [x] Complete common module with shared types ✅
-
-### Medium Priority  
-- [ ] Add Uniswap V3 pool support
-- [ ] Enhanced MEV detection algorithms
-- [ ] Integration tests with live alerts
-
-### Low Priority
-- [ ] Additional DEX protocols
-- [ ] Advanced performance analytics
-- [ ] Historical data analysis
-
-## 🤝 Contributing
-
-1. Follow the modular architecture patterns
-2. Add comprehensive tests for new functionality
-3. Maintain performance targets (<200ms execution)
-4. Document all public APIs and configuration
+ETH Kartal integrates with:
+- **Mempool Processors** - Real-time signal generation
+- **PostgreSQL** - Trade logging and analytics
+- **Flashbots** - MEV protection
+- **Local Reth Node** - Fast RPC access
+- **ZMQ Messaging** - High-speed alert ingestion
 
 ## 📄 License
 
-MIT License - See LICENSE file for details.
-
----
-
-**⚠️ Warning**: This system handles real cryptocurrency transactions. Always test thoroughly on testnets before mainnet deployment.
+This project is for educational and research purposes. Production use requires appropriate trading licenses and compliance with applicable financial regulations.

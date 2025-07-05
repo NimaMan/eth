@@ -41,15 +41,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Load secure wallet
     println!("Loading secure wallet from keystore...");
-    let password = read_password("Enter keystore password: ")?;
     
     let wallet_config = SecureWalletConfig {
         keystore_path: keystore_path.clone(),
-        password,
         chain_id: 1,
+        auto_lock_timeout: Some(std::time::Duration::from_secs(300)), // 5 minutes
     };
     
     let wallet = SecureWallet::from_keystore(wallet_config).await?;
+    
+    // Unlock wallet
+    let password = read_password("Enter keystore password: ")?;
+    wallet.unlock(password).await?;
     
     println!("✅ Wallet loaded: {}\n", wallet.address());
     
@@ -80,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "4" => simulate_arbitrage(&wallet, &pool_factory, &provider).await?,
             "5" => {
                 println!("\n🔒 Locking wallet...");
-                wallet.lock();
+                wallet.lock().await;
                 break;
             }
             _ => println!("Invalid option"),
@@ -122,7 +125,7 @@ async fn simulate_eth_to_usdc(
     println!("\n🔐 Simulating transaction signing...");
     
     // Build a dummy transaction
-    let tx = TransactionRequest::new()
+    let _tx = TransactionRequest::new()
         .to(pool.address())
         .value(eth_amount)
         .data(vec![0x00]); // Dummy calldata

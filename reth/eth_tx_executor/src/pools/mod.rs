@@ -48,6 +48,37 @@ pub struct SwapResult {
     pub timestamp: U256,
 }
 
+/// Pool information for different protocols
+#[derive(Debug, Clone)]
+pub enum PoolInfo {
+    UniswapV2(UniswapV2Info),
+    UniswapV3(UniswapV3Info),
+    SushiSwap(UniswapV2Info), // Uses same interface as V2
+}
+
+/// Uniswap V2 pool information
+#[derive(Debug, Clone)]
+pub struct UniswapV2Info {
+    pub pool_address: Address,
+    pub token0: Address,
+    pub token1: Address,
+    pub reserve0: U256,
+    pub reserve1: U256,
+    pub total_supply: U256,
+}
+
+/// Uniswap V3 pool information
+#[derive(Debug, Clone)]
+pub struct UniswapV3Info {
+    pub pool_address: Address,
+    pub token0: Address,
+    pub token1: Address,
+    pub liquidity: u128,
+    pub sqrt_price_x96: U256,
+    pub tick: i32,
+    pub fee: u32,
+}
+
 /// Common interface for all pool types
 #[async_trait]
 pub trait Pool: Send + Sync {
@@ -112,5 +143,23 @@ impl PoolFactory {
         ).await?;
         
         Ok(Box::new(pool))
+    }
+    
+    /// Get pool information
+    pub async fn get_pool_info(&self, pool_address: &Address) -> PoolResult<PoolInfo> {
+        // For now, assume Uniswap V2
+        // Future: detect pool type dynamically
+        let pool = uniswap_v2::UniswapV2Pool::new(*pool_address, self.provider.clone());
+        
+        // Get reserves from pool contract
+        // This is a simplified version - real implementation would call the contract
+        Ok(PoolInfo::UniswapV2(UniswapV2Info {
+            pool_address: *pool_address,
+            token0: Address::zero(), // Would be fetched from contract
+            token1: Address::zero(), // Would be fetched from contract
+            reserve0: U256::from(1000000), // Mock data
+            reserve1: U256::from(2000000), // Mock data
+            total_supply: U256::from(1000000), // Mock data
+        }))
     }
 }

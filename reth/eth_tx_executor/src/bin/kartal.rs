@@ -11,9 +11,8 @@ use eth_kartal::{
 use std::time::Instant;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tracing_subscriber::{EnvFilter, fmt};
-use secrecy::Secret;
 
 /// CLI arguments
 #[derive(Parser, Debug)]
@@ -83,6 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         flashbots_enabled: args.flashbots,
         flashbots_rpc: args.flashbots_rpc,
         reth_ws_url: args.reth_ws_url,
+        risk_config: eth_kartal::risk::RiskConfig::default(), // TODO: make configurable via CLI args
     };
     
     let executor = TransactionExecutor::new(executor_config).await?;
@@ -102,11 +102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
     
-    let receiver = AlertReceiver::new(receiver_config, alert_tx);
+    let receiver = std::sync::Arc::new(AlertReceiver::new(receiver_config, alert_tx));
+    let receiver_clone = receiver.clone();
     
     // Start alert receiver in background
     let receiver_handle = tokio::spawn(async move {
-        receiver.run().await;
+        receiver_clone.run().await;
     });
     
     info!("Alert receiver started");
@@ -117,8 +118,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut failed_executions = 0u64;
     let mut total_latency_ms = 0u64;
     
-    // Main execution loop
-    while let Some(alert) = alert_rx.recv().await {
+    // Create shutdown handler
+    let shutdown_signal = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install CTRL+C handler");
+        info!("Shutdown signal received");
+    };
+    
+    // Main execution loop with shutdown handling
+    tokio::select! {
+        _ = shutdown_signal => {
+            info!("Initiating graceful shutdown...");
+        }
+        _ = async {
+            while let Some(alert) = alert_rx.recv().await {
         total_alerts += 1;
         let start_time = Instant::now();
         
@@ -185,10 +199,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("📊 Statistics: {} alerts, {:.1}% success rate, {}ms avg latency",
                 total_alerts, success_rate, avg_latency);
         }
+            }
+        } => {
+            // Normal termination (channel closed)
+            info!("Alert channel closed");
+        }
     }
     
-    // Wait for receiver to finish
-    receiver_handle.await?;
+    // Graceful shutdown sequence
+    info!("Shutting down components...");
+    
+    // 1. Stop alert receiver
+    receiver.shutdown();
+    
+    // 2. Lock wallet to clear sensitive data
+    executor.lock_wallet().await;
+    info!("Wallet locked and sensitive data cleared");
+    
+    // 3. Sync nonce with chain for clean restart
+    if let Err(e) = executor.sync_nonce_with_chain().await {
+        warn!("Failed to sync nonce during shutdown: {}", e);
+    }
+    
+    // 4. Wait for receiver to finish
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        receiver_handle
+    ).await;
+    
+    // Print final statistics
+    if total_alerts > 0 {
+        let avg_latency = total_latency_ms / total_alerts;
+        let success_rate = (successful_executions as f64 / total_alerts as f64) * 100.0;
+        
+        info!("📊 Final Statistics:");
+        info!("  Total alerts processed: {}", total_alerts);
+        info!("  Success rate: {:.1}%", success_rate);
+        info!("  Average latency: {}ms", avg_latency);
+    }
+    
+    info!("✅ ETH Kartal shutdown complete");
     
     Ok(())
 }

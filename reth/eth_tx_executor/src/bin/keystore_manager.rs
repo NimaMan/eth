@@ -5,7 +5,7 @@
 use clap::{Parser, Subcommand};
 use eth_kartal::wallet::{SecureWallet, SecureWalletConfig, read_password};
 use std::path::PathBuf;
-use tracing::{info, error};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Parser)]
@@ -120,6 +120,7 @@ async fn show_keystore(keystore_path: PathBuf) -> Result<(), Box<dyn std::error:
     let config = SecureWalletConfig {
         keystore_path,
         chain_id: 1, // Doesn't matter for showing address
+        auto_lock_timeout: None,
     };
     
     let wallet = SecureWallet::from_keystore(config).await?;
@@ -135,6 +136,7 @@ async fn test_keystore(
     let config = SecureWalletConfig {
         keystore_path: keystore_path.clone(),
         chain_id,
+        auto_lock_timeout: None,
     };
     
     let wallet = SecureWallet::from_keystore(config).await?;

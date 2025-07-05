@@ -8,6 +8,8 @@ pub mod constants;
 pub mod errors;
 pub mod types;
 pub mod utils;
+pub mod validation;
+pub mod rpc_pool;
 
 // Re-export commonly used items
 pub use constants::{addresses, limits, timing};
@@ -19,4 +21,8 @@ pub use types::{
 pub use utils::{
     apply_slippage, calculate_price_impact, current_timestamp, format_token_amount,
     format_wei_to_eth, gwei_to_wei, wei_to_gwei,
+};
+pub use validation::{
+    validate_slippage, validate_pool_address, validate_token_address,
+    MIN_SLIPPAGE_PERCENT, MAX_SLIPPAGE_PERCENT, DEFAULT_SLIPPAGE_PERCENT,
 };

@@ -37,6 +37,18 @@ pub enum KartalError {
     #[error("Network error: {0}")]
     Network(#[from] NetworkError),
     
+    /// Validation errors
+    #[error("Validation error: {0}")]
+    Validation(String),
+    
+    /// Database errors
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+    
+    /// Serialization errors
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+    
     /// Generic errors
     #[error("{0}")]
     Generic(String),

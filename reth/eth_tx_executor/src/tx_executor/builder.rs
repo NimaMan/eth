@@ -13,10 +13,10 @@ pub mod routers {
     use ethers::types::Address;
     
     lazy_static::lazy_static! {
-        pub static ref UNISWAP_V2_ROUTER: Address = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap();
-        pub static ref UNISWAP_V3_ROUTER: Address = "0xE592427A0AEce92De3Edee1F18E0157C05861564".parse().unwrap();
-        pub static ref SUSHISWAP_ROUTER: Address = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F".parse().unwrap();
-        pub static ref WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap();
+        pub static ref UNISWAP_V2_ROUTER: Address = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().expect("Invalid Uniswap V2 router address");
+        pub static ref UNISWAP_V3_ROUTER: Address = "0xE592427A0AEce92De3Edee1F18E0157C05861564".parse().expect("Invalid Uniswap V3 router address");
+        pub static ref SUSHISWAP_ROUTER: Address = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F".parse().expect("Invalid Sushiswap router address");
+        pub static ref WETH: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().expect("Invalid WETH address");
     }
 }
 
@@ -214,6 +214,72 @@ impl TransactionBuilder {
     /// Get the wallet address
     pub fn wallet_address(&self) -> Address {
         self.wallet_address
+    }
+    
+    /// Build V2 add liquidity transaction
+    pub fn build_v2_add_liquidity(
+        &self,
+        pool_address: Address,
+        token_address: Address,
+        amount0: U256,
+        amount1: U256,
+        slippage: f64,
+        deadline: u64,
+    ) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
+        // Calculate minimum amounts with slippage
+        let amount0_min = self.calculate_min_amount(amount0, slippage);
+        let amount1_min = self.calculate_min_amount(amount1, slippage);
+        
+        // Build addLiquidity call
+        let data = encode(&[
+            Token::Address(token_address),
+            Token::Address(*routers::WETH),
+            Token::Uint(amount0),
+            Token::Uint(amount1),
+            Token::Uint(amount0_min),
+            Token::Uint(amount1_min),
+            Token::Address(self.wallet_address),
+            Token::Uint(U256::from(deadline)),
+        ]);
+        
+        let mut tx = Eip1559TransactionRequest::new()
+            .to(self.router_address)
+            .data(data)
+            .value(amount1); // ETH value for WETH pair
+        
+        Ok(TypedTransaction::Eip1559(tx))
+    }
+    
+    /// Build V2 remove liquidity transaction
+    pub fn build_v2_remove_liquidity(
+        &self,
+        pool_address: Address,
+        token_address: Address,
+        liquidity: U256,
+        slippage: f64,
+        deadline: u64,
+    ) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
+        // For simplicity, assuming we want to receive minimum amounts
+        // In production, these would be calculated based on pool reserves
+        let amount0_min = U256::zero(); 
+        let amount1_min = U256::zero();
+        
+        // Build removeLiquidity call
+        let data = encode(&[
+            Token::Address(token_address),
+            Token::Address(*routers::WETH),
+            Token::Uint(liquidity),
+            Token::Uint(amount0_min),
+            Token::Uint(amount1_min),
+            Token::Address(self.wallet_address),
+            Token::Uint(U256::from(deadline)),
+        ]);
+        
+        let tx = Eip1559TransactionRequest::new()
+            .to(self.router_address)
+            .data(data);
+        
+        Ok(TypedTransaction::Eip1559(tx))
     }
 }
 

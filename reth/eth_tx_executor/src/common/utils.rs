@@ -55,7 +55,7 @@ pub fn apply_slippage(amount: U256, slippage: f64) -> U256 {
 pub fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .expect("System time before UNIX epoch")
         .as_secs()
 }
 

@@ -11,8 +11,9 @@ use secrecy::{ExposeSecret, Secret, Zeroize};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 
 /// Secure wallet configuration
 #[derive(Debug, Clone)]
@@ -21,6 +22,8 @@ pub struct SecureWalletConfig {
     pub keystore_path: PathBuf,
     /// Chain ID
     pub chain_id: u64,
+    /// Auto-lock timeout (None means no auto-lock)
+    pub auto_lock_timeout: Option<Duration>,
 }
 
 /// Errors that can occur with secure wallet
@@ -53,6 +56,10 @@ pub struct SecureWallet {
     wallet: Arc<RwLock<Option<LocalWallet>>>,
     /// Wallet address (always available)
     address: Address,
+    /// Last activity timestamp
+    last_activity: Arc<RwLock<Option<Instant>>>,
+    /// Auto-lock task handle
+    auto_lock_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl SecureWallet {
@@ -85,6 +92,8 @@ impl SecureWallet {
             config,
             wallet: Arc::new(RwLock::new(None)),
             address,
+            last_activity: Arc::new(RwLock::new(None)),
+            auto_lock_handle: Arc::new(RwLock::new(None)),
         })
     }
     
@@ -127,9 +136,12 @@ impl SecureWallet {
             config: SecureWalletConfig {
                 keystore_path: keystore_path.to_path_buf(),
                 chain_id,
+                auto_lock_timeout: None, // Default to no auto-lock
             },
             wallet: Arc::new(RwLock::new(Some(wallet))),
             address,
+            last_activity: Arc::new(RwLock::new(Some(Instant::now()))),
+            auto_lock_handle: Arc::new(RwLock::new(None)),
         })
     }
     
@@ -152,6 +164,14 @@ impl SecureWallet {
         // Clear sensitive data
         private_key.zeroize();
         
+        // Update last activity
+        *self.last_activity.write().await = Some(Instant::now());
+        
+        // Start auto-lock task if configured
+        if let Some(timeout) = self.config.auto_lock_timeout {
+            self.start_auto_lock_task(timeout).await;
+        }
+        
         info!("Wallet unlocked successfully");
         Ok(())
     }
@@ -160,6 +180,15 @@ impl SecureWallet {
     pub async fn lock(&self) {
         let mut w = self.wallet.write().await;
         *w = None;
+        
+        // Clear last activity
+        *self.last_activity.write().await = None;
+        
+        // Cancel auto-lock task
+        if let Some(handle) = self.auto_lock_handle.write().await.take() {
+            handle.abort();
+        }
+        
         info!("Wallet locked");
     }
     
@@ -180,6 +209,9 @@ impl SecureWallet {
             .as_ref()
             .ok_or(SecureWalletError::WalletLocked)?;
         
+        // Update last activity
+        *self.last_activity.write().await = Some(Instant::now());
+        
         wallet.sign_transaction(tx)
             .await
             .map_err(|e| SecureWalletError::Wallet(e))
@@ -195,18 +227,56 @@ impl SecureWallet {
             .as_ref()
             .ok_or(SecureWalletError::WalletLocked)?;
         
+        // Update last activity
+        *self.last_activity.write().await = Some(Instant::now());
+        
         wallet.sign_typed_data(payload)
             .await
             .map_err(|e| SecureWalletError::Wallet(e))
     }
     
-    /// Get signer (for ethers compatibility)
-    pub async fn signer(&self) -> Result<LocalWallet, SecureWalletError> {
-        let wallet_guard = self.wallet.read().await;
-        wallet_guard
-            .as_ref()
-            .ok_or(SecureWalletError::WalletLocked)
-            .map(|w| w.clone())
+    /// Start auto-lock background task
+    async fn start_auto_lock_task(&self, timeout: Duration) {
+        // Cancel existing task if any
+        if let Some(handle) = self.auto_lock_handle.write().await.take() {
+            handle.abort();
+        }
+        
+        let wallet = self.wallet.clone();
+        let last_activity = self.last_activity.clone();
+        let auto_lock_handle = self.auto_lock_handle.clone();
+        
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30)); // Check every 30 seconds
+            
+            loop {
+                interval.tick().await;
+                
+                // Check if we should auto-lock
+                let should_lock = {
+                    let last_activity_guard = last_activity.read().await;
+                    if let Some(last) = *last_activity_guard {
+                        Instant::now().duration_since(last) > timeout
+                    } else {
+                        false // Already locked
+                    }
+                };
+                
+                if should_lock {
+                    debug!("Auto-locking wallet due to inactivity");
+                    // Lock the wallet
+                    *wallet.write().await = None;
+                    *last_activity.write().await = None;
+                    info!("Wallet auto-locked due to inactivity");
+                    
+                    // Clear our own handle
+                    *auto_lock_handle.write().await = None;
+                    break;
+                }
+            }
+        });
+        
+        *self.auto_lock_handle.write().await = Some(handle);
     }
 }
 

@@ -3,17 +3,21 @@
 //! Executes transactions with detailed latency tracking
 
 use crate::alert_processor::{Alert, Action, Priority};
+use crate::common::{validate_slippage, validate_token_address, validate_pool_address};
 use crate::flashbots::{FlashbotsClient, FlashbotsConfig, BundleBuilder, RelayEndpoint};
-use crate::pools::{PoolFactory, SwapParams};
-use crate::ranking::{TransactionRankingSystem, ExecutionPath};
+use crate::logging::TradeLogger;
+use crate::pools::{PoolFactory, SwapParams, PoolInfo};
+use tx_ranking_system::{TransactionRankingSystem, ExecutionPath, RankingResult};
+use crate::risk::{RiskManager, RiskConfig, RiskDecision};
+use crate::tx_executor::NonceManager;
 use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
 use ethers::prelude::*;
 use ethers::types::transaction::eip2718::TypedTransaction;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::path::PathBuf;
-use tokio::sync::RwLock;
 use tracing::{info, error, warn, instrument};
+use uuid::Uuid;
 
 /// Executor configuration
 #[derive(Debug, Clone)]
@@ -30,6 +34,8 @@ pub struct ExecutorConfig {
     pub flashbots_rpc: Option<String>,
     /// Reth WebSocket URL for mempool monitoring
     pub reth_ws_url: String,
+    /// Risk management configuration
+    pub risk_config: RiskConfig,
 }
 
 /// Execution result with detailed metrics
@@ -48,7 +54,7 @@ pub struct ExecutionResult {
 }
 
 /// Detailed execution metrics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ExecutionMetrics {
     /// Time from alert receipt to execution start
     pub alert_to_start_ms: u64,
@@ -79,9 +85,11 @@ pub struct TransactionExecutor {
     /// Transaction ranking system
     ranking_system: Arc<TransactionRankingSystem>,
     /// Nonce manager
-    nonce: Arc<RwLock<U256>>,
-    /// Configuration
-    config: ExecutorConfig,
+    nonce_manager: Arc<NonceManager>,
+    /// Risk manager
+    risk_manager: Arc<tokio::sync::Mutex<RiskManager>>,
+    /// Trade logger
+    trade_logger: Arc<TradeLogger>,
     /// Flashbots client (optional)
     flashbots_client: Option<Arc<FlashbotsClient>>,
 }
@@ -95,6 +103,7 @@ impl TransactionExecutor {
         let wallet_config = SecureWalletConfig {
             keystore_path: config.keystore_path.clone(),
             chain_id: config.chain_id,
+            auto_lock_timeout: Some(Duration::from_secs(300)), // 5 minutes auto-lock
         };
         let wallet = Arc::new(SecureWallet::from_keystore(wallet_config).await?);
         
@@ -109,9 +118,17 @@ impl TransactionExecutor {
         // Start ranking system background services
         ranking_system.start().await?;
         
-        // Initialize nonce
-        let current_nonce = provider.get_transaction_count(wallet_address, None).await?;
-        let nonce = Arc::new(RwLock::new(current_nonce));
+        // Initialize nonce manager
+        let nonce_manager = Arc::new(NonceManager::new(wallet_address, provider.clone()).await?);
+        
+        // Initialize risk manager
+        let risk_manager = Arc::new(tokio::sync::Mutex::new(RiskManager::new(config.risk_config.clone())));
+        
+        // Initialize trade logger
+        let database_url = std::env::var("DATABASE_URL").ok();
+        let trade_logger = Arc::new(
+            TradeLogger::new(database_url.as_deref(), wallet_address).await?
+        );
         
         // Initialize Flashbots client if enabled
         let flashbots_client = if config.flashbots_enabled {
@@ -147,10 +164,27 @@ impl TransactionExecutor {
             pool_factory,
             position_tracker,
             ranking_system,
-            nonce,
-            config,
+            nonce_manager,
+            risk_manager,
+            trade_logger,
             flashbots_client,
         })
+    }
+    
+    /// Convert eth_kartal Alert to tx_ranking_system Alert
+    fn convert_to_ranking_alert(&self, alert: &Alert) -> tx_ranking_system::Alert {
+        // Convert Priority enum
+        let ranking_priority = match alert.params.priority {
+            Priority::Critical => tx_ranking_system::Priority::Critical,
+            Priority::High => tx_ranking_system::Priority::High,
+            Priority::Normal => tx_ranking_system::Priority::Normal,
+        };
+        
+        tx_ranking_system::Alert::new(
+            alert.id.clone(),
+            ranking_priority,
+            alert.params.max_gas_price,
+        )
     }
     
     /// Execute alert with performance tracking
@@ -167,31 +201,57 @@ impl TransactionExecutor {
             total_ms: 0,
         };
         
-        // Validate alert is still valid
-        if !alert.is_valid() {
+        // Log alert received
+        let signal_id = self.trade_logger.log_alert_received(&alert).await;
+        
+        // Validate inputs
+        if let Err(e) = self.validate_alert_inputs(&alert) {
+            let error_msg = format!("Invalid alert inputs: {}", e);
+            self.trade_logger.log_execution_result(signal_id, &alert.id, &ExecutionResult {
+                alert_id: alert.id.clone(),
+                tx_hash: None,
+                success: false,
+                error: Some(error_msg.clone()),
+                metrics: metrics.clone(),
+            }).await;
+            
             return ExecutionResult {
                 alert_id: alert.id,
+                tx_hash: None,
+                success: false,
+                error: Some(error_msg),
+                metrics,
+            };
+        }
+        
+        // Validate alert is still valid
+        if !alert.is_valid() {
+            let result = ExecutionResult {
+                alert_id: alert.id.clone(),
                 tx_hash: None,
                 success: false,
                 error: Some("Alert expired".to_string()),
                 metrics,
             };
+            self.trade_logger.log_execution_result(signal_id, &alert.id, &result).await;
+            return result;
         }
         
         // Execute based on action
         let result = match alert.action {
-            Action::Sell => self.execute_sell(alert.clone(), &mut metrics).await,
-            Action::Buy => self.execute_buy(alert.clone(), &mut metrics).await,
-            _ => Err("Action not implemented".into()),
+            Action::Sell => self.execute_sell(signal_id, alert.clone(), &mut metrics).await,
+            Action::Buy => self.execute_buy(signal_id, alert.clone(), &mut metrics).await,
+            Action::AddLiquidity => self.execute_add_liquidity(signal_id, alert.clone(), &mut metrics).await,
+            Action::RemoveLiquidity => self.execute_remove_liquidity(signal_id, alert.clone(), &mut metrics).await,
         };
         
         metrics.total_ms = start_time.elapsed().as_millis() as u64;
         
-        match result {
+        let execution_result = match result {
             Ok(tx_hash) => {
                 info!("Execution successful: {:?} in {}ms", tx_hash, metrics.total_ms);
                 ExecutionResult {
-                    alert_id: alert.id,
+                    alert_id: alert.id.clone(),
                     tx_hash: Some(tx_hash),
                     success: true,
                     error: None,
@@ -201,19 +261,39 @@ impl TransactionExecutor {
             Err(e) => {
                 error!("Execution failed: {} in {}ms", e, metrics.total_ms);
                 ExecutionResult {
-                    alert_id: alert.id,
+                    alert_id: alert.id.clone(),
                     tx_hash: None,
                     success: false,
                     error: Some(e.to_string()),
                     metrics,
                 }
             }
-        }
+        };
+        
+        // Log final execution result
+        self.trade_logger.log_execution_result(signal_id, &alert.id, &execution_result).await;
+        
+        execution_result
+    }
+    
+    /// Validate alert inputs
+    fn validate_alert_inputs(&self, alert: &Alert) -> Result<(), Box<dyn std::error::Error>> {
+        // Validate token address
+        validate_token_address(alert.token_address)?;
+        
+        // Validate pool address
+        validate_pool_address(alert.pool_address)?;
+        
+        // Validate and normalize slippage
+        let _validated_slippage = validate_slippage(alert.params.slippage)?;
+        
+        Ok(())
     }
     
     /// Execute sell order
     async fn execute_sell(
         &self,
+        signal_id: uuid::Uuid,
         alert: Alert,
         metrics: &mut ExecutionMetrics,
     ) -> Result<H256, Box<dyn std::error::Error>> {
@@ -237,7 +317,8 @@ impl TransactionExecutor {
         let checkpoint = Instant::now();
         
         // 2. Calculate optimal gas price using ranking system
-        let ranking_result = self.ranking_system.calculate_ranking(&alert).await?;
+        let ranking_alert = self.convert_to_ranking_alert(&alert);
+        let ranking_result = self.ranking_system.calculate_ranking(&ranking_alert).await?;
         metrics.gas_ranking_ms = checkpoint.elapsed().as_millis() as u64;
         
         info!("Ranking result: gas_price={}, position={}, confidence={:.2}", 
@@ -254,9 +335,44 @@ impl TransactionExecutor {
         ).await?;
         
         let amount_out = pool.get_amount_out(amount_to_sell, alert.token_address).await?;
-        let min_amount_out = self.apply_slippage(amount_out, alert.params.slippage);
+        let validated_slippage = validate_slippage(alert.params.slippage)?;
+        let min_amount_out = self.apply_slippage(amount_out, validated_slippage);
         
         metrics.price_quote_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        // 3.5. Risk check
+        let trade_amount_eth = amount_out.as_u128() as f64 / 1e18;
+        let risk_decision = {
+            let mut risk_mgr = self.risk_manager.lock().await;
+            risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
+        };
+        
+        // Log risk decision
+        self.trade_logger.log_risk_decision(
+            signal_id,
+            &alert.id,
+            &risk_decision,
+            amount_to_sell,
+        ).await;
+        
+        let final_amount_to_sell = match risk_decision {
+            RiskDecision::Allow => amount_to_sell,
+            RiskDecision::ReduceSize { new_amount, reason } => {
+                warn!("Risk manager reduced trade: {}", reason);
+                // Recalculate based on reduced ETH amount
+                // new_amount is the reduced ETH amount, we need to work backwards
+                let reduced_tokens = amount_to_sell * new_amount / amount_out;
+                reduced_tokens
+            }
+            RiskDecision::Block { reason } => {
+                error!("Risk manager blocked trade: {}", reason);
+                return Err(format!("Trade blocked by risk manager: {}", reason).into());
+            }
+            RiskDecision::EmergencyHalt { reason } => {
+                error!("Risk manager emergency halt: {}", reason);
+                return Err(format!("Emergency halt triggered: {}", reason).into());
+            }
+        };
         
         let checkpoint = Instant::now();
         
@@ -264,7 +380,7 @@ impl TransactionExecutor {
         let swap_params = SwapParams {
             token_in: alert.token_address,
             token_out: *crate::pools::uniswap_v2::addresses::WETH,
-            amount_in: amount_to_sell,
+            amount_in: final_amount_to_sell,
             amount_out_min: min_amount_out,
             recipient: self.wallet.address(),
             deadline: alert.deadline_timestamp(),
@@ -276,8 +392,8 @@ impl TransactionExecutor {
         // Set optimal gas price from ranking system
         tx.set_gas_price(ranking_result.optimal_gas_price);
         
-        // Set nonce
-        let nonce = self.get_next_nonce().await;
+        // Reserve nonce
+        let nonce = self.nonce_manager.reserve_nonce().await;
         tx.set_nonce(nonce);
         
         // Set from address
@@ -292,6 +408,16 @@ impl TransactionExecutor {
         
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
         
+        // Log transaction submission
+        self.trade_logger.log_tx_submitted(
+            signal_id,
+            &alert.id,
+            tx_hash,
+            nonce,
+            ranking_result.optimal_gas_price,
+            &format!("{:?}", ranking_result.execution_path),
+        ).await;
+        
         info!("Sell transaction submitted: {:?}", tx_hash);
         
         Ok(tx_hash)
@@ -300,6 +426,7 @@ impl TransactionExecutor {
     /// Execute buy order
     async fn execute_buy(
         &self,
+        signal_id: uuid::Uuid,
         alert: Alert,
         metrics: &mut ExecutionMetrics,
     ) -> Result<H256, Box<dyn std::error::Error>> {
@@ -328,7 +455,8 @@ impl TransactionExecutor {
         let checkpoint = Instant::now();
         
         // 2. Calculate optimal gas price using ranking system
-        let ranking_result = self.ranking_system.calculate_ranking(&alert).await?;
+        let ranking_alert = self.convert_to_ranking_alert(&alert);
+        let ranking_result = self.ranking_system.calculate_ranking(&ranking_alert).await?;
         metrics.gas_ranking_ms = checkpoint.elapsed().as_millis() as u64;
         
         info!("Ranking result: gas_price={}, position={}, confidence={:.2}", 
@@ -345,9 +473,41 @@ impl TransactionExecutor {
         ).await?;
         
         let tokens_out = pool.get_amount_out(eth_to_spend, *crate::pools::uniswap_v2::addresses::WETH).await?;
-        let min_tokens_out = self.apply_slippage(tokens_out, alert.params.slippage);
+        let validated_slippage = validate_slippage(alert.params.slippage)?;
+        let min_tokens_out = self.apply_slippage(tokens_out, validated_slippage);
         
         metrics.price_quote_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        // 3.5. Risk check
+        let trade_amount_eth = eth_to_spend.as_u128() as f64 / 1e18;
+        let risk_decision = {
+            let mut risk_mgr = self.risk_manager.lock().await;
+            risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
+        };
+        
+        // Log risk decision
+        self.trade_logger.log_risk_decision(
+            signal_id,
+            &alert.id,
+            &risk_decision,
+            eth_to_spend,
+        ).await;
+        
+        let final_eth_to_spend = match risk_decision {
+            RiskDecision::Allow => eth_to_spend,
+            RiskDecision::ReduceSize { new_amount, reason } => {
+                warn!("Risk manager reduced trade: {}", reason);
+                new_amount // For buy, new_amount is already in ETH
+            }
+            RiskDecision::Block { reason } => {
+                error!("Risk manager blocked trade: {}", reason);
+                return Err(format!("Trade blocked by risk manager: {}", reason).into());
+            }
+            RiskDecision::EmergencyHalt { reason } => {
+                error!("Risk manager emergency halt: {}", reason);
+                return Err(format!("Emergency halt triggered: {}", reason).into());
+            }
+        };
         
         let checkpoint = Instant::now();
         
@@ -355,7 +515,7 @@ impl TransactionExecutor {
         let swap_params = SwapParams {
             token_in: *crate::pools::uniswap_v2::addresses::WETH,
             token_out: alert.token_address,
-            amount_in: eth_to_spend,
+            amount_in: final_eth_to_spend,
             amount_out_min: min_tokens_out,
             recipient: self.wallet.address(),
             deadline: alert.deadline_timestamp(),
@@ -367,7 +527,7 @@ impl TransactionExecutor {
         // Note: For ETH swaps, the value is already set in build_swap_tx
         // Only override if not already set
         if tx.value().is_none() || tx.value() == Some(&U256::zero()) {
-            tx.set_value(eth_to_spend);
+            tx.set_value(final_eth_to_spend);
         }
         
         // Set optimal gas price from ranking system
@@ -383,8 +543,8 @@ impl TransactionExecutor {
         };
         tx.set_gas(gas_limit);
         
-        // Set nonce
-        let nonce = self.get_next_nonce().await;
+        // Reserve nonce
+        let nonce = self.nonce_manager.reserve_nonce().await;
         tx.set_nonce(nonce);
         
         // Set from address
@@ -398,6 +558,16 @@ impl TransactionExecutor {
         let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
         
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        // Log transaction submission
+        self.trade_logger.log_tx_submitted(
+            signal_id,
+            &alert.id,
+            tx_hash,
+            nonce,
+            ranking_result.optimal_gas_price,
+            &format!("{:?}", ranking_result.execution_path),
+        ).await;
         
         info!("Buy transaction submitted: {:?}", tx_hash);
         
@@ -422,13 +592,28 @@ impl TransactionExecutor {
             return Err("Wallet is locked - please unlock before executing transactions".into());
         }
         
+        // Get the nonce from the transaction
+        let nonce = tx.nonce().ok_or("Transaction must have nonce set")?;
+        
         match execution_path {
             ExecutionPath::PublicMempool => {
                 // Standard mempool submission
                 let signature = self.wallet.sign_transaction(&tx).await?;
                 let raw_tx = tx.rlp_signed(&signature);
-                let pending_tx = self.provider.send_raw_transaction(raw_tx).await?;
-                Ok(pending_tx.tx_hash())
+                
+                match self.provider.send_raw_transaction(raw_tx).await {
+                    Ok(pending_tx) => {
+                        let tx_hash = pending_tx.tx_hash();
+                        // Mark as submitted
+                        self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                        Ok(tx_hash)
+                    }
+                    Err(e) => {
+                        // Mark as failed
+                        self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
+                        Err(e.into())
+                    }
+                }
             }
             ExecutionPath::FlashbotsBundle { max_block_number: _ } => {
                 // Use Flashbots for critical transactions
@@ -455,16 +640,28 @@ impl TransactionExecutor {
                     match flashbots.submit_bundle(bundle).await? {
                         crate::flashbots::BundleResult::Included { block_hash, .. } => {
                             info!("Bundle included via Flashbots in block {:?}", block_hash);
-                            Ok(tx.hash(&signature))
+                            let tx_hash = tx.hash(&signature);
+                            self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                            Ok(tx_hash)
                         }
                         crate::flashbots::BundleResult::NotIncluded { reason } => {
                             warn!("Flashbots bundle not included: {:?}, falling back to public mempool", reason);
                             // Fallback to public mempool
-                            let pending_tx = self.provider.send_raw_transaction(signed_tx).await?;
-                            Ok(pending_tx.tx_hash())
+                            match self.provider.send_raw_transaction(signed_tx).await {
+                                Ok(pending_tx) => {
+                                    let tx_hash = pending_tx.tx_hash();
+                                    self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                                    Ok(tx_hash)
+                                }
+                                Err(e) => {
+                                    self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
+                                    Err(e.into())
+                                }
+                            }
                         }
                         crate::flashbots::BundleResult::Failed { error } => {
                             error!("Flashbots submission failed: {}", error);
+                            self.nonce_manager.mark_failed(*nonce, error.clone()).await;
                             return Err(error.into());
                         }
                     }
@@ -472,8 +669,17 @@ impl TransactionExecutor {
                     warn!("Flashbots requested but not available, using public mempool");
                     let signature = self.wallet.sign_transaction(&tx).await?;
                     let raw_tx = tx.rlp_signed(&signature);
-                    let pending_tx = self.provider.send_raw_transaction(raw_tx).await?;
-                    Ok(pending_tx.tx_hash())
+                    match self.provider.send_raw_transaction(raw_tx).await {
+                        Ok(pending_tx) => {
+                            let tx_hash = pending_tx.tx_hash();
+                            self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                            Ok(tx_hash)
+                        }
+                        Err(e) => {
+                            self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
+                            Err(e.into())
+                        }
+                    }
                 }
             }
             ExecutionPath::MultiPath { timeout_ms } => {
@@ -486,7 +692,11 @@ impl TransactionExecutor {
                 let timeout = tokio::time::Duration::from_millis(*timeout_ms);
                 
                 match tokio::time::timeout(timeout, submit_future).await {
-                    Ok(Ok(pending_tx)) => Ok(pending_tx.tx_hash()),
+                    Ok(Ok(pending_tx)) => {
+                        let tx_hash = pending_tx.tx_hash();
+                        self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                        Ok(tx_hash)
+                    }
                     Ok(Err(e)) => {
                         warn!("Public submission failed: {}, trying Flashbots", e);
                         // Try Flashbots as fallback
@@ -498,10 +708,18 @@ impl TransactionExecutor {
                                 .build()?;
                             
                             match flashbots.submit_bundle(bundle).await? {
-                                crate::flashbots::BundleResult::Included { .. } => Ok(tx.hash(&signature)),
-                                _ => Err("Both public and Flashbots submission failed".into()),
+                                crate::flashbots::BundleResult::Included { .. } => {
+                                    let tx_hash = tx.hash(&signature);
+                                    self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                                    Ok(tx_hash)
+                                }
+                                _ => {
+                                    self.nonce_manager.mark_failed(*nonce, "Both public and Flashbots submission failed".to_string()).await;
+                                    Err("Both public and Flashbots submission failed".into())
+                                }
                             }
                         } else {
+                            self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
                             Err(e.into())
                         }
                     }
@@ -516,10 +734,18 @@ impl TransactionExecutor {
                                 .build()?;
                             
                             match flashbots.submit_bundle(bundle).await? {
-                                crate::flashbots::BundleResult::Included { .. } => Ok(tx.hash(&signature)),
-                                _ => Err("Both public and Flashbots submission failed".into()),
+                                crate::flashbots::BundleResult::Included { .. } => {
+                                    let tx_hash = tx.hash(&signature);
+                                    self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
+                                    Ok(tx_hash)
+                                }
+                                _ => {
+                                    self.nonce_manager.mark_failed(*nonce, "Both public and Flashbots submission failed".to_string()).await;
+                                    Err("Both public and Flashbots submission failed".into())
+                                }
                             }
                         } else {
+                            self.nonce_manager.mark_failed(*nonce, "Public submission timed out and Flashbots not available".to_string()).await;
                             Err("Public submission timed out and Flashbots not available".into())
                         }
                     }
@@ -528,23 +754,9 @@ impl TransactionExecutor {
         }
     }
     
-    /// Get next nonce atomically
-    async fn get_next_nonce(&self) -> U256 {
-        let mut nonce = self.nonce.write().await;
-        let current = *nonce;
-        *nonce = current + 1;
-        current
-    }
-    
-    /// Reset nonce from chain
-    pub async fn reset_nonce(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let current_nonce = self.provider
-            .get_transaction_count(self.wallet.address(), None)
-            .await?;
-        
-        let mut nonce = self.nonce.write().await;
-        *nonce = current_nonce;
-        
+    /// Sync nonce manager with chain
+    pub async fn sync_nonce_with_chain(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.nonce_manager.sync_with_chain().await?;
         Ok(())
     }
     
@@ -564,5 +776,138 @@ impl TransactionExecutor {
     /// Check if wallet is unlocked
     pub async fn is_wallet_unlocked(&self) -> bool {
         self.wallet.is_unlocked().await
+    }
+    
+    /// Execute add liquidity action
+    async fn execute_add_liquidity(
+        &self,
+        signal_id: Uuid,
+        alert: Alert,
+        metrics: &mut ExecutionMetrics,
+    ) -> Result<H256, Box<dyn std::error::Error>> {
+        info!("Executing add liquidity for token {} on pool {}", 
+              alert.token_address, alert.pool_address);
+        
+        let checkpoint = Instant::now();
+        
+        // 1. Get pool information
+        let pool_info = self.pool_factory.get_pool_info(&alert.pool_address).await?;
+        metrics.pool_query_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        // 2. Get optimal amounts based on current pool state
+        let target_liquidity = alert.params.amount;
+        let (amount0, amount1) = match &pool_info {
+            PoolInfo::UniswapV2(info) => {
+                // Calculate proportional amounts for V2
+                let total_supply = info.total_supply;
+                
+                if total_supply == U256::zero() {
+                    // First liquidity provider
+                    (target_liquidity, target_liquidity)
+                } else {
+                    // Calculate proportional amounts
+                    let amount0 = target_liquidity * info.reserve0 / total_supply;
+                    let amount1 = target_liquidity * info.reserve1 / total_supply;
+                    (amount0, amount1)
+                }
+            }
+            PoolInfo::UniswapV3(info) => {
+                // For V3, use current price to calculate amounts
+                // This is simplified - real implementation would consider tick ranges
+                let sqrt_price = info.sqrt_price_x96;
+                let amount0 = target_liquidity;
+                let amount1 = target_liquidity * sqrt_price * sqrt_price / (U256::from(1) << 192);
+                (amount0, amount1)
+            }
+            _ => return Err("Unsupported pool type for liquidity provision".into()),
+        };
+        
+        // 3. Build transaction based on pool type
+        let tx = match &pool_info {
+            PoolInfo::UniswapV2(_) => {
+                // Build V2 add liquidity transaction
+                self.tx_builder.build_v2_add_liquidity(
+                    alert.pool_address,
+                    alert.token_address,
+                    amount0,
+                    amount1,
+                    alert.params.slippage,
+                    alert.params.deadline,
+                )?
+            }
+            PoolInfo::UniswapV3(_) => {
+                // Build V3 mint position transaction
+                // Note: This would need tick range parameters
+                return Err("V3 liquidity provision not yet implemented".into());
+            }
+            _ => return Err("Unsupported pool type".into()),
+        };
+        
+        // 4. Execute transaction
+        let checkpoint = Instant::now();
+        let ranking_result = RankingResult {
+            execution_rank: 1,
+            optimal_gas_price: alert.params.gas_price,
+            estimated_arrival_ms: 100,
+            success_probability: 0.8,
+            execution_path: ExecutionPath::PublicMempool,
+        };
+        
+        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        Ok(tx_hash)
+    }
+    
+    /// Execute remove liquidity action
+    async fn execute_remove_liquidity(
+        &self,
+        signal_id: Uuid,
+        alert: Alert,
+        metrics: &mut ExecutionMetrics,
+    ) -> Result<H256, Box<dyn std::error::Error>> {
+        info!("Executing remove liquidity for token {} on pool {}", 
+              alert.token_address, alert.pool_address);
+        
+        let checkpoint = Instant::now();
+        
+        // 1. Get pool information
+        let pool_info = self.pool_factory.get_pool_info(&alert.pool_address).await?;
+        metrics.pool_query_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        // 2. Build transaction based on pool type
+        let tx = match &pool_info {
+            PoolInfo::UniswapV2(_) => {
+                // Build V2 remove liquidity transaction
+                self.tx_builder.build_v2_remove_liquidity(
+                    alert.pool_address,
+                    alert.token_address,
+                    alert.params.amount, // LP token amount
+                    alert.params.slippage,
+                    alert.params.deadline,
+                )?
+            }
+            PoolInfo::UniswapV3(_) => {
+                // Build V3 burn position transaction
+                // Note: This would need position NFT ID
+                return Err("V3 liquidity removal not yet implemented".into());
+            }
+            _ => return Err("Unsupported pool type".into()),
+        };
+        
+        // 3. Execute transaction
+        let checkpoint = Instant::now();
+        let ranking_result = RankingResult {
+            execution_rank: 1,
+            optimal_gas_price: alert.params.gas_price,
+            estimated_arrival_ms: 100,
+            success_probability: 0.8,
+            execution_path: ExecutionPath::PublicMempool,
+        };
+        
+        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
+        
+        Ok(tx_hash)
     }
 }

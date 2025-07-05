@@ -63,7 +63,6 @@ pub struct BundleBuilder {
     reverting_tx_hashes: Vec<H256>,
     tip_percentage: f64,
     min_tip: U256,
-    max_tip: U256,
     revert_protection: bool,
 }
 
@@ -78,7 +77,6 @@ impl BundleBuilder {
             reverting_tx_hashes: Vec::new(),
             tip_percentage: 0.01, // 1% default
             min_tip: ethers::utils::parse_ether("0.001").unwrap(), // 0.001 ETH min
-            max_tip: ethers::utils::parse_ether("0.1").unwrap(),   // 0.1 ETH max
             revert_protection: true,
         }
     }
@@ -93,7 +91,6 @@ impl BundleBuilder {
             reverting_tx_hashes: Vec::new(),
             tip_percentage: config.tip_percentage,
             min_tip: config.min_tip,
-            max_tip: config.max_tip,
             revert_protection: config.revert_protection,
         }
     }
