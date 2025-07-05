@@ -3,6 +3,7 @@
 //! Implements retry logic with exponential backoff for reliable execution
 
 use ethers::prelude::*;
+use ethers::types::transaction::eip2718::TypedTransaction;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error};
 use crate::common::errors::{KartalError, ExecutionError};
