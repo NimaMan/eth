@@ -509,14 +509,14 @@ async fn main() -> Result<()> {
             if let Some(removal_type) = is_liquidity_removal(&tx_view.input_data) {
                 let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
                 let log_entry = format!(
-                    "[{}] 💧 {} | TX: {} | From: {} | To: {} | Value: {:.6} ETH | Gas: {} | IPC: {:.3}ms\n",
+                    "[{}] 💧 {} | TX: 0x{} | From: 0x{} | To: {} | Value: {:.6} ETH | Gas: {} | IPC: {:.3}ms\n",
                     timestamp,
                     removal_type,
-                    tx_view.hash,
-                    tx_view.from.map(|a| format!("{:?}", a)).unwrap_or_else(|| "Unknown".to_string()),
-                    tx_view.to.map(|a| format!("{:?}", a)).unwrap_or_else(|| "Unknown".to_string()),
+                    hex::encode(&tx_view.hash),
+                    hex::encode(&tx_view.from),
+                    tx_view.to.as_ref().map(|a| format!("0x{}", hex::encode(a))).unwrap_or_else(|| "None".to_string()),
                     tx_view.value.to_string().parse::<u128>().unwrap_or(0) as f64 / 1e18,
-                    tx_view.gas,
+                    tx_view.gas_limit.unwrap_or_default(),
                     detection_latency_ms
                 );
                 
@@ -527,7 +527,7 @@ async fn main() -> Result<()> {
                     let _ = file.flush();
                 }
                 
-                info!("💧 {} detected in tx {}", removal_type, tx_view.hash);
+                info!("💧 {} detected in tx 0x{}", removal_type, hex::encode(&tx_view.hash));
             }
             
             // Use debug_traceCall to get state changes - simulate ALL transactions
