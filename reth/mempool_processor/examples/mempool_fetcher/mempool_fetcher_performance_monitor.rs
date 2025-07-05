@@ -120,7 +120,7 @@ impl PerformanceStats {
         info!("  Incomplete: {}", self.incomplete_data_count);
         
         if self.incomplete_data_count > 0 {
-            warn!("⚠️ WARNING: {} transactions had incomplete data!", self.incomplete_data_count);
+            warn!("WARNING: {} transactions had incomplete data!", self.incomplete_data_count);
         }
     }
 }
@@ -196,10 +196,10 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
                     
                     // Log warnings for high latency or incomplete data
                     if latency_us > 50 {
-                        warn!("⚠️ HIGH LATENCY: {} took {}μs", &tx.hash[..10], latency_us);
+                        warn!("HIGH LATENCY: {} took {}μs", tx.hash, latency_us);
                     }
                     if !is_complete {
-                        warn!("⚠️ INCOMPLETE DATA: {}", &tx.hash[..10]);
+                        warn!("INCOMPLETE DATA: {}", tx.hash);
                     }
                 }
             }
@@ -227,9 +227,9 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
             if stats_guard.last_hour_avg_us > 0.0 {
                 let degradation = ((current_avg - stats_guard.last_hour_avg_us) / stats_guard.last_hour_avg_us) * 100.0;
                 if degradation > 10.0 {
-                    warn!("⚠️ PERFORMANCE DEGRADATION: {:.1}% increase in average latency", degradation);
+                    warn!("PERFORMANCE DEGRADATION: {:.1}% increase in average latency", degradation);
                 } else {
-                    info!("✅ Performance stable: avg latency {:.1}μs", current_avg);
+                    info!("Performance stable: avg latency {:.1}μs", current_avg);
                 }
             }
             

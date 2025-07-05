@@ -71,10 +71,10 @@ impl NonBlockingIpcClient {
                 if !response.contains("result") {
                     return Err(eyre!("Subscription failed: {}", response));
                 }
-                info!("✅ Ultra-fast subscription active");
+                info!("Subscription active");
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                info!("⚠️ No subscription response yet");
+                info!("No subscription response yet");
             }
             Err(e) => return Err(e.into()),
         }
@@ -145,10 +145,10 @@ impl NonBlockingIpcClient {
                                                 if detection_ns < 10_000 { stats.sub_10us += 1; }
                                             }
                                             
-                                            // Log ultra-fast
+                                            // Log detection
                                             if detection_ns < 10_000 {
-                                                info!("⚡ ULTRA: {} in {}ns ({}μs)", 
-                                                      &hash[..10], detection_ns, detection_ns / 1000);
+                                                info!("{} {}μs", 
+                                                      hash, detection_ns / 1000);
                                             }
                                             
                                             let tx = NonBlockingTransaction {
