@@ -141,16 +141,25 @@ impl RpcPool {
         Fut: std::future::Future<Output = Result<T, ProviderError>>,
     {
         let mut last_error = None;
-        let endpoints = self.endpoints.read().await;
         
         // Try each healthy endpoint
-        for (idx, endpoint) in endpoints.iter().enumerate() {
-            if !endpoint.is_healthy && endpoint.consecutive_failures >= self.config.max_consecutive_failures {
-                continue;
-            }
-            
-            let provider = endpoint.provider.clone();
-            drop(endpoints);  // Release lock before async operation
+        loop {
+            let (provider, idx) = {
+                let endpoints = self.endpoints.read().await;
+                let mut found = None;
+                
+                for (idx, endpoint) in endpoints.iter().enumerate() {
+                    if endpoint.is_healthy || endpoint.consecutive_failures < self.config.max_consecutive_failures {
+                        found = Some((endpoint.provider.clone(), idx));
+                        break;
+                    }
+                }
+                
+                match found {
+                    Some(p) => p,
+                    None => break, // No healthy endpoints
+                }
+            }; // Lock is released here
             
             match tokio::time::timeout(
                 self.config.request_timeout,
@@ -174,9 +183,6 @@ impl RpcPool {
                     self.mark_endpoint_result(idx, false).await;
                 }
             }
-            
-            // Re-acquire lock for next iteration
-            let endpoints_guard = self.endpoints.read().await;
         }
         
         Err(KartalError::Network(last_error.unwrap_or(NetworkError::ConnectionTimeout)))

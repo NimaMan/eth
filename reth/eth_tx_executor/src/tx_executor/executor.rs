@@ -36,6 +36,8 @@ pub struct ExecutorConfig {
     pub reth_ws_url: String,
     /// Risk management configuration
     pub risk_config: RiskConfig,
+    /// RabbitMQ URL for block processor data (optional)
+    pub rabbitmq_url: Option<String>,
 }
 
 /// Execution result with detailed metrics
@@ -112,14 +114,27 @@ impl TransactionExecutor {
         let pool_factory = PoolFactory::new(provider.clone());
         let position_tracker = Arc::new(PositionTracker::new(provider.clone(), wallet_address)?);
         
-        // Initialize ranking system
-        let ranking_system = Arc::new(TransactionRankingSystem::new(config.reth_ws_url.clone()).await?);
+        // Initialize ranking system with optional RabbitMQ support
+        let ranking_system = if let Some(rabbitmq_url) = config.rabbitmq_url.as_ref() {
+            // Enhanced ranking with live block processor data
+            info!("Initializing ranking system with RabbitMQ block processor data");
+            let system = TransactionRankingSystem::builder(config.reth_ws_url.clone())
+                .with_block_processor(rabbitmq_url.clone())
+                .build()
+                .await?;
+            Arc::new(system)
+        } else {
+            // Standard ranking without block processor
+            info!("Initializing ranking system without block processor");
+            Arc::new(TransactionRankingSystem::new(config.reth_ws_url.clone()).await?)
+        };
         
         // Start ranking system background services
         ranking_system.start().await?;
         
         // Initialize nonce manager
-        let nonce_manager = Arc::new(NonceManager::new(wallet_address, provider.clone()).await?);
+        let nonce_config = crate::tx_executor::nonce_manager::NonceManagerConfig::default();
+        let nonce_manager = Arc::new(NonceManager::new(nonce_config, wallet_address, provider.clone()).await?);
         
         // Initialize risk manager
         let risk_manager = Arc::new(tokio::sync::Mutex::new(RiskManager::new(config.risk_config.clone())));
@@ -180,11 +195,29 @@ impl TransactionExecutor {
             Priority::Normal => tx_ranking_system::Priority::Normal,
         };
         
-        tx_ranking_system::Alert::new(
-            alert.id.clone(),
-            ranking_priority,
-            alert.params.max_gas_price,
-        )
+        // Convert Action enum
+        let ranking_action = match alert.action {
+            Action::Buy => tx_ranking_system::Action::Buy,
+            Action::Sell => tx_ranking_system::Action::Sell,
+            Action::AddLiquidity => tx_ranking_system::Action::AddLiquidity,
+            Action::RemoveLiquidity => tx_ranking_system::Action::RemoveLiquidity,
+        };
+        
+        // Create ranking alert
+        tx_ranking_system::Alert {
+            id: alert.id.clone(),
+            timestamp: alert.timestamp,
+            token_address: alert.token_address,
+            pool_address: alert.pool_address,
+            action: ranking_action,
+            params: tx_ranking_system::ExecutionParams {
+                amount: alert.params.amount,
+                slippage: alert.params.slippage,
+                max_gas_price: alert.params.max_gas_price,
+                deadline_seconds: alert.params.deadline_seconds,
+                priority: ranking_priority,
+            },
+        }
     }
     
     /// Execute alert with performance tracking
@@ -393,7 +426,7 @@ impl TransactionExecutor {
         tx.set_gas_price(ranking_result.optimal_gas_price);
         
         // Reserve nonce
-        let nonce = self.nonce_manager.reserve_nonce().await;
+        let nonce = self.nonce_manager.reserve_nonce().await?;
         tx.set_nonce(nonce);
         
         // Set from address
@@ -544,7 +577,7 @@ impl TransactionExecutor {
         tx.set_gas(gas_limit);
         
         // Reserve nonce
-        let nonce = self.nonce_manager.reserve_nonce().await;
+        let nonce = self.nonce_manager.reserve_nonce().await?;
         tx.set_nonce(nonce);
         
         // Set from address

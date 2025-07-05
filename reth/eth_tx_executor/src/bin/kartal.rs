@@ -46,6 +46,10 @@ struct Args {
     #[arg(long, default_value = "ws://127.0.0.1:8546", env = "RETH_WS_URL")]
     reth_ws_url: String,
     
+    /// RabbitMQ URL for block processor data (optional)
+    #[arg(long, env = "RABBITMQ_URL")]
+    rabbitmq_url: Option<String>,
+    
     /// Test mode (simulates transactions)
     #[arg(long)]
     test_mode: bool,
@@ -73,6 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Chain ID: {}", args.chain_id);
     info!("Alert endpoint: {}", args.alert_endpoint);
     info!("Test mode: {}", args.test_mode);
+    if let Some(ref rabbitmq_url) = args.rabbitmq_url {
+        info!("RabbitMQ: {} (enhanced gas estimation enabled)", rabbitmq_url);
+    } else {
+        info!("RabbitMQ: disabled (using standard gas estimation)");
+    }
     
     // Create executor
     let executor_config = ExecutorConfig {
@@ -83,6 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         flashbots_rpc: args.flashbots_rpc,
         reth_ws_url: args.reth_ws_url,
         risk_config: eth_kartal::risk::RiskConfig::default(), // TODO: make configurable via CLI args
+        rabbitmq_url: args.rabbitmq_url.clone(),
     };
     
     let executor = TransactionExecutor::new(executor_config).await?;

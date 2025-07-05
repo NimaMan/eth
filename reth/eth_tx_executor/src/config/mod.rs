@@ -89,6 +89,10 @@ pub struct TradingConfig {
     /// ZMQ alert receiver bind address
     #[serde(default = "default_zmq_bind")]
     pub zmq_bind_address: String,
+    
+    /// RabbitMQ URL for block processor data
+    #[serde(default)]
+    pub rabbitmq_url: Option<String>,
 }
 
 /// Risk management configuration
@@ -251,6 +255,7 @@ impl Default for Config {
                 flashbots_enabled: true,
                 flashbots_rpc: None,
                 zmq_bind_address: "tcp://127.0.0.1:5559".to_string(),
+                rabbitmq_url: Some("amqp://guest:guest@localhost:5672//".to_string()),
             },
             risk: RiskConfig {
                 max_position_usd: 10_000.0,
