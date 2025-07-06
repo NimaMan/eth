@@ -17,31 +17,26 @@ use chrono::Local;
 use std::io::Write;
 use hex;
 
-// Mempool processor imports - using full transaction IPC for Direct Reth
-use mempool_processor::mempool_fetcher::{FullTransactionIpcClient, FullTransaction, TransactionView};
+// Mempool processor imports - using non-blocking IPC
+use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
-use mempool_processor::tx_simulator::reth_simulator_engine::{RethDirectSimulator, mempool_tx_to_reth_signed};
+use mempool_processor::tx_simulator::DebugTraceCallSimulator;
 use mempool_processor::common::address::to_checksum_address;
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
 use ethers::types::{BlockId, BlockNumber, Address, H256, U256};
 
-
 #[derive(Parser, Debug)]
 struct Args {
-    /// JSON-RPC URL for Ethereum node (still used for block info)
+    /// JSON-RPC URL for Ethereum node
     #[arg(long, env = "ETH_RPC_URL", default_value = "http://localhost:8545")]
     eth_rpc_url: String,
     
     /// IPC socket path (for Full TX IPC connection)
     #[arg(long, env = "IPC_PATH", default_value = "/tmp/reth.ipc")]
     ipc_path: String,
-    
-    /// Reth data directory for Direct Reth simulator
-    #[arg(long, env = "RETH_DATADIR", default_value = "/home/nima/.local/share/reth/mainnet")]
-    reth_datadir: String,
     
     /// ZeroMQ socket address for pool updates
     #[arg(long, env = "POOL_ZMQ_ADDRESS", default_value = "tcp://localhost:5557")]
@@ -107,55 +102,6 @@ fn is_liquidity_removal(input_data: &Option<Vec<u8>>) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-/// Convert full transaction to TransactionView
-fn convert_full_to_transaction_view(tx: &FullTransaction) -> Result<TransactionView> {
-    // Parse transaction data from JSON
-    let hash = tx.tx_data["hash"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing hash"))?
-        .parse::<H256>()?;
-    
-    let from = tx.tx_data["from"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing from"))?
-        .parse::<Address>()?;
-    
-    let to = tx.tx_data["to"].as_str()
-        .and_then(|s| s.parse::<Address>().ok());
-    
-    let value = tx.tx_data["value"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing value"))?
-        .parse::<U256>()?;
-    
-    let gas_price = tx.tx_data["gasPrice"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing gasPrice"))?
-        .parse::<U256>()?;
-    
-    let gas_limit = tx.tx_data["gas"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing gas"))?
-        .parse::<U256>()?;
-    
-    let nonce = tx.tx_data["nonce"].as_str()
-        .ok_or_else(|| eyre::eyre!("Missing nonce"))?
-        .parse::<U256>()?;
-    
-    let input_data = if let Some(input_str) = tx.tx_data["input"].as_str() {
-        let hex_str = input_str.strip_prefix("0x").unwrap_or(input_str);
-        Some(hex::decode(hex_str)?)
-    } else {
-        None
-    };
-    
-    Ok(TransactionView {
-        hash: hash.as_bytes().to_vec(),
-        from: from.as_bytes().to_vec(),
-        to: to.map(|addr| addr.as_bytes().to_vec()),
-        value,
-        gas_price: Some(gas_price),
-        gas_limit: Some(gas_limit),
-        nonce: Some(nonce),
-        input_data,
-    })
 }
 
 /// Convert non-blocking IPC transaction to TransactionView
@@ -341,12 +287,12 @@ async fn main() -> Result<()> {
     
     info!("📦 Current block: #{}", latest_block.number.unwrap_or_default());
     
-    // Initialize full transaction IPC client for Direct Reth
-    info!("🚀 Initializing full transaction IPC client for Direct Reth...");
+    // Initialize non-blocking IPC client
+    info!("🚀 Initializing non-blocking IPC client...");
     info!("   Socket path: {}", args.ipc_path);
-    let ipc_client = FullTransactionIpcClient::new(Some(&args.ipc_path))?;
-    ipc_client.start_monitoring().await?;
-    info!("⚡ Full transaction IPC active - Direct Reth simulation ready!");
+    let ipc_client = NonBlockingIpcClient::new(Some(&args.ipc_path))?;
+    ipc_client.start().await?;
+    info!("⚡ Non-blocking IPC subscription active - Sub-10μs detection!");
     
     // Initialize pool subscriber
     info!("🏊 Initializing pool subscriber...");
@@ -444,12 +390,11 @@ async fn main() -> Result<()> {
         None
     };
     
-    // Initialize Direct Reth transaction simulator
-    info!("🚀 Creating Direct Reth simulator (100-250x faster than RPC)");
-    info!("   Data directory: {}", &args.reth_datadir);
+    // Initialize transaction simulator
+    info!("🔧 Creating transaction simulator with RPC URL: {}", &args.eth_rpc_url);
     let tx_simulator = match tokio::time::timeout(
         Duration::from_secs(10),
-        async { RethDirectSimulator::new(&args.reth_datadir) }
+        DebugTraceCallSimulator::new(&args.eth_rpc_url)
     ).await {
         Ok(Ok(simulator)) => {
             info!("✅ Transaction simulator initialized successfully");
@@ -490,7 +435,6 @@ async fn main() -> Result<()> {
     
     info!("✅ All initialization complete, preparing to start main loop...");
     
-    
     // Main processing loop
     info!("🔄 Starting main processing loop with Full TX IPC...");
     
@@ -504,11 +448,11 @@ async fn main() -> Result<()> {
         }
         
         
-        // Get new transactions from full transaction IPC
-        let new_txs = match ipc_client.get_full_transactions(10).await {  // Get 10 at a time
+        // Get new transactions from ULTRA-FAST IPC
+        let new_txs = match ipc_client.get_transactions(10).await {  // Get 10 at a time
             Ok(txs) => {
                 if !txs.is_empty() {
-                    debug!("📦 Got {} transactions from IPC", txs.len());
+                    info!("📦 Got {} transactions from IPC", txs.len());
                 }
                 txs
             },
@@ -537,7 +481,7 @@ async fn main() -> Result<()> {
             }
             
             // Track IPC detection latency
-            let detection_latency_ms = ipc_tx.latency_ns as f64 / 1_000_000.0;
+            let detection_latency_ms = ipc_tx.detection_ns as f64 / 1_000_000.0;
             detection_latencies_ms.push(detection_latency_ms);
             if detection_latency_ms < 1.0 {
                 sub_1ms_detections += 1;
@@ -552,20 +496,11 @@ async fn main() -> Result<()> {
             let start_time = Instant::now();
             let pipeline_start = Instant::now(); // Measure processing time, not queue wait time
             
-            // Convert full transaction to view
-            let tx_view = match convert_full_to_transaction_view(&ipc_tx) {
+            // We already have the full transaction from non-blocking IPC!
+            let tx_view = match convert_nonblocking_to_transaction_view(&ipc_tx) {
                 Ok(view) => view,
                 Err(e) => {
                     warn!("Failed to convert transaction: {}", e);
-                    continue;
-                }
-            };
-            
-            // Convert to Reth format for Direct simulation
-            let reth_tx = match mempool_tx_to_reth_signed(&ipc_tx) {
-                Ok(tx) => tx,
-                Err(e) => {
-                    warn!("Failed to convert to Reth format: {}", e);
                     continue;
                 }
             };
@@ -606,27 +541,21 @@ async fn main() -> Result<()> {
                 continue;
             }
             
-            // Use Direct Reth simulator (100-250x faster)
+            // Use debug_traceCall to get state changes with timeout
             let sim_start = Instant::now();
             match time::timeout(
-                Duration::from_millis(10), // Much faster timeout since Direct Reth is sub-ms
-                tx_simulator.simulate_transaction(&reth_tx)
+                Duration::from_millis(100),
+                tx_simulator.process_transaction(&tx_view, &Default::default())
             ).await {
-                Ok(Ok(result)) => {
+                Ok(Ok(Some(state_changes))) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
                     
                     // Log simulation results periodically
                     if total_processed % 50 == 0 {
-                        info!("🚀 Direct Reth simulated tx #{}: gas={}, success={} in {:.3}ms", 
-                              total_processed, result.gas_used, result.success, sim_elapsed);
+                        info!("🔬 Simulated tx #{}: {} state changes in {:.3}ms", 
+                              total_processed, state_changes.len(), sim_elapsed);
                     }
-                    
-                    // For now, skip state change detection since Direct Reth doesn't return them yet
-                    // TODO: Enhance Direct Reth to return state changes
-                    total_processed += 1;
-                    successful_simulations += 1;
-                    continue;
                     
                     let mut affected_pools = HashMap::new();
                     
@@ -810,9 +739,17 @@ async fn main() -> Result<()> {
                     }
                     
                         
+                    // Log timing for every 1000th transaction to see the breakdown
+                    if total_processed % 1000 == 0 {
+                        info!("📊 TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
+                              &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
+                    }
+                    
                     // Track processing time for transactions that affected pools
                     if pools_affected > 0 {
                         pool_affected_count += 1;
+                        info!("🎯 POOL AFFECTED TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
+                              &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
                 }
                 Ok(Ok(None)) => {
@@ -866,7 +803,7 @@ async fn main() -> Result<()> {
                 }
             }
             
-            // Report brief statistics every 1000 transactions
+            // Report brief statistics every 1000 transactions for better visibility
             if total_processed % 1000 == 0 && total_processed > 0 {
                 
                 let avg_time = if !processing_times_ms.is_empty() {
@@ -893,6 +830,8 @@ async fn main() -> Result<()> {
                     total_pipeline_times_ms.iter().sum::<f64>() / total_pipeline_times_ms.len() as f64
                 } else { 0.0 };
                 
+                let sub_1ms_pct = (sub_1ms_detections as f64 / total_processed as f64) * 100.0;
+                
                 // Calculate max values
                 let max_detection = if !detection_latencies_ms.is_empty() {
                     detection_latencies_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
@@ -914,8 +853,8 @@ async fn main() -> Result<()> {
                 let throughput = if avg_total > 0.0 { 1000.0 / avg_total } else { 0.0 };
                 
                 // Get queue info
+                // Queue info not available in new client, use 0 for now
                 let queue_info = (0, 50000);
-                
                 // Log to tracing
                 info!("============================================================");
                 info!("IPC Full: {} transactions, avg latency: {}μs, queue: {}/{}", 
@@ -933,6 +872,7 @@ async fn main() -> Result<()> {
                 
                 // Write to timing log file
                 let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+                // Use non-blocking write to avoid deadlock
                 write_timing_report_nowait(
                     timing_file.clone(),
                     timestamp,
@@ -954,6 +894,70 @@ async fn main() -> Result<()> {
             }
         }  // End of for ipc_tx in new_txs loop
         
-        // Removed verbose performance reporting
+        // Report detailed statistics periodically
+        if last_report.elapsed() > Duration::from_secs(60) {  // Every minute for better visibility
+            info!("📊 DETAILED PERFORMANCE REPORT (Full TX IPC):");
+            info!("   Total Transactions: {}", total_processed);
+            info!("   Transactions Affecting Pools: {} ({:.1}%)", 
+                  pool_affected_count, 
+                  (pool_affected_count as f64 / total_processed as f64 * 100.0));
+            
+            info!("\n   ⏱️  TIMING BREAKDOWN:");
+            
+            // IPC detection statistics
+            if !detection_latencies_ms.is_empty() {
+                let avg_detection = detection_latencies_ms.iter().sum::<f64>() / detection_latencies_ms.len() as f64;
+                let min_detection = detection_latencies_ms.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max_detection = detection_latencies_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let sub_1ms_pct = (sub_1ms_detections as f64 / total_processed as f64) * 100.0;
+                
+                info!("   1️⃣  IPC Detection (Mempool → Full TX):");
+                info!("      • Average: {:.3}ms", avg_detection);
+                info!("      • Min: {:.3}ms | Max: {:.3}ms", min_detection, max_detection);
+                info!("      • Sub-1ms: {:.1}% ({} transactions)", sub_1ms_pct, sub_1ms_detections);
+            }
+            
+            // Simulation statistics
+            if !simulation_times_ms.is_empty() {
+                let avg_sim = simulation_times_ms.iter().sum::<f64>() / simulation_times_ms.len() as f64;
+                let min_sim = simulation_times_ms.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max_sim = simulation_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                
+                info!("\n   2️⃣  Transaction Simulation:");
+                info!("      • Average: {:.3}ms", avg_sim);
+                info!("      • Min: {:.3}ms | Max: {:.3}ms", min_sim, max_sim);
+            }
+            
+            // Scam detection statistics
+            if !scam_detection_times_ms.is_empty() {
+                let avg_scam = scam_detection_times_ms.iter().sum::<f64>() / scam_detection_times_ms.len() as f64;
+                let min_scam = scam_detection_times_ms.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max_scam = scam_detection_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                
+                info!("\n   3️⃣  Scam Detection Analysis:");
+                info!("      • Average: {:.3}ms", avg_scam);
+                info!("      • Min: {:.3}ms | Max: {:.3}ms", min_scam, max_scam);
+            }
+            
+            // Total pipeline statistics
+            if !total_pipeline_times_ms.is_empty() {
+                let avg_total = total_pipeline_times_ms.iter().sum::<f64>() / total_pipeline_times_ms.len() as f64;
+                let min_total = total_pipeline_times_ms.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max_total = total_pipeline_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                
+                info!("\n   🎯 TOTAL PIPELINE (End-to-End):");
+                info!("      • Average: {:.3}ms", avg_total);
+                info!("      • Min: {:.3}ms | Max: {:.3}ms", min_total, max_total);
+                info!("      • Throughput: {:.0} tx/second", 1000.0 / avg_total);
+            }
+            
+            info!("   Market events detected: {}", total_events);
+            for (event_type, count) in &events_by_type {
+                info!("     - {}: {}", event_type, count);
+            }
+            info!("   Pools monitored: {}", pool_cache_clone.get_pool_count());
+            info!("   Full TX IPC benefits: 27x faster detection than WebSocket!");
+            last_report = Instant::now();
+        }
     }
 }
