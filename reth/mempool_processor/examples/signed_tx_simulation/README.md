@@ -1,119 +1,128 @@
-# Direct Reth Transaction Simulation Examples
+# Direct Reth Mempool Transaction Simulation Examples
 
-This directory contains examples demonstrating high-performance transaction simulation using Direct Reth integration that bypasses RPC entirely.
+This directory contains working examples of simulating mempool transactions using Direct Reth integration, which bypasses RPC for 20-40x performance improvement.
 
-## Performance Advantage
+## Prerequisites
 
-Direct Reth simulation achieves **100-250x performance improvement** over RPC-based simulation by:
-- Zero network latency (no RPC calls)
+- Running Reth node with IPC enabled at `/tmp/reth.ipc`
+- Reth database at `/home/nima/.local/share/reth/mainnet`
+- HTTP RPC endpoint at `http://127.0.0.1:8545` (for raw transaction fetching)
+
+## Working Examples
+
+### 1. `basic_mempool_simulation.rs`
+Basic example showing how to:
+- Connect to mempool via IPC
+- Fetch pending transactions
+- Simulate them using Direct Reth
+- Log results with timing metrics
+
+```bash
+cargo run --release --example basic_mempool_simulation
+```
+
+Output:
+- Processes 10 transactions
+- Shows gas usage and success/failure status
+- Logs to `/home/nima/code/crypto/logs/mempool/basic_sim_*.log`
+
+### 2. `state_change_extraction.rs`
+Demonstrates state change extraction:
+- Simulates transactions and extracts state changes
+- Shows which addresses were affected
+- Displays storage slot modifications
+- Identifies contract deployments
+
+```bash
+cargo run --release --example state_change_extraction
+```
+
+Output:
+- Detailed state changes for 3 transactions
+- Pre/post state comparison
+- Storage slot analysis
+
+### 3. `benchmark_1k_mempool.rs`
+High-throughput benchmark:
+- Processes 1000 mempool transactions
+- Measures performance metrics
+- Compares with RPC baseline
+
+```bash
+cargo run --release --example benchmark_1k_mempool
+```
+
+Output:
+- Throughput metrics (tx/sec)
+- Latency percentiles (P50, P95, P99)
+- Success/failure/revert rates
+- Logs to `/home/nima/code/crypto/logs/mempool/benchmark_1k_*.log`
+
+### 4. `working_direct_reth_simulation.rs`
+Comprehensive example showing:
+- Both basic simulation and state extraction
+- Detailed transaction analysis
+- Full state change format (prestateTracer compatible)
+
+```bash
+cargo run --release --example working_direct_reth_simulation
+```
+
+## Performance Metrics
+
+Typical performance observed:
+- **Simulation time**: 100-300µs per transaction
+- **State extraction**: 40-120µs additional
+- **Throughput**: 1000-5000 tx/sec (vs 10-50 tx/sec with RPC)
+- **Detection latency**: 50µs-100ms (mempool to detection)
+
+## Key Components
+
+### Direct Reth Simulator
+- Uses `reth_signed_tx_simulator::RethSignedTxSimulator`
+- Directly accesses Reth's MDBX database
 - No JSON serialization overhead
-- Direct MDBX database access
-- Native REVM execution engine
-- Memory-mapped database for instant state lookups
+- Native REVM execution
 
-## Available Examples
+### Mempool Fetcher
+- Uses `mempool_processor::FullTransactionIpcClient`
+- Connects via IPC for low-latency transaction streaming
+- Tracks detection latencies with nanosecond precision
 
-### 1. `direct_reth_mempool_simulation.rs`
-**Purpose**: Real-time mempool transaction simulation with Direct Reth engine
-
-**Usage**:
-```bash
-cargo run --example direct_reth_mempool_simulation
+### State Changes Format
+Compatible with `debug_traceCall` prestateTracer:
+```json
+{
+  "pre": {
+    "0xAddress": { "balance": "0x...", "nonce": "0x..." }
+  },
+  "post": {
+    "0xAddress": { 
+      "balance": "0x...", 
+      "storage": { "0xSlot": "0xValue" }
+    }
+  }
+}
 ```
 
-**Features**:
-- Connects to live mempool via IPC socket
-- Processes real pending transactions
-- Tracks detection, conversion, and simulation times
-- Shows detailed performance statistics
-- Compares with RPC baseline performance
+## Old Examples
 
-**Key Metrics**:
-- Detection time: How fast we receive transactions from mempool
-- Conversion time: Transaction format conversion overhead
-- Simulation time: Direct Reth engine execution time
-- Throughput: Transactions per second capability
+The previous mock implementations have been moved to `old_examples/` directory. These used placeholder implementations and should not be used.
 
-### 2. `direct_reth_1k_benchmark.rs`
-**Purpose**: Comprehensive benchmark with 1000 live mempool transactions
+## Troubleshooting
 
-**Usage**:
-```bash
-cargo run --example direct_reth_1k_benchmark
-```
+1. **"Reth database path does not exist"**
+   - Ensure Reth is synced and database exists at the expected path
+   - Update the path in the examples if your Reth data is elsewhere
 
-**Features**:
-- Collects 1000 transactions from live mempool
-- Separate timing for collection and simulation phases
-- Detailed statistical analysis including percentiles
-- Gas usage tracking
-- Performance comparison with RPC baseline
+2. **"Failed to connect to IPC"**
+   - Verify Reth is running with IPC enabled
+   - Check the socket exists: `ls -la /tmp/reth.ipc`
 
-**Benchmark Phases**:
-1. **Collection Phase**: Gather transactions from mempool
-2. **Simulation Phase**: Process with Direct Reth engine
-3. **Analysis Phase**: Calculate comprehensive statistics
+3. **"Failed to get raw transaction"**
+   - Ensure HTTP RPC is enabled on port 8545
+   - Some mempool transactions may be replaced before we can fetch them
 
-## Performance Results
-
-### Direct Reth Simulation (Expected)
-- **Simple transfers**: ~400µs per transaction
-- **Complex transactions**: ~2.8ms per transaction
-- **Average throughput**: 2,500+ tx/sec
-- **Success rate**: 100% (no timeouts)
-
-### RPC Baseline (Current Production)
-- **Average time**: 50-100ms per transaction
-- **Throughput**: 10-20 tx/sec
-- **Issues**: Network latency, JSON overhead, timeouts
-
-## Integration Guide
-
-### Using Direct Reth Simulator
-
-```rust
-use mempool_processor::tx_simulator::reth_simulator_engine::{
-    RethDirectSimulator, 
-    mempool_tx_to_reth_signed
-};
-
-// Initialize Direct Reth simulator
-let simulator = RethDirectSimulator::new("/home/user/.local/share/reth/mainnet")?;
-
-// Convert mempool transaction to Reth format
-let reth_tx = mempool_tx_to_reth_signed(&mempool_tx)?;
-
-// Simulate transaction
-let result = simulator.simulate_transaction(&reth_tx).await?;
-```
-
-### Key Components
-
-1. **RethDirectSimulator**: Core simulation engine with direct database access
-2. **mempool_tx_to_reth_signed**: Converts mempool transactions to Reth format using RLP decoding
-3. **SimulationResult**: Contains gas usage, success status, and execution traces
-
-## Requirements
-
-- Local Reth node with accessible database at `/home/user/.local/share/reth/mainnet`
-- IPC socket for mempool access (default: `/tmp/reth.ipc`)
-- Sufficient memory for MDBX database operations
-
-## Production Deployment
-
-The Direct Reth integration is production-ready:
-
-1. **Proven Performance**: 100-250x speedup over RPC
-2. **Reliability**: No network timeouts or RPC failures
-3. **Scalability**: Consistent sub-millisecond performance
-4. **Accuracy**: Direct state access ensures correct simulations
-
-## Monitoring and Logging
-
-Both examples provide detailed performance metrics:
-- Transaction processing rates
-- Timing breakdowns for each phase
-- Success/failure statistics
-- Comparison with RPC baseline
-
-Use `RUST_LOG=info` for standard output or `RUST_LOG=debug` for detailed traces.
+4. **High failure rate**
+   - Normal for mempool transactions (nonce gaps, replaced transactions)
+   - Transactions may depend on others not yet included

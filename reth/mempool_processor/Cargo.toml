@@ -107,6 +107,12 @@ alloy-consensus = { version = "1.0" }
 # Note: Using existing revm 25.0.0 from above
 revm-inspectors = "0.19.1"
 
+# Direct Reth simulator
+reth_signed_tx_simulator = { path = "../reth_signed_tx_simulator" }
+
+# For examples
+jsonrpsee = { version = "0.24", features = ["http-client"] }
+
 [lib]
 name = "mempool_processor"
 path = "src/lib.rs"
@@ -183,18 +189,35 @@ path = "examples/signal_detection/monitor_liquidity_removals.rs"
 
 [[example]]
 name = "direct_reth_mempool_simulation"
-path = "examples/signed_tx_simulation/direct_reth_mempool_simulation.rs"
+path = "examples/signed_tx_simulation/old_examples/direct_reth_mempool_simulation.rs"
 
 [[example]]
 name = "direct_reth_1k_benchmark"
-path = "examples/signed_tx_simulation/direct_reth_1k_benchmark.rs"
+path = "examples/signed_tx_simulation/old_examples/direct_reth_1k_benchmark.rs"
 
 [[example]]
 name = "direct_reth_state_change_detection"
-path = "examples/signed_tx_simulation/direct_reth_state_change_detection.rs"
+path = "examples/signed_tx_simulation/old_examples/direct_reth_state_change_detection.rs"
 
 [[example]]
 name = "direct_reth_basic_state_changes"
-path = "examples/signed_tx_simulation/direct_reth_basic_state_changes.rs"
+path = "examples/signed_tx_simulation/old_examples/direct_reth_basic_state_changes.rs"
+
+# New working examples
+[[example]]
+name = "basic_mempool_simulation"
+path = "examples/signed_tx_simulation/basic_mempool_simulation.rs"
+
+[[example]]
+name = "state_change_extraction"
+path = "examples/signed_tx_simulation/state_change_extraction.rs"
+
+[[example]]
+name = "benchmark_1k_mempool"
+path = "examples/signed_tx_simulation/benchmark_1k_mempool.rs"
+
+[[example]]
+name = "working_direct_reth_simulation"
+path = "examples/signed_tx_simulation/working_direct_reth_simulation.rs"
 
 # Using crates.io versions - no patches needed
