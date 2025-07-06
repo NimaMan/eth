@@ -145,6 +145,14 @@ path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
 name = "mempool_full_tx_client"
 path = "src/bin/mempool_full_tx_client.rs"
 
+[[bin]]
+name = "mempool_signal_detector"
+path = "src/bin/mempool_signal_detector.rs"
+
+[[bin]]
+name = "mempool_signal_detector_with_reth_simulator"
+path = "src/bin/mempool_signal_detector_with_reth_simulator.rs"
+
 
 
 
