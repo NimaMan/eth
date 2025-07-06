@@ -544,7 +544,7 @@ async fn main() -> Result<()> {
             // Use debug_traceCall to get state changes with timeout
             let sim_start = Instant::now();
             match time::timeout(
-                Duration::from_millis(250),
+                Duration::from_millis(100),
                 tx_simulator.process_transaction(&tx_view, &Default::default())
             ).await {
                 Ok(Ok(Some(state_changes))) => {
