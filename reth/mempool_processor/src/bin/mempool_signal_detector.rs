@@ -576,7 +576,7 @@ async fn main() -> Result<()> {
                     let pool_check_start = Instant::now();
                     for (address, changes) in &detailed_changes {
                         // Convert address to checksummed string
-                        let address_str = format!("{:?}", address);
+                        let address_str = mempool_processor::common::address::alloy_address_to_checksum(*address);
                         
                         // Check if this address is a pool
                         if let Some(pool_state) = pool_cache_clone.get_pool(&address_str) {

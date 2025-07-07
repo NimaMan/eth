@@ -9,6 +9,12 @@ pub fn to_checksum_address(address: Address) -> String {
     checksum_address(&address_hex)
 }
 
+/// Convert an alloy_primitives::Address to EIP-55 checksummed format
+pub fn alloy_address_to_checksum(address: alloy_primitives::Address) -> String {
+    let address_hex = format!("{:040x}", address);
+    checksum_address(&address_hex)
+}
+
 /// Convert an address string to EIP-55 checksummed format
 /// This function implements the EIP-55 checksumming algorithm
 pub fn checksum_address(address_str: &str) -> String {
