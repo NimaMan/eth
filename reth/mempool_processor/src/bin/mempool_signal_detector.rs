@@ -22,7 +22,6 @@ use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransa
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
 use mempool_processor::tx_simulator::{DirectTxSimulator, CallTraceResult};
-use mempool_processor::common::address::to_checksum_address;
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
@@ -179,12 +178,13 @@ fn write_timing_report_nowait(
     avg_pool_check: f64,
     max_pool_check: f64,
     avg_scam: f64,
+    max_scam: f64,
     avg_total: f64,
     max_total: f64,
-    pool_affected_count: u64,
+    batch_pool_affected: u64,
     throughput: f64,
     queue_info: (usize, usize),
-    processing_times_len: usize,
+    batch_size: usize,
 ) {
     let report = format!(
         "[{}] ============================================================\n\
@@ -199,13 +199,13 @@ fn write_timing_report_nowait(
         [{}]    🚀 Throughput:      {:.1} tx/sec\n\
         [{}] ============================================================\n\n",
         timestamp, timestamp, total_processed, (avg_detection * 1000.0) as u64, queue_info.0, queue_info.1,
-        timestamp, processing_times_len,
+        timestamp, batch_size,
         timestamp, avg_detection, max_detection,
         timestamp, avg_sim, max_sim,
         timestamp, avg_pool_check, max_pool_check,
-        timestamp, avg_scam, 0.1,
+        timestamp, avg_scam, max_scam,
         timestamp, avg_total, max_total,
-        timestamp, pool_affected_count, (pool_affected_count as f64 / total_processed as f64 * 100.0),
+        timestamp, batch_pool_affected, (batch_pool_affected as f64 / batch_size as f64 * 100.0),
         timestamp, throughput,
         timestamp
     );
@@ -223,7 +223,7 @@ fn write_timing_report_nowait(
             }
             Err(_) => {
                 // File write timed out, but don't block the main processing
-                eprintln!("Warning: Timing report file write timed out");
+                warn!("Timing report file write timed out");
             }
         }
     });
@@ -431,26 +431,26 @@ async fn main() -> Result<()> {
     let mut total_events = 0u64;
     let mut events_by_type = HashMap::<String, u64>::new();
     let mut last_report = Instant::now();
-    let mut processing_times_ms: Vec<f64> = Vec::new();
-    let mut pool_affected_count = 0u64;
+    let mut total_pool_affected_count = 0u64;
     let mut sub_1ms_detections = 0u64;
-    let mut detection_latencies_ms: Vec<f64> = Vec::new();
     
-    // Detailed timing breakdown
-    let mut simulation_times_ms: Vec<f64> = Vec::new();
-    let mut pool_check_times_ms: Vec<f64> = Vec::new();
-    let mut scam_detection_times_ms: Vec<f64> = Vec::new();
-    let mut total_pipeline_times_ms: Vec<f64> = Vec::new();
+    // Timing vectors - only keep last 1000 transactions for reporting
+    let mut detection_latencies_ms: Vec<f64> = Vec::with_capacity(1000);
+    let mut simulation_times_ms: Vec<f64> = Vec::with_capacity(1000);
+    let mut pool_check_times_ms: Vec<f64> = Vec::with_capacity(1000);
+    let mut scam_detection_times_ms: Vec<f64> = Vec::with_capacity(1000);
+    let mut total_pipeline_times_ms: Vec<f64> = Vec::with_capacity(1000);
+    
+    // Track transactions in current 1K batch
+    let mut last_report_count = 0u64;
+    let mut batch_pool_affected = 0u64;
     
     info!("✅ All initialization complete, preparing to start main loop...");
     
     // Main processing loop
     info!("🔄 Starting main processing loop with Full TX IPC...");
     
-    let mut loop_iterations = 0u64;
     loop {
-        loop_iterations += 1;
-        
         // Log that we're in the loop
         if total_processed == 0 {
             info!("✅ Main processing loop has started successfully!");
@@ -491,19 +491,12 @@ async fn main() -> Result<()> {
             
             // Track IPC detection latency
             let detection_latency_ms = ipc_tx.detection_ns as f64 / 1_000_000.0;
-            detection_latencies_ms.push(detection_latency_ms);
             if detection_latency_ms < 1.0 {
                 sub_1ms_detections += 1;
             }
             
-            // Keep only last 1000 detection measurements
-            if detection_latencies_ms.len() > 1000 {
-                detection_latencies_ms.remove(0);
-            }
             
-            
-            let start_time = Instant::now();
-            let pipeline_start = Instant::now(); // Measure processing time, not queue wait time
+            let pipeline_start = Instant::now(); // Start timing the entire pipeline
             
             // We already have the full transaction from non-blocking IPC!
             let tx_view = match convert_nonblocking_to_transaction_view(&ipc_tx) {
@@ -543,10 +536,18 @@ async fn main() -> Result<()> {
             let is_simple_transfer = tx_view.input_data.as_ref().map_or(true, |d| d.is_empty()) 
                 && tx_view.to.is_some();
             
-            // Skip simulation for simple transfers
+            // Skip simulation for simple transfers but still track timing
             if is_simple_transfer {
                 debug!("Skipping simulation for simple ETH transfer");
                 total_processed += 1;
+                
+                // Add zero timing for skipped transactions
+                let total_pipeline_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
+                detection_latencies_ms.push(detection_latency_ms);
+                simulation_times_ms.push(0.0);
+                pool_check_times_ms.push(0.0);
+                scam_detection_times_ms.push(0.0);
+                total_pipeline_times_ms.push(total_pipeline_ms);
                 continue;
             }
             
@@ -623,7 +624,8 @@ async fn main() -> Result<()> {
                     
                     let pools_affected = affected_pools.len();
                     
-                    // If pools are affected, check for scams
+                    // Always measure scam detection time, even if no pools affected
+                    let scam_start = Instant::now();
                     if !affected_pools.is_empty() {
                         let simulation_result = mempool_processor::signal_engine::SimulationResult {
                             tx_hash: ipc_tx.hash.clone(),
@@ -632,11 +634,8 @@ async fn main() -> Result<()> {
                             error_message: None,
                         };
                         
-                        let scam_start = Instant::now();
                         match scam_service.process_transaction(simulation_result).await {
                             Ok(events) => {
-                                let scam_elapsed = scam_start.elapsed().as_secs_f64() * 1000.0;
-                                scam_detection_times_ms.push(scam_elapsed);
                         if !events.is_empty() {
                                     total_events += events.len() as u64;
                                     for event in events {
@@ -714,34 +713,21 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    let scam_elapsed = scam_start.elapsed().as_secs_f64() * 1000.0;
                     
                     total_processed += 1;
-                    let elapsed = start_time.elapsed();
                     let total_pipeline_elapsed = Instant::now().duration_since(pipeline_start);
                     
                     
-                    // Track processing time
-                    let processing_time_ms = elapsed.as_secs_f64() * 1000.0;
+                    // Track timing for this transaction
                     let total_pipeline_ms = total_pipeline_elapsed.as_secs_f64() * 1000.0;
-                    processing_times_ms.push(processing_time_ms);
-                    total_pipeline_times_ms.push(total_pipeline_ms);
                     
-                    // Keep only last 1000 measurements to avoid memory growth
-                    if processing_times_ms.len() > 1000 {
-                        processing_times_ms.remove(0);
-                    }
-                    if simulation_times_ms.len() > 1000 {
-                        simulation_times_ms.remove(0);
-                    }
-                    if pool_check_times_ms.len() > 1000 {
-                        pool_check_times_ms.remove(0);
-                    }
-                    if scam_detection_times_ms.len() > 1000 {
-                        scam_detection_times_ms.remove(0);
-                    }
-                    if total_pipeline_times_ms.len() > 1000 {
-                        total_pipeline_times_ms.remove(0);
-                    }
+                    // Add to batch timing vectors
+                    detection_latencies_ms.push(detection_latency_ms);
+                    simulation_times_ms.push(sim_elapsed);
+                    pool_check_times_ms.push(pool_check_elapsed);
+                    scam_detection_times_ms.push(scam_elapsed);
+                    total_pipeline_times_ms.push(total_pipeline_ms);
                     
                         
                     // Log timing for every 1000th transaction to see the breakdown
@@ -752,7 +738,8 @@ async fn main() -> Result<()> {
                     
                     // Track processing time for transactions that affected pools
                     if pools_affected > 0 {
-                        pool_affected_count += 1;
+                        total_pool_affected_count += 1;
+                        batch_pool_affected += 1;
                         info!("🎯 POOL AFFECTED TX {} timing: IPC:{:.3}ms → Sim:{:.3}ms → Total:{:.3}ms | {} pools", 
                               &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
@@ -770,8 +757,12 @@ async fn main() -> Result<()> {
                     // Track timing even for errors
                     let total_pipeline_elapsed = Instant::now().duration_since(pipeline_start);
                     let total_pipeline_ms = total_pipeline_elapsed.as_secs_f64() * 1000.0;
+                    
+                    // Add timing data for failed simulation
+                    detection_latencies_ms.push(detection_latency_ms);
+                    pool_check_times_ms.push(0.0);
+                    scam_detection_times_ms.push(0.0);
                     total_pipeline_times_ms.push(total_pipeline_ms);
-                    processing_times_ms.push(start_time.elapsed().as_secs_f64() * 1000.0);
                 }
                 Err(_) => {
                     // Timeout occurred
@@ -787,17 +778,20 @@ async fn main() -> Result<()> {
                     // Track timing for timeouts
                     let total_pipeline_elapsed = Instant::now().duration_since(pipeline_start);
                     let total_pipeline_ms = total_pipeline_elapsed.as_secs_f64() * 1000.0;
+                    
+                    // Add timing data for timeout
+                    detection_latencies_ms.push(detection_latency_ms);
+                    pool_check_times_ms.push(0.0);
+                    scam_detection_times_ms.push(0.0);
                     total_pipeline_times_ms.push(total_pipeline_ms);
-                    processing_times_ms.push(start_time.elapsed().as_secs_f64() * 1000.0);
                 }
             }
             
-            // Report brief statistics every 1000 transactions for better visibility
-            if total_processed % 1000 == 0 && total_processed > 0 {
+            // Report statistics when we cross each 1000 boundary
+            if total_processed >= last_report_count + 1000 {
                 
-                let avg_time = if !processing_times_ms.is_empty() {
-                    processing_times_ms.iter().sum::<f64>() / processing_times_ms.len() as f64
-                } else { 0.0 };
+                // Calculate batch size
+                let batch_size = detection_latencies_ms.len();
                 
                 let avg_detection = if !detection_latencies_ms.is_empty() {
                     detection_latencies_ms.iter().sum::<f64>() / detection_latencies_ms.len() as f64
@@ -838,6 +832,10 @@ async fn main() -> Result<()> {
                     total_pipeline_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
                 } else { 0.0 };
                 
+                let max_scam = if !scam_detection_times_ms.is_empty() {
+                    scam_detection_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
+                } else { 0.0 };
+                
                 // Calculate throughput
                 let throughput = if avg_total > 0.0 { 1000.0 / avg_total } else { 0.0 };
                 
@@ -848,14 +846,14 @@ async fn main() -> Result<()> {
                 info!("============================================================");
                 info!("IPC Full: {} transactions, avg latency: {}μs, queue: {}/{}", 
                       total_processed, (avg_detection * 1000.0) as u64, queue_info.0, queue_info.1);
-                info!("⚡ TIMING REPORT (last {} transactions):", processing_times_ms.len());
+                info!("⚡ TIMING REPORT (last {} transactions):", batch_size);
                 info!("   📡 IPC Detection:   avg={:.2}ms  max={:.2}ms", avg_detection, max_detection);
                 info!("   🔬 Simulation:      avg={:.2}ms  max={:.2}ms", avg_sim, max_sim);
                 info!("   🔍 Pool Check:      avg={:.2}ms  max={:.2}ms", avg_pool_check, max_pool_check);
-                info!("   🛡️  Scam Detection: avg={:.2}ms  max={:.2}ms", avg_scam, 0.1);
+                info!("   🛡️  Scam Detection: avg={:.2}ms  max={:.2}ms", avg_scam, max_scam);
                 info!("   📊 Total Pipeline:  avg={:.2}ms  max={:.2}ms", avg_total, max_total);
-                info!("   🎯 Pools Affected:  {} ({:.1}%)", pool_affected_count, 
-                      (pool_affected_count as f64 / total_processed as f64 * 100.0));
+                info!("   🎯 Pools Affected:  {} ({:.1}%)", batch_pool_affected, 
+                      (batch_pool_affected as f64 / batch_size as f64 * 100.0));
                 info!("   🚀 Throughput:      {:.1} tx/sec", throughput);
                 info!("============================================================");
                 
@@ -873,13 +871,25 @@ async fn main() -> Result<()> {
                     avg_pool_check,
                     max_pool_check,
                     avg_scam,
+                    max_scam,
                     avg_total,
                     max_total,
-                    pool_affected_count,
+                    batch_pool_affected,
                     throughput,
                     queue_info,
-                    processing_times_ms.len()
+                    batch_size
                 );
+                
+                // Clear buffers for next batch
+                detection_latencies_ms.clear();
+                simulation_times_ms.clear();
+                pool_check_times_ms.clear();
+                scam_detection_times_ms.clear();
+                total_pipeline_times_ms.clear();
+                batch_pool_affected = 0;
+                
+                // Update last report count
+                last_report_count = total_processed;
             }
         }  // End of for ipc_tx in new_txs loop
         
@@ -888,8 +898,8 @@ async fn main() -> Result<()> {
             info!("📊 DETAILED PERFORMANCE REPORT (Full TX IPC):");
             info!("   Total Transactions: {}", total_processed);
             info!("   Transactions Affecting Pools: {} ({:.1}%)", 
-                  pool_affected_count, 
-                  (pool_affected_count as f64 / total_processed as f64 * 100.0));
+                  total_pool_affected_count, 
+                  (total_pool_affected_count as f64 / total_processed as f64 * 100.0));
             
             info!("\n   ⏱️  TIMING BREAKDOWN:");
             

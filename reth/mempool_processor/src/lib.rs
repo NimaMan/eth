@@ -8,7 +8,6 @@ pub mod tx_simulator;
 pub mod pool_subscriber;
 pub mod signal_engine;
 pub mod common;
-pub mod performance_metrics;
 pub mod database;
 
 // Re-export commonly used types

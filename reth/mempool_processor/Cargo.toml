@@ -3,10 +3,6 @@ name      = "mempool_processor"
 version   = "0.1.0"
 edition   = "2021"
 
-[[example]]
-name = "direct_simulation_demo"
-path = "examples/direct_simulation_demo.rs"
-
 [dependencies]
 # Real-time JSON-RPC/WebSocket/IPC client
 ethers          = { version = "2.0", features = ["ws", "ipc"] }
@@ -49,13 +45,6 @@ alloy-rpc-client = { version = "1.0.9" }
 revm_tx_simulator = { path = "../tx_processor" }
 
 # Reth dependencies for database access
-# Using local path instead: reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-# Using local path instead: reth-db = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-# reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-# reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-# reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-# Using local path instead: reth-provider = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
-
 # Reth ExEx dependencies (optional, for direct integration)
 reth-exex = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
 reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
@@ -122,10 +111,6 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 name = "mempool_processor"
 path = "src/lib.rs"
 
-[[bin]]
-name = "mempool_processor"
-path = "src/main.rs"
-
 # Enable tx_processor module tests
 [features]
 default = []
@@ -133,48 +118,10 @@ tx_processor_tests = []
 reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
 
 [[bin]]
-name = "mempool_tracker"
-path = "src/bin/mempool_tracker.rs"
-
-
-[[bin]]
-name = "metrics_api_server"
-path = "src/bin/metrics_api_server.rs"
-
-[[bin]]
-name = "mempool_signal_detection_full_tx_ipc"
-path = "src/bin/mempool_signal_detection_full_tx_ipc.rs"
-
-
-[[bin]]
-name = "mempool_full_tx_client"
-path = "src/bin/mempool_full_tx_client.rs"
-
-[[bin]]
 name = "mempool_signal_detector"
 path = "src/bin/mempool_signal_detector.rs"
 
-[[bin]]
-name = "mempool_signal_detector_with_reth_simulator"
-path = "src/bin/mempool_signal_detector_with_reth_simulator.rs"
-
-
-
-
-
-
-
-
 # Examples
-[[example]]
-name = "detect_pool_creation"
-path = "examples/detect_pool_creation.rs"
-
-
-[[example]]
-name = "actual_simulation_measurement"
-path = "examples/actual_simulation_measurement.rs"
-
 
 [[example]]
 name = "nonblocking_ipc_1k_demo"
@@ -200,23 +147,7 @@ path = "examples/signal_detection/test_function_signature_detection.rs"
 name = "monitor_liquidity_removals"
 path = "examples/signal_detection/monitor_liquidity_removals.rs"
 
-[[example]]
-name = "direct_reth_mempool_simulation"
-path = "examples/signed_tx_simulation/old_examples/direct_reth_mempool_simulation.rs"
-
-[[example]]
-name = "direct_reth_1k_benchmark"
-path = "examples/signed_tx_simulation/old_examples/direct_reth_1k_benchmark.rs"
-
-[[example]]
-name = "direct_reth_state_change_detection"
-path = "examples/signed_tx_simulation/old_examples/direct_reth_state_change_detection.rs"
-
-[[example]]
-name = "direct_reth_basic_state_changes"
-path = "examples/signed_tx_simulation/old_examples/direct_reth_basic_state_changes.rs"
-
-# New working examples
+# Working examples
 [[example]]
 name = "basic_mempool_simulation"
 path = "examples/signed_tx_simulation/basic_mempool_simulation.rs"

@@ -182,19 +182,4 @@ impl MempoolProcessorConfig {
         
         config
     }
-    
-    // TODO: Add TOML support by adding `toml` to Cargo.toml dependencies
-    // /// Load configuration from a TOML file
-    // pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-    //     let contents = std::fs::read_to_string(path)?;
-    //     let config: Self = toml::from_str(&contents)?;
-    //     Ok(config)
-    // }
-    
-    // /// Save configuration to a TOML file
-    // pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    //     let contents = toml::to_string_pretty(self)?;
-    //     std::fs::write(path, contents)?;
-    //     Ok(())
-    // }
 }
