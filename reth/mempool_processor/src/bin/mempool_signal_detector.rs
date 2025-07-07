@@ -21,7 +21,7 @@ use hex;
 use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction, TransactionView};
 use mempool_processor::pool_subscriber::PoolSubscriber;
 use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig, AlertPublisher};
-use mempool_processor::tx_simulator::DebugTraceCallSimulator;
+use mempool_processor::tx_simulator::{DirectTxSimulator, CallTraceResult};
 use mempool_processor::common::address::to_checksum_address;
 
 // Ethers imports
@@ -81,6 +81,10 @@ struct Args {
     /// ZMQ publisher endpoint
     #[arg(long, env = "ALERT_ZMQ_ADDRESS", default_value = "tcp://*:5559")]
     alert_zmq_address: String,
+    
+    /// Reth database directory for Direct simulator (20-40x faster than RPC)
+    #[arg(long, env = "RETH_DATADIR", default_value = "/home/nima/.local/share/reth/mainnet")]
+    reth_datadir: String,
 }
 
 /// Check if transaction is a liquidity removal based on function signature
@@ -101,6 +105,16 @@ fn is_liquidity_removal(input_data: &Option<Vec<u8>>) -> Option<&'static str> {
         }
     } else {
         None
+    }
+}
+
+/// Convert NonBlockingTransaction to FullTransaction for Direct simulator
+fn convert_to_full_transaction(tx: &NonBlockingTransaction) -> mempool_processor::mempool_fetcher::FullTransaction {
+    mempool_processor::mempool_fetcher::FullTransaction {
+        hash: tx.hash.clone(),
+        tx_data: tx.data.clone(),
+        detection_time: Instant::now(),
+        latency_ns: tx.detection_ns,
     }
 }
 
@@ -390,23 +404,18 @@ async fn main() -> Result<()> {
         None
     };
     
-    // Initialize transaction simulator
-    info!("🔧 Creating transaction simulator with RPC URL: {}", &args.eth_rpc_url);
-    let tx_simulator = match tokio::time::timeout(
-        Duration::from_secs(10),
-        DebugTraceCallSimulator::new(&args.eth_rpc_url)
-    ).await {
-        Ok(Ok(simulator)) => {
-            info!("✅ Transaction simulator initialized successfully");
+    // Initialize Direct transaction simulator (20-40x faster than RPC)
+    info!("🔧 Creating Direct transaction simulator with database: {}", &args.reth_datadir);
+    let tx_simulator = match DirectTxSimulator::new(&args.reth_datadir) {
+        Ok(simulator) => {
+            info!("✅ Direct transaction simulator initialized successfully");
+            info!("   ⚡ 20-40x faster than RPC simulation");
             simulator
         }
-        Ok(Err(e)) => {
-            error!("❌ Failed to create transaction simulator: {}", e);
+        Err(e) => {
+            error!("❌ Failed to create Direct transaction simulator: {}", e);
+            error!("   Make sure Reth database exists at: {}", &args.reth_datadir);
             return Err(e);
-        }
-        Err(_) => {
-            error!("❌ Timeout creating transaction simulator after 10 seconds!");
-            return Err(eyre::eyre!("Transaction simulator creation timed out"));
         }
     };
     
@@ -541,41 +550,37 @@ async fn main() -> Result<()> {
                 continue;
             }
             
-            // Use debug_traceCall to get state changes with timeout
+            // Convert to FullTransaction for Direct simulator
+            let full_tx = convert_to_full_transaction(&ipc_tx);
+            
+            // Use Direct simulator with call tracer for detailed state changes
             let sim_start = Instant::now();
             match time::timeout(
                 Duration::from_millis(100),
-                tx_simulator.process_transaction(&tx_view, &Default::default())
+                tx_simulator.simulate_with_call_trace(&full_tx)
             ).await {
-                Ok(Ok(Some(state_changes))) => {
+                Ok(Ok(CallTraceResult { detailed_changes, .. })) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
                     
                     // Log simulation results periodically
                     if total_processed % 50 == 0 {
                         info!("🔬 Simulated tx #{}: {} state changes in {:.3}ms", 
-                              total_processed, state_changes.len(), sim_elapsed);
+                              total_processed, detailed_changes.len(), sim_elapsed);
                     }
                     
                     let mut affected_pools = HashMap::new();
                     
                     // Process state changes for each address
                     let pool_check_start = Instant::now();
-                    for (address_str, changes) in &state_changes {
-                        // address_str is now already checksummed from the simulator
+                    for (address, changes) in &detailed_changes {
+                        // Convert address to checksummed string
+                        let address_str = format!("{:?}", address);
                         
                         // Check if this address is a pool
-                        if let Some(pool_state) = pool_cache_clone.get_pool(address_str) {
-                            // Calculate ETH delta (positive or negative)
-                            let eth_delta = if changes.eth_net_change.is_negative {
-                                -(changes.eth_net_change.absolute_value.to_string()
-                                    .parse::<u128>()
-                                    .unwrap_or(0) as f64 / 1e18)
-                            } else {
-                                changes.eth_net_change.absolute_value.to_string()
-                                    .parse::<u128>()
-                                    .unwrap_or(0) as f64 / 1e18
-                            };
+                        if let Some(pool_state) = pool_cache_clone.get_pool(&address_str) {
+                            // ETH delta is already in the correct format (positive/negative float)
+                            let eth_delta = changes.eth_net;
                             
                             // Skip very small changes (less than 0.001 ETH)
                             if eth_delta.abs() < 0.001 {
@@ -752,22 +757,6 @@ async fn main() -> Result<()> {
                               &ipc_tx.hash[..10], detection_latency_ms, sim_elapsed, total_pipeline_ms, pools_affected);
                     }
                 }
-                Ok(Ok(None)) => {
-                    let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
-                    simulation_times_ms.push(sim_elapsed);
-                    debug!("No state changes detected for transaction {}", ipc_tx.hash);
-                    
-                    // Add 0ms for pool check since there were no state changes to check
-                    pool_check_times_ms.push(0.0);
-                    
-                    total_processed += 1;
-                    
-                    // Track timing even for no state changes
-                    let total_pipeline_elapsed = Instant::now().duration_since(pipeline_start);
-                    let total_pipeline_ms = total_pipeline_elapsed.as_secs_f64() * 1000.0;
-                    total_pipeline_times_ms.push(total_pipeline_ms);
-                    processing_times_ms.push(start_time.elapsed().as_secs_f64() * 1000.0);
-                }
                 Ok(Err(e)) => {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
@@ -786,9 +775,9 @@ async fn main() -> Result<()> {
                 }
                 Err(_) => {
                     // Timeout occurred
-                    let sim_elapsed = 250.0; // Record as 250ms timeout
+                    let sim_elapsed = 100.0; // Record as 100ms timeout
                     simulation_times_ms.push(sim_elapsed);
-                    warn!("Simulation timeout for tx: 0x{}", hex::encode(&tx_view.hash));
+                    warn!("Simulation timeout for tx: {}", ipc_tx.hash);
                     
                     // Add 0ms for pool check since simulation timed out
                     pool_check_times_ms.push(0.0);
