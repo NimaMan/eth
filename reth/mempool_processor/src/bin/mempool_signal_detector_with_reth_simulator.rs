@@ -28,6 +28,8 @@ use mempool_processor::signal_engine::{ScamDetectionService, ScamDetectionConfig
 use reth_signed_tx_simulator::RethSignedTxSimulator;
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
+use alloy_consensus::{TxLegacy, TxEip1559};
+use alloy_primitives::{Signature, TxKind};
 
 // Ethers imports
 use ethers::providers::{Provider, Http, Middleware};
@@ -114,28 +116,134 @@ fn is_liquidity_removal(input_data: &Option<Vec<u8>>) -> Option<&'static str> {
 }
 
 /// Convert non-blocking IPC transaction to Reth TransactionSigned for direct simulation
-async fn convert_to_reth_signed_tx(tx: &NonBlockingTransaction, rpc_url: &str) -> Result<TransactionSigned> {
-    use jsonrpsee::http_client::{HttpClientBuilder, HttpClient};
-    use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::rpc_params;
+fn convert_to_reth_signed_tx(tx: &NonBlockingTransaction) -> Result<TransactionSigned> {
+    use alloy_rlp::{RlpEncodable, Encodable};
     
-    let hash = &tx.hash;
+    // Extract transaction fields from IPC data
+    let tx_data = &tx.data;
     
-    // Get raw transaction from RPC
-    let client: HttpClient = HttpClientBuilder::default()
-        .build(rpc_url)?;
+    // Get transaction type
+    let tx_type = tx_data["type"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| u8::from_str_radix(s, 16).ok())
+        .unwrap_or(0);
     
-    let raw_tx: String = client.request(
-        "eth_getRawTransactionByHash",
-        rpc_params![hash]
-    ).await?;
+    // Extract signature components
+    let v = tx_data["v"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| u64::from_str_radix(s, 16).ok())
+        .ok_or_else(|| eyre::eyre!("Missing v"))?;
     
-    // Decode to Reth format
-    let hex_str = raw_tx.strip_prefix("0x").unwrap_or(&raw_tx);
-    let raw_bytes = hex::decode(hex_str)?;
-    let signed_tx = TransactionSigned::decode(&mut raw_bytes.as_slice())?;
+    let r = tx_data["r"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| hex::decode(s).ok())
+        .ok_or_else(|| eyre::eyre!("Missing r"))?;
     
-    Ok(signed_tx)
+    let s = tx_data["s"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| hex::decode(s).ok())
+        .ok_or_else(|| eyre::eyre!("Missing s"))?;
+    
+    // Parse common fields
+    let nonce = tx_data["nonce"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| u64::from_str_radix(s, 16).ok())
+        .unwrap_or(0);
+    
+    let gas_limit = tx_data["gas"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .and_then(|s| u128::from_str_radix(s, 16).ok())
+        .unwrap_or(21000);
+    
+    let value_str = tx_data["value"].as_str()
+        .and_then(|s| s.strip_prefix("0x"))
+        .unwrap_or("0");
+    let value = alloy_primitives::U256::from_str_radix(value_str, 16)
+        .unwrap_or_default();
+    
+    let input = tx_data["input"].as_str()
+        .and_then(|s| hex::decode(s.strip_prefix("0x").unwrap_or(s)).ok())
+        .unwrap_or_default();
+    
+    let to = tx_data["to"].as_str()
+        .filter(|s| !s.is_empty() && *s != "0x" && *s != "null")
+        .and_then(|s| s.parse::<alloy_primitives::Address>().ok());
+    
+    // Create signature
+    let mut r_bytes = [0u8; 32];
+    let mut s_bytes = [0u8; 32];
+    r_bytes[32 - r.len()..].copy_from_slice(&r);
+    s_bytes[32 - s.len()..].copy_from_slice(&s);
+    
+    let signature = alloy_primitives::Signature::from_rs_and_parity(
+        alloy_primitives::U256::from_be_slice(&r_bytes),
+        alloy_primitives::U256::from_be_slice(&s_bytes),
+        alloy_primitives::Parity::Parity(v % 2 == 1)
+    )?;
+    
+    // Build transaction based on type
+    let transaction = match tx_type {
+        0 => {
+            // Legacy transaction
+            let gas_price = tx_data["gasPrice"].as_str()
+                .and_then(|s| s.strip_prefix("0x"))
+                .and_then(|s| u128::from_str_radix(s, 16).ok())
+                .unwrap_or(0);
+            
+            let chain_id = if v >= 35 { Some((v - 35) / 2) } else { None };
+            
+            let tx = TxLegacy {
+                chain_id,
+                nonce,
+                gas_price,
+                gas_limit,
+                to: if let Some(addr) = to { TxKind::Call(addr) } else { TxKind::Create },
+                value,
+                input: input.into(),
+            };
+            
+            reth_primitives::Transaction::Legacy(tx)
+        }
+        2 => {
+            // EIP-1559 transaction
+            let max_fee_per_gas = tx_data["maxFeePerGas"].as_str()
+                .and_then(|s| s.strip_prefix("0x"))
+                .and_then(|s| u128::from_str_radix(s, 16).ok())
+                .unwrap_or(0);
+            
+            let max_priority_fee_per_gas = tx_data["maxPriorityFeePerGas"].as_str()
+                .and_then(|s| s.strip_prefix("0x"))
+                .and_then(|s| u128::from_str_radix(s, 16).ok())
+                .unwrap_or(0);
+            
+            let tx = TxEip1559 {
+                chain_id: 1, // Mainnet
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to: if let Some(addr) = to { TxKind::Call(addr) } else { TxKind::Create },
+                value,
+                input: input.into(),
+                access_list: Default::default(),
+            };
+            
+            reth_primitives::Transaction::Eip1559(tx)
+        }
+        _ => return Err(eyre::eyre!("Unsupported transaction type: {}", tx_type))
+    };
+    
+    // Create TransactionSigned with the Reth signature type
+    let reth_signature = reth_primitives::Signature {
+        r: alloy_primitives::U256::from_be_slice(&r_bytes),
+        s: alloy_primitives::U256::from_be_slice(&s_bytes),
+        odd_y_parity: v % 2 == 1,
+    };
+    
+    Ok(TransactionSigned::from_transaction_and_signature(
+        transaction,
+        reth_signature
+    ))
 }
 
 /// Convert non-blocking IPC transaction to TransactionView
@@ -570,7 +678,7 @@ async fn main() -> Result<()> {
             }
             
             // Convert to Reth format for Direct simulation
-            let reth_tx = match convert_to_reth_signed_tx(&ipc_tx, &args.eth_rpc_url).await {
+            let reth_tx = match convert_to_reth_signed_tx(&ipc_tx) {
                 Ok(tx) => tx,
                 Err(e) => {
                     warn!("Failed to convert to Reth format: {}", e);

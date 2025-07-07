@@ -1,13 +1,13 @@
-/// Basic Mempool Transaction Simulation
+/// Basic Mempool Transaction Simulation with New reth_tx_simulator
 /// 
 /// Demonstrates how to fetch transactions from mempool and simulate them
-/// using Direct Reth for ultra-fast performance (20-40x faster than RPC).
+/// using the new reth_tx_simulator for ultra-fast performance.
 
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
     FullTransaction,
 };
-use reth_signed_tx_simulator::RethSignedTxSimulator;
+use reth_tx_simulator::RethDirectTxSimulator;
 use reth_primitives::TransactionSigned;
 use eyre::Result;
 use tracing::{info, error, warn};
@@ -23,12 +23,12 @@ async fn main() -> Result<()> {
         .with_env_filter("info")
         .init();
 
-    println!("\n🚀 Basic Mempool Transaction Simulation");
-    println!("======================================\n");
+    println!("\n🚀 Mempool Transaction Simulation with New reth_tx_simulator");
+    println!("==========================================================\n");
 
-    // Initialize Direct Reth simulator
+    // Initialize new Direct Reth simulator
     let start = Instant::now();
-    let simulator = RethSignedTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = RethDirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     info!("✅ Direct Reth simulator initialized in {:?}", start.elapsed());
 
     // Connect to mempool
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
 
     // Create log file
     std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool/basic_sim_{}.log", 
+    let log_path = format!("/home/nima/code/crypto/logs/mempool/new_sim_{}.log", 
         Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)
@@ -47,9 +47,9 @@ async fn main() -> Result<()> {
         .truncate(true)
         .open(&log_path)?;
     
-    writeln!(log_file, "Basic Mempool Simulation Log")?;
+    writeln!(log_file, "Mempool Simulation with New reth_tx_simulator")?;
     writeln!(log_file, "Started: {}", Local::now())?;
-    writeln!(log_file, "============================\n")?;
+    writeln!(log_file, "============================================\n")?;
 
     // Process transactions
     let target_txs = 10;
@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
     let mut successful = 0;
     let mut failed = 0;
     let mut sim_times = Vec::new();
+    let mut state_extraction_times = Vec::new();
 
     info!("📊 Processing {} transactions...\n", target_txs);
 
@@ -73,7 +74,6 @@ async fn main() -> Result<()> {
             
             println!("Transaction {}/{}: {}", processed, target_txs, tx.hash);
             
-            
             // Convert IPC transaction directly to TransactionSigned - NO RPC!
             let signed_tx = match convert_ipc_to_signed_tx(&tx) {
                 Ok(tx) => tx,
@@ -86,15 +86,18 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Simulate transaction
+            // Get latest block for simulation
+            let latest_block = simulator.get_latest_block()?;
+
+            // 1. Basic simulation
             let sim_start = Instant::now();
-            match simulator.simulate_transaction(&signed_tx).await {
+            match simulator.simulate_signed_transaction_at_block(&signed_tx, latest_block).await {
                 Ok(result) => {
                     let sim_time = sim_start.elapsed();
                     sim_times.push(sim_time);
                     successful += 1;
 
-                    println!("  ✅ Simulated in {:?}", sim_time);
+                    println!("  ✅ Basic simulation in {:?}", sim_time);
                     println!("     Gas: {}, Success: {}", result.gas_used, result.success);
 
                     // Log details
@@ -107,7 +110,6 @@ async fn main() -> Result<()> {
                     if let Some(reason) = result.revert_reason {
                         writeln!(log_file, "  Revert reason: {}", reason)?;
                     }
-                    writeln!(log_file)?;
                 }
                 Err(e) => {
                     failed += 1;
@@ -115,8 +117,38 @@ async fn main() -> Result<()> {
                     writeln!(log_file, "[{}] FAILED: {}", 
                         Local::now().format("%H:%M:%S"), tx.hash)?;
                     writeln!(log_file, "  Error: {}\n", e)?;
+                    continue;
                 }
             }
+
+            // 2. Simulate with state changes (for first 3 transactions)
+            if processed <= 3 {
+                let state_start = Instant::now();
+                match simulator.simulate_signed_transaction_with_state_changes_at_block(&signed_tx, latest_block).await {
+                    Ok(state_changes) => {
+                        let state_time = state_start.elapsed();
+                        state_extraction_times.push(state_time);
+                        
+                        println!("  📊 State changes extracted in {:?}", state_time);
+                        
+                        if let Some(obj) = state_changes.as_object() {
+                            println!("     {} addresses affected", obj.len());
+                            writeln!(log_file, "  State extraction time: {:?}", state_time)?;
+                            writeln!(log_file, "  Addresses affected: {}", obj.len())?;
+                            
+                            // Log first few state changes
+                            for (i, (addr, changes)) in obj.iter().enumerate().take(3) {
+                                writeln!(log_file, "    Address {}: {}", i + 1, addr)?;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("  ⚠️  State extraction failed: {}", e);
+                    }
+                }
+            }
+
+            writeln!(log_file)?;
 
             if processed >= target_txs {
                 break;
@@ -137,7 +169,7 @@ async fn main() -> Result<()> {
         let min = sim_times.first().unwrap();
         let max = sim_times.last().unwrap();
         
-        println!("\nSimulation times:");
+        println!("\nBasic simulation times:");
         println!("  Average: {:?}", avg);
         println!("  Min: {:?}", min);
         println!("  Max: {:?}", max);
@@ -145,8 +177,15 @@ async fn main() -> Result<()> {
 
         writeln!(log_file, "\nSUMMARY")?;
         writeln!(log_file, "Total: {}, Success: {}, Failed: {}", processed, successful, failed)?;
-        writeln!(log_file, "Avg simulation time: {:?}", avg)?;
+        writeln!(log_file, "Basic simulation avg: {:?}", avg)?;
         writeln!(log_file, "Throughput: {:.0} tx/sec", 1_000_000.0 / avg.as_micros() as f64)?;
+    }
+
+    if !state_extraction_times.is_empty() {
+        let avg_state = state_extraction_times.iter().sum::<Duration>() / state_extraction_times.len() as u32;
+        println!("\nState extraction times:");
+        println!("  Average: {:?}", avg_state);
+        writeln!(log_file, "State extraction avg: {:?}", avg_state)?;
     }
 
     println!("\n✅ Complete! Log saved to: {}", log_path);

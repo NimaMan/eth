@@ -3,6 +3,10 @@ name      = "mempool_processor"
 version   = "0.1.0"
 edition   = "2021"
 
+[[example]]
+name = "direct_simulation_demo"
+path = "examples/direct_simulation_demo.rs"
+
 [dependencies]
 # Real-time JSON-RPC/WebSocket/IPC client
 ethers          = { version = "2.0", features = ["ws", "ipc"] }
@@ -83,6 +87,7 @@ warp            = "0.3"
 tokio-tungstenite = "0.20"
 
 # Reth direct integration for ultra-fast simulation
+reth_tx_simulator = { path = "../reth_tx_simulator" }
 reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
 reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
 reth-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/reth" }
@@ -108,7 +113,7 @@ alloy-consensus = { version = "1.0" }
 revm-inspectors = "0.19.1"
 
 # Direct Reth simulator
-reth_signed_tx_simulator = { path = "../reth_signed_tx_simulator" }
+# Removed - replaced by reth_tx_simulator
 
 # For examples
 jsonrpsee = { version = "0.24", features = ["http-client"] }
