@@ -47,34 +47,70 @@ impl DirectTxSimulator {
     }
     
     /// Simulate a transaction from mempool
+    /// Automatically retries with correct nonce if simulation fails due to nonce mismatch
     pub async fn simulate_mempool_tx(&self, tx: &FullTransaction) -> Result<SimulationResult> {
         // Convert IPC transaction to CallRequest
-        let call_request = ipc_to_call_request(&tx.tx_data)?;
+        let mut call_request = ipc_to_call_request(&tx.tx_data)?;
         let latest_block = self.get_latest_block().await;
         
-        // Run simulation
-        let result = self.simulator
-            .simulate_unsigned_transaction_at_block(call_request, latest_block)
-            .await?;
+        // First try with original nonce
+        let mut result = self.simulator
+            .simulate_unsigned_transaction_at_block(call_request.clone(), latest_block)
+            .await;
+            
+        // If nonce too high, try with expected nonce
+        if let Err(ref e) = result {
+            let error_msg = e.to_string();
+            if error_msg.contains("nonce") && error_msg.contains("too high, expected") {
+                if let Some(expected_nonce_str) = error_msg.split("expected ").nth(1) {
+                    if let Ok(expected_nonce) = expected_nonce_str.trim().parse::<u64>() {
+                        call_request.nonce = Some(expected_nonce);
+                        result = self.simulator
+                            .simulate_unsigned_transaction_at_block(call_request, latest_block)
+                            .await;
+                    }
+                }
+            }
+        }
+        
+        let sim_result = result?;
             
         Ok(SimulationResult {
-            success: result.success,
-            gas_used: result.gas_used,
-            revert_reason: result.revert_reason,
+            success: sim_result.success,
+            gas_used: sim_result.gas_used,
+            revert_reason: sim_result.revert_reason,
             simulation_time_us: 0, // Will be measured externally
         })
     }
     
     /// Simulate with state changes using prestate tracer (raw format)
+    /// Automatically retries with correct nonce if simulation fails due to nonce mismatch
     pub async fn simulate_with_state_changes(&self, tx: &FullTransaction) -> Result<StateChangeResult> {
         // Convert IPC transaction to CallRequest
-        let call_request = ipc_to_call_request(&tx.tx_data)?;
+        let mut call_request = ipc_to_call_request(&tx.tx_data)?;
         let latest_block = self.get_latest_block().await;
         
-        // Get state changes
-        let state_changes = self.simulator
-            .simulate_unsigned_transaction_with_state_changes_at_block(call_request, latest_block)
-            .await?;
+        // First try with original nonce
+        let mut result = self.simulator
+            .simulate_unsigned_transaction_with_state_changes_at_block(call_request.clone(), latest_block)
+            .await;
+            
+        // If nonce too high, try with expected nonce
+        if let Err(ref e) = result {
+            let error_msg = e.to_string();
+            if error_msg.contains("nonce") && error_msg.contains("too high, expected") {
+                if let Some(expected_nonce_str) = error_msg.split("expected ").nth(1) {
+                    if let Ok(expected_nonce) = expected_nonce_str.trim().parse::<u64>() {
+                        call_request.nonce = Some(expected_nonce);
+                        result = self.simulator
+                            .simulate_unsigned_transaction_with_state_changes_at_block(call_request, latest_block)
+                            .await;
+                    }
+                }
+            }
+        }
+        
+        let state_changes = result?;
             
         // Extract structured state changes
         let parsed_changes = self.simulator
@@ -87,15 +123,33 @@ impl DirectTxSimulator {
     }
     
     /// Simulate with detailed state changes using call tracer (eth_net, token_net format)
+    /// Automatically retries with correct nonce if simulation fails due to nonce mismatch
     pub async fn simulate_with_call_trace(&self, tx: &FullTransaction) -> Result<CallTraceResult> {
         // Convert IPC transaction to CallRequest
-        let call_request = ipc_to_call_request(&tx.tx_data)?;
+        let mut call_request = ipc_to_call_request(&tx.tx_data)?;
         let latest_block = self.get_latest_block().await;
         
-        // Get detailed state changes with call tracer
-        let detailed_changes = self.simulator
-            .simulate_unsigned_transaction_with_call_trace_at_block(call_request, latest_block)
-            .await?;
+        // First try with original nonce
+        let mut result = self.simulator
+            .simulate_unsigned_transaction_with_call_trace_at_block(call_request.clone(), latest_block)
+            .await;
+            
+        // If nonce too high, try with expected nonce
+        if let Err(ref e) = result {
+            let error_msg = e.to_string();
+            if error_msg.contains("nonce") && error_msg.contains("too high, expected") {
+                if let Some(expected_nonce_str) = error_msg.split("expected ").nth(1) {
+                    if let Ok(expected_nonce) = expected_nonce_str.trim().parse::<u64>() {
+                        call_request.nonce = Some(expected_nonce);
+                        result = self.simulator
+                            .simulate_unsigned_transaction_with_call_trace_at_block(call_request, latest_block)
+                            .await;
+                    }
+                }
+            }
+        }
+        
+        let detailed_changes = result?;
             
         Ok(CallTraceResult {
             detailed_changes,
