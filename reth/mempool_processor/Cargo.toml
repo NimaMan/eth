@@ -143,37 +143,26 @@ path = "examples/mempool_fetcher/analyze_transaction_arrival_pattern.rs"
 name = "analyze_log_timing"
 path = "examples/mempool_fetcher/analyze_log_timing.rs"
 
-[[example]]
-name = "pool_detection_monitor"
-path = "examples/pool_detection/pool_detection_monitor.rs"
-
-[[example]]
-name = "test_function_signature_detection"
-path = "examples/signal_detection/test_function_signature_detection.rs"
-
-[[example]]
-name = "monitor_liquidity_removals"
-path = "examples/signal_detection/monitor_liquidity_removals.rs"
-
-# Working examples
+# Reth Simulation Examples
 [[example]]
 name = "basic_mempool_simulation"
-path = "examples/signed_tx_simulation/basic_mempool_simulation.rs"
+path = "examples/reth_simulation/basic_mempool_simulation.rs"
 
 [[example]]
 name = "state_change_extraction"
-path = "examples/signed_tx_simulation/state_change_extraction.rs"
+path = "examples/reth_simulation/state_change_extraction.rs"
 
 [[example]]
 name = "benchmark_1k_mempool"
-path = "examples/signed_tx_simulation/benchmark_1k_mempool.rs"
+path = "examples/reth_simulation/benchmark_1k_mempool.rs"
 
 [[example]]
 name = "working_direct_reth_simulation"
-path = "examples/signed_tx_simulation/working_direct_reth_simulation.rs"
+path = "examples/reth_simulation/working_direct_reth_simulation.rs"
 
+# TxSimulator Examples
 [[example]]
-name = "test_timing_breakdown"
-path = "examples/test_timing_breakdown.rs"
+name = "test_state_changes_nonblocking"
+path = "examples/tx_simulation/test_state_changes_nonblocking.rs"
 
 # Using crates.io versions - no patches needed
