@@ -1,5 +1,6 @@
 use std::time::Instant;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::net::UnixStream;
 use serde_json::{Value, json};
@@ -19,6 +20,7 @@ pub struct NonBlockingIpcClient {
     tx_sender: mpsc::Sender<NonBlockingTransaction>,
     tx_receiver: Arc<Mutex<mpsc::Receiver<NonBlockingTransaction>>>,
     stats: Arc<RwLock<Stats>>,
+    queue_size: Arc<AtomicUsize>,
 }
 
 #[derive(Default, Clone)]
@@ -27,6 +29,7 @@ pub struct Stats {
     pub sub_1ms: u64,
     pub sub_100us: u64,
     pub sub_10us: u64,
+    pub queue_size: usize,
 }
 
 impl NonBlockingIpcClient {
@@ -39,6 +42,7 @@ impl NonBlockingIpcClient {
             tx_sender,
             tx_receiver: Arc::new(Mutex::new(tx_receiver)),
             stats: Arc::new(RwLock::new(Stats::default())),
+            queue_size: Arc::new(AtomicUsize::new(0)),
         })
     }
     
@@ -85,9 +89,10 @@ impl NonBlockingIpcClient {
         // Start monitoring with ultra-fast detection
         let tx_sender = self.tx_sender.clone();
         let stats = self.stats.clone();
+        let queue_size = self.queue_size.clone();
         
         tokio::spawn(async move {
-            if let Err(e) = Self::monitor_nonblocking(stream, tx_sender, stats).await {
+            if let Err(e) = Self::monitor_nonblocking(stream, tx_sender, stats, queue_size).await {
                 error!("Monitor error: {}", e);
             }
         });
@@ -99,6 +104,7 @@ impl NonBlockingIpcClient {
         stream: UnixStream,
         tx_sender: mpsc::Sender<NonBlockingTransaction>,
         stats: Arc<RwLock<Stats>>,
+        queue_size: Arc<AtomicUsize>,
     ) -> Result<()> {
         use tokio::io::AsyncReadExt;
         
@@ -157,8 +163,13 @@ impl NonBlockingIpcClient {
                                                 detection_ns,
                                             };
                                             
-                                            if let Err(e) = tx_sender.try_send(tx) {
-                                                warn!("Channel full, dropping transaction: {}", e);
+                                            match tx_sender.try_send(tx) {
+                                                Ok(_) => {
+                                                    queue_size.fetch_add(1, Ordering::Relaxed);
+                                                }
+                                                Err(e) => {
+                                                    warn!("Channel full, dropping transaction: {}", e);
+                                                }
                                             }
                                         }
                                     }
@@ -195,7 +206,10 @@ impl NonBlockingIpcClient {
             std::time::Duration::from_millis(25),
             receiver.recv()
         ).await {
-            Ok(Some(tx)) => txs.push(tx),
+            Ok(Some(tx)) => {
+                txs.push(tx);
+                self.queue_size.fetch_sub(1, Ordering::Relaxed);
+            },
             Ok(None) => return Err(eyre!("Channel closed")),
             Err(_) => return Ok(txs), // Timeout
         }
@@ -203,10 +217,17 @@ impl NonBlockingIpcClient {
         // Get more without blocking
         while txs.len() < max {
             match receiver.try_recv() {
-                Ok(tx) => txs.push(tx),
+                Ok(tx) => {
+                    txs.push(tx);
+                    self.queue_size.fetch_sub(1, Ordering::Relaxed);
+                },
                 Err(_) => break,
             }
         }
+        
+        // Update stats with current queue size
+        let current_queue_size = self.queue_size.load(Ordering::Relaxed);
+        self.stats.write().await.queue_size = current_queue_size;
         
         Ok(txs)
     }
@@ -219,10 +240,17 @@ impl NonBlockingIpcClient {
         // No waiting - just drain what's available immediately
         while txs.len() < max {
             match receiver.try_recv() {
-                Ok(tx) => txs.push(tx),
+                Ok(tx) => {
+                    txs.push(tx);
+                    self.queue_size.fetch_sub(1, Ordering::Relaxed);
+                },
                 Err(_) => break,
             }
         }
+        
+        // Update stats with current queue size
+        let current_queue_size = self.queue_size.load(Ordering::Relaxed);
+        self.stats.write().await.queue_size = current_queue_size;
         
         txs
     }

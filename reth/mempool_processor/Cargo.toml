@@ -172,4 +172,8 @@ path = "examples/signed_tx_simulation/benchmark_1k_mempool.rs"
 name = "working_direct_reth_simulation"
 path = "examples/signed_tx_simulation/working_direct_reth_simulation.rs"
 
+[[example]]
+name = "test_timing_breakdown"
+path = "examples/test_timing_breakdown.rs"
+
 # Using crates.io versions - no patches needed
