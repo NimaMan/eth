@@ -86,6 +86,28 @@ struct Args {
     reth_datadir: String,
 }
 
+/// Classify simulation error type
+fn is_system_failure(error: &str) -> bool {
+    let error_lower = error.to_lowercase();
+    
+    // System failures we care about
+    if error_lower.contains("timeout") ||
+       error_lower.contains("spawn blocking failed") ||
+       error_lower.contains("database") ||
+       error_lower.contains("provider") ||
+       error_lower.contains("io error") ||
+       error_lower.contains("connection") ||
+       error_lower.contains("parse") ||
+       error_lower.contains("decode") ||
+       error_lower.contains("invalid format") ||
+       error_lower.contains("no header") ||
+       error_lower.contains("block not found") {
+        return true;
+    }
+    
+    false
+}
+
 /// Check if transaction is a liquidity removal based on function signature
 fn is_liquidity_removal(input_data: &Option<Vec<u8>>) -> Option<&'static str> {
     if let Some(data) = input_data {
@@ -190,6 +212,10 @@ fn write_timing_report_nowait(
     batch_pool_affected: u64,
     batch_simulation_failures: u64,
     batch_failure_rate: f64,
+    batch_system_failures: u64,
+    batch_system_failure_rate: f64,
+    batch_expected_failures: u64,
+    batch_expected_failure_rate: f64,
     queue_info: (usize, usize),
     batch_size: usize,
     throughput: f64,
@@ -207,7 +233,9 @@ fn write_timing_report_nowait(
         [{}]    🛡️  Scam Detection:  avg={:.2}ms  max={:.2}ms\n\
         [{}]    📊 TOTAL PIPELINE:   avg={:.2}ms  max={:.2}ms\n\
         [{}]    🎯 Pools Affected:   {} ({:.1}%)\n\
-        [{}]    ❌ Sim Failures:     {} ({:.1}%)\n\
+        [{}]    ❌ Total Failures:   {} ({:.1}%)\n\
+        [{}]    💥 System Failures:  {} ({:.1}%)\n\
+        [{}]    📝 Expected Fails:   {} ({:.1}%)\n\
         [{}]    🚀 Throughput:       {:.1} tx/sec\n\
         [{}] ============================================================\n\n",
         timestamp, timestamp, total_processed, (avg_detection * 1000.0) as u64, queue_info.0, queue_info.1,
@@ -222,6 +250,8 @@ fn write_timing_report_nowait(
         timestamp, avg_total, max_total,
         timestamp, batch_pool_affected, (batch_pool_affected as f64 / batch_size as f64 * 100.0),
         timestamp, batch_simulation_failures, batch_failure_rate,
+        timestamp, batch_system_failures, batch_system_failure_rate,
+        timestamp, batch_expected_failures, batch_expected_failure_rate,
         timestamp, throughput,
         timestamp
     );
@@ -451,6 +481,10 @@ async fn main() -> Result<()> {
     let mut sub_1ms_detections = 0u64;
     let mut simulation_failures = 0u64;
     let mut batch_simulation_failures = 0u64;
+    let mut system_failures = 0u64;  // Timeouts, database errors, etc.
+    let mut batch_system_failures = 0u64;
+    let mut expected_failures = 0u64;  // Insufficient funds, nonce issues, etc.
+    let mut batch_expected_failures = 0u64;
     
     // Timing vectors - only keep last 1000 transactions for reporting
     let mut detection_latencies_ms: Vec<f64> = Vec::with_capacity(1000);
@@ -541,6 +575,7 @@ async fn main() -> Result<()> {
             .collect::<Vec<_>>();
         
         let prioritization_elapsed = prioritization_start.elapsed();
+        let total_txs_in_batch = prioritized_txs.len();
         
         for (tx_idx, (ipc_tx, tx_view, liquidity_removal_type)) in prioritized_txs.into_iter().enumerate() {
             
@@ -551,9 +586,9 @@ async fn main() -> Result<()> {
                 sub_1ms_detections += 1;
             }
             
-            // CRITICAL: Pipeline timing should include prioritization time for accurate measurement
-            // Start time includes the prioritization phase for ALL transactions
-            let pipeline_start = Instant::now() - prioritization_elapsed;
+            // CRITICAL: Start timing for THIS individual transaction only
+            // Each transaction gets its own pipeline timing
+            let pipeline_start = Instant::now();
             
             // No need to convert again - we already have tx_view from prioritization
             // Track the conversion time that happened during prioritization
@@ -604,7 +639,7 @@ async fn main() -> Result<()> {
                 pool_check_times_ms.push(0.0);
                 scam_detection_times_ms.push(0.0);
                 total_pipeline_times_ms.push(total_pipeline_ms);
-                prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / (tx_idx + 1) as f64);
+                prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / total_txs_in_batch as f64);
                 continue;
             }
             
@@ -630,6 +665,21 @@ async fn main() -> Result<()> {
                     if let Some(removal_type) = liquidity_removal_type {
                         info!("✅ {} simulation SUCCESSFUL in {:.3}ms for tx 0x{}", 
                               removal_type, sim_elapsed, hex::encode(&tx_view.hash));
+                              
+                        // Log detailed simulation results to liquidity removal file
+                        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                        let simulation_log = format!(
+                            "[{}] 📊 SIMULATION RESULTS for {} TX: 0x{}\n[{}]    📈 Simulation time: {:.3}ms, {} addresses affected\n",
+                            timestamp, removal_type, hex::encode(&tx_view.hash),
+                            timestamp, sim_elapsed, detailed_changes.len()
+                        );
+                        
+                        // Write initial simulation results
+                        {
+                            let mut file = liquidity_removal_file.lock().await;
+                            let _ = file.write_all(simulation_log.as_bytes());
+                            let _ = file.flush();
+                        }
                     }
                     
                     // Temporarily log ALL simulations to debug (remove liquidity removal check)
@@ -689,6 +739,7 @@ async fn main() -> Result<()> {
                     
                     // Process state changes for each address
                     let pool_check_start = Instant::now();
+                    
                     for (address, changes) in &detailed_changes {
                         // Convert address to checksummed string
                         let address_str = mempool_processor::common::address::alloy_address_to_checksum(*address);
@@ -738,6 +789,71 @@ async fn main() -> Result<()> {
                     pool_check_times_ms.push(pool_check_elapsed);
                     
                     let pools_affected = affected_pools.len();
+                    
+                    // Log detailed pool analysis to liquidity removal file
+                    if let Some(removal_type) = liquidity_removal_type {
+                        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                        
+                        let pool_analysis_log = if pools_affected > 0 {
+                            let mut pool_details = String::new();
+                            for (pool_addr, effect) in &affected_pools {
+                                pool_details.push_str(&format!(
+                                    "[{}]      🎯 MONITORED POOL: {} | ETH: {:.6} → {:.6} ({:.2}%) | Delta: {:.6}\n",
+                                    timestamp,
+                                    pool_addr,
+                                    effect.current_eth_reserve,
+                                    effect.simulated_eth_reserve,
+                                    effect.percentage_change * 100.0,
+                                    effect.eth_delta
+                                ));
+                            }
+                            
+                            format!(
+                                "[{}]    ✅ SUCCESS: {} monitored pools found (proceeding to scam detection)\n{}\n",
+                                timestamp, pools_affected, pool_details
+                            )
+                        } else {
+                            let mut address_details = String::new();
+                            for (idx, (address, changes)) in detailed_changes.iter().enumerate() {
+                                let address_str = mempool_processor::common::address::alloy_address_to_checksum(*address);
+                                let pool_status = if pool_cache_clone.get_pool(&address_str).is_some() {
+                                    "MONITORED"
+                                } else {
+                                    "NOT_MONITORED"
+                                };
+                                address_details.push_str(&format!(
+                                    "[{}]      {}. {} [{}] | ETH: {:.6} | Tokens: {}\n",
+                                    timestamp,
+                                    idx + 1,
+                                    address_str,
+                                    pool_status,
+                                    changes.eth_net,
+                                    changes.token_net.len()
+                                ));
+                            }
+                            
+                            format!(
+                                "[{}]    ⚠️  NO MONITORED POOLS AFFECTED (no scam detection will run)\n[{}]    📍 Address analysis:\n{}\n",
+                                timestamp, timestamp, address_details
+                            )
+                        };
+                        
+                        // Write pool analysis to liquidity removal log file
+                        {
+                            let mut file = liquidity_removal_file.lock().await;
+                            let _ = file.write_all(pool_analysis_log.as_bytes());
+                            let _ = file.flush();
+                        }
+                        
+                        // Console logging
+                        if pools_affected > 0 {
+                            info!("💧 {} tx 0x{}: {} pools affected, proceeding to scam detection", 
+                                  removal_type, hex::encode(&tx_view.hash), pools_affected);
+                        } else {
+                            info!("💧 {} tx 0x{}: NO pools affected (out of {} addresses checked)", 
+                                  removal_type, hex::encode(&tx_view.hash), detailed_changes.len());
+                        }
+                    }
                     
                     // Always measure scam detection time, even if no pools affected
                     let scam_start = Instant::now();
@@ -861,7 +977,7 @@ async fn main() -> Result<()> {
                     pool_check_times_ms.push(pool_check_elapsed);
                     scam_detection_times_ms.push(scam_elapsed);
                     total_pipeline_times_ms.push(total_pipeline_ms);
-                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / (tx_idx + 1) as f64);
+                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / total_txs_in_batch as f64);
                     
                         
                     // Log timing for every 1000th transaction to see the breakdown
@@ -888,17 +1004,37 @@ async fn main() -> Result<()> {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
                     
+                    // Classify error type
+                    let error_msg = e.to_string();
+                    let is_system_error = is_system_failure(&error_msg);
+                    
                     // Log liquidity removal simulation failure
                     if let Some(removal_type) = liquidity_removal_type {
-                        warn!("❌ {} simulation FAILED after {:.3}ms for tx 0x{}: {}", 
-                              removal_type, sim_elapsed, hex::encode(&tx_view.hash), e);
+                        if is_system_error {
+                            error!("💥 {} simulation SYSTEM FAILURE after {:.3}ms for tx 0x{}: {}", 
+                                  removal_type, sim_elapsed, hex::encode(&tx_view.hash), e);
+                        } else {
+                            debug!("❌ {} simulation failed (expected) after {:.3}ms for tx 0x{}: {}", 
+                                  removal_type, sim_elapsed, hex::encode(&tx_view.hash), e);
+                        }
                     } else {
-                        debug!("Failed to simulate transaction {}: {}", ipc_tx.hash, e);
+                        if is_system_error {
+                            warn!("💥 SYSTEM FAILURE in simulation for {}: {}", ipc_tx.hash, e);
+                        } else {
+                            debug!("Expected simulation failure for {}: {}", ipc_tx.hash, e);
+                        }
                     }
                     
-                    // Track simulation failure
+                    // Track simulation failure by type
                     simulation_failures += 1;
                     batch_simulation_failures += 1;
+                    if is_system_error {
+                        system_failures += 1;
+                        batch_system_failures += 1;
+                    } else {
+                        expected_failures += 1;
+                        batch_expected_failures += 1;
+                    }
                     
                     // Add 0ms for pool check since simulation failed
                     pool_check_times_ms.push(0.0);
@@ -916,7 +1052,7 @@ async fn main() -> Result<()> {
                     pool_check_times_ms.push(0.0);
                     scam_detection_times_ms.push(0.0);
                     total_pipeline_times_ms.push(total_pipeline_ms);
-                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / (tx_idx + 1) as f64);
+                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / total_txs_in_batch as f64);
                 }
                 Err(_) => {
                     // Timeout occurred
@@ -925,16 +1061,18 @@ async fn main() -> Result<()> {
                     
                     // Log liquidity removal simulation timeout
                     if let Some(removal_type) = liquidity_removal_type {
-                        error!("⏱️ {} simulation TIMED OUT after 100ms for tx 0x{}", 
+                        error!("💥 {} simulation TIMED OUT after 100ms for tx 0x{}", 
                               removal_type, hex::encode(&tx_view.hash));
                         error!("   This liquidity removal transaction took too long to simulate!");
                     } else {
-                        warn!("Simulation timeout for tx: {}", ipc_tx.hash);
+                        warn!("💥 Simulation TIMEOUT for tx: {}", ipc_tx.hash);
                     }
                     
-                    // Track simulation failure
+                    // Track simulation failure (timeouts are system failures)
                     simulation_failures += 1;
                     batch_simulation_failures += 1;
+                    system_failures += 1;
+                    batch_system_failures += 1;
                     
                     // Add 0ms for pool check since simulation timed out
                     pool_check_times_ms.push(0.0);
@@ -952,7 +1090,7 @@ async fn main() -> Result<()> {
                     pool_check_times_ms.push(0.0);
                     scam_detection_times_ms.push(0.0);
                     total_pipeline_times_ms.push(total_pipeline_ms);
-                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / (tx_idx + 1) as f64);
+                    prioritization_times_ms.push(prioritization_elapsed.as_secs_f64() * 1000.0 / total_txs_in_batch as f64);
                 }
             }
             
@@ -1029,8 +1167,10 @@ async fn main() -> Result<()> {
                     scam_detection_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
                 } else { 0.0 };
                 
-                // Calculate failure rate
+                // Calculate failure rates
                 let batch_failure_rate = (batch_simulation_failures as f64 / batch_size as f64) * 100.0;
+                let batch_system_failure_rate = (batch_system_failures as f64 / batch_size as f64) * 100.0;
+                let batch_expected_failure_rate = (batch_expected_failures as f64 / batch_size as f64) * 100.0;
                 
                 // Calculate throughput
                 let elapsed_since_last = last_report.elapsed();
@@ -1054,7 +1194,9 @@ async fn main() -> Result<()> {
                 info!("   📊 TOTAL PIPELINE:   avg={:.2}ms  max={:.2}ms", avg_total, max_total);
                 info!("   🎯 Pools Affected:  {} ({:.1}%)", batch_pool_affected, 
                       (batch_pool_affected as f64 / batch_size as f64 * 100.0));
-                info!("   ❌ Sim Failures:    {} ({:.1}%)", batch_simulation_failures, batch_failure_rate);
+                info!("   ❌ Total Failures:  {} ({:.1}%)", batch_simulation_failures, batch_failure_rate);
+                info!("   💥 System Failures: {} ({:.1}%)", batch_system_failures, batch_system_failure_rate);
+                info!("   📝 Expected Fails:  {} ({:.1}%)", batch_expected_failures, batch_expected_failure_rate);
                 info!("   🚀 Throughput:      {:.1} tx/sec", throughput);
                 info!("============================================================");
                 
@@ -1084,6 +1226,10 @@ async fn main() -> Result<()> {
                     batch_pool_affected,
                     batch_simulation_failures,
                     batch_failure_rate,
+                    batch_system_failures,
+                    batch_system_failure_rate,
+                    batch_expected_failures,
+                    batch_expected_failure_rate,
                     queue_info,
                     batch_size,
                     throughput
@@ -1100,6 +1246,8 @@ async fn main() -> Result<()> {
                 total_pipeline_times_ms.clear();
                 batch_pool_affected = 0;
                 batch_simulation_failures = 0;
+                batch_system_failures = 0;
+                batch_expected_failures = 0;
                 
                 // Update last report count and time
                 last_report_count = total_processed;
