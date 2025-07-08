@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::net::UnixStream;
 use serde_json::{Value, json};
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use eyre::{Result, eyre};
 
 /// Transaction received via non-blocking IPC
@@ -157,7 +157,9 @@ impl NonBlockingIpcClient {
                                                 detection_ns,
                                             };
                                             
-                                            let _ = tx_sender.try_send(tx);
+                                            if let Err(e) = tx_sender.try_send(tx) {
+                                                warn!("Channel full, dropping transaction: {}", e);
+                                            }
                                         }
                                     }
                                 }
@@ -207,6 +209,22 @@ impl NonBlockingIpcClient {
         }
         
         Ok(txs)
+    }
+    
+    /// Get transactions instantly without any waiting - for ultra-low latency
+    pub async fn get_transactions_instant(&self, max: usize) -> Vec<NonBlockingTransaction> {
+        let mut receiver = self.tx_receiver.lock().await;
+        let mut txs = Vec::with_capacity(max);
+        
+        // No waiting - just drain what's available immediately
+        while txs.len() < max {
+            match receiver.try_recv() {
+                Ok(tx) => txs.push(tx),
+                Err(_) => break,
+            }
+        }
+        
+        txs
     }
     
     pub async fn get_stats(&self) -> Stats {

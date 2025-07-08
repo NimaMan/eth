@@ -1,8 +1,38 @@
 # Mempool Fetcher Examples
 
-## Primary Performance Monitor
+## Instant Collection Performance Measurement
 
-**`mempool_fetcher_performance_monitor.rs`** - The ONLY monitoring tool you need
+**`measure_instant_fetch_performance.rs`** - Measure the new instant fetch method with configurable parameters
+
+### Usage:
+```bash
+# Quick test - 1,000 transactions
+cargo run --example measure_instant_fetch_performance --release -- 1000
+
+# Standard test - 10,000 transactions (default)
+cargo run --example measure_instant_fetch_performance --release
+
+# Long test - 100,000 transactions
+cargo run --example measure_instant_fetch_performance --release -- 100000
+
+# Custom batch size
+cargo run --example measure_instant_fetch_performance --release -- 10000 --batch-size 200
+```
+
+### What it measures:
+- **Fetch latency**: Time to call `get_transactions_instant()` (should be <100μs)
+- **Batch efficiency**: How full are the batches? Are we hitting limits?
+- **Detection latency**: The `detection_ns` from each transaction
+- **Throughput**: Transactions per second sustained
+
+### Output:
+- CSV file with per-fetch details
+- Console summary with percentiles (P50, P95, P99)
+- Warnings for performance issues
+
+## Long-term Monitoring
+
+**`mempool_fetcher_performance_monitor.rs`** - Production monitoring tool
 
 ### What it measures:
 1. **IMMEDIATE detection**: Are we getting transactions within microseconds? (Target: <10μs)
@@ -14,17 +44,11 @@
 cargo run --example mempool_fetcher_performance_monitor --release
 ```
 
-### Output:
-- Logs to `/home/nima/code/crypto/logs/mempool/performance_YYYYMMDD_HHMMSS.csv`
-- Shows real-time warnings for high latency (>50μs) or incomplete data
-- Prints performance summary every 5 minutes
-- Checks for degradation every hour
-
 ## Other Examples
 
-**`nonblocking_ipc_1k_demo.rs`** - Quick test that collects 1,000 transactions
-
 **`verify_new_transactions_only.rs`** - Validates we only get NEW transactions (not existing mempool)
+
+**`analyze_transaction_arrival_pattern.rs`** - Analyzes how transactions arrive in bursts
 
 ## Production Stats
 

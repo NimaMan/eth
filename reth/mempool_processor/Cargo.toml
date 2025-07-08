@@ -124,16 +124,24 @@ path = "src/bin/mempool_signal_detector.rs"
 # Examples
 
 [[example]]
-name = "nonblocking_ipc_1k_demo"
-path = "examples/mempool_fetcher/nonblocking_ipc_1k_demo.rs"
-
-[[example]]
 name = "mempool_fetcher_performance_monitor"
 path = "examples/mempool_fetcher/mempool_fetcher_performance_monitor.rs"
 
 [[example]]
 name = "verify_new_transactions_only"
 path = "examples/mempool_fetcher/verify_new_transactions_only.rs"
+
+[[example]]
+name = "measure_instant_fetch_performance"
+path = "examples/mempool_fetcher/measure_instant_fetch_performance.rs"
+
+[[example]]
+name = "analyze_transaction_arrival_pattern"
+path = "examples/mempool_fetcher/analyze_transaction_arrival_pattern.rs"
+
+[[example]]
+name = "analyze_log_timing"
+path = "examples/mempool_fetcher/analyze_log_timing.rs"
 
 [[example]]
 name = "pool_detection_monitor"

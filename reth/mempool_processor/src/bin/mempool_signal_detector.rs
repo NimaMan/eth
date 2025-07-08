@@ -182,7 +182,8 @@ fn write_timing_report_nowait(
     avg_total: f64,
     max_total: f64,
     batch_pool_affected: u64,
-    throughput: f64,
+    batch_simulation_failures: u64,
+    batch_failure_rate: f64,
     queue_info: (usize, usize),
     batch_size: usize,
 ) {
@@ -196,7 +197,7 @@ fn write_timing_report_nowait(
         [{}]    🛡️  Scam Detection: avg={:.2}ms  max={:.2}ms\n\
         [{}]    📊 Total Pipeline:  avg={:.2}ms  max={:.2}ms\n\
         [{}]    🎯 Pools Affected:  {} ({:.1}%)\n\
-        [{}]    🚀 Throughput:      {:.1} tx/sec\n\
+        [{}]    ❌ Sim Failures:    {} ({:.1}%)\n\
         [{}] ============================================================\n\n",
         timestamp, timestamp, total_processed, (avg_detection * 1000.0) as u64, queue_info.0, queue_info.1,
         timestamp, batch_size,
@@ -206,7 +207,7 @@ fn write_timing_report_nowait(
         timestamp, avg_scam, max_scam,
         timestamp, avg_total, max_total,
         timestamp, batch_pool_affected, (batch_pool_affected as f64 / batch_size as f64 * 100.0),
-        timestamp, throughput,
+        timestamp, batch_simulation_failures, batch_failure_rate,
         timestamp
     );
     
@@ -433,6 +434,8 @@ async fn main() -> Result<()> {
     let mut last_report = Instant::now();
     let mut total_pool_affected_count = 0u64;
     let mut sub_1ms_detections = 0u64;
+    let mut simulation_failures = 0u64;
+    let mut batch_simulation_failures = 0u64;
     
     // Timing vectors - only keep last 1000 transactions for reporting
     let mut detection_latencies_ms: Vec<f64> = Vec::with_capacity(1000);
@@ -447,8 +450,16 @@ async fn main() -> Result<()> {
     
     info!("✅ All initialization complete, preparing to start main loop...");
     
-    // Main processing loop
-    info!("🔄 Starting main processing loop with Full TX IPC...");
+    // Main processing loop with ADAPTIVE BACKOFF
+    // =============================================
+    // Transactions arrive in BURSTS (3-34 at once) every 67-362ms
+    // We fetch INSTANTLY when available, but use adaptive backoff when empty:
+    // - First 1ms: Check every 100μs (catch stragglers)
+    // - Next 90ms: Check every 1ms (typical inter-burst)  
+    // - After 100ms: Check every 10ms (long gaps)
+    info!("🔄 Starting main processing loop with Full TX IPC and adaptive backoff...");
+    
+    let mut consecutive_empty = 0u64;
     
     loop {
         // Log that we're in the loop
@@ -457,25 +468,27 @@ async fn main() -> Result<()> {
         }
         
         
-        // Get new transactions from ULTRA-FAST IPC
-        let new_txs = match ipc_client.get_transactions(10).await {  // Get 10 at a time
-            Ok(txs) => {
-                if !txs.is_empty() {
-                    info!("📦 Got {} transactions from IPC", txs.len());
-                }
-                txs
-            },
-            Err(e) => {
-                warn!("Failed to get transactions: {}", e);
-                time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
-        };
+        // Get new transactions from ULTRA-FAST IPC (NO WAITING!)
+        let new_txs = ipc_client.get_transactions_instant(100).await;  // Take up to 100 at once
         
         if new_txs.is_empty() {
-            // Small sleep to avoid busy waiting
-            time::sleep(Duration::from_millis(10)).await;
+            consecutive_empty += 1;
+            
+            // ADAPTIVE BACKOFF to reduce CPU usage during empty periods
+            let sleep_time = match consecutive_empty {
+                1..=10 => Duration::from_micros(100),     // First 1ms: check every 100μs
+                11..=100 => Duration::from_millis(1),     // Next 90ms: check every 1ms
+                _ => Duration::from_millis(10),           // After 100ms: check every 10ms
+            };
+            time::sleep(sleep_time).await;
             continue;
+        }
+        
+        // Got transactions! Reset counter
+        consecutive_empty = 0;
+        
+        if new_txs.len() > 10 {
+            info!("📦 Got {} transactions from IPC (batch processing)", new_txs.len());
         }
         
         for (tx_idx, ipc_tx) in new_txs.into_iter().enumerate() {
@@ -554,6 +567,11 @@ async fn main() -> Result<()> {
             // Convert to FullTransaction for Direct simulator
             let full_tx = convert_to_full_transaction(&ipc_tx);
             
+            // Update block number for every transaction (only takes ~6.5μs)
+            if let Err(e) = tx_simulator.update_latest_block().await {
+                warn!("Failed to update latest block: {}", e);
+            }
+            
             // Use Direct simulator with call tracer for detailed state changes
             let sim_start = Instant::now();
             match time::timeout(
@@ -564,11 +582,58 @@ async fn main() -> Result<()> {
                     let sim_elapsed = sim_start.elapsed().as_secs_f64() * 1000.0;
                     simulation_times_ms.push(sim_elapsed);
                     
-                    // Log simulation results periodically
-                    if total_processed % 50 == 0 {
+                    // Temporarily log ALL simulations to debug (remove liquidity removal check)
+                    static mut DEBUG_COUNT: u32 = 0;
+                    unsafe {
+                        DEBUG_COUNT += 1;
+                        // Log first 5 simulations with any state changes
+                        if DEBUG_COUNT <= 5 && detailed_changes.len() > 0 {
+                        info!("🔬 LIQUIDITY REMOVAL SIMULATION DETAILS:");
+                        info!("   Transaction: 0x{}", hex::encode(&tx_view.hash));
+                        info!("   Simulation time: {:.3}ms", sim_elapsed);
+                        info!("   Total addresses affected: {}", detailed_changes.len());
+                        info!("   📊 ALL STATE CHANGES:");
+                        
+                        for (idx, (address, changes)) in detailed_changes.iter().enumerate() {
+                            let address_str = mempool_processor::common::address::alloy_address_to_checksum(*address);
+                            
+                            // Log all addresses, not just those with significant changes
+                            if changes.eth_net.abs() > 0.0 || !changes.token_net.is_empty() {
+                                info!("   {}. Address: {}", idx + 1, address_str);
+                                
+                                if changes.eth_net.abs() > 0.0 {
+                                    info!("      ETH change: {:.8} ETH", changes.eth_net);
+                                }
+                                
+                                if !changes.token_net.is_empty() {
+                                    for (token_addr, amount) in &changes.token_net {
+                                        info!("      Token {} change: {:.8}", token_addr, amount);
+                                    }
+                                }
+                                
+                                // Check if this is a monitored pool
+                                if let Some(pool_state) = pool_cache_clone.get_pool(&address_str) {
+                                    info!("      ✅ THIS IS A MONITORED POOL!");
+                                    info!("      Current ETH reserve: {:.6} ETH", pool_state.eth_reserve);
+                                    info!("      Current token reserve: {:.6}", pool_state.token_reserve);
+                                    let new_eth = pool_state.eth_reserve + changes.eth_net;
+                                    info!("      New ETH reserve would be: {:.6} ETH", new_eth);
+                                    let percent_change = if pool_state.eth_reserve > 0.0 {
+                                        (changes.eth_net / pool_state.eth_reserve) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    info!("      Percentage change: {:.2}%", percent_change);
+                                }
+                            }
+                        }
+                        info!("   ====== END SIMULATION DETAILS ======\n");
+                    } else if total_processed % 50 == 0 {
+                        // Still log periodically for non-liquidity removal txs
                         info!("🔬 Simulated tx #{}: {} state changes in {:.3}ms", 
                               total_processed, detailed_changes.len(), sim_elapsed);
                     }
+                    } // Close unsafe block
                     
                     let mut affected_pools = HashMap::new();
                     
@@ -749,6 +814,10 @@ async fn main() -> Result<()> {
                     simulation_times_ms.push(sim_elapsed);
                     debug!("Failed to simulate transaction {}: {}", ipc_tx.hash, e);
                     
+                    // Track simulation failure
+                    simulation_failures += 1;
+                    batch_simulation_failures += 1;
+                    
                     // Add 0ms for pool check since simulation failed
                     pool_check_times_ms.push(0.0);
                     
@@ -769,6 +838,10 @@ async fn main() -> Result<()> {
                     let sim_elapsed = 100.0; // Record as 100ms timeout
                     simulation_times_ms.push(sim_elapsed);
                     warn!("Simulation timeout for tx: {}", ipc_tx.hash);
+                    
+                    // Track simulation failure
+                    simulation_failures += 1;
+                    batch_simulation_failures += 1;
                     
                     // Add 0ms for pool check since simulation timed out
                     pool_check_times_ms.push(0.0);
@@ -836,8 +909,8 @@ async fn main() -> Result<()> {
                     scam_detection_times_ms.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
                 } else { 0.0 };
                 
-                // Calculate throughput
-                let throughput = if avg_total > 0.0 { 1000.0 / avg_total } else { 0.0 };
+                // Calculate failure rate
+                let batch_failure_rate = (batch_simulation_failures as f64 / batch_size as f64) * 100.0;
                 
                 // Get queue info
                 // Queue info not available in new client, use 0 for now
@@ -854,7 +927,7 @@ async fn main() -> Result<()> {
                 info!("   📊 Total Pipeline:  avg={:.2}ms  max={:.2}ms", avg_total, max_total);
                 info!("   🎯 Pools Affected:  {} ({:.1}%)", batch_pool_affected, 
                       (batch_pool_affected as f64 / batch_size as f64 * 100.0));
-                info!("   🚀 Throughput:      {:.1} tx/sec", throughput);
+                info!("   ❌ Sim Failures:    {} ({:.1}%)", batch_simulation_failures, batch_failure_rate);
                 info!("============================================================");
                 
                 // Write to timing log file
@@ -875,7 +948,8 @@ async fn main() -> Result<()> {
                     avg_total,
                     max_total,
                     batch_pool_affected,
-                    throughput,
+                    batch_simulation_failures,
+                    batch_failure_rate,
                     queue_info,
                     batch_size
                 );
@@ -887,6 +961,7 @@ async fn main() -> Result<()> {
                 scam_detection_times_ms.clear();
                 total_pipeline_times_ms.clear();
                 batch_pool_affected = 0;
+                batch_simulation_failures = 0;
                 
                 // Update last report count
                 last_report_count = total_processed;
@@ -900,6 +975,9 @@ async fn main() -> Result<()> {
             info!("   Transactions Affecting Pools: {} ({:.1}%)", 
                   total_pool_affected_count, 
                   (total_pool_affected_count as f64 / total_processed as f64 * 100.0));
+            info!("   Simulation Failures: {} ({:.1}%)", 
+                  simulation_failures, 
+                  (simulation_failures as f64 / total_processed as f64 * 100.0));
             
             info!("\n   ⏱️  TIMING BREAKDOWN:");
             
