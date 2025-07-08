@@ -7,7 +7,7 @@ use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
     FullTransaction,
 };
-use reth_signed_tx_simulator::RethSignedTxSimulator;
+use reth_tx_simulator::RethDirectTxSimulator;
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
 use eyre::Result;
@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
 
     // Initialize Direct Reth simulator
     let start = Instant::now();
-    let simulator = RethSignedTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = RethDirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     let init_time = start.elapsed();
     info!("✅ Direct Reth simulator initialized in {:?}", init_time);
 
@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
             // First: Basic simulation for gas
             println!("\n⚡ Basic Simulation:");
             let sim_start = Instant::now();
-            match simulator.simulate_transaction(&signed_tx).await {
+            match simulator.simulate_signed_transaction(&signed_tx).await {
                 Ok(result) => {
                     let sim_time = sim_start.elapsed();
                     println!("   ✅ Success in {:?}", sim_time);

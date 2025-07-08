@@ -5,10 +5,10 @@
 
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
-    FullTransaction,
 };
-use reth_signed_tx_simulator::RethSignedTxSimulator;
+use reth_tx_simulator::RethDirectTxSimulator;
 use reth_primitives::TransactionSigned;
+use alloy_rlp::Decodable;
 use eyre::Result;
 use tracing::{info, error, warn};
 use std::time::{Duration, Instant};
@@ -16,6 +16,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::Local;
 use hex;
+use tokio::time::timeout;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,7 +29,7 @@ async fn main() -> Result<()> {
 
     // Initialize Direct Reth simulator
     let start = Instant::now();
-    let simulator = RethSignedTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = RethDirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     info!("✅ Direct Reth simulator initialized in {:?}", start.elapsed());
 
     // Connect to mempool
@@ -38,8 +39,8 @@ async fn main() -> Result<()> {
     info!("✅ Mempool monitoring started\n");
 
     // Create log file
-    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool/basic_sim_{}.log", 
+    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool_debug")?;
+    let log_path = format!("/home/nima/code/crypto/logs/mempool_debug/basic_sim_1k_{}.log", 
         Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)
@@ -52,7 +53,7 @@ async fn main() -> Result<()> {
     writeln!(log_file, "============================\n")?;
 
     // Process transactions
-    let target_txs = 10;
+    let target_txs = 1000;
     let mut processed = 0;
     let mut successful = 0;
     let mut failed = 0;
@@ -74,47 +75,77 @@ async fn main() -> Result<()> {
             println!("Transaction {}/{}: {}", processed, target_txs, tx.hash);
             
             
-            // Convert IPC transaction directly to TransactionSigned - NO RPC!
-            let signed_tx = match convert_ipc_to_signed_tx(&tx) {
-                Ok(tx) => tx,
+
+            // Get raw transaction first
+            let raw_tx = match get_raw_tx(&tx.hash).await {
+                Ok(raw) => raw,
                 Err(e) => {
-                    warn!("Failed to convert IPC tx: {}", e);
+                    warn!("Failed to get raw transaction: {}", e);
                     failed += 1;
-                    writeln!(log_file, "[{}] ERROR: Failed to convert IPC tx for {}", 
+                    writeln!(log_file, "[{}] ERROR: Failed to get raw tx for {}", 
                         Local::now().format("%H:%M:%S"), tx.hash)?;
                     continue;
                 }
             };
-
-            // Simulate transaction
+            
+            // Decode the transaction
+            let hex_str = raw_tx.strip_prefix("0x").unwrap_or(&raw_tx);
+            let raw_bytes = match hex::decode(hex_str) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    warn!("Failed to decode hex: {}", e);
+                    failed += 1;
+                    continue;
+                }
+            };
+            
+            let signed_tx = match TransactionSigned::decode(&mut raw_bytes.as_slice()) {
+                Ok(tx) => tx,
+                Err(e) => {
+                    warn!("Failed to decode transaction: {}", e);
+                    failed += 1;
+                    continue;
+                }
+            };
+            
+            // Simulate with timeout (50ms for fast timeout)
             let sim_start = Instant::now();
-            match simulator.simulate_transaction(&signed_tx).await {
-                Ok(result) => {
+            let result = timeout(
+                Duration::from_millis(50),
+                simulator.simulate_signed_transaction(&signed_tx)
+            ).await;
+            
+            match result {
+                Ok(Ok(sim_result)) => {
                     let sim_time = sim_start.elapsed();
                     sim_times.push(sim_time);
                     successful += 1;
 
                     println!("  ✅ Simulated in {:?}", sim_time);
-                    println!("     Gas: {}, Success: {}", result.gas_used, result.success);
+                    println!("     Gas used: {}", sim_result.gas_used);
+                    println!("     Success: {}", sim_result.success);
 
                     // Log details
                     writeln!(log_file, "[{}] SUCCESS", Local::now().format("%H:%M:%S"))?;
                     writeln!(log_file, "  Hash: {}", tx.hash)?;
                     writeln!(log_file, "  Detection latency: {} µs", tx.latency_ns / 1000)?;
                     writeln!(log_file, "  Simulation time: {:?}", sim_time)?;
-                    writeln!(log_file, "  Gas used: {}", result.gas_used)?;
-                    writeln!(log_file, "  Success: {}", result.success)?;
-                    if let Some(reason) = result.revert_reason {
+                    writeln!(log_file, "  Gas used: {}", sim_result.gas_used)?;
+                    writeln!(log_file, "  Success: {}", sim_result.success)?;
+                    if let Some(reason) = &sim_result.revert_reason {
                         writeln!(log_file, "  Revert reason: {}", reason)?;
                     }
                     writeln!(log_file)?;
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     failed += 1;
-                    error!("  ❌ Simulation failed: {}", e);
-                    writeln!(log_file, "[{}] FAILED: {}", 
-                        Local::now().format("%H:%M:%S"), tx.hash)?;
-                    writeln!(log_file, "  Error: {}\n", e)?;
+                    warn!("Simulation error: {}", e);
+                    writeln!(log_file, "[{}] FAILED: {}", Local::now().format("%H:%M:%S"), e)?;
+                }
+                Err(_) => {
+                    failed += 1;
+                    warn!("Simulation timed out after 50ms");
+                    writeln!(log_file, "[{}] TIMEOUT after 50ms", Local::now().format("%H:%M:%S"))?;
                 }
             }
 
@@ -153,134 +184,19 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Convert IPC transaction data directly to TransactionSigned - NO RPC NEEDED!
-fn convert_ipc_to_signed_tx(tx: &FullTransaction) -> Result<TransactionSigned> {
-    use alloy_consensus::{TxLegacy, TxEip1559};
-    use alloy_primitives::{TxKind, U256, Bytes};
-    use reth_primitives::Transaction;
-    use reth_ethereum::primitives::transaction::signature::Signature;
+// Helper function to get raw transaction via RPC
+async fn get_raw_tx(hash: &str) -> Result<String> {
+    use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
+    use jsonrpsee::core::client::ClientT;
+    use jsonrpsee::rpc_params;
     
-    let tx_data = &tx.tx_data;
+    let client = HttpClientBuilder::default()
+        .build("http://127.0.0.1:8545")?;
     
-    // Get transaction type
-    let tx_type = tx_data["type"].as_str()
-        .and_then(|s| s.strip_prefix("0x"))
-        .and_then(|s| u8::from_str_radix(s, 16).ok())
-        .unwrap_or(0);
+    let raw_tx: String = client
+        .request("eth_getRawTransactionByHash", rpc_params![hash])
+        .await?;
     
-    // Parse common fields
-    let chain_id = tx_data["chainId"].as_str()
-        .and_then(|s| s.strip_prefix("0x"))
-        .and_then(|s| u64::from_str_radix(s, 16).ok())
-        .unwrap_or(1);
-    
-    let nonce = tx_data["nonce"].as_str()
-        .and_then(|s| s.strip_prefix("0x"))
-        .and_then(|s| u64::from_str_radix(s, 16).ok())
-        .unwrap_or(0);
-    
-    let gas_limit = tx_data["gas"].as_str()
-        .and_then(|s| s.strip_prefix("0x"))
-        .and_then(|s| u64::from_str_radix(s, 16).ok())
-        .unwrap_or(21000);
-    
-    let to = tx_data["to"].as_str()
-        .filter(|s| !s.is_empty() && *s != "null")
-        .and_then(|s| s.parse::<alloy_primitives::Address>().ok());
-    
-    let value = tx_data["value"].as_str()
-        .and_then(|s| U256::from_str_radix(s.strip_prefix("0x").unwrap_or(s), 16).ok())
-        .unwrap_or_default();
-    
-    let input = tx_data["input"].as_str()
-        .and_then(|s| hex::decode(s.strip_prefix("0x").unwrap_or(s)).ok())
-        .unwrap_or_default();
-    
-    // Extract signature components
-    let r = tx_data["r"].as_str()
-        .and_then(|s| U256::from_str_radix(s.strip_prefix("0x").unwrap_or(s), 16).ok())
-        .ok_or_else(|| eyre::eyre!("Missing r"))?;
-    
-    let s = tx_data["s"].as_str()
-        .and_then(|s| U256::from_str_radix(s.strip_prefix("0x").unwrap_or(s), 16).ok())
-        .ok_or_else(|| eyre::eyre!("Missing s"))?;
-    
-    let v = tx_data["v"].as_str()
-        .and_then(|s| s.strip_prefix("0x"))
-        .and_then(|s| u64::from_str_radix(s, 16).ok())
-        .ok_or_else(|| eyre::eyre!("Missing v"))?;
-    
-    // Build transaction based on type
-    let transaction = match tx_type {
-        0 => {
-            // Legacy transaction
-            let gas_price = tx_data["gasPrice"].as_str()
-                .and_then(|s| s.strip_prefix("0x"))
-                .and_then(|s| u128::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
-            
-            Transaction::Legacy(TxLegacy {
-                chain_id: if v >= 37 { Some((v - 35) / 2) } else { None },
-                nonce,
-                gas_price,
-                gas_limit,
-                to: if let Some(addr) = to {
-                    TxKind::Call(addr)
-                } else {
-                    TxKind::Create
-                },
-                value,
-                input: Bytes::from(input.clone()),
-            })
-        }
-        2 => {
-            // EIP-1559 transaction
-            let max_fee_per_gas = tx_data["maxFeePerGas"].as_str()
-                .and_then(|s| s.strip_prefix("0x"))
-                .and_then(|s| u128::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
-            
-            let max_priority_fee_per_gas = tx_data["maxPriorityFeePerGas"].as_str()
-                .and_then(|s| s.strip_prefix("0x"))
-                .and_then(|s| u128::from_str_radix(s, 16).ok())
-                .unwrap_or(0);
-            
-            Transaction::Eip1559(TxEip1559 {
-                chain_id,
-                nonce,
-                gas_limit,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to: if let Some(addr) = to {
-                    TxKind::Call(addr)
-                } else {
-                    TxKind::Create
-                },
-                value,
-                input: Bytes::from(input.clone()),
-                access_list: Default::default(),
-            })
-        }
-        _ => return Err(eyre::eyre!("Unsupported transaction type: {}", tx_type))
-    };
-    
-    // Create signature
-    let odd_y_parity = if tx_type == 0 {
-        // For legacy transactions, extract parity from v
-        if v >= 37 {
-            // EIP-155 transaction
-            (v - 35) % 2 == 1
-        } else {
-            // Pre-EIP-155 transaction
-            v == 28
-        }
-    } else {
-        // For typed transactions, v is the y_parity (0 or 1)
-        v == 1
-    };
-    
-    let signature = Signature::new(r, s, odd_y_parity);
-    
-    // Create TransactionSigned
-    Ok(TransactionSigned::new_unhashed(transaction, signature))
+    Ok(raw_tx)
 }
+
