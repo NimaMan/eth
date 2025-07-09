@@ -59,32 +59,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Monitoring for 30 seconds...");
     
     while start.elapsed() < Duration::from_secs(30) {
-        match ipc_client.get_transactions(100).await {
-            Ok(transactions) => {
-                for tx in transactions {
-                    received_count += 1;
-                    
-                    if existing_hashes.contains(&tx.hash) {
-                        existing_count += 1;
-                        info!("❌ EXISTING transaction detected: {}", &tx.hash[..10]);
-                    } else {
-                        new_count += 1;
-                        if new_count <= 5 {
-                            info!("✅ NEW transaction: {} ({}μs)", 
-                                  &tx.hash[..10], 
-                                  tx.detection_ns / 1000);
-                        }
-                    }
-                    
-                    if received_count % 50 == 0 {
-                        info!("Progress: {} total, {} new, {} existing", 
-                              received_count, new_count, existing_count);
+        let transactions = ipc_client.get_transactions_instant(100).await;
+        if !transactions.is_empty() {
+            for tx in transactions {
+                received_count += 1;
+                
+                if existing_hashes.contains(&tx.hash) {
+                    existing_count += 1;
+                    info!("❌ EXISTING transaction detected: {}", &tx.hash[..10]);
+                } else {
+                    new_count += 1;
+                    if new_count <= 5 {
+                        info!("✅ NEW transaction: {} ({}μs)", 
+                              &tx.hash[..10], 
+                              tx.detection_ns / 1000);
                     }
                 }
-            }
-            Err(e) => {
-                if !e.to_string().contains("Channel closed") {
-                    eprintln!("Error: {}", e);
+                
+                if received_count % 50 == 0 {
+                    info!("Progress: {} total, {} new, {} existing", 
+                          received_count, new_count, existing_count);
                 }
             }
         }

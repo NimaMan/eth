@@ -6,6 +6,7 @@ use tokio::net::UnixStream;
 use serde_json::{Value, json};
 use tracing::{info, error, warn};
 use eyre::{Result, eyre};
+use hex;
 
 /// Transaction received via non-blocking IPC
 #[derive(Clone)]
@@ -13,6 +14,12 @@ pub struct NonBlockingTransaction {
     pub hash: String,
     pub data: Value,
     pub detection_ns: u64,
+    // Pre-parsed fields for fast access
+    pub from: Vec<u8>,
+    pub to: Option<Vec<u8>>,
+    pub input: Vec<u8>,
+    pub value: ethers::types::U256,
+    pub gas_price: Option<ethers::types::U256>,
 }
 
 pub struct NonBlockingIpcClient {
@@ -152,10 +159,39 @@ impl NonBlockingIpcClient {
                                             }
                                             
                                             
+                                            // Pre-parse transaction fields
+                                            let from = result.get("from")
+                                                .and_then(|v| v.as_str())
+                                                .and_then(|s| hex::decode(s.trim_start_matches("0x")).ok())
+                                                .unwrap_or_default();
+                                                
+                                            let to = result.get("to")
+                                                .and_then(|v| v.as_str())
+                                                .and_then(|s| hex::decode(s.trim_start_matches("0x")).ok());
+                                                
+                                            let input = result.get("input")
+                                                .and_then(|v| v.as_str())
+                                                .and_then(|s| hex::decode(s.trim_start_matches("0x")).ok())
+                                                .unwrap_or_default();
+                                                
+                                            let value = result.get("value")
+                                                .and_then(|v| v.as_str())
+                                                .and_then(|s| ethers::types::U256::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+                                                .unwrap_or_default();
+                                                
+                                            let gas_price = result.get("gasPrice")
+                                                .and_then(|v| v.as_str())
+                                                .and_then(|s| ethers::types::U256::from_str_radix(s.trim_start_matches("0x"), 16).ok());
+                                            
                                             let tx = NonBlockingTransaction {
                                                 hash,
                                                 data: result.clone(),
                                                 detection_ns,
+                                                from,
+                                                to,
+                                                input,
+                                                value,
+                                                gas_price,
                                             };
                                             
                                             match tx_sender.try_send(tx) {

@@ -125,16 +125,13 @@ impl PerformanceStats {
     }
 }
 
-fn check_transaction_completeness(tx: &serde_json::Value) -> bool {
-    // Check all required fields are present
-    tx.get("hash").is_some() &&
-    tx.get("from").is_some() &&
-    tx.get("to").is_some() &&
-    tx.get("value").is_some() &&
-    tx.get("gas").is_some() &&
-    tx.get("gasPrice").is_some() &&
-    tx.get("nonce").is_some() &&
-    tx.get("input").is_some()
+fn check_transaction_completeness(tx: &mempool_processor::mempool_fetcher::NonBlockingTransaction) -> bool {
+    // With pre-parsed fields, we just check the basic requirements
+    !tx.hash.is_empty() &&
+    !tx.from.is_empty() &&
+    tx.to.is_some() &&
+    !tx.input.is_empty() &&
+    tx.gas_price.is_some()
 }
 
 async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
@@ -169,43 +166,37 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     info!("Monitoring started. Press Ctrl+C to stop.");
     
     loop {
-        match ipc_client.get_transactions(100).await {
-            Ok(transactions) => {
-                for tx in transactions {
-                    let latency_us = tx.detection_ns / 1000;
-                    let is_complete = check_transaction_completeness(&tx.data);
-                    
-                    // Update stats
-                    let mut stats_guard = stats.lock().await;
-                    stats_guard.update(latency_us, is_complete);
-                    let avg = stats_guard.avg_latency_us();
-                    let total = stats_guard.total_transactions;
-                    drop(stats_guard);
-                    
-                    // Log to CSV
-                    writeln!(
-                        log_file,
-                        "{},{},{},{},{:.1},{}",
-                        Local::now().format("%Y-%m-%d %H:%M:%S%.6f"),
-                        tx.hash,
-                        latency_us,
-                        is_complete,
-                        avg,
-                        total
-                    )?;
-                    
-                    // Log warnings for high latency or incomplete data
-                    if latency_us > 50 {
-                        warn!("HIGH LATENCY: {} took {}μs", tx.hash, latency_us);
-                    }
-                    if !is_complete {
-                        warn!("INCOMPLETE DATA: {}", tx.hash);
-                    }
+        let transactions = ipc_client.get_transactions_instant(100).await;
+        if !transactions.is_empty() {
+            for tx in transactions {
+                let latency_us = tx.detection_ns / 1000;
+                let is_complete = check_transaction_completeness(&tx);
+                
+                // Update stats
+                let mut stats_guard = stats.lock().await;
+                stats_guard.update(latency_us, is_complete);
+                let avg = stats_guard.avg_latency_us();
+                let total = stats_guard.total_transactions;
+                drop(stats_guard);
+                
+                // Log to CSV
+                writeln!(
+                    log_file,
+                    "{},{},{},{},{:.1},{}",
+                    Local::now().format("%Y-%m-%d %H:%M:%S%.6f"),
+                    tx.hash,
+                    latency_us,
+                    is_complete,
+                    avg,
+                    total
+                )?;
+                
+                // Log warnings for high latency or incomplete data
+                if latency_us > 50 {
+                    warn!("HIGH LATENCY: {} took {}μs", tx.hash, latency_us);
                 }
-            }
-            Err(e) => {
-                if !e.to_string().contains("Channel closed") {
-                    warn!("Error getting transactions: {}", e);
+                if !is_complete {
+                    warn!("INCOMPLETE DATA: {}", tx.hash);
                 }
             }
         }

@@ -7,7 +7,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
 use lazy_static::lazy_static;
-use tracing::{info, debug, warn, error};
+use tracing::{info, warn, error};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use chrono::Local;
@@ -48,14 +48,14 @@ lazy_static! {
         Mutex::new(file)
     };
     
-    /// Performance statistics log file
-    static ref PERFORMANCE_STATS_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("performance_stats.log");
+    /// Main signal detector log file
+    static ref SIGNAL_DETECTOR_LOG: Mutex<std::fs::File> = {
+        let log_path = LOG_DIR.join("signal_detector.log");
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_path)
-            .expect("Failed to open performance stats log file");
+            .expect("Failed to open signal detector log file");
         
         Mutex::new(file)
     };
@@ -125,6 +125,19 @@ impl FunctionDetector {
     pub fn new() -> Self {
         info!("🔍 Function detector initialized");
         info!("📁 Log directory: {}", LOG_DIR.display());
+        
+        // Log startup information to signal detector log
+        if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
+            let _ = writeln!(log_file, "\n{} ==========================================", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 🚀 Starting Mempool Signal Detection Service", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} ⚡ Using non-blocking IPC for sub-millisecond latency", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 🔍 Function detector initialized", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 📁 Log directory: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), LOG_DIR.display());
+            let _ = writeln!(log_file, "{} 🎯 Starting main processing loop...", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} ==========================================\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = log_file.flush();
+        }
+        
         Self {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
@@ -143,30 +156,20 @@ impl FunctionDetector {
     
     /// Detect all function types in the transaction
     pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::NonBlockingTransaction) {
-        // Convert transaction for analysis
-        let tx_view = match crate::common::convert::convert_nonblocking_to_transaction_view(ipc_tx) {
-            Ok(tx) => tx,
-            Err(e) => {
-                debug!("Failed to convert transaction: {}", e);
-                return;
-            }
-        };
-        
-        // Extract transaction details
-        let tx_hash = &ipc_tx.hash;
-        let from = format!("0x{}", hex::encode(&tx_view.from));
-        let to = tx_view.to.as_ref()
-            .map(|addr| format!("0x{}", hex::encode(addr)))
-            .unwrap_or_else(|| "contract_creation".to_string());
-        let value = format!("0x{:x}", tx_view.value);
-        let gas_price = format!("0x{:x}", tx_view.gas_price.unwrap_or_default());
-        let input_data = tx_view.input.as_ref();
-        
-        if input_data.is_empty() {
+        // Use pre-parsed fields directly
+        if ipc_tx.input.is_empty() {
             return;
         }
         
-        self.detect_all(tx_hash, &from, &to, &value, &gas_price, input_data);
+        let tx_hash = &ipc_tx.hash;
+        let from = format!("0x{}", hex::encode(&ipc_tx.from));
+        let to = ipc_tx.to.as_ref()
+            .map(|addr| format!("0x{}", hex::encode(addr)))
+            .unwrap_or_else(|| "contract_creation".to_string());
+        let value = format!("0x{:x}", ipc_tx.value);
+        let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
+        
+        self.detect_all(tx_hash, &from, &to, &value, &gas_price, &ipc_tx.input);
     }
     
     /// Internal function to detect all function types with extracted details
@@ -264,7 +267,7 @@ impl FunctionDetector {
                     Ok(json) => {
                         match socket.send(&json, zmq::DONTWAIT) {
                             Ok(_) => {
-                                debug!("📡 Published signal: {} for tx {}", signal.alert_type, signal.tx_hash);
+                                // Signal published successfully
                             }
                             Err(zmq::Error::EAGAIN) => {
                                 warn!("ZMQ publisher buffer full, signal dropped");
@@ -299,7 +302,7 @@ impl FunctionDetector {
                                   avg_function_ms: f64, max_function_ms: f64) {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
         
-        if let Ok(mut log_file) = PERFORMANCE_STATS_LOG.lock() {
+        if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
             let _ = writeln!(log_file, "\n[{}] === SIGNAL DETECTOR PERFORMANCE ===", timestamp);
             let _ = writeln!(log_file, "  Total Processed: {}", total_processed);
             let _ = writeln!(log_file, "  IPC Detection Latency: Average: {:.3}ms, Maximum: {:.3}ms", 

@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     
     println!("📊 Analyzing Transaction Log Timing: {}", args.log_file);
-    println!("=" .repeat(80));
+    println!("{}", "=".repeat(80));
     
     let file = File::open(&args.log_file)?;
     let reader = BufReader::new(file);
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Analyze timing patterns
     println!("⏱️  TIMING ANALYSIS");
-    println!("-" .repeat(80));
+    println!("{}", "-".repeat(80));
     
     // Calculate inter-arrival times
     let mut inter_arrival_times = Vec::new();
