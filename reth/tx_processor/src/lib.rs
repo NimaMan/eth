@@ -14,6 +14,7 @@ pub use reth_tx_simulator::{
     RethDirectTxSimulator as DirectTxSimulator,
     CallRequest,
     SimulationResult,
+    DetailedSimulationResult,
     AddressStateChange,
     BatchSimulationResult,
     BatchSimulationOptions,
@@ -57,6 +58,15 @@ pub mod tx_processor {
         /// This replaces Python's TransactionSimulator.simulate_transaction()
         pub async fn simulate_transaction(&self, call_request: CallRequest) -> Result<HashMap<Address, AddressStateChange>> {
             self.simulator.simulate_unsigned_transaction_with_call_trace(call_request).await
+        }
+        
+        /// Simulate a transaction at a specific block and get logs + state changes
+        pub async fn simulate_transaction_detailed(
+            &self,
+            call_request: CallRequest,
+            block_number: Option<u64>,
+        ) -> Result<DetailedSimulationResult> {
+            self.simulator.simulate_transaction_detailed(call_request, block_number).await
         }
         
         /// Process a transaction and return full ProcessedTransaction

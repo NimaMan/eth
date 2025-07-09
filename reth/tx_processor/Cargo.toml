@@ -31,6 +31,10 @@ path = "examples/compare_with_python.rs"
 name = "full_comparison_test"
 path = "examples/full_comparison_test.rs"
 
+[[example]]
+name = "exact_comparison_test"
+path = "examples/exact_comparison_test.rs"
+
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
