@@ -28,6 +28,7 @@ pub enum EventType {
     LargeTrade,
 }
 
+
 /// Severity levels for market events
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Severity {

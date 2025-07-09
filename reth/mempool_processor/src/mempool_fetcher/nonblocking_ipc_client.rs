@@ -151,11 +151,6 @@ impl NonBlockingIpcClient {
                                                 if detection_ns < 10_000 { stats.sub_10us += 1; }
                                             }
                                             
-                                            // Log detection
-                                            if detection_ns < 10_000 {
-                                                info!("{} {}μs", 
-                                                      hash, detection_ns / 1000);
-                                            }
                                             
                                             let tx = NonBlockingTransaction {
                                                 hash,

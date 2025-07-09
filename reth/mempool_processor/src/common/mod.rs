@@ -2,6 +2,7 @@
 
 pub mod address;
 pub mod config;
+pub mod convert;
 pub mod erc20;
 pub mod dex;
 
