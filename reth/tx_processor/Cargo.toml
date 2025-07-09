@@ -23,6 +23,14 @@ path = "examples/simple_simulation.rs"
 name = "process_real_transaction"
 path = "examples/process_real_transaction.rs"
 
+[[example]]
+name = "compare_with_python"
+path = "examples/compare_with_python.rs"
+
+[[example]]
+name = "full_comparison_test"
+path = "examples/full_comparison_test.rs"
+
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
@@ -36,3 +44,4 @@ hex = "0.4"
 alloy-primitives = "1.1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
