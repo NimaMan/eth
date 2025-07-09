@@ -13,19 +13,19 @@ use tracing::{info, warn};
 use alloy_primitives::Address;
 
 /// Wrapper around RethDirectTxSimulator for mempool processor integration
-pub struct DirectTxSimulator {
+pub struct TxSimulator {
     simulator: Arc<RethDirectTxSimulator>,
     latest_block: Arc<RwLock<u64>>,
 }
 
-impl DirectTxSimulator {
-    /// Create a new direct simulator
+impl TxSimulator {
+    /// Create a new transaction simulator
     pub fn new(db_path: &str) -> Result<Self> {
-        info!("Initializing direct transaction simulator...");
+        info!("Initializing transaction simulator...");
         let simulator = RethDirectTxSimulator::new(db_path)?;
         let latest_block = simulator.get_latest_block()?;
         
-        info!("✅ Direct simulator ready at block {}", latest_block);
+        info!("✅ Transaction simulator ready at block {}", latest_block);
         
         Ok(Self {
             simulator: Arc::new(simulator),

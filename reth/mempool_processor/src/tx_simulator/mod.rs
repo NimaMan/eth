@@ -11,22 +11,26 @@
 /// 
 /// Usage:
 /// ```rust
-/// use mempool_processor::tx_simulator::DirectTxSimulator;
+/// use mempool_processor::tx_simulator::TxSimulator;
 /// 
-/// let simulator = DirectTxSimulator::new("/path/to/reth/db")?;
+/// let simulator = TxSimulator::new("/path/to/reth/db")?;
 /// let result = simulator.simulate_mempool_tx(&tx).await?;
 /// ```
 
-pub mod direct_simulator;
+pub mod simulator;
+pub mod batch_processor;
+pub mod signal_detector;
 
 // Re-export key types
-pub use direct_simulator::{
-    DirectTxSimulator,
+pub use simulator::{
+    TxSimulator,
     SimulationResult,
     StateChangeResult,
     CallTraceResult,
     mempool_tx_to_call_request,
 };
+pub use batch_processor::BatchProcessor;
+pub use signal_detector::{SignalDetector, SignalDetectionConfig, SimulationSignal};
 
 // Re-export reth_tx_simulator types for convenience
 pub use reth_tx_simulator::{
@@ -35,5 +39,7 @@ pub use reth_tx_simulator::{
     TransactionStateChanges,
     AddressStateChange,
     DebugAddressStateChange,
+    BatchSimulationOptions,
+    BatchSimulationResult,
     ipc_to_call_request,
 };
