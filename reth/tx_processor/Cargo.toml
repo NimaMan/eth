@@ -10,10 +10,18 @@ edition = "2021"
 name = "tx_processor"
 path = "src/lib.rs"
 
-# Clean tx_processor example
+# Clean tx_processor examples
 [[example]]
 name = "tx_processor_demo"
 path = "examples/tx_processor_demo.rs"
+
+[[example]]
+name = "simple_simulation"
+path = "examples/simple_simulation.rs"
+
+[[example]]
+name = "process_real_transaction"
+path = "examples/process_real_transaction.rs"
 
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
@@ -26,3 +34,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
 alloy-primitives = "1.1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
