@@ -36,9 +36,7 @@ pub use signal_detector::{SignalDetector, SignalDetectionConfig, SimulationSigna
 pub use reth_tx_simulator::{
     RethDirectTxSimulator,
     CallRequest,
-    TransactionStateChanges,
     AddressStateChange,
-    DebugAddressStateChange,
     BatchSimulationOptions,
     BatchSimulationResult,
     ipc_to_call_request,

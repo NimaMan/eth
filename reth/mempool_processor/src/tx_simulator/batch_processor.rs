@@ -4,12 +4,13 @@
 /// by converting NonBlockingTransaction to CallRequest and using parallel simulation.
 
 use crate::mempool_fetcher::NonBlockingTransaction;
-use reth_tx_simulator::{RethDirectTxSimulator, CallRequest, BatchSimulationOptions, BatchSimulationResult};
+use reth_tx_simulator::{RethDirectTxSimulator, CallRequest, BatchSimulationOptions, BatchSimulationResult, AddressStateChange};
 use alloy_primitives::{Address, Bytes, U256};
 use ethers::types::U256 as EthersU256;
 use eyre::Result;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use tracing::{info, debug, warn};
 
 /// Batch processor for simulating multiple transactions
@@ -132,16 +133,74 @@ impl BatchProcessor {
         self.simulate_batch(filtered).await
     }
     
-    /// Simulate transactions with state changes
+    /// Simulate transactions that match detected functions
+    pub async fn simulate_with_function_filter(
+        &self,
+        transactions: Vec<NonBlockingTransaction>,
+        detected_functions: &std::collections::HashMap<String, String>,
+    ) -> Result<BatchSimulationResult> {
+        // Filter only transactions with detected functions
+        let filtered: Vec<NonBlockingTransaction> = transactions
+            .into_iter()
+            .filter(|tx| detected_functions.contains_key(&tx.hash))
+            .collect();
+        
+        if filtered.is_empty() {
+            info!("No transactions with interesting functions to simulate");
+            return Ok(BatchSimulationResult {
+                total: 0,
+                successful: 0,
+                failed: 0,
+                timed_out: 0,
+                results: Vec::new(),
+                duration: Duration::from_secs(0),
+                avg_time_per_tx: Duration::from_secs(0),
+            });
+        }
+        
+        info!("Simulating {} transactions with detected functions", filtered.len());
+        for tx in &filtered {
+            if let Some(function) = detected_functions.get(&tx.hash) {
+                debug!("  {} -> {}", tx.hash, function);
+            }
+        }
+        
+        self.simulate_batch(filtered).await
+    }
+    
+    /// Simulate transactions with state changes (with optional function filter)
     pub async fn simulate_batch_with_state_changes(
         &self,
         transactions: Vec<NonBlockingTransaction>,
-    ) -> Result<Vec<(String, Result<serde_json::Value>)>> {
-        let total = transactions.len();
+    ) -> Result<Vec<(String, Result<HashMap<Address, AddressStateChange>>)>> {
+        self.simulate_batch_with_state_changes_filtered(transactions, None).await
+    }
+    
+    /// Simulate transactions with state changes, optionally filtered by detected functions
+    pub async fn simulate_batch_with_state_changes_filtered(
+        &self,
+        transactions: Vec<NonBlockingTransaction>,
+        detected_functions: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<Vec<(String, Result<HashMap<Address, AddressStateChange>>)>> {
+        // Filter transactions if function detection provided
+        let filtered_txs = if let Some(functions) = detected_functions {
+            transactions.into_iter()
+                .filter(|tx| functions.contains_key(&tx.hash))
+                .collect::<Vec<_>>()
+        } else {
+            transactions
+        };
+        
+        let total = filtered_txs.len();
+        if total == 0 {
+            info!("No transactions to simulate after filtering");
+            return Ok(Vec::new());
+        }
+        
         info!("🚀 Starting batch simulation with state changes for {} transactions", total);
         
         // Convert to CallRequests
-        let requests: Vec<(String, CallRequest)> = transactions
+        let requests: Vec<(String, CallRequest)> = filtered_txs
             .into_iter()
             .map(|tx| {
                 let hash = tx.hash.clone();
@@ -174,14 +233,14 @@ impl BatchProcessor {
                     Some(duration) => {
                         match tokio::time::timeout(
                             duration,
-                            sim.simulate_unsigned_transaction_with_state_changes_at_block(request, block_number)
+                            sim.simulate_unsigned_transaction_with_call_trace_at_block(request, block_number)
                         ).await {
                             Ok(Ok(res)) => Ok(res),
                             Ok(Err(e)) => Err(e),
                             Err(_) => Err(eyre::eyre!("Simulation timed out after {:?}", duration)),
                         }
                     }
-                    None => sim.simulate_unsigned_transaction_with_state_changes_at_block(request, block_number).await,
+                    None => sim.simulate_unsigned_transaction_with_call_trace_at_block(request, block_number).await,
                 };
                 
                 (hash, result)

@@ -41,8 +41,6 @@ alloy-provider  = { version = "1.0.6", default-features = false, features = ["re
 alloy-network   = { version = "1.0.6" }
 alloy-rpc-client = { version = "1.0.9" }
 
-# Revm transaction simulator from tx_processor
-revm_tx_simulator = { path = "../tx_processor" }
 
 # Reth dependencies for database access
 # Reth ExEx dependencies (optional, for direct integration)

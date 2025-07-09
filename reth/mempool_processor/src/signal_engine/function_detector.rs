@@ -154,6 +154,43 @@ impl FunctionDetector {
         }
     }
     
+    /// Detect function for a transaction and return the function name if interesting
+    pub fn detect_function(&self, tx: &crate::mempool_fetcher::NonBlockingTransaction) -> Option<String> {
+        if tx.input.len() < 4 {
+            return None;
+        }
+        
+        let selector = hex::encode(&tx.input[0..4]);
+        
+        // Check liquidity removal
+        if let Some(function_name) = self.liquidity_removal.detect(&selector) {
+            return Some(function_name.to_string());
+        }
+        
+        // Check trading enabled
+        if let Some(function_name) = self.trading_enabled.detect(&selector) {
+            return Some(function_name.to_string());
+        }
+        
+        None
+    }
+    
+    /// Process a batch of transactions and return a map of tx_hash to detected function
+    pub fn detect_batch(&self, transactions: &[crate::mempool_fetcher::NonBlockingTransaction]) -> HashMap<String, String> {
+        let mut results = HashMap::new();
+        
+        for tx in transactions {
+            if let Some(function_name) = self.detect_function(tx) {
+                results.insert(tx.hash.clone(), function_name);
+                
+                // Also process normally for logging
+                self.detect_from_ipc(tx);
+            }
+        }
+        
+        results
+    }
+    
     /// Detect all function types in the transaction
     pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::NonBlockingTransaction) {
         // Use pre-parsed fields directly

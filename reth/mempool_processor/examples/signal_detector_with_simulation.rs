@@ -90,39 +90,24 @@ async fn main() -> Result<()> {
             continue;
         }
         
-        for tx in new_txs {
-            total_processed += 1;
-            
-            // Fast function detection
-            let mut signal_found = false;
-            
-            // Check liquidity removal
-            if function_detector.is_liquidity_removal(&tx.input).is_some() {
-                signal_found = true;
-                signals_detected += 1;
-            }
-            
-            // Check trading enabled
-            if tx.input.len() >= 4 {
-                let selector = hex::encode(&tx.input[0..4]);
-                if matches!(selector.as_str(), "c9567bf9" | "8a8c523c" | "a8aa1b31") {
-                    signal_found = true;
-                    signals_detected += 1;
+        // Batch function detection
+        let detected_functions = function_detector.detect_batch(&new_txs);
+        signals_detected += detected_functions.len() as u64;
+        total_processed += new_txs.len() as u64;
+        
+        // Queue transactions with detected functions for simulation
+        if args.enable_simulation && !detected_functions.is_empty() {
+            let mut queue = simulation_queue.lock().await;
+            for tx in new_txs {
+                if detected_functions.contains_key(&tx.hash) {
+                    if queue.len() < args.max_queue_size {
+                        queue.push_back(tx);
+                    } else {
+                        warn!("Simulation queue full, dropping transaction {}", tx.hash);
+                        break;
+                    }
                 }
             }
-            
-            // Queue for simulation if signal found and simulation enabled
-            if signal_found && args.enable_simulation {
-                let mut queue = simulation_queue.lock().await;
-                if queue.len() < args.max_queue_size {
-                    queue.push_back(tx);
-                } else {
-                    warn!("Simulation queue full, dropping transaction");
-                }
-            }
-            
-            // Pass to function detector for logging
-            function_detector.detect_from_ipc(&tx);
         }
         
         // Periodic reporting
@@ -174,11 +159,13 @@ async fn simulation_task(
             Ok(results) => {
                 for (tx_hash, result) in results {
                     if let Ok(state_changes) = result {
-                        // Process state changes
-                        // Note: This is simplified - real implementation would parse properly
+                        // Process state changes - now it's HashMap<Address, DebugAddressStateChange>
                         info!("✅ Simulated {}: {} addresses affected", 
                               tx_hash, 
-                              state_changes.as_object().map(|o| o.len()).unwrap_or(0));
+                              state_changes.len());
+                        
+                        // Could pass to signal detector here for analysis
+                        // signal_detector.process_state_changes(&tx_hash, &state_changes);
                     }
                 }
             }

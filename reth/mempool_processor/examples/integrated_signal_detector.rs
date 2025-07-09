@@ -134,28 +134,34 @@ async fn main() -> Result<()> {
             continue;
         }
         
-        // Process each transaction
+        // Batch function detection
+        let detected_functions = function_detector.detect_batch(&new_txs);
+        let detected_count = detected_functions.len();
+        
+        if detected_count > 0 {
+            info!("🎯 Detected {} interesting functions in batch of {}", 
+                  detected_count, new_txs.len());
+        }
+        
+        total_processed += new_txs.len() as u64;
+        
+        // Add transactions to simulation batch
         for tx in new_txs {
-            total_processed += 1;
-            
-            // Fast function detection
-            if let Some(function_name) = detect_interesting_function(&tx, &function_detector) {
-                info!("🎯 Interesting function detected: {} in tx {}", function_name, tx.hash);
-                simulation_batch.add(tx, &function_name);
+            if let Some(function_name) = detected_functions.get(&tx.hash) {
+                simulation_batch.add(tx, function_name);
             } else if args.simulate_all {
-                // Optionally simulate all transactions
                 simulation_batch.add(tx, "all_transactions");
             }
-            
-            // Process batch if full
-            if simulation_batch.is_full(args.batch_size) {
-                process_simulation_batch(
-                    &mut simulation_batch,
-                    &batch_processor,
-                    &signal_detector,
-                    &mut total_simulated,
-                ).await?;
-            }
+        }
+        
+        // Process batch if full
+        if simulation_batch.is_full(args.batch_size) {
+            process_simulation_batch(
+                &mut simulation_batch,
+                &batch_processor,
+                &signal_detector,
+                &mut total_simulated,
+            ).await?;
         }
         
         // Periodic reporting
@@ -170,31 +176,6 @@ async fn main() -> Result<()> {
             
             last_report = Instant::now();
         }
-    }
-}
-
-/// Detect if transaction has an interesting function
-fn detect_interesting_function(
-    tx: &NonBlockingTransaction,
-    detector: &FunctionDetector,
-) -> Option<String> {
-    if tx.input.len() < 4 {
-        return None;
-    }
-    
-    let selector = hex::encode(&tx.input[0..4]);
-    
-    // Check liquidity removal
-    if detector.is_liquidity_removal(&tx.input).is_some() {
-        return Some("liquidity_removal".to_string());
-    }
-    
-    // Check trading enabled functions
-    match selector.as_str() {
-        "c9567bf9" => Some("openTrading".to_string()),
-        "8a8c523c" => Some("enableTrading".to_string()),
-        "a8aa1b31" => Some("setTrading".to_string()),
-        _ => None,
     }
 }
 

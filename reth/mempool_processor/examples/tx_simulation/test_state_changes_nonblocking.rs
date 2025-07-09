@@ -4,7 +4,7 @@
 /// and nonce retry logic, combined with microsecond-latency NonBlockingIpcClient.
 
 use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction};
-use mempool_processor::tx_simulator::DirectTxSimulator;
+use reth_tx_simulator::DirectTxSimulator;
 use eyre::Result;
 use tracing::{info, error, warn};
 use std::time::{Duration, Instant};
@@ -66,22 +66,30 @@ async fn main() -> Result<()> {
             // Convert to FullTransaction for TxSimulator
             let full_tx = convert_to_full_transaction(&tx).await;
 
+            // Convert to CallRequest for DirectTxSimulator
+            let call_request = match reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data) {
+                Ok(req) => req,
+                Err(e) => {
+                    warn!("   ❌ Failed to convert transaction: {}", e);
+                    continue;
+                }
+            };
+            
             // Simulate with DirectTxSimulator (with call trace for state changes)
             let sim_start = Instant::now();
-            match timeout(Duration::from_millis(5000), simulator.simulate_with_call_trace(&full_tx)).await {
+            match timeout(Duration::from_millis(5000), simulator.simulate_unsigned_transaction_with_call_trace(call_request)).await {
                 Ok(Ok(state_changes)) => {
                     let sim_time = sim_start.elapsed();
                     successful_simulations += 1;
                     
                     info!("   ✅ Simulation successful in {:.3}ms", sim_time.as_secs_f64() * 1000.0);
-                    info!("   📈 Block: {}", state_changes.block_number);
-                    info!("   🎯 Addresses affected: {}", state_changes.detailed_changes.len());
+                    info!("   🎯 Addresses affected: {}", state_changes.len());
 
-                    if !state_changes.detailed_changes.is_empty() {
+                    if !state_changes.is_empty() {
                         state_changes_found += 1;
                         
                         // Show first few state changes
-                        for (i, (address, changes)) in state_changes.detailed_changes.iter().take(3).enumerate() {
+                        for (i, (address, changes)) in state_changes.iter().take(3).enumerate() {
                             let address_str = mempool_processor::common::address::alloy_address_to_checksum(*address);
                             info!("     {}. Address: {}", i + 1, address_str);
                             

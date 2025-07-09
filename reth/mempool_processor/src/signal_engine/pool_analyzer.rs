@@ -118,17 +118,21 @@ impl PoolAnalyzer {
                 
                 info!("🎯 Pool {} affected by tx {}", address_str, tx_hash);
                 
+                // Extract numeric values (now already f64)
+                let eth_delta = changes.eth_net;
+                let token_delta: f64 = changes.token_net.values().sum();
+                
                 // Calculate the effect on the pool
                 let pool_effect = PoolEffect {
                     pool_address: address_str.clone(),
                     current_eth_reserve: pool_state.eth_reserve,
                     current_token_reserve: pool_state.token_reserve,
-                    eth_delta: changes.eth_net,
-                    token_delta: changes.token_net.values().sum::<f64>(),
-                    simulated_eth_reserve: pool_state.eth_reserve + changes.eth_net,
-                    simulated_token_reserve: pool_state.token_reserve + changes.token_net.values().sum::<f64>(),
+                    eth_delta,
+                    token_delta,
+                    simulated_eth_reserve: pool_state.eth_reserve + eth_delta,
+                    simulated_token_reserve: pool_state.token_reserve + token_delta,
                     percentage_change: if pool_state.eth_reserve > 0.0 {
-                        (changes.eth_net / pool_state.eth_reserve) * 100.0
+                        (eth_delta / pool_state.eth_reserve) * 100.0
                     } else {
                         0.0
                     },

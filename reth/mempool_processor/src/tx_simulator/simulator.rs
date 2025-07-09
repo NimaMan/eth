@@ -3,7 +3,7 @@
 /// This module integrates reth_tx_simulator for ultra-fast transaction simulation
 /// by bypassing RPC and using direct database access.
 
-use reth_tx_simulator::{RethDirectTxSimulator, CallRequest, ipc_to_call_request, DebugAddressStateChange};
+use reth_tx_simulator::{RethDirectTxSimulator, CallRequest, ipc_to_call_request, AddressStateChange};
 use crate::mempool_fetcher::FullTransaction;
 use eyre::Result;
 use std::sync::Arc;
@@ -83,7 +83,7 @@ impl TxSimulator {
         })
     }
     
-    /// Simulate with state changes using prestate tracer (raw format)
+    /// Simulate with state changes using call tracer
     /// Automatically retries with correct nonce if simulation fails due to nonce mismatch
     pub async fn simulate_with_state_changes(&self, tx: &FullTransaction) -> Result<StateChangeResult> {
         // Convert IPC transaction to CallRequest
@@ -92,7 +92,7 @@ impl TxSimulator {
         
         // First try with original nonce
         let mut result = self.simulator
-            .simulate_unsigned_transaction_with_state_changes_at_block(call_request.clone(), latest_block)
+            .simulate_unsigned_transaction_with_call_trace_at_block(call_request.clone(), latest_block)
             .await;
             
         // If nonce too high, try with expected nonce
@@ -103,7 +103,7 @@ impl TxSimulator {
                     if let Ok(expected_nonce) = expected_nonce_str.trim().parse::<u64>() {
                         call_request.nonce = Some(expected_nonce);
                         result = self.simulator
-                            .simulate_unsigned_transaction_with_state_changes_at_block(call_request, latest_block)
+                            .simulate_unsigned_transaction_with_call_trace_at_block(call_request, latest_block)
                             .await;
                     }
                 }
@@ -112,13 +112,11 @@ impl TxSimulator {
         
         let state_changes = result?;
             
-        // Extract structured state changes
-        let parsed_changes = self.simulator
-            .get_transaction_state_changes_from_value(&state_changes, latest_block, 0)?;
-            
         Ok(StateChangeResult {
-            raw_changes: state_changes,
-            parsed_changes,
+            success: true, // TODO: get from actual simulation
+            gas_used: 0, // TODO: get from actual simulation
+            revert_reason: None,
+            state_changes,
         })
     }
     
@@ -198,14 +196,16 @@ pub struct SimulationResult {
 /// State change result
 #[derive(Debug)]
 pub struct StateChangeResult {
-    pub raw_changes: serde_json::Value,
-    pub parsed_changes: reth_tx_simulator::TransactionStateChanges,
+    pub success: bool,
+    pub gas_used: u64,
+    pub revert_reason: Option<String>,
+    pub state_changes: HashMap<Address, AddressStateChange>,
 }
 
 /// Call trace result with detailed state changes
 #[derive(Debug)]
 pub struct CallTraceResult {
-    pub detailed_changes: HashMap<Address, DebugAddressStateChange>,
+    pub detailed_changes: HashMap<Address, AddressStateChange>,
     pub block_number: u64,
 }
 

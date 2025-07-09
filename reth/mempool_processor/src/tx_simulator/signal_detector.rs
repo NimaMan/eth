@@ -292,9 +292,8 @@ impl SignalDetector {
             let _ = log_file.flush();
         }
         
-        // Extract token changes from storage
-        let mut token_changes = HashMap::new();
-        // TODO: Parse storage changes to identify token balances
+        // Extract token changes from DebugAddressStateChange
+        let token_changes = changes.token_net.clone();
         
         Some(SimulationSignal {
             signal_type: "liquidity_drain".to_string(),
