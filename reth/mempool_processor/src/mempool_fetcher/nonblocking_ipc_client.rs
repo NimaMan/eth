@@ -9,7 +9,7 @@ use eyre::{Result, eyre};
 use hex;
 
 /// Transaction received via non-blocking IPC
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NonBlockingTransaction {
     pub hash: String,
     pub data: Value,

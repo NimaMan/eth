@@ -1,12 +1,14 @@
 use std::time::{Duration, Instant};
 use clap::Parser;
 use eyre::Result;
-use tracing::info;
+use tracing::{info, warn};
 use tokio::time;
 
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
 use mempool_processor::signal_engine::FunctionDetector;
+use mempool_processor::tx_simulator::SimulatorProcessor;
+use mempool_processor::pool_subscriber::PoolSubscriber;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -17,6 +19,10 @@ struct Args {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+    
+    /// Reth data directory
+    #[arg(long, env = "RETH_DATADIR", default_value = "/home/nima/.local/share/reth/mainnet")]
+    reth_datadir: String,
 }
 
 #[tokio::main]
@@ -41,6 +47,33 @@ async fn main() -> Result<()> {
     // Initialize function detector
     info!("🔍 Initializing function detector...");
     let function_detector = FunctionDetector::new();
+    
+    // Get the log directory from function detector to share with simulator
+    let log_dir = function_detector.get_log_dir().to_path_buf();
+    
+    // Initialize simulator processor with same log directory
+    info!("🔄 Initializing simulator processor...");
+    let mut simulator_processor = SimulatorProcessor::new(&args.reth_datadir, log_dir)?;
+    
+    // Initialize pool subscriber and cache
+    info!("📊 Initializing pool subscriber...");
+    let mut pool_subscriber = PoolSubscriber::new(0.1); // 0.1 ETH threshold
+    let pool_cache = pool_subscriber.get_pool_cache();
+    
+    // Clone pool cache for simulator processor
+    let pool_cache_for_simulator = (*pool_cache).clone();
+    simulator_processor.set_pool_cache(pool_cache_for_simulator);
+    
+    // Start listening for pool updates in background (includes initial pool request)
+    tokio::spawn(async move {
+        if let Err(e) = pool_subscriber.start_listening().await {
+            warn!("Pool subscriber error: {}", e);
+        }
+    });
+    
+    // Give it a moment to load initial pools
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    info!("✅ Pool cache initialized with {} pools", pool_cache.get_pool_count());
     
     // Performance metrics
     info!("🎯 Starting main processing loop...");
@@ -73,23 +106,28 @@ async fn main() -> Result<()> {
         // Got transactions! Reset counter
         consecutive_empty = 0;
         
-        // Process each transaction for function detection
-        for ipc_tx in new_txs {
-            let function_detection_start = Instant::now();
-            
-            // Pass transaction directly to function detector
-            function_detector.detect_from_ipc(&ipc_tx);
-            
-            // Track function detection time
-            let function_detection_elapsed = function_detection_start.elapsed().as_secs_f64() * 1000.0;
-            function_detection_times_ms.push(function_detection_elapsed);
-            
-            // Track IPC detection latency
-            let detection_latency_ms = ipc_tx.detection_ns as f64 / 1_000_000.0;
+        // Process batch with new pipeline
+        let batch_start = Instant::now();
+        
+        // Function detection on entire batch
+        let transactions_with_functions = function_detector.detect_batch(new_txs);
+        
+        // Track function detection time for the batch
+        let function_detection_elapsed = batch_start.elapsed().as_secs_f64() * 1000.0;
+        function_detection_times_ms.push(function_detection_elapsed);
+        
+        // Track IPC detection latency for each transaction
+        for tx_with_func in &transactions_with_functions {
+            let detection_latency_ms = tx_with_func.tx.detection_ns as f64 / 1_000_000.0;
             detection_latencies_ms.push(detection_latency_ms);
-            
-            total_processed += 1;
         }
+        
+        // Send batch to simulator processor (non-blocking)
+        if let Err(e) = simulator_processor.process_batch(transactions_with_functions.clone()).await {
+            warn!("Simulator processor error: {}", e);
+        }
+        
+        total_processed += transactions_with_functions.len() as u64;
         
         // Periodic reporting every 60 seconds
         if last_report.elapsed() > Duration::from_secs(60) {
@@ -122,6 +160,9 @@ async fn main() -> Result<()> {
             
             // Log function detection statistics
             function_detector.log_stats_summary();
+            
+            // Log simulator processor statistics
+            simulator_processor.log_performance_summary();
             
             // Clear timing vectors
             detection_latencies_ms.clear();

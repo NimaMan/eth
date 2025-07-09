@@ -10,14 +10,14 @@ use lazy_static::lazy_static;
 use tracing::{info, warn, error};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use chrono::Local;
+use chrono::Utc;
 use zmq::{Context, Socket};
 use serde::{Serialize, Deserialize};
 
 lazy_static! {
     /// Log directory path - initialized once at startup
     static ref LOG_DIR: PathBuf = {
-        let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
+        let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
         let dir = PathBuf::from("/home/nima/code/crypto/logs/mempool")
             .join(format!("signal_detector_{}", timestamp));
         std::fs::create_dir_all(&dir).expect("Failed to create log directory");
@@ -97,6 +97,7 @@ pub struct FunctionStats {
     pub total_checked: u64,
     pub liquidity_removals: u64,
     pub trading_enabled: u64,
+    pub swaps: u64,
     pub other_functions: u64,
 }
 
@@ -115,10 +116,20 @@ pub struct SignalAlert {
     pub detection_latency_us: u64,
 }
 
+/// Transaction with detected function information
+#[derive(Debug, Clone)]
+pub struct TransactionWithFunctions {
+    pub tx: crate::mempool_fetcher::NonBlockingTransaction,
+    pub functions: Vec<String>,
+    pub has_liquidity_removal: bool,
+    pub has_trading_enabled: bool,
+}
+
 /// Function detector that categorizes transactions by their function signatures
 pub struct FunctionDetector {
     liquidity_removal: LiquidityRemovalDetector,
     trading_enabled: TradingEnabledDetector,
+    swap: SwapDetector,
 }
 
 impl FunctionDetector {
@@ -128,19 +139,20 @@ impl FunctionDetector {
         
         // Log startup information to signal detector log
         if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
-            let _ = writeln!(log_file, "\n{} ==========================================", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 🚀 Starting Mempool Signal Detection Service", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} ⚡ Using non-blocking IPC for sub-millisecond latency", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 🔍 Function detector initialized", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 📁 Log directory: {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), LOG_DIR.display());
-            let _ = writeln!(log_file, "{} 🎯 Starting main processing loop...", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} ==========================================\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "\n{} ==========================================", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 🚀 Starting Mempool Signal Detection Service", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} ⚡ Using non-blocking IPC for sub-millisecond latency", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 🔍 Function detector initialized", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} 📁 Log directory: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"), LOG_DIR.display());
+            let _ = writeln!(log_file, "{} 🎯 Starting main processing loop...", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(log_file, "{} ==========================================\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
             let _ = log_file.flush();
         }
         
         Self {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
+            swap: SwapDetector::new(),
         }
     }
     
@@ -172,24 +184,14 @@ impl FunctionDetector {
             return Some(function_name.to_string());
         }
         
+        // Check swaps
+        if let Some(function_name) = self.swap.detect(&selector) {
+            return Some(function_name.to_string());
+        }
+        
         None
     }
     
-    /// Process a batch of transactions and return a map of tx_hash to detected function
-    pub fn detect_batch(&self, transactions: &[crate::mempool_fetcher::NonBlockingTransaction]) -> HashMap<String, String> {
-        let mut results = HashMap::new();
-        
-        for tx in transactions {
-            if let Some(function_name) = self.detect_function(tx) {
-                results.insert(tx.hash.clone(), function_name);
-                
-                // Also process normally for logging
-                self.detect_from_ipc(tx);
-            }
-        }
-        
-        results
-    }
     
     /// Detect all function types in the transaction
     pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::NonBlockingTransaction) {
@@ -207,6 +209,54 @@ impl FunctionDetector {
         let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
         
         self.detect_all(tx_hash, &from, &to, &value, &gas_price, &ipc_tx.input);
+    }
+    
+    /// Process batch of transactions and return with function information
+    pub fn detect_batch(&self, transactions: Vec<crate::mempool_fetcher::NonBlockingTransaction>) -> Vec<TransactionWithFunctions> {
+        transactions.into_iter().map(|tx| {
+            let mut functions = Vec::new();
+            let mut has_liquidity_removal = false;
+            let mut has_trading_enabled = false;
+            
+            // Skip if no input data
+            if tx.input.len() < 4 {
+                return TransactionWithFunctions {
+                    tx,
+                    functions,
+                    has_liquidity_removal,
+                    has_trading_enabled,
+                };
+            }
+            
+            let selector = hex::encode(&tx.input[0..4]);
+            
+            // Check liquidity removal
+            if let Some(function_name) = self.liquidity_removal.detect(&selector) {
+                functions.push(function_name.to_string());
+                has_liquidity_removal = true;
+            }
+            
+            // Check trading enabled
+            if let Some(function_name) = self.trading_enabled.detect(&selector) {
+                functions.push(function_name.to_string());
+                has_trading_enabled = true;
+            }
+            
+            // Check swaps
+            if let Some(function_name) = self.swap.detect(&selector) {
+                functions.push(function_name.to_string());
+            }
+            
+            // Still call the existing detection for logging and ZMQ publishing
+            self.detect_from_ipc(&tx);
+            
+            TransactionWithFunctions {
+                tx,
+                functions,
+                has_liquidity_removal,
+                has_trading_enabled,
+            }
+        }).collect()
     }
     
     /// Internal function to detect all function types with extracted details
@@ -287,8 +337,19 @@ impl FunctionDetector {
             return;
         }
         
+        // Check swaps - we count them but don't log/alert
+        if let Some(_function_name) = self.swap.detect(&selector) {
+            stats.swaps += 1;
+            return;
+        }
+        
         // All other functions - just count them
         stats.other_functions += 1;
+    }
+    
+    /// Get the log directory path
+    pub fn get_log_dir(&self) -> &std::path::Path {
+        &*LOG_DIR
     }
     
     /// Get statistics
@@ -330,6 +391,7 @@ impl FunctionDetector {
         info!("   Total transactions checked: {}", stats.total_checked);
         info!("   Liquidity removals: {}", stats.liquidity_removals);
         info!("   Trading enabled: {}", stats.trading_enabled);
+        info!("   Swaps: {}", stats.swaps);
         info!("   Other functions: {}", stats.other_functions);
     }
     
@@ -369,7 +431,6 @@ impl LiquidityRemovalDetector {
         
         // Uniswap V3 Position Manager
         signatures.insert("0c49ccbe", "decreaseLiquidity");
-        signatures.insert("42966c68", "burn"); // Burns liquidity NFT
         
         // Balancer
         signatures.insert("8bdb3913", "exitPool");
@@ -414,12 +475,63 @@ impl TradingEnabledDetector {
 }
 
 
+/// Detector for swap functions
+struct SwapDetector {
+    signatures: HashMap<&'static str, &'static str>,
+}
+
+impl SwapDetector {
+    fn new() -> Self {
+        let mut signatures = HashMap::new();
+        
+        // Uniswap V2/V3 and forks
+        signatures.insert("38ed1739", "swapExactTokensForTokens");
+        signatures.insert("8803dbee", "swapTokensForExactTokens");
+        signatures.insert("7ff36ab5", "swapExactETHForTokens");
+        signatures.insert("4a25d94a", "swapTokensForExactETH");
+        signatures.insert("18cbafe5", "swapExactTokensForETH");
+        signatures.insert("fb3bdb41", "swapETHForExactTokens");
+        signatures.insert("791ac947", "swapExactTokensForETHSupportingFeeOnTransferTokens");
+        signatures.insert("b6f9de95", "swapExactETHForTokensSupportingFeeOnTransferTokens");
+        
+        // Uniswap V3
+        signatures.insert("414bf389", "exactInputSingle");
+        signatures.insert("db3e2198", "exactOutputSingle");
+        signatures.insert("c04b8d59", "exactInput");
+        signatures.insert("f28c0498", "exactOutput");
+        
+        // 1inch
+        signatures.insert("2e95b6c8", "swap");
+        signatures.insert("7c025200", "swap_1inch_v2");
+        signatures.insert("e449022e", "uniswapV3Swap");
+        
+        // 0x Protocol
+        signatures.insert("d9627aa4", "sellToUniswap");
+        signatures.insert("3598d8ab", "sellToLiquidityProvider");
+        
+        // Curve
+        signatures.insert("3df02124", "exchange");
+        signatures.insert("5b41b908", "exchange_underlying");
+        
+        // Balancer
+        signatures.insert("52bbbe29", "swap_balancer");
+        signatures.insert("945bcec9", "batchSwap");
+        
+        Self { signatures }
+    }
+    
+    fn detect(&self, selector: &str) -> Option<&'static str> {
+        self.signatures.get(selector).copied()
+    }
+}
+
 impl Clone for FunctionStats {
     fn clone(&self) -> Self {
         Self {
             total_checked: self.total_checked,
             liquidity_removals: self.liquidity_removals,
             trading_enabled: self.trading_enabled,
+            swaps: self.swaps,
             other_functions: self.other_functions,
         }
     }

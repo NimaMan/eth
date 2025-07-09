@@ -20,6 +20,7 @@
 pub mod simulator;
 pub mod batch_processor;
 pub mod signal_detector;
+pub mod simulator_processor;
 
 // Re-export key types
 pub use simulator::{
@@ -31,6 +32,7 @@ pub use simulator::{
 };
 pub use batch_processor::BatchProcessor;
 pub use signal_detector::{SignalDetector, SignalDetectionConfig, SimulationSignal};
+pub use simulator_processor::{SimulatorProcessor, SimulatorProcessorConfig};
 
 // Re-export reth_tx_simulator types for convenience
 pub use reth_tx_simulator::{

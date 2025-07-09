@@ -15,7 +15,7 @@ pub use types::*;
 pub use engine::{SignalEngine, SignalConfig};
 pub use service::{SignalService, ServiceStats};
 pub use publisher::{AlertPublisher, AlertMessage};
-pub use function_detector::FunctionDetector;
+pub use function_detector::{FunctionDetector, TransactionWithFunctions};
 pub use pool_analyzer::{PoolAnalyzer, PoolAnalysisConfig};
 
 // Keep legacy naming for backward compatibility during migration
