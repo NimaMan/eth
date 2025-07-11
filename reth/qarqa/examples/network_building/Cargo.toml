@@ -1,0 +1,33 @@
+[package]
+name = "network_building_example"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "fund_flow_network"
+path = "fund_flow_network.rs"
+
+[[bin]]
+name = "network_analysis"
+path = "network_analysis.rs"
+
+[[bin]]
+name = "graph_visualization"
+path = "graph_visualization.rs"
+
+[[bin]]
+name = "real_transaction_network"
+path = "real_transaction_network.rs"
+
+[dependencies]
+qarqa-core-types = { path = "../../core_types" }
+qarqa-data-access = { path = "../../data_access" }
+qarqa-network-building = { path = "../../network_building" }
+alloy = { version = "0.5", features = ["consensus", "rpc", "rpc-types", "network", "signer-local"] }
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde_json = "1.0"
+chrono = "0.4"

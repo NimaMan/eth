@@ -48,3 +48,7 @@ path = "examples/basic_usage.rs"
 [[example]]
 name = "step1_pool_transactions"
 path = "examples/step1_pool_transactions.rs"
+
+[[example]]
+name = "mexc_to_pool_flow"
+path = "examples/mexc_to_pool_flow.rs"

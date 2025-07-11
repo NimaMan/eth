@@ -1,0 +1,33 @@
+[package]
+name = "qarqa-network-building"
+version = "0.1.0"
+edition = "2021"
+description = "Fund flow network construction and analysis"
+
+[dependencies]
+# Local dependencies
+qarqa-core-types = { path = "../core_types" }
+qarqa-tx-simulation = { path = "../tx_simulation" }
+
+# Ethereum types
+alloy-primitives = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Performance
+dashmap = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,151 @@
+{
+  "edges": [
+    {
+      "arrows": "to",
+      "color": {
+        "color": "#34495e",
+        "opacity": 0.6
+      },
+      "font": {
+        "color": "#7f8c8d",
+        "size": 10
+      },
+      "from": 4,
+      "label": "1.400 ETH",
+      "title": "Amount: 1.3999 ETH\nTransactions: 1\nType: Direct",
+      "to": 2,
+      "width": 1.1460815016336658
+    },
+    {
+      "arrows": "to",
+      "color": {
+        "color": "#34495e",
+        "opacity": 0.6
+      },
+      "font": {
+        "color": "#7f8c8d",
+        "size": 10
+      },
+      "from": 2,
+      "label": "1.100 ETH",
+      "title": "Amount: 1.1000 ETH\nTransactions: 2\nType: Direct",
+      "to": 1,
+      "width": 1.0413926851582251
+    },
+    {
+      "arrows": "to",
+      "color": {
+        "color": "#34495e",
+        "opacity": 0.6
+      },
+      "font": {
+        "color": "#7f8c8d",
+        "size": 10
+      },
+      "from": 1,
+      "label": "1.000 ETH",
+      "title": "Amount: 1.0000 ETH\nTransactions: 1\nType: Internal",
+      "to": 0,
+      "width": 1.0
+    },
+    {
+      "arrows": "to",
+      "color": {
+        "color": "#34495e",
+        "opacity": 0.6
+      },
+      "font": {
+        "color": "#7f8c8d",
+        "size": 10
+      },
+      "from": 0,
+      "label": "1.000 ETH",
+      "title": "Amount: 1.0000 ETH\nTransactions: 1\nType: Internal",
+      "to": 3,
+      "width": 1.0
+    }
+  ],
+  "nodes": [
+    {
+      "color": "#95a5a6",
+      "font": {
+        "color": "#2c3e50",
+        "size": 12
+      },
+      "id": 0,
+      "label": "0xc02aaa39b223fe8d0a",
+      "shape": "circle",
+      "size": 10.0,
+      "title": "Address: 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2\nType: EOA\nBalance Change: 0.0000 ETH\nTransactions: 2"
+    },
+    {
+      "color": "#95a5a6",
+      "font": {
+        "color": "#2c3e50",
+        "size": 12
+      },
+      "id": 1,
+      "label": "0x7a250d5630b4cf5397",
+      "shape": "circle",
+      "size": 10.0,
+      "title": "Address: 0x7a250d5630b4cf539739df2c5dacb4c659f2488d\nType: EOA\nBalance Change: 0.1000 ETH\nTransactions: 3"
+    },
+    {
+      "color": "#95a5a6",
+      "font": {
+        "color": "#2c3e50",
+        "size": 12
+      },
+      "id": 2,
+      "label": "0xc04b517e75907965ad",
+      "shape": "circle",
+      "size": 10.0,
+      "title": "Address: 0xc04b517e75907965ad59976c63912c8c8af97d96\nType: EOA\nBalance Change: 0.2998 ETH\nTransactions: 3"
+    },
+    {
+      "color": "#95a5a6",
+      "font": {
+        "color": "#2c3e50",
+        "size": 12
+      },
+      "id": 3,
+      "label": "0x0e9797f0f05a3de838",
+      "shape": "circle",
+      "size": 10.0,
+      "title": "Address: 0x0e9797f0f05a3de8384d76467e98da03874c86a6\nType: EOA\nBalance Change: 1.0000 ETH\nTransactions: 1"
+    },
+    {
+      "color": "#95a5a6",
+      "font": {
+        "color": "#2c3e50",
+        "size": 12
+      },
+      "id": 4,
+      "label": "0x9642b23ed1e01df109",
+      "shape": "circle",
+      "size": 10.730407508168328,
+      "title": "Address: 0x9642b23ed1e01df1092b92641051881a322f5d4e\nType: EOA\nBalance Change: -1.3999 ETH\nTransactions: 1"
+    }
+  ],
+  "options": {
+    "interaction": {
+      "hover": true,
+      "keyboard": true,
+      "navigationButtons": true
+    },
+    "layout": {
+      "improvedLayout": true
+    },
+    "physics": {
+      "enabled": true,
+      "forceAtlas2Based": {
+        "centralGravity": 0.01,
+        "damping": 0.4,
+        "gravitationalConstant": -50,
+        "springConstant": 0.08,
+        "springLength": 100
+      },
+      "solver": "forceAtlas2Based"
+    }
+  }
+}

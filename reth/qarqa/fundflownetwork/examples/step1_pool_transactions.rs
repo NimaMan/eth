@@ -79,6 +79,11 @@ async fn main() -> eyre::Result<()> {
     
     // Get all transactions for this pool using the new fetcher
     println!("3. Fetching transactions from tx_participants table...");
+    
+    // Debug: Get address_id first
+    let address_id = tx_fetcher.get_address_id(pool_address).await?;
+    println!("   Debug: Address ID from fetcher: {:?}", address_id);
+    
     let address_txs = tx_fetcher.get_address_transactions(
         pool_address,
         Some(liquidity_block),
@@ -86,6 +91,15 @@ async fn main() -> eyre::Result<()> {
     ).await?;
     
     println!("✅ Found {} transactions for pool (block ≤ {})", address_txs.len(), liquidity_block);
+    
+    // Also try with exact address format from DB
+    let db_format_address = "0x0e9797F0f05A3dE8384D76467E98DA03874c86a6"; // Capital F
+    let address_txs2 = tx_fetcher.get_address_transactions(
+        db_format_address,
+        Some(liquidity_block),
+        Some(1000)
+    ).await?;
+    println!("   With DB format address: Found {} transactions", address_txs2.len());
     println!();
     
     let mut relevant_txs: Vec<(String, i64)> = address_txs.iter()

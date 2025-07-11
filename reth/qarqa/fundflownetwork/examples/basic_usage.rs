@@ -1,4 +1,5 @@
 //! Basic usage example for fundflownetwork
+//! Uses real addresses from MEXC → Creator → Pool flow
 
 use qarqa_fundflownetwork::{
     FundFlowAnalyzer, NetworkBuilder, 
@@ -64,67 +65,72 @@ fn main() {
 }
 
 fn create_test_flows() -> Vec<CompleteFundFlows> {
-    let addr1 = Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
-    let addr2 = Address::from_str("0x2222222222222222222222222222222222222222").unwrap();
-    let addr3 = Address::from_str("0x3333333333333333333333333333333333333333").unwrap();
-    let addr4 = Address::from_str("0x4444444444444444444444444444444444444444").unwrap();
+    // Real checksummed addresses from MEXC → Creator → Pool flow
+    let mexc = Address::from_str("0x9642b23Ed1E01Df1092B92641051881a322F5D4E").unwrap(); // MEXC 16
+    let creator = Address::from_str("0xC04B517E75907965AD59976c63912C8C8af97D96").unwrap(); // Pool Creator
+    let router = Address::from_str("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap(); // Uniswap V2: Router 2
+    let pool = Address::from_str("0x0e9797F0f05A3dE8384D76467E98DA03874c86a6").unwrap(); // Uniswap V2: ByteBond
+    let weth = Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(); // Wrapped Ether
     
     vec![
-        // Transaction 1: Direct transfer
+        // Transaction 1: MEXC withdrawal to Creator
         CompleteFundFlows {
-            tx_hash: "0xabc1".to_string(),
-            block_number: 12345,
-            from_address: addr1,
-            to_address: Some(addr2),
+            tx_hash: "0xaa8b115c150332e9d049ef513636b3031f40f28a8f13534c9050aa08c93ddd32".to_string(),
+            block_number: 22885482,
+            from_address: mexc,
+            to_address: Some(creator),
             eth_movements: vec![
                 EthMovement {
-                    from: addr1,
-                    to: addr2,
+                    from: mexc,
+                    to: creator,
+                    amount: U256::from(1_399_850_000_000_000_000u128), // 1.39985 ETH
+                    movement_type: EthMovementType::Direct,
+                },
+            ],
+            token_movements: Vec::new(),
+        },
+        // Transaction 2: Pool creation and liquidity addition
+        CompleteFundFlows {
+            tx_hash: "0x5e439aa276849d6ba592b5bce910fefd79c0d26b9d185d95f367848d6a1f6164".to_string(),
+            block_number: 22885510,
+            from_address: creator,
+            to_address: Some(router),
+            eth_movements: vec![
+                // Creator sends 1 ETH to Router
+                EthMovement {
+                    from: creator,
+                    to: router,
                     amount: U256::from(1_000_000_000_000_000_000u128), // 1 ETH
                     movement_type: EthMovementType::Direct,
                 },
-            ],
-            token_movements: Vec::new(),
-        },
-        // Transaction 2: Contract interaction with internal transfers
-        CompleteFundFlows {
-            tx_hash: "0xabc2".to_string(),
-            block_number: 12346,
-            from_address: addr1,
-            to_address: Some(addr3),
-            eth_movements: vec![
+                // Router wraps ETH to WETH
                 EthMovement {
-                    from: addr1,
-                    to: addr3,
-                    amount: U256::from(500_000_000_000_000_000u128), // 0.5 ETH
-                    movement_type: EthMovementType::Direct,
-                },
-                EthMovement {
-                    from: addr3,
-                    to: addr4,
-                    amount: U256::from(250_000_000_000_000_000u128), // 0.25 ETH
+                    from: router,
+                    to: weth,
+                    amount: U256::from(1_000_000_000_000_000_000u128), // 1 ETH
                     movement_type: EthMovementType::Internal,
                 },
+                // WETH flows to Pool (internal transfer)
                 EthMovement {
-                    from: addr3,
-                    to: addr2,
-                    amount: U256::from(250_000_000_000_000_000u128), // 0.25 ETH
+                    from: weth,
+                    to: pool,
+                    amount: U256::from(1_000_000_000_000_000_000u128), // 1 ETH
                     movement_type: EthMovementType::Internal,
                 },
             ],
             token_movements: Vec::new(),
         },
-        // Transaction 3: Another transfer
+        // Transaction 3: Example of token swap (common pattern)
         CompleteFundFlows {
-            tx_hash: "0xabc3".to_string(),
-            block_number: 12347,
-            from_address: addr2,
-            to_address: Some(addr4),
+            tx_hash: "0x7f5c356a6a215e969630a885933680d5c49545c80bb785ab1b7b6ca1cfef757b".to_string(),
+            block_number: 22885530,
+            from_address: creator,
+            to_address: Some(router),
             eth_movements: vec![
                 EthMovement {
-                    from: addr2,
-                    to: addr4,
-                    amount: U256::from(2_000_000_000_000_000_000u128), // 2 ETH
+                    from: creator,
+                    to: router,
+                    amount: U256::from(100_000_000_000_000_000u128), // 0.1 ETH
                     movement_type: EthMovementType::Direct,
                 },
             ],
