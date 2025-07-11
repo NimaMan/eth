@@ -1,0 +1,31 @@
+# Cargo build artifacts
+target/
+Cargo.lock
+
+# Generated visualization files - DO NOT COMMIT
+network_cytoscape.json
+network_visjs.json
+**/network_cytoscape.json
+**/network_visjs.json
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug files
+*.pdb
+
+# Backup files
+*.bak
+*.backup
+
+# Environment files
+.env
+.env.local
