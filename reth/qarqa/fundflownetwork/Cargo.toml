@@ -1,0 +1,50 @@
+[package]
+name = "qarqa-fundflownetwork"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core dependencies
+qarqa-core-types = { path = "../core_types" }
+qarqa-eth-db-fetcher = { path = "../eth_db_fetcher" }
+tx_processor = { path = "../../tx_processor" }
+
+# Primitives
+alloy-primitives = { workspace = true }
+hex = { workspace = true }
+
+# Data structures
+petgraph = "0.6"
+indexmap = "2.0"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+eyre = "0.6"
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = "0.3"
+
+# Time
+chrono = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "step1_pool_transactions"
+path = "examples/step1_pool_transactions.rs"
