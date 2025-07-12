@@ -15,25 +15,31 @@ path = "src/lib.rs"
 name = "tx_processor_demo"
 path = "examples/tx_processor_demo.rs"
 
-[[example]]
-name = "simple_simulation"
-path = "examples/simple_simulation.rs"
+# Removed examples that were deleted
 
 [[example]]
-name = "process_real_transaction"
-path = "examples/process_real_transaction.rs"
+name = "fetch_by_hash_benchmark"
+path = "examples/fetch_by_hash_benchmark.rs"
 
 [[example]]
-name = "compare_with_python"
-path = "examples/compare_with_python.rs"
+name = "measure_processing_time"
+path = "examples/measure_processing_time.rs"
 
 [[example]]
-name = "full_comparison_test"
-path = "examples/full_comparison_test.rs"
+name = "test_core_objective"
+path = "examples/test_core_objective.rs"
 
 [[example]]
-name = "exact_comparison_test"
-path = "examples/exact_comparison_test.rs"
+name = "fetch_single_transaction"
+path = "examples/fetch_single_transaction.rs"
+
+[[example]]
+name = "benchmark_1k_transactions"
+path = "examples/benchmark_1k_transactions.rs"
+
+[[bin]]
+name = "batch_processor"
+path = "src/bin/batch_processor.rs"
 
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
@@ -48,4 +54,14 @@ hex = "0.4"
 alloy-primitives = "1.1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.11", features = ["json"] } # For benchmark comparison with Python
+futures = "0.3"
+
+# Reth dependencies for direct database access
+reth-provider = { path = "../reth/crates/storage/provider" }
+reth-node-types = { path = "../reth/crates/node/types" }
+reth-node-ethereum = { path = "../reth/crates/ethereum/node" }
+reth-primitives = { path = "../reth/crates/primitives" }
+reth-db = { path = "../reth/crates/storage/db" }
+reth-chainspec = { path = "../reth/crates/chainspec" }
+alloy-consensus = "1.0.20"

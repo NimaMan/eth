@@ -91,6 +91,7 @@ async fn main() -> Result<()> {
         "success".to_string(),
         100, // nonce
         logs,
+        100_000, // gas_limit
     ).await?;
     
     info!("✅ Transaction processed!");

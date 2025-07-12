@@ -1,70 +1,75 @@
 use std::process::Command;
 
-/// Integration tests for REVM transaction simulator
+/// Integration tests for tx_processor
 /// These tests verify that the core functionality works correctly
 
 #[test]
-fn test_json_state_validator_compiles_and_runs() {
-    // Verify the main validator example compiles and can run
+fn test_fetch_single_transaction_example_compiles() {
+    // Verify the main example compiles
     let output = Command::new("cargo")
-        .args(&["build", "--example", "json_state_validator_no_rpc"])
-        .current_dir("/home/nima/code/crypto/rust/revm_tx_simulator")
+        .args(&["build", "--example", "fetch_single_transaction"])
+        .current_dir("/home/nima/code/crypto/rust/tx_processor")
         .output()
         .expect("Failed to execute cargo build");
     
     assert!(output.status.success(), 
-        "json_state_validator_no_rpc failed to compile: {}", 
+        "fetch_single_transaction failed to compile: {}", 
         String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
-fn test_simulate_and_extract_diffs_still_works() {
-    // Ensure we haven't broken the original working example
+fn test_batch_processor_binary_compiles() {
+    // Verify the batch processor binary compiles
     let output = Command::new("cargo")
-        .args(&["build", "--example", "simulate_and_extract_diffs"])
-        .current_dir("/home/nima/code/crypto/rust/revm_tx_simulator")
+        .args(&["build", "--bin", "batch_processor"])
+        .current_dir("/home/nima/code/crypto/rust/tx_processor")
         .output()
         .expect("Failed to execute cargo build");
     
     assert!(output.status.success(), 
-        "simulate_and_extract_diffs failed to compile: {}", 
+        "batch_processor binary failed to compile: {}", 
         String::from_utf8_lossy(&output.stderr));
 }
 
 #[test]
-fn test_accuracy_validation_runner_exists() {
-    // Verify the Python test runner exists and is executable
-    let path = std::path::Path::new("/home/nima/code/crypto/rust/revm_tx_simulator/tests/run_accuracy_tests.py");
-    assert!(path.exists(), "Accuracy test runner script not found");
+fn test_tx_processor_demo_compiles() {
+    // Ensure the main demo example compiles
+    let output = Command::new("cargo")
+        .args(&["build", "--example", "tx_processor_demo"])
+        .current_dir("/home/nima/code/crypto/rust/tx_processor")
+        .output()
+        .expect("Failed to execute cargo build");
     
-    // Check if it's executable (on Unix systems)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = std::fs::metadata(path).expect("Failed to get file metadata");
-        let permissions = metadata.permissions();
-        // Check if owner has execute permission
-        assert!(permissions.mode() & 0o100 != 0 || path.extension().map_or(false, |ext| ext == "py"), 
-            "Test runner should be executable or be a Python script");
-    }
+    assert!(output.status.success(), 
+        "tx_processor_demo failed to compile: {}", 
+        String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn test_comparison_script_exists() {
+    // Verify the Python comparison script exists
+    let path = std::path::Path::new("/home/nima/code/crypto/fetch_and_compare.py");
+    assert!(path.exists(), "Python comparison script not found at expected location");
 }
 
 #[test] 
-fn test_python_validation_script_exists() {
-    // Verify the Python validation script exists
-    let path = std::path::Path::new("/home/nima/code/crypto/rust/mempool_processor/python/core/validate_state_changes.py");
-    assert!(path.exists(), "Python validation script not found at expected location");
+fn test_reth_datadir_accessible() {
+    // Verify the Reth data directory exists
+    let reth_datadir = std::env::var("RETH_DATADIR")
+        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
+    
+    let path = std::path::Path::new(&reth_datadir);
+    assert!(path.exists(), "Reth datadir not found at: {}", reth_datadir);
 }
 
 #[test]
-fn test_validator_example_compiles() {
-    // Just test that the validator example compiles successfully
-    // (We can't easily test execution without a specific transaction hash)
+fn test_library_builds() {
+    // Test that the library builds successfully
     let output = Command::new("cargo")
-        .args(&["build", "--example", "json_state_validator_no_rpc"])
-        .current_dir("/home/nima/code/crypto/rust/revm_tx_simulator")
+        .args(&["build", "--lib"])
+        .current_dir("/home/nima/code/crypto/rust/tx_processor")
         .output()
-        .expect("Failed to build validator example");
+        .expect("Failed to build library");
     
     // Print output for debugging if compilation fails
     if !output.status.success() {
@@ -72,14 +77,12 @@ fn test_validator_example_compiles() {
         eprintln!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
     }
     
-    // The validator should compile successfully
     assert!(output.status.success(), 
-        "Validator example failed to compile: {}", 
+        "Library failed to compile: {}", 
         String::from_utf8_lossy(&output.stderr));
     
-    println!("✅ json_state_validator_no_rpc example compiled successfully");
+    println!("✅ tx_processor library compiled successfully");
 }
 
-// Note: Accuracy tests require proper conda environment setup
-// Run them manually with: ./tests/run_all_tests.sh
-// Or: python3 tests/run_accuracy_tests.py --quick
+// Note: Full integration tests require a running Reth node with synced data
+// Run comparison tests with: python /home/nima/code/crypto/fetch_and_compare.py

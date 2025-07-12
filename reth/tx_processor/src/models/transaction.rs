@@ -46,6 +46,8 @@ pub struct ProcessedTransaction {
     // Addresses and contracts involved
     pub unique_addresses: HashSet<Address>,
     pub erc20_contracts: HashSet<Address>,
+    pub erc721_contracts: HashSet<Address>,
+    pub erc1155_contracts: HashSet<Address>,
     
     // Transfer events
     pub eth_transfers: Vec<ETHTransfer>,
@@ -72,6 +74,7 @@ pub struct ProcessedTransaction {
     
     // Other events and actions
     pub approvals: Vec<ERC20Approval>,
+    pub erc721_approvals: Vec<ERC721Approval>,
     pub mints: Vec<MintAction>,
     pub burns: Vec<BurnAction>,
     pub deposits: Vec<DepositAction>,
@@ -119,6 +122,8 @@ impl ProcessedTransaction {
             bribe_amount: 0.0,
             unique_addresses: HashSet::new(),
             erc20_contracts: HashSet::new(),
+            erc721_contracts: HashSet::new(),
+            erc1155_contracts: HashSet::new(),
             eth_transfers: Vec::new(),
             erc20_transfers: Vec::new(),
             erc721_transfers: Vec::new(),
@@ -139,6 +144,7 @@ impl ProcessedTransaction {
             uniswap_v4_swaps: Vec::new(),
             permit2_events: Vec::new(),
             approvals: Vec::new(),
+            erc721_approvals: Vec::new(),
             mints: Vec::new(),
             burns: Vec::new(),
             deposits: Vec::new(),
