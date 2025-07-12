@@ -26,8 +26,8 @@ async fn main() -> eyre::Result<()> {
     let db_pool = create_pool(&db_config).await?;
     let tx_fetcher = TransactionFetcher::new(db_pool.clone());
     
-    // Pool address from the transaction
-    let pool_address = "0x0e9797f0f05a3de8384d76467e98da03874c86a6";
+    // Pool address from the transaction (checksummed)
+    let pool_address = "0x0e9797F0f05A3dE8384D76467E98DA03874c86a6";
     let liquidity_block = 22885510i64;
     
     println!("Pool address: {}", pool_address);
