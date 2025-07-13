@@ -6,11 +6,11 @@
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
 };
-use reth_tx_simulator::RethDirectTxSimulator;
+use reth_tx_simulator::{DirectTxSimulator, ipc_to_call_request};
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
 use eyre::Result;
-use tracing::{info, error};
+use tracing::{info, error, debug};
 use std::time::{Duration, Instant};
 
 #[tokio::main]
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     println!("======================================\n");
 
     // Initialize
-    let simulator = RethDirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = DirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     let mempool_client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
     mempool_client.start_monitoring().await?;
     
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             
             // Get and decode transaction
             let raw_tx = get_raw_tx(&tx.hash).await?;
-            let signed_tx = decode_transaction(&raw_tx)?;
+            let _signed_tx = decode_transaction(&raw_tx)?;
 
             // Extract transaction info
             let from = tx.tx_data["from"].as_str().unwrap_or("unknown");
@@ -64,18 +64,48 @@ async fn main() -> Result<()> {
             println!("  Value: {}", value);
             println!("  Data:  {} bytes", (input.len() - 2) / 2);
 
-            // Simulate and extract state changes
+            // Convert tx data to CallRequest using existing function
+            let call_request = match ipc_to_call_request(&tx.tx_data) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!("Failed to convert transaction to CallRequest: {}", e);
+                    continue;
+                }
+            };
+            
+            // First try basic simulation with nonce adaptation for performance
+            println!("\n🔍 Attempting simulation with automatic nonce adaptation...");
             let start = Instant::now();
-            match simulator.simulate_with_state_changes(&signed_tx).await {
-                Ok(state_changes) => {
-                    let elapsed = start.elapsed();
-                    println!("\n✅ State extraction completed in {:?}", elapsed);
-                    
-                    // Analyze the state changes
-                    analyze_state_changes(&state_changes);
+            
+            match simulator.simulate_unsigned_transaction(&call_request).await {
+                Ok(basic_result) => {
+                    // If basic simulation succeeds, run detailed simulation
+                    debug!("Basic simulation succeeded, running detailed analysis");
+                    match simulator.simulate_transaction_detailed(call_request, None).await {
+                        Ok(detailed_result) => {
+                            let elapsed = start.elapsed();
+                            println!("\n✅ State extraction completed in {:?}", elapsed);
+                            
+                            // Analyze the state changes
+                            analyze_detailed_state_changes(&detailed_result);
+                        }
+                        Err(e) => {
+                            // This shouldn't happen if basic simulation succeeded
+                            error!("❌ Detailed simulation failed after basic success: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
-                    error!("❌ Failed to extract state changes: {}", e);
+                    let error_str = e.to_string();
+                    if error_str.contains("nonce") && error_str.contains("too high") {
+                        println!("\n⚠️  Skipping: Nonce too high (transaction depends on pending txs)");
+                        println!("    Expected nonce from error: {}", error_str);
+                    } else if error_str.contains("nonce") && error_str.contains("too low") {
+                        // This should have been auto-corrected, but log it anyway
+                        println!("\n⚠️  Nonce too low error not auto-corrected: {}", error_str);
+                    } else {
+                        error!("❌ Failed to simulate: {}", e);
+                    }
                 }
             }
             
@@ -91,71 +121,52 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn analyze_state_changes(state_changes: &serde_json::Value) {
-    if let Some(obj) = state_changes.as_object() {
-        // Check for diff mode (pre/post format)
-        if let (Some(pre), Some(post)) = (obj.get("pre"), obj.get("post")) {
-            println!("\n📊 State Changes (Diff Mode):");
+fn analyze_detailed_state_changes(result: &reth_tx_simulator::DetailedSimulationResult) {
+    println!("\n📊 Detailed State Changes:");
+    println!("  Transaction success: {}", result.success);
+    println!("  Gas used: {}", result.gas_used);
+    
+    if let Some(reason) = &result.revert_reason {
+        println!("  Revert reason: {}", reason);
+    }
+    
+    println!("  Affected addresses: {}", result.state_changes.len());
+    
+    // Show detailed changes for first few addresses
+    for (i, (addr, changes)) in result.state_changes.iter().enumerate() {
+        if i < 3 {
+            println!("\n  📍 Address {}: 0x{:x}", i + 1, addr);
+            println!("     ETH change: {:.6} ETH", changes.eth_net);
             
-            let pre_accounts = pre.as_object().map(|o| o.len()).unwrap_or(0);
-            let post_accounts = post.as_object().map(|o| o.len()).unwrap_or(0);
-            
-            println!("  Pre-state accounts:  {}", pre_accounts);
-            println!("  Post-state accounts: {}", post_accounts);
-            println!("  New accounts:        {}", post_accounts.saturating_sub(pre_accounts));
-            
-            // Analyze specific changes
-            if let Some(post_obj) = post.as_object() {
-                let mut total_storage_changes = 0;
-                let mut contracts_with_storage = 0;
-                
-                for (addr, account) in post_obj.iter() {
-                    if let Some(account_obj) = account.as_object() {
-                        // Count storage changes
-                        if let Some(storage) = account_obj.get("storage").and_then(|s| s.as_object()) {
-                            if !storage.is_empty() {
-                                contracts_with_storage += 1;
-                                total_storage_changes += storage.len();
-                            }
-                        }
-                        
-                        // Show first few accounts in detail
-                        if contracts_with_storage <= 2 && total_storage_changes > 0 {
-                            println!("\n  📍 Account: {}", addr);
-                            
-                            if let Some(balance) = account_obj.get("balance") {
-                                println!("     Balance: {}", balance);
-                            }
-                            
-                            if let Some(storage) = account_obj.get("storage").and_then(|s| s.as_object()) {
-                                println!("     Storage slots: {}", storage.len());
-                                for (i, (slot, value)) in storage.iter().enumerate() {
-                                    if i < 3 {
-                                        println!("       {}: {}", slot, value);
-                                    }
-                                }
-                            }
-                        }
+            if !changes.token_net.is_empty() {
+                println!("     Token changes: {}", changes.token_net.len());
+                for (j, (token, amount)) in changes.token_net.iter().enumerate() {
+                    if j < 3 {
+                        println!("       {}: {}", token, amount);
                     }
                 }
-                
-                println!("\n  📈 Summary:");
-                println!("     Contracts with storage changes: {}", contracts_with_storage);
-                println!("     Total storage slots modified:   {}", total_storage_changes);
-            }
-        } else {
-            // Simple format - just touched accounts
-            println!("\n📊 Touched Accounts: {}", obj.len());
-            for (i, (addr, _)) in obj.iter().enumerate() {
-                if i < 5 {
-                    println!("  - {}", addr);
+                if changes.token_net.len() > 3 {
+                    println!("       ... and {} more tokens", changes.token_net.len() - 3);
                 }
-            }
-            if obj.len() > 5 {
-                println!("  ... and {} more", obj.len() - 5);
             }
         }
     }
+    
+    if result.state_changes.len() > 3 {
+        println!("\n  ... and {} more addresses affected", result.state_changes.len() - 3);
+    }
+    
+    // Summary statistics
+    let total_eth_moved: f64 = result.state_changes.values()
+        .map(|changes| changes.eth_net.abs())
+        .sum();
+    let total_tokens_affected: usize = result.state_changes.values()
+        .map(|changes| changes.token_net.len())
+        .sum();
+    
+    println!("\n  📈 Summary:");
+    println!("     Total ETH movement: {:.6} ETH", total_eth_moved / 2.0); // Divide by 2 since we count both sender and receiver
+    println!("     Total token interactions: {}", total_tokens_affected);
 }
 
 fn decode_transaction(raw_tx: &str) -> Result<TransactionSigned> {
@@ -163,6 +174,7 @@ fn decode_transaction(raw_tx: &str) -> Result<TransactionSigned> {
     let raw_bytes = hex::decode(hex_str)?;
     Ok(TransactionSigned::decode(&mut raw_bytes.as_slice())?)
 }
+
 
 async fn get_raw_tx(hash: &str) -> Result<String> {
     use jsonrpsee::http_client::{HttpClientBuilder, HttpClient};
