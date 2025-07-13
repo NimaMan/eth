@@ -1,14 +1,17 @@
 use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use clap::Parser;
 use eyre::Result;
 use tracing::{info, warn};
 use tokio::time;
+use tokio::signal;
 
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
 use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::tx_simulator::SimulatorProcessor;
-use mempool_processor::pool_subscriber::PoolSubscriber;
+use mempool_processor::token_tracking::TokenTrackingSubscriber;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -29,9 +32,23 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     
-    // Initialize logging
+    // Set up shutdown signal handler
+    let shutdown = setup_shutdown_handler();
+    
+    // Initialize logging with daily rotation
+    use tracing_appender::rolling::{RollingFileAppender, Rotation};
+    let log_dir = std::path::Path::new("logs/mempool_signal_detector");
+    std::fs::create_dir_all(log_dir)?;
+    
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("mempool_signal_detector")
+        .filename_suffix("log")
+        .build(log_dir)?;
+    
     tracing_subscriber::fmt()
         .with_target(false)
+        .with_writer(file_appender)
         .init();
     
     info!("🚀 Starting Mempool Signal Detection Service");
@@ -44,9 +61,14 @@ async fn main() -> Result<()> {
     ipc_client.start().await?;
     info!("⚡ IPC subscription active!");
     
-    // Initialize function detector
+    // Initialize token tracker and cache first
+    info!("📊 Initializing token tracker...");
+    let mut token_tracker = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
+    let token_cache = token_tracker.get_cache();
+    
+    // Initialize function detector with token cache
     info!("🔍 Initializing function detector...");
-    let function_detector = FunctionDetector::new();
+    let function_detector = FunctionDetector::new_with_cache(Some(token_cache.clone()));
     
     // Get the log directory from function detector to share with simulator
     let log_dir = function_detector.get_log_dir().to_path_buf();
@@ -55,25 +77,25 @@ async fn main() -> Result<()> {
     info!("🔄 Initializing simulator processor...");
     let mut simulator_processor = SimulatorProcessor::new(&args.reth_datadir, log_dir)?;
     
-    // Initialize pool subscriber and cache
-    info!("📊 Initializing pool subscriber...");
-    let mut pool_subscriber = PoolSubscriber::new(0.1); // 0.1 ETH threshold
-    let pool_cache = pool_subscriber.get_pool_cache();
-    
-    // Clone pool cache for simulator processor
-    let pool_cache_for_simulator = (*pool_cache).clone();
+    // Set up pool cache for simulator processor
+    let pool_cache_for_simulator = token_cache.pools.clone();
     simulator_processor.set_pool_cache(pool_cache_for_simulator);
     
-    // Start listening for pool updates in background (includes initial pool request)
+    // Set up token cache for creator analysis
+    simulator_processor.set_token_cache(token_cache.clone());
+    
+    // Start listening for token updates in background (includes initial data request)
     tokio::spawn(async move {
-        if let Err(e) = pool_subscriber.start_listening().await {
-            warn!("Pool subscriber error: {}", e);
+        if let Err(e) = token_tracker.start_listening().await {
+            warn!("Token tracker error: {}", e);
         }
     });
     
-    // Give it a moment to load initial pools
+    // Give it a moment to load initial data
     tokio::time::sleep(Duration::from_secs(2)).await;
-    info!("✅ Pool cache initialized with {} pools", pool_cache.get_pool_count());
+    info!("✅ Token cache initialized with {} pools, {} creators", 
+          token_cache.pools.get_pool_count().await, 
+          token_cache.creators.get_creator_count().await);
     
     // Performance metrics
     info!("🎯 Starting main processing loop...");
@@ -86,7 +108,13 @@ async fn main() -> Result<()> {
     
     let mut consecutive_empty = 0u64;
     
+    // Main processing loop with shutdown handling
     loop {
+        // Check for shutdown signal
+        if shutdown.load(Ordering::Relaxed) {
+            info!("🛑 Shutdown signal received, stopping gracefully...");
+            break;
+        }
         // Get new transactions from IPC
         let new_txs = ipc_client.get_transactions_instant(100).await;
         
@@ -136,7 +164,7 @@ async fn main() -> Result<()> {
             } else { 0.0 };
             
             let max_detection = detection_latencies_ms.iter()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .copied()
                 .unwrap_or(0.0);
             
@@ -145,7 +173,7 @@ async fn main() -> Result<()> {
             } else { 0.0 };
             
             let max_function_detection = function_detection_times_ms.iter()
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .copied()
                 .unwrap_or(0.0);
             
@@ -162,7 +190,7 @@ async fn main() -> Result<()> {
             function_detector.log_stats_summary();
             
             // Log simulator processor statistics
-            simulator_processor.log_performance_summary();
+            simulator_processor.log_performance_summary().await;
             
             // Clear timing vectors
             detection_latencies_ms.clear();
@@ -170,4 +198,61 @@ async fn main() -> Result<()> {
             last_report = Instant::now();
         }
     }
+    
+    // Graceful shutdown
+    info!("📊 Final statistics before shutdown:");
+    info!("   Total transactions processed: {}", total_processed);
+    simulator_processor.log_performance_summary().await;
+    
+    // Flush any remaining batches
+    if let Err(e) = simulator_processor.flush_batch().await {
+        warn!("Failed to flush final batch: {}", e);
+    }
+    
+    info!("✅ Mempool signal detector shutdown complete");
+    Ok(())
+}
+
+/// Sets up signal handlers for graceful shutdown
+fn setup_shutdown_handler() -> Arc<AtomicBool> {
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    
+    tokio::spawn(async move {
+        let ctrl_c = async {
+            signal::ctrl_c()
+                .await
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to install Ctrl+C handler: {}", e);
+                    std::process::exit(1);
+                });
+        };
+        
+        #[cfg(unix)]
+        let terminate = async {
+            match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+                Ok(mut stream) => stream.recv().await,
+                Err(e) => {
+                    eprintln!("Failed to install SIGTERM handler: {}", e);
+                    std::future::pending().await
+                }
+            };
+        };
+        
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+        
+        tokio::select! {
+            _ = ctrl_c => {
+                info!("Received Ctrl+C signal");
+            }
+            _ = terminate => {
+                info!("Received SIGTERM signal");
+            }
+        }
+        
+        shutdown_clone.store(true, Ordering::Relaxed);
+    });
+    
+    shutdown
 }

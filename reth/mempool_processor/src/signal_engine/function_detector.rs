@@ -5,7 +5,7 @@
 
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use tracing::{info, warn, error};
 use std::collections::HashMap;
@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use chrono::Utc;
 use zmq::{Context, Socket};
 use serde::{Serialize, Deserialize};
+use crate::token_tracking::TokenTrackingCache;
+use crate::common::address::checksum_address;
 
 lazy_static! {
     /// Log directory path - initialized once at startup
@@ -47,6 +49,19 @@ lazy_static! {
         
         Mutex::new(file)
     };
+    
+    /// Creator actions log file
+    static ref CREATOR_ACTIONS_LOG: Mutex<std::fs::File> = {
+        let log_path = LOG_DIR.join("creator_actions.log");
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .expect("Failed to open creator actions log file");
+        
+        Mutex::new(file)
+    };
+    
     
     /// Main signal detector log file
     static ref SIGNAL_DETECTOR_LOG: Mutex<std::fs::File> = {
@@ -98,6 +113,7 @@ pub struct FunctionStats {
     pub liquidity_removals: u64,
     pub trading_enabled: u64,
     pub swaps: u64,
+    pub creator_actions: u64,
     pub other_functions: u64,
 }
 
@@ -123,6 +139,8 @@ pub struct TransactionWithFunctions {
     pub functions: Vec<String>,
     pub has_liquidity_removal: bool,
     pub has_trading_enabled: bool,
+    pub has_creator_action: bool,
+    pub creator_action_name: Option<String>,
 }
 
 /// Function detector that categorizes transactions by their function signatures
@@ -130,10 +148,16 @@ pub struct FunctionDetector {
     liquidity_removal: LiquidityRemovalDetector,
     trading_enabled: TradingEnabledDetector,
     swap: SwapDetector,
+    creator_action: CreatorActionDetector,
+    token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl FunctionDetector {
     pub fn new() -> Self {
+        Self::new_with_cache(None)
+    }
+    
+    pub fn new_with_cache(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
         info!("🔍 Function detector initialized");
         info!("📁 Log directory: {}", LOG_DIR.display());
         
@@ -153,14 +177,15 @@ impl FunctionDetector {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
             swap: SwapDetector::new(),
+            creator_action: CreatorActionDetector::new(),
+            token_cache,
         }
     }
     
     /// Check if transaction is a liquidity removal (simplified)
     pub fn is_liquidity_removal(&self, input_data: &[u8]) -> Option<&'static str> {
         if input_data.len() >= 4 {
-            let selector = hex::encode(&input_data[0..4]);
-            self.liquidity_removal.detect(&selector)
+            self.liquidity_removal.detect(&input_data[0..4])
         } else {
             None
         }
@@ -172,20 +197,25 @@ impl FunctionDetector {
             return None;
         }
         
-        let selector = hex::encode(&tx.input[0..4]);
+        let selector = &tx.input[0..4];
         
         // Check liquidity removal
-        if let Some(function_name) = self.liquidity_removal.detect(&selector) {
+        if let Some(function_name) = self.liquidity_removal.detect(selector) {
             return Some(function_name.to_string());
         }
         
         // Check trading enabled
-        if let Some(function_name) = self.trading_enabled.detect(&selector) {
+        if let Some(function_name) = self.trading_enabled.detect(selector) {
             return Some(function_name.to_string());
         }
         
         // Check swaps
-        if let Some(function_name) = self.swap.detect(&selector) {
+        if let Some(function_name) = self.swap.detect(selector) {
+            return Some(function_name.to_string());
+        }
+        
+        // Check creator actions
+        if let Some(function_name) = self.creator_action.detect(selector) {
             return Some(function_name.to_string());
         }
         
@@ -217,6 +247,8 @@ impl FunctionDetector {
             let mut functions = Vec::new();
             let mut has_liquidity_removal = false;
             let mut has_trading_enabled = false;
+            let mut has_creator_action = false;
+            let mut creator_action_name = None;
             
             // Skip if no input data
             if tx.input.len() < 4 {
@@ -225,26 +257,35 @@ impl FunctionDetector {
                     functions,
                     has_liquidity_removal,
                     has_trading_enabled,
+                    has_creator_action,
+                    creator_action_name,
                 };
             }
             
-            let selector = hex::encode(&tx.input[0..4]);
+            let selector = &tx.input[0..4];
             
             // Check liquidity removal
-            if let Some(function_name) = self.liquidity_removal.detect(&selector) {
+            if let Some(function_name) = self.liquidity_removal.detect(selector) {
                 functions.push(function_name.to_string());
                 has_liquidity_removal = true;
             }
             
             // Check trading enabled
-            if let Some(function_name) = self.trading_enabled.detect(&selector) {
+            if let Some(function_name) = self.trading_enabled.detect(selector) {
                 functions.push(function_name.to_string());
                 has_trading_enabled = true;
             }
             
             // Check swaps
-            if let Some(function_name) = self.swap.detect(&selector) {
+            if let Some(function_name) = self.swap.detect(selector) {
                 functions.push(function_name.to_string());
+            }
+            
+            // Check creator actions
+            if let Some(function_name) = self.creator_action.detect(selector) {
+                functions.push(function_name.to_string());
+                has_creator_action = true;
+                creator_action_name = Some(function_name.to_string());
             }
             
             // Still call the existing detection for logging and ZMQ publishing
@@ -255,6 +296,8 @@ impl FunctionDetector {
                 functions,
                 has_liquidity_removal,
                 has_trading_enabled,
+                has_creator_action,
+                creator_action_name,
             }
         }).collect()
     }
@@ -265,18 +308,25 @@ impl FunctionDetector {
             return;
         }
         
-        let selector = hex::encode(&input_data[0..4]);
-        let mut stats = FUNCTION_STATS.lock().unwrap();
+        let selector_bytes = &input_data[0..4];
+        let mut stats = match FUNCTION_STATS.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                error!("Failed to acquire function stats lock: {}", e);
+                return;
+            }
+        };
         stats.total_checked += 1;
         
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
         
         // Check liquidity removal first
-        if let Some(function_name) = self.liquidity_removal.detect(&selector) {
+        if let Some(function_name) = self.liquidity_removal.detect(selector_bytes) {
             stats.liquidity_removals += 1;
             info!("💧 LIQUIDITY REMOVAL: {} in tx {}", function_name, tx_hash);
             
             // Create signal alert
+            let selector_hex = hex::encode(selector_bytes);
             let signal = SignalAlert {
                 alert_type: "liquidity_removal".to_string(),
                 function_name: function_name.to_string(),
@@ -285,7 +335,7 @@ impl FunctionDetector {
                 to_address: to.to_string(),
                 value: value.to_string(),
                 gas_price: gas_price.to_string(),
-                selector: selector.clone(),
+                selector: selector_hex.clone(),
                 timestamp: timestamp.to_string(),
                 detection_latency_us: 0, // Will be set by receiver
             };
@@ -297,7 +347,7 @@ impl FunctionDetector {
             if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
                 let _ = writeln!(log_file, 
                     "[{}] TX: {} | From: {} | To: {} | Value: {} | GasPrice: {} | Function: {} | Selector: {}", 
-                    timestamp, tx_hash, from, to, value, gas_price, function_name, selector
+                    timestamp, tx_hash, from, to, value, gas_price, function_name, selector_hex
                 );
                 let _ = log_file.flush();
             }
@@ -305,11 +355,34 @@ impl FunctionDetector {
         }
         
         // Check trading enabled
-        if let Some(function_name) = self.trading_enabled.detect(&selector) {
+        if let Some(function_name) = self.trading_enabled.detect(selector_bytes) {
             stats.trading_enabled += 1;
             info!("🎯 TRADING ENABLED: {} in tx {}", function_name, tx_hash);
             
+            // Try to get the actual token address from creator cache
+            let token_address = if let Some(ref cache) = self.token_cache {
+                // Use tokio runtime to run async function
+                let from_checksum = checksum_address(&from.trim_start_matches("0x"));
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        cache.creators.get_token_by_creator(&from_checksum).await
+                    })
+                })
+            } else {
+                None
+            };
+            
+            // Use found token address or fall back to 'to' address or empty
+            let token_addr = token_address.unwrap_or_else(|| {
+                if to != "contract_creation" {
+                    to.to_string()
+                } else {
+                    String::new()
+                }
+            });
+            
             // Create signal alert
+            let selector_hex = hex::encode(selector_bytes);
             let signal = SignalAlert {
                 alert_type: "trading_enabled".to_string(),
                 function_name: function_name.to_string(),
@@ -318,7 +391,7 @@ impl FunctionDetector {
                 to_address: to.to_string(),
                 value: value.to_string(),
                 gas_price: gas_price.to_string(),
-                selector: selector.clone(),
+                selector: selector_hex.clone(),
                 timestamp: timestamp.to_string(),
                 detection_latency_us: 0, // Will be set by receiver
             };
@@ -326,11 +399,11 @@ impl FunctionDetector {
             // Publish via ZMQ
             self.publish_signal(&signal);
             
-            // Log to trading enabled file with full transaction details
+            // Log to trading enabled file with pattern-friendly format including token address
             if let Ok(mut log_file) = TRADING_ENABLED_LOG.lock() {
                 let _ = writeln!(log_file, 
-                    "[{}] TX: {} | From: {} | To: {} | Value: {} | GasPrice: {} | Function: {} | Selector: {}", 
-                    timestamp, tx_hash, from, to, value, gas_price, function_name, selector
+                    "[{}] {} | {} | {} | {}", 
+                    timestamp, function_name, token_addr, from, tx_hash
                 );
                 let _ = log_file.flush();
             }
@@ -338,8 +411,42 @@ impl FunctionDetector {
         }
         
         // Check swaps - we count them but don't log/alert
-        if let Some(_function_name) = self.swap.detect(&selector) {
+        if let Some(_function_name) = self.swap.detect(selector_bytes) {
             stats.swaps += 1;
+            return;
+        }
+        
+        // Check creator actions - important for early warnings
+        if let Some(function_name) = self.creator_action.detect(selector_bytes) {
+            stats.creator_actions += 1;
+            info!("🚨 CREATOR ACTION: {} in tx {}", function_name, tx_hash);
+            
+            // Create signal alert
+            let selector_hex = hex::encode(selector_bytes);
+            let signal = SignalAlert {
+                alert_type: "creator_action".to_string(),
+                function_name: function_name.to_string(),
+                tx_hash: tx_hash.to_string(),
+                from_address: from.to_string(),
+                to_address: to.to_string(),
+                value: value.to_string(),
+                gas_price: gas_price.to_string(),
+                selector: selector_hex.clone(),
+                timestamp: timestamp.to_string(),
+                detection_latency_us: 0,
+            };
+            
+            // Publish via ZMQ
+            self.publish_signal(&signal);
+            
+            // Log to creator actions file with pattern-friendly format
+            if let Ok(mut log_file) = CREATOR_ACTIONS_LOG.lock() {
+                let _ = writeln!(log_file, 
+                    "[{}] {} | {} | {} | {}", 
+                    timestamp, function_name, to, from, tx_hash
+                );
+                let _ = log_file.flush();
+            }
             return;
         }
         
@@ -354,7 +461,13 @@ impl FunctionDetector {
     
     /// Get statistics
     pub fn get_stats(&self) -> FunctionStats {
-        FUNCTION_STATS.lock().unwrap().clone()
+        match FUNCTION_STATS.lock() {
+            Ok(guard) => guard.clone(),
+            Err(e) => {
+                error!("Failed to acquire function stats lock: {}", e);
+                FunctionStats::default()
+            }
+        }
     }
     
     /// Publish signal via ZMQ
@@ -391,6 +504,7 @@ impl FunctionDetector {
         info!("   Total transactions checked: {}", stats.total_checked);
         info!("   Liquidity removals: {}", stats.liquidity_removals);
         info!("   Trading enabled: {}", stats.trading_enabled);
+        info!("   Creator actions: {}", stats.creator_actions);
         info!("   Swaps: {}", stats.swaps);
         info!("   Other functions: {}", stats.other_functions);
     }
@@ -402,8 +516,7 @@ impl FunctionDetector {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
         
         if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
-            let _ = writeln!(log_file, "\n[{}] === SIGNAL DETECTOR PERFORMANCE ===", timestamp);
-            let _ = writeln!(log_file, "  Total Processed: {}", total_processed);
+            let _ = writeln!(log_file, "\n[{}] === SIGNAL DETECTOR PERFORMANCE ({} processed) ===", timestamp, total_processed);
             let _ = writeln!(log_file, "  IPC Detection Latency: Average: {:.3}ms, Maximum: {:.3}ms", 
                            avg_detection_ms, max_detection_ms);
             let _ = writeln!(log_file, "  Function Detection Time: Average: {:.3}ms, Maximum: {:.3}ms", 
@@ -415,7 +528,7 @@ impl FunctionDetector {
 
 /// Detector for liquidity removal functions
 struct LiquidityRemovalDetector {
-    signatures: HashMap<&'static str, &'static str>,
+    signatures: HashMap<[u8; 4], &'static str>,
 }
 
 impl LiquidityRemovalDetector {
@@ -423,22 +536,22 @@ impl LiquidityRemovalDetector {
         let mut signatures = HashMap::new();
         
         // Uniswap V2 Router
-        signatures.insert("02751cec", "removeLiquidityETH");
-        signatures.insert("baa2abde", "removeLiquidity");
-        signatures.insert("af2979eb", "removeLiquidityETHSupportingFeeOnTransferTokens");
-        signatures.insert("5b0d5984", "removeLiquidityETHWithPermit");
-        signatures.insert("ded9382a", "removeLiquidityETHWithPermitSupportingFeeOnTransferTokens");
+        signatures.insert(hex_to_bytes("02751cec"), "removeLiquidityETH");
+        signatures.insert(hex_to_bytes("baa2abde"), "removeLiquidity");
+        signatures.insert(hex_to_bytes("af2979eb"), "removeLiquidityETHSupportingFeeOnTransferTokens");
+        signatures.insert(hex_to_bytes("5b0d5984"), "removeLiquidityETHWithPermit");
+        signatures.insert(hex_to_bytes("ded9382a"), "removeLiquidityETHWithPermitSupportingFeeOnTransferTokens");
         
         // Uniswap V3 Position Manager
-        signatures.insert("0c49ccbe", "decreaseLiquidity");
+        signatures.insert(hex_to_bytes("0c49ccbe"), "decreaseLiquidity");
         
         // Balancer
-        signatures.insert("8bdb3913", "exitPool");
+        signatures.insert(hex_to_bytes("8bdb3913"), "exitPool");
         
         // Curve
-        signatures.insert("1a4d01d2", "remove_liquidity");
-        signatures.insert("517a55a3", "remove_liquidity_one_coin");
-        signatures.insert("5b36389c", "remove_liquidity_imbalance");
+        signatures.insert(hex_to_bytes("1a4d01d2"), "remove_liquidity");
+        signatures.insert(hex_to_bytes("517a55a3"), "remove_liquidity_one_coin");
+        signatures.insert(hex_to_bytes("5b36389c"), "remove_liquidity_imbalance");
         
         // SushiSwap (same as Uniswap V2)
         // PancakeSwap (same as Uniswap V2)
@@ -446,38 +559,73 @@ impl LiquidityRemovalDetector {
         Self { signatures }
     }
     
-    fn detect(&self, selector: &str) -> Option<&'static str> {
-        self.signatures.get(selector).copied()
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
+    }
+}
+
+/// Helper function to convert hex string to 4-byte array at compile time
+const fn hex_to_bytes(hex: &'static str) -> [u8; 4] {
+    let bytes = hex.as_bytes();
+    let mut result = [0u8; 4];
+    let mut i = 0;
+    while i < 4 {
+        let high = hex_char_to_byte(bytes[i * 2]);
+        let low = hex_char_to_byte(bytes[i * 2 + 1]);
+        result[i] = (high << 4) | low;
+        i += 1;
+    }
+    result
+}
+
+const fn hex_char_to_byte(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => 0,
     }
 }
 
 /// Detector for trading enabled functions
 struct TradingEnabledDetector {
-    signatures: HashMap<&'static str, &'static str>,
+    signatures: HashMap<[u8; 4], &'static str>,
 }
 
 impl TradingEnabledDetector {
     fn new() -> Self {
         let mut signatures = HashMap::new();
         
-        // Trading enabled functions
-        signatures.insert("8a8c523c", "setTradingEnabled");
-        signatures.insert("8ee88c53", "enableTrading");
-        signatures.insert("c9567bf9", "openTrading");
-        signatures.insert("fb201b1d", "startTrading");
+        // Confirmed trading enabled functions
+        signatures.insert(hex_to_bytes("8a8c523c"), "enableTrading");  // ✓ Confirmed
+        signatures.insert(hex_to_bytes("c9567bf9"), "openTrading");    // ✓ Confirmed
+        signatures.insert(hex_to_bytes("8ee88c53"), "enableTrading");
+        signatures.insert(hex_to_bytes("fb201b1d"), "startTrading");
         
         Self { signatures }
     }
     
-    fn detect(&self, selector: &str) -> Option<&'static str> {
-        self.signatures.get(selector).copied()
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
     }
 }
 
 
 /// Detector for swap functions
 struct SwapDetector {
-    signatures: HashMap<&'static str, &'static str>,
+    signatures: HashMap<[u8; 4], &'static str>,
 }
 
 impl SwapDetector {
@@ -485,43 +633,49 @@ impl SwapDetector {
         let mut signatures = HashMap::new();
         
         // Uniswap V2/V3 and forks
-        signatures.insert("38ed1739", "swapExactTokensForTokens");
-        signatures.insert("8803dbee", "swapTokensForExactTokens");
-        signatures.insert("7ff36ab5", "swapExactETHForTokens");
-        signatures.insert("4a25d94a", "swapTokensForExactETH");
-        signatures.insert("18cbafe5", "swapExactTokensForETH");
-        signatures.insert("fb3bdb41", "swapETHForExactTokens");
-        signatures.insert("791ac947", "swapExactTokensForETHSupportingFeeOnTransferTokens");
-        signatures.insert("b6f9de95", "swapExactETHForTokensSupportingFeeOnTransferTokens");
+        signatures.insert(hex_to_bytes("38ed1739"), "swapExactTokensForTokens");
+        signatures.insert(hex_to_bytes("8803dbee"), "swapTokensForExactTokens");
+        signatures.insert(hex_to_bytes("7ff36ab5"), "swapExactETHForTokens");
+        signatures.insert(hex_to_bytes("4a25d94a"), "swapTokensForExactETH");
+        signatures.insert(hex_to_bytes("18cbafe5"), "swapExactTokensForETH");
+        signatures.insert(hex_to_bytes("fb3bdb41"), "swapETHForExactTokens");
+        signatures.insert(hex_to_bytes("791ac947"), "swapExactTokensForETHSupportingFeeOnTransferTokens");
+        signatures.insert(hex_to_bytes("b6f9de95"), "swapExactETHForTokensSupportingFeeOnTransferTokens");
         
         // Uniswap V3
-        signatures.insert("414bf389", "exactInputSingle");
-        signatures.insert("db3e2198", "exactOutputSingle");
-        signatures.insert("c04b8d59", "exactInput");
-        signatures.insert("f28c0498", "exactOutput");
+        signatures.insert(hex_to_bytes("414bf389"), "exactInputSingle");
+        signatures.insert(hex_to_bytes("db3e2198"), "exactOutputSingle");
+        signatures.insert(hex_to_bytes("c04b8d59"), "exactInput");
+        signatures.insert(hex_to_bytes("f28c0498"), "exactOutput");
         
         // 1inch
-        signatures.insert("2e95b6c8", "swap");
-        signatures.insert("7c025200", "swap_1inch_v2");
-        signatures.insert("e449022e", "uniswapV3Swap");
+        signatures.insert(hex_to_bytes("2e95b6c8"), "swap");
+        signatures.insert(hex_to_bytes("7c025200"), "swap_1inch_v2");
+        signatures.insert(hex_to_bytes("e449022e"), "uniswapV3Swap");
         
         // 0x Protocol
-        signatures.insert("d9627aa4", "sellToUniswap");
-        signatures.insert("3598d8ab", "sellToLiquidityProvider");
+        signatures.insert(hex_to_bytes("d9627aa4"), "sellToUniswap");
+        signatures.insert(hex_to_bytes("3598d8ab"), "sellToLiquidityProvider");
         
         // Curve
-        signatures.insert("3df02124", "exchange");
-        signatures.insert("5b41b908", "exchange_underlying");
+        signatures.insert(hex_to_bytes("3df02124"), "exchange");
+        signatures.insert(hex_to_bytes("5b41b908"), "exchange_underlying");
         
         // Balancer
-        signatures.insert("52bbbe29", "swap_balancer");
-        signatures.insert("945bcec9", "batchSwap");
+        signatures.insert(hex_to_bytes("52bbbe29"), "swap_balancer");
+        signatures.insert(hex_to_bytes("945bcec9"), "batchSwap");
         
         Self { signatures }
     }
     
-    fn detect(&self, selector: &str) -> Option<&'static str> {
-        self.signatures.get(selector).copied()
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
     }
 }
 
@@ -532,7 +686,83 @@ impl Clone for FunctionStats {
             liquidity_removals: self.liquidity_removals,
             trading_enabled: self.trading_enabled,
             swaps: self.swaps,
+            creator_actions: self.creator_actions,
             other_functions: self.other_functions,
+        }
+    }
+}
+
+/// Detector for creator/owner actions that could indicate rug pulls
+struct CreatorActionDetector {
+    signatures: HashMap<[u8; 4], &'static str>,
+}
+
+impl CreatorActionDetector {
+    fn new() -> Self {
+        let mut signatures = HashMap::new();
+        
+        // Fee manipulation functions
+        signatures.insert(hex_to_bytes("8ee88c53"), "setFee");
+        signatures.insert(hex_to_bytes("bce38bd7"), "setTaxPercent");
+        signatures.insert(hex_to_bytes("c0d78655"), "setFeePercent");
+        signatures.insert(hex_to_bytes("69fe0e2d"), "setBaseFee");
+        signatures.insert(hex_to_bytes("4a74bb02"), "setSwapFee");
+        signatures.insert(hex_to_bytes("b921e163"), "setSellFee");
+        signatures.insert(hex_to_bytes("dd62ed3e"), "setBuyFee");
+        signatures.insert(hex_to_bytes("f2cc0c18"), "setTaxFeePercent");
+        
+        // Liquidity removal (some overlap with liquidity detector but from owner perspective)
+        signatures.insert(hex_to_bytes("e9fad8ee"), "removeLiquidity");
+        signatures.insert(hex_to_bytes("02751cec"), "removeLiquidityETH");
+        signatures.insert(hex_to_bytes("baa2abde"), "removeLiquidity");
+        
+        // Trading control functions
+        signatures.insert(hex_to_bytes("8456cb59"), "pause");
+        signatures.insert(hex_to_bytes("3f4ba83a"), "unpause");
+        signatures.insert(hex_to_bytes("5c975abb"), "paused");
+        signatures.insert(hex_to_bytes("1694505e"), "disableTrading");
+        signatures.insert(hex_to_bytes("a0712d68"), "stopTrading");
+        signatures.insert(hex_to_bytes("e884f260"), "setTradingEnabled");
+        
+        // Ownership functions
+        signatures.insert(hex_to_bytes("f2fde38b"), "transferOwnership");
+        signatures.insert(hex_to_bytes("715018a6"), "renounceOwnership");
+        signatures.insert(hex_to_bytes("13af4035"), "setOwner");
+        
+        // Blacklist/whitelist functions
+        signatures.insert(hex_to_bytes("9b19251a"), "blacklist");
+        signatures.insert(hex_to_bytes("344e9ba1"), "addToBlacklist");
+        signatures.insert(hex_to_bytes("e4997dc5"), "removeFromBlacklist");
+        signatures.insert(hex_to_bytes("1a895266"), "setBlacklisted");
+        signatures.insert(hex_to_bytes("0ecb93c0"), "addBlacklist");
+        signatures.insert(hex_to_bytes("f3bdc228"), "removeBlacklist");
+        
+        // Max transaction/wallet limits
+        signatures.insert(hex_to_bytes("8da5cb5b"), "setMaxTx");
+        signatures.insert(hex_to_bytes("f8b45b05"), "setMaxWallet");
+        signatures.insert(hex_to_bytes("d543dbeb"), "setMaxBuyAmount");
+        signatures.insert(hex_to_bytes("7571336a"), "setMaxSellAmount");
+        
+        // Token manipulation
+        signatures.insert(hex_to_bytes("42966c68"), "burn");
+        signatures.insert(hex_to_bytes("a0712d68"), "mint");
+        
+        // Emergency/recovery functions
+        signatures.insert(hex_to_bytes("db006a75"), "emergencyWithdraw");
+        signatures.insert(hex_to_bytes("69328dec"), "recoverToken");
+        signatures.insert(hex_to_bytes("9e281a98"), "withdrawToken");
+        signatures.insert(hex_to_bytes("f14210a6"), "withdrawETH");
+        
+        Self { signatures }
+    }
+    
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
         }
     }
 }
