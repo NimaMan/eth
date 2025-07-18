@@ -126,7 +126,7 @@ impl RetryExecutor {
             // Wait for confirmation with timeout
             let receipt = tokio::time::timeout(
                 Duration::from_secs(120),
-                pending_tx.await
+                pending_tx
             )
             .await
             .map_err(|_| KartalError::Execution(ExecutionError::DeadlineExceeded))?

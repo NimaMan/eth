@@ -274,8 +274,14 @@ impl TransactionExecutor {
         let result = match alert.action {
             Action::Sell => self.execute_sell(signal_id, alert.clone(), &mut metrics).await,
             Action::Buy => self.execute_buy(signal_id, alert.clone(), &mut metrics).await,
-            Action::AddLiquidity => self.execute_add_liquidity(signal_id, alert.clone(), &mut metrics).await,
-            Action::RemoveLiquidity => self.execute_remove_liquidity(signal_id, alert.clone(), &mut metrics).await,
+            Action::AddLiquidity => {
+                // TODO: Implement liquidity operations
+                return Err("AddLiquidity not yet implemented".into());
+            }
+            Action::RemoveLiquidity => {
+                // TODO: Implement liquidity operations
+                return Err("RemoveLiquidity not yet implemented".into());
+            }
         };
         
         metrics.total_ms = start_time.elapsed().as_millis() as u64;
@@ -811,6 +817,13 @@ impl TransactionExecutor {
         self.wallet.is_unlocked().await
     }
     
+    /* TODO: Implement liquidity operations
+    // These functions are commented out due to:
+    // 1. RankingResult field mismatches (execution_rank, estimated_arrival_ms don't exist)
+    // 2. Missing self.tx_builder field
+    // 3. Incomplete implementation
+    
+    /*
     /// Execute add liquidity action
     async fn execute_add_liquidity(
         &self,
@@ -825,7 +838,7 @@ impl TransactionExecutor {
         
         // 1. Get pool information
         let pool_info = self.pool_factory.get_pool_info(&alert.pool_address).await?;
-        metrics.pool_query_ms = checkpoint.elapsed().as_millis() as u64;
+        // Note: pool_query_ms metric removed - add to ExecutionMetrics if needed
         
         // 2. Get optimal amounts based on current pool state
         let target_liquidity = alert.params.amount;
@@ -892,13 +905,8 @@ impl TransactionExecutor {
         Ok(tx_hash)
     }
     
-    /// Execute remove liquidity action
-    async fn execute_remove_liquidity(
-        &self,
-        signal_id: Uuid,
-        alert: Alert,
-        metrics: &mut ExecutionMetrics,
-    ) -> Result<H256, Box<dyn std::error::Error>> {
+    // End of commented liquidity functions */
+}
         info!("Executing remove liquidity for token {} on pool {}", 
               alert.token_address, alert.pool_address);
         
@@ -906,7 +914,7 @@ impl TransactionExecutor {
         
         // 1. Get pool information
         let pool_info = self.pool_factory.get_pool_info(&alert.pool_address).await?;
-        metrics.pool_query_ms = checkpoint.elapsed().as_millis() as u64;
+        // Note: pool_query_ms metric removed - add to ExecutionMetrics if needed
         
         // 2. Build transaction based on pool type
         let tx = match &pool_info {
@@ -943,4 +951,5 @@ impl TransactionExecutor {
         
         Ok(tx_hash)
     }
+    */
 }

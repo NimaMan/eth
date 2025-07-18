@@ -74,6 +74,23 @@ path = "src/bin/kartal.rs"
 name = "keystore_manager"
 path = "src/bin/keystore_manager.rs"
 
+# Database integration examples
+[[example]]
+name = "signal_generator"
+path = "examples/db_integration/signal_generator.rs"
+
+[[example]]
+name = "signal_processor"
+path = "examples/db_integration/signal_processor.rs"
+
+[[example]]
+name = "position_updater"
+path = "examples/db_integration/position_updater.rs"
+
+[[example]]
+name = "full_integration_demo"
+path = "examples/db_integration/full_integration_demo.rs"
+
 # Additional binaries to be added as implemented
 # [[bin]]
 # name = "alert_monitor"
