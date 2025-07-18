@@ -151,11 +151,13 @@ class BlockProcessor:
         """Process a single block"""
         try:
             start_time = time.perf_counter()
+            block_data = await self.block_fetcher.fetch_block_by_number(block_number)
+            block_timestamp = block_data['timestamp']
+            
             if transactions is None:
                 # Fetch block
-                block_data = await self.block_fetcher.fetch_block_by_number(block_number)
                 transactions = block_data['transactions']
-                block_timestamp = block_data['timestamp']
+                
             # Process all transactions in the block 
             processed_transactions = await self.tx_batch_processor.process_block_transactions(
                 block_number=block_number,
@@ -173,6 +175,31 @@ class BlockProcessor:
         except Exception as e:
             if self.logger is not None:
                 self.logger.error(f"{__name__} Error processing block {block_number} with {len(transactions)} transactions: {str(e)}", exc_info=True)
+            raise
+
+    async def process_blocks_in_batch(self, block_numbers: list[int]):
+        """Process a batch of blocks"""
+        try:
+            start_time = time.perf_counter()
+            blocks = await self.block_fetcher.fetch_blocks_batch(block_numbers[0], block_numbers[-1])
+            processed_transactions = {}
+            for block_number, block_data in blocks.items():
+                transactions = block_data['transactions']
+                block_timestamp = block_data['timestamp']
+                    
+                processed_transactions[block_number] = await self.tx_batch_processor.process_block_transactions(
+                    block_number=block_number,
+                    transactions=transactions,
+                    block_timestamp=block_timestamp
+                )
+
+            end_time = time.perf_counter()
+            if self.logger is not None:
+                self.logger.info(f"Processed {len(block_numbers)} blocks in batch in {end_time - start_time:.4f} seconds")
+            return processed_transactions
+        except Exception as e:
+            if self.logger is not None:
+                self.logger.error(f"{__name__} Error processing blocks in batch: {str(e)}", exc_info=True)
             raise
 
     async def close(self):

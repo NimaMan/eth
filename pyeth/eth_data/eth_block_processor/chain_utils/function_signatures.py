@@ -1,3 +1,17 @@
+"""Function Signatures for Ethereum Transaction Analysis
+
+This module contains function selectors (4-byte signatures) for detecting and categorizing
+Ethereum transactions, with special focus on functions commonly used in scams and rug pulls.
+
+CRITICAL SCAM FUNCTIONS TO MONITOR:
+- 0x02751cec: removeLiquidityETH (immediate rug pull threat)
+- 0x8a8c523c: setFees/setTradingEnabled (tax manipulation)
+- 0x8456cb59: pause() (trap users)
+- 0xdb2e21bc: emergencyWithdraw() (backdoor drain)
+
+For complete scam detection guide, see SCAM_FUNCTIONS_GUIDE.md
+"""
+
 from web3 import Web3
 
 w3 = Web3()
@@ -42,6 +56,30 @@ FUNCTION_SIGNATURES = {
     w3.keccak(text="removeLiquidityETHSupportingFeeOnTransferTokens(address,uint256,uint256,uint256,address,uint256)").hex()[:8]: "Remove Liquidity",
     w3.keccak(text="removeLiquidityETHWithPermitSupportingFeeOnTransferTokens(address,uint256,uint256,uint256,address,uint256,bool,uint8,bytes32,bytes32)").hex()[:8]: "Remove Liquidity",
     w3.keccak(text="lockLPToken(address _lpToken, uint256 _amount, uint256 _unlock_date, address _referral, bool _fee_in_eth, address _withdrawer)").hex()[:8]: "Lock Liquidity Tokens",
+    
+    # Critical Scam Functions - Tax Manipulation
+    w3.keccak(text="setFees(uint256,uint256)").hex()[:8]: "Set Fees",
+    w3.keccak(text="updateFees(uint256,uint256)").hex()[:8]: "Update Fees",
+    w3.keccak(text="setTaxes(uint256,uint256)").hex()[:8]: "Set Taxes",
+    w3.keccak(text="setBuyTax(uint256)").hex()[:8]: "Set Buy Tax",
+    w3.keccak(text="setSellTax(uint256)").hex()[:8]: "Set Sell Tax",
+    w3.keccak(text="changeFees(uint256,uint256)").hex()[:8]: "Change Fees",
+    w3.keccak(text="modifyTaxes(uint256,uint256)").hex()[:8]: "Modify Taxes",
+    
+    # Critical Scam Functions - Emergency/Backdoor
+    w3.keccak(text="emergencyWithdraw()").hex()[:8]: "Emergency Withdraw",
+    w3.keccak(text="rescueETH(uint256)").hex()[:8]: "Rescue ETH",
+    w3.keccak(text="rescueToken(address,uint256)").hex()[:8]: "Rescue Token",
+    w3.keccak(text="withdrawAll()").hex()[:8]: "Withdraw All",
+    w3.keccak(text="drainPool()").hex()[:8]: "Drain Pool",
+    
+    # Critical Scam Functions - Trading Control
+    w3.keccak(text="pause()").hex()[:8]: "Pause Trading",
+    w3.keccak(text="unpause()").hex()[:8]: "Unpause Trading",
+    w3.keccak(text="disableTrading()").hex()[:8]: "Disable Trading",
+    w3.keccak(text="blacklist(address)").hex()[:8]: "Blacklist Address",
+    w3.keccak(text="addToBlacklist(address)").hex()[:8]: "Add To Blacklist",
+    w3.keccak(text="setBots(address[])").hex()[:8]: "Set Bots",
 
     # Deposits and Withdrawals
     w3.keccak(text="deposit()").hex()[:8]: "Deposit",
@@ -77,6 +115,20 @@ FUNCTION_SIGNATURES = {
     w3.keccak(text="approve(address,uint256)").hex()[:8]: "Approve",
     w3.keccak(text="transfer(address,uint256)").hex()[:8]: "Transfer",
     w3.keccak(text="transferFrom(address,address,uint256)").hex()[:8]: "Transfer From",
+    
+    # Critical Scam Functions - Minting (Hidden Supply Increase)
+    w3.keccak(text="adminMint(address,uint256)").hex()[:8]: "Admin Mint",
+    w3.keccak(text="ownerMint(address,uint256)").hex()[:8]: "Owner Mint",
+    w3.keccak(text="devMint(address,uint256)").hex()[:8]: "Dev Mint",
+    w3.keccak(text="batchMint(address[],uint256[])").hex()[:8]: "Batch Mint",
+    w3.keccak(text="airdrop(address,uint256)").hex()[:8]: "Airdrop",
+    
+    # Critical Scam Functions - Max Transaction/Wallet Limits
+    w3.keccak(text="setMaxTxAmount(uint256)").hex()[:8]: "Set Max Tx Amount",
+    w3.keccak(text="setMaxWalletAmount(uint256)").hex()[:8]: "Set Max Wallet",
+    w3.keccak(text="updateMaxTxn(uint256)").hex()[:8]: "Update Max Txn",
+    w3.keccak(text="changeMaxWallet(uint256)").hex()[:8]: "Change Max Wallet",
+    w3.keccak(text="removeLimits()").hex()[:8]: "Remove Limits",
 
     # Miscellaneous
     w3.keccak(text="multicall(bytes[])").hex()[:8]: "Multicall",
@@ -113,6 +165,18 @@ FUNCTION_SIGNATURES = {
     "8a8c523c": "Trading Enabled",
     "ed995307": "Add Liquidity",
     '667f6526': 'Set Tax',
+    
+    # Additional critical scam function selectors (hardcoded for speed)
+    '02751cec': 'Remove Liquidity ETH',  # Most common rug pull
+    'baa2abde': 'Remove Liquidity',
+    'af2979eb': 'Remove Liquidity ETH Supporting Fee',
+    'db2e21bc': 'Emergency Withdraw',
+    '8a8c523c': 'Set Fees/Enable Trading',  # COLLISION - check params
+    '9012c4a8': 'Update Fees',
+    '8456cb59': 'Pause',
+    '3f4ba83a': 'Unpause',
+    'f9f92be4': 'Blacklist',
+    '40c10f19': 'Mint',
     '74010ece': 'Set Max Txn Amount',
     'ea1644d5': 'Set Max Wallet Size',
     '715018a6': "Renounce Ownership",
@@ -181,12 +245,31 @@ EVENT_TOPICS = {
     'InitializeV4': w3.keccak(text="Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)").hex(),
     'ModifyLiquidityV4': w3.keccak(text="ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)").hex(),
     'SwapV4': w3.keccak(text="Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)").hex(),
+    'DonateV4': w3.keccak(text="Donate(bytes32,address,int256,int256)").hex(),
+    'ProtocolFeeUpdatedV4': w3.keccak(text="ProtocolFeeUpdated(bytes32,uint24)").hex(),
+    'DynamicLPFeeUpdatedV4': w3.keccak(text="DynamicLPFeeUpdated(bytes32,uint24)").hex(),
+    'ProtocolFeeControllerUpdatedV4': w3.keccak(text="ProtocolFeeControllerUpdated(address)").hex(),
+    'BalanceDeltaV4': '0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f',  # BalanceDelta(bytes32,address,int256,int256)
     # --- Uniswap Protocol: Permit2 ---
     'Permit2': w3.keccak(text="Permit(address,address,address,uint160,uint48,uint48)").hex(),
 }
 
 EVENT_TOPICS_REVERSE = {v: k for k, v in EVENT_TOPICS.items()}
 EVENT_TOPICS_REVERSE[w3.keccak(text="Mint(address,uint256)").hex()] = "Mint"
+
+# Critical function selectors for fast scam detection
+CRITICAL_SCAM_FUNCTIONS = {
+    '02751cec',  # removeLiquidityETH
+    'baa2abde',  # removeLiquidity
+    'af2979eb',  # removeLiquidityETHSupportingFeeOnTransferTokens
+    'db2e21bc',  # emergencyWithdraw
+    '8a8c523c',  # setFees/setTradingEnabled
+    '9012c4a8',  # updateFees
+    '8456cb59',  # pause
+    'f9f92be4',  # blacklist
+    '40c10f19',  # mint
+    '715018a6',  # setMaxTxAmount/renounceOwnership
+}
 
 
 UNISWAP_CONTRACTS = {

@@ -6,7 +6,7 @@ from eth_block_processor.blockchain.live_block_processor import LiveBlockProcess
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger(name="live_block_processor")
+logger = get_logger(name="live_block_processor", log_folder="live_block_processor")
 
 # Store references to tasks and resources for proper cleanup
 _tasks = set()
