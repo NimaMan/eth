@@ -174,14 +174,15 @@ class LiveBlockProcessor:
         websocket_url: str = "ws://127.0.0.1:8546",
         http_url: str = "http://127.0.0.1:8545",
         rabbitmq_url: str = "amqp://guest:guest@localhost/",
-        save_txn_to_db: bool = False
+        save_txn_to_db: bool = False, 
+        logger=None
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
         self.w3 = AsyncWeb3(self.provider)
         self.rabbitmq_url = rabbitmq_url
         self.save_txn_to_db = save_txn_to_db
-        self.logger = get_logger(name="live_block_processor")
+        self.logger = logger or get_logger(name="live_block_processor")
         
         # Initialize BlockProcessor with HTTP connection for detailed data fetching
         self.block_processor = BlockProcessor(

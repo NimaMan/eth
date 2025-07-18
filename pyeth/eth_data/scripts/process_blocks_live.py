@@ -6,7 +6,7 @@ from eth_block_processor.blockchain.live_block_processor import LiveBlockProcess
 from eth_block_processor.utils.logger import get_logger
 
 
-logger = get_logger(name="live_block_processor", log_folder="live_block_processor")
+logger = get_logger(name="live_block_processor")
 
 # Store references to tasks and resources for proper cleanup
 _tasks = set()
@@ -55,7 +55,8 @@ async def main(save_txn_to_db: bool = True):
     # Initialize components
     _processor = LiveBlockProcessor(
         save_txn_to_db=save_txn_to_db,
-        rabbitmq_url="amqp://guest:guest@127.0.0.1/"
+        rabbitmq_url="amqp://guest:guest@127.0.0.1/",
+        logger=logger
     )
     
     # Register signal handlers for graceful shutdown
