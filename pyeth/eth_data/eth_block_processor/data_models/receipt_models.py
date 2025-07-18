@@ -467,12 +467,19 @@ class UniswapV4Swap:
     Event Format:
       Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1,
            uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)
+    
+    Note: amount0 and amount1 represent the balance deltas for the swap:
+    - Negative values indicate tokens flowing out of the pool
+    - Positive values indicate tokens flowing into the pool
+    - For a typical swap, one will be negative (token out) and one positive (token in)
+    
+    The 'sender' field in V4 is often called the 'settler' in some contexts.
     """
     pool_manager_address: str
     event_id: str
-    sender: str
-    amount0: int
-    amount1: int
+    sender: str  # Also known as 'settler' in V4 terminology
+    amount0: int  # Balance delta for token0 (can be negative)
+    amount1: int  # Balance delta for token1 (can be negative)
     sqrt_price_x96: int
     liquidity: int
     tick: int
@@ -485,3 +492,84 @@ class UniswapV4Swap:
         self.sqrt_price_x96 = str(self.sqrt_price_x96)
         self.liquidity = str(self.liquidity)
         self.tick = str(self.tick)
+        self.fee = str(self.fee)
+
+
+@dataclass
+class UniswapV4Donate:
+    """
+    Uniswap V4 Donate Event
+    Event Format:
+      Donate(bytes32 indexed id, address indexed sender, int256 amount0, int256 amount1)
+    """
+    pool_manager_address: str
+    event_id: str
+    sender: str
+    amount0: int
+    amount1: int
+    log_index: int
+
+    def __post_init__(self):
+        self.amount0 = str(self.amount0)
+        self.amount1 = str(self.amount1)
+
+
+@dataclass
+class UniswapV4ProtocolFeeUpdated:
+    """
+    Uniswap V4 ProtocolFeeUpdated Event
+    Event Format:
+      ProtocolFeeUpdated(bytes32 indexed id, uint24 protocolFee)
+    """
+    pool_manager_address: str
+    event_id: str
+    protocol_fee: int
+    log_index: int
+
+    def __post_init__(self):
+        self.protocol_fee = str(self.protocol_fee)
+
+
+@dataclass
+class UniswapV4DynamicLPFeeUpdated:
+    """
+    Uniswap V4 DynamicLPFeeUpdated Event
+    Event Format:
+      DynamicLPFeeUpdated(bytes32 indexed id, uint24 dynamicLPFee)
+    """
+    pool_manager_address: str
+    event_id: str
+    dynamic_lp_fee: int
+    log_index: int
+
+    def __post_init__(self):
+        self.dynamic_lp_fee = str(self.dynamic_lp_fee)
+
+
+@dataclass
+class UniswapV4ProtocolFeeControllerUpdated:
+    """
+    Uniswap V4 ProtocolFeeControllerUpdated Event
+    Event Format:
+      ProtocolFeeControllerUpdated(address indexed protocolFeeController)
+    """
+    pool_manager_address: str
+    protocol_fee_controller: str
+    log_index: int
+
+
+@dataclass
+class UniswapV4BalanceDelta:
+    """
+    Uniswap V4 BalanceDelta Event
+    Event Format:
+      BalanceDelta(bytes32 indexed poolId, address indexed settler, int256 delta0, int256 delta1)
+    
+    This event is emitted when balance changes occur in a V4 pool during swaps or liquidity operations.
+    """
+    pool_manager_address: str
+    pool_id: str
+    settler: str
+    delta0: int  # Can be negative (outflow) or positive (inflow)
+    delta1: int  # Can be negative (outflow) or positive (inflow)
+    log_index: int

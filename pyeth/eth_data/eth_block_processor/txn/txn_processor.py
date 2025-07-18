@@ -62,10 +62,10 @@ The core `process_transaction` logic is synchronous, assuming the caller provide
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
-from eth_block_processor.utils.common_addresses import fee_recipients
-from eth_block_processor.address.contract_type import get_erc20_contract_info
+from eth_block_processor.chain_utils.common_addresses import fee_recipients
+from eth_block_processor.chain_utils.contract_type import get_erc20_contract_info
 from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
-from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier
+from eth_block_processor.txn.txn_type_classifier import EthTransactionClassifier, EthProtocolTypeClassifier
 from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
 from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
 from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
@@ -77,14 +77,15 @@ from eth_block_processor.data_models.txn_models import ContractCreationEvent
 
 
 class TransactionProcessor:
-    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = False):
+    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = False, eth_state_change_threshold: int = 0.005):
         self.w3 = w3
         self.calculate_state_changes = calculate_state_changes
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
+        self.protocol_classifier = EthProtocolTypeClassifier()
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_processor = TransactionLogProcessor(w3=w3)
         self.trace_processor = TransactionTraceProcessor(w3=w3)
-        self.state_diff_calculator = ProcessedTxStateDiffCalculator()
+        self.state_diff_calculator = ProcessedTxStateDiffCalculator(eth_state_change_threshold=eth_state_change_threshold)
         self.action_identifier = TransactionActionIdentifier()
 
     def needs_trace(self, txn: Dict[str, Any]) -> bool:
@@ -118,17 +119,24 @@ class TransactionProcessor:
             erc20_contracts.remove('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
         return erc20_contracts, unique_addresses
     
-    def _extract_transaction_fees(self, receipt: Dict[str, Any]) -> TransactionFees:
-        """Extract transaction fee information from receipt"""
-        # Convert hex values to integers if needed
-        gas_price = int(receipt['effectiveGasPrice'], 16) if isinstance(receipt['effectiveGasPrice'], str) else receipt['effectiveGasPrice']
+    def _extract_transaction_fees(self, transaction: Dict[str, Any], receipt: Dict[str, Any]) -> TransactionFees:
+        """Extract transaction fee information from transaction and receipt"""
+        # Get effective gas price and gas used from receipt
+        effective_gas_price = int(receipt['effectiveGasPrice'], 16) if isinstance(receipt['effectiveGasPrice'], str) else receipt['effectiveGasPrice']
         gas_used = int(receipt['gasUsed'], 16) if isinstance(receipt['gasUsed'], str) else receipt['gasUsed']
-        total_fee = gas_price * gas_used
-        total_fee = np.float64(self.w3.from_wei(total_fee, 'ether'))
+        total_fee = effective_gas_price * gas_used
+        total_fee_eth = np.float64(self.w3.from_wei(total_fee, 'ether'))
+        
+        # Get gas fields - priority fee will be calculated later in ranking module
+        gas_fields = self.protocol_classifier.get_gas_fields(transaction, receipt)
+        
         return TransactionFees(
-            gas_price=gas_price,
+            gas_price=effective_gas_price,  # For backward compatibility
             gas_used=gas_used,
-            txn_fee=total_fee,
+            txn_fee=total_fee_eth,
+            protocol_type=gas_fields.get('protocol_type', 'unknown'),
+            max_fee_per_gas=gas_fields.get('max_fee_per_gas'),
+            max_priority_fee=gas_fields.get('max_priority_fee')
         )
     
     def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
@@ -191,7 +199,7 @@ class TransactionProcessor:
         from_address = self.w3.to_checksum_address(transaction['from'])
         to_address = self.w3.to_checksum_address(transaction['to']) if transaction['to'] is not None else None
         logs = self.log_processor.process_logs(receipt['logs'])
-        fees = self._extract_transaction_fees(receipt)
+        fees = self._extract_transaction_fees(transaction, receipt)
         contract_address = receipt.get('contractAddress', None)
         if block_timestamp == 0:
             block_timestamp = self._get_block_timestamp(receipt)
@@ -283,7 +291,7 @@ class TransactionProcessor:
         logs = self.log_processor.process_logs(receipt['logs'])
         
         # Extract fees
-        fees = self._extract_transaction_fees(receipt)
+        fees = self._extract_transaction_fees(transaction, receipt)
         
         # Get contract address if contract creation
         contract_address = receipt.get('contractAddress', None)

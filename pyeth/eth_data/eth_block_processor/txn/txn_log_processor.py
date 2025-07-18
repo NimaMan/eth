@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 from web3 import Web3
-from eth_block_processor.utils.function_signatures import EVENT_TOPICS
+from eth_block_processor.chain_utils.function_signatures import EVENT_TOPICS
 from eth_block_processor.data_models.receipt_models import *
 
 
@@ -41,6 +41,11 @@ class TransactionLogProcessor:
             'uniswap_v4_swaps': [],
             'uniswap_v4_mints': [],
             'uniswap_v4_burns': [],
+            'uniswap_v4_donates': [],
+            'uniswap_v4_protocol_fee_updates': [],
+            'uniswap_v4_dynamic_lp_fee_updates': [],
+            'uniswap_v4_protocol_fee_controller_updates': [],
+            'uniswap_v4_balance_deltas': [],
             'permit2_events': [],
         }
         
@@ -166,6 +171,24 @@ class TransactionLogProcessor:
                 result['uniswap_v4_swaps'].append(event)
                 result['unique_addresses'].add(event.pool_manager_address)
                 result['unique_addresses'].add(event.sender)
+            elif isinstance(event, UniswapV4Donate):
+                result['uniswap_v4_donates'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.sender)
+            elif isinstance(event, UniswapV4ProtocolFeeUpdated):
+                result['uniswap_v4_protocol_fee_updates'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+            elif isinstance(event, UniswapV4DynamicLPFeeUpdated):
+                result['uniswap_v4_dynamic_lp_fee_updates'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+            elif isinstance(event, UniswapV4ProtocolFeeControllerUpdated):
+                result['uniswap_v4_protocol_fee_controller_updates'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.protocol_fee_controller)
+            elif isinstance(event, UniswapV4BalanceDelta):
+                result['uniswap_v4_balance_deltas'].append(event)
+                result['unique_addresses'].add(event.pool_manager_address)
+                result['unique_addresses'].add(event.settler)
             else:
                 result['other_events'].append(event)
         return result
@@ -228,6 +251,16 @@ class TransactionLogProcessor:
                 return self.parse_uniswap_v4_modify_liquidity(log)
             elif topic == EVENT_TOPICS['SwapV4']:
                 return self.parse_uniswap_v4_swap(log)
+            elif topic == EVENT_TOPICS['DonateV4']:
+                return self.parse_uniswap_v4_donate(log)
+            elif topic == EVENT_TOPICS['ProtocolFeeUpdatedV4']:
+                return self.parse_uniswap_v4_protocol_fee_updated(log)
+            elif topic == EVENT_TOPICS['DynamicLPFeeUpdatedV4']:
+                return self.parse_uniswap_v4_dynamic_lp_fee_updated(log)
+            elif topic == EVENT_TOPICS['ProtocolFeeControllerUpdatedV4']:
+                return self.parse_uniswap_v4_protocol_fee_controller_updated(log)
+            elif topic == EVENT_TOPICS['BalanceDeltaV4']:
+                return self.parse_uniswap_v4_balance_delta(log)
             else:
                 return self.parse_other_event(log)
         except Exception as e:
@@ -899,6 +932,152 @@ class TransactionLogProcessor:
             liquidity=liquidity,
             tick=tick,
             fee=fee,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_donate(self, log: Dict[str, Any]) -> UniswapV4Donate:
+        """
+        Parse Uniswap V4 Donate event
+        Event: Donate(bytes32 indexed id, address indexed sender, int256 amount0, int256 amount1)
+        
+        Topics:
+          [0]: Event signature
+          [1]: id (bytes32)
+          [2]: sender (address)
+        
+        Data:
+          - amount0 (int256 as 32-byte word)
+          - amount1 (int256 as 32-byte word)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameters
+        event_id = topics[1]
+        sender = self.w3.to_checksum_address(topics[2][-40:])
+        
+        # Parse data parameters (each 32-byte word)
+        amount0 = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True)
+        amount1 = int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True)
+        
+        return UniswapV4Donate(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            sender=sender,
+            amount0=amount0,
+            amount1=amount1,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_protocol_fee_updated(self, log: Dict[str, Any]) -> UniswapV4ProtocolFeeUpdated:
+        """
+        Parse Uniswap V4 ProtocolFeeUpdated event
+        Event: ProtocolFeeUpdated(bytes32 indexed id, uint24 protocolFee)
+        
+        Topics:
+          [0]: Event signature
+          [1]: id (bytes32)
+        
+        Data:
+          - protocolFee (uint24 as 32-byte word)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameters
+        event_id = topics[1]
+        
+        # Parse data parameter
+        protocol_fee = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=False)
+        
+        return UniswapV4ProtocolFeeUpdated(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            protocol_fee=protocol_fee,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_dynamic_lp_fee_updated(self, log: Dict[str, Any]) -> UniswapV4DynamicLPFeeUpdated:
+        """
+        Parse Uniswap V4 DynamicLPFeeUpdated event
+        Event: DynamicLPFeeUpdated(bytes32 indexed id, uint24 dynamicLPFee)
+        
+        Topics:
+          [0]: Event signature
+          [1]: id (bytes32)
+        
+        Data:
+          - dynamicLPFee (uint24 as 32-byte word)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameters
+        event_id = topics[1]
+        
+        # Parse data parameter
+        dynamic_lp_fee = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=False)
+        
+        return UniswapV4DynamicLPFeeUpdated(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            event_id=event_id,
+            dynamic_lp_fee=dynamic_lp_fee,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_protocol_fee_controller_updated(self, log: Dict[str, Any]) -> UniswapV4ProtocolFeeControllerUpdated:
+        """
+        Parse Uniswap V4 ProtocolFeeControllerUpdated event
+        Event: ProtocolFeeControllerUpdated(address indexed protocolFeeController)
+        
+        Topics:
+          [0]: Event signature
+          [1]: protocolFeeController (address)
+        
+        Data: None
+        """
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameter
+        protocol_fee_controller = self.w3.to_checksum_address(topics[1][-40:])
+        
+        return UniswapV4ProtocolFeeControllerUpdated(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            protocol_fee_controller=protocol_fee_controller,
+            log_index=self._process_integer(log['logIndex'])
+        )
+    
+    def parse_uniswap_v4_balance_delta(self, log: Dict[str, Any]) -> UniswapV4BalanceDelta:
+        """
+        Parse Uniswap V4 BalanceDelta event
+        Event: BalanceDelta(bytes32 indexed poolId, address indexed settler, int256 delta0, int256 delta1)
+        
+        Topics:
+          [0]: Event signature
+          [1]: poolId (bytes32)
+          [2]: settler (address)
+        
+        Data:
+          - delta0 (int256 as 32-byte word)
+          - delta1 (int256 as 32-byte word)
+        """
+        data = self._ensure_hex_string(log['data'])
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        
+        # Extract indexed parameters
+        pool_id = topics[1]
+        settler = self.w3.to_checksum_address(topics[2][-40:])
+        
+        # Parse data parameters (each 32-byte word)
+        delta0 = int.from_bytes(bytes.fromhex(data[2:66]), byteorder='big', signed=True)
+        delta1 = int.from_bytes(bytes.fromhex(data[66:130]), byteorder='big', signed=True)
+        
+        return UniswapV4BalanceDelta(
+            pool_manager_address=self.w3.to_checksum_address(log['address']),
+            pool_id=pool_id,
+            settler=settler,
+            delta0=delta0,
+            delta1=delta1,
             log_index=self._process_integer(log['logIndex'])
         )
     

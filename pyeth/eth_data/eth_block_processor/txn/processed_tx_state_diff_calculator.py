@@ -1,5 +1,5 @@
 from collections import defaultdict, OrderedDict
-from eth_block_processor.utils.common_addresses import fee_recipients_set, DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS
+from eth_block_processor.chain_utils.common_addresses import fee_recipients_set, DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS
 
 
 class ProcessedTxStateDiffCalculator:

@@ -28,9 +28,14 @@ class ContractCreationEvent:
 
 @dataclass
 class TransactionFees:
-    gas_price: Wei
+    gas_price: Wei  # Effective gas price paid (for backward compatibility)
     gas_used: int
-    txn_fee: Wei
+    txn_fee: Wei    # Total transaction fee in ETH (gas_price * gas_used)
+    
+    # New fields for gas ranking
+    protocol_type: str = "unknown"  # "legacy", "eip1559", "eip2930"
+    max_fee_per_gas: Optional[Wei] = None  # User's max willingness
+    max_priority_fee: Optional[Wei] = None  # User's max tip (EIP-1559 only)
     
 
 @dataclass
