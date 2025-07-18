@@ -10,6 +10,8 @@ qarqa_restructured/
 ├── data_access/         # Database connections, data fetchers  
 ├── tx_simulation/       # Transaction simulation with REVM
 ├── network_building/    # Fund flow network construction
+├── fundflownetwork/     # Fund flow analysis and visualization
+├── tx_ranking_system/   # Real-time gas ranking and mempool analytics
 ├── api_layer/           # CLI and web API interfaces
 └── tests_integration/   # End-to-end integration tests
 ```

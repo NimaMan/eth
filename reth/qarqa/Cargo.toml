@@ -6,7 +6,8 @@ members = [
     "api_layer",
     "tests_integration",
     "eth_db_fetcher",
-    "fundflownetwork"
+    "fundflownetwork",
+    "tx_ranking_system"
 ]
 
 [workspace.dependencies]

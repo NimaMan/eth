@@ -10,6 +10,7 @@ pub mod network_builder;
 // pub mod interactive_builder; // Disabled - needs schema updates
 pub mod visualization;
 pub mod tx_processor_integration;
+pub mod graph_discovery;
 
 // Re-export main types
 pub use fund_flow_analyzer::{FundFlowAnalyzer, NetBalance};
