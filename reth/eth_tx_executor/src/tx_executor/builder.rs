@@ -227,8 +227,9 @@ impl TransactionBuilder {
         deadline: u64,
     ) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
         // Calculate minimum amounts with slippage
-        let amount0_min = self.calculate_min_amount(amount0, slippage);
-        let amount1_min = self.calculate_min_amount(amount1, slippage);
+        let slippage_factor = ((1.0 - slippage) * 10000.0) as u64;
+        let amount0_min = amount0 * U256::from(slippage_factor) / U256::from(10000);
+        let amount1_min = amount1 * U256::from(slippage_factor) / U256::from(10000);
         
         // Build addLiquidity call
         let data = encode(&[

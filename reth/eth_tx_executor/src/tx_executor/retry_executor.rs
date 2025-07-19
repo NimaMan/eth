@@ -112,14 +112,15 @@ impl RetryExecutor {
             let tx = tx.clone();
             
             // Sign transaction
-            let signed_tx = provider.sign_transaction(tx, wallet.address())
+            let signed_tx = provider.sign_transaction(&tx, wallet.address())
                 .await
                 .map_err(|e| KartalError::Execution(ExecutionError::TransactionFailed {
                     reason: format!("Failed to sign: {}", e)
                 }))?;
             
             // Send transaction
-            let pending_tx = provider.send_raw_transaction(signed_tx)
+            let raw_tx = tx.rlp_signed(&signed_tx);
+            let pending_tx = provider.send_raw_transaction(raw_tx)
                 .await
                 .map_err(|e| self.map_provider_error(e))?;
             
@@ -184,13 +185,14 @@ impl RetryExecutor {
     /// Map provider errors to KartalError
     fn map_provider_error(&self, err: ProviderError) -> KartalError {
         match &err {
-            ProviderError::JsonRpcClientError(msg) => {
-                if msg.contains("nonce too low") {
+            ProviderError::JsonRpcClientError(rpc_err) => {
+                let err_str = rpc_err.to_string();
+                if err_str.contains("nonce too low") {
                     KartalError::Execution(ExecutionError::NonceTooLow {
                         expected: U256::zero(),
                         actual: U256::zero(),
                     })
-                } else if msg.contains("insufficient funds") {
+                } else if err_str.contains("insufficient funds") {
                     KartalError::Execution(ExecutionError::InsufficientBalance {
                         required: U256::zero(),
                         available: U256::zero(),

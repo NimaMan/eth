@@ -9,7 +9,6 @@ pub mod errors;
 pub mod types;
 pub mod utils;
 pub mod validation;
-pub mod rpc_pool;
 
 // Re-export commonly used items
 pub use constants::{addresses, limits, timing};

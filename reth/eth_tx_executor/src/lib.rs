@@ -7,6 +7,7 @@ pub mod alert_processor;
 pub mod common;
 pub mod config;
 pub mod flashbots;
+pub mod gas_ranking;
 pub mod logging;
 pub mod pools;
 pub mod risk;
@@ -18,6 +19,4 @@ pub use alert_processor::{Alert, AlertReceiver};
 pub use common::{KartalError, Result};
 pub use config::Config;
 pub use logging::{TradeLogger, TradeEvent};
-// Re-export ranking types from tx_ranking_system
-pub use tx_ranking_system::{TransactionRankingSystem, RankingResult};
 pub use tx_executor::TransactionExecutor;

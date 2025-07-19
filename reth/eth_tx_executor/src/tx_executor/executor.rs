@@ -7,7 +7,7 @@ use crate::common::{validate_slippage, validate_token_address, validate_pool_add
 use crate::flashbots::{FlashbotsClient, FlashbotsConfig, BundleBuilder, RelayEndpoint};
 use crate::logging::TradeLogger;
 use crate::pools::{PoolFactory, SwapParams, PoolInfo};
-use tx_ranking_system::{TransactionRankingSystem, ExecutionPath, RankingResult};
+use crate::gas_ranking::{GasRanking, GasRecommendation, ExecutionPath};
 use crate::risk::{RiskManager, RiskConfig, RiskDecision};
 use crate::tx_executor::NonceManager;
 use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
@@ -84,8 +84,8 @@ pub struct TransactionExecutor {
     pool_factory: PoolFactory,
     /// Position tracker
     position_tracker: Arc<PositionTracker>,
-    /// Transaction ranking system
-    ranking_system: Arc<TransactionRankingSystem>,
+    /// Gas ranking system
+    gas_ranking: Arc<GasRanking>,
     /// Nonce manager
     nonce_manager: Arc<NonceManager>,
     /// Risk manager
@@ -114,23 +114,13 @@ impl TransactionExecutor {
         let pool_factory = PoolFactory::new(provider.clone());
         let position_tracker = Arc::new(PositionTracker::new(provider.clone(), wallet_address)?);
         
-        // Initialize ranking system with optional RabbitMQ support
-        let ranking_system = if let Some(rabbitmq_url) = config.rabbitmq_url.as_ref() {
-            // Enhanced ranking with live block processor data
-            info!("Initializing ranking system with RabbitMQ block processor data");
-            let system = TransactionRankingSystem::builder(config.reth_ws_url.clone())
-                .with_block_processor(rabbitmq_url.clone())
-                .build()
-                .await?;
-            Arc::new(system)
+        // Initialize gas ranking system
+        let gas_ranking = if let Some(rabbitmq_url) = config.rabbitmq_url.as_ref() {
+            info!("Initializing gas ranking with RabbitMQ and RPC");
+            Arc::new(GasRanking::new(rabbitmq_url, &config.rpc_url).await?)
         } else {
-            // Standard ranking without block processor
-            info!("Initializing ranking system without block processor");
-            Arc::new(TransactionRankingSystem::new(config.reth_ws_url.clone()).await?)
+            return Err("RabbitMQ URL is required for gas ranking system".into());
         };
-        
-        // Start ranking system background services
-        ranking_system.start().await?;
         
         // Initialize nonce manager
         let nonce_config = crate::tx_executor::nonce_manager::NonceManagerConfig::default();
@@ -178,46 +168,12 @@ impl TransactionExecutor {
             wallet,
             pool_factory,
             position_tracker,
-            ranking_system,
+            gas_ranking,
             nonce_manager,
             risk_manager,
             trade_logger,
             flashbots_client,
         })
-    }
-    
-    /// Convert eth_kartal Alert to tx_ranking_system Alert
-    fn convert_to_ranking_alert(&self, alert: &Alert) -> tx_ranking_system::Alert {
-        // Convert Priority enum
-        let ranking_priority = match alert.params.priority {
-            Priority::Critical => tx_ranking_system::Priority::Critical,
-            Priority::High => tx_ranking_system::Priority::High,
-            Priority::Normal => tx_ranking_system::Priority::Normal,
-        };
-        
-        // Convert Action enum
-        let ranking_action = match alert.action {
-            Action::Buy => tx_ranking_system::Action::Buy,
-            Action::Sell => tx_ranking_system::Action::Sell,
-            Action::AddLiquidity => tx_ranking_system::Action::AddLiquidity,
-            Action::RemoveLiquidity => tx_ranking_system::Action::RemoveLiquidity,
-        };
-        
-        // Create ranking alert
-        tx_ranking_system::Alert {
-            id: alert.id.clone(),
-            timestamp: alert.timestamp,
-            token_address: alert.token_address,
-            pool_address: alert.pool_address,
-            action: ranking_action,
-            params: tx_ranking_system::ExecutionParams {
-                amount: alert.params.amount,
-                slippage: alert.params.slippage,
-                max_gas_price: alert.params.max_gas_price,
-                deadline_seconds: alert.params.deadline_seconds,
-                priority: ranking_priority,
-            },
-        }
     }
     
     /// Execute alert with performance tracking
@@ -276,11 +232,23 @@ impl TransactionExecutor {
             Action::Buy => self.execute_buy(signal_id, alert.clone(), &mut metrics).await,
             Action::AddLiquidity => {
                 // TODO: Implement liquidity operations
-                return Err("AddLiquidity not yet implemented".into());
+                return ExecutionResult {
+                    alert_id: alert.id.clone(),
+                    tx_hash: None,
+                    success: false,
+                    error: Some("AddLiquidity not yet implemented".to_string()),
+                    metrics,
+                };
             }
             Action::RemoveLiquidity => {
                 // TODO: Implement liquidity operations
-                return Err("RemoveLiquidity not yet implemented".into());
+                return ExecutionResult {
+                    alert_id: alert.id.clone(),
+                    tx_hash: None,
+                    success: false,
+                    error: Some("RemoveLiquidity not yet implemented".to_string()),
+                    metrics,
+                };
             }
         };
         
@@ -355,15 +323,19 @@ impl TransactionExecutor {
         
         let checkpoint = Instant::now();
         
-        // 2. Calculate optimal gas price using ranking system
-        let ranking_alert = self.convert_to_ranking_alert(&alert);
-        let ranking_result = self.ranking_system.calculate_ranking(&ranking_alert).await?;
+        // 2. Calculate optimal gas price using gas ranking
+        let gas_recommendation = match alert.params.priority {
+            Priority::Critical => self.gas_ranking.get_gas_for_position(1), // Top priority
+            Priority::High => self.gas_ranking.get_gas_for_position(10),    // High priority
+            Priority::Normal => self.gas_ranking.get_gas_for_position(50),  // Normal priority
+        };
         metrics.gas_ranking_ms = checkpoint.elapsed().as_millis() as u64;
         
-        info!("Ranking result: gas_price={}, position={}, confidence={:.2}", 
-            ranking_result.optimal_gas_price, 
-            ranking_result.expected_position, 
-            ranking_result.confidence);
+        info!("Gas recommendation: priority_fee={}, max_fee={}, position={}, confidence={:.2}", 
+            gas_recommendation.priority_fee, 
+            gas_recommendation.max_fee,
+            gas_recommendation.expected_position, 
+            gas_recommendation.confidence);
         
         let checkpoint = Instant::now();
         
@@ -429,7 +401,7 @@ impl TransactionExecutor {
         let mut tx = pool.build_swap_tx(swap_params).await?;
         
         // Set optimal gas price from ranking system
-        tx.set_gas_price(ranking_result.optimal_gas_price);
+        tx.set_gas_price(gas_recommendation.max_fee);
         
         // Reserve nonce
         let nonce = self.nonce_manager.reserve_nonce().await?;
@@ -443,7 +415,7 @@ impl TransactionExecutor {
         let checkpoint = Instant::now();
         
         // 6. Submit using execution path from ranking
-        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        let tx_hash = self.submit_transaction(tx, &gas_recommendation.execution_path).await?;
         
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
         
@@ -453,8 +425,8 @@ impl TransactionExecutor {
             &alert.id,
             tx_hash,
             nonce,
-            ranking_result.optimal_gas_price,
-            &format!("{:?}", ranking_result.execution_path),
+            gas_recommendation.max_fee,
+            &format!("{:?}", gas_recommendation.execution_path),
         ).await;
         
         info!("Sell transaction submitted: {:?}", tx_hash);
@@ -493,15 +465,19 @@ impl TransactionExecutor {
         
         let checkpoint = Instant::now();
         
-        // 2. Calculate optimal gas price using ranking system
-        let ranking_alert = self.convert_to_ranking_alert(&alert);
-        let ranking_result = self.ranking_system.calculate_ranking(&ranking_alert).await?;
+        // 2. Calculate optimal gas price using gas ranking
+        let gas_recommendation = match alert.params.priority {
+            Priority::Critical => self.gas_ranking.get_gas_for_position(1), // Top priority
+            Priority::High => self.gas_ranking.get_gas_for_position(10),    // High priority
+            Priority::Normal => self.gas_ranking.get_gas_for_position(50),  // Normal priority
+        };
         metrics.gas_ranking_ms = checkpoint.elapsed().as_millis() as u64;
         
-        info!("Ranking result: gas_price={}, position={}, confidence={:.2}", 
-            ranking_result.optimal_gas_price, 
-            ranking_result.expected_position, 
-            ranking_result.confidence);
+        info!("Gas recommendation: priority_fee={}, max_fee={}, position={}, confidence={:.2}", 
+            gas_recommendation.priority_fee, 
+            gas_recommendation.max_fee,
+            gas_recommendation.expected_position, 
+            gas_recommendation.confidence);
         
         let checkpoint = Instant::now();
         
@@ -570,7 +546,7 @@ impl TransactionExecutor {
         }
         
         // Set optimal gas price from ranking system
-        tx.set_gas_price(ranking_result.optimal_gas_price);
+        tx.set_gas_price(gas_recommendation.max_fee);
         
         // Set gas limit for optimal performance
         // For critical alerts, use pre-calculated safe gas limit to avoid estimation delay
@@ -594,7 +570,7 @@ impl TransactionExecutor {
         let checkpoint = Instant::now();
         
         // 6. Submit using execution path from ranking
-        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        let tx_hash = self.submit_transaction(tx, &gas_recommendation.execution_path).await?;
         
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
         
@@ -604,8 +580,8 @@ impl TransactionExecutor {
             &alert.id,
             tx_hash,
             nonce,
-            ranking_result.optimal_gas_price,
-            &format!("{:?}", ranking_result.execution_path),
+            gas_recommendation.max_fee,
+            &format!("{:?}", gas_recommendation.execution_path),
         ).await;
         
         info!("Buy transaction submitted: {:?}", tx_hash);
@@ -635,7 +611,7 @@ impl TransactionExecutor {
         let nonce = tx.nonce().ok_or("Transaction must have nonce set")?;
         
         match execution_path {
-            ExecutionPath::PublicMempool => {
+            ExecutionPath::Public => {
                 // Standard mempool submission
                 let signature = self.wallet.sign_transaction(&tx).await?;
                 let raw_tx = tx.rlp_signed(&signature);
@@ -654,7 +630,7 @@ impl TransactionExecutor {
                     }
                 }
             }
-            ExecutionPath::FlashbotsBundle { max_block_number: _ } => {
+            ExecutionPath::Flashbots => {
                 // Use Flashbots for critical transactions
                 if let Some(flashbots) = &self.flashbots_client {
                     info!("Submitting transaction via Flashbots");
@@ -721,72 +697,22 @@ impl TransactionExecutor {
                     }
                 }
             }
-            ExecutionPath::MultiPath { timeout_ms } => {
-                // Try public mempool first with timeout, then Flashbots
+            ExecutionPath::DirectBuilder => {
+                // Direct builder submission (future implementation)
+                // For now, fallback to public mempool
+                warn!("DirectBuilder not yet implemented, using public mempool");
                 let signature = self.wallet.sign_transaction(&tx).await?;
                 let raw_tx = tx.rlp_signed(&signature);
                 
-                // Try public submission with timeout
-                let submit_future = self.provider.send_raw_transaction(raw_tx.clone());
-                let timeout = tokio::time::Duration::from_millis(*timeout_ms);
-                
-                match tokio::time::timeout(timeout, submit_future).await {
-                    Ok(Ok(pending_tx)) => {
+                match self.provider.send_raw_transaction(raw_tx).await {
+                    Ok(pending_tx) => {
                         let tx_hash = pending_tx.tx_hash();
                         self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
                         Ok(tx_hash)
                     }
-                    Ok(Err(e)) => {
-                        warn!("Public submission failed: {}, trying Flashbots", e);
-                        // Try Flashbots as fallback
-                        if let Some(flashbots) = &self.flashbots_client {
-                            let current_block = self.provider.get_block_number().await?.as_u64();
-                            let bundle = BundleBuilder::new()
-                                .add_transaction(raw_tx.clone())
-                                .block_number(current_block + 1)
-                                .build()?;
-                            
-                            match flashbots.submit_bundle(bundle).await? {
-                                crate::flashbots::BundleResult::Included { .. } => {
-                                    let tx_hash = tx.hash(&signature);
-                                    self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
-                                    Ok(tx_hash)
-                                }
-                                _ => {
-                                    self.nonce_manager.mark_failed(*nonce, "Both public and Flashbots submission failed".to_string()).await;
-                                    Err("Both public and Flashbots submission failed".into())
-                                }
-                            }
-                        } else {
-                            self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
-                            Err(e.into())
-                        }
-                    }
-                    Err(_) => {
-                        warn!("Public submission timed out, trying Flashbots");
-                        // Timeout - try Flashbots
-                        if let Some(flashbots) = &self.flashbots_client {
-                            let current_block = self.provider.get_block_number().await?.as_u64();
-                            let bundle = BundleBuilder::new()
-                                .add_transaction(raw_tx.clone())
-                                .block_number(current_block + 1)
-                                .build()?;
-                            
-                            match flashbots.submit_bundle(bundle).await? {
-                                crate::flashbots::BundleResult::Included { .. } => {
-                                    let tx_hash = tx.hash(&signature);
-                                    self.nonce_manager.mark_submitted(*nonce, tx_hash).await;
-                                    Ok(tx_hash)
-                                }
-                                _ => {
-                                    self.nonce_manager.mark_failed(*nonce, "Both public and Flashbots submission failed".to_string()).await;
-                                    Err("Both public and Flashbots submission failed".into())
-                                }
-                            }
-                        } else {
-                            self.nonce_manager.mark_failed(*nonce, "Public submission timed out and Flashbots not available".to_string()).await;
-                            Err("Public submission timed out and Flashbots not available".into())
-                        }
+                    Err(e) => {
+                        self.nonce_manager.mark_failed(*nonce, e.to_string()).await;
+                        Err(e.into())
                     }
                 }
             }
@@ -891,15 +817,9 @@ impl TransactionExecutor {
         
         // 4. Execute transaction
         let checkpoint = Instant::now();
-        let ranking_result = RankingResult {
-            execution_rank: 1,
-            optimal_gas_price: alert.params.gas_price,
-            estimated_arrival_ms: 100,
-            success_probability: 0.8,
-            execution_path: ExecutionPath::PublicMempool,
-        };
-        
-        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        // Note: gas_recommendation should be created for liquidity operations too
+        // For now, using default public mempool path
+        let tx_hash = self.submit_transaction(tx, &ExecutionPath::Public).await?;
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
         
         Ok(tx_hash)
@@ -938,15 +858,9 @@ impl TransactionExecutor {
         
         // 3. Execute transaction
         let checkpoint = Instant::now();
-        let ranking_result = RankingResult {
-            execution_rank: 1,
-            optimal_gas_price: alert.params.gas_price,
-            estimated_arrival_ms: 100,
-            success_probability: 0.8,
-            execution_path: ExecutionPath::PublicMempool,
-        };
-        
-        let tx_hash = self.submit_transaction(tx, &ranking_result.execution_path).await?;
+        // Note: gas_recommendation should be created for liquidity operations too
+        // For now, using default public mempool path
+        let tx_hash = self.submit_transaction(tx, &ExecutionPath::Public).await?;
         metrics.tx_submit_ms = checkpoint.elapsed().as_millis() as u64;
         
         Ok(tx_hash)
