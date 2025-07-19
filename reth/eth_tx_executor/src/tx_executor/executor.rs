@@ -353,7 +353,7 @@ impl TransactionExecutor {
         // 3.5. Risk check
         let trade_amount_eth = amount_out.as_u128() as f64 / 1e18;
         let risk_decision = {
-            let mut risk_mgr = self.risk_manager.lock().await;
+            let risk_mgr = self.risk_manager.lock().await;
             risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
         };
         
@@ -365,22 +365,13 @@ impl TransactionExecutor {
             amount_to_sell,
         ).await;
         
-        let final_amount_to_sell = match risk_decision {
-            RiskDecision::Allow => amount_to_sell,
-            RiskDecision::ReduceSize { new_amount, reason } => {
-                warn!("Risk manager reduced trade: {}", reason);
-                // Recalculate based on reduced ETH amount
-                // new_amount is the reduced ETH amount, we need to work backwards
-                let reduced_tokens = amount_to_sell * new_amount / amount_out;
-                reduced_tokens
+        match risk_decision {
+            RiskDecision::Allow => {
+                info!("Risk check passed for sell order");
             }
             RiskDecision::Block { reason } => {
                 error!("Risk manager blocked trade: {}", reason);
                 return Err(format!("Trade blocked by risk manager: {}", reason).into());
-            }
-            RiskDecision::EmergencyHalt { reason } => {
-                error!("Risk manager emergency halt: {}", reason);
-                return Err(format!("Emergency halt triggered: {}", reason).into());
             }
         };
         
@@ -390,7 +381,7 @@ impl TransactionExecutor {
         let swap_params = SwapParams {
             token_in: alert.token_address,
             token_out: *crate::pools::uniswap_v2::addresses::WETH,
-            amount_in: final_amount_to_sell,
+            amount_in: amount_to_sell,
             amount_out_min: min_amount_out,
             recipient: self.wallet.address(),
             deadline: alert.deadline_timestamp(),
@@ -495,7 +486,7 @@ impl TransactionExecutor {
         // 3.5. Risk check
         let trade_amount_eth = eth_to_spend.as_u128() as f64 / 1e18;
         let risk_decision = {
-            let mut risk_mgr = self.risk_manager.lock().await;
+            let risk_mgr = self.risk_manager.lock().await;
             risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
         };
         
@@ -507,19 +498,13 @@ impl TransactionExecutor {
             eth_to_spend,
         ).await;
         
-        let final_eth_to_spend = match risk_decision {
-            RiskDecision::Allow => eth_to_spend,
-            RiskDecision::ReduceSize { new_amount, reason } => {
-                warn!("Risk manager reduced trade: {}", reason);
-                new_amount // For buy, new_amount is already in ETH
+        match risk_decision {
+            RiskDecision::Allow => {
+                info!("Risk check passed for buy order");
             }
             RiskDecision::Block { reason } => {
                 error!("Risk manager blocked trade: {}", reason);
                 return Err(format!("Trade blocked by risk manager: {}", reason).into());
-            }
-            RiskDecision::EmergencyHalt { reason } => {
-                error!("Risk manager emergency halt: {}", reason);
-                return Err(format!("Emergency halt triggered: {}", reason).into());
             }
         };
         
@@ -529,7 +514,7 @@ impl TransactionExecutor {
         let swap_params = SwapParams {
             token_in: *crate::pools::uniswap_v2::addresses::WETH,
             token_out: alert.token_address,
-            amount_in: final_eth_to_spend,
+            amount_in: eth_to_spend,
             amount_out_min: min_tokens_out,
             recipient: self.wallet.address(),
             deadline: alert.deadline_timestamp(),
@@ -541,7 +526,7 @@ impl TransactionExecutor {
         // Note: For ETH swaps, the value is already set in build_swap_tx
         // Only override if not already set
         if tx.value().is_none() || tx.value() == Some(&U256::zero()) {
-            tx.set_value(final_eth_to_spend);
+            tx.set_value(eth_to_spend);
         }
         
         // Set optimal gas price from ranking system

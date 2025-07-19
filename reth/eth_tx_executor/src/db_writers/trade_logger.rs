@@ -171,12 +171,8 @@ impl TradeLogger {
     ) {
         let (decision_str, final_amount, reason) = match decision {
             RiskDecision::Allow => ("ALLOW", original_amount, None),
-            RiskDecision::ReduceSize { new_amount, reason } => 
-                ("REDUCE", *new_amount, Some(reason.clone())),
             RiskDecision::Block { reason } => 
                 ("BLOCK", U256::zero(), Some(reason.clone())),
-            RiskDecision::EmergencyHalt { reason } => 
-                ("HALT", U256::zero(), Some(reason.clone())),
         };
         
         info!(

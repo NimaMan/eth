@@ -104,6 +104,15 @@ path = "examples/db_integration/position_updater.rs"
 name = "full_integration_demo"
 path = "examples/db_integration/full_integration_demo.rs"
 
+# Trading examples
+[[example]]
+name = "risk_check_demo"
+path = "examples/trading/risk_check_demo.rs"
+
+[[example]]
+name = "risk_integrated_trading"
+path = "examples/trading/risk_integrated_trading.rs"
+
 # Additional binaries to be added as implemented
 # [[bin]]
 # name = "alert_monitor"
