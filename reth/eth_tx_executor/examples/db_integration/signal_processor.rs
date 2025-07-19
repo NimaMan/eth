@@ -88,14 +88,7 @@ async fn create_executor() -> Result<Arc<TransactionExecutor>, Box<dyn std::erro
         flashbots_enabled: true,
         flashbots_rpc: Some("https://relay.flashbots.net".to_string()),
         reth_ws_url: "ws://localhost:8546".to_string(),
-        risk_config: RiskConfig {
-            max_position_size_eth: 5.0,
-            max_daily_loss_eth: 20.0,
-            max_slippage_allowed: 0.10,
-            min_liquidity_eth: 10.0,
-            circuit_breaker_enabled: true,
-            max_consecutive_failures: 3,
-        },
+        risk_config: RiskConfig::default(),
         rabbitmq_url: None,
     };
     

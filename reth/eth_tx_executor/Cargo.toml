@@ -104,6 +104,10 @@ path = "examples/db_integration/position_updater.rs"
 name = "full_integration_demo"
 path = "examples/db_integration/full_integration_demo.rs"
 
+[[example]]
+name = "trade_logger_demo"
+path = "examples/db_integration/trade_logger_demo.rs"
+
 # Trading examples
 [[example]]
 name = "risk_check_demo"

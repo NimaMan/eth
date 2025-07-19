@@ -1,6 +1,6 @@
-//! Trade decision and execution logger
+//! Trade logger for database persistence
 //!
-//! Logs all trading activity to PostgreSQL for audit trail and analysis
+//! Writes trading activity to PostgreSQL for audit trail
 
 use crate::alert_processor::Alert;
 use crate::risk::RiskDecision;
@@ -25,7 +25,7 @@ pub enum TradeEvent {
     /// Risk decision made
     RiskDecision {
         alert_id: String,
-        decision: String, // Allow, ReduceSize, Block, EmergencyHalt
+        decision: String,
         original_amount: U256,
         final_amount: U256,
         reason: Option<String>,
@@ -37,7 +37,7 @@ pub enum TradeEvent {
         tx_hash: H256,
         nonce: U256,
         gas_price: U256,
-        execution_path: String, // PublicMempool, FlashbotsBundle, MultiPath
+        execution_path: String,
     },
     
     /// Transaction confirmed
@@ -55,28 +55,6 @@ pub enum TradeEvent {
         error: String,
         revert_reason: Option<String>,
     },
-}
-
-/// Detailed execution log matching database schema
-#[derive(Debug, Clone, Serialize)]
-pub struct ExecutionLog {
-    pub signal_id: Uuid,
-    pub alert_id: String,
-    pub wallet_address: Address,
-    pub token_address: Address,
-    pub pool_address: Address,
-    pub action: String, // BUY, SELL
-    pub amount_eth: Option<f64>,
-    pub amount_tokens: Option<U256>,
-    pub slippage: f64,
-    pub priority: String,
-    pub status: String,
-    pub tx_hash: Option<H256>,
-    pub error_message: Option<String>,
-    pub metrics: Option<ExecutionMetrics>,
-    pub risk_score: Option<f64>,
-    pub mev_protected: bool,
-    pub gas_optimization_path: Option<serde_json::Value>,
 }
 
 /// Trade logger for comprehensive activity tracking
@@ -367,8 +345,6 @@ impl TradeLogger {
                 error!("❌ Event: Transaction failed for alert {}: {}", alert_id, error);
             }
         }
-        
-        // Could extend this to log custom events to a separate table
     }
     
     /// Get wallet statistics

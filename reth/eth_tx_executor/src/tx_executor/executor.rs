@@ -350,8 +350,44 @@ impl TransactionExecutor {
         
         metrics.price_quote_ms = checkpoint.elapsed().as_millis() as u64;
         
-        // 3.5. Risk check
+        // 3.5. Risk checks
         let trade_amount_eth = amount_out.as_u128() as f64 / 1e18;
+        
+        // Estimate gas cost
+        let gas_limit = U256::from(200_000); // Typical swap gas
+        let gas_cost_wei = gas_recommendation.max_fee * gas_limit;
+        let gas_cost_eth = gas_cost_wei.as_u128() as f64 / 1e18;
+        
+        // Check 1: Gas cost reasonable?
+        {
+            let risk_mgr = self.risk_manager.lock().await;
+            match risk_mgr.check_gas_cost(trade_amount_eth, gas_cost_eth) {
+                RiskDecision::Allow => {
+                    info!("Gas cost check passed: {:.4} ETH ({:.1}% of trade)", 
+                        gas_cost_eth, (gas_cost_eth / trade_amount_eth) * 100.0);
+                }
+                RiskDecision::Block { reason } => {
+                    error!("Gas cost check failed: {}", reason);
+                    return Err(format!("Trade blocked: {}", reason).into());
+                }
+            }
+        }
+        
+        // Check 2: Slippage acceptable?
+        {
+            let risk_mgr = self.risk_manager.lock().await;
+            match risk_mgr.check_slippage(amount_out, min_amount_out) {
+                RiskDecision::Allow => {
+                    info!("Slippage check passed");
+                }
+                RiskDecision::Block { reason } => {
+                    error!("Slippage check failed: {}", reason);
+                    return Err(format!("Trade blocked: {}", reason).into());
+                }
+            }
+        }
+        
+        // Check 3: General risk evaluation
         let risk_decision = {
             let risk_mgr = self.risk_manager.lock().await;
             risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
@@ -367,7 +403,7 @@ impl TransactionExecutor {
         
         match risk_decision {
             RiskDecision::Allow => {
-                info!("Risk check passed for sell order");
+                info!("All risk checks passed for sell order");
             }
             RiskDecision::Block { reason } => {
                 error!("Risk manager blocked trade: {}", reason);
@@ -483,8 +519,58 @@ impl TransactionExecutor {
         
         metrics.price_quote_ms = checkpoint.elapsed().as_millis() as u64;
         
-        // 3.5. Risk check
+        // 3.5. Risk checks
         let trade_amount_eth = eth_to_spend.as_u128() as f64 / 1e18;
+        
+        // Estimate gas cost
+        let gas_limit = U256::from(300_000); // ETH->Token swaps need more gas
+        let gas_cost_wei = gas_recommendation.max_fee * gas_limit;
+        let gas_cost_eth = gas_cost_wei.as_u128() as f64 / 1e18;
+        
+        // Check 1: Sufficient funds (including gas)?
+        {
+            let risk_mgr = self.risk_manager.lock().await;
+            match risk_mgr.check_sufficient_funds(eth_balance, eth_to_spend, gas_cost_eth) {
+                RiskDecision::Allow => {
+                    info!("Sufficient funds check passed");
+                }
+                RiskDecision::Block { reason } => {
+                    error!("Insufficient funds: {}", reason);
+                    return Err(format!("Trade blocked: {}", reason).into());
+                }
+            }
+        }
+        
+        // Check 2: Gas cost reasonable?
+        {
+            let risk_mgr = self.risk_manager.lock().await;
+            match risk_mgr.check_gas_cost(trade_amount_eth, gas_cost_eth) {
+                RiskDecision::Allow => {
+                    info!("Gas cost check passed: {:.4} ETH ({:.1}% of trade)", 
+                        gas_cost_eth, (gas_cost_eth / trade_amount_eth) * 100.0);
+                }
+                RiskDecision::Block { reason } => {
+                    error!("Gas cost check failed: {}", reason);
+                    return Err(format!("Trade blocked: {}", reason).into());
+                }
+            }
+        }
+        
+        // Check 3: Slippage acceptable?
+        {
+            let risk_mgr = self.risk_manager.lock().await;
+            match risk_mgr.check_slippage(tokens_out, min_tokens_out) {
+                RiskDecision::Allow => {
+                    info!("Slippage check passed");
+                }
+                RiskDecision::Block { reason } => {
+                    error!("Slippage check failed: {}", reason);
+                    return Err(format!("Trade blocked: {}", reason).into());
+                }
+            }
+        }
+        
+        // Check 4: General risk evaluation
         let risk_decision = {
             let risk_mgr = self.risk_manager.lock().await;
             risk_mgr.evaluate_trade_risk(&alert, trade_amount_eth, alert.token_address)
@@ -500,7 +586,7 @@ impl TransactionExecutor {
         
         match risk_decision {
             RiskDecision::Allow => {
-                info!("Risk check passed for buy order");
+                info!("All risk checks passed for buy order");
             }
             RiskDecision::Block { reason } => {
                 error!("Risk manager blocked trade: {}", reason);
