@@ -1,6 +1,6 @@
-//! Trade logging module
+//! Database writers module
 //! 
-//! Provides comprehensive logging of all trading decisions and executions
+//! Writes all trading decisions and transaction executions to database
 //! for audit trail and performance analysis
 
 pub mod trade_logger;

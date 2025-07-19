@@ -5,9 +5,9 @@
 use crate::alert_processor::{Alert, Action, Priority};
 use crate::common::{validate_slippage, validate_token_address, validate_pool_address};
 use crate::flashbots::{FlashbotsClient, FlashbotsConfig, BundleBuilder, RelayEndpoint};
-use crate::logging::TradeLogger;
-use crate::pools::{PoolFactory, SwapParams, PoolInfo};
-use crate::gas_ranking::{GasRanking, GasRecommendation, ExecutionPath};
+use crate::db_writers::TradeLogger;
+use crate::pools::{PoolFactory, SwapParams};
+use crate::gas_ranking::{GasRanking, ExecutionPath};
 use crate::risk::{RiskManager, RiskConfig, RiskDecision};
 use crate::tx_executor::NonceManager;
 use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::path::PathBuf;
 use tracing::{info, error, warn, instrument};
-use uuid::Uuid;
 
 /// Executor configuration
 #[derive(Debug, Clone)]

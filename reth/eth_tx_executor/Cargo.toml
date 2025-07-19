@@ -82,6 +82,11 @@ path = "src/bin/kartal.rs"
 name = "keystore_manager"
 path = "src/bin/keystore_manager.rs"
 
+# Wallet examples
+[[example]]
+name = "swap_sim_with_kartal_kilit"
+path = "examples/wallet/swap_sim_with_kartal_kilit.rs"
+
 # Database integration examples
 [[example]]
 name = "signal_generator"
