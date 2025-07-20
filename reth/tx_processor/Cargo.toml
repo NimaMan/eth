@@ -37,6 +37,10 @@ path = "examples/fetch_single_transaction.rs"
 name = "benchmark_1k_transactions"
 path = "examples/benchmark_1k_transactions.rs"
 
+[[example]]
+name = "test_simulate_unsigned_transaction"
+path = "examples/simulation/test_simulate_unsigned_transaction.rs"
+
 [[bin]]
 name = "batch_processor"
 path = "src/bin/batch_processor.rs"

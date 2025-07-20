@@ -32,6 +32,9 @@ pub mod transaction_loader;
 pub mod config;
 pub mod retry_utils;
 
+// Export TxProcessor for external use
+pub use tx_processor::TxProcessor;
+
 /// TX Processor functionality using Direct Reth
 pub mod tx_processor {
     use super::*;
@@ -462,6 +465,105 @@ pub mod tx_processor {
         pub async fn process_transaction_by_hash(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
             // Use the transaction loader to fetch and process transaction
             self.load_transaction(tx_hash).await
+        }
+        
+        /// Simulate an unsigned transaction and return ProcessedTransaction with all transfers
+        /// This function takes unsigned transaction data and returns comprehensive transfer information
+        /// extracted from simulation - useful for tax calculation and analysis
+        pub async fn simulate_unsigned_transaction(&self, call_request: CallRequest) -> Result<ProcessedTransaction> {
+            // Get current block for simulation
+            let latest_block = self.simulator.get_latest_block()?;
+            
+            // Simulate with full trace to get logs and internal transactions
+            let detailed_result = self.simulator.simulate_transaction_detailed(call_request.clone(), Some(latest_block)).await?;
+            
+            // Create ProcessedTransaction with simulated data (dummy values for block info since it's unsigned)
+            let mut processed_tx = ProcessedTransaction::new(
+                B256::ZERO, // No real hash for unsigned tx
+                latest_block, // Current block
+                0, // No real timestamp for unsigned tx  
+                0, // No real index for unsigned tx
+                call_request.from.unwrap_or(Address::ZERO),
+                call_request.to,
+                call_request.value.unwrap_or(U256::ZERO),
+                if detailed_result.success { "1".to_string() } else { "0".to_string() },
+                call_request.nonce.unwrap_or(0),
+                call_request.data.map(|d| d.to_vec()).unwrap_or_default(),
+            );
+            
+            // Set fees from simulation
+            processed_tx.fees = TransactionFees::new(
+                U256::from(call_request.gas_price.unwrap_or(0)),
+                detailed_result.gas_used,
+            );
+            
+            // Decode logs from simulation into events
+            for log in detailed_result.logs.iter() {
+                if let Ok(Some(decoded_event)) = self.decoder.decode_log(log) {
+                    match decoded_event {
+                        DecodedEvent::ERC20Transfer(transfer) => {
+                            processed_tx.erc20_transfers.push(transfer);
+                        }
+                        DecodedEvent::ERC721Transfer(transfer) => {
+                            processed_tx.erc721_transfers.push(transfer);
+                        }
+                        DecodedEvent::ERC1155Transfer(transfer) => {
+                            processed_tx.erc1155_transfers.push(transfer);
+                        }
+                        DecodedEvent::ERC20Approval(approval) => {
+                            processed_tx.approvals.push(approval);
+                        }
+                        DecodedEvent::ERC721Approval(approval) => {
+                            processed_tx.erc721_approvals.push(approval);
+                        }
+                        DecodedEvent::UniswapV2Swap(swap) => {
+                            processed_tx.uniswap_v2_swaps.push(swap);
+                        }
+                        DecodedEvent::UniswapV2Sync(sync) => {
+                            processed_tx.uniswap_v2_syncs.push(sync);
+                        }
+                        DecodedEvent::UniswapV3Swap(swap) => {
+                            processed_tx.uniswap_v3_swaps.push(swap);
+                        }
+                        _ => {
+                            // Handle other events as needed
+                        }
+                    }
+                }
+            }
+            
+            // Extract state changes from detailed result
+            for (addr, changes) in detailed_result.state_changes {
+                processed_tx.state_changes.insert(
+                    addr,
+                    serde_json::json!({
+                        "eth_net": changes.eth_net,
+                        "token_net": changes.token_net,
+                    })
+                );
+            }
+            
+            // Add unique addresses
+            processed_tx.unique_addresses.insert(call_request.from.unwrap_or(Address::ZERO));
+            if let Some(to_addr) = call_request.to {
+                processed_tx.unique_addresses.insert(to_addr);
+            }
+            
+            // Collect addresses from transfers
+            for transfer in &processed_tx.erc20_transfers {
+                processed_tx.erc20_contracts.insert(transfer.token_address);
+                processed_tx.unique_addresses.insert(transfer.from_address);
+                processed_tx.unique_addresses.insert(transfer.to_address);
+            }
+            
+            // Classify transaction
+            let tx_type = self.classifier.classify(&processed_tx);
+            processed_tx.txn_type = tx_type.to_string();
+            
+            // Identify actions
+            processed_tx.actions = self.classifier.identify_actions(&processed_tx);
+            
+            Ok(processed_tx)
         }
     }
 } 
