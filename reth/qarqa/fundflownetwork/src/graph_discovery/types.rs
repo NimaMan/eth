@@ -34,14 +34,14 @@ impl GraphEdge {
     }
 }
 
-/// Preliminary undirected graph from discovery
+/// Undirected graph from discovery phase
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct PreliminaryGraph {
+pub struct UndirectedGraph {
     pub nodes: HashMap<Address, GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
-impl PreliminaryGraph {
+impl UndirectedGraph {
     pub fn new() -> Self {
         Self::default()
     }
@@ -87,7 +87,7 @@ pub struct DiscoveryConfig {
     pub max_nodes: usize,              // Maximum nodes to discover
     pub min_value_wei: U256,           // Minimum transaction value
     pub max_txs_per_address: usize,    // Limit transactions per address
-    pub time_window_blocks: Option<u64>, // Optional: only recent blocks
+    pub max_block_number: Option<u64>,  // Optional: only blocks before this number
 }
 
 impl Default for DiscoveryConfig {
@@ -97,7 +97,7 @@ impl Default for DiscoveryConfig {
             max_nodes: 500,
             min_value_wei: U256::from(10).pow(U256::from(17)), // 0.1 ETH
             max_txs_per_address: 100,
-            time_window_blocks: None,
+            max_block_number: None,
         }
     }
 }
@@ -105,7 +105,7 @@ impl Default for DiscoveryConfig {
 /// Output from graph discovery
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DiscoveryOutput {
-    pub graph: PreliminaryGraph,
+    pub graph: UndirectedGraph,
     pub priority_transactions: Vec<TxCandidate>,
     pub stop_reason: StopReason,
     pub discovery_stats: DiscoveryStats,
@@ -131,7 +131,7 @@ pub struct DiscoveryStats {
 
 /// Item in the exploration frontier (for BFS)
 #[derive(Debug, Clone)]
-pub struct ExplorationItem {
+pub struct FrontierItem {
     pub tx_hash: TxHash,
     pub from: Address,
     pub to: Address,
@@ -141,22 +141,22 @@ pub struct ExplorationItem {
     pub block_number: u64,
 }
 
-impl Ord for ExplorationItem {
+impl Ord for FrontierItem {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Higher value = higher priority
         self.value.cmp(&other.value)
     }
 }
 
-impl PartialOrd for ExplorationItem {
+impl PartialOrd for FrontierItem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Eq for ExplorationItem {}
+impl Eq for FrontierItem {}
 
-impl PartialEq for ExplorationItem {
+impl PartialEq for FrontierItem {
     fn eq(&self, other: &Self) -> bool {
         self.tx_hash == other.tx_hash
     }

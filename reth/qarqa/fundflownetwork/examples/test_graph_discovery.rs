@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
         max_nodes: 50,                                         // Plenty for this example
         min_value_wei: U256::ZERO,                            // Include 0-value transactions
         max_txs_per_address: 20,                              // Limit for testing
-        time_window_blocks: None,                             // No time limit
+        max_block_number: Some(22885510),                     // Only transactions before liquidity was added
     };
     
     println!("\nStarting graph discovery from pool address...");

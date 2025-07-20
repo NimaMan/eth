@@ -5,9 +5,9 @@ use sqlx::{PgPool, FromRow};
 use std::collections::HashMap;
 use eyre::Result;
 
-/// Transaction participant record from database
+/// Raw transaction participant record from database
 #[derive(Debug, FromRow)]
-pub struct TxParticipant {
+pub struct RawTxParticipant {
     pub tx_hash: String,
     pub from_address: String,
     pub to_address: String,
@@ -15,10 +15,10 @@ pub struct TxParticipant {
     pub block_number: i64,
 }
 
-impl TxParticipant {
-    /// Convert database strings to proper types
-    pub fn into_typed(self) -> Result<TxParticipantTyped> {
-        Ok(TxParticipantTyped {
+impl RawTxParticipant {
+    /// Parse database strings to proper types
+    pub fn parse(self) -> Result<TxParticipant> {
+        Ok(TxParticipant {
             tx_hash: self.tx_hash.parse()?,
             from_address: self.from_address.parse()?,
             to_address: self.to_address.parse()?,
@@ -28,7 +28,7 @@ impl TxParticipant {
     }
 }
 
-pub struct TxParticipantTyped {
+pub struct TxParticipant {
     pub tx_hash: TxHash,
     pub from_address: Address,
     pub to_address: Address,
@@ -36,21 +36,21 @@ pub struct TxParticipantTyped {
     pub block_number: u64,
 }
 
-/// Address information from database
+/// Raw address information from database
 #[derive(Debug, Default, FromRow)]
-pub struct AddressInfo {
+pub struct RawAddressInfo {
     pub address: String,
     pub is_contract: bool,
     pub cluster_label: Option<String>,
     pub scam_ratio: Option<f64>,
 }
 
-impl AddressInfo {
-    pub fn into_typed(self) -> Result<AddressInfoTyped> {
+impl RawAddressInfo {
+    pub fn parse(self) -> Result<AddressInfo> {
         // Derive entity type before consuming self
         let entity_type = derive_entity_type(&self.cluster_label);
         
-        Ok(AddressInfoTyped {
+        Ok(AddressInfo {
             address: self.address.parse()?,
             is_contract: self.is_contract,
             cluster_label: self.cluster_label,
@@ -74,7 +74,7 @@ fn derive_entity_type(cluster_label: &Option<String>) -> Option<String> {
 }
 
 #[derive(Debug, Clone)]
-pub struct AddressInfoTyped {
+pub struct AddressInfo {
     pub address: Address,
     pub is_contract: bool,
     pub cluster_label: Option<String>,
@@ -99,8 +99,8 @@ impl GraphDiscoveryQueries {
         address: &Address,
         min_value_wei: &U256,
         limit: usize,
-        recent_blocks_only: Option<u64>,
-    ) -> Result<Vec<TxParticipantTyped>> {
+        max_block: Option<u64>,
+    ) -> Result<Vec<TxParticipant>> {
         let address_str = format!("{:?}", address);
         let min_value_eth = min_value_wei.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
         
@@ -150,12 +150,12 @@ impl GraphDiscoveryQueries {
             "#,
             placeholders.join(", "),
             tx_hashes.len() + 1,
-            if recent_blocks_only.is_some() {
-                format!("AND t.block_number >= ${}", tx_hashes.len() + 2)
+            if max_block.is_some() {
+                format!("AND t.block_number <= ${}", tx_hashes.len() + 2)
             } else {
                 String::new()
             },
-            if recent_blocks_only.is_some() {
+            if max_block.is_some() {
                 tx_hashes.len() + 3
             } else {
                 tx_hashes.len() + 2
@@ -163,13 +163,13 @@ impl GraphDiscoveryQueries {
         );
         
         // Build and execute query
-        let mut query_builder = sqlx::query_as::<_, TxParticipant>(&base_query);
+        let mut query_builder = sqlx::query_as::<_, RawTxParticipant>(&base_query);
         for tx_hash in &tx_hashes {
             query_builder = query_builder.bind(tx_hash);
         }
         query_builder = query_builder.bind(min_value_eth);
         
-        if let Some(block_limit) = recent_blocks_only {
+        if let Some(block_limit) = max_block {
             query_builder = query_builder.bind(block_limit as i64);
         }
         
@@ -183,7 +183,7 @@ impl GraphDiscoveryQueries {
             let value_float = row.value.parse::<f64>().unwrap_or(0.0);
             let value_wei = U256::from((value_float * 1e18) as u128);
             
-            typed_results.push(TxParticipantTyped {
+            typed_results.push(TxParticipant {
                 tx_hash: row.tx_hash.parse()?,
                 from_address: row.from_address.parse()?,
                 to_address: if row.to_address.is_empty() { 
@@ -203,7 +203,7 @@ impl GraphDiscoveryQueries {
     pub async fn get_address_info(
         &self,
         address: &Address,
-    ) -> Result<AddressInfoTyped> {
+    ) -> Result<AddressInfo> {
         let address_str = format!("{:?}", address);
         
         let query = r#"
@@ -216,25 +216,25 @@ impl GraphDiscoveryQueries {
             WHERE LOWER(address) = LOWER($1)
         "#;
         
-        let info = sqlx::query_as::<_, AddressInfo>(query)
+        let info = sqlx::query_as::<_, RawAddressInfo>(query)
             .bind(&address_str)
             .fetch_optional(&self.pool)
             .await?
-            .unwrap_or_else(|| AddressInfo {
+            .unwrap_or_else(|| RawAddressInfo {
                 address: address_str.clone(),
                 is_contract: false,
                 cluster_label: None,
                 scam_ratio: None,
             });
             
-        info.into_typed()
+        info.parse()
     }
     
     /// Batch get address info for multiple addresses
     pub async fn get_addresses_info(
         &self,
         addresses: &[Address],
-    ) -> Result<HashMap<Address, AddressInfoTyped>> {
+    ) -> Result<HashMap<Address, AddressInfo>> {
         if addresses.is_empty() {
             return Ok(HashMap::new());
         }
@@ -254,7 +254,7 @@ impl GraphDiscoveryQueries {
         );
         
         // Build query
-        let mut query_builder = sqlx::query_as::<_, AddressInfo>(&query);
+        let mut query_builder = sqlx::query_as::<_, RawAddressInfo>(&query);
         for addr in addresses {
             let addr_str = format!("{:?}", addr).to_lowercase();
             query_builder = query_builder.bind(addr_str);
@@ -266,7 +266,7 @@ impl GraphDiscoveryQueries {
         // Convert to HashMap
         let mut result = HashMap::new();
         for row in rows {
-            if let Ok(typed) = row.into_typed() {
+            if let Ok(typed) = row.parse() {
                 result.insert(typed.address, typed);
             }
         }
@@ -274,7 +274,7 @@ impl GraphDiscoveryQueries {
         // Add default entries for addresses not in DB
         for addr in addresses {
             if !result.contains_key(addr) {
-                result.insert(*addr, AddressInfoTyped {
+                result.insert(*addr, AddressInfo {
                     address: *addr,
                     is_contract: false,
                     cluster_label: None,

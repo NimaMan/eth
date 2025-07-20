@@ -2,7 +2,7 @@
 
 use crate::graph_discovery::{
     types::*,
-    db_queries::{GraphDiscoveryQueries, AddressInfoTyped},
+    db_queries::{GraphDiscoveryQueries, AddressInfo},
     routing_rules::RoutingRules,
     tx_selector::TxSelector,
 };
@@ -38,7 +38,7 @@ impl GraphExplorer {
         info!("Config: max_depth={}, max_nodes={}, min_value={}", 
               config.max_depth, config.max_nodes, config.min_value_wei);
         
-        let mut graph = PreliminaryGraph::new();
+        let mut graph = UndirectedGraph::new();
         let priority_txs;
         let mut tx_candidates = Vec::new();
         let mut frontier = BinaryHeap::new();
@@ -64,7 +64,7 @@ impl GraphExplorer {
                 &seed,
                 &config.min_value_wei,
                 config.max_txs_per_address,
-                config.time_window_blocks,
+                config.max_block_number,
             )
             .await?;
             
@@ -79,7 +79,7 @@ impl GraphExplorer {
                 tx.from_address
             };
             
-            frontier.push(ExplorationItem {
+            frontier.push(FrontierItem {
                 tx_hash: tx.tx_hash,
                 from: tx.from_address,
                 to: tx.to_address,
@@ -134,9 +134,9 @@ impl GraphExplorer {
     
     async fn explore_bfs(
         &self,
-        graph: &mut PreliminaryGraph,
+        graph: &mut UndirectedGraph,
         tx_candidates: &mut Vec<TxCandidate>,
-        frontier: &mut BinaryHeap<ExplorationItem>,
+        frontier: &mut BinaryHeap<FrontierItem>,
         visited: &mut HashSet<Address>,
         config: &DiscoveryConfig,
         stats: &mut DiscoveryStats,
@@ -235,7 +235,7 @@ impl GraphExplorer {
                         &item.counterparty,
                         &config.min_value_wei,
                         config.max_txs_per_address,
-                        config.time_window_blocks,
+                        config.max_block_number,
                     )
                     .await?;
                 
@@ -253,7 +253,7 @@ impl GraphExplorer {
                         continue;
                     }
                     
-                    frontier.push(ExplorationItem {
+                    frontier.push(FrontierItem {
                         tx_hash: tx.tx_hash,
                         from: tx.from_address,
                         to: tx.to_address,

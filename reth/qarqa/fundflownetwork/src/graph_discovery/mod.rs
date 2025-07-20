@@ -13,7 +13,7 @@ pub mod tx_selector;
 pub mod explorer;
 
 pub use types::{
-    PreliminaryGraph, GraphNode, GraphEdge, 
+    UndirectedGraph, GraphNode, GraphEdge, 
     DiscoveryConfig, DiscoveryOutput, TxCandidate
 };
 pub use explorer::GraphExplorer;

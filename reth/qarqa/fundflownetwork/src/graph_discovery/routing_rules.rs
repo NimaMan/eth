@@ -1,13 +1,13 @@
 //! Routing rules for graph exploration
 //! Decides which addresses to expand and which to stop at
 
-use crate::graph_discovery::db_queries::AddressInfoTyped;
+use crate::graph_discovery::db_queries::AddressInfo;
 
 pub struct RoutingRules;
 
 impl RoutingRules {
     /// Should we expand exploration from this address?
-    pub fn should_expand(info: &AddressInfoTyped) -> bool {
+    pub fn should_expand(info: &AddressInfo) -> bool {
         match info.entity_type.as_deref() {
             // Dead ends - don't expand
             Some("CEX") => false,              // Centralized exchanges are endpoints
@@ -49,8 +49,8 @@ impl RoutingRules {
     /// Should we mark this transaction for deep analysis in Layer 2?
     /// This is more selective than expansion
     pub fn should_analyze_deeply(
-        from_info: &AddressInfoTyped,
-        to_info: &AddressInfoTyped,
+        from_info: &AddressInfo,
+        to_info: &AddressInfo,
         value: &alloy_primitives::U256,
     ) -> bool {
         use alloy_primitives::U256;
@@ -92,7 +92,7 @@ impl RoutingRules {
     }
     
     /// Check if address is a router/aggregator that needs deep analysis
-    pub fn is_router(info: &AddressInfoTyped) -> bool {
+    pub fn is_router(info: &AddressInfo) -> bool {
         matches!(
             info.entity_type.as_deref(),
             Some("DEX_ROUTER") | Some("DEX_AGGREGATOR") | Some("1INCH_ROUTER")
@@ -100,7 +100,7 @@ impl RoutingRules {
     }
     
     /// Check if address is MEV related
-    fn is_mev_related(info: &AddressInfoTyped) -> bool {
+    fn is_mev_related(info: &AddressInfo) -> bool {
         matches!(
             info.entity_type.as_deref(),
             Some("MEV_BOT") | Some("FLASHLOAN_PROVIDER") | Some("SANDWICH_BOT")
@@ -108,7 +108,7 @@ impl RoutingRules {
     }
     
     /// Check if address is a CEX
-    fn is_cex(info: &AddressInfoTyped) -> bool {
+    fn is_cex(info: &AddressInfo) -> bool {
         matches!(
             info.entity_type.as_deref(),
             Some("CEX") | Some("CEX_DEPOSIT") | Some("CEX_HOT_WALLET")
@@ -116,7 +116,7 @@ impl RoutingRules {
     }
     
     /// Check if address is a protocol
-    fn is_protocol(info: &AddressInfoTyped) -> bool {
+    fn is_protocol(info: &AddressInfo) -> bool {
         info.entity_type
             .as_ref()
             .map(|t| t.contains("PROTOCOL") || t.contains("POOL") || t.contains("VAULT"))
