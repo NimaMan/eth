@@ -22,7 +22,7 @@ pub struct TransactionExecutor {
     provider: Arc<Provider<Http>>,           // Ethereum RPC provider
     wallet: Arc<SecureWallet>,              // Encrypted wallet for signing
     pool_factory: PoolFactory,              // DEX pool interactions
-    position_tracker: Arc<PositionTracker>, // Current position monitoring
+    // Note: Position tracking removed - trading agent handles balances
     ranking_system: Arc<TransactionRankingSystem>, // Gas optimization
     nonce_manager: Arc<NonceManager>,       // Nonce tracking
     risk_manager: Arc<Mutex<RiskManager>>,  // Risk validation
@@ -92,11 +92,8 @@ pub async fn execute_alert(&self, alert: Alert) -> ExecutionResult {
 ### 2. Sell Execution Example
 ```rust
 async fn execute_sell(&self, alert: Alert, metrics: &mut ExecutionMetrics) -> Result<H256> {
-    // Step 1: Check current position
-    let position = self.position_tracker.get_position(alert.token_address).await?;
-    if position.balance.is_zero() {
-        return Err("No tokens to sell");
-    }
+    // Step 1: Use amount from alert (trading agent ensures tokens are available)
+    // The trading agent is responsible for checking positions before sending alerts
     
     // Step 2: Calculate optimal gas price using ranking system
     let ranking_result = self.ranking_system.calculate_ranking(&alert).await?;

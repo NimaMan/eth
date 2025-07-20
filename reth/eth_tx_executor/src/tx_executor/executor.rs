@@ -10,7 +10,7 @@ use crate::pools::{PoolFactory, SwapParams};
 use crate::gas_ranking::{GasRanking, ExecutionPath};
 use crate::risk::{RiskManager, RiskConfig, RiskDecision};
 use crate::tx_executor::NonceManager;
-use crate::wallet::{PositionTracker, SecureWallet, SecureWalletConfig};
+use crate::wallet::{SecureWallet, SecureWalletConfig};
 use ethers::prelude::*;
 use ethers::types::transaction::eip2718::TypedTransaction;
 use std::sync::Arc;
@@ -81,8 +81,6 @@ pub struct TransactionExecutor {
     wallet: Arc<SecureWallet>,
     /// Pool factory
     pool_factory: PoolFactory,
-    /// Position tracker
-    position_tracker: Arc<PositionTracker>,
     /// Gas ranking system
     gas_ranking: Arc<GasRanking>,
     /// Nonce manager
@@ -111,7 +109,6 @@ impl TransactionExecutor {
         let wallet_address = wallet.address();
         
         let pool_factory = PoolFactory::new(provider.clone());
-        let position_tracker = Arc::new(PositionTracker::new(provider.clone(), wallet_address)?);
         
         // Initialize gas ranking system
         let gas_ranking = if let Some(rabbitmq_url) = config.rabbitmq_url.as_ref() {
@@ -166,7 +163,6 @@ impl TransactionExecutor {
             provider,
             wallet,
             pool_factory,
-            position_tracker,
             gas_ranking,
             nonce_manager,
             risk_manager,
@@ -305,20 +301,10 @@ impl TransactionExecutor {
     ) -> Result<H256, Box<dyn std::error::Error>> {
         let checkpoint = Instant::now();
         
-        // 1. Check position
-        let position = self.position_tracker.get_position(alert.token_address).await?;
+        // 1. Use amount from alert directly
+        // Note: The trading agent should ensure it has tokens before sending sell alerts
+        let amount_to_sell = alert.params.amount;
         metrics.position_check_ms = checkpoint.elapsed().as_millis() as u64;
-        
-        if position.balance.is_zero() {
-            return Err("No tokens to sell".into());
-        }
-        
-        // Determine amount to sell
-        let amount_to_sell = if alert.params.amount == U256::MAX {
-            position.balance // Sell all
-        } else {
-            alert.params.amount.min(position.balance)
-        };
         
         let checkpoint = Instant::now();
         
