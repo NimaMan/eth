@@ -38,7 +38,8 @@ Interaction with Blockchain:
     the necessary data for instantiating pools that were not discovered through creation events.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+import logging
 from collections import defaultdict
 from web3 import Web3
 
@@ -46,6 +47,7 @@ from .base_pool import BasePool
 from .uniswap_v2_pool import UniswapV2Pool, UNISWAP_V2_PAIR_ABI
 from .uniswap_v3_pool import UniswapV3Pool
 from .uniswap_v4_pool import UniswapV4Pool, PoolKey
+from .arbitrage_detector import ArbitrageDetector, ArbitrageOpportunity
 from eth_block_processor.chain_utils.pool_addresses import POOL_FACTORIES
 from eth_block_processor.data_models.txn_models import ProcessedTransaction
 
@@ -79,6 +81,9 @@ class PoolManager:
         self.trading_enabled_txn = ""
     
         self.logger = logger
+        
+        # Initialize arbitrage detector
+        self.arbitrage_detector = ArbitrageDetector(token_address)
         
     def process_transaction(self, transaction: ProcessedTransaction):
         """
@@ -935,5 +940,114 @@ class PoolManager:
             'enabled': self.trading_enabled,
             'block': self.trading_enabled_block,
             'txn': self.trading_enabled_txn
+        }
+    
+    def detect_arbitrage(self, min_profit_threshold: float = None) -> List[ArbitrageOpportunity]:
+        """
+        Detect arbitrage opportunities across all pools.
+        
+        Args:
+            min_profit_threshold: Minimum profit percentage to report (overrides detector default)
+            
+        Returns:
+            List of arbitrage opportunities sorted by profit percentage
+        """
+        if min_profit_threshold is not None:
+            old_threshold = self.arbitrage_detector.min_profit_threshold
+            self.arbitrage_detector.min_profit_threshold = min_profit_threshold
+            opportunities = self.arbitrage_detector.detect_arbitrage(self)
+            self.arbitrage_detector.min_profit_threshold = old_threshold
+        else:
+            opportunities = self.arbitrage_detector.detect_arbitrage(self)
+        
+        # Log if significant opportunities found
+        if opportunities:
+            self.arbitrage_detector.log_opportunities(opportunities)
+        
+        return opportunities
+    
+    def get_arbitrage_stats(self) -> Dict:
+        """
+        Get arbitrage statistics including price spreads and opportunities.
+        
+        Returns:
+            Dict with arbitrage statistics
+        """
+        # Get price spread stats
+        spread_stats = self.arbitrage_detector.get_price_spread_stats(self)
+        
+        # Detect current opportunities
+        opportunities = self.detect_arbitrage()
+        
+        # Format opportunity data
+        opp_data = []
+        for opp in opportunities[:10]:  # Top 10 opportunities
+            opp_data.append({
+                'buy_pool': opp.buy_pool,
+                'sell_pool': opp.sell_pool,
+                'profit_pct': opp.profit_percentage,
+                'buy_price': opp.buy_price,
+                'sell_price': opp.sell_price,
+                'max_amount': opp.max_profitable_amount
+            })
+        
+        return {
+            'price_spread': spread_stats,
+            'num_opportunities': len(opportunities),
+            'top_opportunities': opp_data,
+            'max_profit_pct': opportunities[0].profit_percentage if opportunities else 0,
+            'has_significant_arbitrage': any(opp.profit_percentage > 5 for opp in opportunities)
+        }
+    
+    def check_price_consistency(self, tolerance: float = 0.05) -> Dict:
+        """
+        Check if prices across pools are consistent within tolerance.
+        
+        Args:
+            tolerance: Maximum acceptable price deviation (default 5%)
+            
+        Returns:
+            Dict with consistency check results
+        """
+        pools_with_prices = []
+        
+        for pool in self.get_all_pools():
+            if pool.get_denom_reserve() > 0:
+                price = pool.get_price()
+                if price > 0:
+                    pools_with_prices.append({
+                        'pool': pool,
+                        'price': price,
+                        'address': pool.pool_address,
+                        'protocol': pool.get_protocol()
+                    })
+        
+        if len(pools_with_prices) < 2:
+            return {
+                'is_consistent': True,
+                'reason': 'Less than 2 pools with valid prices',
+                'num_pools': len(pools_with_prices)
+            }
+        
+        prices = [p['price'] for p in pools_with_prices]
+        avg_price = sum(prices) / len(prices)
+        
+        inconsistent_pools = []
+        for pool_data in pools_with_prices:
+            deviation = abs(pool_data['price'] - avg_price) / avg_price
+            if deviation > tolerance:
+                inconsistent_pools.append({
+                    'address': pool_data['address'],
+                    'protocol': pool_data['protocol'],
+                    'price': pool_data['price'],
+                    'deviation_pct': deviation * 100
+                })
+        
+        return {
+            'is_consistent': len(inconsistent_pools) == 0,
+            'avg_price': avg_price,
+            'num_pools': len(pools_with_prices),
+            'inconsistent_pools': inconsistent_pools,
+            'max_deviation_pct': max(p['deviation_pct'] for p in inconsistent_pools) if inconsistent_pools else 0
         }
 

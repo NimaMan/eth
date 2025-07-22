@@ -15,7 +15,7 @@ from eth_block_processor.chain_utils.common_addresses import (
     DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, DENOM_NAMES_TO_ADDRESS,
     denominator_addresses_by_name, known_denom_decimals
 )
-from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
+from .pool_reserve_tracker import PoolReserveTracker
 
 
 # Uniswap V2 Pair contract ABI for getReserves()
@@ -141,7 +141,17 @@ class BasePool(ABC):
         self._token_decimals: Optional[int] = None
         self._denom_decimals: Optional[int] = None
         
-        # Scam detection (set by external reserve tracker)
+        # Pool-specific reserve tracker
+        self.reserve_tracker = PoolReserveTracker(
+            pool_address=pool_address,
+            denom_address=denom_address,
+            logger=None  # Logger can be set later if needed
+        )
+        
+        # Logger (can be set by subclasses)
+        self.logger = None
+        
+        # Scam detection (from reserve tracker)
         self.scam_label: Optional[str] = None
         self.scam_block: Optional[int] = None        
         self.scam_tx_hash: Optional[str] = None
@@ -202,7 +212,8 @@ class BasePool(ABC):
         else:
             return self.state.reserve0
             
-    def update_reserves(self, reserve0: float, reserve1: float, block_number: int):
+    def update_reserves(self, reserve0: float, reserve1: float, block_number: int, 
+                       timestamp: int = 0, tx_hash: str = ''):
         """Update pool reserves and calculate prices."""
         self.state.reserve0 = reserve0
         self.state.reserve1 = reserve1
@@ -218,6 +229,28 @@ class BasePool(ABC):
         price = self.get_price()
         if price > 0:
             self.price_history.append((block_number, price))
+            
+        # Update reserve tracker
+        denom_reserve = self.get_denom_reserve()
+        token_reserve = self.get_token_reserve()
+        self.reserve_tracker.update_reserves(
+            denom_reserve=denom_reserve,
+            token_reserve=token_reserve,
+            price=price,
+            block_number=block_number,
+            timestamp=timestamp,
+            tx_hash=tx_hash
+        )
+        
+        # Sync scam detection from tracker
+        if self.reserve_tracker.is_scam:
+            self.scam_label = self.reserve_tracker.scam_label
+            self.scam_block = self.reserve_tracker.scam_block
+            self.scam_tx_hash = self.reserve_tracker.scam_tx_hash
+        else:
+            self.scam_label = None
+            self.scam_block = None
+            self.scam_tx_hash = None
     
     def _mark_trading_enabled(self, transaction: ProcessedTransaction):
         """Mark trading as enabled for this pool."""
@@ -241,28 +274,9 @@ class BasePool(ABC):
     @property
     def is_scam(self) -> bool:
         """
-        Check if this pool is a scam based on low liquidity.
-        
-        A pool is considered a scam if its denomination currency reserves
-        fall below critical thresholds defined in the config.
+        Check if this pool is a scam based on the reserve tracker's detection.
         """
-        # Get current reserves in denomination currency
-        denom_reserve = self.get_denom_reserve()
-        
-        # Get the denomination token name
-        denom_name = DENOM_ADDRESSES.get(self.denom_address, None)
-        if not denom_name:
-            # Unknown denomination, can't determine scam status
-            return False
-        
-        # Get threshold config for this denomination
-        threshold_config = get_threshold_for_token(denom_name)
-        if not threshold_config:
-            # No threshold defined for this token
-            return False
-        
-        # Check if reserves are below threshold
-        return denom_reserve < threshold_config['threshold']
+        return self.reserve_tracker.is_scam
     
     @property
     def w3(self) -> Web3:

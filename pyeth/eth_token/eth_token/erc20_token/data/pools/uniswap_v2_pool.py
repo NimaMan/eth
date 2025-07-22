@@ -148,18 +148,20 @@ class UniswapV2Pool(BasePool):
                 self.logger.warning(f"Cannot process sync for pool {self.pool_address}: missing decimals (token0: {token0_decimals}, token1: {token1_decimals})")
             return
         
-        # Update pool state
-        self.state.reserve0 = reserve0
-        self.state.reserve1 = reserve1
-        
-        # Calculate prices
-        if reserve0 > 0 and reserve1 > 0:
-            self.state.price0 = reserve1 / reserve0
-            self.state.price1 = reserve0 / reserve1
+        # Update pool state with reserve tracker
+        timestamp = transaction.block_timestamp
+        if hasattr(timestamp, 'timestamp'):
+            timestamp = int(timestamp.timestamp())
+        else:
+            timestamp = int(timestamp) if timestamp else 0
             
-            # Add to price history
-            price = reserve1 / reserve0 if not self.token1_is_denom else reserve0 / reserve1
-            self.price_history.append((transaction.block_number, price))
+        self.update_reserves(
+            reserve0=reserve0, 
+            reserve1=reserve1, 
+            block_number=transaction.block_number,
+            timestamp=timestamp,
+            tx_hash=transaction.hash
+        )
         
         # Store sync event
         self.sync_events.append({
