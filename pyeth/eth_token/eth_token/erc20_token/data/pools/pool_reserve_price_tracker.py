@@ -7,21 +7,12 @@ responsibility is to determine if a token should be labeled as a scam
 due to insufficient liquidity in its pools.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from collections import defaultdict
+from web3 import Web3
 from eth_token.utils.common_addresses import *
-
-
-# Reserve thresholds for scam detection
-WETH_DENOM_RESERVE_THRESHOLD = 0.1  # 0.1 ETH
-USD_DENOM_RESERVE_THRESHOLD = 1000  # $1000 for USDC/USDT/DAI
-
-# Known stablecoin addresses
-STABLECOIN_ADDRESSES = set(STABLECOINS_NAME_BY_ADDRESS.keys())
-
-# WETH address
-WETH_ADDRESS = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
 
 
 @dataclass
@@ -47,7 +38,7 @@ class PoolReservePriceTracker:
     """
     
     def __init__(self, token_address: str, logger):
-        self.token_address = token_address.lower()
+        self.token_address = Web3.to_checksum_address(token_address)
         self.logger = logger
         
         # Reserve snapshots by pool
@@ -56,12 +47,8 @@ class PoolReservePriceTracker:
         # Latest reserves by pool
         self.latest_reserves: Dict[str, PoolReserveSnapshot] = {}
         
-        # Scam detection state
-        self.is_scam = False
-        self.scam_reason: Optional[str] = None
-        self.scam_block: Optional[int] = None
-        self.scam_tx_hash: Optional[str] = None
-        self.scam_pool: Optional[str] = None
+        # Pool scam detection state (pool -> scam info)
+        self.pool_scam_status: Dict[str, Dict[str, Any]] = {}
         
     def update_reserves(self, pool_address: str, denom_address: str, denom_reserve: float,
                        token_reserve: float, price: float,
@@ -98,45 +85,42 @@ class PoolReservePriceTracker:
     def _check_for_low_liquidity_scam(self, pool_address: str, denom_address: str, snapshot: PoolReserveSnapshot, tx_hash: str):
         """
         Checks if the pool's liquidity is below the acceptable threshold for its
-        denomination currency, flagging the token as a scam if it is.
+        denomination currency, flagging the specific pool as a scam if it is.
         
-        This is the core scam-labeling logic. It prevents false positives by
-        applying the correct threshold (WETH vs. USD) based on the pool's
-        actual denomination currency.
+        This tracks scam status per pool, not per token. Each pool can independently
+        be marked as a scam based on its own liquidity levels.
         """
-        # Skip if already flagged
-        if self.is_scam:
+        # Get the denomination token name
+        denom_name = DENOM_ADDRESSES.get(denom_address, None)
+        if not denom_name:
+            # Can't determine threshold for unknown denomination
             return
-            
-        is_low_liquidity = False
-        threshold = 0.0
-        denom_symbol = "unknown"
-
-        # Check against WETH threshold
-        if denom_address.lower() == WETH_ADDRESS.lower():
-            threshold = WETH_DENOM_RESERVE_THRESHOLD
-            denom_symbol = "WETH"
-            if snapshot.denom_reserve < threshold:
-                is_low_liquidity = True
         
-        # Check against stablecoin threshold
-        elif denom_address.lower() in STABLECOIN_ADDRESSES:
-            threshold = USD_DENOM_RESERVE_THRESHOLD
-            denom_symbol = STABLECOINS_NAME_BY_ADDRESS.get(denom_address.lower(), "USD")
-            if snapshot.denom_reserve < threshold:
-                is_low_liquidity = True
+        # Get threshold config
+        threshold_config = get_threshold_for_token(denom_name)
+        if not threshold_config:
+            # No threshold defined for this token
+            return
+        
+        threshold = threshold_config['threshold']
+        unit = threshold_config['unit']
+        
+        is_low_liquidity = snapshot.denom_reserve < threshold
         
         if is_low_liquidity:
-            self.is_scam = True
-            self.scam_reason = (f"Low liquidity: Pool has {snapshot.denom_reserve:.4f} {denom_symbol}, "
-                              f"which is below the {threshold} {denom_symbol} threshold.")
-            self.scam_block = snapshot.block_number
-            self.scam_tx_hash = tx_hash
-            self.scam_pool = pool_address
-            self.logger.warning(
-                f"SCAM DETECTED for token {self.token_address}: {self.scam_reason} "
-                f"in pool {pool_address} at block {snapshot.block_number} (tx: {tx_hash[:10]}...)"
-            )
+            # Mark this specific pool as scam
+            self.pool_scam_status[pool_address] = {
+                'is_scam': True,
+                'reason': (f"Low liquidity: Pool has {snapshot.denom_reserve:.4f} {unit}, "
+                          f"< {threshold} {unit} threshold."),
+                'block_number': snapshot.block_number,
+                'tx_hash': tx_hash,
+                'detected_at': snapshot.timestamp
+            }
+        else:
+            # Pool is healthy, remove from scam status if it was there
+            if pool_address in self.pool_scam_status:
+                del self.pool_scam_status[pool_address]
 
     def get_latest_price(self, pool_address: str) -> Optional[float]:
         """Gets the latest recorded price for a given pool."""
@@ -154,6 +138,22 @@ class PoolReservePriceTracker:
         history = self.reserve_history.get(pool_address, [])
         return [(s.tx_hash, s.block_number, s.price) for s in history]
 
+    def get_best_price(self) -> Optional[float]:
+        """
+        Gets the price from the pool with the highest denomination reserves.
+        
+        Returns the most reliable price by selecting from the pool with the 
+        highest liquidity (denomination reserves).
+        """
+        if not self.latest_reserves:
+            return None
+            
+        # Find pool with highest denomination reserves
+        best_pool = max(self.latest_reserves.items(), 
+                       key=lambda x: x[1].denom_reserve)
+        
+        return best_pool[1].price if best_pool else None
+    
     def get_price_ratio_to_initial(self, pool_address: str) -> Optional[float]:
         """
         Calculates the ratio of the latest price to the initial price for a pool.
@@ -174,32 +174,177 @@ class PoolReservePriceTracker:
         
         # Avoid division by zero if the initial price was 0
         return None
+    
+    def is_pool_scam(self, pool_address: str) -> bool:
+        """Check if a specific pool is marked as scam."""
+        return pool_address in self.pool_scam_status and self.pool_scam_status[pool_address].get('is_scam', False)
+    
+    def get_pool_scam_info(self, pool_address: str) -> Optional[Dict[str, Any]]:
+        """Get scam information for a specific pool."""
+        return self.pool_scam_status.get(pool_address)
+    
+    def get_healthy_pools(self) -> List[str]:
+        """Get list of pools that are not marked as scam."""
+        return [pool for pool in self.latest_reserves.keys() if not self.is_pool_scam(pool)]
+    
+    def get_scammed_pools(self) -> List[str]:
+        """Get list of pools that are marked as scam."""
+        return list(self.pool_scam_status.keys())
+    
+    @property
+    def all_pools_are_scam(self) -> bool:
+        """Check if all tracked pools are marked as scam."""
+        if not self.latest_reserves:
+            return False
+        return all(self.is_pool_scam(pool) for pool in self.latest_reserves.keys())
 
-    def get_best_price(self) -> Optional[float]:
+    def _is_dominant_pool_scam(self, dominance_threshold: float = 0.8) -> bool:
         """
-        Determines the most reliable price for the token by finding the pool
-        with the highest denomination currency reserve.
-
+        Check if a dominant pool (one with significant liquidity share) is marked as scam.
+        
+        Args:
+            dominance_threshold: The fraction of total liquidity a pool must have to be considered dominant (default: 0.8)
+        
         Returns:
-            The price from the most liquid pool, or None if no valid pools exist.
+            True if a dominant pool is marked as scam, False otherwise
         """
         if not self.latest_reserves:
-            return None
-
-        best_pool_address = None
-        max_denom_reserve = -1
-
+            return False
+            
+        # Calculate total liquidity across all pools (in denomination currency)
+        total_liquidity = sum(snapshot.denom_reserve for snapshot in self.latest_reserves.values())
+        
+        if total_liquidity == 0:
+            return False
+            
+        # Check each pool's dominance
         for pool_address, snapshot in self.latest_reserves.items():
-            # We must consider the *value* of the reserves. A simple comparison
-            # isn't enough (e.g., 1000 USDC vs 1 WETH). We need to normalize to USD.
-            # For this implementation, we assume WETH and stablecoins are the primary
-            # denominators and can be compared directly for liquidity ranking.
-            # A more advanced version could use a real-time price feed for all denoms.
-            if snapshot.denom_reserve > max_denom_reserve:
-                max_denom_reserve = snapshot.denom_reserve
-                best_pool_address = pool_address
+            pool_liquidity_share = snapshot.denom_reserve / total_liquidity
+            
+            # If this pool is dominant and is a scam, mark token as scam
+            if pool_liquidity_share >= dominance_threshold and self.is_pool_scam(pool_address):
+                return True
+                
+        return False
 
-        if best_pool_address:
-            return self.latest_reserves[best_pool_address].price
+    def get_pool_dominance_info(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get dominance information for all pools.
+        
+        Returns:
+            Dictionary mapping pool addresses to their dominance info including:
+            - liquidity_share: Percentage of total liquidity
+            - denom_reserve: Actual reserve amount
+            - is_dominant: Whether the pool is considered dominant
+            - is_scam: Whether the pool is marked as scam
+        """
+        if not self.latest_reserves:
+            return {}
+            
+        total_liquidity = sum(snapshot.denom_reserve for snapshot in self.latest_reserves.values())
+        if total_liquidity == 0:
+            return {}
+            
+        dominance_info = {}
+        for pool_address, snapshot in self.latest_reserves.items():
+            liquidity_share = snapshot.denom_reserve / total_liquidity
+            dominance_info[pool_address] = {
+                'liquidity_share': liquidity_share,
+                'liquidity_share_percent': liquidity_share * 100,
+                'denom_reserve': snapshot.denom_reserve,
+                'is_dominant': liquidity_share >= 0.8,
+                'is_scam': self.is_pool_scam(pool_address)
+            }
+            
+        return dominance_info
 
-        return None
+    @property
+    def is_scam(self) -> bool:
+        """
+        Determines if the token should be labeled as a scam based on its pools.
+        
+        A token is considered a scam if:
+        1. All pools are marked as scams, OR
+        2. The dominant pool (>80% of total liquidity) is marked as a scam
+        """
+        # If all pools are scams, definitely a scam
+        if self.all_pools_are_scam:
+            return True
+            
+        # Check for dominant pool scam
+        return self._is_dominant_pool_scam()
+    
+    @property
+    def scam_reason(self) -> Optional[str]:
+        """
+        Provides a concise reason label for the scam if the token is marked as a scam.
+        Only considers pools with at least 20% of total pool liquidity.
+        
+        Returns:
+            A concise string label like "Denom_removal (ETH<0.05)" or "hidden_mint", or None if not a scam.
+        """
+        if not self.is_scam:
+            return None
+        
+        # Get dominance info to find pools with significant liquidity share
+        dominance_info = self.get_pool_dominance_info()
+        
+        # Find the dominant scam pool (20%+ liquidity threshold)
+        dominant_scam_reason = None
+        highest_liquidity_pct = 0
+        
+        for pool_address, dom_info in dominance_info.items():
+            liquidity_pct = dom_info.get('liquidity_share_percent', 0)
+            
+            # Only consider pools with at least 20% of total pool liquidity
+            if liquidity_pct >= 20 and pool_address in self.pool_scam_status:
+                scam_info = self.pool_scam_status[pool_address]
+                
+                # Use the pool with highest liquidity percentage
+                if liquidity_pct > highest_liquidity_pct:
+                    highest_liquidity_pct = liquidity_pct
+                    reason = scam_info.get('reason', '')
+                    
+                    # Parse and simplify the reason
+                    if 'Low liquidity' in reason:
+                        # Extract the value and unit from reason string
+                        import re
+                        match = re.search(r'Pool has ([\d.]+) (\w+),', reason)
+                        if match:
+                            value = float(match.group(1))
+                            unit = match.group(2)
+                            dominant_scam_reason = f"Denom_removal ({unit}<{value:.2f})"
+                        else:
+                            dominant_scam_reason = "Denom_removal"
+                    elif 'hidden mint' in reason.lower():
+                        dominant_scam_reason = "hidden_mint"
+                    else:
+                        # For other reasons, extract key phrase or use generic label
+                        dominant_scam_reason = reason.split(':')[0].strip() if ':' in reason else "scam_detected"
+        
+        # If no pool has 20%+ liquidity, return generic reason
+        return dominant_scam_reason or "scam_detected"
+    
+    @property
+    def scam_block(self) -> Optional[int]:
+        """
+        Returns the earliest block number where a scam was detected.
+        
+        For dominant pool scams, returns the block when the dominant pool was marked as scam.
+        For all-pool scams, returns the earliest detection block.
+        
+        Returns:
+            The block number where scam was first detected, or None if not a scam.
+        """
+        if not self.is_scam or not self.pool_scam_status:
+            return None
+            
+        # If there's a dominant pool scam, return its detection block
+        dominance_info = self.get_pool_dominance_info()
+        for pool_address, dom_info in dominance_info.items():
+            if dom_info['is_dominant'] and dom_info['is_scam']:
+                return self.pool_scam_status[pool_address]['block_number']
+        
+        # Otherwise return the earliest scam detection
+        return min(info['block_number'] for info in self.pool_scam_status.values())
+    

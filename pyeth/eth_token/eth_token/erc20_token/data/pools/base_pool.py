@@ -15,6 +15,7 @@ from eth_block_processor.chain_utils.common_addresses import (
     DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, DENOM_NAMES_TO_ADDRESS,
     denominator_addresses_by_name, known_denom_decimals
 )
+from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
 
 
 # Uniswap V2 Pair contract ABI for getReserves()
@@ -138,7 +139,12 @@ class BasePool(ABC):
         
         # Token decimals (cached)
         self._token_decimals: Optional[int] = None
-        self._denom_decimals: Optional[int] = None        
+        self._denom_decimals: Optional[int] = None
+        
+        # Scam detection (set by external reserve tracker)
+        self.scam_label: Optional[str] = None
+        self.scam_block: Optional[int] = None        
+        self.scam_tx_hash: Optional[str] = None
         
     @abstractmethod
     def get_protocol(self) -> str:
@@ -233,6 +239,32 @@ class BasePool(ABC):
         }
     
     @property
+    def is_scam(self) -> bool:
+        """
+        Check if this pool is a scam based on low liquidity.
+        
+        A pool is considered a scam if its denomination currency reserves
+        fall below critical thresholds defined in the config.
+        """
+        # Get current reserves in denomination currency
+        denom_reserve = self.get_denom_reserve()
+        
+        # Get the denomination token name
+        denom_name = DENOM_ADDRESSES.get(self.denom_address, None)
+        if not denom_name:
+            # Unknown denomination, can't determine scam status
+            return False
+        
+        # Get threshold config for this denomination
+        threshold_config = get_threshold_for_token(denom_name)
+        if not threshold_config:
+            # No threshold defined for this token
+            return False
+        
+        # Check if reserves are below threshold
+        return denom_reserve < threshold_config['threshold']
+    
+    @property
     def w3(self) -> Web3:
         """Get Web3 connection (lazy loaded)."""
         if self._w3 is None:
@@ -257,7 +289,17 @@ class BasePool(ABC):
                 denom_name = DENOM_ADDRESSES[self.denom_address]
                 self._denom_decimals = known_denom_decimals.get(denom_name)
             else:
-                self._denom_decimals = None
+                # For unknown tokens, fetch decimals from blockchain
+                try:
+                    denom_contract = self.w3.eth.contract(address=self.denom_address, abi=ERC20_DECIMALS_ABI)
+                    self._denom_decimals = denom_contract.functions.decimals().call()
+                except Exception as e:
+                    # Log the error and return None
+                    if hasattr(self, 'logger') and self.logger:
+                        self.logger.error(f"Failed to fetch decimals for token {self.denom_address}: {e}")
+                    else:
+                        print(f"Failed to fetch decimals for token {self.denom_address}: {e}")
+                    self._denom_decimals = None
         return self._denom_decimals
     
     def get_denom_name(self) -> str:

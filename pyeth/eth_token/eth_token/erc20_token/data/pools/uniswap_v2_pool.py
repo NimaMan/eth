@@ -138,8 +138,15 @@ class UniswapV2Pool(BasePool):
         reserve0_raw = float(sync.get('reserve0', 0))
         reserve1_raw = float(sync.get('reserve1', 0))
         
-        reserve0 = reserve0_raw / (10 ** token0_decimals)
-        reserve1 = reserve1_raw / (10 ** token1_decimals)
+        # Handle cases where decimals might be None
+        if token0_decimals is not None and token1_decimals is not None:
+            reserve0 = reserve0_raw / (10 ** token0_decimals)
+            reserve1 = reserve1_raw / (10 ** token1_decimals)
+        else:
+            # Skip processing if we can't get decimals
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.warning(f"Cannot process sync for pool {self.pool_address}: missing decimals (token0: {token0_decimals}, token1: {token1_decimals})")
+            return
         
         # Update pool state
         self.state.reserve0 = reserve0
@@ -410,7 +417,7 @@ class UniswapV2Pool(BasePool):
         balance = self.lp_holders.get(address, 0)
         return (balance / self.lp_total_supply) * 100
     
-    def get_top_lp_holders(self, n: int = 10) -> List[Tuple[str, float, float]]:
+    def get_lp_holders(self) -> List[Tuple[str, float, float]]:
         """
         Get the top N LP token holders.
         
@@ -420,33 +427,12 @@ class UniswapV2Pool(BasePool):
         Returns:
             List of tuples (address, balance, percentage_share)
         """
-        sorted_holders = sorted(
-            self.lp_holders.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
         
-        result = []
-        for address, balance in sorted_holders[:n]:
+        result = {}
+        for address, balance in self.lp_holders.items():
             if balance > 0:  # Only include positive balances
                 share = self.get_lp_share(address)
-                result.append((address, balance, share))
-        
-        return result
+                result[address] = (balance, share)
+        # Sort by balance descending
+        return dict(sorted(result.items(), key=lambda x: x[1][0], reverse=True))
     
-    def get_lp_stats(self) -> Dict:
-        """
-        Get LP token statistics for this pool.
-        
-        Returns:
-            Dictionary with LP token stats
-        """
-        return {
-            'lp_total_supply': self.lp_total_supply,
-            'lp_holder_count': len([h for h, b in self.lp_holders.items() if b > 0]),
-            'lp_transfers_count': len(self.lp_transfers),
-            'lp_mints_count': len(self.lp_mint_events),
-            'lp_burns_count': len(self.lp_burn_events),
-            'largest_holder': max(self.lp_holders.items(), key=lambda x: x[1])[0] if self.lp_holders else None,
-            'concentration': self.get_lp_share(max(self.lp_holders.items(), key=lambda x: x[1])[0]) if self.lp_holders else 0
-        }

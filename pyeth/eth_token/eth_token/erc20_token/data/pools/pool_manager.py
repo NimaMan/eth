@@ -40,6 +40,7 @@ Interaction with Blockchain:
 
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
+from web3 import Web3
 
 from .base_pool import BasePool
 from .uniswap_v2_pool import UniswapV2Pool, UNISWAP_V2_PAIR_ABI
@@ -356,15 +357,65 @@ class PoolManager:
             
         return dict(liquidity_by_denom)
         
+    def get_pool_health_stats(self) -> Dict[str, Dict]:
+        """
+        Get health statistics for all pools including scam status.
+        
+        Returns dict mapping pool addresses to health info.
+        """
+        health_stats = {}
+        
+        for address, pool in self.pools.items():
+            health_stats[address] = {
+                'protocol': pool.get_protocol(),
+                'is_scam': bool(pool.scam_label),
+                'scam_label': pool.scam_label,
+                'scam_block': pool.scam_block,
+                'scam_tx_hash': pool.scam_tx_hash,
+                'denom_reserve': pool.get_denom_reserve(),
+                'token_reserve': pool.get_token_reserve(),
+                'price': pool.get_price(),
+                'has_liquidity': pool.get_denom_reserve() > 0
+            }
+            
+        # Add V4 pools
+        for pool_id, pool in self.v4_pools.items():
+            health_stats[pool.display_address] = {
+                'protocol': 'V4',
+                'pool_id': pool_id,
+                'is_scam': bool(pool.scam_label),
+                'scam_label': pool.scam_label,
+                'scam_block': pool.scam_block,
+                'scam_tx_hash': pool.scam_tx_hash,
+                'denom_reserve': pool.get_denom_reserve(),
+                'token_reserve': pool.get_token_reserve(),
+                'price': pool.get_price(),
+                'has_liquidity': pool.get_denom_reserve() > 0
+            }
+            
+        return health_stats
+        
     def get_stats(self) -> Dict:
         """Get aggregated statistics across all pools."""
+        # Count pools including V4
+        total_pools = len(self.pools) + len(self.v4_pools)
+        
+        # Count healthy pools (those without scam labels)
+        healthy_pools = sum(1 for p in self.pools.values() if not p.scam_label)
+        healthy_pools += sum(1 for p in self.v4_pools.values() if not p.scam_label)
+        
+        # Count scam pools
+        scam_pools = sum(1 for p in self.pools.values() if p.scam_label)
+        scam_pools += sum(1 for p in self.v4_pools.values() if p.scam_label)
+        
         stats = {
-            'total_pools': len(self.pools),
+            'total_pools': total_pools,
             'pools_by_protocol': {
                 protocol: len(addresses) 
                 for protocol, addresses in self.pools_by_protocol.items()
             },
-            'healthy_pools': sum(1 for p in self.pools.values() if p.is_healthy()),
+            'healthy_pools': healthy_pools,
+            'scam_pools': scam_pools,
             'total_swaps': sum(p.state.total_swaps for p in self.pools.values()),
             'total_liquidity_by_denom': self.get_total_liquidity(),
         }
@@ -383,13 +434,23 @@ class PoolManager:
         # Add V2/V3 pools
         for address, pool in self.pools.items():
             denom_symbol = self._get_token_symbol(pool.denom_address)
-            pool_info[address] = {
+            pool_data = {
                 'pool_type': pool.get_protocol().upper(),  # "V2", "V3"
                 'denom_address': pool.denom_address,
                 'denom_currency': denom_symbol,
                 'decimals': 18,  # Default, should get from token contract
+                "token_reserve": pool.get_token_reserve(),
+                "denom_reserve": pool.get_denom_reserve(),
                 'token1_is_denom': pool.token1_is_denom
             }
+            
+            # Add LP holder information for V2 pools
+            if pool.get_protocol() == 'V2' and hasattr(pool, 'get_lp_holders'):
+                lp_holders = pool.get_lp_holders()
+                if lp_holders:
+                    pool_data['lp_holders'] = lp_holders
+                    
+            pool_info[address] = pool_data
             
         # Add V4 pools (use display address for compatibility)
         for pool_id, pool in self.v4_pools.items():
@@ -398,6 +459,8 @@ class PoolManager:
                 'denom_address': pool.denom_address,
                 'denom_currency': self._get_token_symbol(pool.denom_address),
                 'decimals': 18,
+                'token_reserve': pool.get_token_reserve(),
+                'denom_reserve': pool.get_denom_reserve(),
                 'token1_is_denom': pool.token1_is_denom,
                 'pool_id': pool_id  # Extra field for V4
             }
@@ -605,33 +668,10 @@ class PoolManager:
         pool = self.get_pool(pool_address)
         if not pool or pool.get_protocol() != 'V2':
             return {}
-            
-        if not hasattr(pool, 'get_top_lp_holders'):
-            return {}
-            
-        # Get top holders
-        top_holders = pool.get_top_lp_holders(20)
         
-        # Calculate concentration metrics
-        total_top_20_share = sum(share for _, _, share in top_holders)
-        
-        return {
-            'pool_address': pool_address,
-            'lp_total_supply': getattr(pool, 'lp_total_supply', 0),
-            'holder_count': len([h for h, b in getattr(pool, 'lp_holders', {}).items() if b > 0]),
-            'top_holder': top_holders[0] if top_holders else None,
-            'top_5_concentration': sum(share for _, _, share in top_holders[:5]),
-            'top_10_concentration': sum(share for _, _, share in top_holders[:10]),
-            'top_20_concentration': total_top_20_share,
-            'top_holders': [
-                {
-                    'address': addr,
-                    'balance': balance,
-                    'share_percent': share
-                }
-                for addr, balance, share in top_holders[:10]
-            ]
-        }
+        if hasattr(pool, 'get_lp_holders'):
+            return pool.get_lp_holders()
+        return {}
     
     def _check_swap_events_for_pools(self, transaction: ProcessedTransaction):
         """
@@ -834,14 +874,20 @@ class PoolManager:
         query from blockchain or database.
         """
         # Common token mappings
+        # Use checksum addresses for keys
         common_tokens = {
-            '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 'WETH',
-            '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 'USDC',
-            '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
-            '0x6b175474e89094c44da98b954eedeac495271d0f': 'DAI',
+            '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2': 'WETH',
+            '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48': 'USDC',
+            '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'USDT',
+            '0x6B175474E89094C44Da98b954EedeAC495271d0F': 'DAI',
         }
         
-        return common_tokens.get(token_address.lower(), 'Unknown')
+        # Convert to checksum for lookup
+        try:
+            checksum_address = Web3.to_checksum_address(token_address)
+            return common_tokens.get(checksum_address, 'Unknown')
+        except:
+            return 'Unknown'
     
     def _check_trading_enabled(self, transaction: ProcessedTransaction):
         """
