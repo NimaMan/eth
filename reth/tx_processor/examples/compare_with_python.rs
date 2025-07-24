@@ -27,6 +27,8 @@ struct ComparisonResult {
     python_state_changes: Option<usize>,
     rust_internal_txs: usize,
     python_internal_txs: Option<usize>,
+    rust_erc20_transfers: usize,
+    python_erc20_transfers: Option<usize>,
 }
 
 /// Fetch transaction hashes from recent blocks that exist in Reth DB
@@ -218,6 +220,8 @@ async fn main() -> Result<()> {
             python_state_changes: None,
             rust_internal_txs: rust_result.internal_transactions.len(),
             python_internal_txs: None,
+            rust_erc20_transfers: rust_result.erc20_transfers.len(),
+            python_erc20_transfers: None,
         };
         
         // Compare with Python if available
@@ -243,6 +247,7 @@ async fn main() -> Result<()> {
                             comparison.differences = differences;
                             comparison.python_state_changes = python_tx["state_changes"].as_object().map(|o| o.len());
                             comparison.python_internal_txs = python_tx["internal_transactions"].as_array().map(|a| a.len());
+                            comparison.python_erc20_transfers = python_tx["erc20_transfers"].as_array().map(|a| a.len());
                             
                             info!("  📊 Python processed in {}ms", python_time);
                             if matches {
@@ -319,6 +324,16 @@ async fn main() -> Result<()> {
             info!("  Total: {}ms for {} transactions", total_time, rust_times.len());
             info!("  Throughput: ~{} tx/second", (1000.0 / avg_rust) as u32);
         }
+        
+        // Data extracted summary
+        let total_state_changes: usize = results.iter().map(|r| r.rust_state_changes).sum();
+        let total_internal_txs: usize = results.iter().map(|r| r.rust_internal_txs).sum();
+        let total_erc20_transfers: usize = results.iter().map(|r| r.rust_erc20_transfers).sum();
+        
+        info!("\n📊 Data Extracted:");
+        info!("  Total state changes: {}", total_state_changes);
+        info!("  Total internal txs: {}", total_internal_txs);
+        info!("  Total ERC20 transfers: {}", total_erc20_transfers);
     }
     
     // Save results

@@ -1,31 +1,35 @@
 [
   {
-    "tx_hash": "0xad1f61059fb06ba2d28671210ff871266d1b3545163faf86cade3b10a73ae7a6",
-    "block_number": 22987695,
-    "rust_time_ms": 35,
+    "tx_hash": "0x0c0b205d70cef2628dbd53f4ca71c856f0f375d8b8d8e14a47c7661c3321cc2f",
+    "block_number": 22987713,
+    "rust_time_ms": 94,
     "python_time_ms": null,
     "matches": true,
     "differences": [],
-    "rust_state_changes": 11,
+    "rust_state_changes": 8,
     "python_state_changes": null,
-    "rust_internal_txs": 39,
-    "python_internal_txs": null
+    "rust_internal_txs": 183,
+    "python_internal_txs": null,
+    "rust_erc20_transfers": 13,
+    "python_erc20_transfers": null
   },
   {
-    "tx_hash": "0x5f7524c534bf21a1cbef18918e22c4c5852e06b54cd19eee22ad28eba2e16f08",
-    "block_number": 22987695,
-    "rust_time_ms": 2,
+    "tx_hash": "0x757809a2511136c16611c22ea4b8b4ae94a9fbca5150a4ddadeb2b4c3b88b2de",
+    "block_number": 22987713,
+    "rust_time_ms": 16,
     "python_time_ms": null,
     "matches": true,
     "differences": [],
-    "rust_state_changes": 0,
+    "rust_state_changes": 5,
     "python_state_changes": null,
-    "rust_internal_txs": 1,
-    "python_internal_txs": null
+    "rust_internal_txs": 42,
+    "python_internal_txs": null,
+    "rust_erc20_transfers": 8,
+    "python_erc20_transfers": null
   },
   {
-    "tx_hash": "0x640a5d6bd0df13cdbfd4902a75f2f413c0f7e2430da7ba275c725e34c39b85d7",
-    "block_number": 22987695,
+    "tx_hash": "0x2fc08378a57bf71fe02a096c7a457a5d0b79e00cc6be08422b5d447ce320197a",
+    "block_number": 22987713,
     "rust_time_ms": 1,
     "python_time_ms": null,
     "matches": true,
@@ -33,30 +37,36 @@
     "rust_state_changes": 0,
     "python_state_changes": null,
     "rust_internal_txs": 0,
-    "python_internal_txs": null
+    "python_internal_txs": null,
+    "rust_erc20_transfers": 0,
+    "python_erc20_transfers": null
   },
   {
-    "tx_hash": "0x1161c70f325acd1d88571de44d24c097049fe38b60a81a8504aaac86618c6e08",
-    "block_number": 22987695,
-    "rust_time_ms": 3,
+    "tx_hash": "0x33045c23f37b5172f364c3d9ec9dd7e0eb688a9f1e1df11b0c3dd5fa33cbf3ad",
+    "block_number": 22987713,
+    "rust_time_ms": 1,
     "python_time_ms": null,
     "matches": true,
     "differences": [],
-    "rust_state_changes": 1,
+    "rust_state_changes": 0,
+    "python_state_changes": null,
+    "rust_internal_txs": 0,
+    "python_internal_txs": null,
+    "rust_erc20_transfers": 0,
+    "python_erc20_transfers": null
+  },
+  {
+    "tx_hash": "0xaa8166d5866ed8b50cf7e808696ec98f677289f1e082acdb983c21df556e2acb",
+    "block_number": 22987713,
+    "rust_time_ms": 2,
+    "python_time_ms": null,
+    "matches": true,
+    "differences": [],
+    "rust_state_changes": 2,
     "python_state_changes": null,
     "rust_internal_txs": 1,
-    "python_internal_txs": null
-  },
-  {
-    "tx_hash": "0xd67379b2c41ae8b83fa9669e9a43032f91326277bb69831207fa9a51fea4ed43",
-    "block_number": 22987695,
-    "rust_time_ms": 20,
-    "python_time_ms": null,
-    "matches": true,
-    "differences": [],
-    "rust_state_changes": 3,
-    "python_state_changes": null,
-    "rust_internal_txs": 49,
-    "python_internal_txs": null
+    "python_internal_txs": null,
+    "rust_erc20_transfers": 1,
+    "python_erc20_transfers": null
   }
 ]
