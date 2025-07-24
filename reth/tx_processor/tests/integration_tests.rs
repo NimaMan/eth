@@ -4,40 +4,34 @@ use std::process::Command;
 /// These tests verify that the core functionality works correctly
 
 #[test]
-fn test_fetch_single_transaction_example_compiles() {
+fn test_process_transaction_by_hash_example_compiles() {
     // Verify the main example compiles
     let output = Command::new("cargo")
-        .args(&["build", "--example", "fetch_single_transaction"])
+        .args(&["build", "--example", "process_transaction_by_hash"])
         .current_dir("/home/nima/code/crypto/rust/tx_processor")
         .output()
         .expect("Failed to execute cargo build");
     
     assert!(output.status.success(), 
-        "fetch_single_transaction failed to compile: {}", 
+        "process_transaction_by_hash failed to compile: {}", 
         String::from_utf8_lossy(&output.stderr));
 }
 
 
 #[test]
-fn test_tx_processor_demo_compiles() {
-    // Ensure the main demo example compiles
+fn test_simulate_unsigned_transaction_example_compiles() {
+    // Test simulation example compiles
     let output = Command::new("cargo")
-        .args(&["build", "--example", "tx_processor_demo"])
+        .args(&["build", "--example", "simulate_unsigned_transaction"])
         .current_dir("/home/nima/code/crypto/rust/tx_processor")
         .output()
         .expect("Failed to execute cargo build");
     
     assert!(output.status.success(), 
-        "tx_processor_demo failed to compile: {}", 
+        "simulate_unsigned_transaction failed to compile: {}", 
         String::from_utf8_lossy(&output.stderr));
 }
 
-#[test]
-fn test_comparison_script_exists() {
-    // Verify the Python comparison script exists
-    let path = std::path::Path::new("/home/nima/code/crypto/fetch_and_compare.py");
-    assert!(path.exists(), "Python comparison script not found at expected location");
-}
 
 #[test] 
 fn test_reth_datadir_accessible() {
@@ -71,5 +65,4 @@ fn test_library_builds() {
     println!("✅ tx_processor library compiled successfully");
 }
 
-// Note: Full integration tests require a running Reth node with synced data
-// Run comparison tests with: python /home/nima/code/crypto/fetch_and_compare.py
+// Note: Full integration tests require a synced Reth database
