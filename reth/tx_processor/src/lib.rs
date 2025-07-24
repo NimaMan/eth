@@ -12,7 +12,6 @@
 // Re-export the Reth Transaction Simulator
 pub use reth_tx_simulator::{
     RethTxSimulator,
-    RethTxSimulator as DirectTxSimulator, // Keep compatibility alias
     CallRequest,
     SimulationResult,
     DetailedSimulationResult,
@@ -49,7 +48,7 @@ pub mod tx_processor {
     
     /// TX Processor that uses direct Reth database access (no RPC)
     pub struct TxProcessor {
-        simulator: DirectTxSimulator,
+        simulator: RethTxSimulator,
         decoder: LogDecoder,
         classifier: TransactionClassifier,
         transaction_loader: Option<TransactionLoader>,
@@ -100,6 +99,11 @@ pub mod tx_processor {
             })
         }
         
+        /// Get the latest block number from the database
+        pub fn get_latest_block(&self) -> Result<u64> {
+            self.simulator.get_latest_block()
+        }
+        
         /// Load a transaction by hash using intelligent simulation
         /// This method fetches from DB and only simulates when needed
         pub async fn load_transaction(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
@@ -107,7 +111,7 @@ pub mod tx_processor {
                 let (tx_hash, block_number, timestamp, tx_index, from, to, value, input, gas_price, gas_used, status, nonce, logs, gas_limit) = 
                     loader.load_transaction_data(tx_hash).await?;
                 
-                self.process_transaction(
+                self.process_transaction_from_raw_data(
                     tx_hash,
                     block_number,
                     timestamp,
@@ -128,14 +132,15 @@ pub mod tx_processor {
             }
         }
         
-        /// Process a transaction and return state changes
-        /// This replaces Python's TransactionSimulator.simulate_transaction()
-        pub async fn simulate_transaction(&self, call_request: CallRequest) -> Result<HashMap<Address, AddressStateChange>> {
+        /// Simulate an unsigned transaction and return only state changes (ETH and token balance changes)
+        /// This is a wrapper around reth_tx_simulator's simulate_unsigned_transaction_with_call_trace
+        pub async fn simulate_unsigned_transaction_with_state_changes(&self, call_request: CallRequest) -> Result<HashMap<Address, AddressStateChange>> {
             self.simulator.simulate_unsigned_transaction_with_call_trace(call_request).await
         }
         
-        /// Simulate a transaction at a specific block and get logs + state changes
-        pub async fn simulate_transaction_detailed(
+        /// Simulate an unsigned transaction and return logs + state changes + execution details
+        /// This is a wrapper around reth_tx_simulator's simulate_transaction_detailed
+        pub async fn simulate_unsigned_transaction_with_logs_and_state_changes(
             &self,
             call_request: CallRequest,
             block_number: Option<u64>,
@@ -143,9 +148,9 @@ pub mod tx_processor {
             self.simulator.simulate_transaction_detailed(call_request, block_number).await
         }
         
-        /// Process a transaction and return full ProcessedTransaction
-        /// This is the main entry point that matches Python's process_transaction()
-        pub async fn process_transaction(
+        /// Process a transaction from raw data including logs (no DB fetch) and return ProcessedTransaction
+        /// This is used when you already have all the transaction data from another source
+        pub async fn process_transaction_from_raw_data(
             &self,
             tx_hash: B256,
             block_number: u64,
@@ -454,28 +459,33 @@ pub mod tx_processor {
             use futures::future::join_all;
             
             let futures = requests.into_iter().map(|request| {
-                self.simulate_transaction(request)
+                self.simulate_unsigned_transaction_with_state_changes(request)
             });
             
             let results = join_all(futures).await;
             Ok(results)
         }
         
-        /// Process a transaction by its hash - fetches data and processes it
+        // ===== Transaction Processing Methods =====
+        // We have 3 ways to get a ProcessedTransaction:
+        // 1. process_transaction_by_hash() - Give it a hash, it fetches from DB
+        // 2. process_unsigned_transaction() - Give it unsigned tx data (CallRequest)
+        // 3. process_transaction_from_raw_data() - Give it all the data manually
+        
+        /// Process a transaction by its hash - fetches from DB and returns ProcessedTransaction
         pub async fn process_transaction_by_hash(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
             // Use the transaction loader to fetch and process transaction
             self.load_transaction(tx_hash).await
         }
         
-        /// Simulate an unsigned transaction and return ProcessedTransaction with all transfers
-        /// This function takes unsigned transaction data and returns comprehensive transfer information
-        /// extracted from simulation - useful for tax calculation and analysis
-        pub async fn simulate_unsigned_transaction(&self, call_request: CallRequest) -> Result<ProcessedTransaction> {
+        /// Process an unsigned transaction (without fetching from DB) and return ProcessedTransaction
+        /// This simulates the transaction and extracts all transfers, DEX events, and classifications
+        pub async fn process_unsigned_transaction(&self, call_request: CallRequest) -> Result<ProcessedTransaction> {
             // Get current block for simulation
             let latest_block = self.simulator.get_latest_block()?;
             
             // Simulate with full trace to get logs and internal transactions
-            let detailed_result = self.simulator.simulate_transaction_detailed(call_request.clone(), Some(latest_block)).await?;
+            let detailed_result = self.simulate_unsigned_transaction_with_logs_and_state_changes(call_request.clone(), Some(latest_block)).await?;
             
             // Create ProcessedTransaction with simulated data (dummy values for block info since it's unsigned)
             let mut processed_tx = ProcessedTransaction::new(

@@ -40,7 +40,7 @@ async fn main() -> Result<()> {
     // Simulate the unsigned transaction at one block before the original transaction
     // Original transaction was at block 22939570, so simulate at 22939569
     let simulation_block = 22939569;
-    let processed_tx = match processor.simulate_transaction_detailed(call_request.clone(), Some(simulation_block)).await {
+    let processed_tx = match processor.simulate_unsigned_transaction_with_logs_and_state_changes(call_request.clone(), Some(simulation_block)).await {
         Ok(detailed_result) => {
             println!("✅ Detailed simulation at block {} successful!", simulation_block);
             println!("   Success: {}", detailed_result.success);
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
         Err(e) => {
             println!("❌ Detailed simulation failed: {}", e);
             println!("🔄 Trying current block simulation instead...");
-            processor.simulate_unsigned_transaction(call_request).await?
+            processor.process_unsigned_transaction(call_request).await?
         }
     };
     

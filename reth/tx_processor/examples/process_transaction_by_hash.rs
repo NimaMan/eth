@@ -1,4 +1,10 @@
-/// Test a complex transaction with ERC20 transfers and internal transactions
+/// Process a transaction by hash and display all decoded information
+/// 
+/// This example shows how to fetch and process a transaction from the Reth database
+/// using only its hash. It demonstrates the full processing pipeline including:
+/// - Event decoding (ERC20 transfers, swaps, etc.)
+/// - Internal transaction extraction
+/// - Transaction classification
 
 use tx_processor::tx_processor::TxProcessor;
 use alloy_primitives::B256;
@@ -7,8 +13,8 @@ use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🔍 Testing Complex Transaction");
-    println!("==============================\n");
+    println!("🔍 Process Transaction by Hash Example");
+    println!("=====================================\n");
     
     // Initialize processor
     let processor = TxProcessor::new("/home/nima/.local/share/reth/mainnet")?;

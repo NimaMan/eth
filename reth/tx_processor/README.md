@@ -1,170 +1,70 @@
 # TX Processor
 
-A high-performance Rust implementation for processing Ethereum transactions, designed as a drop-in replacement for Python's eth_block_processor.txn module.
+High-performance Rust implementation for processing Ethereum transactions, designed as a drop-in replacement for Python's eth_block_processor.txn module.
 
-## Core Purpose
+## Quick Start
 
-**Input**: Transaction hash(es)  
-**Output**: ProcessedTransaction(s) with decoded events, classifications, and internal transfers  
-**Performance**: 10-40x faster than Python implementation
+```bash
+# Process a transaction by hash
+cargo run --example process_transaction_by_hash
 
-## 🚨 CRITICAL BUG: SIMULATION FAILURE
+# Run tests
+cargo test
+```
 
-### The Problem
-When processing transaction `0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7`:
-- **Expected**: 5 ERC20 transfers + 2 internal ETH transfers (from WETH unwrapping)
-- **Actual**: 5 ERC20 transfers + 0 internal ETH transfers
+## Features
 
-### Root Cause
-The transaction simulation is **FAILING** with error: `"failed to initialize a transaction: unknown error code: 11"`
-
-**What this means:**
-- Simulation returns `success: false` 
-- Only uses 26,160 gas instead of 181,391 (actual on-chain usage)
-- Even simple ETH transfers fail in simulation
-- Because simulation fails, we can't extract internal ETH transfers
-
-### Investigation Results
-1. **Transaction data is correct**:
-   - Gas limit: 229,467 ✅
-   - Gas used: 181,391 ✅ 
-   - Nonce: 6 ✅
-   - All parameters match on-chain values
-
-2. **State appears valid**:
-   - Account balance: 0.4 ETH ✅
-   - Account nonce: 6 ✅
-   - Uniswap Router has bytecode ✅
-   - WETH contract has bytecode ✅
-
-3. **Error happens during initialization**:
-   - Error code 11 occurs in `evm.transact()` BEFORE execution
-   - Not a revert during execution - fails to even start
-   - Affects ALL simulations, even simple transfers
-
-### What Works vs What's Broken
-
-**WORKS**:
-- ✅ Loading transaction data from Reth DB
-- ✅ Calculating actual gas_used (not cumulative)
-- ✅ Decoding all ERC20 transfers from logs
-- ✅ Transaction classification
-- ✅ Fee calculations
-
-**BROKEN**:
-- ❌ ALL transaction simulations fail
-- ❌ Can't extract internal ETH transfers
-- ❌ Can't get state changes
-- ❌ Error code 11 is not properly handled
-
-## Architecture Assessment
-
-### ✅ Strengths
-
-1. **Clean Architecture**
-   - Well-separated concerns (decoder, classifier, processor)
-   - Event-driven design for log processing
-   - Direct database access eliminates RPC bottleneck
-
-2. **Performance**
-   - Direct Reth DB access (no RPC calls)
-   - Intelligent simulation (only for contract interactions)
-   - Parallel processing capabilities
-
-3. **Compatibility**
-   - Output format matches Python ProcessedTransaction
-   - Can be used as drop-in replacement
-   - Tracks more contract types than Python (ERC721/1155)
-
-### ⚠️ Current Limitations
-
-1. **Simulation Failure**
-   - ALL simulations fail with error code 11
-   - Internal transactions cannot be extracted
-   - State changes cannot be calculated
-
-2. **Transaction Fetching**
-   - Direct fetching by hash works (`process_transaction_by_hash`)
-   - But simulation component is broken
-
-### 🎯 Key Design Decisions
-
-1. **Simulation Logic**
-   ```rust
-   // Only simulate if it's a contract interaction
-   if !input.is_empty() && to.is_some() {
-       // Simulate to get internal transfers
-   }
-   ```
-
-2. **Event Processing**
-   - Decode all logs into typed events
-   - Support for ERC20/721/1155, Uniswap V2/V3/V4
-   - Extensible for new protocols
-
-3. **Error Handling**
-   - Simulation failures don't break processing
-   - Continue with available data
-   - But we lose internal transfers!
+- **Direct Database Access**: Reads from Reth DB without RPC calls
+- **Fast Processing**: 10-40x faster than Python implementation
+- **Comprehensive Decoding**: Supports ERC20/721/1155, Uniswap V2/V3/V4, and more
+- **Transaction Simulation**: Extracts internal transfers and state changes
+- **Drop-in Replacement**: Compatible with Python ProcessedTransaction format
 
 ## Usage
 
 ```rust
-use tx_processor::tx_processor::TxProcessor;
+use tx_processor::TxProcessor;
 
 // Initialize processor
-let processor = TxProcessor::new("/path/to/reth/data")?;
+let processor = TxProcessor::new("/path/to/reth/mainnet")?;
 
-// Process by hash (SIMULATION WILL FAIL)
-let processed_tx = processor.process_transaction_by_hash(tx_hash).await?;
+// Process by hash
+let tx = processor.process_transaction_by_hash(hash).await?;
 
-// You'll get:
-// - All ERC20/NFT transfers ✅
-// - Transaction type/classification ✅
-// - Fees ✅
-// - Internal transfers ❌ (due to simulation failure)
-// - State changes ❌ (due to simulation failure)
+// Process unsigned transaction
+let tx = processor.process_unsigned_transaction(call_request).await?;
 ```
 
-## Next Steps to Fix
+## Documentation
 
-1. **Identify error code 11 in REVM**
-   - Check REVM source for error code definitions
-   - Understand why transaction initialization fails
+See [tx_processor.md](tx_processor.md) for detailed technical documentation including:
+- Architecture overview
+- API reference
+- Performance benchmarks
+- Integration examples
 
-2. **Debug simulation environment**
-   - Verify EVM environment setup
-   - Check if block state is complete
-   - Test with different block numbers
+## Requirements
 
-3. **Minimal reproduction**
-   - Create smallest possible failing case
-   - Test directly with REVM
-   - Isolate the issue
+- Synced Reth node with local database
+- Rust 1.70+
 
-## Performance Benchmarks
+## Troubleshooting
 
-Run the 1K transaction benchmark:
+### EAGAIN Error (Error Code 11)
+
+If you see `"failed to initialize a transaction: unknown error code: 11"`, this means the Reth database is locked by the running node.
+
+**Solution**: Stop the Reth node before running tx_processor:
 ```bash
-cargo run --example benchmark_1k_transactions --release
+systemctl stop reth  # or kill the reth process
 ```
 
-Expected results (if simulation worked):
-- Simple ETH transfers: ~5-10ms
-- ERC20 transfers: ~10-20ms (with simulation)
-- Complex DeFi transactions: ~20-50ms
-- Average speedup vs Python: 10-40x
+The error occurs because MDBX enforces strict locking when Reth is actively writing to the database.
 
-**Current**: All simulations fail, so internal transfers are missing
+## Configuration
 
-## Examples
-
-- `test_internal_txs` - Shows the simulation failure
-- `debug_gas_and_trace` - Debug simulation issues
-- `check_contract` - Verify contract bytecode exists
-
-## Dependencies
-
-- `reth_tx_simulator` - For transaction simulation (CURRENTLY BROKEN)
-- `alloy_primitives` - Ethereum types
-- Direct Reth database access
+Environment variables:
+- `RETH_DATADIR` - Path to Reth data directory (default: `/home/user/.local/share/reth/mainnet`)
+- `ETH_RPC_URL` - RPC endpoint for comparisons (optional)
+- `MAX_BATCH_SIZE` - Maximum batch size for processing
+- `RPC_TIMEOUT_SECS` - RPC timeout in seconds

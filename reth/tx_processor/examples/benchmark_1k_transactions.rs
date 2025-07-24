@@ -168,7 +168,7 @@ async fn main() -> Result<()> {
         
         // Process with Rust
         let rust_start = Instant::now();
-        let processed_tx = processor.process_transaction(
+        let processed_tx = processor.process_transaction_from_raw_data(
             tx_hash,
             block_number,
             block_timestamp,

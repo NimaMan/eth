@@ -11,35 +11,19 @@ name = "tx_processor"
 path = "src/lib.rs"
 
 # Clean tx_processor examples
-[[example]]
-name = "tx_processor_demo"
-path = "examples/tx_processor_demo.rs"
-
-# Removed examples that were deleted
-
-[[example]]
-name = "fetch_by_hash_benchmark"
-path = "examples/fetch_by_hash_benchmark.rs"
-
-[[example]]
-name = "measure_processing_time"
-path = "examples/measure_processing_time.rs"
-
-[[example]]
-name = "test_core_objective"
-path = "examples/test_core_objective.rs"
-
-[[example]]
-name = "fetch_single_transaction"
-path = "examples/fetch_single_transaction.rs"
+# Examples that actually exist
 
 [[example]]
 name = "benchmark_1k_transactions"
 path = "examples/benchmark_1k_transactions.rs"
 
 [[example]]
-name = "test_simulate_unsigned_transaction"
+name = "simulate_unsigned_transaction"
 path = "examples/simulation/test_simulate_unsigned_transaction.rs"
+
+[[example]]
+name = "process_transaction_by_hash"
+path = "examples/process_transaction_by_hash.rs"
 
 [[bin]]
 name = "batch_processor"
