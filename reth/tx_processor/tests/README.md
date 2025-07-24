@@ -4,13 +4,13 @@ This directory contains tests for the tx_processor module.
 
 ## Test Files
 
-### integration_tests.rs
-Integration tests that verify:
+### compilation_tests.rs
+Compilation tests that verify:
 - Examples compile correctly (`process_transaction_by_hash`, `simulate_unsigned_transaction`)
 - Library builds successfully
 - Reth data directory is accessible
 
-Run with: `cargo test --test integration_tests`
+Run with: `cargo test --test compilation_tests`
 
 ### event_decoder_tests.rs
 Unit tests for the event decoder functionality:
@@ -28,7 +28,7 @@ Run with: `cargo test --test event_decoder_tests`
 cargo test
 
 # Run specific test file
-cargo test --test integration_tests
+cargo test --test compilation_tests
 cargo test --test event_decoder_tests
 
 # Run with output
