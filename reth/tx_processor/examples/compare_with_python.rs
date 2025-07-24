@@ -1,6 +1,6 @@
 /// Compare Rust TX Processor with Python ProcessedTransaction
 /// 
-/// This example fetches transactions from the latest blocks and compares
+/// This example fetches transactions from recent blocks and compares
 /// the Rust implementation with Python's eth_block_processor.txn module.
 ///
 /// Usage: cargo run --example compare_with_python -- [num_transactions]
@@ -29,38 +29,26 @@ struct ComparisonResult {
     python_internal_txs: Option<usize>,
 }
 
-/// Fetch transaction hashes from recent blocks using RPC
-async fn fetch_recent_transactions(num_transactions: usize) -> Result<Vec<(B256, u64)>> {
+/// Fetch transaction hashes from recent blocks that exist in Reth DB
+async fn fetch_recent_transactions(processor: &TxProcessor, num_transactions: usize) -> Result<Vec<(B256, u64)>> {
+    // Get latest block from Reth DB
+    let latest_db_block = processor.get_latest_block()?;
+    info!("Latest block in Reth DB: {}", latest_db_block);
+    
+    // Use blocks from 1000 blocks before to ensure transactions are in the DB
+    let start_block = latest_db_block.saturating_sub(1000);
+    
     let eth_rpc_url = std::env::var("ETH_RPC_URL")
         .unwrap_or_else(|_| "http://localhost:8545".to_string());
     
-    info!("Fetching {} transactions from recent blocks via {}", num_transactions, eth_rpc_url);
+    info!("Fetching {} transactions from blocks around {} via {}", num_transactions, start_block, eth_rpc_url);
     
     let client = reqwest::Client::new();
     let mut transactions = Vec::new();
     
-    // Get latest block number
-    let response = client
-        .post(&eth_rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_blockNumber",
-            "params": [],
-            "id": 1
-        }))
-        .send()
-        .await?;
-    
-    let result: Value = response.json().await?;
-    let latest_block_hex = result["result"].as_str()
-        .ok_or_else(|| eyre::eyre!("Failed to get latest block number"))?;
-    let latest_block = u64::from_str_radix(latest_block_hex.trim_start_matches("0x"), 16)?;
-    
-    info!("Latest block: {}", latest_block);
-    
     // Fetch transactions from recent blocks
-    let mut block_num = latest_block;
-    while transactions.len() < num_transactions && block_num > latest_block.saturating_sub(100) {
+    let mut block_num = start_block;
+    while transactions.len() < num_transactions && block_num > start_block.saturating_sub(100) {
         // Fetch block by number
         let response = client
             .post(&eth_rpc_url)
@@ -76,7 +64,9 @@ async fn fetch_recent_transactions(num_transactions: usize) -> Result<Vec<(B256,
         let result: Value = response.json().await?;
         if let Some(block) = result["result"].as_object() {
             if let Some(txs) = block["transactions"].as_array() {
-                info!("Block {} has {} transactions", block_num, txs.len());
+                if !txs.is_empty() {
+                    info!("Block {} has {} transactions", block_num, txs.len());
+                }
                 
                 for tx in txs.iter().take(num_transactions - transactions.len()) {
                     if let Some(hash_str) = tx["hash"].as_str() {
@@ -184,7 +174,7 @@ async fn main() -> Result<()> {
     }
     
     // Fetch recent transactions
-    let transactions = fetch_recent_transactions(num_transactions).await?;
+    let transactions = fetch_recent_transactions(&processor, num_transactions).await?;
     
     if transactions.is_empty() {
         error!("No transactions found!");
