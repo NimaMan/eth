@@ -25,9 +25,6 @@ path = "examples/simulation/test_simulate_unsigned_transaction.rs"
 name = "process_transaction_by_hash"
 path = "examples/process_transaction_by_hash.rs"
 
-[[bin]]
-name = "batch_processor"
-path = "src/bin/batch_processor.rs"
 
 [dependencies]
 # Use the new Direct Reth Transaction Simulator

@@ -1,4 +1,4 @@
-use crate::models::ProcessedTransaction;
+use crate::data_models::ProcessedTransaction;
 use alloy_primitives::{Address, U256};
 
 /// Transaction types based on what the transaction does

@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256, Log as AlloyLog};
-use crate::models::events::*;
+use crate::data_models::events::*;
 use eyre::Result;
 
 /// Event signatures for common token standards and DEX protocols

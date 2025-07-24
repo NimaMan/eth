@@ -17,19 +17,6 @@ fn test_fetch_single_transaction_example_compiles() {
         String::from_utf8_lossy(&output.stderr));
 }
 
-#[test]
-fn test_batch_processor_binary_compiles() {
-    // Verify the batch processor binary compiles
-    let output = Command::new("cargo")
-        .args(&["build", "--bin", "batch_processor"])
-        .current_dir("/home/nima/code/crypto/rust/tx_processor")
-        .output()
-        .expect("Failed to execute cargo build");
-    
-    assert!(output.status.success(), 
-        "batch_processor binary failed to compile: {}", 
-        String::from_utf8_lossy(&output.stderr));
-}
 
 #[test]
 fn test_tx_processor_demo_compiles() {

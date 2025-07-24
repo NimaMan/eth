@@ -21,8 +21,8 @@ pub use reth_tx_simulator::{
 };
 
 // Export data models
-pub mod models;
-pub use models::{ProcessedTransaction, TransactionFees};
+pub mod data_models;
+pub use data_models::{ProcessedTransaction, TransactionFees};
 
 // Export processing modules
 pub mod decoder;
@@ -39,8 +39,8 @@ pub mod tx_processor {
     use super::*;
     use crate::decoder::{LogDecoder, DecodedEvent};
     use crate::classifier::TransactionClassifier;
-    use crate::models::{ProcessedTransaction, TransactionFees};
-    use crate::models::events::InternalTransaction;
+    use crate::data_models::{ProcessedTransaction, TransactionFees};
+    use crate::data_models::events::InternalTransaction;
     use crate::transaction_loader::TransactionLoader;
     use eyre::Result;
     use std::collections::HashMap;
