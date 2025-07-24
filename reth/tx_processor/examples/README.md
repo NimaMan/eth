@@ -4,24 +4,30 @@ These examples demonstrate how to use the tx_processor module to fetch and proce
 
 ## Working Examples
 
-### 1. `test_complex_tx.rs`
-Tests processing of a real DeFi transaction with ERC20 transfers and internal transactions.
+### 1. `process_transaction_by_hash.rs`
+Process a specific transaction by its hash and display all decoded information.
 ```bash
-cargo run --example test_complex_tx
+cargo run --example process_transaction_by_hash
 ```
 
-### 2. `tx_processor_demo.rs`
-Basic usage demonstration showing transaction simulation and processing.
+### 2. `compare_with_python.rs`
+Fetches transactions from the latest blocks and compares Rust implementation with Python.
 ```bash
-cargo run --example tx_processor_demo
+# Process 5 transactions (default)
+cargo run --example compare_with_python
+
+# Process 10 transactions
+cargo run --example compare_with_python -- 10
+
+# With Python service for comparison
+PYTHON_SERVICE_URL=http://localhost:18000 cargo run --example compare_with_python
 ```
 
-## Broken/Incomplete Examples
-
-### `benchmark_1k_transactions.rs` - **DOES NOT WORK**
-- Requires Python service at localhost:18000 (not running)
-- Contains fake transaction hashes that don't exist
-- Needs to be fixed later with real data and working Python comparison
+### 3. `simulate_unsigned_transaction.rs`
+Demonstrates how to simulate unsigned transactions and extract state changes.
+```bash
+cargo run --example simulate_unsigned_transaction
+```
 
 ## Performance
 

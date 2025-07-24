@@ -14,8 +14,8 @@ path = "src/lib.rs"
 # Examples that actually exist
 
 [[example]]
-name = "benchmark_1k_transactions"
-path = "examples/benchmark_1k_transactions.rs"
+name = "compare_with_python"
+path = "examples/compare_with_python.rs"
 
 [[example]]
 name = "simulate_unsigned_transaction"
