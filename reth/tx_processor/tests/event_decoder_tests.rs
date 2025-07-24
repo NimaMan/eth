@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use tx_processor::decoder::{LogDecoder, DecodedEvent};
+    use tx_processor::processing::{LogDecoder, DecodedEvent};
     use alloy_primitives::{Address, B256, U256, Log as AlloyLog, keccak256};
     use std::str::FromStr;
 

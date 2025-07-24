@@ -25,8 +25,7 @@ pub mod data_models;
 pub use data_models::{ProcessedTransaction, TransactionFees};
 
 // Export processing modules
-pub mod decoder;
-pub mod classifier;
+pub mod processing;
 pub mod transaction_loader;
 pub mod config;
 pub mod retry_utils;
@@ -37,8 +36,7 @@ pub use tx_processor::TxProcessor;
 /// TX Processor functionality using Direct Reth
 pub mod tx_processor {
     use super::*;
-    use crate::decoder::{LogDecoder, DecodedEvent};
-    use crate::classifier::TransactionClassifier;
+    use crate::processing::{LogDecoder, DecodedEvent, TransactionClassifier};
     use crate::data_models::{ProcessedTransaction, TransactionFees};
     use crate::data_models::events::InternalTransaction;
     use crate::transaction_loader::TransactionLoader;
