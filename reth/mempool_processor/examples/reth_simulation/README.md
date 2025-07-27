@@ -8,7 +8,7 @@ This directory contains working examples of simulating mempool transactions usin
 - Reth database at `/home/nima/.local/share/reth/mainnet`
 - HTTP RPC endpoint at `http://127.0.0.1:8545` (for raw transaction fetching)
 
-## Working Examples
+## Examples
 
 ### 1. `basic_mempool_simulation.rs`
 Basic example showing how to:
@@ -58,15 +58,21 @@ Output:
 - Success/failure/revert rates
 - Logs to `/home/nima/code/crypto/logs/mempool/benchmark_1k_*.log`
 
-### 4. `working_direct_reth_simulation.rs`
-Comprehensive example showing:
-- Both basic simulation and state extraction
-- Detailed transaction analysis
-- Full state change format (prestateTracer compatible)
+### 4. `test_buy_sell_simulator.rs`
+Honeypot detection and tax calculation:
+- Simulates buy -> approve -> sell sequences
+- Detects honeypot tokens (can buy but can't sell)
+- Calculates buy and sell taxes from state changes
+- Tests with known tokens (AITAI and 0xT)
 
 ```bash
-cargo run --release --example working_direct_reth_simulation
+cargo run --release --example test_buy_sell_simulator
 ```
+
+Output:
+- Honeypot detection results
+- Tax percentages for buy/sell
+- Performance metrics (8-15ms per simulation)
 
 ## Performance Metrics
 

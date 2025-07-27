@@ -169,9 +169,6 @@ name = "benchmark_1k_mempool"
 path = "examples/reth_simulation/benchmark_1k_mempool.rs"
 
 [[example]]
-name = "working_direct_reth_simulation"
-path = "examples/reth_simulation/working_direct_reth_simulation.rs"
-[[example]]
 name = "test_buy_sell_simulator"
 path = "examples/reth_simulation/test_buy_sell_simulator.rs"
 

@@ -6,11 +6,11 @@
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
 };
-use reth_tx_simulator::RethDirectTxSimulator;
+use reth_tx_simulator::DirectTxSimulator;
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
 use eyre::Result;
-use tracing::{info, error, warn};
+use tracing::{info, warn};
 use std::time::{Duration, Instant};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
 
     // Initialize Direct Reth simulator
     let start = Instant::now();
-    let simulator = RethDirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = DirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     info!("✅ Direct Reth simulator initialized in {:?}", start.elapsed());
 
     // Connect to mempool
@@ -186,7 +186,7 @@ async fn main() -> Result<()> {
 
 // Helper function to get raw transaction via RPC
 async fn get_raw_tx(hash: &str) -> Result<String> {
-    use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
+    use jsonrpsee::http_client::HttpClientBuilder;
     use jsonrpsee::core::client::ClientT;
     use jsonrpsee::rpc_params;
     
