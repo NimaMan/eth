@@ -35,7 +35,7 @@ impl ContractCreationClassifier {
 
     /// Analyze contract creation to determine if it's a token
     pub fn analyze_creation(&self, tx: &MempoolTransaction) -> (bool, bool) {
-        let bytecode = hex::decode(&tx.input.trim_start_matches("0x")).unwrap_or_default();
+        let bytecode = &tx.input;
         
         if bytecode.len() < 100 {
             return (false, false);

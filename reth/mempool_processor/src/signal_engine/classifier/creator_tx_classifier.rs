@@ -18,13 +18,11 @@ impl CreatorTransactionClassifier {
 
     /// Identify the type of function being called
     pub fn identify_function(&self, tx: &MempoolTransaction) -> CreatorFunctionType {
-        let input_data = hex::decode(&tx.input.trim_start_matches("0x")).unwrap_or_default();
-        
-        if input_data.len() < 4 {
+        if tx.input.len() < 4 {
             return CreatorFunctionType::Other("unknown".to_string());
         }
 
-        let selector = &input_data[0..4];
+        let selector = &tx.input[0..4];
         
         match selector {
             // Tax modification functions

@@ -13,10 +13,11 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use eyre::Result;
 
-use crate::signal_engine::{TransactionWithFunctions, CreatorAnalyzer};
+use crate::signal_engine::CreatorAnalyzer;
 use crate::token_tracking::{TokenTrackingCache, cache::PoolStateCache};
-use super::{DirectTxSimulator, BatchSimulationOptions, CallRequest};
-use super::signal_detector::SignalDetector;
+use crate::mempool_fetcher::MempoolTransaction;
+use reth_tx_simulator::{DirectTxSimulator, BatchSimulationOptions, CallRequest};
+use crate::signal_engine::detectors::SignalDetector;
 use alloy_primitives::{Address, Bytes, U256};
 
 /// Configuration for simulator processor
@@ -43,7 +44,7 @@ pub struct SimulatorProcessor {
     signal_detector: SignalDetector,
     creator_analyzer: Option<CreatorAnalyzer>,
     // Thread-safe mutable state
-    transaction_queue: Arc<Mutex<Vec<TransactionWithFunctions>>>,
+    transaction_queue: Arc<Mutex<Vec<MempoolTransaction>>>,
     config: SimulatorProcessorConfig,
     last_batch_time: Arc<Mutex<Instant>>,
     stats: Arc<Mutex<ProcessorStats>>,
@@ -91,7 +92,7 @@ impl SimulatorProcessor {
     }
     
     /// Process a batch of transactions with function information
-    pub async fn process_batch(&mut self, transactions: Vec<TransactionWithFunctions>) -> Result<()> {
+    pub async fn process_batch(&mut self, transactions: Vec<MempoolTransaction>) -> Result<()> {
         // Update stats
         {
             let mut stats = self.stats.lock().await;
@@ -142,26 +143,26 @@ impl SimulatorProcessor {
     }
     
     /// Filter transactions based on criteria
-    fn filter_transactions(&self, transactions: Vec<TransactionWithFunctions>) -> Vec<TransactionWithFunctions> {
+    fn filter_transactions(&self, transactions: Vec<MempoolTransaction>) -> Vec<MempoolTransaction> {
         transactions.into_iter()
             .filter(|tx| self.should_simulate(tx))
             .collect()
     }
     
     /// Determine if a transaction should be simulated
-    fn should_simulate(&self, tx: &TransactionWithFunctions) -> bool {
+    fn should_simulate(&self, tx: &MempoolTransaction) -> bool {
         // Filter out simple transfers (no function calls)
-        if tx.tx.input.len() <= 4 {
+        if tx.input.len() <= 4 {
             return false;
         }
         
         // Include transactions with detected functions
-        if tx.has_liquidity_removal || tx.has_trading_enabled || tx.has_creator_action {
+        if !tx.functions.is_empty() {
             return true;
         }
         
         // Include transactions with function calls (non-empty input data)
-        tx.tx.input.len() > 4
+        tx.input.len() > 4
     }
     
     /// Check if we should process the current batch

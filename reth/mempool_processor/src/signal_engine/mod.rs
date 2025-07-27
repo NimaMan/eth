@@ -23,6 +23,17 @@ pub use function_detector::FunctionDetector;
 pub use pool_analyzer::{PoolAnalyzer, PoolAnalysisConfig};
 pub use creator_analyzer::{CreatorAnalyzer, CreatorAlert, AlertSeverity};
 
+// Re-export simulation types
+pub use simulator::{
+    TxSimulator,
+    BatchProcessor,
+    TxSimulationResult,
+    StateChangeResult,
+    CallTraceResult,
+    mempool_tx_to_call_request,
+};
+pub use detectors::{SignalDetector, SignalDetectionConfig, SimulationSignal};
+
 // Keep legacy naming for backward compatibility during migration
 pub use engine::SignalEngine as ScamDetectionEngine;
 pub use engine::SignalConfig as ScamDetectionConfig;

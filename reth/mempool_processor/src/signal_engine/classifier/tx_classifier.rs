@@ -133,7 +133,7 @@ impl TransactionClassifier {
 
         // Check if from a known creator
         if let Some(ref cache) = self.token_cache {
-            let from_addr = checksum_address(&tx.from.trim_start_matches("0x"));
+            let from_addr = checksum_address(&hex::encode(&tx.from));
             if cache.is_creator(&from_addr).await {
                 let result = self.classify_creator_transaction(tx).await;
                 debug!("Classified creator transaction in {:?}", start.elapsed());
@@ -159,7 +159,7 @@ impl TransactionClassifier {
         
         ClassificationResult {
             category: TransactionCategory::ContractCreation {
-                deployer: tx.from.clone(),
+                deployer: format!("0x{}", hex::encode(&tx.from)),
                 contract_address: "pending".to_string(), // Will be determined after execution
                 is_token,
                 has_liquidity_in_calldata: has_liquidity,
@@ -176,9 +176,13 @@ impl TransactionClassifier {
         
         // Determine if target is a token
         let target_token = if let Some(ref cache) = self.token_cache {
-            let to_addr = checksum_address(&tx.to.trim_start_matches("0x"));
-            if cache.get_token_info(&to_addr).await.is_some() {
-                Some(to_addr)
+            if let Some(to_bytes) = &tx.to {
+                let to_addr = checksum_address(&hex::encode(to_bytes));
+                if cache.get_token_info(&to_addr).await.is_some() {
+                    Some(to_addr)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -204,8 +208,10 @@ impl TransactionClassifier {
 
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
-                creator: tx.from.clone(),
-                target_address: tx.to.clone(),
+                creator: format!("0x{}", hex::encode(&tx.from)),
+                target_address: tx.to.as_ref()
+                    .map(|t| format!("0x{}", hex::encode(t)))
+                    .unwrap_or_else(|| "none".to_string()),
                 target_token,
                 function_type,
             },
@@ -244,7 +250,7 @@ impl TransactionClassifier {
 
     /// Classify regular transaction
     async fn classify_regular_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
-        let input_data = hex::decode(&tx.input.trim_start_matches("0x")).unwrap_or_default();
+        let input_data = &tx.input;
         
         // Check for transfer (0xa9059cbb) or transferFrom (0x23b872dd)
         let is_transfer = input_data.len() >= 4 && (

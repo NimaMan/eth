@@ -18,7 +18,7 @@ use zmq::Context;
 use alloy_primitives::{Address, U256};
 use crate::common::address::{alloy_address_to_checksum, checksum_address};
 use crate::token_tracking::cache::PoolStateCache;
-use super::AddressStateChange;
+use reth_tx_simulator::AddressStateChange;
 
 lazy_static! {
     /// Global statistics

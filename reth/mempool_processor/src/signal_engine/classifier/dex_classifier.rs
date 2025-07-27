@@ -35,18 +35,18 @@ impl DexClassifier {
 
     /// Identify DEX action from transaction
     pub fn identify_dex_action(&self, tx: &MempoolTransaction) -> Option<(DexType, DexAction)> {
-        let to_addr = checksum_address(&tx.to.trim_start_matches("0x"));
+        let to_bytes = tx.to.as_ref()?;
+        let to_addr = checksum_address(&hex::encode(to_bytes));
         
         // Check if it's a known DEX router
         let dex_type = self.router_addresses.get(&to_addr)?.clone();
         
-        // Decode function selector
-        let input_data = hex::decode(&tx.input.trim_start_matches("0x")).ok()?;
-        if input_data.len() < 4 {
+        // Check function selector
+        if tx.input.len() < 4 {
             return None;
         }
         
-        let selector = &input_data[0..4];
+        let selector = &tx.input[0..4];
         let action = match selector {
             // Add liquidity functions
             [0xe8, 0xe3, 0x37, 0x00] => DexAction::AddLiquidity,     // addLiquidity
