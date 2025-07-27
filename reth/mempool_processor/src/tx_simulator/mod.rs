@@ -21,6 +21,7 @@ pub mod simulator;
 pub mod batch_processor;
 pub mod signal_detector;
 pub mod simulator_processor;
+pub mod buy_sell_simulator;
 
 // Re-export key types
 pub use simulator::{
@@ -36,10 +37,21 @@ pub use simulator_processor::{SimulatorProcessor, SimulatorProcessorConfig};
 
 // Re-export reth_tx_simulator types for convenience
 pub use reth_tx_simulator::{
-    RethDirectTxSimulator,
+    DirectTxSimulator,
     CallRequest,
     AddressStateChange,
     BatchSimulationOptions,
     BatchSimulationResult,
     ipc_to_call_request,
+};
+
+// Re-export tx_processor types for ProcessedTransaction functionality
+pub use tx_processor::{TxProcessor, ProcessedTransaction};
+
+// Re-export buy_sell_simulator types
+pub use buy_sell_simulator::{
+    BuySellSimulator,
+    BuySellResult,
+    SequentialBuySellSimulator,
+    BuySellSimulatorConfig,
 };

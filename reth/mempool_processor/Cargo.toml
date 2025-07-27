@@ -4,6 +4,7 @@ version   = "0.1.0"
 edition   = "2021"
 
 [dependencies]
+
 # Real-time JSON-RPC/WebSocket/IPC client
 ethers          = { version = "2.0", features = ["ws", "ipc"] }
 tokio           = { version = "1.37", features = ["full"] }
@@ -28,6 +29,15 @@ zmq             = "0.10"
 
 # Time handling
 chrono          = { version = "0.4", features = ["serde"] }
+
+# Concurrency
+parking_lot     = "0.12"
+
+# Signal handling
+ctrlc           = "3.4"
+
+# Async trait support
+async-trait     = "0.1"
 
 # Transaction simulation with REVM - Using crates.io versions to match revm_tx_simulator
 revm            = { version = "25.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
@@ -55,6 +65,7 @@ lazy_static     = "1.4"
 
 serde           = { version = "1.0", features = ["derive"] }
 serde_json      = "1.0"
+toml            = "0.8"
 hex             = "0.4"
 fastrand        = "2.0"
 tiny-keccak     = { version = "2.0", features = ["keccak"] }
@@ -75,6 +86,7 @@ tokio-tungstenite = "0.20"
 
 # Reth direct integration for ultra-fast simulation
 reth_tx_simulator = { path = "../reth_tx_simulator" }
+tx_processor = { path = "../tx_processor" }
 reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
 reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
 reth-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/reth" }
@@ -94,6 +106,8 @@ alloy-primitives = { version = "1.0", features = ["rlp"] }
 alloy-rlp = "0.3"
 # alloy-eips already defined above from git
 alloy-consensus = { version = "1.0" }
+alloy-sol-types = { version = "1.0" }
+alloy-rpc-types = { version = "1.0" }
 
 # REVM for Direct Reth simulation
 # Note: Using existing revm 25.0.0 from above
@@ -157,10 +171,132 @@ path = "examples/reth_simulation/benchmark_1k_mempool.rs"
 [[example]]
 name = "working_direct_reth_simulation"
 path = "examples/reth_simulation/working_direct_reth_simulation.rs"
+[[example]]
+name = "test_buy_sell_simulator"
+path = "examples/reth_simulation/test_buy_sell_simulator.rs"
 
 # TxSimulator Examples
 [[example]]
 name = "test_state_changes_nonblocking"
 path = "examples/tx_simulation/test_state_changes_nonblocking.rs"
+
+# Token Parameter Extraction Examples
+[[example]]
+name = "decode_tax_transactions"
+path = "examples/token_parameter_extraction/decode_tax_transactions.rs"
+
+[[example]]
+name = "extract_token_parameters"
+path = "examples/token_parameter_extraction/extract_token_parameters.rs"
+
+[[example]]
+name = "get_token_parameters"
+path = "examples/token_parameter_extraction/get_token_parameters.rs"
+
+[[example]]
+name = "analyze_token_timeline"
+path = "examples/token_parameter_extraction/analyze_token_timeline.rs"
+
+[[example]]
+name = "identify_storage_slots"
+path = "examples/token_parameter_extraction/identify_storage_slots.rs"
+
+[[example]]
+name = "calculate_dogeina_taxes"
+path = "examples/token_parameter_extraction/calculate_dogeina_taxes.rs"
+
+[[example]]
+name = "clean_tax_calculation"
+path = "examples/token_parameter_extraction/clean_tax_calculation.rs"
+
+[[example]]
+name = "simulate_buy_sell_taxes"
+path = "examples/token_parameter_extraction/simulate_buy_sell_taxes.rs"
+
+# Unified Publisher Examples
+[[example]]
+name = "publisher_demo"
+path = "examples/unified_publisher/publisher_demo.rs"
+
+[[example]]
+name = "multipart_subscriber"
+path = "examples/unified_publisher/multipart_subscriber.rs"
+
+[[example]]
+name = "unified_publisher_example"
+path = "examples/unified_publisher/unified_publisher_example.rs"
+
+[[example]]
+name = "get_0xt_data_at_block"
+path = "examples/token_parameter_extraction/get_0xt_data_at_block.rs"
+
+[[example]]
+name = "read_token_data_from_storage"
+path = "examples/token_parameter_extraction/read_token_data_from_storage.rs"
+
+[[example]]
+name = "get_token_info_via_rpc"
+path = "examples/token_parameter_extraction/get_token_info_via_rpc.rs"
+
+[[example]]
+name = "calculate_0xt_taxes"
+path = "examples/token_parameter_extraction/calculate_0xt_taxes.rs"
+
+[[example]]
+name = "calculate_0xt_taxes_formula"
+path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
+
+[[example]]
+name = "calculate_initial_tax"
+path = "examples/token_parameter_extraction/tax/calculate_initial_tax.rs"
+
+[[example]]
+name = "calculate_initial_tax_vocl"
+path = "examples/token_parameter_extraction/tax/calculate_initial_tax_vocl.rs"
+
+[[example]]
+name = "calculate_tax_homer"
+path = "examples/token_parameter_extraction/tax/calculate_tax_homer.rs"
+
+[[example]]
+name = "analyze_homer_behavior"
+path = "examples/token_parameter_extraction/tax/analyze_homer_behavior.rs"
+
+[[example]]
+name = "debug_homer_k_error"
+path = "examples/token_parameter_extraction/tax/debug_homer_k_error.rs"
+
+[[example]]
+name = "debug_homer_reserves"
+path = "examples/token_parameter_extraction/tax/debug_homer_reserves.rs"
+
+[[example]]
+name = "test_float_conversion"
+path = "examples/token_parameter_extraction/tax/test_float_conversion.rs"
+
+[[example]]
+name = "homer_comprehensive_analysis"
+path = "examples/token_parameter_extraction/tax/homer_comprehensive_analysis.rs"
+
+[[example]]
+name = "analyze_angstrom_token"
+path = "examples/token_parameter_extraction/tax/analyze_angstrom_token.rs"
+[[example]]
+name = "analyze_homer_token"
+path = "examples/token_parameter_extraction/tax/analyze_homer_token.rs"
+
+[[example]]
+name = "homer_detailed_logging"
+path = "examples/token_parameter_extraction/tax/homer_detailed_logging.rs"
+
+
+[[example]]
+name = "homer_deep_analysis"
+path = "examples/token_parameter_extraction/tax/homer_deep_analysis.rs"
+
+[[example]]
+name = "analyze_tax_for_block_range"
+path = "examples/token_parameter_extraction/tax/analyze_tax_for_block_range.rs"
+
 
 # Using crates.io versions - no patches needed
