@@ -9,6 +9,7 @@ use mempool_processor::mempool_fetcher::{
 use reth_tx_simulator::{DirectTxSimulator, ipc_to_call_request};
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
+use alloy_primitives::U256;
 use eyre::Result;
 use tracing::{info, error, debug};
 use std::time::{Duration, Instant};
@@ -77,8 +78,8 @@ async fn main() -> Result<()> {
             println!("\n🔍 Attempting simulation with automatic nonce adaptation...");
             let start = Instant::now();
             
-            match simulator.simulate_unsigned_transaction(&call_request).await {
-                Ok(basic_result) => {
+            match simulator.simulate_unsigned_transaction(call_request.clone()).await {
+                Ok(_basic_result) => {
                     // If basic simulation succeeds, run detailed simulation
                     debug!("Basic simulation succeeded, running detailed analysis");
                     match simulator.simulate_transaction_detailed(call_request, None).await {
@@ -157,16 +158,29 @@ fn analyze_detailed_state_changes(result: &reth_tx_simulator::DetailedSimulation
     }
     
     // Summary statistics
-    let total_eth_moved: f64 = result.state_changes.values()
-        .map(|changes| changes.eth_net.abs())
+    let total_eth_moved: U256 = result.state_changes.values()
+        .map(|changes| changes.eth_net)
         .sum();
     let total_tokens_affected: usize = result.state_changes.values()
         .map(|changes| changes.token_net.len())
         .sum();
     
     println!("\n  📈 Summary:");
-    println!("     Total ETH movement: {:.6} ETH", total_eth_moved / 2.0); // Divide by 2 since we count both sender and receiver
+    println!("     Total ETH movement: {} ETH", format_ether(total_eth_moved / U256::from(2))); // Divide by 2 since we count both sender and receiver
     println!("     Total token interactions: {}", total_tokens_affected);
+}
+
+fn format_ether(value: U256) -> String {
+    let eth = value / U256::from(10).pow(U256::from(18));
+    let wei = value % U256::from(10).pow(U256::from(18));
+    
+    if wei == U256::ZERO {
+        format!("{}", eth)
+    } else {
+        // Format with 6 decimal places
+        let decimal_part = wei * U256::from(1_000_000) / U256::from(10).pow(U256::from(18));
+        format!("{}.{:06}", eth, decimal_part)
+    }
 }
 
 fn decode_transaction(raw_tx: &str) -> Result<TransactionSigned> {

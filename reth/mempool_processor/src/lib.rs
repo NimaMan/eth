@@ -5,7 +5,7 @@
 
 pub mod mempool_fetcher;
 pub mod token_tracking;
-// pub mod signal_engine; // Temporarily disabled until fixed
+pub mod signal_engine;
 pub mod common;
 pub mod config;
 pub mod database;

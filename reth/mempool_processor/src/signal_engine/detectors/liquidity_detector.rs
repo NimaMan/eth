@@ -2,7 +2,7 @@
 /// 
 /// Detects significant liquidity changes in pools
 
-use crate::signal_engine::simulator::{SimulationResult, StateChange};
+use crate::signal_engine::simulator::{StateChange, simulation_orchestrator::SimulationResult};
 use tracing::{info, debug};
 use std::collections::HashMap;
 
@@ -115,7 +115,7 @@ impl LiquidityDetector {
 
         // Extract token address
         let token_address = match &sim_result.request.category {
-            crate::signal_engine::classifier::TransactionCategory::DexInteraction { token_address, .. } => {
+            crate::signal_engine::tx_router::TransactionCategory::DexInteraction { token_address, .. } => {
                 token_address.as_ref()?.clone()
             }
             _ => "unknown".to_string(),

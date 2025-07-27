@@ -2,8 +2,8 @@
 /// 
 /// Detects changes in token buy/sell taxes
 
-use crate::signal_engine::simulator::{SimulationResult, BuySellResult};
-use crate::signal_engine::classifier::CreatorFunctionType;
+use crate::signal_engine::simulator::{BuySellResult, simulation_orchestrator::SimulationResult};
+use crate::signal_engine::tx_router::CreatorFunctionType;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
@@ -56,7 +56,7 @@ impl TaxChangeDetector {
     pub fn detect(&self, sim_result: &SimulationResult) -> Option<TaxChangeSignal> {
         // Only detect for creator transactions that modify taxes
         let (creator, function_type, target_token) = match &sim_result.request.category {
-            crate::signal_engine::classifier::TransactionCategory::CreatorTransaction { 
+            crate::signal_engine::tx_router::TransactionCategory::CreatorTransaction { 
                 creator, 
                 function_type, 
                 target_token,

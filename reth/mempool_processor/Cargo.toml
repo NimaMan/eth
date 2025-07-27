@@ -166,19 +166,23 @@ path = "examples/test_classifier.rs"
 # Reth Simulation Examples
 [[example]]
 name = "basic_mempool_simulation"
-path = "examples/reth_simulation/basic_mempool_simulation.rs"
+path = "examples/signal_engine/simulator/basic_mempool_simulation.rs"
 
 [[example]]
 name = "state_change_extraction"
-path = "examples/reth_simulation/state_change_extraction.rs"
+path = "examples/signal_engine/simulator/state_change_extraction.rs"
 
 [[example]]
 name = "benchmark_1k_mempool"
-path = "examples/reth_simulation/benchmark_1k_mempool.rs"
+path = "examples/signal_engine/simulator/benchmark_1k_mempool.rs"
 
 [[example]]
 name = "test_buy_sell_simulator"
-path = "examples/reth_simulation/test_buy_sell_simulator.rs"
+path = "examples/signal_engine/simulator/test_buy_sell_simulator.rs"
+
+[[example]]
+name = "signal_detector_with_simulation"
+path = "examples/signal_engine/simulator/signal_detector_with_simulation.rs"
 
 # TxSimulator Examples
 [[example]]

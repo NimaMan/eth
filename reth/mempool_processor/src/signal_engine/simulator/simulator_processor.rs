@@ -102,7 +102,7 @@ impl SimulatorProcessor {
         // First check for creator actions - these get immediate alerts
         if let Some(ref creator_analyzer) = self.creator_analyzer {
             for tx in &transactions {
-                if tx.has_creator_action {
+                if tx.functions.iter().any(|f| creator_analyzer.is_creator_action(f)) {
                     if let Some(alert) = creator_analyzer.analyze_transaction(tx).await {
                         // Log critical creator actions
                         match alert.severity {
@@ -249,8 +249,8 @@ impl SimulatorProcessor {
         // Convert to CallRequest batch using efficient byte conversion
         let mut call_requests = Vec::new();
         for tx in &transactions {
-            let call_request = Self::nonblocking_tx_to_call_request(&tx.tx);
-            call_requests.push((tx.tx.hash.clone(), call_request));
+            let call_request = Self::nonblocking_tx_to_call_request(&tx);
+            call_requests.push((tx.hash.clone(), call_request));
         }
         
         if call_requests.is_empty() {
@@ -278,12 +278,12 @@ impl SimulatorProcessor {
                     
                     // Find the corresponding transaction to get the from address
                     let from_address = transactions.iter()
-                        .find(|tx| tx.tx.hash == tx_hash)
+                        .find(|tx| tx.hash == tx_hash)
                         .map(|tx| {
                             // Convert Vec<u8> to Address (20 bytes)
-                            if tx.tx.from.len() == 20 {
+                            if tx.from.len() == 20 {
                                 let mut addr_bytes = [0u8; 20];
-                                addr_bytes.copy_from_slice(&tx.tx.from);
+                                addr_bytes.copy_from_slice(&tx.from);
                                 alloy_primitives::Address::from(addr_bytes)
                             } else {
                                 alloy_primitives::Address::ZERO
@@ -292,9 +292,9 @@ impl SimulatorProcessor {
                         .unwrap_or(alloy_primitives::Address::ZERO);
                     
                     let (to_address, functions) = transactions.iter()
-                        .find(|tx| tx.tx.hash == tx_hash)
+                        .find(|tx| tx.hash == tx_hash)
                         .map(|tx_with_functions| {
-                            let to = tx_with_functions.tx.to.as_ref()
+                            let to = tx_with_functions.to.as_ref()
                                 .map(|to_bytes| {
                                     // Convert Vec<u8> to Address (20 bytes)
                                     if to_bytes.len() == 20 {

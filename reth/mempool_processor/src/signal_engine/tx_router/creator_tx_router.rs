@@ -7,11 +7,11 @@ use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
 use super::CreatorFunctionType;
 
-pub struct CreatorTransactionClassifier {
+pub struct CreatorTransactionRouter {
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
-impl CreatorTransactionClassifier {
+impl CreatorTransactionRouter {
     pub fn new(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
         Self { token_cache }
     }

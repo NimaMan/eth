@@ -13,8 +13,8 @@ use tokio::time;
 
 use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction};
 use mempool_processor::signal_engine::FunctionDetector;
-use mempool_processor::tx_simulator::{BatchProcessor, SignalDetector, SignalDetectionConfig};
-use reth_tx_simulator::{RethDirectTxSimulator, BatchSimulationOptions};
+use mempool_processor::signal_engine::{BatchProcessor, SignalDetector, SignalDetectionConfig};
+use mempool_processor::tx_simulator::RethDirectTxSimulator;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
         info!("🧪 Initializing transaction simulator...");
         let reth_simulator = Arc::new(RethDirectTxSimulator::new(&args.reth_db_path)?);
         let batch_processor = BatchProcessor::new(reth_simulator);
-        let signal_detector = SignalDetector::new(SignalDetectionConfig::default());
+        let signal_detector = SignalDetector::new(SignalDetectionConfig::default(), std::path::PathBuf::from("./logs"));
         let queue = simulation_queue.clone();
         
         // Spawn simulation task
@@ -91,21 +91,20 @@ async fn main() -> Result<()> {
         }
         
         // Batch function detection
-        let detected_functions = function_detector.detect_batch(&new_txs);
-        signals_detected += detected_functions.len() as u64;
-        total_processed += new_txs.len() as u64;
+        let total_txs = new_txs.len();
+        let txs_with_functions = function_detector.detect_batch(new_txs);
+        signals_detected += txs_with_functions.len() as u64;
+        total_processed += total_txs as u64;
         
         // Queue transactions with detected functions for simulation
-        if args.enable_simulation && !detected_functions.is_empty() {
+        if args.enable_simulation && !txs_with_functions.is_empty() {
             let mut queue = simulation_queue.lock().await;
-            for tx in new_txs {
-                if detected_functions.contains_key(&tx.hash) {
-                    if queue.len() < args.max_queue_size {
-                        queue.push_back(tx);
-                    } else {
-                        warn!("Simulation queue full, dropping transaction {}", tx.hash);
-                        break;
-                    }
+            for tx in txs_with_functions {
+                if queue.len() < args.max_queue_size {
+                    queue.push_back(tx);
+                } else {
+                    warn!("Simulation queue full, dropping transaction {}", tx.hash);
+                    break;
                 }
             }
         }

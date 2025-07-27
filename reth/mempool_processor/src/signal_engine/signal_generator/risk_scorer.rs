@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use crate::token_tracking::TokenTrackingCache;
-use crate::signal_engine::classifier::TransactionCategory;
+use crate::signal_engine::tx_router::TransactionCategory;
 use crate::signal_engine::detectors::{
     HoneypotSignal, LiquiditySignal, TaxChangeSignal, TradingStatusSignal,
     LiquidityChangeType,
@@ -190,11 +190,14 @@ impl RiskScorer {
         cache: &TokenTrackingCache,
     ) -> u8 {
         // Check number of tokens created
-        let tokens = cache.get_creator_tokens(creator_address).await;
-        let token_count = tokens.len();
+        // TODO: Implement get_creator_tokens method
+        // let tokens = cache.get_creator_tokens(creator_address).await;
+        let token_count = 0; // tokens.len();
 
         // Check if uses private mempool
-        let uses_private = cache.is_creator_private_mempool(creator_address).await;
+        // TODO: Implement is_creator_private_mempool method
+        // let uses_private = cache.is_creator_private_mempool(creator_address).await;
+        let uses_private = false;
 
         // Calculate score
         let mut score = match token_count {

@@ -1,7 +1,7 @@
-/// Main Transaction Classifier
+/// Main Transaction Router
 /// 
-/// Categorizes transactions based on their characteristics and routes them
-/// for appropriate processing with assigned priorities
+/// Routes transactions to appropriate simulation strategies based on their
+/// characteristics and assigns processing priorities
 
 use alloy_primitives::Address;
 use std::sync::Arc;
@@ -11,9 +11,9 @@ use crate::token_tracking::TokenTrackingCache;
 use crate::common::address::checksum_address;
 
 use super::{
-    ContractCreationClassifier,
-    CreatorTransactionClassifier, 
-    DexClassifier,
+    ContractCreationRouter,
+    CreatorTransactionRouter, 
+    DexRouter,
 };
 
 /// Categories of transactions for processing
@@ -89,7 +89,7 @@ pub struct ClassificationResult {
 }
 
 /// Simulation priority levels
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimulationPriority {
     Critical = 0,  // Must simulate immediately
     High = 1,      // Should simulate soon
@@ -97,21 +97,21 @@ pub enum SimulationPriority {
     Low = 3,       // Optional simulation
 }
 
-/// Main transaction classifier
-pub struct TransactionClassifier {
-    contract_classifier: ContractCreationClassifier,
-    creator_classifier: CreatorTransactionClassifier,
-    dex_classifier: DexClassifier,
+/// Main transaction router
+pub struct TransactionRouter {
+    contract_router: ContractCreationRouter,
+    creator_router: CreatorTransactionRouter,
+    dex_router: DexRouter,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
-impl TransactionClassifier {
+impl TransactionRouter {
     /// Create a new transaction classifier
     pub fn new(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
         Self {
-            contract_classifier: ContractCreationClassifier::new(),
-            creator_classifier: CreatorTransactionClassifier::new(token_cache.clone()),
-            dex_classifier: DexClassifier::new(),
+            contract_router: ContractCreationRouter::new(),
+            creator_router: CreatorTransactionRouter::new(token_cache.clone()),
+            dex_router: DexRouter::new(),
             token_cache,
         }
     }
@@ -134,7 +134,7 @@ impl TransactionClassifier {
         // Check if from a known creator
         if let Some(ref cache) = self.token_cache {
             let from_addr = checksum_address(&hex::encode(&tx.from));
-            if cache.is_creator(&from_addr).await {
+            if cache.creators.is_creator(&from_addr).await {
                 let result = self.classify_creator_transaction(tx).await;
                 debug!("Classified creator transaction in {:?}", start.elapsed());
                 return result;
@@ -155,7 +155,7 @@ impl TransactionClassifier {
 
     /// Classify contract creation
     async fn classify_contract_creation(&self, tx: &MempoolTransaction) -> ClassificationResult {
-        let (is_token, has_liquidity) = self.contract_classifier.analyze_creation(tx);
+        let (is_token, has_liquidity) = self.contract_router.analyze_creation(tx);
         
         ClassificationResult {
             category: TransactionCategory::ContractCreation {
@@ -172,13 +172,13 @@ impl TransactionClassifier {
 
     /// Classify creator transaction
     async fn classify_creator_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
-        let function_type = self.creator_classifier.identify_function(tx);
+        let function_type = self.creator_router.identify_function(tx);
         
         // Determine if target is a token
         let target_token = if let Some(ref cache) = self.token_cache {
             if let Some(to_bytes) = &tx.to {
                 let to_addr = checksum_address(&hex::encode(to_bytes));
-                if cache.get_token_info(&to_addr).await.is_some() {
+                if cache.get_token_info(&to_addr).await.creator_info.is_some() {
                     Some(to_addr)
                 } else {
                     None
@@ -223,10 +223,10 @@ impl TransactionClassifier {
 
     /// Classify DEX interaction
     async fn classify_dex_interaction(&self, tx: &MempoolTransaction) -> Option<ClassificationResult> {
-        let (dex_type, action) = self.dex_classifier.identify_dex_action(tx)?;
+        let (dex_type, action) = self.dex_router.identify_dex_action(tx)?;
         
         // Extract token/pool from calldata if possible
-        let (token_address, pool_address) = self.dex_classifier.extract_addresses(tx);
+        let (token_address, pool_address) = self.dex_router.extract_addresses(tx);
 
         let priority = match action {
             DexAction::RemoveLiquidity => SimulationPriority::High,
@@ -238,7 +238,7 @@ impl TransactionClassifier {
         Some(ClassificationResult {
             category: TransactionCategory::DexInteraction {
                 dex_type,
-                action,
+                action: action.clone(),
                 token_address,
                 pool_address,
             },

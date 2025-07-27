@@ -12,11 +12,11 @@ const UNISWAP_V3_ROUTER: &str = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
 const UNISWAP_V3_ROUTER2: &str = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45";
 const SUSHISWAP_ROUTER: &str = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F";
 
-pub struct DexClassifier {
+pub struct DexRouter {
     router_addresses: std::collections::HashMap<String, DexType>,
 }
 
-impl DexClassifier {
+impl DexRouter {
     pub fn new() -> Self {
         let mut router_addresses = std::collections::HashMap::new();
         

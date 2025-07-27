@@ -15,7 +15,7 @@ use eyre::Result;
 use std::time::Instant;
 use std::sync::Arc;
 use alloy_primitives::{Address, Bytes, U256};
-use crate::tx_simulator::{DirectTxSimulator, CallRequest};
+use reth_tx_simulator::{DirectTxSimulator, CallRequest};
 use reth_tx_simulator::SequentialSimulationOptions;
 
 /// Result of a buy/sell simulation sequence

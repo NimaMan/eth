@@ -111,6 +111,22 @@ impl CreatorAnalyzer {
         Self { token_cache }
     }
     
+    /// Check if a function is a creator-related action
+    pub fn is_creator_action(&self, function_name: &str) -> bool {
+        matches!(function_name,
+            "removeLiquidity" | "removeLiquidityETH" | "removeLiquidityETHSupportingFeeOnTransferTokens" |
+            "pause" | "stopTrading" | "disableTrading" |
+            "emergencyWithdraw" | "withdrawETH" | "withdrawToken" |
+            "setFee" | "setTaxPercent" | "setSellFee" | "setBuyFee" |
+            "blacklist" | "addToBlacklist" | "setBlacklisted" |
+            "setMaxWalletPercent" | "setMaxTxPercent" | "setMaxTransaction" | "setMaxWallet" |
+            "renounceOwnership" | "transferOwnership" |
+            "unpause" | "enableTrading" | "openTrading" | "startTrading" |
+            "excludeFromFee" | "includeInFee" | "setExcludeFromFee" |
+            "airdrop" | "multisend" | "distributeTokens"
+        )
+    }
+    
     /// Analyze a transaction with detected functions
     pub async fn analyze_transaction(&self, tx: &MempoolTransaction) -> Option<CreatorAlert> {
         // Check if this is a token creation or trading enable transaction

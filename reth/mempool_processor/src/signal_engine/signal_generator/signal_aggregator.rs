@@ -48,7 +48,9 @@ impl SignalAggregator {
         let mut aggregated = Vec::new();
 
         // Process each transaction's signals
-        for (tx_hash, signals) in self.signal_buffer.drain() {
+        let buffer_contents: Vec<(H256, Vec<UnifiedSignal>)> = self.signal_buffer.drain().collect();
+        
+        for (tx_hash, signals) in buffer_contents {
             if signals.is_empty() {
                 continue;
             }

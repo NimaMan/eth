@@ -7,9 +7,9 @@ use tokio::sync::Mutex;
 use tracing::{info, debug, warn, error};
 use ethers::types::{Transaction, H256};
 use crate::mempool_fetcher::MempoolTransaction;
-use crate::signal_engine::classifier::{TransactionCategory, SimulationPriority};
+use crate::signal_engine::tx_router::{TransactionCategory, SimulationPriority};
 use super::{SimulationQueue, BuySellSimulator};
-use crate::tx_simulator::TxSimulator;
+use super::tx_simulator::TxSimulator;
 use std::collections::HashMap;
 
 /// Types of simulation to perform
@@ -75,7 +75,7 @@ pub struct StateChange {
 /// Orchestrator for managing simulations
 pub struct SimulationOrchestrator {
     tx_simulator: Arc<TxSimulator>,
-    buy_sell_simulator: Arc<BuySellSimulator>,
+    buy_sell_simulator: Arc<dyn BuySellSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
     
     // Configuration
@@ -86,7 +86,7 @@ pub struct SimulationOrchestrator {
     stats: Arc<Mutex<OrchestratorStats>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct OrchestratorStats {
     total_requests: u64,
     successful_simulations: u64,
@@ -100,7 +100,7 @@ impl SimulationOrchestrator {
     /// Create new simulation orchestrator
     pub fn new(
         tx_simulator: Arc<TxSimulator>,
-        buy_sell_simulator: Arc<BuySellSimulator>,
+        buy_sell_simulator: Arc<dyn BuySellSimulator>,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -263,6 +263,7 @@ impl SimulationOrchestrator {
 
     /// Get orchestrator statistics
     pub async fn get_stats(&self) -> OrchestratorStats {
-        self.stats.lock().await.clone()
+        let stats = self.stats.lock().await;
+        stats.clone()
     }
 }

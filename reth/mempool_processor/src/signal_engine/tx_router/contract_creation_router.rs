@@ -5,13 +5,13 @@
 use crate::mempool_fetcher::MempoolTransaction;
 use tracing::debug;
 
-pub struct ContractCreationClassifier {
+pub struct ContractCreationRouter {
     // Common token creation patterns
     token_signatures: Vec<Vec<u8>>,
     liquidity_signatures: Vec<Vec<u8>>,
 }
 
-impl ContractCreationClassifier {
+impl ContractCreationRouter {
     pub fn new() -> Self {
         Self {
             // Common ERC20 function signatures in bytecode

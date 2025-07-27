@@ -4,7 +4,8 @@
 /// - AITAI token (should work - no honeypot)
 /// - 0xT token (should fail sell - honeypot)
 
-use mempool_processor::tx_simulator::{BuySellSimulator, SequentialBuySellSimulator};
+use mempool_processor::signal_engine::simulator::buy_sell_simulator::SequentialBuySellSimulator;
+use mempool_processor::signal_engine::simulator::BuySellSimulator;
 use alloy_primitives::Address;
 use std::str::FromStr;
 use eyre::Result;

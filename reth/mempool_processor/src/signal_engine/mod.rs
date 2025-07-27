@@ -10,7 +10,7 @@ pub mod function_detector;
 pub mod pool_analyzer;
 pub mod creator_analyzer;
 pub mod token_parameter_extractor;
-pub mod classifier;
+pub mod tx_router;
 pub mod simulator;
 pub mod detectors;
 pub mod signal_generator;
