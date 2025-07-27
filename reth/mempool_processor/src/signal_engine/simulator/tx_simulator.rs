@@ -3,7 +3,7 @@
 /// This module integrates reth_tx_simulator for ultra-fast transaction simulation
 /// by bypassing RPC and using direct database access.
 
-use reth_tx_simulator::{DirectTxSimulator, CallRequest, ipc_to_call_request, AddressStateChange};
+use reth_tx_simulator::{RethTxSimulator, CallRequest, ipc_to_call_request, AddressStateChange};
 use crate::mempool_fetcher::FullTransaction;
 use eyre::Result;
 use std::sync::Arc;
@@ -12,9 +12,9 @@ use tokio::sync::RwLock;
 use tracing::info;
 use alloy_primitives::Address;
 
-/// Wrapper around DirectTxSimulator for mempool processor integration
+/// Wrapper around RethTxSimulator for mempool processor integration
 pub struct TxSimulator {
-    simulator: Arc<DirectTxSimulator>,
+    simulator: Arc<RethTxSimulator>,
     latest_block: Arc<RwLock<u64>>,
 }
 
@@ -22,7 +22,7 @@ impl TxSimulator {
     /// Create a new transaction simulator
     pub fn new(db_path: &str) -> Result<Self> {
         info!("Initializing transaction simulator...");
-        let simulator = DirectTxSimulator::new(db_path)?;
+        let simulator = RethTxSimulator::new(db_path)?;
         let latest_block = simulator.get_latest_block()?;
         
         info!("✅ Transaction simulator ready at block {}", latest_block);
@@ -220,7 +220,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_direct_simulator_creation() {
-        let result = DirectTxSimulator::new("/home/nima/.local/share/reth/mainnet");
+        let result = RethTxSimulator::new("/home/nima/.local/share/reth/mainnet");
         assert!(result.is_ok());
     }
 }

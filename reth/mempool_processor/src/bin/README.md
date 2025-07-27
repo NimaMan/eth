@@ -12,12 +12,38 @@ This document explains the complete architecture of the mempool signal detection
                                                            │
                                                            ▼
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│ Signal Engine   │────▶│   Publishers     │     │   Simulator     │
-│ (Orchestrator)  │     │  (ZMQ/Logs)      │     │   Processor     │
+│  TX Router      │────▶│ Signal Processor │────▶│ Signal          │
+│ (Classification)│     │ (Coordinator)    │     │ Generator       │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+           │                       │                       │
+           ▼                       ▼                       ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Token Cache    │     │ Signal Detectors │     │   Publishers    │
+│ (Trading Status)│     │ (Binary Signals) │     │  (ZMQ/Logs)     │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
 ## Data Flow and Transformation
+
+### Complete Processing Pipeline
+
+```
+1. IPC Client receives transaction
+   ↓
+2. FunctionDetector identifies function signatures  
+   ↓
+3. TransactionRouter categorizes and assigns priority
+   ↓
+4. SignalProcessor coordinates the detection pipeline:
+   - Queries TokenCache for trading status  
+   - Triggers buy/sell simulation if needed (internal)
+   - Passes results + trading status to signal detectors
+   - Collects binary signals
+   ↓
+5. SignalGenerator formats signals for publishing
+   ↓  
+6. Publishers output signals (ZMQ + Logs)
+```
 
 ### 1. IPC Transaction Data Format
 
@@ -89,24 +115,21 @@ for tx in transactions_with_functions {
 - **Tax**: `setTaxes` (0x032dc6a2), `setBuyTax` (0x2f2ff15d)
 - **Swaps**: Various swap functions from DEX routers
 
-### 3. Transaction Classification & Routing
+### 3. Transaction Routing
 
-The classifier combines function detection with additional context:
+The `TransactionRouter` categorizes transactions and assigns simulation priorities:
 
 ```rust
-// Input: MempoolTransaction with populated functions field + TokenCache data
+// Input: MempoolTransaction with populated functions field
 let tx = MempoolTransaction { 
     functions: vec!["enableTrading"],
     from: creator_address_bytes,
+    to: Some(token_address_bytes),
     ... 
 };
 
-// Classification process
-let is_creator = token_cache.is_creator(&tx.from);
-let is_contract_creation = tx.to.is_none();
-let has_risky_functions = tx.functions.iter().any(|f| 
-    f.contains("Trading") || f.contains("Tax") || f.contains("Liquidity")
-);
+// Routing process
+let routing_result = tx_router.classify(&tx).await;
 
 // Output: ClassificationResult
 pub struct ClassificationResult {
@@ -118,20 +141,85 @@ pub struct ClassificationResult {
 ```
 
 **Categories**:
-- `ContractCreation`: New deployments (check for ERC20 bytecode patterns)
-- `CreatorTransaction`: From known token creators (regardless of function)
-- `DexInteraction`: To Uniswap/Sushiswap routers
-- `Regular`: Everything else
+- `ContractCreation`: New deployments with deployer and contract address
+- `CreatorTransaction`: From known token creators with target analysis  
+- `DexInteraction`: DEX operations (Uniswap, Sushiswap) with action type
+- `Regular`: Standard transfers and approvals
 
 **Priority Assignment**:
-- `Critical`: Creator + tax/trading functions, liquidity removals
-- `High`: Trading enables, new tokens with liquidity
-- `Normal`: Regular swaps
-- `Low`: Simple transfers
+- `Critical`: Creator transactions with critical functions
+- `High`: Trading enabled, liquidity operations
+- `Normal`: DEX interactions, regular contract calls
+- `Low`: Simple transfers and standard operations
 
-### 4. Simulation Processing
+### 4. Signal Processing Coordination
 
-The `SimulatorProcessor` executes transactions against current blockchain state:
+The `SignalProcessor` coordinates the entire detection pipeline:
+
+```rust
+impl SignalProcessor {
+    pub async fn process_transaction(&self, tx: MempoolTransaction) -> Vec<Signal> {
+        // 1. Route the transaction
+        let routing = self.tx_router.classify(&tx).await;
+        
+        // 2. Get trading status from token cache
+        let trading_status = if let Some(token_addr) = self.extract_token_address(&tx) {
+            self.token_cache.is_trading_enabled(&token_addr).await
+        } else {
+            false // No token = no trading status
+        };
+        
+        // 3. Run simulation if transaction requires it
+        let simulation_result = if routing.requires_simulation || routing.requires_buy_sell_test {
+            Some(self.buy_sell_simulator.simulate(&tx).await?)
+        } else {
+            None
+        };
+        
+        // 4. Check all signal detectors with context
+        let mut signals = Vec::new();
+        
+        if let Some(sim_result) = &simulation_result {
+            // Trading Enabled Signal
+            if let Some(signal) = self.trading_enabled_detector
+                .check_transaction(&tx, sim_result, trading_status) {
+                signals.push(Signal::TradingEnabled(signal));
+            }
+            
+            // High Tax Warning Signal  
+            if let Some(signal) = self.high_tax_detector
+                .check_transaction(&tx, sim_result, trading_status) {
+                signals.push(Signal::HighTaxWarning(signal));
+            }
+        }
+        
+        // Liquidity Removal Signal (no simulation needed)
+        if let Some(signal) = self.liquidity_removal_detector
+            .check_transaction(&tx) {
+            signals.push(Signal::LiquidityRemoval(signal));
+        }
+        
+        // 5. Send signals to generator for formatting and publishing
+        for signal in &signals {
+            self.signal_generator.process_and_publish(signal).await;
+        }
+        
+        signals
+    }
+}
+```
+
+**Key Coordination Functions**:
+- **Token Address Extraction**: From transaction data or routing results
+- **Trading Status Query**: Via TokenCache (ZMQ communication with Python)
+- **Simulation Orchestration**: Only when needed based on routing
+- **Context Passing**: Provides detectors with trading status
+- **Signal Collection**: Aggregates all binary signals
+- **Publishing**: Coordinates output to all channels
+
+### 5. Simulation Processing
+
+The `BuySellSimulator` executes transactions against current blockchain state:
 
 ```rust
 // Input: Classified transaction batch
@@ -170,129 +258,118 @@ pub struct StateChange {
 
 **Performance**: 5-10ms average, 50ms max
 
-### 5. Signal Detection
+### 5. Signal Detection (Simplified Binary System)
 
-Specialized detectors analyze simulation results to identify patterns:
+Three simple detectors check clear conditions and emit binary signals:
 
 ```rust
-// Input: SimulationResult with state changes
-let sim_result = SimulationResult {
-    buy_sell_result: Some(BuySellResult {
-        can_buy: true,
-        can_sell: false,  // Red flag!
-        buy_tax: Some(5.0),
-        sell_tax: Some(99.0),
-        tokens_received: Some(1000000.0),
-        eth_received_on_sell: None,
-    }),
+// Input: Transaction with simulation results
+let tx = MempoolTransaction { 
+    functions: vec!["enableTrading"],
+    ... 
+};
+let simulation_result = BuySellResult {
+    can_buy: true,
+    can_sell: true,
+    buy_tax: Some(5.0),    // ≤ 25% threshold
+    sell_tax: Some(10.0),  // ≤ 25% threshold
     ...
 };
 
-// Each detector runs independently
-let honeypot_signal = honeypot_detector.detect(&sim_result);
-let liquidity_signal = liquidity_detector.detect(&sim_result);
-let tax_signal = tax_change_detector.detect(&sim_result);
+// Simple detector checks
+if trading_enabled_detector.check_transaction(&tx, &simulation_result) {
+    emit_signal(TradingEnabledSignal { 
+        token_address, buy_tax: 5, sell_tax: 10, ... 
+    });
+}
 
-// Output: Specific signal types
-pub struct HoneypotSignal {
-    pub token_address: String,
-    pub detection_method: HoneypotDetectionMethod,
-    pub buy_tax: Option<f64>,
-    pub sell_tax: Option<f64>,
-    pub confidence: f64,
+if high_tax_detector.check_transaction(&tx, &simulation_result) {
+    emit_signal(HighTaxWarningSignal { 
+        warning_type: TaxWarningType::PotentialHoneypot, ... 
+    });
+}
+
+if liquidity_removal_detector.check_transaction(&tx) {
+    emit_signal(LiquidityRemovalSignal { 
+        pool_address, function_name: "removeLiquidityETH", ... 
+    });
 }
 ```
 
-**Detector Types**:
-1. **Honeypot**: Sell fails, high tax >50%, zero return
-2. **Liquidity**: Drain detection (>90% removed, <0.3 ETH left)
-3. **Tax Change**: Before/after comparison, honeypot conversion
-4. **Trading Status**: Enable/disable with verification
+**Simple Signal Types**:
+1. **Trading Enabled**: Token tradeable with reasonable taxes (≤25%)
+2. **High Tax Warning**: Taxes exceed thresholds (>25% or >50% for honeypot)
+3. **Liquidity Removal**: LP removal from pools with minimum ETH value
 
-### 6. Signal Generation & Risk Scoring
+**Configuration** (in `/src/config.rs`):
+- `max_acceptable_buy_tax: 25%`
+- `max_acceptable_sell_tax: 25%`
+- `honeypot_sell_threshold: 50%`
+- `min_pool_eth: 0.05 ETH`
 
-The signal generator combines detector outputs with risk scoring:
+### 6. Signal Publishing (Simplified Output)
+
+Binary signals are published immediately when detected:
 
 ```rust
-// Input: Multiple detector signals
-let honeypot_signal = HoneypotSignal { ... };
-let category = TransactionCategory::CreatorTransaction { ... };
-
-// Risk scoring considers multiple factors
-let risk_factors = RiskFactors {
-    creator_history_score: 80,  // Known serial creator
-    token_age_score: 90,        // Brand new token
-    liquidity_score: 70,        // Low liquidity
-    tax_score: 95,              // 99% sell tax
-    function_score: 80,         // High-risk function
-    private_mempool_score: 20,  // Public tx
-    pattern_score: 90,          // Clear honeypot pattern
-};
-
-// Weighted scoring algorithm
-let risk_score = calculate_weighted_score(&risk_factors); // = 85
-
-// Output: Unified signal
-let unified_signal = UnifiedSignal {
-    signal_id: "0x123-honeypot-1234567890",
-    signal_type: SignalType::Honeypot,
-    severity: Severity::Critical,
-    confidence: 0.95,
-    risk_score: 85,
-    tx_hash: H256::from("0x123..."),
-    timestamp: 1234567890,
-    data: SignalData::Honeypot(honeypot_data),
-    metadata: SignalMetadata { ... },
-};
+// Input: Simple binary signal detection
+if conditions_met {
+    let signal = TradingEnabledSignal {
+        tx_hash: "0x123...".to_string(),
+        token_address: "0xabc...".to_string(),
+        creator_address: "0xdef...".to_string(),
+        buy_tax: 5,
+        sell_tax: 10,
+        timestamp: chrono::Utc::now().timestamp() as u64,
+        block_number: latest_block,
+    };
+    
+    // Immediate publishing - no risk scoring
+    publish_to_zmq("trading_enabled", &signal);
+    log_to_file("trading_enabled.log", &signal);
+}
 ```
 
-**Risk Calculation**: Weighted average of factors with pattern score having highest weight
+**No Risk Scoring**: Direct binary output - signal detected or not detected
 
-### 7. Signal Publishing
+### 7. Output Channels
 
-The final unified signals are published to multiple outputs:
+Simple binary signals are published to multiple outputs:
 
 ```rust
-// Input: UnifiedSignal ready for publishing
-let signal = UnifiedSignal {
-    signal_type: SignalType::Honeypot,
-    severity: Severity::Critical,
-    risk_score: 85,
+// Input: Simple binary signal ready for publishing
+let signal = TradingEnabledSignal {
+    token_address: "0xabc...".to_string(),
+    buy_tax: 5,
+    sell_tax: 10,
     ...
 };
 
-// ZMQ multipart message format
-let topic = signal.topic(); // "honeypot.critical"
+// ZMQ publishing with topic
+let topic = "trading_enabled";
 let json_data = serde_json::to_string(&signal)?;
-
-// Publish to ZMQ
 socket.send_multipart(&[topic.as_bytes(), json_data.as_bytes()], 0)?;
 
-// Also log to files
-writeln!(honeypot_log, "[{}] {}", timestamp, json_data)?;
+// File logging with clear format
+writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}", 
+    timestamp, signal.token_address, signal.buy_tax, signal.sell_tax, signal.tx_hash)?;
 ```
 
 **Publishing Channels**:
 
-#### 7.1 ZMQ Publishers
-- **Port 5556**: Function detection alerts (raw detections)
-- **Port 5557**: Pool analysis (scams, drains) 
-- **Port 5559**: Creator action alerts
-- **Port 5560**: Unified signals (new, all signal types)
+#### 7.1 ZMQ Publishers  
+- **Port 5556**: All binary signals (trading_enabled, high_tax, liquidity_removal)
 
-**Message Format**: `[topic, json_payload]` where topic is `{signal_type}.{severity}`
+**Message Format**: `[topic, json_payload]` where topic is signal type
 
-#### 7.2 Log Files
-- `liquidity_removals.log`: Liquidity events with amounts
-- `trading_enabled.log`: Trading status changes
-- `creator_actions.log`: All creator transactions
-- `signal_detector.log`: Main unified signal log
-- `honeypots.log`: Confirmed honeypot detections
+#### 7.2 Log Files (in `/home/nima/code/crypto/logs/mempool/dev/`)
+- `trading_enabled.log`: Token becomes tradeable with reasonable taxes
+- `high_tax_warnings.log`: Tokens with excessive taxes  
+- `liquidity_removals.log`: LP removal operations
 
 #### 7.3 Database (Optional)
-- `signals` table: All unified signals with risk scores
-- `detections` table: Raw detector outputs
-- `simulations` table: Simulation results for analysis
+- Simple schema for binary signals only
+- No complex risk scores or confidence calculations
 
 ## Performance Characteristics
 
@@ -340,39 +417,24 @@ const CREATOR_TX_PRIORITY: Priority = Critical;
 const LIQUIDITY_REMOVAL_PRIORITY: Priority = High;
 ```
 
-## High-Level Signal Types
+## Binary Signal Types
 
-The system generates various signal types based on detected patterns:
+The system generates three simple binary signals:
 
-1. **Honeypot Signals**
-   - Token prevents selling through various mechanisms
-   - High confidence when sell simulation fails
-   - Critical severity for confirmed honeypots
+1. **Trading Enabled Signal**
+   - Token becomes tradeable with reasonable taxes (≤25%)
+   - Both buy and sell transactions succeed
+   - Clear indication of legitimate token launch
 
-2. **Liquidity Signals**
-   - Major liquidity removals that could crash price
-   - Complete drains indicate rug pull
-   - Tracks remaining ETH in pools
+2. **High Tax Warning Signal** 
+   - Buy tax > 25% OR sell tax > 25%
+   - Sell tax > 50% indicates potential honeypot
+   - Simple threshold-based detection
 
-3. **Tax Manipulation Signals**
-   - Creator changes buy/sell taxes
-   - Detects conversion to honeypot
-   - Risk based on tax levels and changes
-
-4. **Trading Control Signals**
-   - Trading enabled/disabled/paused
-   - Verifies if trading actually works
-   - Detects fake enables (honeypot risk)
-
-5. **Creator Action Signals**
-   - Any suspicious action by token creators
-   - Higher risk for serial creators
-   - Tracks pattern of behavior
-
-6. **Scam/Rug Pull Signals**
-   - Combination of multiple risk factors
-   - Highest severity for immediate action
-   - Based on liquidity drain + creator history
+3. **Liquidity Removal Signal**
+   - LP removal functions detected (removeLiquidity*, decreaseLiquidity)
+   - Pool has minimum ETH value (≥0.05 ETH)
+   - Immediate alert for potential rug pulls
 
 ## Integration Points
 

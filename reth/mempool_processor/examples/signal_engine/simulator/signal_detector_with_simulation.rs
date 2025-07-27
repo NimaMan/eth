@@ -14,7 +14,7 @@ use tokio::time;
 use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction};
 use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::signal_engine::{BatchProcessor, SignalDetector, SignalDetectionConfig};
-use mempool_processor::tx_simulator::RethDirectTxSimulator;
+use mempool_processor::tx_simulator::RethRethTxSimulator;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     
     let sim_handle = if args.enable_simulation {
         info!("🧪 Initializing transaction simulator...");
-        let reth_simulator = Arc::new(RethDirectTxSimulator::new(&args.reth_db_path)?);
+        let reth_simulator = Arc::new(RethRethTxSimulator::new(&args.reth_db_path)?);
         let batch_processor = BatchProcessor::new(reth_simulator);
         let signal_detector = SignalDetector::new(SignalDetectionConfig::default(), std::path::PathBuf::from("./logs"));
         let queue = simulation_queue.clone();

@@ -8,7 +8,7 @@ use tracing::{info, debug, warn, error};
 use ethers::types::{Transaction, H256};
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::signal_engine::tx_router::{TransactionCategory, SimulationPriority};
-use super::{SimulationQueue, BuySellSimulator};
+use super::{SimulationQueue, SequentialBuySellSimulator};
 use super::tx_simulator::TxSimulator;
 use std::collections::HashMap;
 
@@ -75,7 +75,7 @@ pub struct StateChange {
 /// Orchestrator for managing simulations
 pub struct SimulationOrchestrator {
     tx_simulator: Arc<TxSimulator>,
-    buy_sell_simulator: Arc<dyn BuySellSimulator>,
+    buy_sell_simulator: Arc<SequentialBuySellSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
     
     // Configuration
@@ -100,7 +100,7 @@ impl SimulationOrchestrator {
     /// Create new simulation orchestrator
     pub fn new(
         tx_simulator: Arc<TxSimulator>,
-        buy_sell_simulator: Arc<dyn BuySellSimulator>,
+        buy_sell_simulator: Arc<SequentialBuySellSimulator>,
         max_concurrent: usize,
     ) -> Self {
         Self {
@@ -249,7 +249,7 @@ impl SimulationOrchestrator {
         // Run buy/sell simulation
         info!("Running buy/sell simulation for token {}", token_address);
         
-        // Placeholder - integrate with actual BuySellSimulator
+        // TODO: integrate with actual SequentialBuySellSimulator
         Ok(BuySellResult {
             can_buy: true,
             can_sell: true,

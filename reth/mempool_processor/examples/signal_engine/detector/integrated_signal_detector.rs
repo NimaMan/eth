@@ -15,7 +15,7 @@ use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, MempoolTransactio
 use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::tx_simulator::{
     TxSimulator, BatchProcessor, SignalDetector, SignalDetectionConfig,
-    BatchSimulationOptions, RethDirectTxSimulator,
+    BatchSimulationOptions, RethRethTxSimulator,
 };
 
 #[derive(Parser, Debug)]
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
     
     info!("🧪 Initializing transaction simulator...");
     let tx_simulator = TxSimulator::new(&args.reth_db_path)?;
-    let reth_simulator = Arc::new(RethDirectTxSimulator::new(&args.reth_db_path)?);
+    let reth_simulator = Arc::new(RethRethTxSimulator::new(&args.reth_db_path)?);
     
     // Create batch processor with custom options
     let batch_options = BatchSimulationOptions {

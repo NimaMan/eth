@@ -13,11 +13,10 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 use eyre::Result;
 
-use crate::signal_engine::CreatorAnalyzer;
 use crate::token_tracking::{TokenTrackingCache, cache::PoolStateCache};
 use crate::mempool_fetcher::MempoolTransaction;
-use reth_tx_simulator::{DirectTxSimulator, BatchSimulationOptions, CallRequest};
-use crate::signal_engine::detectors::SignalDetector;
+use reth_tx_simulator::{RethTxSimulator, BatchSimulationOptions, CallRequest};
+use crate::signal_engine::signal_detector::SignalDetector;
 use alloy_primitives::{Address, Bytes, U256};
 
 /// Configuration for simulator processor
@@ -40,9 +39,8 @@ impl Default for SimulatorProcessorConfig {
 
 /// Main processor for transaction simulation pipeline
 pub struct SimulatorProcessor {
-    reth_simulator: DirectTxSimulator,
+    reth_simulator: RethTxSimulator,
     signal_detector: SignalDetector,
-    creator_analyzer: Option<CreatorAnalyzer>,
     // Thread-safe mutable state
     transaction_queue: Arc<Mutex<Vec<MempoolTransaction>>>,
     config: SimulatorProcessorConfig,
@@ -61,7 +59,7 @@ struct ProcessorStats {
 impl SimulatorProcessor {
     /// Create new simulator processor
     pub fn new(reth_datadir: &str, log_dir: std::path::PathBuf) -> Result<Self> {
-        let reth_simulator = DirectTxSimulator::new(reth_datadir)?;
+        let reth_simulator = RethTxSimulator::new(reth_datadir)?;
         let signal_detector = SignalDetector::new(Default::default(), log_dir);
         let config = SimulatorProcessorConfig::default();
         
@@ -73,7 +71,6 @@ impl SimulatorProcessor {
         Ok(Self {
             reth_simulator,
             signal_detector,
-            creator_analyzer: None,
             transaction_queue: Arc::new(Mutex::new(Vec::new())),
             config,
             last_batch_time: Arc::new(Mutex::new(Instant::now())),
@@ -87,8 +84,8 @@ impl SimulatorProcessor {
     }
     
     /// Set the token tracking cache for creator analysis
-    pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
-        self.creator_analyzer = Some(CreatorAnalyzer::new(token_cache));
+    pub fn set_token_cache(&mut self, _token_cache: Arc<TokenTrackingCache>) {
+        // Token cache functionality will be implemented when needed
     }
     
     /// Process a batch of transactions with function information
@@ -99,23 +96,6 @@ impl SimulatorProcessor {
             stats.total_received += transactions.len() as u64;
         }
         
-        // First check for creator actions - these get immediate alerts
-        if let Some(ref creator_analyzer) = self.creator_analyzer {
-            for tx in &transactions {
-                if tx.functions.iter().any(|f| creator_analyzer.is_creator_action(f)) {
-                    if let Some(alert) = creator_analyzer.analyze_transaction(tx).await {
-                        // Log critical creator actions
-                        match alert.severity {
-                            crate::signal_engine::AlertSeverity::Critical => {
-                                warn!("🚨 CRITICAL: Creator {} calling {} on token {:?}", 
-                                      alert.creator_address, alert.function_name, alert.token_address);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
         
         // Filter transactions for simulation
         let filtered = self.filter_transactions(transactions);

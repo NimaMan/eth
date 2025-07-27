@@ -1,0 +1,410 @@
+/// Buy/Sell Sequence Simulator
+/// 
+/// This module provides transaction sequence simulation for tokens.
+/// It runs sequences like: [Given TX] → Buy → Approve → Sell
+/// and returns raw simulation results with state changes for analysis.
+/// 
+/// The simulator focuses purely on execution and returns raw data.
+/// Signal detectors will analyze the state changes to determine:
+/// - Tax rates
+/// - Honeypot status
+/// - Trading enabled status
+/// - Other market signals
+
+use async_trait::async_trait;
+use eyre::Result;
+use std::time::Instant;
+use std::sync::Arc;
+use std::collections::HashMap;
+use alloy_primitives::{Address, Bytes, U256};
+use reth_tx_simulator::{RethTxSimulator, CallRequest, AddressStateChange};
+use reth_tx_simulator::SequentialSimulationOptions;
+
+/// Result of a single transaction in the sequence
+#[derive(Debug, Clone)]
+pub struct TransactionSimulationResult {
+    /// Whether the transaction succeeded
+    pub success: bool,
+    /// Gas used by the transaction
+    pub gas_used: u64,
+    /// Revert reason if transaction failed
+    pub revert_reason: Option<String>,
+    /// State changes for all affected addresses
+    pub state_changes: HashMap<Address, AddressStateChange>,
+}
+
+/// Result of a buy/sell simulation sequence
+#[derive(Debug, Clone)]
+pub struct SequenceSimulationResult {
+    /// Result of the given transaction (if provided)
+    pub given_tx_result: Option<TransactionSimulationResult>,
+    /// Result of the buy transaction
+    pub buy_result: TransactionSimulationResult,
+    /// Result of the approve transaction (not usually needed by detectors)
+    pub approve_result: TransactionSimulationResult,
+    /// Result of the sell transaction
+    pub sell_result: TransactionSimulationResult,
+    /// Total simulation time in milliseconds
+    pub simulation_time_ms: f64,
+    /// Block number used for simulation
+    pub block_number: u64,
+}
+
+/// Configuration for buy/sell simulation
+#[derive(Debug, Clone)]
+pub struct BuySellSimulatorConfig {
+    /// Amount of ETH to use for test buy (default: 0.1 ETH)
+    pub test_buy_amount: U256,
+    /// Router address for swaps (default: Uniswap V2)
+    pub router_address: Address,
+    /// WETH address (default: mainnet WETH)
+    pub weth_address: Address,
+    /// Gas limit for transactions
+    pub gas_limit: u64,
+    /// Gas price in wei
+    pub gas_price: u128,
+    /// Buyer address for simulations
+    pub buyer_address: Address,
+}
+
+impl Default for BuySellSimulatorConfig {
+    fn default() -> Self {
+        Self {
+            test_buy_amount: U256::from(100_000_000_000_000_000u64), // 0.1 ETH
+            router_address: Address::from([0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D]), // Uniswap V2
+            weth_address: Address::from([0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2]), // WETH
+            gas_limit: 300_000,
+            gas_price: 20_000_000_000u128, // 20 gwei
+            buyer_address: Address::from([0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D, 0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89]), // Fixed test address
+        }
+    }
+}
+
+/// Sequential buy/sell simulator using transaction simulation
+pub struct SequentialBuySellSimulator {
+    simulator: RethTxSimulator,
+    config: BuySellSimulatorConfig,
+    /// Optional token cache for faster lookups
+    token_cache: Option<Arc<crate::token_tracking::TokenTrackingCache>>,
+}
+
+impl SequentialBuySellSimulator {
+    /// Create a new buy/sell simulator
+    pub fn new(reth_datadir: &str) -> Result<Self> {
+        let simulator = RethTxSimulator::new(reth_datadir)?;
+        Ok(Self {
+            simulator,
+            config: BuySellSimulatorConfig::default(),
+            token_cache: None,
+        })
+    }
+    
+    /// Create with custom configuration
+    pub fn with_config(reth_datadir: &str, config: BuySellSimulatorConfig) -> Result<Self> {
+        let simulator = RethTxSimulator::new(reth_datadir)?;
+        Ok(Self {
+            simulator,
+            config,
+            token_cache: None,
+        })
+    }
+    
+    /// Set token cache for optimized lookups
+    pub fn set_token_cache(&mut self, cache: Arc<crate::token_tracking::TokenTrackingCache>) {
+        self.token_cache = Some(cache);
+    }
+    
+    /// Simulate a buy/sell sequence for a token
+    /// Returns raw simulation results with state changes
+    pub async fn simulate_sequence(
+        &self,
+        token_address: Address,
+        pool_address: Address,
+        block_number: Option<u64>,
+    ) -> Result<SequenceSimulationResult> {
+        self.simulate_sequence_with_tx(None, token_address, pool_address, block_number).await
+    }
+    
+    /// Simulate a sequence with an optional given transaction first
+    /// Sequence: [Given TX] → Buy → Approve → Sell
+    pub async fn simulate_sequence_with_tx(
+        &self,
+        given_tx: Option<CallRequest>,
+        token_address: Address,
+        pool_address: Address,
+        block_number: Option<u64>,
+    ) -> Result<SequenceSimulationResult> {
+        let start_time = Instant::now();
+        
+        // Build buy transaction
+        let buy_calldata = self.encode_swap_exact_eth_for_tokens(
+            U256::ZERO, // min tokens out
+            vec![self.config.weth_address, token_address],
+            self.config.buyer_address,
+            U256::from(9999999999u64),
+        );
+        
+        let buy_request = CallRequest {
+            from: Some(self.config.buyer_address),
+            to: Some(self.config.router_address),
+            value: Some(self.config.test_buy_amount),
+            data: Some(buy_calldata),
+            gas: Some(self.config.gas_limit),
+            gas_price: Some(self.config.gas_price),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            nonce: None,
+        };
+        
+        // First simulate just the buy to get tokens received
+        let mut sequence = vec![buy_request.clone()];
+        if let Some(tx) = given_tx.clone() {
+            sequence.insert(0, tx);
+        }
+        
+        let initial_result = self.simulator.simulate_transaction_sequence(
+            sequence,
+            SequentialSimulationOptions {
+                at_block: block_number,
+                stop_on_failure: true,
+                auto_increment_nonces: true,
+                gas_limit_per_tx: None,
+            }
+        ).await?;
+        
+        // Extract the buy result index (0 if no given tx, 1 if given tx exists)
+        let buy_index = if given_tx.is_some() { 1 } else { 0 };
+        
+        // Check if buy succeeded
+        if !initial_result.results.get(buy_index).map(|r| r.success).unwrap_or(false) {
+            return Err(eyre::eyre!("Buy transaction failed"));
+        }
+        
+        // Extract tokens received from buy
+        let tokens_received = initial_result.results[buy_index].state_changes
+            .get(&self.config.buyer_address)
+            .and_then(|changes| {
+                let token_addr_str = format!("{:#x}", token_address);
+                changes.token_net.get(&token_addr_str).copied()
+            })
+            .unwrap_or(U256::ZERO);
+        
+        if tokens_received == U256::ZERO {
+            return Err(eyre::eyre!("No tokens received from buy transaction"));
+        }
+        
+        // Build approve transaction
+        let approve_calldata = self.encode_approve(self.config.router_address, tokens_received);
+        let approve_request = CallRequest {
+            from: Some(self.config.buyer_address),
+            to: Some(token_address),
+            value: Some(U256::ZERO),
+            data: Some(approve_calldata),
+            gas: Some(self.config.gas_limit),
+            gas_price: Some(self.config.gas_price),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            nonce: None,
+        };
+        
+        // Build sell transaction
+        let sell_calldata = self.encode_swap_exact_tokens_for_eth(
+            tokens_received,
+            U256::ZERO, // min ETH out
+            vec![token_address, self.config.weth_address],
+            self.config.buyer_address,
+            U256::from(9999999999u64),
+        );
+        
+        let sell_request = CallRequest {
+            from: Some(self.config.buyer_address),
+            to: Some(self.config.router_address),
+            value: Some(U256::ZERO),
+            data: Some(sell_calldata),
+            gas: Some(self.config.gas_limit),
+            gas_price: Some(self.config.gas_price),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            nonce: None,
+        };
+        
+        // Build full sequence
+        let mut full_sequence = Vec::new();
+        let has_given_tx = given_tx.is_some();
+        if let Some(tx) = given_tx {
+            full_sequence.push(tx);
+        }
+        full_sequence.extend(vec![buy_request, approve_request, sell_request]);
+        
+        // Run full sequence
+        let sequence_result = self.simulator.simulate_transaction_sequence(
+            full_sequence,
+            SequentialSimulationOptions {
+                at_block: block_number,
+                stop_on_failure: false, // Don't stop on failure to see all results
+                auto_increment_nonces: true,
+                gas_limit_per_tx: None,
+            }
+        ).await?;
+        
+        // Extract results based on whether we have a given tx
+        let (given_tx_result, buy_result, approve_result, sell_result) = if has_given_tx {
+            (
+                Some(TransactionSimulationResult {
+                    success: sequence_result.results[0].success,
+                    gas_used: sequence_result.results[0].gas_used,
+                    revert_reason: sequence_result.results[0].revert_reason.clone(),
+                    state_changes: sequence_result.results[0].state_changes.clone(),
+                }),
+                TransactionSimulationResult {
+                    success: sequence_result.results[1].success,
+                    gas_used: sequence_result.results[1].gas_used,
+                    revert_reason: sequence_result.results[1].revert_reason.clone(),
+                    state_changes: sequence_result.results[1].state_changes.clone(),
+                },
+                TransactionSimulationResult {
+                    success: sequence_result.results[2].success,
+                    gas_used: sequence_result.results[2].gas_used,
+                    revert_reason: sequence_result.results[2].revert_reason.clone(),
+                    state_changes: sequence_result.results[2].state_changes.clone(),
+                },
+                TransactionSimulationResult {
+                    success: sequence_result.results[3].success,
+                    gas_used: sequence_result.results[3].gas_used,
+                    revert_reason: sequence_result.results[3].revert_reason.clone(),
+                    state_changes: sequence_result.results[3].state_changes.clone(),
+                },
+            )
+        } else {
+            (
+                None,
+                TransactionSimulationResult {
+                    success: sequence_result.results[0].success,
+                    gas_used: sequence_result.results[0].gas_used,
+                    revert_reason: sequence_result.results[0].revert_reason.clone(),
+                    state_changes: sequence_result.results[0].state_changes.clone(),
+                },
+                TransactionSimulationResult {
+                    success: sequence_result.results[1].success,
+                    gas_used: sequence_result.results[1].gas_used,
+                    revert_reason: sequence_result.results[1].revert_reason.clone(),
+                    state_changes: sequence_result.results[1].state_changes.clone(),
+                },
+                TransactionSimulationResult {
+                    success: sequence_result.results[2].success,
+                    gas_used: sequence_result.results[2].gas_used,
+                    revert_reason: sequence_result.results[2].revert_reason.clone(),
+                    state_changes: sequence_result.results[2].state_changes.clone(),
+                },
+            )
+        };
+        
+        Ok(SequenceSimulationResult {
+            given_tx_result,
+            buy_result,
+            approve_result,
+            sell_result,
+            simulation_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+            block_number: block_number.unwrap_or(0),
+        })
+    }
+    
+    /// Encode swapExactETHForTokens function call
+    fn encode_swap_exact_eth_for_tokens(
+        &self,
+        amount_out_min: U256,
+        path: Vec<Address>,
+        to: Address,
+        deadline: U256,
+    ) -> Bytes {
+        // Function selector: 0x7ff36ab5
+        let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5];
+        
+        // amountOutMin
+        data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+        
+        // path offset
+        data.extend_from_slice(&U256::from(128).to_be_bytes::<32>());
+        
+        // to address
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(to.as_slice());
+        
+        // deadline
+        data.extend_from_slice(&deadline.to_be_bytes::<32>());
+        
+        // path array
+        data.extend_from_slice(&U256::from(path.len()).to_be_bytes::<32>());
+        
+        for addr in path {
+            data.extend_from_slice(&[0u8; 12]);
+            data.extend_from_slice(addr.as_slice());
+        }
+        
+        Bytes::from(data)
+    }
+    
+    /// Encode swapExactTokensForETH function call
+    fn encode_swap_exact_tokens_for_eth(
+        &self,
+        amount_in: U256,
+        amount_out_min: U256,
+        path: Vec<Address>,
+        to: Address,
+        deadline: U256,
+    ) -> Bytes {
+        // Function selector: 0x18cbafe5
+        let mut data = vec![0x18, 0xcb, 0xaf, 0xe5];
+        
+        // amountIn
+        data.extend_from_slice(&amount_in.to_be_bytes::<32>());
+        
+        // amountOutMin
+        data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+        
+        // path offset
+        data.extend_from_slice(&U256::from(160).to_be_bytes::<32>());
+        
+        // to address
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(to.as_slice());
+        
+        // deadline
+        data.extend_from_slice(&deadline.to_be_bytes::<32>());
+        
+        // path array
+        data.extend_from_slice(&U256::from(path.len()).to_be_bytes::<32>());
+        
+        for addr in path {
+            data.extend_from_slice(&[0u8; 12]);
+            data.extend_from_slice(addr.as_slice());
+        }
+        
+        Bytes::from(data)
+    }
+    
+    /// Encode approve(spender, amount) function call
+    fn encode_approve(&self, spender: Address, amount: U256) -> Bytes {
+        // Function selector: 0x095ea7b3
+        let mut data = vec![0x09, 0x5e, 0xa7, 0xb3];
+        
+        // spender address
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(spender.as_slice());
+        
+        // amount
+        data.extend_from_slice(&amount.to_be_bytes::<32>());
+        
+        Bytes::from(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[tokio::test]
+    async fn test_sequence_simulation() {
+        // This would be a unit test
+    }
+}

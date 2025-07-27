@@ -4,7 +4,7 @@
 
 pub mod simulation_orchestrator;
 pub mod simulation_queue;
-pub mod buy_sell_simulator;
+pub mod buy_sell_sequence_simulator;
 pub mod batch_processor;
 pub mod tx_simulator;
 pub mod simulator_processor;
@@ -18,7 +18,12 @@ pub use simulation_orchestrator::{
     StateChange,
 };
 pub use simulation_queue::{SimulationQueue, QueueStats};
-pub use buy_sell_simulator::BuySellSimulator;
+pub use buy_sell_sequence_simulator::{
+    SequentialBuySellSimulator,
+    SequenceSimulationResult,
+    TransactionSimulationResult,
+    BuySellSimulatorConfig,
+};
 pub use batch_processor::BatchProcessor;
 pub use tx_simulator::{
     TxSimulator,

@@ -4,7 +4,7 @@
 /// by converting MempoolTransaction to CallRequest and using parallel simulation.
 
 use crate::mempool_fetcher::MempoolTransaction;
-use reth_tx_simulator::{DirectTxSimulator, CallRequest, BatchSimulationOptions, BatchSimulationResult, AddressStateChange};
+use reth_tx_simulator::{RethTxSimulator, CallRequest, BatchSimulationOptions, BatchSimulationResult, AddressStateChange};
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use std::sync::Arc;
@@ -14,13 +14,13 @@ use tracing::{info, debug, error};
 
 /// Batch processor for simulating multiple transactions
 pub struct BatchProcessor {
-    simulator: Arc<DirectTxSimulator>,
+    simulator: Arc<RethTxSimulator>,
     default_options: BatchSimulationOptions,
 }
 
 impl BatchProcessor {
     /// Create a new batch processor
-    pub fn new(simulator: Arc<DirectTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
         let default_options = BatchSimulationOptions {
             max_concurrent: 10,
             timeout_per_tx: Some(Duration::from_millis(50)), // 50ms per tx

@@ -10,7 +10,6 @@ use tokio::signal;
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
 use mempool_processor::signal_engine::FunctionDetector;
-use mempool_processor::tx_simulator::SimulatorProcessor;
 use mempool_processor::token_tracking::TokenTrackingSubscriber;
 
 #[derive(Parser, Debug)]
@@ -70,19 +69,19 @@ async fn main() -> Result<()> {
     info!("🔍 Initializing function detector...");
     let function_detector = FunctionDetector::new_with_cache(Some(token_cache.clone()));
     
-    // Get the log directory from function detector to share with simulator
+    // Get the log directory from function detector to share with other components
     let log_dir = function_detector.get_log_dir().to_path_buf();
+    let base_log_dir = log_dir.parent().unwrap().to_str().unwrap();
     
-    // Initialize simulator processor with same log directory
-    info!("🔄 Initializing simulator processor...");
-    let mut simulator_processor = SimulatorProcessor::new(&args.reth_datadir, log_dir)?;
+    // Initialize signal processor (disabled for now due to compilation issues)
+    // info!("🧠 Initializing signal processor...");
+    // let signal_processor = SignalProcessor::new(token_cache.clone())?;
     
-    // Set up pool cache for simulator processor
-    let pool_cache_for_simulator = token_cache.pools.clone();
-    simulator_processor.set_pool_cache(pool_cache_for_simulator);
+    // Signal publisher disabled for now due to compilation issues
+    // info!("📡 Initializing signal publisher...");
+    // let publisher_config = SignalPublisherConfig::with_timestamped_logs(base_log_dir);
+    // let mut _signal_publisher = SignalPublisher::new(publisher_config).await?;
     
-    // Set up token cache for creator analysis
-    simulator_processor.set_token_cache(token_cache.clone());
     
     // Start listening for token updates in background (includes initial data request)
     tokio::spawn(async move {
@@ -146,14 +145,28 @@ async fn main() -> Result<()> {
         
         // Track IPC detection latency for each transaction
         for tx_with_func in &transactions_with_functions {
-            let detection_latency_ms = tx_with_func.tx.detection_ns as f64 / 1_000_000.0;
+            let detection_latency_ms = tx_with_func.detection_ns as f64 / 1_000_000.0;
             detection_latencies_ms.push(detection_latency_ms);
         }
         
-        // Send batch to simulator processor (non-blocking)
-        if let Err(e) = simulator_processor.process_batch(transactions_with_functions.clone()).await {
-            warn!("Simulator processor error: {}", e);
+        // Signal processing disabled for now due to compilation issues
+        // TODO: Re-enable once signal_processor compilation issues are fixed
+        /*
+        match signal_processor.process_batch(transactions_with_functions.clone()).await {
+            Ok(signals) => {
+                // Publish each detected signal
+                for signal in signals {
+                    if let Err(e) = signal_publisher.publish(signal).await {
+                        warn!("Failed to publish signal: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Signal processor error: {}", e);
+            }
         }
+        */
+        
         
         total_processed += transactions_with_functions.len() as u64;
         
@@ -182,6 +195,12 @@ async fn main() -> Result<()> {
             info!("   IPC detection latency - Avg: {:.3}ms, Max: {:.3}ms", avg_detection, max_detection);
             info!("   Function detection time - Avg: {:.3}ms, Max: {:.3}ms", avg_function_detection, max_function_detection);
             
+            // Signal publisher statistics disabled for now
+            // let publisher_stats = signal_publisher.get_stats();
+            // info!("   Signal publisher - Published: {}, ZMQ: {}, Logs: {}, DB: {}, Errors: {}", 
+            //       publisher_stats.total_published, publisher_stats.zmq_published, 
+            //       publisher_stats.logs_written, publisher_stats.db_written, publisher_stats.errors);
+            
             // Log performance metrics to file
             function_detector.log_performance_metrics(total_processed, avg_detection, max_detection,
                                                     avg_function_detection, max_function_detection);
@@ -189,8 +208,6 @@ async fn main() -> Result<()> {
             // Log function detection statistics
             function_detector.log_stats_summary();
             
-            // Log simulator processor statistics
-            simulator_processor.log_performance_summary().await;
             
             // Clear timing vectors
             detection_latencies_ms.clear();
@@ -202,12 +219,13 @@ async fn main() -> Result<()> {
     // Graceful shutdown
     info!("📊 Final statistics before shutdown:");
     info!("   Total transactions processed: {}", total_processed);
-    simulator_processor.log_performance_summary().await;
     
-    // Flush any remaining batches
-    if let Err(e) = simulator_processor.flush_batch().await {
-        warn!("Failed to flush final batch: {}", e);
-    }
+    // Signal publisher statistics disabled for now
+    // let final_publisher_stats = signal_publisher.get_stats();
+    // info!("   Final signal publisher stats - Published: {}, ZMQ: {}, Logs: {}, DB: {}, Errors: {}", 
+    //       final_publisher_stats.total_published, final_publisher_stats.zmq_published, 
+    //       final_publisher_stats.logs_written, final_publisher_stats.db_written, final_publisher_stats.errors);
+    
     
     info!("✅ Mempool signal detector shutdown complete");
     Ok(())

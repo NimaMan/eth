@@ -6,7 +6,7 @@
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
 };
-use reth_tx_simulator::DirectTxSimulator;
+use reth_tx_simulator::RethTxSimulator;
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
 use eyre::Result;
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
 
     // Initialize
     let start = Instant::now();
-    let simulator = DirectTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = RethTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     let mempool_client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
     mempool_client.start_monitoring().await?;
     info!("✅ Initialized in {:?}\n", start.elapsed());

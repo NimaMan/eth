@@ -1,11 +1,12 @@
 /// Signal Generator Module
 /// 
-/// Generates unified signals with risk scoring and aggregation
+/// Simple signal formatting and publishing
 
-pub mod signal_builder;
-pub mod risk_scorer;
-pub mod signal_aggregator;
+/// Placeholder for future signal generation functionality
+pub struct SignalGenerator;
 
-pub use signal_builder::{SignalBuilder, UnifiedSignal, SignalData};
-pub use risk_scorer::{RiskScorer, RiskFactors};
-pub use signal_aggregator::{SignalAggregator, AggregatedSignal};
+impl SignalGenerator {
+    pub fn new() -> Self {
+        Self
+    }
+}

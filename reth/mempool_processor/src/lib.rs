@@ -19,13 +19,12 @@ pub use mempool_fetcher::{FullTransactionIpcClient, FullTransaction, IpcClientSt
 pub mod tx_simulator {
     // Re-export reth_tx_simulator types directly for now
     pub use reth_tx_simulator::{
-        DirectTxSimulator,
+        RethTxSimulator,
         CallRequest,
         AddressStateChange,
         BatchSimulationOptions,
         BatchSimulationResult,
         ipc_to_call_request,
-        DirectTxSimulator as RethDirectTxSimulator,
     };
     
     // Re-export tx_processor if available

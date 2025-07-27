@@ -211,8 +211,8 @@ impl Default for MempoolProcessorConfig {
             
             tax_detection: TaxDetectionConfig {
                 enabled: true,
-                max_acceptable_buy_tax: 25,
-                max_acceptable_sell_tax: 25,
+                max_acceptable_buy_tax: 30,
+                max_acceptable_sell_tax: 30,
                 honeypot_sell_threshold: 50,
                 alert_on_any_change: false,
                 alert_only_increases: true,
@@ -220,7 +220,7 @@ impl Default for MempoolProcessorConfig {
             },
             
             signal_detection: SignalDetectionConfig {
-                min_pool_eth: 0.05,
+                min_pool_eth: 0.7,
                 scam_eth_threshold: 0.3,
                 scam_percentage_threshold: 60.0,
                 liquidity_warning_percentage: 20.0,

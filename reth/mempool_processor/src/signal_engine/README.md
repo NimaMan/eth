@@ -1,94 +1,152 @@
 # Signal Engine
 
-The Signal Engine is a high-performance transaction analysis system that detects specific function calls, market events, and suspicious activity in Ethereum mempool transactions with sub-millisecond latency. It combines multiple detection methods to identify potential scams, trading opportunities, and market manipulation in real-time.
+The Signal Engine is a simplified binary signal detection system that identifies clear, actionable market events in Ethereum mempool transactions. It focuses on three critical signals with straightforward threshold-based detection.
 
 ## Overview
 
-The signal detection system monitors mempool transactions to provide comprehensive analysis through:
+The signal detection system provides **binary signals** (detected/not detected) through:
 
-1. **Function Detection**: Identifies specific function calls in transactions (liquidity removals, trading enables, swaps)
-2. **Creator Analysis**: Tracks known token creators/owners for suspicious pre-market activity
-3. **Sequential Simulation**: Simulates transactions and their effects on trading (buy/sell tests)
-4. **Pool Analysis**: Analyzes state changes to detect liquidity drains and scams
-5. **Alert Publishing**: Publishes alerts via ZMQ for real-time consumption
+1. **Function Detection**: Identifies specific function calls in transactions
+2. **Transaction Routing**: Categorizes transactions and assigns simulation priorities
+3. **Signal Processing**: Coordinates detection pipeline with TokenCache integration
+4. **Binary Signal Detection**: Three simple signals with clear thresholds
+5. **Signal Publishing**: Publishes signals via ZMQ and log files
 
-## Real-World Scenarios
+## Three Binary Signals
 
-### 1. New Token Launch
+### 1. Trading Enabled Signal
 ```
-Mempool → Contract Creation → Extract Token Info → Monitor Creator
+Mempool → enableTrading() detected → TokenCache: trading_status = true
          ↓
-         Trading Enabled? → Simulate Buy/Sell → Detect Initial Tax
+         Simulate buy/sell → Extract taxes → Check thresholds
          ↓
-         Signal: NEW_TOKEN_LAUNCH {safe: true/false, tax: X%}
-```
-
-### 2. Creator Manipulation
-```
-Mempool → Transaction from Known Creator → Identify Function
-         ↓
-         Simulate Transaction → Simulate Buy/Sell After
-         ↓
-         Compare Before/After → Detect Changes
-         ↓
-         Signal: TAX_CHANGE {before: X%, after: Y%, honeypot: bool}
+         If taxes ≤30% AND simulation succeeds → TRADING_ENABLED_SIGNAL
 ```
 
-### 3. Trading Status Change
+### 2. High Tax Warning Signal  
 ```
-Mempool → enableTrading() or disableTrading() → Simulate
+Mempool → Any transaction → Simulate buy/sell → Extract taxes
          ↓
-         Verify Trading Works → Check Tax Changes
+         If buy_tax >30% OR sell_tax >30% → HIGH_TAX_WARNING_SIGNAL
+```
+
+### 3. Liquidity Removal Signal
+```
+Mempool → removeLiquidity() detected → Check pool has ≥0.7 ETH
          ↓
-         Signal: TRADING_ENABLED {token: address, safe: bool, tax: X%}
+         If threshold met → LIQUIDITY_REMOVAL_SIGNAL
 ```
 
 ## Architecture
 
 ```
-mempool_signal_detector.rs (main binary)
-    ↓
-NonBlockingIpcClient → FunctionDetector → SimulatorProcessor → SignalDetector
-    ↓                                           ↓                    ↓
-TokenTrackingSubscriber                   CreatorAnalyzer      PoolAnalyzer
-    ↓                                           ↓                    ↓
-TokenTrackingCache                         ZMQ :5559           ZMQ :5557
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Reth Node     │────▶│  IPC Client      │────▶│ Function        │
+│   (Mempool)     │     │  (NonBlocking)   │     │ Detector        │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                                                           │
+                                                           ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  TX Router      │────▶│ Signal Processor │────▶│ Signal          │
+│ (Classification)│     │ (Coordinator)    │     │ Generator       │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+           │                       │                       │
+           ▼                       ▼                       ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Token Cache    │     │ Signal Detectors │     │   Publishers    │
+│ (Trading Status)│     │ (Binary Signals) │     │  (ZMQ/Logs)     │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
-## Detection Flow
+## SignalProcessor - The Main Coordinator
 
+The **SignalProcessor** is the central component that coordinates the entire signal detection pipeline:
+
+### Key Responsibilities:
+1. **Transaction Routing**: Uses TransactionRouter to classify transactions
+2. **Trading Status**: Queries TokenCache for `trading_status: bool`
+3. **Simulation Coordination**: Triggers buy/sell simulation when needed
+4. **Context Passing**: Provides signal detectors with all necessary context
+5. **Signal Collection**: Aggregates binary signals from all detectors
+6. **Publishing**: Sends signals to SignalGenerator for formatting
+
+### Processing Flow:
+```rust
+impl SignalProcessor {
+    pub async fn process_transaction(&self, tx: MempoolTransaction) -> Result<Vec<Signal>> {
+        // 1. Route transaction to get classification
+        let routing = self.tx_router.classify(&tx).await;
+        
+        // 2. Extract token address from routing or transaction
+        let token_address = self.extract_token_address(&tx, &routing).await;
+        
+        // 3. Query TokenCache for trading status
+        let trading_status = if let Some(token_addr) = &token_address {
+            self.token_cache.is_trading_enabled(token_addr).await.unwrap_or(false)
+        } else {
+            false
+        };
+        
+        // 4. Run buy/sell simulation if needed
+        let simulation_result = if routing.requires_simulation {
+            self.buy_sell_simulator.simulate(&tx).await
+        } else { None };
+        
+        // 5. Check all signal detectors with context
+        let mut signals = Vec::new();
+        
+        // TradingEnabledDetector - only triggers if trading_status == true
+        if trading_status && simulation_result.is_some() {
+            if let Some(signal) = self.check_trading_enabled(&tx, &sim_result) {
+                signals.push(Signal::TradingEnabled(signal));
+            }
+        }
+        
+        // HighTaxDetector - triggers on high taxes regardless of trading status
+        if simulation_result.is_some() {
+            if let Some(signal) = self.check_high_tax(&tx, &sim_result) {
+                signals.push(Signal::HighTaxWarning(signal));
+            }
+        }
+        
+        // LiquidityRemovalDetector - no simulation needed
+        if let Some(signal) = self.check_liquidity_removal(&tx) {
+            signals.push(Signal::LiquidityRemoval(signal));
+        }
+        
+        // 6. Send signals to generator for publishing
+        for signal in &signals {
+            self.signal_generator.process_and_publish(signal).await;
+        }
+        
+        Ok(signals)
+    }
+}
 ```
-                    Mempool Transaction
-                           |
-                    ┌──────┴──────┐
-                    │ Classifier  │
-                    └──────┬──────┘
-                           |
-        ┌─────────────────┼─────────────────┐
-        |                 |                 |
-   Contract          Creator Tx        DEX/Other
-   Creation              |                 |
-        |                |                 |
-   Extract          Function           (monitor)
-   Token Info       Detector
-        |                |
-        └────────┬───────┘
-                 |
-          ┌──────┴──────┐
-          │  Simulator  │
-          └──────┬──────┘
-                 |
-          - Simulate Tx
-          - Buy Simulation
-          - Sell Simulation
-                 |
-          ┌──────┴──────┐
-          │   Signal    │
-          │ Generator   │
-          └──────┬──────┘
-                 |
-            Risk Score
-            + Signal
+
+### Binary Signal Detection Logic:
+
+#### 1. Trading Enabled Signal
+- **Trigger Condition**: `trading_status == true` AND `simulation_result.can_buy && simulation_result.can_sell` AND `taxes ≤ 30%`
+- **Purpose**: Confirms token is tradeable with reasonable taxes
+- **Output**: `TradingEnabledSignal { token_address, buy_tax, sell_tax, creator_address, ... }`
+
+#### 2. High Tax Warning Signal  
+- **Trigger Condition**: `buy_tax > 30%` OR `sell_tax > 30%`
+- **Purpose**: Warns of excessive taxes that may indicate honeypot
+- **Output**: `HighTaxWarningSignal { warning_type: HighBuyTax | HighSellTax | PotentialHoneypot, ... }`
+
+#### 3. Liquidity Removal Signal
+- **Trigger Condition**: Liquidity removal function detected AND pool has ≥ 0.7 ETH
+- **Purpose**: Alerts on potential rug pulls
+- **Output**: `LiquidityRemovalSignal { pool_address, function_name, remover_address, ... }`
+
+### Configuration Integration:
+```rust
+// Tax thresholds from config.rs
+max_acceptable_buy_tax: 30%     // Trading enabled threshold
+max_acceptable_sell_tax: 30%    // Trading enabled threshold  
+min_pool_eth: 0.7 ETH          // Liquidity removal threshold
 ```
 
 ## Components
