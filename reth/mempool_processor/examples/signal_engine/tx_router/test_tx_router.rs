@@ -2,7 +2,8 @@
 /// 
 /// This example tests the tx_router with sample transactions
 
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, SimpleFunctionDetector};
+use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::signal_engine::tx_router::TransactionRouter;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -23,7 +24,7 @@ async fn main() -> Result<()> {
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 
-    let function_detector = SimpleFunctionDetector::new();
+    let function_detector = FunctionDetector::new();
     
     // Create token cache (optional, but helps with classification)
     let token_cache = None; // In production, this would connect to ZMQ
