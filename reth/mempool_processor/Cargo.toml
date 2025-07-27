@@ -155,6 +155,10 @@ path = "examples/mempool_fetcher/analyze_transaction_arrival_pattern.rs"
 name = "analyze_log_timing"
 path = "examples/mempool_fetcher/analyze_log_timing.rs"
 
+[[example]]
+name = "function_detector_example"
+path = "examples/mempool_fetcher/function_detector_example.rs"
+
 # Reth Simulation Examples
 [[example]]
 name = "basic_mempool_simulation"

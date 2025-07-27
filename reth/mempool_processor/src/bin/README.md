@@ -54,6 +54,7 @@ pub struct MempoolTransaction {
     pub input: Vec<u8>,
     pub value: U256,
     pub gas_price: Option<U256>,
+    pub functions: Vec<String>,    // Detected function names (populated by FunctionDetector)
 }
 ```
 
@@ -69,16 +70,16 @@ pub struct MempoolTransaction {
 The `FunctionDetector` analyzes the `input` field to identify function calls:
 
 ```rust
-// Input: MempoolTransaction with calldata
-let input_data = tx.input; // e.g., [0xa9, 0x05, 0x9c, 0xbb, ...]
+// Input: Vec<MempoolTransaction> with calldata
+let mut transactions = vec![tx1, tx2, tx3];
 
-// Extract 4-byte function selector
-let selector = &input_data[0..4]; // [0xa9, 0x05, 0x9c, 0xbb] = transfer()
+// Process batch - modifies functions field in-place
+let transactions_with_functions = function_detector.detect_batch(transactions);
 
-// Output: TransactionWithFunctions
-pub struct TransactionWithFunctions {
-    pub tx: MempoolTransaction,
-    pub functions: Vec<String>, // ["transfer", "liquidity_removal", etc.]
+// Each transaction now has populated functions field
+for tx in transactions_with_functions {
+    println!("TX {} has functions: {:?}", tx.hash, tx.functions);
+    // tx.functions = ["transfer", "liquidity_removal", etc.]
 }
 ```
 
@@ -86,24 +87,26 @@ pub struct TransactionWithFunctions {
 - **Liquidity**: `removeLiquidityETH` (0x02751cec), `removeLiquidity` (0xbaa2abde)
 - **Trading**: `enableTrading` (0x8ee88c53), `openTrading` (0xc9567bf9)
 - **Tax**: `setTaxes` (0x032dc6a2), `setBuyTax` (0x2f2ff15d)
-- **Creator Actions**: Any function from known creator addresses
-
-**Performance**: ~0.005ms per transaction
+- **Swaps**: Various swap functions from DEX routers
 
 ### 3. Transaction Classification & Routing
 
 The classifier combines function detection with additional context:
 
 ```rust
-// Input: TransactionWithFunctions + TokenCache data
-let tx_with_functions = TransactionWithFunctions {
-    tx: MempoolTransaction { ... },
+// Input: MempoolTransaction with populated functions field + TokenCache data
+let tx = MempoolTransaction { 
     functions: vec!["enableTrading"],
+    from: creator_address_bytes,
+    ... 
 };
 
 // Classification process
 let is_creator = token_cache.is_creator(&tx.from);
 let is_contract_creation = tx.to.is_none();
+let has_risky_functions = tx.functions.iter().any(|f| 
+    f.contains("Trading") || f.contains("Tax") || f.contains("Liquidity")
+);
 
 // Output: ClassificationResult
 pub struct ClassificationResult {
@@ -116,7 +119,7 @@ pub struct ClassificationResult {
 
 **Categories**:
 - `ContractCreation`: New deployments (check for ERC20 bytecode patterns)
-- `CreatorTransaction`: From known token creators
+- `CreatorTransaction`: From known token creators (regardless of function)
 - `DexInteraction`: To Uniswap/Sushiswap routers
 - `Regular`: Everything else
 
