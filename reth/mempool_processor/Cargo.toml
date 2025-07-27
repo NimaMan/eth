@@ -160,12 +160,8 @@ name = "function_detector_example"
 path = "examples/mempool_fetcher/function_detector_example.rs"
 
 [[example]]
-name = "test_tx_router"
-path = "examples/signal_engine/tx_router/test_tx_router.rs"
-
-[[example]]
-name = "tx_routing_demo"
-path = "examples/signal_engine/tx_router/tx_routing_demo.rs"
+name = "tx_router_example"
+path = "examples/signal_engine/tx_router/tx_router_example.rs"
 
 # Reth Simulation Examples
 [[example]]

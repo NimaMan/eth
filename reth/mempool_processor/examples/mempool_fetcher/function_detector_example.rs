@@ -5,7 +5,8 @@
 /// 2. Process mempool transactions to detect function calls
 /// 3. Access the detected functions from the transaction
 
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, SimpleFunctionDetector};
+use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::signal_engine::FunctionDetector;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use eyre::Result;
@@ -26,7 +27,7 @@ async fn main() -> Result<()> {
     info!("✅ Connected to IPC");
 
     // Create function detector
-    let function_detector = SimpleFunctionDetector::new();
+    let function_detector = FunctionDetector::new();
     info!("✅ Function detector initialized");
 
     // Main processing loop - process 100 transactions

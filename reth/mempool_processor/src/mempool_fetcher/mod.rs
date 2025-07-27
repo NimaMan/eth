@@ -17,14 +17,11 @@ pub mod nonblocking_ipc_client;
 // Full transaction client with reconnection logic
 pub mod full_transaction_ipc_client;
 
-// Simple function detector for testing
-pub mod simple_function_detector;
 
 // Re-export main types for convenience
 pub use types::*;
 pub use nonblocking_ipc_client::{NonBlockingIpcClient, MempoolTransaction};
 pub use full_transaction_ipc_client::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
-pub use simple_function_detector::{SimpleFunctionDetector, FunctionStats};
 
 // Re-export tx_simulator functionality 
 // pub use crate::tx_simulator::*; // Temporarily disabled for migration
