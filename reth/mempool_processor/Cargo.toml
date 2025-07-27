@@ -244,54 +244,6 @@ name = "calculate_0xt_taxes_formula"
 path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
 
 [[example]]
-name = "calculate_initial_tax"
-path = "examples/token_parameter_extraction/tax/calculate_initial_tax.rs"
-
-[[example]]
-name = "calculate_initial_tax_vocl"
-path = "examples/token_parameter_extraction/tax/calculate_initial_tax_vocl.rs"
-
-[[example]]
-name = "calculate_tax_homer"
-path = "examples/token_parameter_extraction/tax/calculate_tax_homer.rs"
-
-[[example]]
-name = "analyze_homer_behavior"
-path = "examples/token_parameter_extraction/tax/analyze_homer_behavior.rs"
-
-[[example]]
-name = "debug_homer_k_error"
-path = "examples/token_parameter_extraction/tax/debug_homer_k_error.rs"
-
-[[example]]
-name = "debug_homer_reserves"
-path = "examples/token_parameter_extraction/tax/debug_homer_reserves.rs"
-
-[[example]]
-name = "test_float_conversion"
-path = "examples/token_parameter_extraction/tax/test_float_conversion.rs"
-
-[[example]]
-name = "homer_comprehensive_analysis"
-path = "examples/token_parameter_extraction/tax/homer_comprehensive_analysis.rs"
-
-[[example]]
-name = "analyze_angstrom_token"
-path = "examples/token_parameter_extraction/tax/analyze_angstrom_token.rs"
-[[example]]
-name = "analyze_homer_token"
-path = "examples/token_parameter_extraction/tax/analyze_homer_token.rs"
-
-[[example]]
-name = "homer_detailed_logging"
-path = "examples/token_parameter_extraction/tax/homer_detailed_logging.rs"
-
-
-[[example]]
-name = "homer_deep_analysis"
-path = "examples/token_parameter_extraction/tax/homer_deep_analysis.rs"
-
-[[example]]
 name = "analyze_tax_for_block_range"
 path = "examples/token_parameter_extraction/tax/analyze_tax_for_block_range.rs"
 
