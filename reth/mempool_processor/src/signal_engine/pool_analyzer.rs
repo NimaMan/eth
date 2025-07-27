@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Mutex;
+use tracing::error;
 use tracing::{info, debug, warn};
 use lazy_static::lazy_static;
 
-use crate::pool_subscriber::cache::PoolStateCache;
+use crate::token_tracking::cache::PoolStateCache;
 use crate::common::address::alloy_address_to_checksum;
 use super::types::{MarketEvent, EventType, Severity, EventMetrics, PoolEffect};
 
@@ -90,13 +91,19 @@ impl PoolAnalyzer {
     }
     
     /// Analyze address state changes to detect pool-level events
-    pub fn analyze_state_changes(
+    pub async fn analyze_state_changes(
         &self, 
         tx_hash: &str,
         state_changes: &HashMap<alloy_primitives::Address, crate::tx_simulator::AddressStateChange>
     ) -> Vec<MarketEvent> {
         let mut events = Vec::new();
-        let mut stats = POOL_STATS.lock().unwrap();
+        let mut stats = match POOL_STATS.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                error!("Failed to acquire pool stats lock: {}", e);
+                return events;
+            }
+        };
         
         debug!("🔍 Analyzing {} address changes for tx {}", state_changes.len(), tx_hash);
         
@@ -112,15 +119,17 @@ impl PoolAnalyzer {
             let address_str = alloy_address_to_checksum(*address);
             
             // Check if this is a monitored pool
-            if let Some(pool_state) = self.pool_cache.get_pool(&address_str) {
+            if let Some(pool_state) = self.pool_cache.get_pool(&address_str).await {
                 stats.total_pools_analyzed += 1;
                 *stats.pools_affected.entry(address_str.clone()).or_insert(0) += 1;
                 
                 info!("🎯 Pool {} affected by tx {}", address_str, tx_hash);
                 
-                // Extract numeric values (now already f64)
-                let eth_delta = changes.eth_net;
-                let token_delta: f64 = changes.token_net.values().sum();
+                // Extract numeric values (convert U256 to f64)
+                let eth_delta = changes.eth_net.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
+                let token_delta: f64 = changes.token_net.values()
+                    .map(|v| v.to_string().parse::<f64>().unwrap_or(0.0))
+                    .sum();
                 
                 // Calculate the effect on the pool
                 let pool_effect = PoolEffect {
@@ -216,6 +225,7 @@ impl PoolAnalyzer {
                         new_eth_reserve,
                         new_token_reserve: effect.simulated_token_reserve,
                         token_symbol: String::new(), // Would need token info
+                        tax_info: None,
                         extra: HashMap::new(),
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
@@ -258,6 +268,7 @@ impl PoolAnalyzer {
                     new_token_reserve: effect.simulated_token_reserve,
                     token_symbol: String::new(),
                     extra: HashMap::new(),
+                    tax_info: None,
                 },
                 detection_time: chrono::Utc::now().timestamp() as f64,
                 timestamp: chrono::Utc::now().timestamp() as u64,
@@ -271,13 +282,25 @@ impl PoolAnalyzer {
     
     /// Get current statistics
     pub fn get_stats(&self) -> PoolAnalysisStats {
-        POOL_STATS.lock().unwrap().clone()
+        match POOL_STATS.lock() {
+            Ok(guard) => guard.clone(),
+            Err(e) => {
+                error!("Failed to acquire pool stats lock: {}", e);
+                PoolAnalysisStats::default()
+            }
+        }
     }
     
     /// Reset statistics
     pub fn reset_stats(&self) {
-        let mut stats = POOL_STATS.lock().unwrap();
-        *stats = PoolAnalysisStats::default();
+        match POOL_STATS.lock() {
+            Ok(mut guard) => {
+                *guard = PoolAnalysisStats::default();
+            }
+            Err(e) => {
+                error!("Failed to acquire pool stats lock for reset: {}", e);
+            }
+        }
     }
 }
 

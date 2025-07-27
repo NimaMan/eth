@@ -1,9 +1,9 @@
 /// Batch Processor for Mempool Transactions
 /// 
 /// This module provides efficient batch simulation of mempool transactions
-/// by converting NonBlockingTransaction to CallRequest and using parallel simulation.
+/// by converting MempoolTransaction to CallRequest and using parallel simulation.
 
-use crate::mempool_fetcher::NonBlockingTransaction;
+use crate::mempool_fetcher::MempoolTransaction;
 use reth_tx_simulator::{DirectTxSimulator, CallRequest, BatchSimulationOptions, BatchSimulationResult, AddressStateChange};
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
@@ -39,8 +39,8 @@ impl BatchProcessor {
         self
     }
     
-    /// Convert NonBlockingTransaction to CallRequest using pre-parsed fields
-    pub fn convert_to_call_request(tx: &NonBlockingTransaction) -> CallRequest {
+    /// Convert MempoolTransaction to CallRequest using pre-parsed fields
+    pub fn convert_to_call_request(tx: &MempoolTransaction) -> CallRequest {
         CallRequest {
             from: Some(Address::from_slice(&tx.from)),
             to: tx.to.as_ref().map(|addr| Address::from_slice(addr)),
@@ -71,10 +71,10 @@ impl BatchProcessor {
         }
     }
     
-    /// Simulate a batch of NonBlockingTransactions
+    /// Simulate a batch of MempoolTransactions
     pub async fn simulate_batch(
         &self,
-        transactions: Vec<NonBlockingTransaction>,
+        transactions: Vec<MempoolTransaction>,
     ) -> Result<BatchSimulationResult> {
         let start = Instant::now();
         let total = transactions.len();
@@ -107,11 +107,11 @@ impl BatchProcessor {
     /// Simulate a filtered batch (only specific transactions)
     pub async fn simulate_filtered_batch(
         &self,
-        transactions: Vec<NonBlockingTransaction>,
-        filter: impl Fn(&NonBlockingTransaction) -> bool,
+        transactions: Vec<MempoolTransaction>,
+        filter: impl Fn(&MempoolTransaction) -> bool,
     ) -> Result<BatchSimulationResult> {
         // Filter transactions
-        let filtered: Vec<NonBlockingTransaction> = transactions
+        let filtered: Vec<MempoolTransaction> = transactions
             .into_iter()
             .filter(|tx| filter(tx))
             .collect();
@@ -135,11 +135,11 @@ impl BatchProcessor {
     /// Simulate transactions that match detected functions
     pub async fn simulate_with_function_filter(
         &self,
-        transactions: Vec<NonBlockingTransaction>,
+        transactions: Vec<MempoolTransaction>,
         detected_functions: &std::collections::HashMap<String, String>,
     ) -> Result<BatchSimulationResult> {
         // Filter only transactions with detected functions
-        let filtered: Vec<NonBlockingTransaction> = transactions
+        let filtered: Vec<MempoolTransaction> = transactions
             .into_iter()
             .filter(|tx| detected_functions.contains_key(&tx.hash))
             .collect();
@@ -170,7 +170,7 @@ impl BatchProcessor {
     /// Simulate transactions with state changes (with optional function filter)
     pub async fn simulate_batch_with_state_changes(
         &self,
-        transactions: Vec<NonBlockingTransaction>,
+        transactions: Vec<MempoolTransaction>,
     ) -> Result<Vec<(String, Result<HashMap<Address, AddressStateChange>>)>> {
         self.simulate_batch_with_state_changes_filtered(transactions, None).await
     }
@@ -178,7 +178,7 @@ impl BatchProcessor {
     /// Simulate transactions with state changes, optionally filtered by detected functions
     pub async fn simulate_batch_with_state_changes_filtered(
         &self,
-        transactions: Vec<NonBlockingTransaction>,
+        transactions: Vec<MempoolTransaction>,
         detected_functions: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Vec<(String, Result<HashMap<Address, AddressStateChange>>)>> {
         // Filter transactions if function detection provided
@@ -270,12 +270,12 @@ mod tests {
     
     #[test]
     fn test_convert_to_call_request() {
-        // Create a mock NonBlockingTransaction
+        // Create a mock MempoolTransaction
         let mut data = serde_json::Map::new();
         data.insert("gas".to_string(), serde_json::Value::String("0x5208".to_string()));
         data.insert("nonce".to_string(), serde_json::Value::String("0x1".to_string()));
         
-        let tx = NonBlockingTransaction {
+        let tx = MempoolTransaction {
             hash: "0xabc123".to_string(),
             data: serde_json::Value::Object(data),
             detection_ns: 1000,

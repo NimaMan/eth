@@ -18,9 +18,8 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use tracing::{info, debug, warn};
-use ethers::types::H256;
 
-use crate::pool_subscriber::cache::PoolStateCache;
+use crate::token_tracking::cache::PoolStateCache;
 use super::types::{
     MarketEvent, EventType, Severity, EventMetrics, SimulationResult, PoolEffect,
     SignalThresholds, ScamAlert, ScamAlertReason
@@ -72,6 +71,7 @@ impl SignalEngine {
         accuracy_tracker.insert(EventType::TokenSupplyAlert, 0.85);
         accuracy_tracker.insert(EventType::VolumeSpike, 0.80);
         accuracy_tracker.insert(EventType::PriceImpact, 0.75);
+        accuracy_tracker.insert(EventType::TaxManipulation, 0.92);
         
         Self {
             pool_cache,
@@ -87,7 +87,7 @@ impl SignalEngine {
     
     /// Analyze a simulated transaction to detect market events
     /// Returns a vector of MarketEvent for detected conditions
-    pub fn analyze_transaction(&self, simulation: SimulationResult) -> Vec<MarketEvent> {
+    pub async fn analyze_transaction(&self, simulation: SimulationResult) -> Vec<MarketEvent> {
         let mut events = Vec::new();
         
         debug!("Analyzing tx {} affecting {} pools", 
@@ -96,7 +96,7 @@ impl SignalEngine {
         // For each affected pool, check for various event types
         for (pool_address, effect) in simulation.affected_pools.iter() {
             // Get the current pool state from cache
-            if let Some(pool_state) = self.pool_cache.get_pool(pool_address) {
+            if let Some(pool_state) = self.pool_cache.get_pool(pool_address).await {
                 // Data freshness score - pools are updated when transactions affect them
                 // No need to warn about "stale" data since Python updates on-demand
                 let data_freshness_score = 1.0;
@@ -170,6 +170,7 @@ impl SignalEngine {
                         new_token_reserve: effect.simulated_token_reserve,
                         token_symbol: String::new(),
                         extra: HashMap::new(),
+                        tax_info: None,
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
                     timestamp: chrono::Utc::now().timestamp() as u64,
@@ -213,6 +214,7 @@ impl SignalEngine {
                         new_token_reserve: effect.simulated_token_reserve,
                         token_symbol: String::new(),
                         extra: HashMap::new(),
+                        tax_info: None,
                     },
                     detection_time: chrono::Utc::now().timestamp() as f64,
                     timestamp: chrono::Utc::now().timestamp() as u64,
@@ -264,6 +266,7 @@ impl SignalEngine {
                         new_eth_reserve: effect.simulated_eth_reserve,
                         new_token_reserve: effect.simulated_token_reserve,
                         token_symbol: String::new(),
+                        tax_info: None,
                         extra: {
                             let mut extra = HashMap::new();
                             extra.insert("suspicious".to_string(), serde_json::json!(is_suspicious));
@@ -281,6 +284,90 @@ impl SignalEngine {
         }
         
         None
+    }
+    
+    /// Check for tax manipulation in mempool
+    pub fn check_tax_manipulation(
+        &self,
+        tx_hash: &str,
+        token_address: &str,
+        pool_address: &str,
+        tax_info: &super::types::TaxManipulationInfo,
+        freshness: f64,
+    ) -> Option<MarketEvent> {
+        // Calculate tax increases
+        let buy_tax_increase = tax_info.predicted_buy_tax - tax_info.current_buy_tax;
+        let sell_tax_increase = tax_info.predicted_sell_tax - tax_info.current_sell_tax;
+        let max_increase = buy_tax_increase.max(sell_tax_increase);
+        let total_tax = tax_info.predicted_buy_tax + tax_info.predicted_sell_tax;
+        
+        // Determine severity based on tax changes
+        let severity = if tax_info.predicted_sell_tax > 90.0 || total_tax > 60.0 {
+            Severity::Critical
+        } else if max_increase > 50.0 || total_tax > 30.0 {
+            Severity::High
+        } else if max_increase > 20.0 || total_tax > 20.0 {
+            Severity::Medium
+        } else if max_increase > 10.0 {
+            Severity::Low
+        } else {
+            return None; // No significant tax change
+        };
+        
+        // Calculate confidence based on pattern and context
+        let pattern_confidence = match tax_info.pattern.as_str() {
+            "HoneypotSetup" => 0.95,
+            "RugPullPreparation" => 0.93,
+            "EmergencyTaxIncrease" => 0.90,
+            "SandwichAttack" => 0.85,
+            "StealthEscalation" => 0.80,
+            _ => 0.75,
+        };
+        
+        let confidence = self.calculate_confidence(EventType::TaxManipulation, freshness, true) * pattern_confidence;
+        
+        // Create detailed message
+        let details = format!(
+            "Tax manipulation detected: {} pattern. Buy tax: {:.1}% → {:.1}% ({:+.1}%), Sell tax: {:.1}% → {:.1}% ({:+.1}%). Manipulator: {}",
+            tax_info.pattern,
+            tax_info.current_buy_tax,
+            tax_info.predicted_buy_tax,
+            buy_tax_increase,
+            tax_info.current_sell_tax,
+            tax_info.predicted_sell_tax,
+            sell_tax_increase,
+            tax_info.manipulator_address
+        );
+        
+        Some(MarketEvent {
+            event_type: EventType::TaxManipulation,
+            severity,
+            confidence,
+            tx_hash: tx_hash.to_string(),
+            pool_address: pool_address.to_string(),
+            token_address: token_address.to_string(),
+            metrics: EventMetrics {
+                eth_change: 0.0, // Tax changes don't affect ETH directly
+                eth_percent: 0.0,
+                token_change: 0.0,
+                token_percent: 0.0,
+                new_eth_reserve: 0.0,
+                new_token_reserve: 0.0,
+                token_symbol: String::new(),
+                tax_info: Some(tax_info.clone()),
+                extra: HashMap::new(),
+            },
+            detection_time: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64(),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            block_number: 0, // Would be filled by caller
+            details,
+        })
     }
     
     /// Calculate confidence score for an event
@@ -301,8 +388,8 @@ pub type DecisionEngine = SignalEngine;
 
 impl SignalEngine {
     /// Legacy method for backward compatibility - returns only scam alerts
-    pub fn analyze_transaction_legacy(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
-        let events = self.analyze_transaction(simulation);
+    pub async fn analyze_transaction_legacy(&self, simulation: SimulationResult) -> Vec<ScamAlert> {
+        let events = self.analyze_transaction(simulation).await;
         
         // Convert MarketEvents to legacy ScamAlerts (only for actual scams)
         events.into_iter()
@@ -328,7 +415,7 @@ impl SignalEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pool_subscriber::types::PoolUpdate;
+    use crate::token_tracking::types::PoolUpdate;
     
     #[test]
     fn test_scam_detection() {

@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use tokio::time;
 
 // Mempool processor imports
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction};
+use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction};
 use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::tx_simulator::{
     TxSimulator, BatchProcessor, SignalDetector, SignalDetectionConfig,
@@ -43,7 +43,7 @@ struct Args {
 
 /// Tracks interesting transactions for batch simulation
 struct SimulationBatch {
-    transactions: Vec<NonBlockingTransaction>,
+    transactions: Vec<MempoolTransaction>,
     reasons: Vec<String>,
 }
 
@@ -55,7 +55,7 @@ impl SimulationBatch {
         }
     }
     
-    fn add(&mut self, tx: NonBlockingTransaction, reason: &str) {
+    fn add(&mut self, tx: MempoolTransaction, reason: &str) {
         self.transactions.push(tx);
         self.reasons.push(reason.to_string());
     }
@@ -64,7 +64,7 @@ impl SimulationBatch {
         self.transactions.len() >= max_size
     }
     
-    fn take(&mut self) -> (Vec<NonBlockingTransaction>, Vec<String>) {
+    fn take(&mut self) -> (Vec<MempoolTransaction>, Vec<String>) {
         let txs = std::mem::take(&mut self.transactions);
         let reasons = std::mem::take(&mut self.reasons);
         (txs, reasons)

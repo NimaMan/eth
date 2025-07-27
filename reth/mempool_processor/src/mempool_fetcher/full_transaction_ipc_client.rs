@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::net::UnixStream;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::time::timeout;
 use serde_json::{Value, json};
 use tracing::{info, debug, error, warn};
 use eyre::{Result, eyre};
@@ -72,8 +73,15 @@ impl FullTransactionIpcClient {
     pub async fn start_monitoring(&self) -> Result<()> {
         info!("🔌 Connecting to Reth IPC for full transactions: {}", self.socket_path);
         
-        let stream = UnixStream::connect(&self.socket_path).await
-            .map_err(|e| eyre!("Failed to connect to IPC socket: {}", e))?;
+        // Add timeout to connection attempt (5 seconds)
+        let stream = match timeout(
+            Duration::from_secs(5),
+            UnixStream::connect(&self.socket_path)
+        ).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(e)) => return Err(eyre!("Failed to connect to IPC socket: {}", e)),
+            Err(_) => return Err(eyre!("IPC connection timed out after 5 seconds")),
+        };
             
         info!("✅ Connected to Reth IPC");
         
@@ -113,9 +121,16 @@ impl FullTransactionIpcClient {
         let request_str = format!("{}\n", subscribe_request);
         stream.get_mut().write_all(request_str.as_bytes()).await?;
         
-        // Read subscription confirmation
+        // Read subscription confirmation with timeout
         let mut response_line = String::new();
-        stream.read_line(&mut response_line).await?;
+        match timeout(
+            Duration::from_secs(5),
+            stream.read_line(&mut response_line)
+        ).await {
+            Ok(Ok(_)) => {},
+            Ok(Err(e)) => return Err(eyre!("Failed to read subscription response: {}", e)),
+            Err(_) => return Err(eyre!("Subscription response timed out after 5 seconds")),
+        };
         
         let response: Value = serde_json::from_str(&response_line)?;
         
@@ -146,8 +161,21 @@ impl FullTransactionIpcClient {
             let mut notification_line = String::new();
             let read_start = Instant::now();
             
-            if stream.read_line(&mut notification_line).await? == 0 {
-                break; // Connection closed
+            // Add timeout to read operations (60 seconds for long-running streams)
+            match timeout(
+                Duration::from_secs(60),
+                stream.read_line(&mut notification_line)
+            ).await {
+                Ok(Ok(0)) => break, // Connection closed
+                Ok(Ok(_)) => {}, // Successfully read line
+                Ok(Err(e)) => {
+                    error!("Failed to read from IPC stream: {}", e);
+                    return Err(eyre!("IPC read error: {}", e));
+                },
+                Err(_) => {
+                    warn!("IPC read timed out after 60 seconds, continuing...");
+                    continue;
+                }
             }
             
             let detection_time = Instant::now();

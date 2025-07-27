@@ -187,8 +187,8 @@ impl SimulatorProcessor {
         false
     }
     
-    /// Convert NonBlockingTransaction to CallRequest using pre-parsed bytes
-    fn nonblocking_tx_to_call_request(tx: &crate::mempool_fetcher::NonBlockingTransaction) -> CallRequest {
+    /// Convert MempoolTransaction to CallRequest using pre-parsed bytes
+    fn nonblocking_tx_to_call_request(tx: &crate::mempool_fetcher::MempoolTransaction) -> CallRequest {
         // Convert addresses from Vec<u8> to Address
         let from = if tx.from.len() == 20 {
             let mut addr_bytes = [0u8; 20];

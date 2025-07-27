@@ -3,9 +3,7 @@
 // This module provides utilities for detecting interactions with decentralized exchanges (DEXs)
 // like Uniswap V2, V3, and V4.
 
-use ethers::abi::{decode, ParamType, Token};
 use ethers::types::{Address, U256};
-use hex;
 use tracing::{debug, trace};
 
 /// Common Uniswap V2 Router addresses

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use tracing::{info, warn, error};
 use crate::token_tracking::TokenTrackingCache;
-use crate::signal_engine::function_detector::TransactionWithFunctions;
+use crate::mempool_fetcher::MempoolTransaction;
 use crate::common::address::checksum_address;
 use zmq::{Context, Socket};
 use serde::{Serialize, Deserialize};
@@ -112,14 +112,13 @@ impl CreatorAnalyzer {
     }
     
     /// Analyze a transaction with detected functions
-    pub async fn analyze_transaction(&self, tx_with_functions: &TransactionWithFunctions) -> Option<CreatorAlert> {
+    pub async fn analyze_transaction(&self, tx: &MempoolTransaction) -> Option<CreatorAlert> {
         // Check if this is a token creation or trading enable transaction
-        if tx_with_functions.has_trading_enabled {
-            let tx = &tx_with_functions.tx;
+        if tx.functions.iter().any(|f| f.contains("enableTrading") || f.contains("openTrading")) {
             let from_address = checksum_address(&hex::encode(&tx.from));
             
             // Record that we saw this creator's trading enable tx in mempool
-            if let Some(function_name) = tx_with_functions.functions.iter()
+            if let Some(function_name) = tx.functions.iter()
                 .find(|f| f.contains("Trading") || f.contains("trading")) {
                 self.record_creator_transaction(&from_address, &tx.hash, function_name, true).await;
                 info!("Observed trading enable from {} in mempool - marking as public user", from_address);
@@ -127,11 +126,9 @@ impl CreatorAnalyzer {
         }
         
         // Skip if no creator action detected
-        if !tx_with_functions.has_creator_action {
+        if !tx.functions.iter().any(|f| self.is_creator_action(f)) {
             return None;
         }
-        
-        let tx = &tx_with_functions.tx;
         let from_address = checksum_address(&hex::encode(&tx.from));
         let to_address = tx.to.as_ref()
             .map(|addr| checksum_address(&hex::encode(addr)))
@@ -141,7 +138,8 @@ impl CreatorAnalyzer {
         let creator_info = self.check_if_known_creator(&from_address).await;
         
         if let Some((token_address, is_creator, is_owner, is_lp)) = creator_info {
-            let function_name = tx_with_functions.creator_action_name.as_ref()
+            let function_name = tx.functions.iter()
+                .find(|f| self.is_creator_action(f))
                 .map(|s| s.as_str())
                 .unwrap_or("unknown");
             

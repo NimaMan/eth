@@ -3,7 +3,6 @@
 // Type definitions for market signal detection and signal engine.
 
 use std::collections::HashMap;
-use ethers::types::H256;
 use serde::{Serialize, Deserialize};
 
 /// Types of market events detected by the signal engine
@@ -26,6 +25,9 @@ pub enum EventType {
     
     /// Large trade detected
     LargeTrade,
+    
+    /// Tax manipulation detected in mempool
+    TaxManipulation,
 }
 
 
@@ -105,6 +107,9 @@ pub struct EventMetrics {
     
     /// Token symbol
     pub token_symbol: String,
+    
+    /// Tax manipulation specific info (if applicable)
+    pub tax_info: Option<TaxManipulationInfo>,
     
     /// Additional event-specific data
     #[serde(flatten)]
@@ -202,6 +207,7 @@ impl From<ScamAlert> for MarketEvent {
                 new_token_reserve: 0.0,
                 token_symbol: String::new(),
                 extra: HashMap::new(),
+                tax_info: None,
             },
             detection_time: alert.detection_time,
             timestamp: alert.detection_time as u64,
@@ -266,6 +272,37 @@ pub struct PoolStatistics {
     
     /// Last update timestamp
     pub last_updated: f64,
+}
+
+/// Tax manipulation specific information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaxManipulationInfo {
+    /// Current buy tax percentage
+    pub current_buy_tax: f64,
+    
+    /// Current sell tax percentage  
+    pub current_sell_tax: f64,
+    
+    /// Predicted buy tax after transaction
+    pub predicted_buy_tax: f64,
+    
+    /// Predicted sell tax after transaction
+    pub predicted_sell_tax: f64,
+    
+    /// Address attempting to change taxes
+    pub manipulator_address: String,
+    
+    /// Function being called (selector)
+    pub function_selector: String,
+    
+    /// Pattern type detected
+    pub pattern: String,
+    
+    /// Whether token owner has been renounced
+    pub ownership_renounced: bool,
+    
+    /// Time since last liquidity event (seconds)
+    pub time_since_liquidity_event: Option<u64>,
 }
 
 // Type aliases for backward compatibility

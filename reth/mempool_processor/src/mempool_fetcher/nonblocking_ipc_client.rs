@@ -3,14 +3,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{mpsc, RwLock, Mutex};
 use tokio::net::UnixStream;
+use tokio::time::{timeout, Duration};
 use serde_json::{Value, json};
 use tracing::{info, error, warn};
 use eyre::{Result, eyre};
 use hex;
 
-/// Transaction received via non-blocking IPC
+/// Transaction received from mempool via IPC
 #[derive(Debug, Clone)]
-pub struct NonBlockingTransaction {
+pub struct MempoolTransaction {
     pub hash: String,
     pub data: Value,
     pub detection_ns: u64,
@@ -20,12 +21,13 @@ pub struct NonBlockingTransaction {
     pub input: Vec<u8>,
     pub value: ethers::types::U256,
     pub gas_price: Option<ethers::types::U256>,
+    pub functions: Vec<String>, // ["transfer", "liquidity_removal", etc.]
 }
 
 pub struct NonBlockingIpcClient {
     socket_path: String,
-    tx_sender: mpsc::Sender<NonBlockingTransaction>,
-    tx_receiver: Arc<Mutex<mpsc::Receiver<NonBlockingTransaction>>>,
+    tx_sender: mpsc::Sender<MempoolTransaction>,
+    tx_receiver: Arc<Mutex<mpsc::Receiver<MempoolTransaction>>>,
     stats: Arc<RwLock<Stats>>,
     queue_size: Arc<AtomicUsize>,
 }
@@ -54,7 +56,15 @@ impl NonBlockingIpcClient {
     }
     
     pub async fn start(&self) -> Result<()> {
-        let stream = UnixStream::connect(&self.socket_path).await?;
+        // Add timeout to connection attempt (5 seconds)
+        let stream = match timeout(
+            Duration::from_secs(5),
+            UnixStream::connect(&self.socket_path)
+        ).await {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(e)) => return Err(eyre!("Failed to connect to IPC socket: {}", e)),
+            Err(_) => return Err(eyre!("IPC connection timed out after 5 seconds")),
+        };
         
         // Subscribe with correct parameters
         let subscribe = json!({
@@ -109,14 +119,15 @@ impl NonBlockingIpcClient {
     
     async fn monitor_nonblocking(
         stream: UnixStream,
-        tx_sender: mpsc::Sender<NonBlockingTransaction>,
+        tx_sender: mpsc::Sender<MempoolTransaction>,
         stats: Arc<RwLock<Stats>>,
         queue_size: Arc<AtomicUsize>,
     ) -> Result<()> {
-        use tokio::io::AsyncReadExt;
+        
         
         let mut buffer = vec![0u8; 65536]; // 64KB
         let mut pending = Vec::with_capacity(1024 * 1024); // 1MB
+        const MAX_PENDING_SIZE: usize = 10 * 1024 * 1024; // 10MB limit
         
         loop {
             // Try to read data with minimal blocking
@@ -131,7 +142,12 @@ impl NonBlockingIpcClient {
                     // ULTRA-FAST DETECTION!
                     let detection_ns = detect_start.elapsed().as_nanos() as u64;
                     
-                    // Append data
+                    // Append data with bounds checking
+                    if pending.len() + n > MAX_PENDING_SIZE {
+                        warn!("Pending buffer too large ({} bytes), clearing to prevent memory exhaustion", pending.len());
+                        pending.clear();
+                        continue;
+                    }
                     pending.extend_from_slice(&buffer[..n]);
                     
                     // Process complete JSON lines
@@ -183,7 +199,7 @@ impl NonBlockingIpcClient {
                                                 .and_then(|v| v.as_str())
                                                 .and_then(|s| ethers::types::U256::from_str_radix(s.trim_start_matches("0x"), 16).ok());
                                             
-                                            let tx = NonBlockingTransaction {
+                                            let tx = MempoolTransaction {
                                                 hash,
                                                 data: result.clone(),
                                                 detection_ns,
@@ -192,6 +208,7 @@ impl NonBlockingIpcClient {
                                                 input,
                                                 value,
                                                 gas_price,
+                                                functions: Vec::new(), // Will be populated by function detector
                                             };
                                             
                                             match tx_sender.try_send(tx) {
@@ -228,7 +245,7 @@ impl NonBlockingIpcClient {
         Ok(())
     }
     
-    pub async fn get_transactions(&self, max: usize) -> Result<Vec<NonBlockingTransaction>> {
+    pub async fn get_transactions(&self, max: usize) -> Result<Vec<MempoolTransaction>> {
         let mut receiver = self.tx_receiver.lock().await;
         let mut txs = Vec::with_capacity(max);
         
@@ -264,7 +281,7 @@ impl NonBlockingIpcClient {
     }
     
     /// Get transactions instantly without any waiting - for ultra-low latency
-    pub async fn get_transactions_instant(&self, max: usize) -> Vec<NonBlockingTransaction> {
+    pub async fn get_transactions_instant(&self, max: usize) -> Vec<MempoolTransaction> {
         let mut receiver = self.tx_receiver.lock().await;
         let mut txs = Vec::with_capacity(max);
         

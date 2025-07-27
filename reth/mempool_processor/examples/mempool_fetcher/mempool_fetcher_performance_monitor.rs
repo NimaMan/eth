@@ -125,7 +125,7 @@ impl PerformanceStats {
     }
 }
 
-fn check_transaction_completeness(tx: &mempool_processor::mempool_fetcher::NonBlockingTransaction) -> bool {
+fn check_transaction_completeness(tx: &mempool_processor::mempool_fetcher::MempoolTransaction) -> bool {
     // With pre-parsed fields, we just check the basic requirements
     !tx.hash.is_empty() &&
     !tx.from.is_empty() &&

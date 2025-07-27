@@ -84,6 +84,15 @@ pub struct TokenInfo {
     /// Block of latest activity
     pub latest_activity_block: u64,
     
+    /// Current buy tax percentage (0-100)
+    pub buy_tax: Option<u8>,
+    
+    /// Current sell tax percentage (0-100)
+    pub sell_tax: Option<u8>,
+    
+    /// Last tax update transaction hash
+    pub last_tax_update_txn: Option<String>,
+    
     /// Map of pool addresses to pool information
     pub pools: HashMap<String, PoolInfo>,
 }

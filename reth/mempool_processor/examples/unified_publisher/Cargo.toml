@@ -1,0 +1,11 @@
+[[example]]
+name = "publisher_demo"
+path = "publisher_demo.rs"
+
+[[example]]
+name = "multipart_subscriber"
+path = "multipart_subscriber.rs"
+
+[[example]]
+name = "unified_publisher_example"
+path = "unified_publisher_example.rs"

@@ -9,11 +9,13 @@
  * to ensure reliable data persistence.
  */
 
-use tokio_postgres::{NoTls, Error as PgError, Client};
+use tokio_postgres::{NoTls, Client};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 use tracing::{info, error, debug};
 use std::time::{SystemTime, UNIX_EPOCH};
+use eyre::{eyre, Result};
 
 #[derive(Debug, Clone)]
 pub struct ScamPredictionWriter {
@@ -29,7 +31,7 @@ impl ScamPredictionWriter {
         host: &str,
         port: u16,
         dbname: &str,
-    ) -> Result<Self, PgError> {
+    ) -> Result<Self> {
         info!("ScamPredictionWriter::new() called with host={}, port={}, dbname={}", host, port, dbname);
         
         let connection_string = format!(
@@ -55,7 +57,7 @@ impl ScamPredictionWriter {
     }
     
     /// Create a new scam prediction writer with default connection parameters
-    pub async fn default() -> Result<Self, PgError> {
+    pub async fn default() -> Result<Self> {
         let user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
         let password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
         let host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
@@ -69,57 +71,89 @@ impl ScamPredictionWriter {
     }
     
     /// Connect to the database
-    async fn connect(&self) -> Result<(), PgError> {
-        info!("connect() called - acquiring lock...");
-        let mut client_lock = self.client.lock().await;
-        info!("connect() - lock acquired");
+    async fn connect(&self) -> Result<()> {
+        info!("connect() called");
         
-        // Only connect if not already connected
-        if client_lock.is_none() {
-            info!("connect() - attempting to connect to database...");
-            debug!("Connecting to database: {}", self.connection_string);
-            
-            info!("connect() - calling tokio_postgres::connect...");
-            let (client, connection) = tokio_postgres::connect(&self.connection_string, NoTls).await?;
-            info!("connect() - tokio_postgres::connect returned successfully");
-            
-            // Spawn the connection handler in the background
-            info!("connect() - spawning connection handler...");
-            tokio::spawn(async move {
-                info!("Connection handler task started");
-                if let Err(e) = connection.await {
-                    error!("Database connection error: {}", e);
-                } else {
-                    info!("Connection handler completed successfully");
-                }
-            });
-            info!("connect() - connection handler spawned");
-            
-            *client_lock = Some(client);
-            debug!("Database connection established");
-            info!("connect() - client stored, connection established");
-        } else {
-            info!("connect() - already connected, skipping");
+        // First check if already connected without holding the lock
+        {
+            let client_lock = self.client.lock().await;
+            if client_lock.is_some() {
+                info!("connect() - already connected, skipping");
+                return Ok(());
+            }
         }
         
-        info!("connect() - releasing lock and returning Ok");
+        // Now do the actual connection without holding the lock
+        info!("connect() - attempting to connect to database...");
+        debug!("Connecting to database: {}", self.connection_string);
+        
+        // Add timeout to connection attempt (5 seconds)
+        let connection_result = timeout(
+            Duration::from_secs(5),
+            tokio_postgres::connect(&self.connection_string, NoTls)
+        ).await;
+        
+        let (client, connection) = match connection_result {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                error!("Failed to connect to database: {}", e);
+                return Err(eyre!("Failed to connect to database: {}", e));
+            }
+            Err(_) => {
+                error!("Database connection timed out after 5 seconds");
+                return Err(eyre!("Database connection timed out after 5 seconds"));
+            }
+        };
+        
+        info!("connect() - connection established successfully");
+        
+        // Spawn the connection handler in the background
+        info!("connect() - spawning connection handler...");
+        tokio::spawn(async move {
+            info!("Connection handler task started");
+            if let Err(e) = connection.await {
+                error!("Database connection error: {}", e);
+            } else {
+                info!("Connection handler completed successfully");
+            }
+        });
+        
+        // Now acquire the lock and store the client
+        let mut client_lock = self.client.lock().await;
+        *client_lock = Some(client);
+        debug!("Database connection established");
+        info!("connect() - client stored, connection established");
+        
         Ok(())
     }
     
     /// Execute a direct SQL query on the database connection
     /// This is useful for administrative commands or testing
-    pub async fn execute_query(&self, query: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<u64, PgError> {
-        let mut client_guard = self.client.lock().await;
-        
+    pub async fn execute_query(&self, query: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<u64> {
         // Ensure we have a connection
-        if client_guard.is_none() {
-            drop(client_guard); // Release the lock before connecting
-            self.connect().await?;
-            client_guard = self.client.lock().await;
-        }
+        self.ensure_connected().await?;
         
-        let client = client_guard.as_ref().expect("Database client not initialized");
-        client.execute(query, params).await
+        let client_guard = self.client.lock().await;
+        let client = match client_guard.as_ref() {
+            Some(c) => c,
+            None => {
+                error!("Database client not initialized after connection");
+                return Err(eyre!("Database client not initialized"));
+            }
+        };
+        
+        // Execute query with timeout (30 seconds)
+        match timeout(Duration::from_secs(30), client.execute(query, params)).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(e)) => {
+                error!("Database query failed: {}", e);
+                Err(eyre!("Database query failed: {}", e))
+            }
+            Err(_) => {
+                error!("Database query timed out after 30 seconds");
+                Err(eyre!("Database query timed out after 30 seconds"))
+            }
+        }
     }
     
     /// Writes a mempool scam prediction to the database
@@ -131,7 +165,7 @@ impl ScamPredictionWriter {
         current_eth_level: f64,
         simulated_eth_level: f64,
         eth_threshold: f64,
-    ) -> Result<(), PgError> {
+    ) -> Result<()> {
         self.write_mempool_scam_prediction_with_tx(
             token_address,
             pool_address,
@@ -153,17 +187,18 @@ impl ScamPredictionWriter {
         simulated_eth_level: f64,
         eth_threshold: f64,
         tx_hash: Option<&str>,
-    ) -> Result<(), PgError> {
-        let mut client_guard = self.client.lock().await;
-        
+    ) -> Result<()> {
         // Ensure we have a connection
-        if client_guard.is_none() {
-            drop(client_guard); // Release the lock before connecting
-            self.connect().await?;
-            client_guard = self.client.lock().await;
-        }
+        self.ensure_connected().await?;
         
-        let client = client_guard.as_ref().expect("Database client not initialized");
+        let client_guard = self.client.lock().await;
+        let client = match client_guard.as_ref() {
+            Some(c) => c,
+            None => {
+                error!("Database client not initialized after connection");
+                return Err(eyre!("Database client not initialized"));
+            }
+        };
         
         // Get current timestamp if needed
         let current_timestamp = SystemTime::now()
@@ -185,20 +220,25 @@ impl ScamPredictionWriter {
             token_address, pool_address, prediction_block_number
         );
         
-        // Execute the query with proper error handling
-        match client.execute(
-            QUERY,
-            &[
-                &token_address,
-                &pool_address,
-                &prediction_block_number,
-                &current_timestamp,
-                &current_eth_level,
-                &simulated_eth_level,
-                &eth_threshold,
-            ],
-        ).await {
-            Ok(_) => {
+        // Execute the query with timeout and proper error handling
+        let query_result = timeout(
+            Duration::from_secs(30),
+            client.execute(
+                QUERY,
+                &[
+                    &token_address,
+                    &pool_address,
+                    &prediction_block_number,
+                    &current_timestamp,
+                    &current_eth_level,
+                    &simulated_eth_level,
+                    &eth_threshold,
+                ],
+            )
+        ).await;
+        
+        match query_result {
+            Ok(Ok(_)) => {
                 // Log the full scam details when successfully written to database
                 info!("🚨 SCAM DETECTED AND LOGGED TO DATABASE:");
                 if let Some(tx) = tx_hash {
@@ -221,7 +261,7 @@ impl ScamPredictionWriter {
                      
                 Ok(())
             },
-            Err(e) => {
+            Ok(Err(e)) => {
                 // Check if this is a foreign key constraint error
                 if let Some(db_error) = e.as_db_error() {
                     if db_error.code().code() == "23503" { // Foreign key violation
@@ -252,7 +292,11 @@ impl ScamPredictionWriter {
                 
                 // For other errors, propagate them
                 error!("Failed to log scam prediction: {}", e);
-                Err(e)
+                Err(eyre!("Failed to log scam prediction: {}", e))
+            },
+            Err(_) => {
+                error!("Database query timed out after 30 seconds");
+                Err(eyre!("Database query timed out after 30 seconds"))
             }
         }
     }
@@ -263,17 +307,18 @@ impl ScamPredictionWriter {
         token_address: &str,
         pool_address: &str,
         prediction_block_number: i64,
-    ) -> Result<u64, PgError> {
-        let mut client_guard = self.client.lock().await;
-        
+    ) -> Result<u64> {
         // Ensure we have a connection
-        if client_guard.is_none() {
-            drop(client_guard); // Release the lock before connecting
-            self.connect().await?;
-            client_guard = self.client.lock().await;
-        }
+        self.ensure_connected().await?;
         
-        let client = client_guard.as_ref().expect("Database client not initialized");
+        let client_guard = self.client.lock().await;
+        let client = match client_guard.as_ref() {
+            Some(c) => c,
+            None => {
+                error!("Database client not initialized after connection");
+                return Err(eyre!("Database client not initialized"));
+            }
+        };
         
         // SQL DELETE query
         const QUERY: &str = "
@@ -288,11 +333,24 @@ impl ScamPredictionWriter {
             token_address, pool_address, prediction_block_number
         );
         
-        // Execute the query
-        let rows_deleted = client.execute(
-            QUERY, 
-            &[&token_address, &pool_address, &prediction_block_number]
-        ).await?;
+        // Execute the query with timeout
+        let rows_deleted = match timeout(
+            Duration::from_secs(30),
+            client.execute(
+                QUERY, 
+                &[&token_address, &pool_address, &prediction_block_number]
+            )
+        ).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                error!("Failed to delete test records: {}", e);
+                return Err(eyre!("Failed to delete test records: {}", e));
+            }
+            Err(_) => {
+                error!("Database query timed out after 30 seconds");
+                return Err(eyre!("Database query timed out after 30 seconds"));
+            }
+        };
         
         debug!("Deleted {} test records", rows_deleted);
         Ok(rows_deleted)
@@ -305,7 +363,7 @@ impl ScamPredictionWriter {
     }
     
     /// Reconnect to the database if the connection is lost
-    pub async fn ensure_connected(&self) -> Result<(), PgError> {
+    pub async fn ensure_connected(&self) -> Result<()> {
         if !self.is_connected().await {
             self.connect().await?;
         }

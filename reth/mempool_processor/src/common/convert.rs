@@ -1,13 +1,13 @@
 // Conversion utilities for transforming between different transaction representations
 
 use eyre::{Result, eyre};
-use ethers::types::{Transaction as EthersTransaction, U256, H160, Bytes};
-use crate::mempool_fetcher::NonBlockingTransaction;
+use ethers::types::{Transaction as EthersTransaction, U256, Bytes};
+use crate::mempool_fetcher::MempoolTransaction;
 
-/// Convert a NonBlockingTransaction (from IPC) to an ethers Transaction view
+/// Convert a MempoolTransaction (from IPC) to an ethers Transaction view
 /// This is needed for compatibility with existing analysis code that expects ethers types
-pub fn convert_nonblocking_to_transaction_view(tx: &NonBlockingTransaction) -> Result<EthersTransaction> {
-    // The NonBlockingTransaction contains transaction data as a JSON Value
+pub fn convert_nonblocking_to_transaction_view(tx: &MempoolTransaction) -> Result<EthersTransaction> {
+    // The MempoolTransaction contains transaction data as a JSON Value
     let data = &tx.data;
     
     // Create a minimal transaction view with the fields we need

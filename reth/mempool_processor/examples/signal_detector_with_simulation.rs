@@ -11,7 +11,7 @@ use eyre::Result;
 use tracing::{info, warn};
 use tokio::time;
 
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction};
+use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction};
 use mempool_processor::signal_engine::FunctionDetector;
 use mempool_processor::tx_simulator::{BatchProcessor, SignalDetector, SignalDetectionConfig};
 use reth_tx_simulator::{RethDirectTxSimulator, BatchSimulationOptions};
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
     let function_detector = FunctionDetector::new();
     
     // Initialize simulation components if enabled
-    let simulation_queue: Arc<tokio::sync::Mutex<VecDeque<NonBlockingTransaction>>> = 
+    let simulation_queue: Arc<tokio::sync::Mutex<VecDeque<MempoolTransaction>>> = 
         Arc::new(tokio::sync::Mutex::new(VecDeque::new()));
     
     let sim_handle = if args.enable_simulation {
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
 async fn simulation_task(
     processor: BatchProcessor,
     signal_detector: SignalDetector,
-    queue: Arc<tokio::sync::Mutex<VecDeque<NonBlockingTransaction>>>,
+    queue: Arc<tokio::sync::Mutex<VecDeque<MempoolTransaction>>>,
 ) -> Result<()> {
     let mut batch = Vec::new();
     let batch_size = 5;

@@ -17,6 +17,7 @@ use alloy_rpc_types::TransactionRequest;
 use std::str::FromStr;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
+use std::time::Instant;
 use eyre::Result;
 use chrono::Local;
 
@@ -175,8 +176,8 @@ async fn main() -> Result<()> {
     writeln!(log_file, "Pool: {}", pool_address)?;
     writeln!(log_file, "Block Range: {} to {}", start_block, end_block)?;
     writeln!(log_file, "=")?;
-    writeln!(log_file, "Block | Buy Amount | Tokens Received | Buy Tax | Sell Amount | Sell Result | Sell Tax | Error")?;
-    writeln!(log_file, "------|------------|----------------|---------|------------|-------------|----------|------")?;
+    writeln!(log_file, "Block | Buy Amount | Tokens Received | Buy Tax | Sell Amount | Sell Result | Sell Tax | Time(ms) | Error")?;
+    writeln!(log_file, "------|------------|----------------|---------|------------|-------------|----------|----------|------")?;
     
     // Initialize tax calculator
     let reth_datadir = "/home/nima/.local/share/reth/mainnet";
@@ -198,6 +199,7 @@ async fn main() -> Result<()> {
     for block_number in start_block..=end_block {
         print!("Block {} ... ", block_number);
         
+        let start_time = Instant::now();
         match tax_calculator.calculate_taxes_via_simulation(
             buyer_address,
             &token_info,
@@ -207,20 +209,23 @@ async fn main() -> Result<()> {
             block_number,
         ).await {
             Ok((buy_tax, sell_tax, tokens_bought, tokens_sold)) => {
+                let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                 if sell_tax >= 0.0 {
-                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | SUCCESS | {:.1}% | -", 
-                        block_number, tokens_bought, buy_tax, tokens_sold, sell_tax)?;
-                    println!("✅ Buy: {:.1}%, Sell: {:.1}% (Bought: {}, Sold: {})", 
+                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | SUCCESS | {:.1}% | {:.1} | -", 
+                        block_number, tokens_bought, buy_tax, tokens_sold, sell_tax, elapsed_ms)?;
+                    println!("✅ Buy: {:.1}%, Sell: {:.1}% (Bought: {}, Sold: {}) - {:.1}ms", 
                         buy_tax, sell_tax, 
                         format_token_amount(tokens_bought, token_info.decimals), 
-                        format_token_amount(tokens_sold, token_info.decimals));
+                        format_token_amount(tokens_sold, token_info.decimals),
+                        elapsed_ms);
                 } else {
-                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | FAILED | - | Transfer failed", 
-                        block_number, tokens_bought, buy_tax, tokens_sold)?;
-                    println!("❌ Buy: {:.1}%, Sell: FAILED (Bought: {}, Tried: {})", 
+                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | FAILED | - | {:.1} | Transfer failed", 
+                        block_number, tokens_bought, buy_tax, tokens_sold, elapsed_ms)?;
+                    println!("❌ Buy: {:.1}%, Sell: FAILED (Bought: {}, Tried: {}) - {:.1}ms", 
                         buy_tax, 
                         format_token_amount(tokens_bought, token_info.decimals), 
-                        format_token_amount(tokens_sold, token_info.decimals));
+                        format_token_amount(tokens_sold, token_info.decimals),
+                        elapsed_ms);
                 }
             }
             Err(e) => {
@@ -245,7 +250,8 @@ async fn main() -> Result<()> {
                 } else {
                     &error_msg[..error_msg.len().min(50)]
                 };
-                writeln!(log_file, "{} | - | - | - | - | FAILED | - | {}", block_number, short_error)?;
+                let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
+                writeln!(log_file, "{} | - | - | - | - | FAILED | - | {:.1} | {}", block_number, elapsed_ms, short_error)?;
             }
         }
         

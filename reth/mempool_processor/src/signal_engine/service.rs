@@ -14,7 +14,7 @@ use tracing::{error, info, debug};
 use serde_json;
 
 use crate::database::ScamPredictionWriter;
-use crate::pool_subscriber::cache::PoolStateCache;
+use crate::token_tracking::cache::PoolStateCache;
 use super::engine::{SignalEngine, SignalConfig};
 use super::types::{MarketEvent, SimulationResult, EventType, Severity};
 
@@ -128,18 +128,15 @@ impl SignalService {
     
     /// Process a simulated transaction, detect market events, and distribute them
     pub async fn process_transaction(&self, simulation: SimulationResult) -> Result<Vec<MarketEvent>, Box<dyn std::error::Error>> {
-        // Update transaction count
+        // Run the market event analysis first
+        let events = self.engine.analyze_transaction(simulation).await;
+        
+        // Update all statistics in a single lock acquisition
         {
             let mut stats = self.stats.lock().await;
             stats.transactions_analyzed += 1;
-        }
-        
-        // Run the market event analysis
-        let events = self.engine.analyze_transaction(simulation);
-        
-        // Update event counts by type
-        {
-            let mut stats = self.stats.lock().await;
+            
+            // Update event counts by type
             for event in &events {
                 *stats.events_by_type.entry(event.event_type).or_insert(0) += 1;
             }
@@ -152,34 +149,35 @@ impl SignalService {
             // Log to database (for all events)
             match self.log_event_to_db(&event).await {
                 Ok(_) => {
-                    let mut stats = self.stats.lock().await;
-                    stats.events_logged += 1;
+                    // We'll update stats in batch later
                 },
                 Err(e) => {
                     error!("Failed to log market event to database: {}", e);
-                    let mut stats = self.stats.lock().await;
-                    stats.db_errors += 1;
                 }
             }
             
             // Publish via ZMQ (for high-severity events)
             if event.severity >= Severity::High {
                 if let Some(ref publisher) = self.zmq_publisher {
-                    match self.publish_event(&event, publisher).await {
-                        Ok(_) => {
-                            let mut stats = self.stats.lock().await;
-                            stats.signals_published += 1;
-                        },
-                        Err(e) => {
-                            error!("Failed to publish market event via ZMQ: {}", e);
-                            let mut stats = self.stats.lock().await;
-                            stats.zmq_errors += 1;
-                        }
+                    if let Err(e) = self.publish_event(&event, publisher).await {
+                        error!("Failed to publish market event via ZMQ: {}", e);
                     }
                 }
             }
             
             processed_events.push(event);
+        }
+        
+        // Update statistics in batch after processing all events
+        if !processed_events.is_empty() {
+            let mut stats = self.stats.lock().await;
+            stats.events_logged += processed_events.len() as u64;
+            
+            // Count published events (high severity ones)
+            let published_count = processed_events.iter()
+                .filter(|e| e.severity >= Severity::High)
+                .count();
+            stats.signals_published += published_count as u64;
         }
         
         Ok(processed_events)
@@ -212,21 +210,26 @@ impl SignalService {
         Ok(())
     }
     
-    /// Publish a market event via ZMQ
+    /// Publish a market event via ZMQ with multipart format
     async fn publish_event(&self, event: &MarketEvent, publisher: &zmq::Socket) -> Result<(), Box<dyn std::error::Error>> {
         let message = serde_json::to_string(event)?;
-        publisher.send(&message, 0)?;
         
-        debug!("Published {} event for pool {}", 
-               match event.event_type {
-                   EventType::ScamAlert => "SCAM",
-                   EventType::LiquidityWarning => "LIQUIDITY",
-                   EventType::TokenSupplyAlert => "SUPPLY",
-                   EventType::VolumeSpike => "VOLUME",
-                   EventType::PriceImpact => "PRICE",
-                   EventType::LargeTrade => "TRADE",
-               },
-               event.pool_address);
+        // Determine topic based on event type
+        let topic = match event.event_type {
+            EventType::ScamAlert => "scam_alert",
+            EventType::LiquidityWarning => "liquidity_warning",
+            EventType::TokenSupplyAlert => "token_supply_alert",
+            EventType::VolumeSpike => "volume_spike",
+            EventType::PriceImpact => "price_impact",
+            EventType::LargeTrade => "large_trade",
+            EventType::TaxManipulation => "tax_manipulation",
+        };
+        
+        // Send as multipart message: [topic, json_data]
+        publisher.send_multipart(&[topic.as_bytes(), message.as_bytes()], 0)?;
+        
+        debug!("Published {} event for pool {} on topic {}", 
+               topic, event.pool_address, topic);
         
         Ok(())
     }
@@ -266,7 +269,7 @@ mod tests {
     use std::collections::HashMap;
     use ethers::types::H256;
     use crate::signal_engine::types::PoolEffect;
-    use crate::pool_subscriber::types::PoolUpdate;
+    use crate::token_tracking::types::PoolUpdate;
     
     // Helper to create a test pool cache with sample data
     fn create_test_pool_cache() -> Arc<PoolStateCache> {

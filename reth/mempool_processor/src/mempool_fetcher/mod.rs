@@ -19,8 +19,8 @@ pub mod full_transaction_ipc_client;
 
 // Re-export main types for convenience
 pub use types::*;
-pub use nonblocking_ipc_client::{NonBlockingIpcClient, NonBlockingTransaction};
+pub use nonblocking_ipc_client::{NonBlockingIpcClient, MempoolTransaction};
 pub use full_transaction_ipc_client::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
 
 // Re-export tx_simulator functionality 
-pub use crate::tx_simulator::*;
+// pub use crate::tx_simulator::*; // Temporarily disabled for migration

@@ -122,6 +122,12 @@ impl PoolStateCache {
         
         storage.len()
     }
+    
+    /// Check if an address is a known pool address
+    pub async fn is_pool_address(&self, address: &str) -> bool {
+        let storage = self.storage.read().await;
+        storage.contains_key(address)
+    }
 }
 
 /// Thread-safe cache for storing token creator information and risk metrics.
@@ -149,6 +155,12 @@ impl TokenCreatorCache {
             creator_storage: Arc::new(RwLock::new(HashMap::new())),
             max_creators: 50_000, // 50K creators max
         }
+    }
+    
+    /// Check if an address is a known creator
+    pub async fn is_creator(&self, address: &str) -> bool {
+        let storage = self.creator_storage.read().await;
+        storage.contains_key(address)
     }
     
     /// Update the cache with token creator information
@@ -390,6 +402,16 @@ impl TokenTrackingCache {
             uses_private_mempool,
             related_pools,
         }
+    }
+    
+    /// Update token tax information
+    /// This is a placeholder for now - in a real implementation this would update
+    /// the token's tax info in a persistent store or cache
+    pub async fn update_token_tax(&self, token_address: &str, buy_tax: Option<u8>, sell_tax: Option<u8>) {
+        // TODO: Implement actual storage of tax information
+        // For now, just log the update
+        info!("Tax update for token {}: Buy: {:?}%, Sell: {:?}%", 
+              token_address, buy_tax, sell_tax);
     }
 }
 

@@ -50,17 +50,6 @@ lazy_static! {
         Mutex::new(file)
     };
     
-    /// Creator actions log file
-    static ref CREATOR_ACTIONS_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("creator_actions.log");
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .expect("Failed to open creator actions log file");
-        
-        Mutex::new(file)
-    };
     
     
     /// Main signal detector log file
@@ -113,7 +102,6 @@ pub struct FunctionStats {
     pub liquidity_removals: u64,
     pub trading_enabled: u64,
     pub swaps: u64,
-    pub creator_actions: u64,
     pub other_functions: u64,
 }
 
@@ -132,23 +120,13 @@ pub struct SignalAlert {
     pub detection_latency_us: u64,
 }
 
-/// Transaction with detected function information
-#[derive(Debug, Clone)]
-pub struct TransactionWithFunctions {
-    pub tx: crate::mempool_fetcher::NonBlockingTransaction,
-    pub functions: Vec<String>,
-    pub has_liquidity_removal: bool,
-    pub has_trading_enabled: bool,
-    pub has_creator_action: bool,
-    pub creator_action_name: Option<String>,
-}
+
 
 /// Function detector that categorizes transactions by their function signatures
 pub struct FunctionDetector {
     liquidity_removal: LiquidityRemovalDetector,
     trading_enabled: TradingEnabledDetector,
     swap: SwapDetector,
-    creator_action: CreatorActionDetector,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
@@ -177,7 +155,6 @@ impl FunctionDetector {
             liquidity_removal: LiquidityRemovalDetector::new(),
             trading_enabled: TradingEnabledDetector::new(),
             swap: SwapDetector::new(),
-            creator_action: CreatorActionDetector::new(),
             token_cache,
         }
     }
@@ -192,7 +169,7 @@ impl FunctionDetector {
     }
     
     /// Detect function for a transaction and return the function name if interesting
-    pub fn detect_function(&self, tx: &crate::mempool_fetcher::NonBlockingTransaction) -> Option<String> {
+    pub fn detect_function(&self, tx: &crate::mempool_fetcher::MempoolTransaction) -> Option<String> {
         if tx.input.len() < 4 {
             return None;
         }
@@ -214,17 +191,13 @@ impl FunctionDetector {
             return Some(function_name.to_string());
         }
         
-        // Check creator actions
-        if let Some(function_name) = self.creator_action.detect(selector) {
-            return Some(function_name.to_string());
-        }
         
         None
     }
     
     
     /// Detect all function types in the transaction
-    pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::NonBlockingTransaction) {
+    pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::MempoolTransaction) {
         // Use pre-parsed fields directly
         if ipc_tx.input.is_empty() {
             return;
@@ -242,38 +215,49 @@ impl FunctionDetector {
     }
     
     /// Process batch of transactions and return with function information
-    pub fn detect_batch(&self, transactions: Vec<crate::mempool_fetcher::NonBlockingTransaction>) -> Vec<TransactionWithFunctions> {
-        transactions.into_iter().map(|tx| {
+    pub fn detect_batch(&self, mut transactions: Vec<crate::mempool_fetcher::MempoolTransaction>) -> Vec<crate::mempool_fetcher::MempoolTransaction> {
+        for tx in transactions.iter_mut() {
             let mut functions = Vec::new();
-            let mut has_liquidity_removal = false;
-            let mut has_trading_enabled = false;
-            let mut has_creator_action = false;
-            let mut creator_action_name = None;
             
             // Skip if no input data
             if tx.input.len() < 4 {
-                return TransactionWithFunctions {
-                    tx,
-                    functions,
-                    has_liquidity_removal,
-                    has_trading_enabled,
-                    has_creator_action,
-                    creator_action_name,
-                };
+                tx.functions = functions;
+                continue;
             }
             
             let selector = &tx.input[0..4];
             
+            // Check for approve function first - needs special handling for LP tokens
+            if selector == &hex_to_bytes("095ea7b3") {
+                // Check if this is an LP token approval
+                let to_address = tx.to.as_ref()
+                    .map(|addr| format!("0x{}", hex::encode(addr)))
+                    .unwrap_or_else(|| "contract_creation".to_string());
+                    
+                let is_lp_approval = if let Some(ref cache) = self.token_cache {
+                    let to_checksum = checksum_address(&to_address.trim_start_matches("0x"));
+                    tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            cache.pools.is_pool_address(&to_checksum).await
+                        })
+                    })
+                } else {
+                    false
+                };
+                
+                if is_lp_approval {
+                    functions.push("approve (LP Token)".to_string());
+                }
+            }
+            
             // Check liquidity removal
             if let Some(function_name) = self.liquidity_removal.detect(selector) {
                 functions.push(function_name.to_string());
-                has_liquidity_removal = true;
             }
             
             // Check trading enabled
             if let Some(function_name) = self.trading_enabled.detect(selector) {
                 functions.push(function_name.to_string());
-                has_trading_enabled = true;
             }
             
             // Check swaps
@@ -281,25 +265,14 @@ impl FunctionDetector {
                 functions.push(function_name.to_string());
             }
             
-            // Check creator actions
-            if let Some(function_name) = self.creator_action.detect(selector) {
-                functions.push(function_name.to_string());
-                has_creator_action = true;
-                creator_action_name = Some(function_name.to_string());
-            }
             
             // Still call the existing detection for logging and ZMQ publishing
             self.detect_from_ipc(&tx);
             
-            TransactionWithFunctions {
-                tx,
-                functions,
-                has_liquidity_removal,
-                has_trading_enabled,
-                has_creator_action,
-                creator_action_name,
-            }
-        }).collect()
+            tx.functions = functions;
+        }
+        
+        transactions
     }
     
     /// Internal function to detect all function types with extracted details
@@ -416,39 +389,58 @@ impl FunctionDetector {
             return;
         }
         
-        // Check creator actions - important for early warnings
-        if let Some(function_name) = self.creator_action.detect(selector_bytes) {
-            stats.creator_actions += 1;
-            info!("🚨 CREATOR ACTION: {} in tx {}", function_name, tx_hash);
-            
-            // Create signal alert
-            let selector_hex = hex::encode(selector_bytes);
-            let signal = SignalAlert {
-                alert_type: "creator_action".to_string(),
-                function_name: function_name.to_string(),
-                tx_hash: tx_hash.to_string(),
-                from_address: from.to_string(),
-                to_address: to.to_string(),
-                value: value.to_string(),
-                gas_price: gas_price.to_string(),
-                selector: selector_hex.clone(),
-                timestamp: timestamp.to_string(),
-                detection_latency_us: 0,
+        // Check for approve function first - needs special handling
+        if selector_bytes == &hex_to_bytes("095ea7b3") {
+            // This is an approve function - check if it's an LP token approval
+            let is_lp_approval = if let Some(ref cache) = self.token_cache {
+                let to_checksum = checksum_address(&to.trim_start_matches("0x"));
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        cache.pools.is_pool_address(&to_checksum).await
+                    })
+                })
+            } else {
+                false
             };
             
-            // Publish via ZMQ
-            self.publish_signal(&signal);
-            
-            // Log to creator actions file with pattern-friendly format
-            if let Ok(mut log_file) = CREATOR_ACTIONS_LOG.lock() {
-                let _ = writeln!(log_file, 
-                    "[{}] {} | {} | {} | {}", 
-                    timestamp, function_name, to, from, tx_hash
-                );
-                let _ = log_file.flush();
+            if is_lp_approval {
+                // This is an LP token approval - critical signal!
+                stats.liquidity_removals += 1; // Count as liquidity removal preparation
+                info!("🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}", tx_hash);
+                
+                // Create critical signal alert
+                let selector_hex = hex::encode(selector_bytes);
+                let signal = SignalAlert {
+                    alert_type: "lp_token_approval".to_string(),
+                    function_name: "approve (LP Token)".to_string(),
+                    tx_hash: tx_hash.to_string(),
+                    from_address: from.to_string(),
+                    to_address: to.to_string(),
+                    value: value.to_string(),
+                    gas_price: gas_price.to_string(),
+                    selector: selector_hex.clone(),
+                    timestamp: timestamp.to_string(),
+                    detection_latency_us: 0,
+                    };
+                
+                // Publish via ZMQ
+                self.publish_signal(&signal);
+                
+                // Log to liquidity removal file as preparation
+                if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
+                    let _ = writeln!(log_file, 
+                        "[{}] LP APPROVAL TX: {} | From: {} | LP Pair: {} | Value: {} | GasPrice: {} | Function: approve (LP Token) | Selector: {}", 
+                        timestamp, tx_hash, from, to, value, gas_price, selector_hex
+                    );
+                    let _ = log_file.flush();
+                }
+                return;
             }
+            // Regular token approval - just log as other function
+            stats.other_functions += 1;
             return;
         }
+        
         
         // All other functions - just count them
         stats.other_functions += 1;
@@ -504,7 +496,6 @@ impl FunctionDetector {
         info!("   Total transactions checked: {}", stats.total_checked);
         info!("   Liquidity removals: {}", stats.liquidity_removals);
         info!("   Trading enabled: {}", stats.trading_enabled);
-        info!("   Creator actions: {}", stats.creator_actions);
         info!("   Swaps: {}", stats.swaps);
         info!("   Other functions: {}", stats.other_functions);
     }
@@ -686,16 +677,11 @@ impl Clone for FunctionStats {
             liquidity_removals: self.liquidity_removals,
             trading_enabled: self.trading_enabled,
             swaps: self.swaps,
-            creator_actions: self.creator_actions,
             other_functions: self.other_functions,
         }
     }
 }
 
-/// Detector for creator/owner actions that could indicate rug pulls
-struct CreatorActionDetector {
-    signatures: HashMap<[u8; 4], &'static str>,
-}
 
 impl CreatorActionDetector {
     fn new() -> Self {
@@ -711,10 +697,26 @@ impl CreatorActionDetector {
         signatures.insert(hex_to_bytes("dd62ed3e"), "setBuyFee");
         signatures.insert(hex_to_bytes("f2cc0c18"), "setTaxFeePercent");
         
+        // Critical tax setting functions for honeypot detection
+        signatures.insert(hex_to_bytes("032dc6a2"), "setTaxes"); // Sets both buy/sell taxes - HIGH PRIORITY
+        signatures.insert(hex_to_bytes("658d4581"), "setTax");
+        signatures.insert(hex_to_bytes("ea1644d5"), "setMaxTaxPercent");
+        signatures.insert(hex_to_bytes("2f2ff15d"), "setBuyTax");
+        signatures.insert(hex_to_bytes("6d4e21f5"), "setSellTax");
+        signatures.insert(hex_to_bytes("66cfee39"), "updateFees");
+        signatures.insert(hex_to_bytes("770d5c38"), "changeFees");
+        signatures.insert(hex_to_bytes("083c6323"), "setFees");
+        signatures.insert(hex_to_bytes("9d0014b1"), "setBuyAndSellTax");
+        signatures.insert(hex_to_bytes("c024666f"), "excludeFromFees");
+        signatures.insert(hex_to_bytes("b697f531"), "setTransactionFee");
+        
         // Liquidity removal (some overlap with liquidity detector but from owner perspective)
         signatures.insert(hex_to_bytes("e9fad8ee"), "removeLiquidity");
         signatures.insert(hex_to_bytes("02751cec"), "removeLiquidityETH");
         signatures.insert(hex_to_bytes("baa2abde"), "removeLiquidity");
+        
+        // Note: approve(0x095ea7b3) is NOT added here because it needs special handling
+        // to distinguish LP token approvals from regular token approvals
         
         // Trading control functions
         signatures.insert(hex_to_bytes("8456cb59"), "pause");
