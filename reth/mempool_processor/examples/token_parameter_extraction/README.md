@@ -1,35 +1,63 @@
-# Tax Calculation Examples
+# Token Parameter Extraction Examples
 
-This directory contains examples demonstrating how to calculate token taxes using transaction simulation and state change analysis.
+This directory contains examples for analyzing token parameters, particularly buy/sell taxes and honeypot detection using the mempool processor's simulation capabilities.
 
-## Overview
+## Examples Overview
 
-These examples demonstrate tax calculation using transaction simulation and state change analysis. This approach works by simulating actual transactions and measuring where tokens/ETH flow.
+### 1. analyze_token_with_detectors.rs
 
-### Key Innovation
+**Purpose**: Comprehensive token analysis using signal detectors. Simulates buy/sell sequences and runs various detectors to identify token characteristics and potential risks.
 
-Our simulation-based approach:
-1. Simulates swap transactions (buy/sell)
-2. Tracks actual token and ETH movements via state changes
-3. Calculates tax as: `Tax% = (1 - amount_received / amount_sent_by_pool) × 100`
-
-This method works with ANY tax implementation because it measures actual economic impact.
-
-## Tax Calculation Example
-
-The tax analysis example is located in the `tax/` subdirectory:
-
-- `tax/analyze_tax_for_block_range.rs` - Analyzes buy/sell taxes for any token across a range of blocks
-
-### Usage
-
+**Usage**:
 ```bash
-# Generic analyzer for any token
-cargo run --example analyze_tax_for_block_range <token_address> <pool_address> <start_block> [end_block]
+cargo run --example analyze_token_with_detectors -- <token_address> <pool_address> [block_number]
+```
+
+**Inputs**:
+- `token_address`: The token contract address to analyze
+- `pool_address`: The liquidity pool address for the token
+- `block_number` (optional): Specific block to analyze at (defaults to latest)
+
+**Outputs**:
+- Log file at `/home/nima/code/crypto/logs/mempool/dev/token_parameter_extraction/token_analysis_[token]_[timestamp].log`
+- Console output showing progress and key findings
+
+**What it analyzes**:
+1. **Token Information**: Name, symbol, decimals, total supply
+2. **Buy/Sell Simulation**: 
+   - Simulates buying tokens with 0.1 ETH
+   - Attempts to sell tokens back
+   - Calculates actual taxes from state changes
+3. **Signal Detection**:
+   - Trading status (enabled/restricted)
+   - Honeypot detection (can't sell after buying)
+   - Buy/sell tax thresholds
+4. **State Change Analysis**:
+   - Detailed ETH and token movements
+   - Gas usage for each transaction
+   - Revert reasons if transactions fail
+
+### 2. analyze_tax_for_block_range.rs
+
+**Purpose**: Analyzes how a token's buy/sell taxes change over a range of blocks. Useful for tracking tax modifications over time.
+
+**Usage**:
+```bash
+cargo run --example analyze_tax_for_block_range -- <token_address> <pool_address> <start_block> <end_block>
 
 # Example usage:
-cargo run --example analyze_tax_for_block_range 0x354ee0074cd5538a1dd1fda7a13e517e11b02699 0xa1eb81db04d93b210ba934a31d794eea76007b20 23002159 23002359
+cargo run --example analyze_tax_for_block_range -- 0x354ee0074cd5538a1dd1fda7a13e517e11b02699 0xa1eb81db04d93b210ba934a31d794eea76007b20 23002159 23002359
 ```
+
+**Inputs**:
+- `token_address`: The token contract address
+- `pool_address`: The liquidity pool address
+- `start_block`: First block to analyze
+- `end_block`: Last block to analyze
+
+**Outputs**:
+- Log file at `/home/nima/code/crypto/logs/mempool/dev/token_parameter_extraction/token_tax_[token]_[timestamp].log`
+- Console output showing progress for each block
 
 ## How It Works
 

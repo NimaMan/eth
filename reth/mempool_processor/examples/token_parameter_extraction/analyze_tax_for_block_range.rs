@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     println!("Blocks: {} to {}\n", start_block, end_block);
     
     // Create log directory
-    let log_dir = "/home/nima/code/crypto/logs/test";
+    let log_dir = "/home/nima/code/crypto/logs/mempool/dev/token_parameter_extraction";
     create_dir_all(log_dir)?;
     
     // Create log file with timestamp

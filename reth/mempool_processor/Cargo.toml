@@ -254,7 +254,7 @@ path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
 
 [[example]]
 name = "analyze_tax_for_block_range"
-path = "examples/token_parameter_extraction/tax/analyze_tax_for_block_range.rs"
+path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
 [[example]]
 name = "analyze_token_with_detectors"
 path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
