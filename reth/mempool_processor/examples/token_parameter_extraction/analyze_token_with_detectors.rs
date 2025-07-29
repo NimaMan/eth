@@ -8,11 +8,11 @@
 ///
 /// Usage: cargo run --example analyze_token_with_detectors -- <token_address> <pool_address> [block_number]
 
-use mempool_processor::signal_engine::simulator::{
+use mempool_processor::simulator::{
     SequentialBuySellSimulator,
     BuySellSimulatorConfig,
 };
-use mempool_processor::signal_engine::signal_detector::{
+use mempool_processor::signal_detector::{
     TradingStatusDetector,
     HoneypotDetector,
 };
