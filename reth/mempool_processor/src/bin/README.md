@@ -143,7 +143,6 @@ pub struct ClassificationResult {
 **Categories**:
 - `ContractCreation`: New deployments with deployer and contract address
 - `CreatorTransaction`: From known token creators with target analysis  
-- `DexInteraction`: DEX operations (Uniswap, Sushiswap) with action type
 - `Regular`: Standard transfers and approvals
 
 **Priority Assignment**:
@@ -152,7 +151,27 @@ pub struct ClassificationResult {
 - `Normal`: DEX interactions, regular contract calls
 - `Low`: Simple transfers and standard operations
 
-### 4. Signal Processing Coordination
+### 4. Main Loop Architecture
+
+The main processing loop implements an asynchronous queue-based design that separates fast transaction reception from slower simulation processing. This architecture ensures the IPC client maintains sub-millisecond latency while critical transactions receive immediate simulation.
+
+**Queue-Based Processing Flow**:
+- Main loop receives transactions from IPC and routes them
+- Contract Creation and Creator Actions are queued for simulation
+- Separate async task processes the simulation queue by priority
+- Main loop continues without blocking on simulation
+- Signals are detected and published after simulation completes
+
+**Priority System**:
+- Critical priority transactions (tax changes, trading controls) are simulated within milliseconds
+- High priority transactions (liquidity changes, token deployments) are processed quickly
+- Normal priority transactions are batched for efficiency
+- Low priority transactions are dropped when queue is full
+
+**Focused Scope**: 
+The system currently processes only Contract Creation and Creator Action transactions. DEX interactions and regular transfers are filtered out early to focus computational resources on high-value signals. This design decision simplifies the pipeline while capturing the most important events for scam detection.
+
+### 5. Signal Processing Coordination
 
 The `SignalProcessor` coordinates the entire detection pipeline:
 
@@ -218,6 +237,19 @@ impl SignalProcessor {
 - **Publishing**: Coordinates output to all channels
 
 ### 5. Simulation Processing
+
+The simulation system uses a priority queue and batch processing to efficiently handle high-value transactions. The `SimulatorProcessor` runs as a separate async task, pulling transactions from the queue and processing them in priority order.
+
+**Queue Management**:
+- Maximum queue size of 10,000 transactions prevents memory issues
+- Critical priority transactions bypass normal batching for immediate processing
+- Transactions are grouped into batches of up to 50 for efficiency
+- Queue automatically drops low priority transactions when full
+
+**Simulation Types**:
+- Contract Creation simulations extract token parameters and check initial state
+- Creator Action simulations test the effects of function calls (tax changes, trading controls)
+- Buy/Sell testing validates that tokens remain tradeable after changes
 
 The `BuySellSimulator` executes transactions against current blockchain state:
 

@@ -1,6 +1,6 @@
-// signal_engine/types.rs
+// signal_generator/types.rs
 //
-// Type definitions for market signal detection and signal engine.
+// Type definitions for market signals and signal generation.
 
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};

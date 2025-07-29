@@ -2,7 +2,7 @@
 /// 
 /// Detects honeypot tokens using buy/sell simulation results
 
-use crate::signal_engine::simulator::{BuySellResult, simulation_orchestrator::SimulationResult};
+use crate::simulator::{BuySellResult, SimulationResult};
 use tracing::{info, debug};
 
 #[derive(Debug, Clone)]
@@ -50,11 +50,8 @@ impl HoneypotDetector {
         
         // Extract token address from request
         let token_address = match &sim_result.request.category {
-            crate::signal_engine::tx_router::TransactionCategory::CreatorTransaction { target_token, .. } => {
+            crate::tx_router::TransactionCategory::CreatorTransaction { target_token, .. } => {
                 target_token.as_ref()?.clone()
-            }
-            crate::signal_engine::tx_router::TransactionCategory::DexInteraction { token_address, .. } => {
-                token_address.as_ref()?.clone()
             }
             _ => return None,
         };

@@ -8,7 +8,7 @@
 /// 3. Calculate taxes from actual token/ETH movements
 
 use eyre::Result;
-use alloy_primitives::{Address, U256, Bytes};
+use alloy_primitives::{Address, U256, I256, Bytes};
 use reth_tx_simulator::{RethTxSimulator, CallRequest, state_change_calculator::AddressStateChange, SequentialSimulationOptions};
 use std::collections::HashMap;
 
@@ -111,9 +111,9 @@ impl TaxCalculator {
         if let Some(buyer_changes) = buy_result.state_changes.get(&buyer_address) {
             for (token_key, amount) in &buyer_changes.token_net {
                 let token_addr_str = format!("{:#x}", token_info.address);
-                if token_key == &token_addr_str && *amount > U256::ZERO {
-                    // Use the amount directly - no conversion needed
-                    tokens_received = *amount;
+                if token_key == &token_addr_str && *amount > I256::ZERO {
+                    // Convert I256 to U256 (positive value)
+                    tokens_received = amount.unsigned_abs();
                     break;
                 }
             }
@@ -227,7 +227,7 @@ impl TaxCalculator {
                 for (addr, name) in addresses_to_check {
                     if let Some(changes) = buy_tx.state_changes.get(&addr) {
                         println!("      {} ({:#x}):", name, addr);
-                        if changes.eth_net != U256::ZERO {
+                        if !changes.eth_net.is_zero() {
                             let eth_f64 = changes.eth_net.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
                             println!("        ETH: {:+.6}", eth_f64);
                         }
@@ -308,7 +308,7 @@ impl TaxCalculator {
                 // The key format is the token address in hex format (0x...)
                 let token_addr_str = format!("{:#x}", token_address);
                 if token_key == &token_addr_str {
-                    if *amount > U256::ZERO {
+                    if *amount > I256::ZERO {
                         // Now we have the EXACT U256 amount - no conversion needed!
                         println!("      🔍 Found token balance change: {} (exact U256)", amount);
                         println!("      🔍 Token key: {}", token_key);
@@ -316,7 +316,7 @@ impl TaxCalculator {
                         
                         // Use the amount directly - no conversion needed
                         println!("      Using EXACT amount: {}", amount);
-                        return Some(*amount);
+                        return Some(amount.unsigned_abs());
                     }
                 }
             }

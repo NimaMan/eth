@@ -9,7 +9,7 @@ use mempool_processor::mempool_fetcher::{
 use reth_tx_simulator::{RethTxSimulator, ipc_to_call_request};
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
-use alloy_primitives::U256;
+use alloy_primitives::{U256, I256};
 use eyre::Result;
 use tracing::{info, error, debug};
 use std::time::{Duration, Instant};
@@ -137,7 +137,7 @@ fn analyze_detailed_state_changes(result: &reth_tx_simulator::DetailedSimulation
     for (i, (addr, changes)) in result.state_changes.iter().enumerate() {
         if i < 3 {
             println!("\n  📍 Address {}: 0x{:x}", i + 1, addr);
-            println!("     ETH change: {:.6} ETH", changes.eth_net);
+            println!("     ETH change: {} ETH", changes.eth_net);
             
             if !changes.token_net.is_empty() {
                 println!("     Token changes: {}", changes.token_net.len());
@@ -159,7 +159,7 @@ fn analyze_detailed_state_changes(result: &reth_tx_simulator::DetailedSimulation
     
     // Summary statistics
     let total_eth_moved: U256 = result.state_changes.values()
-        .map(|changes| changes.eth_net)
+        .map(|changes| changes.eth_net.unsigned_abs())
         .sum();
     let total_tokens_affected: usize = result.state_changes.values()
         .map(|changes| changes.token_net.len())

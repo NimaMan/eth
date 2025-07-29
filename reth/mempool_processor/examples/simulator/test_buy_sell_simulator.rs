@@ -6,12 +6,12 @@
 /// 
 /// It prints the raw state changes from buy and sell transactions
 
-use mempool_processor::signal_engine::simulator::{
+use mempool_processor::simulator::{
     SequentialBuySellSimulator,
     BuySellSimulatorConfig,
 };
 use mempool_processor::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, U256, I256};
 use std::str::FromStr;
 use eyre::Result;
 
@@ -45,24 +45,22 @@ fn print_state_changes(state_changes: &std::collections::HashMap<Address, reth_t
         println!("   Address: {}", address);
         
         // ETH changes
-        if changes.eth_net != U256::ZERO {
-            let sign = if changes.eth_net > U256::from(i128::MAX) { "-" } else { "+" };
-            let amount = if changes.eth_net > U256::from(i128::MAX) {
-                U256::MAX - changes.eth_net + U256::from(1)
+        if changes.eth_net != I256::ZERO {
+            let (sign, amount) = if changes.eth_net.is_negative() {
+                ("-", changes.eth_net.unsigned_abs())
             } else {
-                changes.eth_net
+                ("+", changes.eth_net.unsigned_abs())
             };
             println!("     ETH: {}{} ETH", sign, format_token_amount(amount, 18));
         }
         
         // Token changes
         for (token_addr, token_change) in &changes.token_net {
-            if *token_change != U256::ZERO {
-                let sign = if *token_change > U256::from(i128::MAX) { "-" } else { "+" };
-                let amount = if *token_change > U256::from(i128::MAX) {
-                    U256::MAX - *token_change + U256::from(1)
+            if *token_change != I256::ZERO {
+                let (sign, amount) = if token_change.is_negative() {
+                    ("-", token_change.unsigned_abs())
                 } else {
-                    *token_change
+                    ("+", token_change.unsigned_abs())
                 };
                 println!("     Token {}: {}{}", token_addr, sign, amount);
             }

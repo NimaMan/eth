@@ -7,7 +7,7 @@
 /// - Buy Tax: (1 - tokens_received_by_buyer / tokens_sent_by_pool) × 100
 /// - Sell Tax: (1 - eth_received_by_seller / eth_sent_by_pool) × 100
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, U256, I256};
 use reth_tx_simulator::AddressStateChange;
 use std::collections::HashMap;
 
@@ -45,28 +45,29 @@ pub fn calculate_buy_tax(
     // Get tokens sent by pool (negative value in token_net)
     let pool_token_change = pool_changes.token_net.get(&token_addr_str)?;
     
-    // Pool loses tokens, so the value should be negative or zero
+    // Pool loses tokens, so the value should be negative
     // We need the absolute value
-    let tokens_from_pool = if *pool_token_change > U256::ZERO {
+    let tokens_from_pool = if *pool_token_change >= I256::ZERO {
         // This shouldn't happen in a normal buy, pool should lose tokens
         return None;
     } else {
-        // Negate the negative value to get positive amount
-        U256::ZERO - *pool_token_change
+        // Convert negative to positive by subtracting from zero
+        pool_token_change.wrapping_neg()
     };
     
     // Get tokens received by buyer (positive value in token_net)
     let tokens_to_buyer = buyer_changes.token_net.get(&token_addr_str)?;
     
     // Buyer should receive tokens (positive value)
-    if *tokens_to_buyer == U256::ZERO {
+    if tokens_to_buyer.is_zero() {
         return None;
     }
     
     // Calculate tax percentage
     // Convert to f64 for percentage calculation
+    // tokens_from_pool is already U256, tokens_to_buyer is I256
     let from_pool_f64 = tokens_from_pool.to_string().parse::<f64>().unwrap_or(0.0);
-    let to_buyer_f64 = tokens_to_buyer.to_string().parse::<f64>().unwrap_or(0.0);
+    let to_buyer_f64 = tokens_to_buyer.unsigned_abs().to_string().parse::<f64>().unwrap_or(0.0);
     
     if from_pool_f64 > 0.0 {
         let tax_percent = (1.0 - (to_buyer_f64 / from_pool_f64)) * 100.0;
@@ -107,26 +108,27 @@ pub fn calculate_sell_tax(
     
     // Pool loses ETH, so the value should be negative
     // We need the absolute value
-    let eth_from_pool = if pool_eth_change > U256::ZERO {
+    let eth_from_pool = if pool_eth_change >= I256::ZERO {
         // This shouldn't happen in a normal sell, pool should lose ETH
         return None;
     } else {
-        // Negate the negative value to get positive amount
-        U256::ZERO - pool_eth_change
+        // Convert negative to positive by subtracting from zero
+        pool_eth_change.wrapping_neg()
     };
     
     // Get ETH received by seller (positive value in eth_net)
     let eth_to_seller = seller_changes.eth_net;
     
     // Seller should receive ETH (positive value)
-    if eth_to_seller == U256::ZERO {
+    if eth_to_seller.is_zero() {
         return None;
     }
     
     // Calculate tax percentage
     // Convert to f64 for percentage calculation
+    // eth_from_pool is already U256, eth_to_seller is I256
     let from_pool_f64 = eth_from_pool.to_string().parse::<f64>().unwrap_or(0.0);
-    let to_seller_f64 = eth_to_seller.to_string().parse::<f64>().unwrap_or(0.0);
+    let to_seller_f64 = eth_to_seller.unsigned_abs().to_string().parse::<f64>().unwrap_or(0.0);
     
     if from_pool_f64 > 0.0 {
         let tax_percent = (1.0 - (to_seller_f64 / from_pool_f64)) * 100.0;

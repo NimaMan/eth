@@ -161,28 +161,25 @@ path = "examples/mempool_fetcher/function_detector_example.rs"
 
 [[example]]
 name = "tx_router_example"
-path = "examples/signal_engine/tx_router/tx_router_example.rs"
+path = "examples/tx_router/tx_router_example.rs"
 
 # Reth Simulation Examples
 [[example]]
 name = "basic_mempool_simulation"
-path = "examples/signal_engine/simulator/basic_mempool_simulation.rs"
+path = "examples/simulator/basic_mempool_simulation.rs"
 
 [[example]]
 name = "state_change_extraction"
-path = "examples/signal_engine/simulator/state_change_extraction.rs"
+path = "examples/simulator/state_change_extraction.rs"
 
 [[example]]
-name = "benchmark_1k_mempool"
-path = "examples/signal_engine/simulator/benchmark_1k_mempool.rs"
+name = "benchmark_direct_reth_simulation"
+path = "examples/simulator/benchmark_direct_reth_simulation.rs"
 
 [[example]]
 name = "test_buy_sell_simulator"
-path = "examples/signal_engine/simulator/test_buy_sell_simulator.rs"
+path = "examples/simulator/test_buy_sell_simulator.rs"
 
-[[example]]
-name = "signal_detector_with_simulation"
-path = "examples/signal_engine/simulator/signal_detector_with_simulation.rs"
 
 # TxSimulator Examples
 [[example]]
@@ -258,6 +255,9 @@ path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
 [[example]]
 name = "analyze_tax_for_block_range"
 path = "examples/token_parameter_extraction/tax/analyze_tax_for_block_range.rs"
+[[example]]
+name = "analyze_token_with_detectors"
+path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
 
 
 # Using crates.io versions - no patches needed

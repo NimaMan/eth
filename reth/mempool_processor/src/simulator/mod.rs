@@ -1,16 +1,14 @@
-/// Simulation Orchestrator Module
+/// Simulation Manager Module
 /// 
 /// Manages transaction simulations with priority queuing and result caching
 
-pub mod simulation_orchestrator;
+pub mod simulation_manager;
 pub mod simulation_queue;
 pub mod buy_sell_sequence_simulator;
-pub mod batch_processor;
 pub mod tx_simulator;
-pub mod simulator_processor;
 
-pub use simulation_orchestrator::{
-    SimulationOrchestrator,
+pub use simulation_manager::{
+    SimulationManager,
     SimulationRequest,
     SimulationType,
     SimulationResult,
@@ -24,7 +22,6 @@ pub use buy_sell_sequence_simulator::{
     TransactionSimulationResult,
     BuySellSimulatorConfig,
 };
-pub use batch_processor::BatchProcessor;
 pub use tx_simulator::{
     TxSimulator,
     SimulationResult as TxSimulationResult,
@@ -32,4 +29,3 @@ pub use tx_simulator::{
     CallTraceResult,
     mempool_tx_to_call_request,
 };
-pub use simulator_processor::{SimulatorProcessor, SimulatorProcessorConfig};

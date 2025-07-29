@@ -9,7 +9,7 @@ use tokio::signal;
 
 // Mempool processor imports
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
-use mempool_processor::signal_engine::FunctionDetector;
+use mempool_processor::function_detector::FunctionDetector;
 use mempool_processor::token_tracking::TokenTrackingSubscriber;
 
 #[derive(Parser, Debug)]

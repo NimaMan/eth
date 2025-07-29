@@ -39,8 +39,8 @@ async fn main() -> Result<()> {
     info!("✅ Mempool monitoring started\n");
 
     // Create log file
-    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool_debug")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool_debug/basic_sim_1k_{}.log", 
+    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool/dev")?;
+    let log_path = format!("/home/nima/code/crypto/logs/mempool/dev/basic_sim_1k_{}.log", 
         Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)

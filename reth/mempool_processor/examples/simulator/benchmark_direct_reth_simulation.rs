@@ -1,7 +1,8 @@
-/// Benchmark 1000 Mempool Transactions with Direct Reth
+/// Benchmark Direct Reth Simulation Performance
 /// 
 /// This example demonstrates the high-throughput capability of Direct Reth
-/// by processing 1000 mempool transactions and measuring performance.
+/// by processing mempool transactions and measuring simulation performance.
+/// Compares Direct Reth (local DB access) vs traditional RPC methods.
 
 use mempool_processor::mempool_fetcher::{
     full_transaction_ipc_client::FullTransactionIpcClient,
@@ -15,34 +16,66 @@ use std::time::{Duration, Instant};
 use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::Local;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Number of transactions to process
+    #[arg(short, long, default_value = "1000")]
+    count: usize,
+    
+    /// Batch size for fetching transactions
+    #[arg(short, long, default_value = "50")]
+    batch_size: usize,
+    
+    /// Path to Reth database
+    #[arg(long, default_value = "/home/nima/.local/share/reth/mainnet")]
+    reth_db: String,
+    
+    /// IPC socket path
+    #[arg(long, default_value = "/tmp/reth.ipc")]
+    ipc_path: String,
+    
+    /// RPC endpoint for fetching raw transactions
+    #[arg(long, default_value = "http://127.0.0.1:8545")]
+    rpc_url: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+    
     tracing_subscriber::fmt()
         .with_env_filter("info")
         .init();
 
-    println!("\n🚀 Benchmark: 1000 Mempool Transactions");
-    println!("======================================\n");
+    println!("\n🚀 Direct Reth Simulation Benchmark");
+    println!("====================================");
+    println!("Target: {} transactions", args.count);
+    println!("Batch size: {}", args.batch_size);
+    println!("Reth DB: {}", args.reth_db);
+    println!("\n");
 
     // Initialize
     let start = Instant::now();
-    let simulator = RethTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
-    let mempool_client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let simulator = RethTxSimulator::new(&args.reth_db)?;
+    let mempool_client = FullTransactionIpcClient::new(Some(&args.ipc_path))?;
     mempool_client.start_monitoring().await?;
     info!("✅ Initialized in {:?}\n", start.elapsed());
 
     // Create benchmark log
-    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool/benchmark_1k_{}.log", 
-        Local::now().format("%Y%m%d_%H%M%S"));
+    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool/dev")?;
+    let log_path = format!("/home/nima/code/crypto/logs/mempool/dev/benchmark_direct_reth_{}tx_{}.log", 
+        args.count, Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&log_path)?;
     
-    writeln!(log_file, "1000 Transaction Benchmark")?;
+    writeln!(log_file, "Direct Reth Simulation Benchmark")?;
+    writeln!(log_file, "Target transactions: {}", args.count)?;
     writeln!(log_file, "Started: {}", Local::now())?;
     writeln!(log_file, "========================\n")?;
 
@@ -65,9 +98,9 @@ async fn main() -> Result<()> {
         reverted: 0,
     };
 
-    let target = 1000;
+    let target = args.count;
     let mut processed = 0;
-    let batch_size = 50;
+    let batch_size = args.batch_size;
     let overall_start = Instant::now();
 
     println!("📊 Processing {} transactions in batches of {}...\n", target, batch_size);
@@ -88,7 +121,7 @@ async fn main() -> Result<()> {
             stats.detection_times.push(tx.latency_ns);
 
             // Get raw transaction
-            let raw_tx = match get_raw_tx(&tx.hash).await {
+            let raw_tx = match get_raw_tx(&tx.hash, &args.rpc_url).await {
                 Ok(raw) => raw,
                 Err(_) => {
                     stats.failed += 1;
@@ -190,7 +223,7 @@ async fn main() -> Result<()> {
         }
 
         // Write summary to log
-        writeln!(log_file, "\n=== FINAL RESULTS ===")?;
+            writeln!(log_file, "\n=== FINAL RESULTS ===")?;
         writeln!(log_file, "Total transactions: {}", processed)?;
         writeln!(log_file, "Total time: {:?}", overall_time)?;
         writeln!(log_file, "Overall throughput: {:.0} tx/sec", processed as f64 / overall_time.as_secs_f64())?;
@@ -217,13 +250,13 @@ fn decode_transaction(raw_tx: &str) -> Result<TransactionSigned> {
     Ok(TransactionSigned::decode(&mut raw_bytes.as_slice())?)
 }
 
-async fn get_raw_tx(hash: &str) -> Result<String> {
+async fn get_raw_tx(hash: &str, rpc_url: &str) -> Result<String> {
     use jsonrpsee::http_client::{HttpClientBuilder, HttpClient};
     use jsonrpsee::core::client::ClientT;
     use jsonrpsee::rpc_params;
     
     let client: HttpClient = HttpClientBuilder::default()
-        .build("http://127.0.0.1:8545")?;
+        .build(rpc_url)?;
     
     let raw_tx: String = client.request(
         "eth_getRawTransactionByHash",

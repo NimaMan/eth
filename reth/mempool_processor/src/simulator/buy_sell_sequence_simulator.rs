@@ -16,7 +16,7 @@ use eyre::Result;
 use std::time::Instant;
 use std::sync::Arc;
 use std::collections::HashMap;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, U256, I256};
 use reth_tx_simulator::{RethTxSimulator, CallRequest, AddressStateChange};
 use reth_tx_simulator::SequentialSimulationOptions;
 
@@ -114,6 +114,11 @@ impl SequentialBuySellSimulator {
         self.token_cache = Some(cache);
     }
     
+    /// Get the buyer address used for simulations
+    pub fn get_buyer_address(&self) -> Address {
+        self.config.buyer_address
+    }
+    
     /// Simulate a buy/sell sequence for a token
     /// Returns raw simulation results with state changes
     pub async fn simulate_sequence(
@@ -187,14 +192,20 @@ impl SequentialBuySellSimulator {
                 let token_addr_str = format!("{:#x}", token_address);
                 changes.token_net.get(&token_addr_str).copied()
             })
-            .unwrap_or(U256::ZERO);
+            .unwrap_or(I256::ZERO);
         
-        if tokens_received == U256::ZERO {
+        if tokens_received.is_zero() {
             return Err(eyre::eyre!("No tokens received from buy transaction"));
         }
         
         // Build approve transaction
-        let approve_calldata = self.encode_approve(self.config.router_address, tokens_received);
+        // Convert I256 to U256 for approve - tokens received should be positive
+        let tokens_received_u256 = if tokens_received >= I256::ZERO {
+            tokens_received.unsigned_abs()
+        } else {
+            return Err(eyre::eyre!("Negative tokens received, this should not happen"));
+        };
+        let approve_calldata = self.encode_approve(self.config.router_address, tokens_received_u256);
         let approve_request = CallRequest {
             from: Some(self.config.buyer_address),
             to: Some(token_address),
@@ -209,7 +220,7 @@ impl SequentialBuySellSimulator {
         
         // Build sell transaction
         let sell_calldata = self.encode_swap_exact_tokens_for_eth(
-            tokens_received,
+            tokens_received_u256,
             U256::ZERO, // min ETH out
             vec![token_address, self.config.weth_address],
             self.config.buyer_address,

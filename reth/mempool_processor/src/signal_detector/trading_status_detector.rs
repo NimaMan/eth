@@ -2,8 +2,8 @@
 /// 
 /// Detects changes in token trading status (enabled/disabled)
 
-use crate::signal_engine::simulator::{BuySellResult, simulation_orchestrator::SimulationResult};
-use crate::signal_engine::tx_router::CreatorFunctionType;
+use crate::simulator::{BuySellResult, SimulationResult};
+use crate::tx_router::CreatorFunctionType;
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ impl TradingStatusDetector {
     pub fn detect(&self, sim_result: &SimulationResult) -> Option<TradingStatusSignal> {
         // Check if this is a trading control function
         let (executor, function_type, target_token) = match &sim_result.request.category {
-            crate::signal_engine::tx_router::TransactionCategory::CreatorTransaction { 
+            crate::tx_router::TransactionCategory::CreatorTransaction { 
                 creator, 
                 function_type, 
                 target_token,

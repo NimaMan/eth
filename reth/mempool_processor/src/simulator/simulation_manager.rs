@@ -1,13 +1,14 @@
-/// Simulation Orchestrator
+/// Simulation Manager
 /// 
-/// Coordinates transaction simulations based on priority and type
+/// Manages transaction simulations based on priority and type
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, debug, warn, error};
-use ethers::types::{Transaction, H256};
+use tracing::{info, debug, warn};
+use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
-use crate::signal_engine::tx_router::{TransactionCategory, SimulationPriority};
+use crate::tx_router::{TransactionCategory, SimulationPriority};
+use crate::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
 use super::{SimulationQueue, SequentialBuySellSimulator};
 use super::tx_simulator::TxSimulator;
 use std::collections::HashMap;
@@ -72,8 +73,8 @@ pub struct StateChange {
     pub token_changes: HashMap<String, f64>,
 }
 
-/// Orchestrator for managing simulations
-pub struct SimulationOrchestrator {
+/// Manager for transaction simulations
+pub struct SimulationManager {
     tx_simulator: Arc<TxSimulator>,
     buy_sell_simulator: Arc<SequentialBuySellSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
@@ -83,11 +84,11 @@ pub struct SimulationOrchestrator {
     enable_caching: bool,
     
     // Statistics
-    stats: Arc<Mutex<OrchestratorStats>>,
+    stats: Arc<Mutex<ManagerStats>>,
 }
 
 #[derive(Debug, Default, Clone)]
-struct OrchestratorStats {
+struct ManagerStats {
     total_requests: u64,
     successful_simulations: u64,
     failed_simulations: u64,
@@ -96,8 +97,8 @@ struct OrchestratorStats {
     avg_simulation_time_ms: f64,
 }
 
-impl SimulationOrchestrator {
-    /// Create new simulation orchestrator
+impl SimulationManager {
+    /// Create new simulation manager
     pub fn new(
         tx_simulator: Arc<TxSimulator>,
         buy_sell_simulator: Arc<SequentialBuySellSimulator>,
@@ -109,7 +110,7 @@ impl SimulationOrchestrator {
             queue: Arc::new(Mutex::new(SimulationQueue::new())),
             max_concurrent_simulations: max_concurrent,
             enable_caching: true,
-            stats: Arc::new(Mutex::new(OrchestratorStats::default())),
+            stats: Arc::new(Mutex::new(ManagerStats::default())),
         }
     }
 
@@ -236,34 +237,119 @@ impl SimulationOrchestrator {
     /// Simulate buy/sell sequence
     async fn simulate_buy_sell(&self, request: &SimulationRequest) -> Result<BuySellResult, String> {
         // Extract token address from category
-        let token_address = match &request.category {
-            TransactionCategory::CreatorTransaction { target_token, .. } => {
-                target_token.as_ref().ok_or("No token address")?
+        let (token_address_str, pool_address) = match &request.category {
+            TransactionCategory::CreatorTransaction { target_token, target_address, .. } => {
+                let token_addr = target_token.as_ref().ok_or("No token address")?;
+                // For creator transactions, the target might be the pool or the token
+                // We need to find the pool address from our token cache
+                (token_addr.clone(), target_address.clone())
             }
-            TransactionCategory::DexInteraction { token_address, .. } => {
-                token_address.as_ref().ok_or("No token address")?
+            TransactionCategory::ContractCreation { contract_address, .. } => {
+                // For new contracts, we might not have a pool yet
+                return Err("Cannot simulate buy/sell for contract creation without pool".to_string());
             }
-            _ => return Err("Category doesn't have token address".to_string()),
+            _ => return Err("Category doesn't support buy/sell simulation".to_string()),
         };
 
-        // Run buy/sell simulation
-        info!("Running buy/sell simulation for token {}", token_address);
+        info!("Running buy/sell simulation for token {}", token_address_str);
         
-        // TODO: integrate with actual SequentialBuySellSimulator
-        Ok(BuySellResult {
-            can_buy: true,
-            can_sell: true,
-            buy_tax: Some(5.0),
-            sell_tax: Some(5.0),
-            is_honeypot: false,
-            tokens_received: Some(1000.0),
-            eth_received_on_sell: Some(0.095),
-        })
+        // Convert string addresses to alloy Address type
+        let token_address = token_address_str.trim_start_matches("0x")
+            .parse::<alloy_primitives::Address>()
+            .map_err(|e| format!("Invalid token address: {}", e))?;
+            
+        // Try to find pool address from token cache if we have it
+        // For now, we'll need the pool address to be provided or found elsewhere
+        // This is a limitation we need to address
+        
+        // Get current block number (simulate at latest)
+        let block_number = None;
+        
+        // Create a dummy pool address for now (this needs to be fixed)
+        let pool_address = alloy_primitives::Address::ZERO;
+        
+        // Run the actual simulation
+        match self.buy_sell_simulator.simulate_sequence(token_address, pool_address, block_number).await {
+            Ok(result) => {
+                // We need the pool address and buyer address for tax calculations
+                // The buyer address is from the simulator config
+                let buyer_address = self.buy_sell_simulator.get_buyer_address();
+                
+                // Calculate tax rates from state changes
+                let buy_tax = if !pool_address.is_zero() {
+                    calculate_buy_tax(&result.buy_result.state_changes, &pool_address, &buyer_address, &token_address)
+                } else {
+                    None
+                };
+                
+                let sell_tax = if !pool_address.is_zero() {
+                    calculate_sell_tax(&result.sell_result.state_changes, &pool_address, &buyer_address)
+                } else {
+                    None
+                };
+                
+                // Determine if it's a honeypot
+                let is_honeypot = result.buy_result.success && !result.sell_result.success;
+                
+                // Extract token amounts from state changes
+                let tokens_received = self.extract_tokens_received(&result.buy_result.state_changes, &token_address, &buyer_address);
+                let eth_received = self.extract_eth_received(&result.sell_result.state_changes, &buyer_address);
+                
+                Ok(BuySellResult {
+                    can_buy: result.buy_result.success,
+                    can_sell: result.sell_result.success,
+                    buy_tax,
+                    sell_tax,
+                    is_honeypot,
+                    tokens_received,
+                    eth_received_on_sell: eth_received,
+                })
+            }
+            Err(e) => {
+                warn!("Buy/sell simulation failed: {}", e);
+                Err(format!("Simulation failed: {}", e))
+            }
+        }
     }
 
-    /// Get orchestrator statistics
-    pub async fn get_stats(&self) -> OrchestratorStats {
+    /// Get manager statistics
+    pub async fn get_stats(&self) -> ManagerStats {
         let stats = self.stats.lock().await;
         stats.clone()
+    }
+    
+    
+    /// Extract tokens received from buy transaction
+    fn extract_tokens_received(&self, state_changes: &HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>, token_address: &alloy_primitives::Address, buyer_address: &alloy_primitives::Address) -> Option<f64> {
+        // Look for token balance change for the buyer address
+        let buyer_changes = state_changes.get(buyer_address)?;
+        let token_addr_str = format!("{:#x}", token_address);
+        
+        // Get the token balance change for the buyer
+        let token_change = buyer_changes.token_net.get(&token_addr_str)?;
+        
+        // Convert from I256 to f64 (tokens received should be positive)
+        if *token_change > alloy_primitives::I256::ZERO {
+            // Simple conversion - assumes 18 decimals
+            Some(token_change.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)
+        } else {
+            None
+        }
+    }
+    
+    /// Extract ETH received from sell transaction
+    fn extract_eth_received(&self, state_changes: &HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>, buyer_address: &alloy_primitives::Address) -> Option<f64> {
+        // Look for ETH balance change for the buyer address
+        let buyer_changes = state_changes.get(buyer_address)?;
+        
+        // Get the ETH balance change for the buyer (should be positive for sell)
+        let eth_change = buyer_changes.eth_net;
+        
+        // Convert from I256 to f64
+        if eth_change > alloy_primitives::I256::ZERO {
+            Some(eth_change.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)
+        } else {
+            None
+        }
     }
 }

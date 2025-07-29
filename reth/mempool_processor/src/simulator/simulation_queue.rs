@@ -3,7 +3,7 @@
 /// Manages simulation requests with priority ordering
 
 use super::SimulationRequest;
-use crate::signal_engine::tx_router::SimulationPriority;
+use crate::tx_router::SimulationPriority;
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use tracing::debug;

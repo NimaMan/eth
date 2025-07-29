@@ -3,7 +3,6 @@
 /// Routes transactions to appropriate simulation strategies based on their
 /// characteristics and assigns processing priorities
 
-use alloy_primitives::Address;
 use std::sync::Arc;
 use tracing::{debug, trace};
 use crate::mempool_fetcher::MempoolTransaction;
@@ -12,8 +11,7 @@ use crate::common::address::checksum_address;
 
 use super::{
     ContractCreationRouter,
-    CreatorTransactionRouter, 
-    DexRouter,
+    CreatorTransactionRouter,
 };
 
 /// Categories of transactions for processing
@@ -33,13 +31,6 @@ pub enum TransactionCategory {
         target_token: Option<String>,
         function_type: CreatorFunctionType,
     },
-    /// DEX interaction (swap, liquidity, etc)
-    DexInteraction {
-        dex_type: DexType,
-        action: DexAction,
-        token_address: Option<String>,
-        pool_address: Option<String>,
-    },
     /// Regular transaction (transfer, approval, etc)
     Regular {
         is_transfer: bool,
@@ -58,26 +49,6 @@ pub enum CreatorFunctionType {
     Other(String),
 }
 
-/// DEX actions
-#[derive(Debug, Clone, PartialEq)]
-pub enum DexAction {
-    AddLiquidity,
-    RemoveLiquidity,
-    Swap,
-    CreatePool,
-    Other,
-}
-
-/// DEX types
-#[derive(Debug, Clone, PartialEq)]
-pub enum DexType {
-    UniswapV2,
-    UniswapV3,
-    SushiSwap,
-    Balancer,
-    Curve,
-    Other(String),
-}
 
 /// Classification result with priority
 #[derive(Debug, Clone)]
@@ -101,7 +72,6 @@ pub enum SimulationPriority {
 pub struct TransactionRouter {
     contract_router: ContractCreationRouter,
     creator_router: CreatorTransactionRouter,
-    dex_router: DexRouter,
     token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
@@ -111,7 +81,6 @@ impl TransactionRouter {
         Self {
             contract_router: ContractCreationRouter::new(),
             creator_router: CreatorTransactionRouter::new(token_cache.clone()),
-            dex_router: DexRouter::new(),
             token_cache,
         }
     }
@@ -141,11 +110,6 @@ impl TransactionRouter {
             }
         }
 
-        // Check if it's a DEX interaction
-        if let Some(result) = self.classify_dex_interaction(tx).await {
-            debug!("Classified DEX interaction in {:?}", start.elapsed());
-            return result;
-        }
 
         // Default to regular transaction
         let result = self.classify_regular_transaction(tx).await;
@@ -221,32 +185,6 @@ impl TransactionRouter {
         }
     }
 
-    /// Classify DEX interaction
-    async fn classify_dex_interaction(&self, tx: &MempoolTransaction) -> Option<ClassificationResult> {
-        let (dex_type, action) = self.dex_router.identify_dex_action(tx)?;
-        
-        // Extract token/pool from calldata if possible
-        let (token_address, pool_address) = self.dex_router.extract_addresses(tx);
-
-        let priority = match action {
-            DexAction::RemoveLiquidity => SimulationPriority::High,
-            DexAction::AddLiquidity => SimulationPriority::Normal,
-            DexAction::Swap => SimulationPriority::Low,
-            _ => SimulationPriority::Low,
-        };
-
-        Some(ClassificationResult {
-            category: TransactionCategory::DexInteraction {
-                dex_type,
-                action: action.clone(),
-                token_address,
-                pool_address,
-            },
-            priority,
-            requires_simulation: matches!(action, DexAction::RemoveLiquidity | DexAction::AddLiquidity),
-            requires_buy_sell_test: false,
-        })
-    }
 
     /// Classify regular transaction
     async fn classify_regular_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
