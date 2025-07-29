@@ -157,66 +157,39 @@ impl ServiceMetrics {
         (avg, max, p99)
     }
     
-    async fn report(&self) -> String {
+    async fn report(&self, elapsed: Duration) -> String {
         let detection_latencies = self.detection_latencies.lock().await;
-        let (avg_detect, max_detect, p99_detect) = self.calculate_latency_stats(&detection_latencies).await;
+        let (avg_detect, max_detect, _p99_detect) = self.calculate_latency_stats(&detection_latencies).await;
         drop(detection_latencies);
         
         let routing_latencies = self.routing_latencies.lock().await;
-        let (avg_route, max_route, p99_route) = self.calculate_latency_stats(&routing_latencies).await;
+        let (avg_route, max_route, _p99_route) = self.calculate_latency_stats(&routing_latencies).await;
         drop(routing_latencies);
         
         let simulation_times = self.simulation_times.lock().await;
-        let (avg_sim, max_sim, p99_sim) = self.calculate_latency_stats(&simulation_times).await;
+        let (avg_sim, max_sim, _p99_sim) = self.calculate_latency_stats(&simulation_times).await;
         drop(simulation_times);
         
         let total = self.total_processed.load(Ordering::Relaxed);
         let creations = self.contract_creations.load(Ordering::Relaxed);
         let creator_actions = self.creator_actions.load(Ordering::Relaxed);
-        let dex = self.dex_interactions.load(Ordering::Relaxed);
-        let regular = self.regular_txs.load(Ordering::Relaxed);
+        let _dex = self.dex_interactions.load(Ordering::Relaxed);
+        let _regular = self.regular_txs.load(Ordering::Relaxed);
+        
+        let _sims_submitted = self.simulations_submitted.load(Ordering::Relaxed);
+        let sims_completed = self.simulations_completed.load(Ordering::Relaxed);
+        let sim_errors = self.simulation_errors.load(Ordering::Relaxed);
+        
+        let rate = total as f64 / elapsed.as_secs_f64();
         
         format!(
-            "\n📊 PERFORMANCE REPORT\n\
-            ====================================\n\
-            Transaction Processing:\n\
-            - Total Processed: {}\n\
-            - Contract Creations: {} ({:.1}%)\n\
-            - Creator Actions: {} ({:.1}%)\n\
-            - DEX Interactions: {} ({:.1}%)\n\
-            - Regular: {} ({:.1}%)\n\
-            \n\
-            Latency Metrics:\n\
-            - Function Detection: avg {:.0}μs, max {:.0}μs, p99 {:.0}μs\n\
-            - TX Routing: avg {:.0}μs, max {:.0}μs, p99 {:.0}μs\n\
-            - Simulation: avg {:.1}ms, max {:.1}ms, p99 {:.1}ms\n\
-            \n\
-            Simulation Stats:\n\
-            - Submitted: {}\n\
-            - Completed: {} ({:.1}% success)\n\
-            - Errors: {}\n\
-            \n\
-            Signals Detected:\n\
-            - Trading Enabled: {}\n\
-            - Liquidity Removals: {}\n\
-            - Honeypots: {}\n\
-            - Tax Changes: {}\n\
-            ====================================",
-            total,
-            creations, if total > 0 { creations as f64 / total as f64 * 100.0 } else { 0.0 },
-            creator_actions, if total > 0 { creator_actions as f64 / total as f64 * 100.0 } else { 0.0 },
-            dex, if total > 0 { dex as f64 / total as f64 * 100.0 } else { 0.0 },
-            regular, if total > 0 { regular as f64 / total as f64 * 100.0 } else { 0.0 },
-            avg_detect.as_micros(), max_detect.as_micros(), p99_detect.as_micros(),
-            avg_route.as_micros(), max_route.as_micros(), p99_route.as_micros(),
-            avg_sim.as_secs_f64() * 1000.0, max_sim.as_secs_f64() * 1000.0, p99_sim.as_secs_f64() * 1000.0,
-            self.simulations_submitted.load(Ordering::Relaxed),
-            self.simulations_completed.load(Ordering::Relaxed),
-            if self.simulations_submitted.load(Ordering::Relaxed) > 0 { 
-                self.simulations_completed.load(Ordering::Relaxed) as f64 / 
-                self.simulations_submitted.load(Ordering::Relaxed) as f64 * 100.0 
-            } else { 0.0 },
-            self.simulation_errors.load(Ordering::Relaxed),
+            "TX: {} ({:.1}/s) | Detect: {}μs/{}μs | Route: {}μs/{}μs | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims:{}/{} | Signals: TE:{} LR:{} HP:{} TC:{}",
+            total, rate,
+            avg_detect.as_micros(), max_detect.as_micros(),
+            avg_route.as_micros(), max_route.as_micros(),
+            avg_sim.as_secs_f64() * 1000.0, max_sim.as_secs_f64() * 1000.0,
+            creations, creator_actions,
+            sims_completed, sim_errors,
             self.trading_enabled_signals.load(Ordering::Relaxed),
             self.liquidity_removal_signals.load(Ordering::Relaxed),
             self.honeypot_signals.load(Ordering::Relaxed),
@@ -363,6 +336,20 @@ async fn main() -> Result<()> {
     writeln!(summary_file, "Real-time Metrics:\n")?;
     
     let summary_log_path = Arc::new(summary_log_path);
+    
+    // Initialize performance log with header
+    let perf_log_path = run_dir.join("performance.log");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&perf_log_path)
+    {
+        writeln!(file, "# Performance metrics logged every {} seconds", args.report_interval).ok();
+        writeln!(file, "# Format: TX: total (rate/s) | Detect: avg/max μs | Route: avg/max μs | Sim: avg/max ms | CC:contract_creations CA:creator_actions | Sims:ok/err | Signals: TE:trading_enabled LR:liquidity_removal HP:honeypot TC:tax_change").ok();
+        writeln!(file, "#").ok();
+    }
+    
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
     let start_time = Instant::now();
@@ -475,10 +462,10 @@ async fn main() -> Result<()> {
         
         // Periodic reporting
         if last_report.elapsed() > Duration::from_secs(args.report_interval) {
-            let report = metrics.report().await;
-            info!("{}", report);
+            let elapsed = start_time.elapsed();
+            let report = metrics.report(elapsed).await;
             
-            // Log to performance file
+            // Log to performance file with cleaner format
             let perf_log_path = run_dir.join("performance.log");
             if let Ok(mut file) = std::fs::OpenOptions::new()
                 .create(true)
@@ -486,8 +473,7 @@ async fn main() -> Result<()> {
                 .open(&perf_log_path)
             {
                 let timestamp = chrono::Local::now();
-                writeln!(file, "\n[{}]", timestamp.format("%Y-%m-%d %H:%M:%S")).ok();
-                writeln!(file, "{}", report).ok();
+                writeln!(file, "[{}] {}", timestamp.format("%H:%M:%S"), report).ok();
             }
             
             // Update summary file with latest high-level metrics
@@ -525,7 +511,7 @@ async fn main() -> Result<()> {
     info!("\n🛑 Shutting down Mempool Signal Detection Service...");
     
     // Final statistics
-    let final_report = metrics.report().await;
+    let final_report = metrics.report(total_runtime).await;
     info!("{}", final_report);
     info!("\n📊 Service Statistics:");
     info!("  Total Runtime: {:.1} minutes", total_runtime.as_secs_f64() / 60.0);
@@ -544,8 +530,7 @@ async fn main() -> Result<()> {
         writeln!(file, "Total Transactions: {}", metrics.total_processed.load(Ordering::Relaxed))?;
         writeln!(file, "Average Throughput: {:.1} tx/sec", 
             metrics.total_processed.load(Ordering::Relaxed) as f64 / total_runtime.as_secs_f64())?;
-        writeln!(file, "\nFinal Performance Metrics:")?;
-        writeln!(file, "{}", final_report)?;
+        writeln!(file, "\nFinal Metrics: {}", final_report)?;
     }
     
     // Shutdown components
