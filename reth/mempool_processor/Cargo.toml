@@ -237,6 +237,19 @@ name = "get_0xt_data_at_block"
 path = "examples/token_parameter_extraction/get_0xt_data_at_block.rs"
 
 [[example]]
+name = "analyze_token_with_detectors"
+path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
+
+[[example]]
+name = "analyze_tax_for_block_range"
+path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
+
+# Signal Detector Examples
+[[example]]
+name = "full_pipeline_signal_detection"
+path = "examples/signal_detector/full_pipeline_signal_detection.rs"
+
+[[example]]
 name = "read_token_data_from_storage"
 path = "examples/token_parameter_extraction/read_token_data_from_storage.rs"
 
@@ -252,12 +265,6 @@ path = "examples/token_parameter_extraction/calculate_0xt_taxes.rs"
 name = "calculate_0xt_taxes_formula"
 path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
 
-[[example]]
-name = "analyze_tax_for_block_range"
-path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
-[[example]]
-name = "analyze_token_with_detectors"
-path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
 
 
 # Using crates.io versions - no patches needed
