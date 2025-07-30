@@ -11,21 +11,21 @@ This document explains the complete architecture of the mempool signal detection
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                                            │
                                                            ▼
+┌─────────────────┐     ┌──────────────────┐     
+│  TX Router      │────▶│ SimulationManager│     
+│ (Classification)│     │ (Integrated)     │     
+└─────────────────┘     └──────────────────┘     
+           │                       │               
+           ▼                       ▼               
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  TX Router      │────▶│ Signal Processor │────▶│ Signal          │
-│ (Classification)│     │ (Coordinator)    │     │ Generator       │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-           │                       │                       │
-           ▼                       ▼                       ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Token Cache    │     │ Signal Detectors │     │   Publishers    │
-│ (Trading Status)│     │ (Binary Signals) │     │  (ZMQ/Logs)     │
+│  Token Cache    │────▶│ Signal Manager   │────▶│   Publishers    │
+│ (Context)       │     │ (Auto-Detection) │     │  (ZMQ/Logs)     │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
 ## Data Flow and Transformation
 
-### Complete Processing Pipeline
+### Complete Processing Pipeline (New Integrated Architecture)
 
 ```
 1. IPC Client receives transaction
@@ -34,16 +34,18 @@ This document explains the complete architecture of the mempool signal detection
    ↓
 3. TransactionRouter categorizes and assigns priority
    ↓
-4. SignalProcessor coordinates the detection pipeline:
-   - Queries TokenCache for trading status  
-   - Triggers buy/sell simulation if needed (internal)
-   - Passes results + trading status to signal detectors
-   - Collects binary signals
+4. SimulationManager.submit() - All-in-one processing:
+   - Executes transaction simulation
+   - Runs buy/sell tests if needed
+   - Gets token context from cache
+   - Detects signals automatically
+   - Publishes signals immediately
    ↓
-5. SignalGenerator formats signals for publishing
-   ↓  
-6. Publishers output signals (ZMQ + Logs)
+5. Main loop continues (no result handling needed)
 ```
+
+**Key Change**: Signal detection is now integrated into SimulationManager, 
+eliminating the need for separate signal processing steps.
 
 ### 1. IPC Transaction Data Format
 
@@ -173,10 +175,10 @@ The system currently processes only Contract Creation and Creator Action transac
 
 ### 5. Signal Processing Coordination
 
-The `SignalProcessor` coordinates the entire detection pipeline:
+The `SimulationManager` now handles the entire flow internally:
 
 ```rust
-impl SignalProcessor {
+impl SimulationManager {
     pub async fn process_transaction(&self, tx: MempoolTransaction) -> Vec<Signal> {
         // 1. Route the transaction
         let routing = self.tx_router.classify(&tx).await;

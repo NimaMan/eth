@@ -52,45 +52,66 @@ High-performance Rust system for real-time Ethereum mempool monitoring, transact
                └─────────────────────────────────────────────────────┘
 ```
 
-### **Component Architecture**
+### **Component Architecture (New Integrated Design)**
 
 ```
-mempool_signal_detection_full_tx_ipc (Single Binary)
+mempool_signal_detector (Single Binary)
 │
-├── 🔌 UltraFastClient                    ──▶ /tmp/reth.ipc
+├── 🔌 NonBlockingIpcClient              ──▶ /tmp/reth.ipc
 │   ├── Non-blocking socket reads        ──▶ 2-7μs detection
-│   ├── JSON streaming parser            ──▶ No RPC fallback
-│   └── 50K transaction buffer           ──▶ mpsc channels
+│   ├── JSON streaming parser            ──▶ Zero-copy parsing
+│   └── Auto-reconnect on failure        ──▶ Resilient connection
 │
-├── 🔬 DebugTraceCallSimulator           ──▶ http://localhost:8545
-│   ├── debug_traceCall RPC              ──▶ ~3.6ms simulation
-│   ├── State diff extraction            ──▶ ETH/token changes
-│   └── Pool effect calculation          ──▶ Reserve % changes
+├── 🧭 TransactionRouter                 ──▶ Classification
+│   ├── Function signature detection     ──▶ <10μs latency
+│   ├── Priority assignment              ──▶ Critical/High/Normal
+│   └── Category routing                 ──▶ Contract/Creator/DEX
 │
-├── 🏊 PoolSubscriber                    ──▶ tcp://localhost:5557
-│   ├── ZMQ subscription (Python)        ──▶ Real-time pool state
-│   ├── In-memory cache (1000+ pools)    ──▶ <1ms lookups
-│   └── Block-level updates (~12s)       ──▶ Fresh reserve data
+├── 🔧 SimulationManager (Integrated)    ──▶ All-in-one processing
+│   ├── TxSimulator                      ──▶ Reth DB direct access
+│   ├── BuySellSimulator                 ──▶ Trading validation
+│   ├── SignalManager (built-in)         ──▶ Automatic detection
+│   └── TokenCache integration           ──▶ Context-aware signals
 │
-├── 🚨 SignalEngine                      ──▶ Multi-category analysis
-│   ├── Scam detection (>50% drain)      ──▶ Critical alerts
-│   ├── Liquidity warnings (>20%)        ──▶ High priority
-│   ├── Volume spike detection (5x)      ──▶ Medium priority
-│   ├── Supply manipulation alerts       ──▶ High priority
-│   └── Price impact analysis (>15%)     ──▶ Medium priority
+├── 🎯 Signal Detection (Automatic)      ──▶ Inside SimulationManager
+│   ├── Trading Enabled (buy+sell OK)    ──▶ New tradeable tokens
+│   ├── Honeypot Detection               ──▶ Can't sell anymore
+│   ├── High Tax Warning (>25%)          ──▶ Excessive fees
+│   └── Liquidity/Scam Detection         ──▶ Pool drains
 │
-├── 📡 AlertPublisher                    ──▶ tcp://*:5559
-│   ├── ZMQ PUB socket                   ──▶ Trading bot integration
-│   ├── JSON alert messages              ──▶ Rich event context
-│   └── Severity filtering               ──▶ High+ alerts only
+├── 💾 AddressTrackingCache              ──▶ Context provider
+│   ├── Token trading status             ──▶ Historical state
+│   ├── Creator addresses                ──▶ Ownership tracking
+│   └── Pool information                 ──▶ Reserve data
 │
-└── 💾 ScamPredictionWriter              ──▶ PostgreSQL (eth_db)
-    ├── Audit trail logging              ──▶ All detections
-    ├── Performance metrics              ──▶ Timing analysis
-    └── Event correlation                ──▶ Historical patterns
+└── 📡 SignalPublisher                   ──▶ Multi-channel output
+    ├── ZMQ publisher                    ──▶ Real-time alerts
+    ├── Log files                        ──▶ Audit trail
+    └── Metric counters                  ──▶ Performance tracking
 ```
+
+**Key Improvement**: Signal detection is now integrated directly into the 
+SimulationManager, eliminating the need for result polling and separate 
+signal processing steps.
 
 ## 🎯 Core Features
+
+### **Simplified API with Integrated Detection**
+The new architecture dramatically simplifies the main processing loop:
+
+```rust
+// OLD: Complex multi-step process
+let results = simulation_manager.process_queue().await;
+for result in results {
+    let signals = signal_manager.process_result(result);
+    publisher.publish(signals);
+    // Handle errors, update metrics...
+}
+
+// NEW: Single submit call - everything handled internally
+simulation_manager.submit(request).await?;
+// That's it! Simulation, detection, and publishing all automatic
+```
 
 ### **Ultra-Fast Detection**
 - **IPC Integration**: Direct Unix socket connection to Reth node

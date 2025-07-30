@@ -1,15 +1,33 @@
-# Signal Detectors - Simplified Signal System
+# Signal Detectors - Integrated Signal Detection System
 
 ## Overview
 
-This module implements a **simplified binary signal system** that replaces complex risk scoring with clear, actionable signals based on configurable thresholds. Each detector emits simple YES/NO signals when specific conditions are met.
+This module implements a **context-aware signal detection system** that is now integrated directly into the SimulationManager. Signal detection happens automatically after each simulation, using token cache data for intelligent, context-aware decisions.
+
+## New Architecture (Integrated with SimulationManager)
+
+The signal detection system is no longer standalone - it's integrated into the simulation flow:
+
+```rust
+SimulationManager {
+    signal_manager: Arc<Mutex<SignalManager>>,
+    token_cache: Arc<AddressTrackingCache>,
+    // ... simulation components
+}
+```
+
+### Key Changes:
+1. **Automatic Detection**: Signals detected immediately after simulation
+2. **Context-Aware**: Uses token cache to understand previous state
+3. **No Polling**: Results processed internally, not returned to caller
+4. **Simplified API**: Main loop just calls `submit()`, no result handling
 
 ## Design Philosophy
 
-- **No risk scores** - only binary signals (detected/not detected)
-- **Clear thresholds** - all parameters configurable in `/src/config.rs`
-- **Simple logic** - straightforward if/then conditions
-- **Actionable signals** - each signal has a clear meaning and response
+- **Context-aware decisions** - uses token cache for historical state
+- **Integrated flow** - detection happens within simulation manager
+- **Binary signals** - clear YES/NO decisions, no risk scores
+- **Immediate action** - signals published as soon as detected
 
 ## Signal Types
 
@@ -135,7 +153,7 @@ pub struct ScamDetectionSignal {
 - Cross-references state change addresses with TokenCache pool addresses
 - Binary signal: scam detected (meets threshold) or not detected
 
-## Signal Detection Flow
+## New Integrated Signal Detection Flow
 
 ```
 1. Transaction arrives via IPC
@@ -144,22 +162,60 @@ pub struct ScamDetectionSignal {
    ↓
 3. TransactionRouter categorizes transaction
    ↓
-4. If creator/owner transaction → Run simulation sequence:
-   a. Simulate creator transaction → state changes
-   b. Simulate buy transaction → state changes
-   c. Simulate approve transaction → state changes
-   d. Simulate sell transaction → state changes
+4. SimulationManager.submit(request) called
    ↓
-5. Pass simulation results to signal detectors:
-   - LiquidityDetector uses creator tx state changes
-   - TaxDetector uses buy/sell state changes
-   - TradingEnabledDetector uses buy/sell success
-   - ScamDetector uses all state changes
+5. Inside SimulationManager:
+   a. Run simulation (tx + buy/sell if needed)
+   b. Get token info from cache for context
+   c. Call signal_manager.process_simulation_result()
+   d. Log and publish signals immediately
    ↓
-6. If conditions met → Emit binary signal
-   ↓
-7. Publish to ZMQ + Log to file
+6. Main loop continues (no result handling needed)
 ```
+
+### The process_simulation_result Method
+
+This is the new central method that processes simulation results with context:
+
+```rust
+pub async fn process_simulation_result(
+    &mut self,
+    result: &SimulationResult,
+    token_info: Option<&TokenInfo>,
+) -> Vec<Signal>
+```
+
+**Context-Aware Detection Logic:**
+
+1. **For Contract Creations** (no token_info):
+   ```rust
+   if buy_sell_result.can_buy && buy_sell_result.can_sell {
+       // New token with trading enabled
+       emit TradingEnabledSignal
+   }
+   ```
+
+2. **For Creator Transactions** (with token_info):
+   ```rust
+   // Check if trading status changed
+   if !token_info.trading_enabled && can_buy && can_sell {
+       // Trading just enabled!
+       emit TradingEnabledSignal
+   }
+   
+   // Check for honeypot
+   if token_info.trading_enabled && !can_sell {
+       // Was tradeable, now can't sell!
+       emit HoneypotSignal
+   }
+   ```
+
+3. **Tax Warnings** (always checked):
+   ```rust
+   if buy_tax > 0.25 || sell_tax > 0.25 {
+       emit HighTaxWarningSignal
+   }
+   ```
 
 ## Simulation Sequence
 
@@ -310,6 +366,51 @@ Create test transactions for each signal type:
 - `test_trading_enabled_high_tax.json` - should NOT trigger signal
 - `test_honeypot_tax.json` - should trigger high tax warning
 - `test_liquidity_removal.json` - should trigger liquidity signal
+
+## Benefits of Integrated Architecture
+
+### 1. **Simplified Main Loop**
+```rust
+// OLD: Complex result handling
+let results = simulation_manager.process_queue().await;
+for result in results {
+    let signals = signal_manager.process(result);
+    // Handle signals...
+}
+
+// NEW: Fire and forget
+simulation_manager.submit(request).await;
+```
+
+### 2. **Context Preservation**
+- All simulation context available for detection
+- Token cache access at the right moment
+- No data passing between components
+
+### 3. **Atomic Operations**
+- Simulation and detection in single flow
+- No race conditions or missed results
+- Guaranteed signal detection for every simulation
+
+### 4. **Better Performance**
+- No queue polling overhead
+- No result serialization/deserialization
+- Direct internal method calls
+
+### 5. **Easier Maintenance**
+- Signal detection logic in one place
+- Clear ownership and responsibility
+- Easier to add new signal types
+
+## Migration Guide
+
+If upgrading from the old architecture:
+
+1. **Remove result polling code** from main loop
+2. **Remove manual signal manager calls**
+3. **Update SimulationManager creation** to include token cache and signal config
+4. **Set metric counters** if you need external tracking
+5. **Simplify error handling** - just handle submit() errors
 
 ## Performance Requirements
 
