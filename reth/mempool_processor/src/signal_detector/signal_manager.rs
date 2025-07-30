@@ -10,11 +10,14 @@ use tracing::{info, debug};
 use alloy_primitives::Address;
 use reth_tx_simulator::AddressStateChange;
 use crate::token_tracking::cache::PoolStateCache;
+use crate::token_tracking::types::TokenInfo;
+use crate::simulator::SimulationResult;
 
 use super::{
     LiquidityDetector, LiquiditySignal,
     StablecoinDetector, StablecoinSignal,
-    // Other detectors can be added here
+    TradingStatusDetector, TradingStatusSignal, TradingStatusChange,
+    Signal,
 };
 
 /// Configuration for signal detection
@@ -51,6 +54,7 @@ pub struct SignalManager {
     config: SignalManagerConfig,
     liquidity_detector: LiquidityDetector,
     stablecoin_detector: StablecoinDetector,
+    trading_status_detector: TradingStatusDetector,
     // Stats tracking
     total_simulations_analyzed: u64,
 }
@@ -68,6 +72,7 @@ impl SignalManager {
             config,
             liquidity_detector: LiquidityDetector::new(),
             stablecoin_detector: StablecoinDetector::new(),
+            trading_status_detector: TradingStatusDetector::new(),
             total_simulations_analyzed: 0,
         }
     }
@@ -131,6 +136,100 @@ impl SignalManager {
         if total_signals > 0 {
             info!("🎯 Found {} total signals from simulation of {} ({}μs)", 
                   total_signals, tx_hash, simulation_time_us);
+        }
+        
+        signals
+    }
+    
+    /// Process simulation result to detect signals
+    pub async fn process_simulation_result(
+        &mut self,
+        result: &SimulationResult,
+        token_info: Option<&TokenInfo>,
+    ) -> Vec<Signal> {
+        self.total_simulations_analyzed += 1;
+        let mut signals = Vec::new();
+        
+        // Check for trading status changes
+        if let Some(trading_signal) = self.trading_status_detector.detect(result) {
+            // Context-aware detection
+            if let Some(token_info) = token_info {
+                match trading_signal.status_change {
+                    TradingStatusChange::TradingEnabled => {
+                        // Only emit signal if trading wasn't already enabled
+                        if !token_info.trading_enabled {
+                            info!("🎯 Trading newly enabled for token {}", trading_signal.token_address);
+                            signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
+                                tx_hash: result.request.tx.hash.clone(),
+                                token_address: trading_signal.token_address.clone(),
+                                creator_address: trading_signal.executor.clone(),
+                                buy_tax: (trading_signal.buy_tax.unwrap_or(0.0) * 100.0) as u8,
+                                sell_tax: (trading_signal.sell_tax.unwrap_or(0.0) * 100.0) as u8,
+                                timestamp: chrono::Utc::now().timestamp() as u64,
+                                block_number: 0, // TODO: Get from result
+                            }));
+                        }
+                    }
+                    _ => {}
+                }
+                
+                // Check for honeypot - was tradeable but now can't sell
+                if token_info.trading_enabled && !trading_signal.can_trade_after {
+                    warn!("🍯 Potential honeypot - trading disabled for {}", trading_signal.token_address);
+                    signals.push(Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
+                        tx_hash: result.request.tx.hash.clone(),
+                        pool_address: "".to_string(), // TODO: Get pool from token info
+                        token_address: trading_signal.token_address.clone(),
+                        scammer_address: trading_signal.executor.clone(),
+                        eth_drained: 0.0,
+                        scam_type: "honeypot_trading_disabled".to_string(),
+                        confidence: 0.9,
+                    }));
+                }
+            } else {
+                // No context - for new tokens, just check if trading is enabled
+                if trading_signal.status_change == TradingStatusChange::TradingEnabled {
+                    signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
+                        tx_hash: result.request.tx.hash.clone(),
+                        token_address: trading_signal.token_address.clone(),
+                        creator_address: trading_signal.executor.clone(),
+                        buy_tax: (trading_signal.buy_tax.unwrap_or(0.0) * 100.0) as u8,
+                        sell_tax: (trading_signal.sell_tax.unwrap_or(0.0) * 100.0) as u8,
+                        timestamp: chrono::Utc::now().timestamp() as u64,
+                        block_number: 0, // TODO: Get from result
+                    }));
+                }
+            }
+        }
+        
+        // Check for high tax warning
+        if let Some(buy_sell) = &result.buy_sell_result {
+            if let Some(buy_tax) = buy_sell.buy_tax {
+                if let Some(sell_tax) = buy_sell.sell_tax {
+                    if buy_tax > 0.25 || sell_tax > 0.25 {
+                        signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
+                            tx_hash: result.request.tx.hash.clone(),
+                            token_address: match &result.request.category {
+                                crate::tx_router::TransactionCategory::ContractCreation { contract_address, .. } => contract_address.to_string(),
+                                crate::tx_router::TransactionCategory::CreatorTransaction { token_address, .. } => token_address.clone(),
+                                _ => "".to_string(),
+                            },
+                            creator_address: None,
+                            buy_tax: (buy_tax * 100.0) as u8,
+                            sell_tax: (sell_tax * 100.0) as u8,
+                            warning_type: if sell_tax > 0.5 { 
+                                crate::signal_detector::TaxWarningType::PotentialHoneypot 
+                            } else if buy_tax > 0.25 {
+                                crate::signal_detector::TaxWarningType::HighBuyTax
+                            } else {
+                                crate::signal_detector::TaxWarningType::HighSellTax 
+                            },
+                            timestamp: chrono::Utc::now().timestamp() as u64,
+                            block_number: 0, // TODO: Get from result
+                        }));
+                    }
+                }
+            }
         }
         
         signals

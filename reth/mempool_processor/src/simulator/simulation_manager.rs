@@ -3,12 +3,15 @@
 /// Manages transaction simulations based on priority and type
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 use tracing::{info, debug, warn};
 use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
 use crate::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
+use crate::signal_detector::{SignalManager, SignalManagerConfig, Signal};
+use crate::token_tracking::address_tracking_cache::AddressTrackingCache;
 use super::{SimulationQueue, SequentialBuySellSimulator};
 use super::tx_simulator::TxSimulator;
 use std::collections::HashMap;
@@ -79,6 +82,15 @@ pub struct SimulationManager {
     buy_sell_simulator: Arc<SequentialBuySellSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
     
+    // Signal detection (NEW)
+    signal_manager: Arc<Mutex<SignalManager>>,
+    token_cache: Arc<AddressTrackingCache>,
+    
+    // Signal counters (optional, for external metrics)
+    pub trading_enabled_counter: Option<Arc<AtomicU64>>,
+    pub honeypot_counter: Option<Arc<AtomicU64>>,
+    pub high_tax_counter: Option<Arc<AtomicU64>>,
+    
     // Configuration
     max_concurrent_simulations: usize,
     enable_caching: bool,
@@ -102,16 +114,35 @@ impl SimulationManager {
     pub fn new(
         tx_simulator: Arc<TxSimulator>,
         buy_sell_simulator: Arc<SequentialBuySellSimulator>,
+        token_cache: Arc<AddressTrackingCache>,
+        signal_config: SignalManagerConfig,
         max_concurrent: usize,
     ) -> Self {
         Self {
             tx_simulator,
             buy_sell_simulator,
             queue: Arc::new(Mutex::new(SimulationQueue::new())),
+            signal_manager: Arc::new(Mutex::new(SignalManager::new(signal_config))),
+            token_cache,
+            trading_enabled_counter: None,
+            honeypot_counter: None,
+            high_tax_counter: None,
             max_concurrent_simulations: max_concurrent,
             enable_caching: true,
             stats: Arc::new(Mutex::new(ManagerStats::default())),
         }
+    }
+    
+    /// Set external metric counters
+    pub fn set_metric_counters(
+        &mut self,
+        trading_enabled: Arc<AtomicU64>,
+        honeypot: Arc<AtomicU64>,
+        high_tax: Arc<AtomicU64>,
+    ) {
+        self.trading_enabled_counter = Some(trading_enabled);
+        self.honeypot_counter = Some(honeypot);
+        self.high_tax_counter = Some(high_tax);
     }
 
     /// Submit a simulation request
@@ -221,7 +252,73 @@ impl SimulationManager {
         }
 
         result.simulation_time_ms = start.elapsed().as_secs_f64() * 1000.0;
+        
+        // Detect and publish signals
+        self.detect_and_publish_signals(&result).await;
+        
         result
+    }
+    
+    /// Detect signals from simulation result and publish them
+    async fn detect_and_publish_signals(&self, result: &SimulationResult) {
+        // Get token info from cache for context
+        let token_info = match &result.request.category {
+            TransactionCategory::ContractCreation { contract_address, .. } => {
+                self.token_cache.get_token_info(&contract_address.to_string()).await
+            }
+            TransactionCategory::CreatorTransaction { token_address, .. } => {
+                self.token_cache.get_token_info(token_address).await
+            }
+            _ => None,
+        };
+        
+        // Process simulation result for signals
+        let mut signal_manager = self.signal_manager.lock().await;
+        let signals = signal_manager.process_simulation_result(
+            result,
+            token_info.as_ref(),
+        ).await;
+        
+        // Log detected signals and update counters
+        for signal in &signals {
+            match signal {
+                Signal::TradingEnabled(s) => {
+                    info!("🎯 Trading Enabled Signal - Token: {} | TX: {} | Buy Tax: {}% | Sell Tax: {}%",
+                        s.token_address, s.tx_hash, 
+                        s.buy_tax as f64,
+                        s.sell_tax as f64
+                    );
+                    if let Some(counter) = &self.trading_enabled_counter {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Signal::HighTaxWarning(s) => {
+                    warn!("⚠️ High Tax Warning - Token: {} | TX: {} | Buy: {}% | Sell: {}%",
+                        s.token_address, s.tx_hash, s.buy_tax, s.sell_tax
+                    );
+                    if let Some(counter) = &self.high_tax_counter {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Signal::LiquidityRemoval(s) => {
+                    warn!("💧 Liquidity Removal - Pool: {} | TX: {} | Function: {}",
+                        s.pool_address, s.tx_hash, s.function_name
+                    );
+                }
+                Signal::ScamDetection(s) => {
+                    warn!("🚨 Scam Detected - Pool: {} | TX: {} | ETH Drained: {} | Reason: {}",
+                        s.pool_address, s.tx_hash, s.eth_drained, s.scam_type
+                    );
+                    if s.scam_type.contains("honeypot") {
+                        if let Some(counter) = &self.honeypot_counter {
+                            counter.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // TODO: Publish signals to ZMQ/file outputs
     }
 
     /// Simulate transaction execution

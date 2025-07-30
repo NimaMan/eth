@@ -85,10 +85,10 @@ struct ServiceMetrics {
     simulation_errors: AtomicU64,
     
     // Signal counts
-    trading_enabled_signals: AtomicU64,
-    liquidity_removal_signals: AtomicU64,
-    honeypot_signals: AtomicU64,
-    tax_change_signals: AtomicU64,
+    trading_enabled_signals: Arc<AtomicU64>,
+    liquidity_removal_signals: Arc<AtomicU64>,
+    honeypot_signals: Arc<AtomicU64>,
+    tax_change_signals: Arc<AtomicU64>,
     
     // Timing metrics (using Mutex for simplicity with vectors)
     detection_latencies: Arc<Mutex<Vec<Duration>>>,
@@ -107,10 +107,10 @@ impl ServiceMetrics {
             simulations_submitted: AtomicU64::new(0),
             simulations_completed: AtomicU64::new(0),
             simulation_errors: AtomicU64::new(0),
-            trading_enabled_signals: AtomicU64::new(0),
-            liquidity_removal_signals: AtomicU64::new(0),
-            honeypot_signals: AtomicU64::new(0),
-            tax_change_signals: AtomicU64::new(0),
+            trading_enabled_signals: Arc::new(AtomicU64::new(0)),
+            liquidity_removal_signals: Arc::new(AtomicU64::new(0)),
+            honeypot_signals: Arc::new(AtomicU64::new(0)),
+            tax_change_signals: Arc::new(AtomicU64::new(0)),
             detection_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
             routing_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
             simulation_times: Arc::new(Mutex::new(Vec::with_capacity(1000))),
@@ -289,16 +289,25 @@ async fn main() -> Result<()> {
     let buy_sell_simulator = Arc::new(SequentialBuySellSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
     info!("✅ Simulators initialized");
     
-    // 6. Simulation manager
-    info!("📦 Starting simulation manager...");
-    let simulation_manager = SimulationManager::new(tx_simulator, buy_sell_simulator, args.sim_workers);
-    info!("✅ Simulation manager ready with {} workers", args.sim_workers);
-    
-    // 7. Signal manager
-    info!("🎯 Initializing signal manager...");
+    // 6. Simulation manager (now includes signal detection)
+    info!("📦 Starting simulation manager with integrated signal detection...");
     let signal_config = SignalManagerConfig::default();
-    let _signal_manager = SignalManager::new(signal_config);
-    info!("✅ Signal manager ready");
+    let mut simulation_manager = SimulationManager::new(
+        tx_simulator, 
+        buy_sell_simulator,
+        Arc::clone(&address_cache),
+        signal_config,
+        args.sim_workers
+    );
+    
+    // Pass signal counters to simulation manager
+    simulation_manager.set_metric_counters(
+        Arc::clone(&metrics.trading_enabled_signals),
+        Arc::clone(&metrics.honeypot_signals),
+        Arc::clone(&metrics.tax_change_signals),
+    );
+    
+    info!("✅ Simulation manager ready with {} workers and signal detection", args.sim_workers);
     
     // 8. Signal publisher
     info!("📡 Initializing signal publisher...");
@@ -439,7 +448,7 @@ async fn main() -> Result<()> {
                 ),
             };
             
-            // Submit for simulation
+            // Submit for simulation (signal detection happens internally)
             metrics.simulations_submitted.fetch_add(1, Ordering::Relaxed);
             
             let sim_start = Instant::now();
@@ -451,14 +460,10 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                    warn!("Simulation error for {}: {}", tx.hash, e);
+                    warn!("Simulation submission error for {}: {}", tx.hash, e);
                 }
             }
         }
-        
-        // TODO: Process simulation results and detect signals
-        // This would require polling the simulation manager's result queue
-        // and feeding results to the signal manager
         
         // Periodic reporting
         if last_report.elapsed() > Duration::from_secs(args.report_interval) {

@@ -238,7 +238,31 @@ impl SignalProcessor {
 
 ### 5. Simulation Processing
 
-The simulation system uses a priority queue and batch processing to efficiently handle high-value transactions. The `SimulatorProcessor` runs as a separate async task, pulling transactions from the queue and processing them in priority order.
+The simulation system uses a priority queue and batch processing to efficiently handle high-value transactions. The `SimulationManager` coordinates transaction execution and signal detection in a single integrated flow.
+
+**Architecture Overview**:
+```rust
+pub struct SimulationManager {
+    // Simulation components
+    tx_simulator: Arc<TxSimulator>,
+    buy_sell_simulator: Arc<SequentialBuySellSimulator>,
+    queue: Arc<Mutex<SimulationQueue>>,
+    
+    // Signal detection (NEW)
+    signal_manager: SignalManager,
+    token_cache: Arc<AddressTrackingCache>,
+    
+    // Configuration
+    max_concurrent_simulations: usize,
+}
+```
+
+**Integrated Flow**:
+1. Transaction submitted to SimulationManager
+2. Simulation executed (transaction + buy/sell tests)
+3. Signal detection runs immediately using token cache context
+4. Signals published automatically
+5. Main loop doesn't need to handle results
 
 **Queue Management**:
 - Maximum queue size of 10,000 transactions prevents memory issues
@@ -290,41 +314,64 @@ pub struct StateChange {
 
 **Performance**: 5-10ms average, 50ms max
 
-### 5. Signal Detection (Simplified Binary System)
+### 5. Signal Detection (Integrated with Simulation)
 
-Three simple detectors check clear conditions and emit binary signals:
+Signal detection is now integrated directly within the SimulationManager, using token cache for context-aware decisions:
 
 ```rust
-// Input: Transaction with simulation results
-let tx = MempoolTransaction { 
-    functions: vec!["enableTrading"],
-    ... 
-};
-let simulation_result = BuySellResult {
-    can_buy: true,
-    can_sell: true,
-    buy_tax: Some(5.0),    // ≤ 25% threshold
-    sell_tax: Some(10.0),  // ≤ 25% threshold
-    ...
-};
+// Inside SimulationManager::simulate_request()
+async fn simulate_request(&self, request: SimulationRequest) -> SimulationResult {
+    // 1. Run simulation
+    let result = self.execute_simulation(request).await;
+    
+    // 2. Get token context from cache
+    let token_info = match &request.category {
+        TransactionCategory::ContractCreation { contract_address, .. } => {
+            self.token_cache.get_token_info(contract_address).await
+        }
+        TransactionCategory::CreatorTransaction { token_address, .. } => {
+            self.token_cache.get_token_info(token_address).await
+        }
+        _ => None
+    };
+    
+    // 3. Detect signals with context
+    let signals = self.signal_manager.process_simulation_result(
+        &result,
+        token_info.as_ref(),
+    ).await;
+    
+    // 4. Publish signals immediately
+    for signal in signals {
+        self.publish_signal(signal).await;
+    }
+    
+    result
+}
+```
 
-// Simple detector checks
-if trading_enabled_detector.check_transaction(&tx, &simulation_result) {
-    emit_signal(TradingEnabledSignal { 
-        token_address, buy_tax: 5, sell_tax: 10, ... 
-    });
+**Context-Aware Detection Examples**:
+
+```rust
+// Contract Creation: Check if trading is enabled
+if let Some(buy_sell) = &result.buy_sell_result {
+    if buy_sell.can_buy && buy_sell.can_sell {
+        // New token with trading enabled!
+        emit_signal(TradingEnabledSignal { ... });
+    }
 }
 
-if high_tax_detector.check_transaction(&tx, &simulation_result) {
-    emit_signal(HighTaxWarningSignal { 
-        warning_type: TaxWarningType::PotentialHoneypot, ... 
-    });
-}
-
-if liquidity_removal_detector.check_transaction(&tx) {
-    emit_signal(LiquidityRemovalSignal { 
-        pool_address, function_name: "removeLiquidityETH", ... 
-    });
+// Creator Transaction: Compare with cached state
+if let Some(token_info) = token_info {
+    if !token_info.trading_enabled && buy_sell.can_buy && buy_sell.can_sell {
+        // Trading just got enabled!
+        emit_signal(TradingEnabledSignal { ... });
+    }
+    
+    if token_info.trading_enabled && !buy_sell.can_sell {
+        // Honeypot - was tradeable, now can't sell!
+        emit_signal(HoneypotSignal { ... });
+    }
 }
 ```
 
@@ -363,6 +410,32 @@ if conditions_met {
 ```
 
 **No Risk Scoring**: Direct binary output - signal detected or not detected
+
+### Main Loop Simplification
+
+With the integrated architecture, the main processing loop is greatly simplified:
+
+```rust
+// OLD: Complex result handling
+let sim_results = simulation_manager.process_queue().await;
+for result in sim_results {
+    let signals = signal_manager.process_result(result);
+    // Handle signals...
+}
+
+// NEW: Fire and forget
+simulation_manager.submit(sim_request).await;
+// That's it! Signals are detected and published internally
+```
+
+The SimulationManager handles the complete flow internally:
+- Executes simulation
+- Checks token cache for context
+- Detects signals based on results + context
+- Publishes signals to ZMQ/logs
+- Updates internal metrics
+
+This encapsulation makes the system more maintainable and ensures signal detection always happens with proper context.
 
 ### 7. Output Channels
 
