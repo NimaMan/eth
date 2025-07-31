@@ -296,6 +296,12 @@ impl AddressTrackingCache {
         }
     }
     
+    /// Get token information by token address
+    pub async fn get_token_info(&self, token_address: &str) -> Option<TokenTrackingInfo> {
+        let token_info_guard = self.token_info.read().await;
+        token_info_guard.get(token_address).cloned()
+    }
+    
     /// Clean up stale entries (addresses with no activity for 24 hours)
     pub async fn cleanup_stale_entries(&self, max_age_seconds: u64) -> usize {
         let current_time = std::time::SystemTime::now()

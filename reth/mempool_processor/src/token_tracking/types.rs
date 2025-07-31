@@ -2,7 +2,7 @@
 //
 // Type definitions for token and pool data structures from Python ZMQ publisher
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::HashMap;
 
 /// Pool-specific information within a token
@@ -85,9 +85,11 @@ pub struct TokenInfo {
     pub latest_activity_block: u64,
     
     /// Current buy tax percentage (0-100)
+    #[serde(skip)]
     pub buy_tax: Option<u8>,
     
     /// Current sell tax percentage (0-100)
+    #[serde(skip)]
     pub sell_tax: Option<u8>,
     
     /// Last tax update transaction hash
@@ -95,6 +97,81 @@ pub struct TokenInfo {
     
     /// Map of pool addresses to pool information
     pub pools: HashMap<String, PoolInfo>,
+    
+    /// Token metadata
+    #[serde(alias = "token_symbol")]
+    pub symbol: Option<String>,
+    #[serde(alias = "token_name")]
+    pub name: Option<String>,
+    #[serde(alias = "token_decimals")]
+    pub decimals: Option<u8>,
+    #[serde(deserialize_with = "deserialize_supply")]
+    pub total_supply: Option<String>,
+    
+    /// Tax setter addresses (list from Python)
+    #[serde(default)]
+    pub tax_setter_addresses: Vec<String>,
+    
+    /// Derived tax setter addresses  
+    #[serde(skip)]
+    pub buy_tax_setter: Option<String>,
+    #[serde(skip)]
+    pub sell_tax_setter: Option<String>,
+    
+    /// Current buy tax from Python
+    #[serde(alias = "current_buy_tax")]
+    pub buy_tax_python: Option<f64>,
+    
+    /// Current sell tax from Python  
+    #[serde(alias = "current_sell_tax")]
+    pub sell_tax_python: Option<f64>,
+    
+    /// Simulation results from Rust
+    pub simulation_data: Option<SimulationData>,
+}
+
+/// Custom deserializer for total_supply that handles both strings and numbers
+fn deserialize_supply<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrNumber {
+        String(String),
+        Number(f64),
+    }
+
+    match Option::<StringOrNumber>::deserialize(deserializer)? {
+        Some(StringOrNumber::String(s)) => Ok(Some(s)),
+        Some(StringOrNumber::Number(n)) => Ok(Some(n.to_string())),
+        None => Ok(None),
+    }
+}
+
+/// Simulation results data structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationData {
+    /// Whether buy transactions succeed
+    pub can_buy: bool,
+    
+    /// Whether sell transactions succeed
+    pub can_sell: bool,
+    
+    /// Measured buy tax from simulation
+    pub measured_buy_tax: Option<f64>,
+    
+    /// Measured sell tax from simulation
+    pub measured_sell_tax: Option<f64>,
+    
+    /// Whether token is detected as honeypot
+    pub is_honeypot: bool,
+    
+    /// Block number when simulation was last run
+    pub last_simulated_block: u64,
+    
+    /// Error message if simulation failed
+    pub simulation_error: Option<String>,
 }
 
 /// Message format for token updates from Python

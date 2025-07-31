@@ -97,6 +97,9 @@ impl TokenTrackingSubscriber {
                 let mut creators_map = std::collections::HashMap::new();
                 
                 for (token_address, token_info) in token_data {
+                    // Update the full token information
+                    self.cache.update_token(token_info.clone()).await;
+                    
                     // Store creator info
                     let creator = types::TokenCreator {
                         creator_address: token_info.creator_address.clone(),
@@ -205,6 +208,9 @@ impl TokenTrackingSubscriber {
                         let mut creators_map = std::collections::HashMap::new();
                         
                         for (token_address, token_info) in token_message.data.iter() {
+                            // Update the full token information
+                            self.cache.update_token(token_info.clone()).await;
+                            
                             // Store creator info
                             let creator = types::TokenCreator {
                                 creator_address: token_info.creator_address.clone(),

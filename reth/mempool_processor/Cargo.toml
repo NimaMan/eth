@@ -265,6 +265,24 @@ path = "examples/token_parameter_extraction/calculate_0xt_taxes.rs"
 name = "calculate_0xt_taxes_formula"
 path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
 
+# Token Tracking Examples
+[[example]]
+name = "test_token_cache"
+path = "examples/token_tracking/test_token_cache.rs"
+
+[[example]]
+name = "token_cache_inspector"
+path = "examples/token_tracking/token_cache_inspector.rs"
+[[example]]
+name = "address_role_detection_example"
+path = "examples/token_tracking/address_role_detection_example.rs"
+[[example]]
+name = "zmq_connection_example"
+path = "examples/token_tracking/zmq_connection_example.rs"
+[[example]]
+name = "test_unified_cache"
+path = "examples/token_tracking/test_unified_cache.rs"
+
 
 
 # Using crates.io versions - no patches needed

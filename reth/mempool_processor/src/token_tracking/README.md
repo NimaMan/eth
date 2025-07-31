@@ -1,215 +1,170 @@
-# Token Tracking Cache Design
+# Token Tracking Module
 
-## Purpose
+This module provides a real-time cache of token and pool information, subscribing to updates from the Python token tracker via ZMQ.
 
-The token tracking cache is a high-performance, thread-safe cache that bridges Python's token data with real-time mempool transaction analysis for signal detection. It serves as the critical link between:
+## Overview
 
-1. **Static token data** from Python (who created/owns tokens, which pools exist)
-2. **Dynamic mempool activity** (real-time transactions from creators/owners)
-3. **Signal generation** (immediate alerts when critical actions detected)
+The token tracking system maintains a comprehensive cache of:
+- All tracked tokens with their metadata, ownership, and tax information
+- All liquidity pools and their current reserves
+- All "creator" addresses (token creators, owners, tax setters) for fast lookup
+- Simulation results (can buy/sell, measured taxes, honeypot detection)
 
-### Core Objectives
-
-- **Fast Address Matching**: O(1) lookup to check if mempool tx is from a tracked creator/owner
-- **Function History Tracking**: Build patterns of creator/owner behavior over time
-- **Pool Monitoring**: Track pool addresses for post-simulation drain detection
-- **Future DB Integration**: Structured data ready for persistence and analysis
-
-## Signal Types and Emission Points
-
-The system emits different signal types at different stages of processing:
-
-### 1. Function Detection Signals (Immediate)
-**Emitted by**: `FunctionDetector` when critical functions detected
-**Signal Type**: `SignalAlert`
-- **Liquidity Removal Signal**: When removeLiquidity functions detected
-- **Trading Enabled Signal**: When enableTrading/openTrading detected  
-- **General Function Signal**: Other important functions
-
-These signals are emitted **immediately** upon detection, before simulation.
-
-### 2. Simulation-Based Signals (Post-Simulation)
-**Emitted by**: `SignalDetector` after transaction simulation
-**Signal Type**: `SimulationSignal`
-- **Pool Drain Signal**: When pool reserves drop >60% or below 0.3 ETH
-- **Scam Alert Signal**: When significant drain detected
-- **Stablecoin Burns/Mints**: USDC/USDT burn or mint events
-
-### 3. Creator/Owner Action Signals (With Cache Integration)
-**Purpose**: Enhanced signals when tx.from matches tracked creators/owners
-- Combines function detection with creator/owner role information
-- Tracks patterns of behavior over time
-- Enables predictive detection based on historical actions
-
-## Cache Architecture
+## Architecture
 
 ```
+Python Token Tracker (ZMQ Publisher)
+         ↓
+TokenTrackingSubscriber (ZMQ Subscriber)
+         ↓
 TokenTrackingCache
-├── AddressToTokenCache (Primary lookup)
-│   ├── Creator addresses → Token info + function history
-│   └── Owner addresses → Token info + function history
-│
-├── TokenInfoCache (Token metadata)
-│   ├── Token address → Full token data
-│   ├── Pools → Pool addresses for this token
-│   └── Ownership history
-│
-└── PoolAddressCache (Pool monitoring)
-    └── Pool address → Token address + reserves
+    ├── tokens: HashMap<String, TrackedToken>
+    ├── all_creators: HashSet  // All authority addresses
+    └── all_pools: HashSet     // All pool addresses
 ```
 
-## Complete Signal Flow
+## Key Components
 
-```
-Mempool TX → Is from tracked address? → Record function → Critical function? → Generate signal
-     ↓
-Simulation → State changes → Affects our pools? → Drain detected? → Generate signal
-```
+### TrackedToken
+Represents a single token with all its information:
+- Basic metadata (symbol, name, decimals, supply)
+- Authority addresses (creator, owner, tax setters)
+- Trading status and tax rates
+- Associated pools with liquidity reserves
+- Simulation results from Rust (can buy/sell, honeypot status)
 
-### Detailed Flow:
+### TokenTrackingCache
+The main cache that:
+- Subscribes to Python updates via ZMQ
+- Maintains fast HashSets for mempool transaction filtering
+- Stores simulation results from the Rust simulation engine
+- Provides methods to query tokens, pools, and authority addresses
 
-1. **Mempool Transaction Analysis**
-   - Check if `tx.from` is in our tracked addresses (creators/owners)
-   - If yes: Record the function call in their history
-   - If critical function (removeLiquidity, etc.): Generate immediate signal
+## Usage
 
-2. **Transaction Simulation**
-   - Simulate transactions (prioritize those from tracked addresses)
-   - Get state changes from simulation
-
-3. **Pool State Analysis**
-   - Check if any state changes affect our tracked pools
-   - If pool drain detected (>60% or <0.3 ETH): Generate signal
-
-## Key Design Decisions
-
-### 1. Address-First Indexing
-- **Primary key**: Ethereum addresses (creators/owners)
-- **Why**: Mempool txs only give us `from` address, need O(1) lookup
-- **Trade-off**: Duplicate data when one address owns multiple tokens
-
-### 2. Function History Storage
+### Basic Usage
 ```rust
-pub struct AddressActivity {
-    pub token_address: String,
-    pub role: AddressRole,  // Creator, Owner, Both
-    pub function_history: Vec<FunctionCall>,
-    pub last_activity: u64,
+use mempool_processor::token_tracking::{TokenTrackingSubscriber, TokenTrackingCache};
+
+// Create subscriber with ETH threshold
+let mut subscriber = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
+let cache = subscriber.get_cache();
+
+// Start listening in background
+tokio::spawn(async move {
+    subscriber.start_listening().await.unwrap();
+});
+
+// Use the cache
+let creators = cache.get_all_creators().await;
+let pools = cache.get_all_pools().await;
+let token_addresses = cache.get_all_token_addresses().await;
+```
+
+### Checking Addresses in Mempool Processing
+```rust
+// Fast O(1) lookup to check if address is a token authority
+if cache.is_creator(&tx.from).await {
+    // This is a creator/owner/tax setter transaction
+    classify_as_creator_transaction(&tx);
 }
 
-pub struct FunctionCall {
-    pub tx_hash: String,
-    pub function_selector: [u8; 4],
-    pub function_name: String,
-    pub block_number: Option<u64>,
-    pub timestamp: u64,
-    pub args_summary: Option<String>,  // For critical functions
+// Check if any state change affects a pool
+let all_pools = cache.get_all_pools().await;
+for (address, _) in simulation_result.state_changes {
+    if all_pools.contains(&address) {
+        // Pool liquidity was affected
+    }
 }
 ```
 
-### 3. Critical Function Detection
+### Getting Token Information
 ```rust
-// Critical functions that trigger immediate signals
-const CRITICAL_FUNCTIONS: &[&str] = &[
-    "removeLiquidity",
-    "removeLiquidityETH",
-    "removeLiquidityWithPermit",
-    "transferOwnership",
-    "renounceOwnership",
-    "pause",
-    "blacklist",
-    "setMaxTxAmount",
-    "setMaxWalletSize",
-];
-```
-
-### 4. Pool State Tracking
-- Store pool addresses with token mapping
-- Track latest reserves for drain detection
-- Enable post-simulation state change analysis
-
-## Key Functionality
-
-### 1. Creator/Owner Tracking
-- **Store**: All token creators and current owners from Python
-- **Match**: Instantly identify if mempool tx is from a tracked address
-- **Track**: Record all functions called by each creator/owner
-- **Pattern**: Build behavioral profiles (e.g., "always removes liquidity after 100 blocks")
-
-### 2. Pool Address Monitoring
-- **Store**: All pool addresses for each token
-- **Lookup**: Quick check if simulation state change affects our pools
-- **Reserves**: Track current reserve levels for drain detection
-- **Priority**: Mark primary pools vs secondary pools
-
-### 3. Function Call History
-- **Record**: Every function called by tracked addresses
-- **Analyze**: Detect patterns and suspicious sequences
-- **Alert**: Enhanced signals when known bad actors detected
-- **Future**: Feed ML models for predictive detection
-
-## Usage Example
-
-```rust
-// When mempool tx arrives
-let tx_from = "0x123...";
-let function_selector = &tx.input[0..4];
-
-// Fast lookup: Is this address a creator/owner?
-if let Some(address_info) = cache.get_address_info(tx_from).await {
-    // Record the function call
-    cache.record_function_call(
-        tx_from,
-        function_selector,
-        tx.hash,
-        timestamp,
-    ).await;
+// Get full token information
+if let Some(token) = cache.get_token("0x...").await {
+    println!("Token: {} ({})", token.symbol.unwrap_or_default(), token.name.unwrap_or_default());
+    println!("Creator: {}", token.creator_address);
+    println!("Owner: {}", token.current_owner);
+    println!("Buy Tax: {:?}%", token.buy_tax);
+    println!("Pools: {}", token.pools.len());
     
-    // Check if it's a critical function
-    if is_critical_function(function_selector) {
-        // Generate immediate signal with role context
-        signal_detector.emit_creator_action_signal(
-            address_info.token_address,
-            tx_from,
-            function_selector,
-            address_info.role, // Creator vs Owner matters!
-        );
+    // Check simulation results
+    if let Some(sim_data) = token.simulation_data {
+        println!("Can Buy: {}", sim_data.can_buy);
+        println!("Can Sell: {}", sim_data.can_sell);
+        println!("Is Honeypot: {}", sim_data.is_honeypot);
     }
 }
 
-// After simulation
-for state_change in simulation_results.state_changes {
-    if let Some(pool_info) = cache.get_pool_info(&state_change.address).await {
-        // Check for significant reserve changes
-        if is_drain_detected(&pool_info, &state_change) {
-            signal_detector.emit_pool_drain_signal(
-                pool_info,
-                state_change,
-                tx_from,
-            );
-        }
+// Get primary pool (highest liquidity)
+if let Some(pool) = cache.get_primary_pool("0x...").await {
+    println!("Primary pool: {} with {} ETH", pool.pool_address, pool.denom_reserve);
+}
+```
+
+### Updating Simulation Results
+```rust
+use mempool_processor::token_tracking::SimulationData;
+
+// After running buy/sell simulation
+let sim_data = SimulationData {
+    can_buy: true,
+    can_sell: false,
+    measured_buy_tax: Some(5.0),
+    measured_sell_tax: None,
+    is_honeypot: true,
+    last_simulated_block: 12345678,
+    simulation_error: None,
+};
+
+cache.set_simulation_results("0x...", sim_data).await;
+```
+
+### Getting All Token Addresses
+```rust
+// Get all unique token addresses in the system
+let all_tokens = cache.get_all_token_addresses().await;
+println!("Tracking {} tokens", all_tokens.len());
+
+// Process each token
+for token_address in all_tokens {
+    if let Some(token_info) = cache.get_token(&token_address).await {
+        // Process token...
     }
 }
 ```
+
+## Data Flow
+
+1. **Python → Rust**: Token updates arrive via ZMQ with:
+   - Token metadata and ownership
+   - Current tax rates from contract reads
+   - Pool addresses and reserves
+   - Trading status
+
+2. **Rust Simulations → Cache**: Simulation results are stored:
+   - Can buy/sell status from actual swap attempts
+   - Measured tax rates from simulations
+   - Honeypot detection
+   - Simulation errors
+
+3. **Cache → Signal Detection**: The cache provides:
+   - Fast lookups for transaction classification
+   - Pool addresses for liquidity monitoring
+   - Combined Python + simulation data for signal generation
 
 ## Performance Considerations
 
-1. **Memory Usage**: ~1KB per tracked address (including function history)
-2. **Lookup Speed**: O(1) for address → token mapping
-3. **Update Frequency**: Batch updates from Python every block
-4. **Eviction Policy**: LRU for addresses inactive > 24 hours
+- Pre-computed HashSets enable O(1) lookups for address checking
+- Cache size limits prevent unbounded growth (100K pools, 50K tokens)
+- Scam tokens are evicted after 5000 blocks of inactivity
+- All updates are done under async locks for thread safety
 
-## Signal Types Generated
+## Example: Token Cache Inspector
 
-1. **CreatorLiquidityRemoval**: Creator removing liquidity
-2. **OwnershipChange**: Ownership transferred or renounced  
-3. **TradingPaused**: Owner paused trading
-4. **SignificantDrain**: Pool reserves dropped > 50%
-5. **SuspiciousPattern**: Creator following known scam patterns
-
-## Future Enhancements
-
-1. **Pattern Learning**: ML model to detect scam patterns from function sequences
-2. **Cross-Token Analysis**: Detect creators with multiple scam tokens
-3. **MEV Protection**: Detect sandwich attack attempts on tracked tokens
-4. **Collaborative Filtering**: Share creator reputation across instances
+See `examples/token_cache_inspector.rs` for a complete example that:
+- Connects to the token cache
+- Lists all authority addresses (creators/owners/tax setters)
+- Lists all tracked pools
+- Displays detailed information for 10 sample tokens
+- Shows all token addresses in the system

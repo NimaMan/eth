@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use super::types::{PoolState, PoolUpdate, TokenCreator, TokenCreatorState};
+use super::types::{PoolState, PoolUpdate, TokenCreator, TokenCreatorState, SimulationData};
 
 /// Thread-safe cache for storing the latest pool ETH levels and metadata.
 #[derive(Debug, Clone)]
@@ -373,6 +373,14 @@ pub struct TokenTrackingCache {
     
     /// Token creator cache
     pub creators: TokenCreatorCache,
+    
+    /// Full token information storage (includes simulation data)
+    /// Maps token addresses to complete token information
+    tokens: Arc<RwLock<HashMap<String, super::types::TokenInfo>>>,
+    
+    /// Pre-computed sets for fast lookups
+    all_creators: Arc<RwLock<std::collections::HashSet<String>>>,
+    all_pools: Arc<RwLock<std::collections::HashSet<String>>>,
 }
 
 impl TokenTrackingCache {
@@ -381,6 +389,9 @@ impl TokenTrackingCache {
         Self {
             pools: PoolStateCache::new(eth_threshold),
             creators: TokenCreatorCache::new(),
+            tokens: Arc::new(RwLock::new(HashMap::new())),
+            all_creators: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            all_pools: Arc::new(RwLock::new(std::collections::HashSet::new())),
         }
     }
     
@@ -412,6 +423,138 @@ impl TokenTrackingCache {
         // For now, just log the update
         info!("Tax update for token {}: Buy: {:?}%, Sell: {:?}%", 
               token_address, buy_tax, sell_tax);
+    }
+    
+    
+    /// Get all tokens created by a specific address
+    pub async fn get_tokens_by_creator(&self, creator_address: &str) -> Vec<String> {
+        self.creators.get_creator_tokens(creator_address).await
+    }
+    
+    /// Get pool information for a specific pool address
+    pub async fn get_pool_by_address(&self, pool_address: &str) -> Option<PoolState> {
+        self.pools.get_pool(pool_address).await
+    }
+    
+    /// Get all pools for a specific token
+    pub async fn get_pools_for_token(&self, token_address: &str) -> Vec<(String, PoolState)> {
+        let all_pools = self.pools.get_all_pools().await;
+        all_pools.into_iter()
+            .filter(|(_, pool)| pool.token_address == token_address)
+            .collect()
+    }
+    
+    /// Get all unique token addresses tracked in the system
+    /// This includes tokens from both pools and creator information
+    pub async fn get_all_token_addresses(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        
+        // Get all tokens from pools
+        let pools = self.pools.get_all_pools().await;
+        let mut token_set: HashSet<String> = pools.values()
+            .map(|pool| pool.token_address.clone())
+            .collect();
+        
+        // Get all tokens from creator cache
+        let creators = self.creators.get_all_creators().await;
+        for creator_state in creators.values() {
+            token_set.insert(creator_state.creator.token_address.clone());
+        }
+        
+        // Convert to Vec and return
+        token_set.into_iter().collect()
+    }
+    
+    /// Check if an address is associated with any token (as creator or pool)
+    pub async fn is_tracked_address(&self, address: &str) -> bool {
+        // Check if it's a creator
+        if self.is_creator(address).await {
+            return true;
+        }
+        
+        // Check if it's a pool
+        if self.pools.get_pool(address).await.is_some() {
+            return true;
+        }
+        
+        false
+    }
+    
+    /// Update full token information from Python
+    pub async fn update_token(&self, mut token_info: super::types::TokenInfo) {
+        let token_address = token_info.token_address.clone();
+        
+        // Convert Python tax values (0-100 float) to u8
+        token_info.buy_tax = token_info.buy_tax_python.map(|t| t.round() as u8);
+        token_info.sell_tax = token_info.sell_tax_python.map(|t| t.round() as u8);
+        
+        // Update the pre-computed sets
+        let mut all_creators_guard = self.all_creators.write().await;
+        all_creators_guard.insert(token_info.creator_address.clone());
+        // Add all tax setter addresses
+        for tax_setter in &token_info.tax_setter_addresses {
+            all_creators_guard.insert(tax_setter.clone());
+        }
+        all_creators_guard.insert(token_info.current_owner.clone());
+        drop(all_creators_guard);
+        
+        let mut all_pools_guard = self.all_pools.write().await;
+        for pool_address in token_info.pools.keys() {
+            all_pools_guard.insert(pool_address.clone());
+        }
+        drop(all_pools_guard);
+        
+        // Store the full token information
+        let mut tokens_guard = self.tokens.write().await;
+        tokens_guard.insert(token_address, token_info);
+    }
+    
+    /// Get full token information (with simulation data if available)
+    pub async fn get_token(&self, token_address: &str) -> Option<super::types::TokenInfo> {
+        let tokens_guard = self.tokens.read().await;
+        tokens_guard.get(token_address).cloned()
+    }
+    
+    /// Set simulation results for a token
+    pub async fn set_simulation_results(&self, token_address: &str, simulation_data: SimulationData) {
+        let mut tokens_guard = self.tokens.write().await;
+        if let Some(token_info) = tokens_guard.get_mut(token_address) {
+            token_info.simulation_data = Some(simulation_data);
+            info!("Updated simulation results for token {}", token_address);
+        } else {
+            warn!("Attempted to set simulation results for unknown token: {}", token_address);
+        }
+    }
+    
+    /// Get all creator addresses for fast mempool filtering
+    pub async fn get_all_creators(&self) -> std::collections::HashSet<String> {
+        let guard = self.all_creators.read().await;
+        guard.clone()
+    }
+    
+    /// Get all pool addresses for fast mempool filtering
+    pub async fn get_all_pools(&self) -> std::collections::HashSet<String> {
+        let guard = self.all_pools.read().await;
+        guard.clone()
+    }
+    
+    /// Check if an address is a creator/owner/tax setter
+    pub async fn is_creator(&self, address: &str) -> bool {
+        let guard = self.all_creators.read().await;
+        guard.contains(address)
+    }
+    
+    /// Get the primary pool for a token (highest liquidity)
+    pub async fn get_primary_pool(&self, token_address: &str) -> Option<super::types::PoolInfo> {
+        let tokens_guard = self.tokens.read().await;
+        if let Some(token_info) = tokens_guard.get(token_address) {
+            // Find pool with highest ETH reserve
+            token_info.pools.values()
+                .max_by(|a, b| a.denom_reserve.partial_cmp(&b.denom_reserve).unwrap())
+                .cloned()
+        } else {
+            None
+        }
     }
 }
 
@@ -539,5 +682,53 @@ mod tests {
         assert!(token_info.uses_private_mempool);
         assert_eq!(token_info.related_pools.len(), 1);
         assert_eq!(token_info.related_pools[0].0, pool_address);
+    }
+    
+    #[tokio::test]
+    async fn test_get_all_token_addresses() {
+        let cache = TokenTrackingCache::new(0.1);
+        
+        // Add multiple tokens through pools
+        let mut pools = HashMap::new();
+        let token1 = "0x1111111111111111111111111111111111111111".to_string();
+        let token2 = "0x2222222222222222222222222222222222222222".to_string();
+        
+        pools.insert("0xaaa".to_string(), crate::token_tracking::types::PoolUpdate {
+            eth_reserve: 5.0,
+            token_reserve: 10000.0,
+            token_address: token1.clone(),
+            block_number: 12345,
+            update_time: 1626000000.0,
+        });
+        
+        pools.insert("0xbbb".to_string(), crate::token_tracking::types::PoolUpdate {
+            eth_reserve: 10.0,
+            token_reserve: 20000.0,
+            token_address: token2.clone(),
+            block_number: 12346,
+            update_time: 1626000001.0,
+        });
+        
+        cache.pools.update_pools(pools.iter()).await;
+        
+        // Add a token through creator (different from pools)
+        let token3 = "0x3333333333333333333333333333333333333333".to_string();
+        let mut creators = HashMap::new();
+        creators.insert(token3.clone(), crate::token_tracking::types::TokenCreator {
+            creator_address: "0xcreator".to_string(),
+            token_address: token3.clone(),
+            creation_block: 12340,
+            creation_tx_hash: "0xhash".to_string(),
+            creation_time: 1625999000.0,
+            uses_private_mempool: false,
+        });
+        cache.creators.update_creators(creators.iter()).await;
+        
+        // Get all token addresses
+        let all_tokens = cache.get_all_token_addresses().await;
+        assert_eq!(all_tokens.len(), 3);
+        assert!(all_tokens.contains(&token1));
+        assert!(all_tokens.contains(&token2));
+        assert!(all_tokens.contains(&token3));
     }
 } 
