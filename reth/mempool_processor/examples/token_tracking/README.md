@@ -4,18 +4,34 @@ This directory contains examples demonstrating the token tracking cache function
 
 ## Examples
 
-### 1. `test_token_cache.rs`
-Comprehensive test suite for the `AddressTrackingCache` that demonstrates:
-- Basic cache creation and initialization
-- Adding token, creator, owner, and pool data
-- Querying cache for different entity types (creators, owners, pools)
-- Recording function calls from specific addresses
-- Testing cache growth with multiple tokens
-- Retrieving and verifying cache statistics
+### 1. `inspect_creator_info.rs`
+Comprehensive creator and token inspection tool that:
+- Looks up creator addresses in the cache
+- Displays all tokens created by a specific address
+- Shows detailed token metadata, pools, and simulation results
+- Can analyze token/pool/creator addresses with --detailed flag
+- Demonstrates how to get complete token information for routing
 
-**Use case**: Run this to verify the cache is working correctly and understand all available operations.
+**Use case**: Debug creator transactions and inspect token data comprehensively.
 
-### 2. `zmq_connection_example.rs`
+### 2. `get_token_info.rs`
+Quick token information retrieval tool that:
+- Gets token info by token address, creator, or pool
+- Shows summary information suitable for the router
+- Displays primary pool liquidity and trading status
+- Demonstrates efficient token cache queries
+
+**Use case**: Quick lookups for routing decisions and token verification.
+
+### 3. `token_cache_inspector.rs`
+Shows token cache statistics and contents:
+- Displays total tokens, pools, and creators in cache
+- Lists sample tokens with their metadata
+- Shows cache initialization from ZMQ data
+
+**Use case**: Monitor cache health and verify data population.
+
+### 4. `zmq_connection_example.rs`
 Shows how to connect to the Python token publisher via ZMQ:
 - Connects to ZMQ endpoints (pub: 5557, rep: 5558)
 - Requests initial token data from Python
@@ -24,40 +40,34 @@ Shows how to connect to the Python token publisher via ZMQ:
 
 **Use case**: Use this as a reference for integrating with the Python token publisher.
 
-### 3. `address_role_detection_example.rs`
-Demonstrates address role detection and cache lookups:
-- Adding tokens with different creator/owner addresses
-- Detecting address roles (creator vs owner)
-- Checking if an address has special permissions
-- Simulating transaction routing based on address roles
-
-**Use case**: Understand how to detect creator transactions vs regular transactions.
-
 ## Running the Examples
 
-These examples are not registered in Cargo.toml to keep them separate from the main examples. To run them:
+All examples are registered in Cargo.toml and can be run with:
 
 ```bash
-# Run from the mempool_processor directory
-rustc --edition 2021 examples/token_tracking/test_token_cache.rs \
-  -L target/debug/deps \
-  --extern mempool_processor=target/debug/libmempool_processor.rlib \
-  --extern tokio=target/debug/deps/libtokio-*.rlib \
-  --extern tracing=target/debug/deps/libtracing-*.rlib \
-  -o target/debug/test_token_cache
+# Inspect creator and token information
+cargo run --example inspect_creator_info -- --creator 0xYourCreatorAddress
 
-./target/debug/test_token_cache
+# Get quick token info
+cargo run --example get_token_info -- --token 0xTokenAddress
+# Or by creator
+cargo run --example get_token_info -- --creator 0xCreatorAddress
+# Or by pool
+cargo run --example get_token_info -- --pool 0xPoolAddress
+
+# Inspect cache statistics
+cargo run --example token_cache_inspector
+
+# Test ZMQ connection
+cargo run --example zmq_connection_example
 ```
-
-Or compile them as regular Rust files with appropriate dependencies.
 
 ## Token Cache Architecture
 
 The token tracking system consists of:
-- **AddressTrackingCache**: Main cache storing token/creator/owner relationships
+- **TokenTrackingCache**: Unified cache storing tokens, creators, and pool relationships
 - **TokenTrackingSubscriber**: ZMQ subscriber that connects to Python publisher
 - **PoolStateCache**: Tracks pool ETH reserves and state
-- **TokenCreatorCache**: Maps tokens to their creators
 
 The Python publisher (running on port 5556 for signals, 5557/5558 for token data) sends:
 - Initial token data on request

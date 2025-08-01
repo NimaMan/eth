@@ -32,7 +32,7 @@ use mempool_processor::{
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter, TransactionCategory},
     simulator::{SimulationManager, SimulationRequest, SimulationType, SequentialBuySellSimulator, BuySellSimulatorConfig, TxSimulator},
-    signal_detector::{SignalManager, SignalManagerConfig},
+    signal_detector::{SignalManagerConfig},
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
 };
@@ -220,7 +220,11 @@ async fn main() -> Result<()> {
     
     tracing_subscriber::fmt()
         .with_target(false)
-        .with_env_filter(if args.verbose { "debug" } else { "info" })
+        .with_env_filter(if args.verbose { 
+            "debug,reth=warn,reth_provider=warn,reth_db=warn"
+        } else { 
+            "info,reth=warn,reth_provider=warn,reth_db=warn"
+        })
         .with_writer(file_appender)
         .init();
     
@@ -259,7 +263,7 @@ async fn main() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(3)).await;
     
     let initial_pools = token_cache.pools.get_pool_count().await;
-    let initial_creators = token_cache.creators.get_creator_count().await;
+    let initial_creators = token_cache.get_creator_count().await;
     info!("✅ Token cache initialized: {} pools, {} creators", initial_pools, initial_creators);
     
     // 2. IPC client
@@ -289,33 +293,28 @@ async fn main() -> Result<()> {
     let buy_sell_simulator = Arc::new(SequentialBuySellSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
     info!("✅ Simulators initialized");
     
-    // 6. Simulation manager (now includes signal detection)
-    info!("📦 Starting simulation manager with integrated signal detection...");
+    // 6. Signal publisher (moved before simulation manager)
+    info!("📡 Initializing signal publisher...");
+    let signals_dir = run_dir.join("signals");
+    std::fs::create_dir_all(&signals_dir)?;
+    let publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
+    info!("✅ Signal publisher ready");
+    
+    // 7. Simulation manager (now includes signal detection and publishing)
+    info!("📦 Starting simulation manager with integrated signal detection and publishing...");
     let signal_config = SignalManagerConfig::default();
     let mut simulation_manager = SimulationManager::new(
         tx_simulator, 
         buy_sell_simulator,
-        Arc::clone(&address_cache),
+        token_cache.clone(),
         signal_config,
         args.sim_workers
     );
     
-    // Pass signal counters to simulation manager
-    simulation_manager.set_metric_counters(
-        Arc::clone(&metrics.trading_enabled_signals),
-        Arc::clone(&metrics.honeypot_signals),
-        Arc::clone(&metrics.tax_change_signals),
-    );
+    // Note: set_metric_counters has been removed from SimulationManager
     
-    info!("✅ Simulation manager ready with {} workers and signal detection", args.sim_workers);
-    
-    // 8. Signal publisher
-    info!("📡 Initializing signal publisher...");
-    let signals_dir = run_dir.join("signals");
-    std::fs::create_dir_all(&signals_dir)?;
-    let publisher_config = SignalPublisherConfig::with_timestamped_logs(signals_dir.to_str().unwrap());
-    let _signal_publisher = SignalPublisher::new(publisher_config).await?;
-    info!("✅ Signal publisher ready");
+    info!("✅ Simulation manager ready with {} workers, signal detection and publishing", args.sim_workers);
     
     info!("\n🏃 Starting main processing loop...\n");
     info!("📁 Run directory: {}", run_dir.display());
@@ -465,6 +464,21 @@ async fn main() -> Result<()> {
             }
         }
         
+        // Process simulation queue
+        let simulation_results = simulation_manager.process_queue().await;
+        for result in simulation_results {
+            if let Some(ref error) = result.error {
+                metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
+                warn!("Simulation error: {}", error);
+            } else {
+                metrics.simulations_completed.fetch_add(1, Ordering::Relaxed);
+                if result.simulation_time_ms > 0.0 {
+                    let sim_duration = Duration::from_secs_f64(result.simulation_time_ms / 1000.0);
+                    metrics.add_simulation_time(sim_duration).await;
+                }
+            }
+        }
+        
         // Periodic reporting
         if last_report.elapsed() > Duration::from_secs(args.report_interval) {
             let elapsed = start_time.elapsed();
@@ -500,7 +514,7 @@ async fn main() -> Result<()> {
             
             // Update cache statistics
             let current_pools = token_cache.pools.get_pool_count().await;
-            let current_creators = token_cache.creators.get_creator_count().await;
+            let current_creators = token_cache.get_creator_count().await;
             if current_pools != initial_pools || current_creators != initial_creators {
                 info!("📊 Token cache updated: {} pools (+{}), {} creators (+{})", 
                     current_pools, current_pools.saturating_sub(initial_pools),
@@ -539,7 +553,7 @@ async fn main() -> Result<()> {
     }
     
     // Shutdown components
-    drop(_signal_publisher);
+    drop(signal_publisher);
     drop(simulation_manager);
     subscriber_handle.abort();
     

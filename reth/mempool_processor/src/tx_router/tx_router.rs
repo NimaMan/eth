@@ -103,7 +103,7 @@ impl TransactionRouter {
         // Check if from a known creator
         if let Some(ref cache) = self.token_cache {
             let from_addr = checksum_address(&hex::encode(&tx.from));
-            if cache.creators.is_creator(&from_addr).await {
+            if cache.is_creator(&from_addr).await {
                 let result = self.classify_creator_transaction(tx).await;
                 debug!("Classified creator transaction in {:?}", start.elapsed());
                 return result;
@@ -138,20 +138,30 @@ impl TransactionRouter {
     async fn classify_creator_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
         let function_type = self.creator_router.identify_function(tx);
         
-        // Determine if target is a token
-        let target_token = if let Some(ref cache) = self.token_cache {
-            if let Some(to_bytes) = &tx.to {
-                let to_addr = checksum_address(&hex::encode(to_bytes));
-                if cache.get_token_info(&to_addr).await.creator_info.is_some() {
-                    Some(to_addr)
+        // Get the token created by this creator
+        let (target_token, is_interacting_with_own_token) = if let Some(ref cache) = self.token_cache {
+            let from_addr = checksum_address(&hex::encode(&tx.from));
+            
+            // Get token info for this creator
+            if let Some(token_info) = cache.get_token_for_creator(&from_addr).await {
+                // Check if the target address is the token itself
+                if let Some(to_bytes) = &tx.to {
+                    let to_addr = checksum_address(&hex::encode(to_bytes));
+                    if to_addr.eq_ignore_ascii_case(&token_info.token_address) {
+                        (Some(token_info.token_address.clone()), true)
+                    } else {
+                        // Creator is interacting with something else (like a pool)
+                        // Still return the token address for context
+                        (Some(token_info.token_address.clone()), false)
+                    }
                 } else {
-                    None
+                    (Some(token_info.token_address.clone()), false)
                 }
             } else {
-                None
+                (None, false)
             }
         } else {
-            None
+            (None, false)
         };
 
         let priority = match &function_type {

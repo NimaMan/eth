@@ -8,7 +8,7 @@ pub mod address_tracking_cache;
 pub mod signal_integration;
 
 // Re-export commonly used types
-pub use cache::{PoolStateCache, TokenCreatorCache, TokenTrackingCache};
+pub use cache::{PoolStateCache, TokenTrackingCache};
 pub use address_tracking_cache::{AddressTrackingCache, AddressRole};
 pub use signal_integration::SignalIntegration;
 
@@ -129,7 +129,7 @@ impl TokenTrackingSubscriber {
                 
                 // Update caches with extracted data
                 let updated_pools = self.cache.pools.update_pools(pools_map.iter()).await;
-                let updated_creators = self.cache.creators.update_creators(creators_map.iter()).await;
+                let updated_creators = self.cache.update_creators(creators_map.iter()).await;
                 
                 info!("✅ Initialized cache with {} tokens containing {} pools (above threshold: {})", 
                      token_count, pools_map.len(), updated_pools.len());
@@ -240,7 +240,7 @@ impl TokenTrackingSubscriber {
                         
                         // Update caches with extracted data
                         let updated_pools = self.cache.pools.update_pools(pools_map.iter()).await;
-                        let updated_creators = self.cache.creators.update_creators(creators_map.iter()).await;
+                        let updated_creators = self.cache.update_creators(creators_map.iter()).await;
                         
                         debug!("Updated {} pools and {} creators from token message", 
                                updated_pools.len(), updated_creators);
@@ -270,7 +270,7 @@ impl TokenTrackingSubscriber {
                         let mut creators_map = std::collections::HashMap::new();
                         creators_map.insert(checksummed_token, creator_message.creator);
                         
-                        let updated_count = self.cache.creators.update_creators(creators_map.iter()).await;
+                        let updated_count = self.cache.update_creators(creators_map.iter()).await;
                         debug!("Updated {} creators in cache", updated_count);
                         
                     } else if let Ok(creators_message) = serde_json::from_str::<TokenCreatorsMessage>(&msg_str) {
@@ -283,7 +283,7 @@ impl TokenTrackingSubscriber {
                             creators_map.insert(checksummed_token, creator.clone());
                         }
                         
-                        let updated_count = self.cache.creators.update_creators(creators_map.iter()).await;
+                        let updated_count = self.cache.update_creators(creators_map.iter()).await;
                         debug!("Updated {} creators in cache", updated_count);
                         
                     } else {

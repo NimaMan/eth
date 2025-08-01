@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use super::types::{PoolState, PoolUpdate, TokenCreator, TokenCreatorState, SimulationData};
+use super::types::{PoolState, PoolUpdate, TokenCreatorState, SimulationData};
 
 /// Thread-safe cache for storing the latest pool ETH levels and metadata.
 #[derive(Debug, Clone)]
@@ -130,249 +130,12 @@ impl PoolStateCache {
     }
 }
 
-/// Thread-safe cache for storing token creator information and risk metrics.
-#[derive(Debug, Clone)]
-pub struct TokenCreatorCache {
-    /// Internal storage mapping token addresses to creator information
-    /// Keys are token contract addresses (as hex strings)
-    /// Values are creator state information
-    token_storage: Arc<RwLock<HashMap<String, TokenCreatorState>>>,
-    
-    /// Internal storage mapping creator addresses to their tokens
-    /// Keys are creator addresses (as hex strings)
-    /// Values are sets of token addresses created by this creator
-    creator_storage: Arc<RwLock<HashMap<String, Vec<String>>>>,
-    
-    /// Maximum number of token creators to keep in cache
-    max_creators: usize,
-}
-
-impl TokenCreatorCache {
-    /// Create a new token creator cache
-    pub fn new() -> Self {
-        Self {
-            token_storage: Arc::new(RwLock::new(HashMap::new())),
-            creator_storage: Arc::new(RwLock::new(HashMap::new())),
-            max_creators: 50_000, // 50K creators max
-        }
-    }
-    
-    /// Check if an address is a known creator
-    pub async fn is_creator(&self, address: &str) -> bool {
-        let storage = self.creator_storage.read().await;
-        storage.contains_key(address)
-    }
-    
-    /// Update the cache with token creator information
-    /// Returns the number of creators updated
-    pub async fn update_creators<'a, I>(&self, creator_updates: I) -> usize 
-    where
-        I: IntoIterator<Item = (&'a String, &'a TokenCreator)>,
-    {
-        let mut updated_count = 0;
-        
-        // Lock both storages for writing
-        let mut token_storage = self.token_storage.write().await;
-        let mut creator_storage = self.creator_storage.write().await;
-        
-        // Process each creator update
-        for (token_address, creator) in creator_updates {
-            // Store token -> creator mapping
-            let creator_state = TokenCreatorState::from(creator.clone());
-            token_storage.insert(token_address.clone(), creator_state);
-            
-            // Store creator -> tokens mapping
-            creator_storage
-                .entry(creator.creator_address.clone())
-                .or_insert_with(Vec::new)
-                .push(token_address.clone());
-            
-            updated_count += 1;
-        }
-        
-        // Check cache size and evict old entries if necessary
-        if token_storage.len() > self.max_creators {
-            let excess = token_storage.len() - self.max_creators;
-            warn!("Creator cache exceeded limit ({} creators), evicting {} oldest entries", token_storage.len(), excess);
-            
-            // Convert to Vec and sort by age (oldest first)
-            let mut entries: Vec<_> = token_storage.iter()
-                .map(|(addr, state)| (addr.clone(), state.received_at))
-                .collect();
-            entries.sort_by_key(|(_, received_at)| *received_at);
-            
-            // Remove oldest entries
-            for (addr, _) in entries.into_iter().take(excess) {
-                token_storage.remove(&addr);
-            }
-        }
-        
-        if updated_count > 0 {
-            debug!("Updated {} token creators in cache (total: {})", updated_count, token_storage.len());
-        }
-        
-        updated_count
-    }
-    
-    /// Get creator information for a specific token
-    pub async fn get_token_creator(&self, token_address: &str) -> Option<TokenCreatorState> {
-        let storage = self.token_storage.read().await;
-        
-        storage.get(token_address).cloned()
-    }
-    
-    /// Get all tokens created by a specific creator address
-    pub async fn get_creator_tokens(&self, creator_address: &str) -> Vec<String> {
-        let storage = self.creator_storage.read().await;
-        
-        storage.get(creator_address).cloned().unwrap_or_default()
-    }
-    
-    /// Get creators who use private mempool
-    pub async fn get_private_mempool_creators(&self) -> Vec<TokenCreatorState> {
-        let storage = self.token_storage.read().await;
-        
-        storage
-            .values()
-            .filter(|creator_state| creator_state.creator.uses_private_mempool)
-            .cloned()
-            .collect()
-    }
-    
-    /// Get all token creators in the cache
-    pub async fn get_all_creators(&self) -> HashMap<String, TokenCreatorState> {
-        let storage = self.token_storage.read().await;
-        
-        storage.clone()
-    }
-    
-    /// Get the number of token creators currently in the cache
-    pub async fn get_creator_count(&self) -> usize {
-        let storage = self.token_storage.read().await;
-        
-        storage.len()
-    }
-    
-    /// Check if a token's creator uses private mempool
-    pub async fn is_token_creator_private(&self, token_address: &str) -> bool {
-        if let Some(creator_state) = self.get_token_creator(token_address).await {
-            creator_state.creator.uses_private_mempool
-        } else {
-            false
-        }
-    }
-    
-    /// Get token address by creator address (reverse lookup)
-    pub async fn get_token_by_creator(&self, creator_address: &str) -> Option<String> {
-        let storage = self.token_storage.read().await;
-        
-        // Search through all tokens to find one created by this address
-        for (token_address, creator_state) in storage.iter() {
-            if creator_state.creator.creator_address.eq_ignore_ascii_case(creator_address) {
-                return Some(token_address.clone());
-            }
-        }
-        
-        None
-    }
-    
-    /// Record an observed transaction from a creator
-    pub async fn record_creator_transaction(&self, creator_address: &str, tx_hash: &str, 
-                                     function_name: &str, seen_in_mempool: bool) {
-        let mut storage = self.token_storage.write().await;
-        
-        // Find the token created by this address
-        let token_address = storage.iter()
-            .find(|(_, state)| state.creator.creator_address.eq_ignore_ascii_case(creator_address))
-            .map(|(addr, _)| addr.clone());
-            
-        if let Some(token_addr) = token_address {
-            if let Some(creator_state) = storage.get_mut(&token_addr) {
-                // Add the observed transaction
-                creator_state.observed_transactions.push(
-                    super::types::ObservedTransaction {
-                        tx_hash: tx_hash.to_string(),
-                        block_number: None, // Will be set when mined
-                        function_name: function_name.to_string(),
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        seen_in_mempool,
-                    }
-                );
-                
-                // Check if we have enough data to determine mempool usage
-                if creator_state.observed_transactions.len() >= 3 && creator_state.mempool_usage_determined.is_none() {
-                    let total_txs = creator_state.observed_transactions.len();
-                    let mempool_visible = creator_state.observed_transactions.iter()
-                        .filter(|tx| tx.seen_in_mempool)
-                        .count();
-                    
-                    let visibility_ratio = mempool_visible as f64 / total_txs as f64;
-                    
-                    // Determine mempool usage pattern
-                    if visibility_ratio >= 0.7 {
-                        creator_state.mempool_usage_determined = Some(false); // Public mempool user
-                        creator_state.creator.uses_private_mempool = false;
-                        info!("Creator {} determined to be PUBLIC mempool user ({}% visible)", 
-                              creator_address, (visibility_ratio * 100.0) as u32);
-                    } else if visibility_ratio <= 0.3 {
-                        creator_state.mempool_usage_determined = Some(true); // Private mempool user
-                        creator_state.creator.uses_private_mempool = true;
-                        warn!("Creator {} determined to be PRIVATE mempool user ({}% visible)", 
-                              creator_address, (visibility_ratio * 100.0) as u32);
-                    }
-                    // Between 30-70% = mixed usage, keep as None
-                }
-            }
-        }
-    }
-    
-    /// Mark a transaction as mined with its block number
-    pub async fn mark_transaction_mined(&self, tx_hash: &str, block_number: u64) {
-        let mut storage = self.token_storage.write().await;
-        
-        // Update block number for this transaction across all creators
-        for creator_state in storage.values_mut() {
-            for tx in &mut creator_state.observed_transactions {
-                if tx.tx_hash == tx_hash {
-                    tx.block_number = Some(block_number);
-                }
-            }
-        }
-    }
-    
-    /// Remove stale creator entries older than the specified duration
-    pub async fn cleanup_stale_entries(&self, max_age: std::time::Duration) -> usize {
-        let mut token_storage = self.token_storage.write().await;
-        
-        let initial_count = token_storage.len();
-        token_storage.retain(|_, creator_state| !creator_state.is_stale(max_age));
-        let removed_count = initial_count - token_storage.len();
-        
-        if removed_count > 0 {
-            info!("Cleaned up {} stale token creator entries", removed_count);
-        }
-        
-        removed_count
-    }
-}
-
-impl Default for TokenCreatorCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Combined cache for both pool states and token creator information.
 #[derive(Debug, Clone)]
 pub struct TokenTrackingCache {
     /// Pool state cache
     pub pools: PoolStateCache,
-    
-    /// Token creator cache
-    pub creators: TokenCreatorCache,
     
     /// Full token information storage (includes simulation data)
     /// Maps token addresses to complete token information
@@ -388,7 +151,6 @@ impl TokenTrackingCache {
     pub fn new(eth_threshold: f64) -> Self {
         Self {
             pools: PoolStateCache::new(eth_threshold),
-            creators: TokenCreatorCache::new(),
             tokens: Arc::new(RwLock::new(HashMap::new())),
             all_creators: Arc::new(RwLock::new(std::collections::HashSet::new())),
             all_pools: Arc::new(RwLock::new(std::collections::HashSet::new())),
@@ -397,38 +159,53 @@ impl TokenTrackingCache {
     
     /// Get comprehensive information about a token including pool and creator data
     pub async fn get_token_info(&self, token_address: &str) -> TokenInfo {
-        let creator_info = self.creators.get_token_creator(token_address).await;
-        let uses_private_mempool = self.creators.is_token_creator_private(token_address).await;
+        // Try to get from full token info first
+        if let Some(token) = self.get_token(token_address).await {
+            return TokenInfo {
+                token_address: token.token_address,
+                creator_info: None, // TokenCreatorState has been removed
+                uses_private_mempool: false, // This info is not in TokenInfo type
+                related_pools: self.get_pools_for_token(token_address).await,
+            };
+        }
         
-        // Find pools containing this token
-        let pools = self.pools.get_all_pools().await;
-        let related_pools: Vec<(String, PoolState)> = pools
-            .into_iter()
-            .filter(|(_, pool_state)| pool_state.token_address == token_address)
-            .collect();
-        
+        // If not found, return minimal info
         TokenInfo {
             token_address: token_address.to_string(),
-            creator_info,
-            uses_private_mempool,
-            related_pools,
+            creator_info: None,
+            uses_private_mempool: false,
+            related_pools: vec![],
         }
     }
     
     /// Update token tax information
-    /// This is a placeholder for now - in a real implementation this would update
-    /// the token's tax info in a persistent store or cache
     pub async fn update_token_tax(&self, token_address: &str, buy_tax: Option<u8>, sell_tax: Option<u8>) {
-        // TODO: Implement actual storage of tax information
-        // For now, just log the update
-        info!("Tax update for token {}: Buy: {:?}%, Sell: {:?}%", 
-              token_address, buy_tax, sell_tax);
+        let mut tokens_guard = self.tokens.write().await;
+        
+        if let Some(token_info) = tokens_guard.get_mut(token_address) {
+            // Update tax values
+            if buy_tax.is_some() {
+                token_info.buy_tax = buy_tax;
+            }
+            if sell_tax.is_some() {
+                token_info.sell_tax = sell_tax;
+            }
+            
+            info!("Updated tax for token {}: Buy: {:?}%, Sell: {:?}%", 
+                  token_address, buy_tax, sell_tax);
+        } else {
+            warn!("Attempted to update tax for unknown token: {}", token_address);
+        }
     }
     
     
     /// Get all tokens created by a specific address
     pub async fn get_tokens_by_creator(&self, creator_address: &str) -> Vec<String> {
-        self.creators.get_creator_tokens(creator_address).await
+        let tokens_guard = self.tokens.read().await;
+        tokens_guard.iter()
+            .filter(|(_, token_info)| token_info.creator_address == creator_address)
+            .map(|(token_addr, _)| token_addr.clone())
+            .collect()
     }
     
     /// Get pool information for a specific pool address
@@ -455,10 +232,10 @@ impl TokenTrackingCache {
             .map(|pool| pool.token_address.clone())
             .collect();
         
-        // Get all tokens from creator cache
-        let creators = self.creators.get_all_creators().await;
-        for creator_state in creators.values() {
-            token_set.insert(creator_state.creator.token_address.clone());
+        // Add all tokens from the tokens HashMap
+        let tokens_guard = self.tokens.read().await;
+        for token_addr in tokens_guard.keys() {
+            token_set.insert(token_addr.clone());
         }
         
         // Convert to Vec and return
@@ -515,6 +292,15 @@ impl TokenTrackingCache {
         tokens_guard.get(token_address).cloned()
     }
     
+    /// Get the token created by a specific creator address
+    /// Returns the first token if creator has multiple tokens
+    pub async fn get_token_for_creator(&self, creator_address: &str) -> Option<super::types::TokenInfo> {
+        let tokens_guard = self.tokens.read().await;
+        tokens_guard.values()
+            .find(|token| token.creator_address.eq_ignore_ascii_case(creator_address))
+            .cloned()
+    }
+    
     /// Set simulation results for a token
     pub async fn set_simulation_results(&self, token_address: &str, simulation_data: SimulationData) {
         let mut tokens_guard = self.tokens.write().await;
@@ -555,6 +341,68 @@ impl TokenTrackingCache {
         } else {
             None
         }
+    }
+    
+    /// Update creators from TokenCreator data (compatibility method)
+    /// Returns the number of creators updated
+    pub async fn update_creators<'a, I>(&self, creator_updates: I) -> usize 
+    where
+        I: IntoIterator<Item = (&'a String, &'a super::types::TokenCreator)>,
+    {
+        let mut updated_count = 0;
+        
+        for (token_address, creator) in creator_updates {
+            // Check if we already have this token
+            let existing_token = self.get_token(token_address).await;
+            
+            if let Some(mut token_info) = existing_token {
+                // Update existing token info
+                token_info.creator_address = creator.creator_address.clone();
+                token_info.creation_block = creator.creation_block;
+                token_info.creation_txn = creator.creation_tx_hash.clone();
+                self.update_token(token_info).await;
+            } else {
+                // Create new token info from creator data
+                let token_info = super::types::TokenInfo {
+                    token_address: token_address.clone(),
+                    creator_address: creator.creator_address.clone(),
+                    creation_block: creator.creation_block,
+                    creation_txn: creator.creation_tx_hash.clone(),
+                    trading_enabled: false,
+                    trading_enabled_txn: None,
+                    current_owner: creator.creator_address.clone(),
+                    ownership_renounced: false,
+                    is_scam: false,
+                    scam_label: None,
+                    latest_activity_block: creator.creation_block,
+                    buy_tax: None,
+                    sell_tax: None,
+                    last_tax_update_txn: None,
+                    pools: HashMap::new(),
+                    symbol: None,
+                    name: None,
+                    decimals: None,
+                    total_supply: None,
+                    tax_setter_addresses: vec![],
+                    buy_tax_setter: None,
+                    sell_tax_setter: None,
+                    buy_tax_python: None,
+                    sell_tax_python: None,
+                    simulation_data: None,
+                };
+                self.update_token(token_info).await;
+            }
+            
+            updated_count += 1;
+        }
+        
+        updated_count
+    }
+    
+    /// Get the count of creators (for compatibility)
+    pub async fn get_creator_count(&self) -> usize {
+        let guard = self.all_creators.read().await;
+        guard.len()
     }
 }
 
@@ -611,38 +459,7 @@ mod tests {
         assert_eq!(pool_state.last_updated_block, 12345);
     }
     
-    #[tokio::test]
-    async fn test_token_creator_cache() {
-        let cache = TokenCreatorCache::new();
-        
-        // Create test creator data
-        let mut creators = HashMap::new();
-        let token_address = "0x1234567890abcdef1234567890abcdef12345678".to_string();
-        let creator = crate::token_tracking::types::TokenCreator {
-            creator_address: "0xabcdef1234567890abcdef1234567890abcdef12".to_string(),
-            token_address: token_address.clone(),
-            creation_block: 12345,
-            creation_tx_hash: "0xdeadbeef".to_string(),
-            creation_time: 1626000000.0,
-            uses_private_mempool: false,
-        };
-        creators.insert(token_address.clone(), creator);
-        
-        // Update cache
-        let updated_count = cache.update_creators(creators.iter()).await;
-        assert_eq!(updated_count, 1);
-        
-        // Get creator information
-        let creator_state = cache.get_token_creator(&token_address).await;
-        assert!(creator_state.is_some());
-        
-        let creator_state = creator_state.unwrap();
-        assert_eq!(creator_state.creator.creator_address, "0xabcdef1234567890abcdef1234567890abcdef12");
-        assert!(!creator_state.creator.uses_private_mempool);
-        
-        // Test private mempool status
-        assert!(!cache.is_token_creator_private(&token_address).await);
-    }
+    // TokenCreatorCache test removed - functionality merged into TokenTrackingCache
     
     #[tokio::test]
     async fn test_combined_token_tracking_cache() {
@@ -673,7 +490,7 @@ mod tests {
             uses_private_mempool: true,
         };
         creators.insert(token_address.clone(), creator);
-        cache.creators.update_creators(creators.iter()).await;
+        cache.update_creators(creators.iter()).await;
         
         // Get comprehensive token info
         let token_info = cache.get_token_info(&token_address).await;
@@ -722,7 +539,7 @@ mod tests {
             creation_time: 1625999000.0,
             uses_private_mempool: false,
         });
-        cache.creators.update_creators(creators.iter()).await;
+        cache.update_creators(creators.iter()).await;
         
         // Get all token addresses
         let all_tokens = cache.get_all_token_addresses().await;
