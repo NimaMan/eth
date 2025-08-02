@@ -4,8 +4,9 @@
 
 pub mod simulation_manager;
 pub mod simulation_queue;
-pub mod buy_sell_sequence_simulator;
-pub mod tx_simulator;
+pub mod sequential_tx_simulator;
+pub mod single_tx_simulator;
+pub mod unified_simulator;
 
 pub use simulation_manager::{
     SimulationManager,
@@ -13,19 +14,19 @@ pub use simulation_manager::{
     SimulationType,
     SimulationResult,
     BuySellResult,
-    StateChange,
 };
 pub use simulation_queue::{SimulationQueue, QueueStats};
-pub use buy_sell_sequence_simulator::{
+pub use sequential_tx_simulator::{
     SequentialBuySellSimulator,
     SequenceSimulationResult,
     TransactionSimulationResult,
     BuySellSimulatorConfig,
 };
-pub use tx_simulator::{
+pub use single_tx_simulator::{
     TxSimulator,
     SimulationResult as TxSimulationResult,
     StateChangeResult,
     CallTraceResult,
     mempool_tx_to_call_request,
 };
+pub use unified_simulator::UnifiedSimulator;
