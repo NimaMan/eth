@@ -6,7 +6,7 @@
 /// 3. Access the detected functions from the transaction
 
 use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
-use mempool_processor::signal_engine::FunctionDetector;
+use mempool_processor::function_detector::FunctionDetector;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 use eyre::Result;

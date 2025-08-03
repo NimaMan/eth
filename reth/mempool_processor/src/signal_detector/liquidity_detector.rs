@@ -10,7 +10,8 @@ use tracing::{info, debug, warn};
 use alloy_primitives::{Address, I256};
 use reth_tx_simulator::AddressStateChange;
 use crate::common::address::alloy_address_to_checksum;
-use crate::token_tracking::cache::PoolStateCache;
+use crate::token_tracking::TokenTrackingCache;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct LiquiditySignal {
@@ -64,8 +65,8 @@ pub struct LiquidityDetector {
     major_removal_threshold: f64,
     /// Threshold for significant removal
     significant_removal_threshold: f64,
-    /// Pool cache for tracking pool states
-    pool_cache: Option<PoolStateCache>,
+    /// Token tracking cache for pool information
+    token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl Default for LiquidityDetector {
@@ -75,7 +76,7 @@ impl Default for LiquidityDetector {
             min_eth_threshold: 0.3,         // 0.3 ETH
             major_removal_threshold: 0.5,   // 50%
             significant_removal_threshold: 0.2, // 20%
-            pool_cache: None,
+            token_cache: None,
         }
     }
 }
@@ -85,10 +86,10 @@ impl LiquidityDetector {
         Self::default()
     }
     
-    /// Set the pool state cache for drain detection
-    pub fn set_pool_cache(&mut self, pool_cache: PoolStateCache) {
-        self.pool_cache = Some(pool_cache);
-        info!("📊 Pool state cache connected to liquidity detector");
+    /// Set the token tracking cache
+    pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
+        self.token_cache = Some(token_cache);
+        info!("📊 Token tracking cache connected to liquidity detector");
     }
 
     /// Detect liquidity changes and scams from state changes
@@ -125,11 +126,11 @@ impl LiquidityDetector {
     ) -> Option<LiquiditySignal> {
         let address_str = alloy_address_to_checksum(*address);
         
-        // Step 1: Check if this address is a tracked pool (if we have pool cache)
-        let pool_state = if let Some(ref pool_cache) = self.pool_cache {
-            pool_cache.get_pool(&address_str).await?
+        // Step 1: Check if this address is a tracked pool
+        let pool_state = if let Some(ref token_cache) = self.token_cache {
+            token_cache.pools.get_pool(&address_str).await?
         } else {
-            // Without pool cache, we can't determine if this is a pool
+            // Without token cache, we can't determine if this is a pool
             return None;
         };
         

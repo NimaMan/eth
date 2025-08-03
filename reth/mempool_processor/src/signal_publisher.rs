@@ -34,18 +34,22 @@ pub struct SignalPublisherConfig {
 }
 
 impl SignalPublisherConfig {
-    /// Create config with timestamped log directory using provided base path
-    pub fn with_timestamped_logs(base_dir: &str) -> Self {
-        let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
-        let log_dir = format!("{}/signal_publisher_{}", base_dir, timestamp);
-        
+    /// Create config with the provided log directory
+    pub fn with_log_dir(log_dir: &str) -> Self {
         Self {
             zmq_endpoint: "tcp://127.0.0.1:5556".to_string(),
-            log_dir,
+            log_dir: log_dir.to_string(),
             enable_database: false,
             database_url: None,
             db_channel_buffer_size: 1000,
         }
+    }
+    
+    /// Create config with timestamped log directory using provided base path
+    pub fn with_timestamped_logs(base_dir: &str) -> Self {
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
+        let log_dir = format!("{}/signal_publisher_{}", base_dir, timestamp);
+        Self::with_log_dir(&log_dir)
     }
 }
 
@@ -127,28 +131,27 @@ impl SignalPublisher {
     
     /// Create log files
     fn create_log_files(log_dir: &str) -> Result<LogFiles> {
-        let timestamp = Utc::now().format("%Y-%m-%d");
         let log_dir = PathBuf::from(log_dir);
         
         let trading_enabled = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join(format!("trading_enabled_{}.log", timestamp)))?;
+            .open(log_dir.join("trading_enabled.log"))?;
             
         let high_tax = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join(format!("high_tax_warnings_{}.log", timestamp)))?;
+            .open(log_dir.join("high_tax_warnings.log"))?;
             
         let liquidity_removal = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join(format!("liquidity_removals_{}.log", timestamp)))?;
+            .open(log_dir.join("liquidity_removals.log"))?;
         
         let scam_detection = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join(format!("scam_detections_{}.log", timestamp)))?;
+            .open(log_dir.join("scam_detections.log"))?;
         
         Ok(LogFiles {
             trading_enabled,

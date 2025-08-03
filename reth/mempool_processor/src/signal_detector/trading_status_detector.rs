@@ -14,7 +14,6 @@ pub struct TradingStatusSignal {
     pub can_trade_after: bool,
     pub buy_tax: Option<f64>,
     pub sell_tax: Option<f64>,
-    pub confidence: f64,
     pub details: String,
 }
 
@@ -60,44 +59,32 @@ impl TradingStatusDetector {
             _ => return None,
         };
 
-        // Determine status change from function name
-        let status_change = match function_type {
-            CreatorFunctionType::TradingControl => {
-                // In real implementation, would parse actual function name
-                TradingStatusChange::TradingEnabled
-            }
-            _ => TradingStatusChange::NoChange,
+        // Check if trading actually works based on simulation
+        let (can_trade, buy_tax, sell_tax) = if let Some(buy_sell) = &sim_result.buy_sell_result {
+            (
+                buy_sell.can_buy && buy_sell.can_sell,
+                None::<f64>, // TODO: Calculate from state changes
+                None::<f64>, // TODO: Calculate from state changes
+            )
+        } else {
+            // No buy/sell result means we can't verify trading works
+            return None;
         };
 
-        if status_change == TradingStatusChange::NoChange {
-            return None;
-        }
-
-        // Check if trading actually works
-        let (can_trade, buy_tax, sell_tax) = if self.verify_trading_works {
-            if let Some(buy_sell) = &sim_result.buy_sell_result {
-                (
-                    buy_sell.can_buy && buy_sell.can_sell,
-                    buy_sell.buy_tax,
-                    buy_sell.sell_tax,
-                )
-            } else {
-                (false, None, None)
-            }
+        // Only emit TradingEnabled signal if we can actually trade
+        let status_change = if can_trade {
+            TradingStatusChange::TradingEnabled
         } else {
-            (true, None, None) // Assume it works if not verified
+            // Function was called but trading doesn't actually work
+            return None;
         };
 
         let details = match status_change {
             TradingStatusChange::TradingEnabled => {
-                if can_trade {
-                    if let (Some(buy), Some(sell)) = (buy_tax, sell_tax) {
-                        format!("Trading enabled successfully. Buy tax: {:.1}%, Sell tax: {:.1}%", buy, sell)
-                    } else {
-                        "Trading enabled successfully".to_string()
-                    }
+                if let (Some(buy), Some(sell)) = (buy_tax, sell_tax) {
+                    format!("Trading enabled successfully. Buy tax: {:.1}%, Sell tax: {:.1}%", buy, sell)
                 } else {
-                    "Trading enabled but verification failed - may be honeypot".to_string()
+                    "Trading enabled successfully".to_string()
                 }
             }
             TradingStatusChange::TradingDisabled => {
@@ -116,9 +103,8 @@ impl TradingStatusDetector {
             status_change,
             executor: executor.clone(),
             can_trade_after: can_trade,
-            buy_tax,
-            sell_tax,
-            confidence: if can_trade { 0.95 } else { 0.7 },
+            buy_tax, // TODO: Calculate from state changes
+            sell_tax, // TODO: Calculate from state changes
             details,
         })
     }

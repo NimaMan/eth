@@ -19,16 +19,23 @@ use crate::common::address::checksum_address;
 lazy_static! {
     /// Log directory path - initialized once at startup
     static ref LOG_DIR: PathBuf = {
-        let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
-        let dir = PathBuf::from("/home/nima/code/crypto/logs/mempool")
-            .join(format!("signal_detector_{}", timestamp));
-        std::fs::create_dir_all(&dir).expect("Failed to create log directory");
-        dir
+        // Check if log directory is provided via environment variable
+        if let Ok(dir) = std::env::var("FUNCTION_DETECTOR_LOG_DIR") {
+            PathBuf::from(dir)
+        } else {
+            // Fallback to default with timestamp
+            let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
+            let dir = PathBuf::from("/home/nima/code/crypto/logs/mempool")
+                .join(format!("signal_detector_{}", timestamp));
+            std::fs::create_dir_all(&dir).expect("Failed to create log directory");
+            dir
+        }
     };
     
     /// Liquidity removal log file
     static ref LIQUIDITY_REMOVAL_LOG: Mutex<std::fs::File> = {
         let log_path = LOG_DIR.join("liquidity_removals.log");
+        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -41,6 +48,7 @@ lazy_static! {
     /// Trading enabled log file
     static ref TRADING_ENABLED_LOG: Mutex<std::fs::File> = {
         let log_path = LOG_DIR.join("trading_enabled.log");
+        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -54,12 +62,13 @@ lazy_static! {
     
     /// Main signal detector log file
     static ref SIGNAL_DETECTOR_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("signal_detector.log");
+        let log_path = LOG_DIR.join("function_detector.log");
+        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_path)
-            .expect("Failed to open signal detector log file");
+            .expect("Failed to open function detector log file");
         
         Mutex::new(file)
     };
@@ -298,8 +307,9 @@ impl FunctionDetector {
             stats.liquidity_removals += 1;
             info!("💧 LIQUIDITY REMOVAL: {} in tx {}", function_name, tx_hash);
             
-            // Create signal alert
-            let selector_hex = hex::encode(selector_bytes);
+            // Create signal alert - only encode to hex when needed for external publishing
+            let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
+                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]);
             let signal = SignalAlert {
                 alert_type: "liquidity_removal".to_string(),
                 function_name: function_name.to_string(),
@@ -338,7 +348,8 @@ impl FunctionDetector {
                 let from_checksum = checksum_address(&from.trim_start_matches("0x"));
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        cache.creators.get_token_by_creator(&from_checksum).await
+                        cache.get_token_for_creator(&from_checksum).await
+                            .map(|token_info| token_info.token_address)
                     })
                 })
             } else {
@@ -354,8 +365,9 @@ impl FunctionDetector {
                 }
             });
             
-            // Create signal alert
-            let selector_hex = hex::encode(selector_bytes);
+            // Create signal alert - only encode to hex when needed for external publishing
+            let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
+                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]);
             let signal = SignalAlert {
                 alert_type: "trading_enabled".to_string(),
                 function_name: function_name.to_string(),
@@ -408,8 +420,9 @@ impl FunctionDetector {
                 stats.liquidity_removals += 1; // Count as liquidity removal preparation
                 info!("🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}", tx_hash);
                 
-                // Create critical signal alert
-                let selector_hex = hex::encode(selector_bytes);
+                // Create critical signal alert - only encode to hex when needed for external publishing
+                let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
+                    selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]);
                 let signal = SignalAlert {
                     alert_type: "lp_token_approval".to_string(),
                     function_name: "approve (LP Token)".to_string(),
@@ -598,6 +611,10 @@ impl TradingEnabledDetector {
         signatures.insert(hex_to_bytes("c9567bf9"), "openTrading");    // ✓ Confirmed
         signatures.insert(hex_to_bytes("8ee88c53"), "enableTrading");
         signatures.insert(hex_to_bytes("fb201b1d"), "startTrading");
+        
+        // Trading disable/pause functions
+        signatures.insert(hex_to_bytes("1c8387fa"), "pauseTrading");
+        signatures.insert(hex_to_bytes("0fb5a6ec"), "disableTrading");
         
         Self { signatures }
     }

@@ -25,13 +25,14 @@ use tracing::{info, warn, error};
 use tokio::time;
 use tokio::signal;
 use tokio::sync::Mutex;
+use tracing_subscriber::Layer;
 
 // Mempool processor imports
 use mempool_processor::{
     mempool_fetcher::NonBlockingIpcClient,
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter, TransactionCategory},
-    simulator::{SimulationManager, SimulationRequest, SimulationType, SequentialBuySellSimulator, BuySellSimulatorConfig, TxSimulator},
+    simulator::{SimulationManager, SimulationRequest, SimulationType, UnifiedSimulator, BuySellSimulatorConfig},
     signal_detector::{SignalManagerConfig},
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
@@ -212,20 +213,44 @@ async fn main() -> Result<()> {
     
     // Initialize logging to run directory
     use tracing_appender::rolling::{RollingFileAppender, Rotation};
-    let file_appender = RollingFileAppender::builder()
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+    
+    // Main log file for general logs
+    let main_file_appender = RollingFileAppender::builder()
         .rotation(Rotation::NEVER)  // Single file per run
         .filename_prefix("signal_detector")
         .filename_suffix("log")
         .build(&run_dir)?;
     
-    tracing_subscriber::fmt()
+    // Simulation log file for simulation-specific logs
+    let sim_file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::NEVER)
+        .filename_prefix("simulation")
+        .filename_suffix("log")
+        .build(&run_dir)?;
+    
+    // Create the main layer with filtering to exclude simulation logs
+    let main_filter = if args.verbose {
+        "debug,mempool_processor::simulator=warn,reth=warn,reth_provider=warn,reth_db=warn"
+    } else {
+        "info,mempool_processor::simulator=warn,reth=warn,reth_provider=warn,reth_db=warn"
+    };
+    
+    let main_layer = fmt::layer()
         .with_target(false)
-        .with_env_filter(if args.verbose { 
-            "debug,reth=warn,reth_provider=warn,reth_db=warn"
-        } else { 
-            "info,reth=warn,reth_provider=warn,reth_db=warn"
-        })
-        .with_writer(file_appender)
+        .with_writer(main_file_appender)
+        .with_filter(EnvFilter::new(main_filter));
+    
+    // Create the simulation layer that only captures simulation logs
+    let sim_layer = fmt::layer()
+        .with_target(false)
+        .with_writer(sim_file_appender)
+        .with_filter(EnvFilter::new("mempool_processor::simulator=info"));
+    
+    // Combine layers
+    tracing_subscriber::registry()
+        .with(main_layer)
+        .with(sim_layer)
         .init();
     
     info!("🚀 Starting Mempool Signal Detection Service");
@@ -286,12 +311,11 @@ async fn main() -> Result<()> {
     let tx_router = TransactionRouter::new(Some(token_cache.clone()));
     info!("✅ Transaction router ready");
     
-    // 5. Simulators
-    info!("🧪 Initializing simulators...");
-    let tx_simulator = Arc::new(TxSimulator::new(&args.reth_db_path)?);
+    // 5. Unified Simulator (single database connection)
+    info!("🧪 Initializing unified simulator...");
     let buy_sell_config = BuySellSimulatorConfig::default();
-    let buy_sell_simulator = Arc::new(SequentialBuySellSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
-    info!("✅ Simulators initialized");
+    let unified_simulator = Arc::new(UnifiedSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
+    info!("✅ Unified simulator initialized");
     
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");
@@ -304,9 +328,8 @@ async fn main() -> Result<()> {
     // 7. Simulation manager (now includes signal detection and publishing)
     info!("📦 Starting simulation manager with integrated signal detection and publishing...");
     let signal_config = SignalManagerConfig::default();
-    let mut simulation_manager = SimulationManager::new(
-        tx_simulator, 
-        buy_sell_simulator,
+    let simulation_manager = SimulationManager::new(
+        unified_simulator,
         token_cache.clone(),
         signal_config,
         args.sim_workers
@@ -357,6 +380,9 @@ async fn main() -> Result<()> {
         writeln!(file, "# Format: TX: total (rate/s) | Detect: avg/max μs | Route: avg/max μs | Sim: avg/max ms | CC:contract_creations CA:creator_actions | Sims:ok/err | Signals: TE:trading_enabled LR:liquidity_removal HP:honeypot TC:tax_change").ok();
         writeln!(file, "#").ok();
     }
+    
+    // Create simulation log path for direct simulation result logging
+    let simulation_log_path = Arc::new(run_dir.join("simulation_results.log"));
     
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
@@ -467,6 +493,48 @@ async fn main() -> Result<()> {
         // Process simulation queue
         let simulation_results = simulation_manager.process_queue().await;
         for result in simulation_results {
+            // Log simulation result to dedicated file
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(simulation_log_path.as_ref())
+            {
+                let timestamp = chrono::Local::now();
+                let tx_hash = format!("{:?}", result.request.tx_hash);
+                let category = match &result.request.category {
+                    TransactionCategory::ContractCreation { .. } => "ContractCreation",
+                    TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
+                    _ => "Other",
+                };
+                
+                if let Some(ref error) = result.error {
+                    writeln!(file, "[{}] ERROR | {} | {} | {}", 
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        tx_hash,
+                        category,
+                        error
+                    ).ok();
+                } else {
+                    // Log successful simulation with key results
+                    let buy_sell_info = if let Some(ref bs) = result.buy_sell_result {
+                        format!("CanBuy: {}, CanSell: {}", 
+                            bs.can_buy,
+                            bs.can_sell
+                        )
+                    } else {
+                        "No buy/sell data".to_string()
+                    };
+                    
+                    writeln!(file, "[{}] SUCCESS | {} | {} | SimTime: {:.1}ms | {}", 
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        tx_hash,
+                        category,
+                        result.simulation_time_ms,
+                        buy_sell_info
+                    ).ok();
+                }
+            }
+            
             if let Some(ref error) = result.error {
                 metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
                 warn!("Simulation error: {}", error);

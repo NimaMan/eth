@@ -57,57 +57,61 @@ impl HoneypotDetector {
         };
 
         // Check for honeypot patterns
-        if buy_sell.is_honeypot {
-            return Some(self.create_honeypot_signal(
-                token_address,
-                buy_sell,
-                HoneypotDetectionMethod::SellFails,
-                1.0,
-                "Token is confirmed honeypot - sells fail".to_string(),
-            ));
-        }
+        // TODO: Calculate from state changes
+        // if buy_sell.is_honeypot {
+        //     return Some(self.create_honeypot_signal(
+        //         token_address,
+        //         buy_sell,
+        //         HoneypotDetectionMethod::SellFails,
+        //         1.0,
+        //         "Token is confirmed honeypot - sells fail".to_string(),
+        //     ));
+        // }
 
         // Check for high sell tax
-        if let Some(sell_tax) = buy_sell.sell_tax {
-            if sell_tax > self.high_tax_threshold {
-                return Some(self.create_honeypot_signal(
-                    token_address,
-                    buy_sell,
-                    HoneypotDetectionMethod::HighSellTax,
-                    0.9,
-                    format!("Extremely high sell tax: {:.1}%", sell_tax),
-                ));
-            }
-        }
+        // TODO: Calculate from state changes
+        // if let Some(sell_tax) = buy_sell.sell_tax {
+        //     if sell_tax > self.high_tax_threshold {
+        //         return Some(self.create_honeypot_signal(
+        //             token_address,
+        //             buy_sell,
+        //             HoneypotDetectionMethod::HighSellTax,
+        //             0.9,
+        //             format!("Extremely high sell tax: {:.1}%", sell_tax),
+        //         ));
+        //     }
+        // }
 
         // Check for zero sell return
-        if buy_sell.can_buy && buy_sell.can_sell {
-            if let Some(eth_received) = buy_sell.eth_received_on_sell {
-                if eth_received < 0.001 {
-                    return Some(self.create_honeypot_signal(
-                        token_address,
-                        buy_sell,
-                        HoneypotDetectionMethod::ZeroSellReturn,
-                        0.95,
-                        "Sell returns almost nothing".to_string(),
-                    ));
-                }
-            }
-        }
+        // TODO: Calculate from state changes
+        // if buy_sell.can_buy && buy_sell.can_sell {
+        //     if let Some(eth_received) = buy_sell.eth_received_on_sell {
+        //         if eth_received < 0.001 {
+        //             return Some(self.create_honeypot_signal(
+        //                 token_address,
+        //                 buy_sell,
+        //                 HoneypotDetectionMethod::ZeroSellReturn,
+        //                 0.95,
+        //                 "Sell returns almost nothing".to_string(),
+        //             ));
+        //         }
+        //     }
+        // }
 
         // Check for suspicious tax patterns
-        if let (Some(buy_tax), Some(sell_tax)) = (buy_sell.buy_tax, buy_sell.sell_tax) {
-            // Low/zero buy tax with high sell tax is suspicious
-            if buy_tax <= 5.0 && sell_tax > 30.0 {
-                return Some(self.create_honeypot_signal(
-                    token_address,
-                    buy_sell,
-                    HoneypotDetectionMethod::SuspiciousPattern("Low buy, high sell".to_string()),
-                    0.7,
-                    format!("Suspicious tax pattern: buy {:.1}%, sell {:.1}%", buy_tax, sell_tax),
-                ));
-            }
-        }
+        // TODO: Calculate from state changes
+        // if let (Some(buy_tax), Some(sell_tax)) = (buy_sell.buy_tax, buy_sell.sell_tax) {
+        //     // Low/zero buy tax with high sell tax is suspicious
+        //     if buy_tax <= 5.0 && sell_tax > 30.0 {
+        //         return Some(self.create_honeypot_signal(
+        //             token_address,
+        //             buy_sell,
+        //             HoneypotDetectionMethod::SuspiciousPattern("Low buy, high sell".to_string()),
+        //             0.7,
+        //             format!("Suspicious tax pattern: buy {:.1}%, sell {:.1}%", buy_tax, sell_tax),
+        //         ));
+        //     }
+        // }
 
         None
     }
@@ -125,8 +129,8 @@ impl HoneypotDetector {
         HoneypotSignal {
             token_address,
             detection_method: method,
-            buy_tax: buy_sell.buy_tax,
-            sell_tax: buy_sell.sell_tax,
+            buy_tax: None, // TODO: Calculate from state changes
+            sell_tax: None, // TODO: Calculate from state changes
             can_buy: buy_sell.can_buy,
             can_sell: buy_sell.can_sell,
             confidence,

@@ -6,17 +6,18 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use alloy_primitives::Address;
 use reth_tx_simulator::AddressStateChange;
-use crate::token_tracking::cache::PoolStateCache;
-use crate::token_tracking::types::TokenInfo;
+use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
 
 use super::{
     LiquidityDetector, LiquiditySignal,
     StablecoinDetector, StablecoinSignal,
-    TradingStatusDetector, TradingStatusSignal, TradingStatusChange,
+    TradingStatusDetector, TradingStatusSignal,
+    trading_status_detector::TradingStatusChange,
+    TaxDetector, TaxSignal, TaxSignalType,
     Signal,
 };
 
@@ -25,29 +26,16 @@ use super::{
 pub struct SignalManagerConfig {
     /// Log directory for signal outputs
     pub log_dir: PathBuf,
-    /// Enable liquidity/scam detection
-    pub enable_liquidity_detection: bool,
-    /// Enable stablecoin activity detection
-    pub enable_stablecoin_detection: bool,
 }
 
 impl Default for SignalManagerConfig {
     fn default() -> Self {
         Self {
             log_dir: PathBuf::from("logs/signals"),
-            enable_liquidity_detection: true,
-            enable_stablecoin_detection: true,
         }
     }
 }
 
-/// Aggregated signals from all detectors
-#[derive(Debug, Clone)]
-pub struct DetectedSignals {
-    pub liquidity_signals: Vec<LiquiditySignal>,
-    pub stablecoin_signals: Vec<StablecoinSignal>,
-    // Other signal types can be added here
-}
 
 /// Signal manager that coordinates all detectors
 pub struct SignalManager {
@@ -55,8 +43,8 @@ pub struct SignalManager {
     liquidity_detector: LiquidityDetector,
     stablecoin_detector: StablecoinDetector,
     trading_status_detector: TradingStatusDetector,
-    // Stats tracking
-    total_simulations_analyzed: u64,
+    tax_detector: TaxDetector,
+    token_cache: Option<Arc<TokenTrackingCache>>,
 }
 
 impl SignalManager {
@@ -73,177 +61,175 @@ impl SignalManager {
             liquidity_detector: LiquidityDetector::new(),
             stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::new(),
-            total_simulations_analyzed: 0,
+            tax_detector: TaxDetector::new(),
+            token_cache: None,
         }
     }
     
-    /// Set the pool state cache for detectors that need it
-    pub fn set_pool_cache(&mut self, pool_cache: PoolStateCache) {
-        self.liquidity_detector.set_pool_cache(pool_cache);
-    }
-    
-    /// Analyze state changes from a transaction simulation
-    pub async fn analyze_simulation_result(
-        &mut self,
-        tx_hash: &str,
-        from_address: Address,
-        to_address: Option<Address>,
-        state_changes: &HashMap<Address, AddressStateChange>,
-        simulation_time_us: u64,
-    ) -> DetectedSignals {
-        self.total_simulations_analyzed += 1;
-        
-        debug!("🔍 Analyzing {} address changes for tx {}", state_changes.len(), tx_hash);
-        
-        let mut signals = DetectedSignals {
-            liquidity_signals: Vec::new(),
-            stablecoin_signals: Vec::new(),
-        };
-        
-        // Run liquidity/scam detection
-        if self.config.enable_liquidity_detection {
-            let liquidity_signals = self.liquidity_detector.detect(
-                tx_hash,
-                from_address,
-                state_changes,
-            ).await;
-            
-            if !liquidity_signals.is_empty() {
-                info!("💧 Found {} liquidity signals for tx {}", liquidity_signals.len(), tx_hash);
-            }
-            
-            signals.liquidity_signals = liquidity_signals;
-        }
-        
-        // Run stablecoin detection
-        if self.config.enable_stablecoin_detection {
-            let stablecoin_signals = self.stablecoin_detector.detect(
-                tx_hash,
-                from_address,
-                to_address,
-                state_changes,
-            ).await;
-            
-            if !stablecoin_signals.is_empty() {
-                info!("💰 Found {} stablecoin signals for tx {}", stablecoin_signals.len(), tx_hash);
-            }
-            
-            signals.stablecoin_signals = stablecoin_signals;
-        }
-        
-        // Log summary
-        let total_signals = signals.liquidity_signals.len() + signals.stablecoin_signals.len();
-        if total_signals > 0 {
-            info!("🎯 Found {} total signals from simulation of {} ({}μs)", 
-                  total_signals, tx_hash, simulation_time_us);
-        }
-        
-        signals
+    /// Set the token tracking cache
+    pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
+        self.token_cache = Some(token_cache.clone());
+        self.liquidity_detector.set_token_cache(token_cache);
     }
     
     /// Process simulation result to detect signals
     pub async fn process_simulation_result(
         &mut self,
         result: &SimulationResult,
-        token_info: Option<&TokenInfo>,
     ) -> Vec<Signal> {
-        self.total_simulations_analyzed += 1;
         let mut signals = Vec::new();
         
-        // Check for trading status changes
-        if let Some(trading_signal) = self.trading_status_detector.detect(result) {
-            // Context-aware detection
-            if let Some(token_info) = token_info {
-                match trading_signal.status_change {
-                    TradingStatusChange::TradingEnabled => {
-                        // Only emit signal if trading wasn't already enabled
-                        if !token_info.trading_enabled {
-                            info!("🎯 Trading newly enabled for token {}", trading_signal.token_address);
-                            signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
-                                tx_hash: result.request.tx.hash.clone(),
-                                token_address: trading_signal.token_address.clone(),
-                                creator_address: trading_signal.executor.clone(),
-                                buy_tax: (trading_signal.buy_tax.unwrap_or(0.0) * 100.0) as u8,
-                                sell_tax: (trading_signal.sell_tax.unwrap_or(0.0) * 100.0) as u8,
-                                timestamp: chrono::Utc::now().timestamp() as u64,
-                                block_number: 0, // TODO: Get from result
-                            }));
-                        }
-                    }
-                    _ => {}
-                }
-                
-                // Check for honeypot - was tradeable but now can't sell
-                if token_info.trading_enabled && !trading_signal.can_trade_after {
-                    warn!("🍯 Potential honeypot - trading disabled for {}", trading_signal.token_address);
-                    signals.push(Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
+        // First, extract key values from simulation result
+        let (buy_tax, sell_tax, can_buy, can_sell) = if let Some(buy_sell) = &result.buy_sell_result {
+            (
+                None::<f64>, // TODO: Calculate from state changes
+                None::<f64>, // TODO: Calculate from state changes
+                buy_sell.can_buy,
+                buy_sell.can_sell,
+            )
+        } else {
+            // No buy/sell simulation means we can't analyze properly
+            return signals;
+        };
+        
+        // Use tax detector for all tax-related signals
+        let tax_signals = self.tax_detector.detect(result);
+        for tax_signal in tax_signals {
+            match tax_signal.signal_type {
+                TaxSignalType::Honeypot => {
+                    // Convert to high tax warning with honeypot type
+                    signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
                         tx_hash: result.request.tx.hash.clone(),
-                        pool_address: "".to_string(), // TODO: Get pool from token info
-                        token_address: trading_signal.token_address.clone(),
-                        scammer_address: trading_signal.executor.clone(),
-                        eth_drained: 0.0,
-                        scam_type: "honeypot_trading_disabled".to_string(),
-                        confidence: 0.9,
-                    }));
-                }
-            } else {
-                // No context - for new tokens, just check if trading is enabled
-                if trading_signal.status_change == TradingStatusChange::TradingEnabled {
-                    signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
-                        tx_hash: result.request.tx.hash.clone(),
-                        token_address: trading_signal.token_address.clone(),
-                        creator_address: trading_signal.executor.clone(),
-                        buy_tax: (trading_signal.buy_tax.unwrap_or(0.0) * 100.0) as u8,
-                        sell_tax: (trading_signal.sell_tax.unwrap_or(0.0) * 100.0) as u8,
+                        token_address: tax_signal.token_address,
+                        creator_address: None,
+                        buy_tax: (tax_signal.buy_tax.unwrap_or(0.0)) as u8,
+                        sell_tax: (tax_signal.sell_tax.unwrap_or(0.0)) as u8,
+                        warning_type: crate::signal_detector::TaxWarningType::PotentialHoneypot,
                         timestamp: chrono::Utc::now().timestamp() as u64,
-                        block_number: 0, // TODO: Get from result
+                        block_number: 0,
                     }));
+                }
+                TaxSignalType::HighTax { buy, sell } => {
+                    // Convert to high tax warning
+                    let warning_type = if sell && tax_signal.sell_tax.unwrap_or(0.0) > 50.0 {
+                        crate::signal_detector::TaxWarningType::PotentialHoneypot
+                    } else if buy {
+                        crate::signal_detector::TaxWarningType::HighBuyTax
+                    } else {
+                        crate::signal_detector::TaxWarningType::HighSellTax
+                    };
+                    
+                    signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
+                        tx_hash: result.request.tx.hash.clone(),
+                        token_address: tax_signal.token_address,
+                        creator_address: None,
+                        buy_tax: (tax_signal.buy_tax.unwrap_or(0.0)) as u8,
+                        sell_tax: (tax_signal.sell_tax.unwrap_or(0.0)) as u8,
+                        warning_type,
+                        timestamp: chrono::Utc::now().timestamp() as u64,
+                        block_number: 0,
+                    }));
+                }
+                _ => {
+                    // Log other tax signals but don't convert to specific signal types yet
+                    info!("💸 Tax signal detected: {:?}", tax_signal);
                 }
             }
         }
         
-        // Check for high tax warning
-        if let Some(buy_sell) = &result.buy_sell_result {
-            if let Some(buy_tax) = buy_sell.buy_tax {
-                if let Some(sell_tax) = buy_sell.sell_tax {
-                    if buy_tax > 0.25 || sell_tax > 0.25 {
-                        signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
+        // Check for trading status changes
+        if let Some(trading_signal) = self.trading_status_detector.detect(result) {
+            match trading_signal.status_change {
+                TradingStatusChange::TradingEnabled => {
+                    // Check with tax detector if we should actually enable trading
+                    let should_enable = self.tax_detector.should_enable_trading(
+                        trading_signal.buy_tax,
+                        trading_signal.sell_tax
+                    );
+                    
+                    if should_enable {
+                        info!("🎯 Trading newly enabled for token {}", trading_signal.token_address);
+                        signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
                             tx_hash: result.request.tx.hash.clone(),
-                            token_address: match &result.request.category {
-                                crate::tx_router::TransactionCategory::ContractCreation { contract_address, .. } => contract_address.to_string(),
-                                crate::tx_router::TransactionCategory::CreatorTransaction { token_address, .. } => token_address.clone(),
-                                _ => "".to_string(),
-                            },
-                            creator_address: None,
-                            buy_tax: (buy_tax * 100.0) as u8,
-                            sell_tax: (sell_tax * 100.0) as u8,
-                            warning_type: if sell_tax > 0.5 { 
-                                crate::signal_detector::TaxWarningType::PotentialHoneypot 
-                            } else if buy_tax > 0.25 {
-                                crate::signal_detector::TaxWarningType::HighBuyTax
-                            } else {
-                                crate::signal_detector::TaxWarningType::HighSellTax 
-                            },
+                            token_address: trading_signal.token_address.clone(),
+                            creator_address: trading_signal.executor.clone(),
+                            buy_tax: (trading_signal.buy_tax.unwrap_or(0.0)) as u8,
+                            sell_tax: (trading_signal.sell_tax.unwrap_or(0.0)) as u8,
                             timestamp: chrono::Utc::now().timestamp() as u64,
-                            block_number: 0, // TODO: Get from result
+                            block_number: 0,
                         }));
+                    } else {
+                        warn!("⚠️  Trading enabled but taxes indicate honeypot for token {}", trading_signal.token_address);
                     }
                 }
+                _ => {}
+            }
+        }
+        
+        // Get state changes from buy/sell result for other detectors
+        let state_changes = result.buy_sell_result.as_ref()
+            .and_then(|bs| bs.buy_state_changes.as_ref());
+        
+        // Run liquidity detection if we have state changes
+        if let Some(state_changes) = state_changes {
+            let from_address = if let Ok(bytes) = hex::decode(&result.request.tx.from) {
+                if let Ok(addr) = alloy_primitives::Address::try_from(bytes.as_slice()) {
+                    addr
+                } else {
+                    return signals; // Invalid from address
+                }
+            } else {
+                return signals; // Invalid from address hex
+            };
+            
+            
+            let liquidity_signals = self.liquidity_detector.detect(
+                &result.request.tx.hash,
+                from_address,
+                state_changes,
+            ).await;
+            
+            // Convert liquidity signals to the Signal enum
+            for liq_signal in liquidity_signals {
+                match liq_signal.signal_type {
+                    super::LiquiditySignalType::ScamDetected => {
+                        signals.push(Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
+                            tx_hash: liq_signal.tx_hash,
+                            pool_address: liq_signal.pool_address,
+                            token_address: liq_signal.token_address,
+                            scammer_address: liq_signal.from_address,
+                            eth_drained: liq_signal.eth_change.abs(),
+                            eth_remaining: liq_signal.remaining_liquidity,
+                            drain_percentage: liq_signal.percentage_change,
+                            timestamp: chrono::Utc::now().timestamp() as u64,
+                            block_number: 0,
+                        }));
+                    }
+                    super::LiquiditySignalType::LiquidityRemoval => {
+                        // Could add LiquidityRemoval signal if needed
+                        info!("💧 Liquidity removal detected: {}", liq_signal.details);
+                    }
+                }
+            }
+            
+            // Run stablecoin detection
+            let to_address = result.request.tx.to.as_ref()
+                .and_then(|to| hex::decode(to).ok())
+                .and_then(|bytes| alloy_primitives::Address::try_from(bytes.as_slice()).ok());
+            
+            let stablecoin_signals = self.stablecoin_detector.detect(
+                &result.request.tx.hash,
+                from_address,
+                to_address,
+                state_changes,
+            ).await;
+            
+            if !stablecoin_signals.is_empty() {
+                info!("💰 Found {} stablecoin signals", stablecoin_signals.len());
             }
         }
         
         signals
     }
     
-    /// Get statistics
-    pub fn get_stats(&self) -> SignalManagerStats {
-        SignalManagerStats {
-            total_simulations_analyzed: self.total_simulations_analyzed,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SignalManagerStats {
-    pub total_simulations_analyzed: u64,
 }

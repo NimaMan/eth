@@ -1,10 +1,12 @@
-/// Full Pipeline Signal Detection Example (Simplified Architecture)
+/// Simulation Only Test
 /// 
-/// Demonstrates the integrated signal detection pipeline:
-/// IPC → Function Detector → TX Router → SimplifiedSimulationManager
+/// Tests the simulation pipeline WITHOUT signal detection
+/// Logs detailed simulation results for debugging
 ///
-/// Currently runs with signal detection DISABLED to test the pipeline first.
-/// Processes transactions and provides comprehensive performance metrics.
+/// This example:
+/// 1. Runs transactions through simulation
+/// 2. Logs all simulation details to dev directory
+/// 3. Skips signal manager processing entirely
 
 use std::time::{Duration, Instant};
 use std::sync::Arc;
@@ -20,7 +22,7 @@ use hex;
 
 // Mempool processor imports
 use mempool_processor::{
-    mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction, FullTransaction},
+    mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction},
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter as TxRouter, TransactionCategory, SimulationPriority},
     simulator::{UnifiedSimulator, BuySellSimulatorConfig},
@@ -31,7 +33,7 @@ use alloy_primitives::Address;
 use reth_tx_simulator::AddressStateChange;
 use mempool_processor::simulator::SequenceSimulationResult;
 
-// ========== SimplifiedSimulationManager (No Signal Detection) ==========
+// ========== Simplified Simulation Manager (No Signal Detection) ==========
 
 /// Types of simulation to perform
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -290,7 +292,7 @@ impl SimplifiedSimulationManager {
         result.pool_address = pool_address;
         
         // Convert transaction for simulation
-        let full_tx = FullTransaction {
+        let full_tx = mempool_processor::mempool_fetcher::FullTransaction {
             hash: request.tx.hash.clone(),
             tx_data: request.tx.data.clone(),
             detection_time: std::time::Instant::now(),
@@ -373,7 +375,7 @@ impl SimplifiedSimulationManager {
     }
 }
 
-// ========== End of SimplifiedSimulationManager ==========
+// ========== End of Simplified Simulation Manager ==========
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -386,69 +388,12 @@ struct Args {
     reth_db_path: String,
     
     /// Number of transactions to process
-    #[arg(long, default_value = "1000")]
+    #[arg(long, default_value = "10000")]
     target_count: usize,
-    
-    /// Batch size for simulation
-    #[arg(long, default_value = "10")]
-    batch_size: usize,
     
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
-}
-
-/// Performance metrics tracker
-#[derive(Default)]
-struct PipelineMetrics {
-    // Function detection metrics
-    trading_enabled_count: usize,
-    liquidity_removal_count: usize,
-    tax_change_count: usize,
-    detection_latencies: Vec<Duration>,
-    
-    // Routing metrics
-    contract_creation_count: usize,
-    creator_action_count: usize,
-    skipped_count: usize,
-    
-    // Simulation metrics
-    simulations_submitted: usize,
-    simulations_completed: usize,
-    simulations_success: usize,
-    simulations_failed: usize,
-    simulation_times: Vec<Duration>,
-    
-    // Trading results
-    can_buy_count: usize,
-    can_sell_count: usize,
-    both_tradeable: usize,
-}
-
-impl PipelineMetrics {
-    fn add_detection_latency(&mut self, latency: Duration) {
-        self.detection_latencies.push(latency);
-    }
-    
-    fn add_simulation_time(&mut self, time: Duration) {
-        self.simulation_times.push(time);
-    }
-    
-    fn calculate_stats(&self) -> (Duration, Duration, Duration, Duration) {
-        if self.simulation_times.is_empty() {
-            return (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
-        }
-        
-        let mut times = self.simulation_times.clone();
-        times.sort();
-        
-        let sum: Duration = times.iter().sum();
-        let avg = sum / times.len() as u32;
-        let max = times.last().cloned().unwrap_or(Duration::ZERO);
-        let p99 = times.get(times.len() * 99 / 100).cloned().unwrap_or(max);
-        
-        (avg, max, p99, sum)
-    }
 }
 
 #[tokio::main]
@@ -462,24 +407,24 @@ async fn main() -> Result<()> {
         .init();
     
     // Create log directory
-    let log_dir = "/home/nima/code/crypto/logs/mempool/dev/signal_detector";
+    let log_dir = "/home/nima/code/crypto/logs/mempool/dev/simulation_only";
     create_dir_all(log_dir)?;
     
     // Create log file
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let log_path = format!("{}/full_pipeline_{}.log", log_dir, timestamp);
+    let log_path = format!("{}/simulation_test_{}.log", log_dir, timestamp);
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&log_path)?;
     
-    writeln!(log_file, "Full Pipeline Test (Signal Detection DISABLED)")?;
+    writeln!(log_file, "Simulation Only Test - NO Signal Detection")?;
     writeln!(log_file, "Started: {}", Local::now())?;
     writeln!(log_file, "Target: {} transactions", args.target_count)?;
     writeln!(log_file, "======================================\n")?;
     
-    info!("🚀 Starting Full Pipeline Test");
+    info!("🚀 Starting Simulation Only Test");
     info!("📝 Logging to: {}", log_path);
     info!("🎯 Target: {} transactions", args.target_count);
     info!("⚠️  Signal detection is DISABLED for this test");
@@ -506,10 +451,22 @@ async fn main() -> Result<()> {
     info!("   Total Pools: {}", initial_pools);
     info!("   Total Creators: {}", initial_creators);
     
-    writeln!(log_file, "Token Cache Initial State:")?;
-    writeln!(log_file, "  Pools: {}", initial_pools)?;
-    writeln!(log_file, "  Creators: {}", initial_creators)?;
-    writeln!(log_file)?;
+    // Log some sample pools
+    info!("\n📋 Sample pools in cache:");
+    let all_pools = token_cache.pools.get_all_pools().await;
+    for (i, (pool_addr, pool_state)) in all_pools.iter().take(5).enumerate() {
+        info!("   {}: {} - {:.4} ETH, token: {}", 
+            i+1, 
+            pool_addr, 
+            pool_state.eth_reserve,
+            pool_state.token_address
+        );
+    }
+    
+    // Log cache details
+    info!("\n📡 Cache configuration:");
+    info!("   ETH threshold: 0.1 ETH");
+    info!("   Monitoring pools above threshold: {}", initial_pools);
     
     // Initialize components
     info!("\n🔧 Initializing pipeline components...");
@@ -530,7 +487,7 @@ async fn main() -> Result<()> {
     // Initialize unified simulator with custom config
     let buy_sell_config = BuySellSimulatorConfig::default();
     let simulator = Arc::new(UnifiedSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
-    info!("✅ UnifiedSimulator initialized");
+    info!("✅ UnifiedSimulator initialized (no database lock issues!)");
     
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
@@ -544,13 +501,18 @@ async fn main() -> Result<()> {
     );
     info!("✅ Simplified simulation manager initialized (no signal detection)");
     
-    // Metrics tracker
-    let metrics = Arc::new(Mutex::new(PipelineMetrics::default()));
-    
-    info!("\n🏃 Starting pipeline processing...\n");
+    info!("\n🏃 Starting simulation testing...\n");
     
     let mut total_processed = 0;
     let pipeline_start = Instant::now();
+    
+    // Stats tracking
+    let mut total_simulations = 0;
+    let mut successful_simulations = 0;
+    let mut failed_simulations = 0;
+    let mut can_buy_count = 0;
+    let mut can_sell_count = 0;
+    let mut both_tradeable = 0;
     
     while total_processed < args.target_count {
         // Fetch transactions
@@ -561,53 +523,33 @@ async fn main() -> Result<()> {
             continue;
         }
         
-        // Process each transaction through the pipeline
+        // Process each transaction
         for tx in new_txs {
             if total_processed >= args.target_count {
                 break;
             }
             
-            let tx_start = Instant::now();
             total_processed += 1;
             
             // 1. Function Detection
-            let detection_start = Instant::now();
-            let detected_function = function_detector.detect_function(&tx);
-            let detection_time = detection_start.elapsed();
-            
-            // Update detection metrics
-            {
-                let mut m = metrics.lock().await;
-                m.add_detection_latency(detection_time);
-                
-                if let Some(func_name) = &detected_function {
-                    match func_name.as_str() {
-                        "enableTrading" | "openTrading" => m.trading_enabled_count += 1,
-                        "removeLiquidity" | "removeLiquidityETH" => m.liquidity_removal_count += 1,
-                        "setTaxes" | "updateTaxes" | "setTax" => m.tax_change_count += 1,
-                        _ => {}
-                    }
-                }
-            }
+            let _detected_function = function_detector.detect_function(&tx);
             
             // 2. Transaction Routing
             let classification = tx_router.classify(&tx).await;
             let category = classification.category;
             
-            // Update routing metrics
-            {
-                let mut m = metrics.lock().await;
-                match &category {
-                    TransactionCategory::ContractCreation { .. } => {
-                        m.contract_creation_count += 1;
+            // Skip non-relevant transactions (but log what we're seeing)
+            match &category {
+                TransactionCategory::ContractCreation { .. } |
+                TransactionCategory::CreatorTransaction { .. } => {
+                    // Continue with simulation
+                }
+                _ => {
+                    // Log what types we're skipping every 100 transactions
+                    if total_processed % 100 == 0 {
+                        writeln!(log_file, "Skipping: {} - {:?}", tx.hash, category)?;
                     }
-                    TransactionCategory::CreatorTransaction { .. } => {
-                        m.creator_action_count += 1;
-                    }
-                    _ => {
-                        m.skipped_count += 1;
-                        continue; // Skip non-relevant transactions
-                    }
+                    continue;
                 }
             }
             
@@ -620,200 +562,167 @@ async fn main() -> Result<()> {
                     TransactionCategory::CreatorTransaction { .. } => SimulationPriority::Normal,
                     _ => SimulationPriority::Low,
                 },
-                simulation_type: match &category {
-                    TransactionCategory::ContractCreation { .. } => SimulationType::TransactionWithBuySell,
-                    TransactionCategory::CreatorTransaction { .. } => SimulationType::TransactionWithBuySell,
-                    _ => SimulationType::TransactionOnly,
-                },
+                simulation_type: SimulationType::TransactionWithBuySell,
                 tx_hash: H256::from_slice(hex::decode(&tx.hash.trim_start_matches("0x")).unwrap_or_default().as_slice()),
             };
             
-            // 4. Submit for simulation
-            let sim_start = Instant::now();
+            // 4. Submit for simulation with more details
+            let tx_type = match &category {
+                TransactionCategory::ContractCreation { contract_address, .. } => {
+                    format!("Creation[{}]", contract_address)
+                }
+                TransactionCategory::CreatorTransaction { target_token, .. } => {
+                    if let Some(token) = target_token {
+                        // Check if we have token info in cache
+                        if let Some(token_info) = token_cache.get_token(token).await {
+                            let pool_count = token_info.pools.len();
+                            let has_pools = !token_info.pools.is_empty();
+                            format!("Creator[{} p:{} has_pools:{}]", token, pool_count, has_pools)
+                        } else {
+                            format!("Creator[{} NOT_IN_CACHE]", token)
+                        }
+                    } else {
+                        format!("Creator[Unknown]")
+                    }
+                }
+                _ => "Other".to_string(),
+            };
             
-            if let Err(e) = simulation_manager.submit(sim_request).await {
+            writeln!(log_file, "Submit: {} from 0x{} Type:{}", 
+                tx.hash, hex::encode(&tx.from), tx_type)?;
+            
+            if let Err(e) = simulation_manager.submit(sim_request.clone()).await {
                 warn!("Failed to submit simulation for {}: {}", tx.hash, e);
                 continue;
             }
-            
-            let sim_submit_time = sim_start.elapsed();
-            
-            // Update metrics
-            {
-                let mut m = metrics.lock().await;
-                m.simulations_submitted += 1;
-                m.add_simulation_time(sim_submit_time);
-            }
-            
-            if args.verbose && total_processed % 10 == 0 {
-                info!("📤 Submitted {} for simulation", tx.hash);
-            }
         }
         
-        // Process pending simulations periodically
-        if total_processed % args.batch_size == 0 || total_processed >= args.target_count {
-            let results = simulation_manager.process_queue().await;
+        // Process simulations in batches
+        let results = simulation_manager.process_queue().await;
+        
+        for result in results {
+            total_simulations += 1;
             
-            let mut m = metrics.lock().await;
-            for result in results {
-                m.simulations_completed += 1;
+            // Log simulation result with token/pool info
+            let token_info = match &result.request.category {
+                TransactionCategory::ContractCreation { contract_address, .. } => {
+                    format!(" Token:{} Pool:{}", 
+                        result.token_address.map(|a| format!("{:?}", a)).unwrap_or("None".to_string()),
+                        result.pool_address.map(|a| format!("{:?}", a)).unwrap_or("None".to_string())
+                    )
+                }
+                TransactionCategory::CreatorTransaction { target_token, .. } => {
+                    format!(" Token:{} Pool:{}", 
+                        target_token.as_ref().unwrap_or(&"None".to_string()),
+                        result.pool_address.map(|a| format!("{:?}", a)).unwrap_or("None".to_string())
+                    )
+                }
+                _ => String::new(),
+            };
+            
+            write!(log_file, "Result: {} from 0x{} - {:.2}ms{}", 
+                result.request.tx.hash, 
+                hex::encode(&result.request.tx.from),
+                result.simulation_time_ms,
+                token_info)?;
+            
+            // Check buy/sell results
+            if let Some(buy_sell) = &result.buy_sell_result {
+                write!(log_file, " Buy:{} Sell:{}", 
+                    if buy_sell.can_buy { "✓" } else { "✗" },
+                    if buy_sell.can_sell { "✓" } else { "✗" }
+                )?;
                 
-                if let Some(err) = &result.error {
-                    m.simulations_failed += 1;
-                    // Always log simulation errors for debugging
-                    warn!("Simulation failed for {} (from: 0x{}): {}", 
-                        result.request.tx.hash, 
-                        hex::encode(&result.request.tx.from),
-                        err);
-                } else {
-                    m.simulations_success += 1;
-                    
-                    // Check buy/sell results
-                    if let Some(buy_sell) = &result.buy_sell_result {
-                        if buy_sell.can_buy {
-                            m.can_buy_count += 1;
-                        }
-                        if buy_sell.can_sell {
-                            m.can_sell_count += 1;
-                        }
-                        if buy_sell.can_buy && buy_sell.can_sell {
-                            m.both_tradeable += 1;
-                        }
-                    }
+                if buy_sell.can_buy {
+                    can_buy_count += 1;
+                }
+                if buy_sell.can_sell {
+                    can_sell_count += 1;
+                }
+                if buy_sell.can_buy && buy_sell.can_sell {
+                    both_tradeable += 1;
                 }
             }
+            
+            if let Some(error) = &result.error {
+                failed_simulations += 1;
+                write!(log_file, " Error: {}", error)?;
+            } else {
+                successful_simulations += 1;
+            }
+            
+            writeln!(log_file)?;
         }
         
-        // Progress update every 100 transactions
-        if total_processed % 100 == 0 {
+        // Progress update every 1000 transactions
+        if total_processed % 1000 == 0 {
             let elapsed = pipeline_start.elapsed();
             let rate = total_processed as f64 / elapsed.as_secs_f64();
-            let m = metrics.lock().await;
             info!("Progress: {}/{} transactions ({:.1} tx/sec)", 
                 total_processed, args.target_count, rate);
-            info!("  Submitted: {} | Completed: {} | Success: {} | Failed: {}", 
-                m.simulations_submitted, m.simulations_completed, 
-                m.simulations_success, m.simulations_failed);
-        }
-    }
-    
-    // Process any remaining simulations
-    info!("\n🔄 Processing remaining simulations...");
-    let final_results = simulation_manager.process_queue().await;
-    {
-        let mut m = metrics.lock().await;
-        for result in final_results {
-            m.simulations_completed += 1;
             
-            if let Some(err) = result.error {
-                m.simulations_failed += 1;
-                if args.verbose {
-                    warn!("Simulation error for {}: {}", result.request.tx.hash, err);
-                }
-            } else {
-                m.simulations_success += 1;
-                
-                // Check buy/sell results
-                if let Some(buy_sell) = &result.buy_sell_result {
-                    if buy_sell.can_buy {
-                        m.can_buy_count += 1;
-                    }
-                    if buy_sell.can_sell {
-                        m.can_sell_count += 1;
-                    }
-                    if buy_sell.can_buy && buy_sell.can_sell {
-                        m.both_tradeable += 1;
-                    }
-                }
+            if total_simulations > 0 {
+                info!("  Simulations: {} total, {} success, {} failed", 
+                    total_simulations, successful_simulations, failed_simulations);
+                info!("  Trading: {} can buy, {} can sell, {} both", 
+                    can_buy_count, can_sell_count, both_tradeable);
             }
         }
     }
     
     let total_time = pipeline_start.elapsed();
     
-    // Calculate final metrics
-    let m = metrics.lock().await;
-    let (avg_sim_time, max_sim_time, p99_sim_time, _) = m.calculate_stats();
+    // Final summary - only show meaningful metrics
+    let summary = if total_simulations > 0 {
+        format!(
+            "\n📊 SIMULATION TEST SUMMARY\n\
+            =====================================\n\
+            Total Transactions Processed: {}\n\
+            Total Simulations Run: {}\n\
+            Successful Simulations: {} ({:.1}%)\n\
+            Failed Simulations: {} ({:.1}%)\n\
+            \n\
+            Trading Results:\n\
+            - Can Buy: {} ({:.1}% of successful)\n\
+            - Can Sell: {} ({:.1}% of successful)\n\
+            - Both (Tradeable): {} ({:.1}% of successful)\n\
+            \n\
+            Time Elapsed: {:.2}s\n\
+            Avg Simulation Time: {:.1}ms",
+            total_processed,
+            total_simulations,
+            successful_simulations,
+            successful_simulations as f64 / total_simulations as f64 * 100.0,
+            failed_simulations,
+            failed_simulations as f64 / total_simulations as f64 * 100.0,
+            can_buy_count,
+            can_buy_count as f64 / successful_simulations as f64 * 100.0,
+            can_sell_count,
+            can_sell_count as f64 / successful_simulations as f64 * 100.0,
+            both_tradeable,
+            both_tradeable as f64 / successful_simulations as f64 * 100.0,
+            total_time.as_secs_f64(),
+            total_time.as_millis() as f64 / total_simulations as f64
+        )
+    } else {
+        format!(
+            "\n📊 SIMULATION TEST SUMMARY\n\
+            =====================================\n\
+            Total Transactions Processed: {}\n\
+            No simulations were run (no contract creations or creator transactions found)\n\
+            Time Elapsed: {:.2}s",
+            total_processed,
+            total_time.as_secs_f64()
+        )
+    };
     
-    // Get final stats from simulation manager
-    let manager_stats = simulation_manager.get_stats().await;
+    println!("{}", summary);
+    writeln!(log_file, "{}", summary)?;
     
-    // Print and log results
-    let results = format!(
-        "\n📊 PIPELINE PERFORMANCE REPORT ({} transactions)\n\
-        =====================================\n\
-        Function Detection:\n\
-        - Trading Enabled: {} detected\n\
-        - Liquidity Removals: {} detected\n\
-        - Tax Changes: {} detected\n\
-        - Detection Latency: avg {:.1}μs\n\
-        \n\
-        Transaction Routing:\n\
-        - Contract Creations: {} routed\n\
-        - Creator Actions: {} routed\n\
-        - Skipped (DEX/Other): {}\n\
-        \n\
-        Simulation Results:\n\
-        - Submitted: {}\n\
-        - Completed: {}\n\
-        - Success: {} ({:.1}%)\n\
-        - Failed: {} ({:.1}%)\n\
-        - Avg Simulation Time: {:.2}ms\n\
-        - Max Simulation Time: {:.2}ms\n\
-        - P99 Simulation Time: {:.2}ms\n\
-        \n\
-        Trading Results:\n\
-        - Can Buy: {} ({:.1}% of successful)\n\
-        - Can Sell: {} ({:.1}% of successful)\n\
-        - Both Tradeable: {} ({:.1}% of successful)\n\
-        \n\
-        Overall Performance:\n\
-        - Total Time: {:.2}s\n\
-        - Throughput: {:.1} tx/sec\n\
-        - End-to-end Latency: avg {:.1}ms\n\
-        \n\
-        Manager Stats:\n\
-        - Avg Sim Time: {:.2}ms\n\
-        - Max Sim Time: {:.2}ms",
-        total_processed,
-        m.trading_enabled_count,
-        m.liquidity_removal_count,
-        m.tax_change_count,
-        if m.detection_latencies.is_empty() { 0.0 } else { 
-            m.detection_latencies.iter().sum::<Duration>().as_micros() as f64 / m.detection_latencies.len() as f64 
-        },
-        m.contract_creation_count,
-        m.creator_action_count,
-        m.skipped_count,
-        m.simulations_submitted,
-        m.simulations_completed,
-        m.simulations_success,
-        if m.simulations_completed > 0 { m.simulations_success as f64 / m.simulations_completed as f64 * 100.0 } else { 0.0 },
-        m.simulations_failed,
-        if m.simulations_completed > 0 { m.simulations_failed as f64 / m.simulations_completed as f64 * 100.0 } else { 0.0 },
-        avg_sim_time.as_secs_f64() * 1000.0,
-        max_sim_time.as_secs_f64() * 1000.0,
-        p99_sim_time.as_secs_f64() * 1000.0,
-        m.can_buy_count,
-        if m.simulations_success > 0 { m.can_buy_count as f64 / m.simulations_success as f64 * 100.0 } else { 0.0 },
-        m.can_sell_count,
-        if m.simulations_success > 0 { m.can_sell_count as f64 / m.simulations_success as f64 * 100.0 } else { 0.0 },
-        m.both_tradeable,
-        if m.simulations_success > 0 { m.both_tradeable as f64 / m.simulations_success as f64 * 100.0 } else { 0.0 },
-        total_time.as_secs_f64(),
-        total_processed as f64 / total_time.as_secs_f64(),
-        total_time.as_millis() as f64 / total_processed as f64,
-        manager_stats.avg_simulation_time_ms,
-        manager_stats.max_simulation_time_ms
-    );
-    
-    println!("{}", results);
-    writeln!(log_file, "{}", results)?;
-    
-    info!("\n✅ Pipeline test complete!");
+    info!("\n✅ Simulation test complete!");
     info!("📄 Results saved to: {}", log_path);
     info!("🔍 This test ran WITHOUT signal detection");
-    info!("   Next step: Enable signal detection once pipeline is working");
+    info!("   Use this log to debug simulation issues");
     
     Ok(())
 }

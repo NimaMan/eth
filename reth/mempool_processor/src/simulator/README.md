@@ -2,39 +2,42 @@
 
 ## Overview
 
-The simulator module provides transaction simulation capabilities with integrated signal detection. It executes transactions against current blockchain state, performs buy/sell testing, and automatically detects trading signals based on simulation results.
+The simulator module provides transaction simulation capabilities with integrated signal detection. It executes transactions against current blockchain state, performs buy/sell testing, and passes results to the signal manager for detection.
 
 ## Architecture
 
 ### Core Components
 
 #### 1. SimulationManager
-The central coordinator that manages the entire simulation and signal detection flow.
+The central coordinator that manages the simulation flow and passes results to signal detection.
 
 ```rust
 pub struct SimulationManager {
-    // Simulation components
+    // Simulators
     tx_simulator: Arc<TxSimulator>,
     buy_sell_simulator: Arc<SequentialBuySellSimulator>,
+    
+    // Queue management
     queue: Arc<Mutex<SimulationQueue>>,
     
-    // Signal detection (integrated)
+    // Signal detection
     signal_manager: Arc<Mutex<SignalManager>>,
-    token_cache: Arc<AddressTrackingCache>,
+    token_cache: Arc<TokenTrackingCache>,
     
-    // Optional metric counters
-    trading_enabled_counter: Option<Arc<AtomicU64>>,
-    honeypot_counter: Option<Arc<AtomicU64>>,
-    high_tax_counter: Option<Arc<AtomicU64>>,
+    // Configuration
+    max_concurrent_simulations: usize,
+    enable_caching: bool,
+    
+    // Statistics
+    stats: Arc<Mutex<ManagerStats>>,
 }
 ```
 
 **Key Features:**
 - Manages transaction simulation queue with priority ordering
-- Integrates signal detection directly into simulation flow
-- Uses token cache for context-aware signal detection
-- Automatically publishes detected signals
-- Updates external metrics if provided
+- Runs transaction and buy/sell simulations
+- Passes results to SignalManager for detection
+- Tracks simulation statistics
 
 #### 2. TxSimulator
 Executes individual transactions against the current blockchain state.
@@ -51,8 +54,8 @@ Tests token tradability by simulating buy and sell transactions.
 **Process:**
 1. Simulate 0.1 ETH buy transaction
 2. If successful, simulate selling received tokens
-3. Calculate taxes from price impact
-4. Detect honeypots (can buy but can't sell)
+3. Calculate buy/sell taxes from state changes
+4. Return results with taxes, can_buy/can_sell flags, and state changes
 
 #### 4. SimulationQueue
 Priority queue for managing simulation requests.
@@ -63,9 +66,9 @@ Priority queue for managing simulation requests.
 - `Normal`: Regular DEX interactions
 - `Low`: Other transactions
 
-## Integrated Signal Detection Flow
+## Data Flow and Calculations
 
-### 1. Submission
+### 1. Transaction Submission
 ```rust
 simulation_manager.submit(SimulationRequest {
     tx: MempoolTransaction,
@@ -75,53 +78,56 @@ simulation_manager.submit(SimulationRequest {
 })
 ```
 
-### 2. Internal Processing
+### 2. Simulation Processing
 ```rust
-async fn simulate_request(&self, request: SimulationRequest) {
-    // 1. Execute simulation
-    let result = self.execute_simulation(request).await;
+async fn simulate_request(&self, request: SimulationRequest) -> SimulationResult {
+    // 1. For ContractCreation or CreatorTransaction:
+    let (tx_result, bs_result, token_addr, pool_addr) = 
+        self.simulate_tx_with_buy_sell(&request).await;
     
-    // 2. Get token context from cache
-    let token_info = self.token_cache.get_token_info(token_address).await;
-    
-    // 3. Detect signals with context
-    let signals = self.signal_manager.process_simulation_result(
-        &result,
-        token_info.as_ref(),
-    ).await;
-    
-    // 4. Log and publish signals
-    for signal in signals {
-        self.log_signal(&signal);
-        self.update_counters(&signal);
-        self.publish_signal(signal).await;
+    // 2. Build result structure
+    SimulationResult {
+        request: request,
+        tx_simulation: Some(tx_result),
+        buy_sell_result: Some(BuySellResult {
+            can_buy: buy_result.success,
+            can_sell: sell_result.success,
+            buy_tax: None,    // Currently set to None, taxes calculated in SignalManager from state changes
+            sell_tax: None,   // Currently set to None, taxes calculated in SignalManager from state changes
+            tokens_received: None,
+            eth_received_on_sell: None,
+            buy_state_changes: Some(buy_result.state_changes),
+            sell_state_changes: Some(sell_result.state_changes),
+        }),
+        token_address: Some(token_addr),
+        pool_address: pool_addr,
+        simulation_time_ms: elapsed_ms,
     }
+    
+    // 3. Pass to SignalManager
+    signal_manager.process_simulation_result(&result).await;
 }
 ```
 
-### 3. Context-Aware Signal Detection
+### 3. SignalManager Processing
 
-#### For Contract Creations:
-```rust
-if buy_sell_result.can_buy && buy_sell_result.can_sell {
-    // New token with trading enabled!
-    emit TradingEnabledSignal
-}
-```
+The SignalManager receives the SimulationResult and:
 
-#### For Creator Transactions:
-```rust
-// Check previous state from cache
-if !token_info.trading_enabled && buy_sell_result.can_buy && buy_sell_result.can_sell {
-    // Trading just got enabled!
-    emit TradingEnabledSignal
-}
+1. **Extracts key values**:
+   - `buy_tax`, `sell_tax`, `can_buy`, `can_sell` from BuySellResult
+   - State changes for liquidity and stablecoin detection
 
-if token_info.trading_enabled && !buy_sell_result.can_sell {
-    // Honeypot - was tradeable, now can't sell!
-    emit HoneypotSignal
-}
-```
+2. **Runs detectors**:
+   - **TaxDetector**: Calculates taxes from state changes, detects honeypots/high taxes
+   - **TradingStatusDetector**: Emits TradingEnabled if can_buy && can_sell
+   - **LiquidityDetector**: Checks for pool drains using TokenTrackingCache
+   - **StablecoinDetector**: Tracks USDT/USDC mints/burns
+
+3. **Returns signals** as `Vec<Signal>`:
+   - TradingEnabled
+   - HighTaxWarning
+   - LiquidityRemoval
+   - ScamDetection
 
 ## Simulation Types
 

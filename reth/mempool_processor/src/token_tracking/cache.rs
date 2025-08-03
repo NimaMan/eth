@@ -217,7 +217,7 @@ impl TokenTrackingCache {
     pub async fn get_pools_for_token(&self, token_address: &str) -> Vec<(String, PoolState)> {
         let all_pools = self.pools.get_all_pools().await;
         all_pools.into_iter()
-            .filter(|(_, pool)| pool.token_address == token_address)
+            .filter(|(_, pool)| pool.token_address.eq_ignore_ascii_case(token_address))
             .collect()
     }
     

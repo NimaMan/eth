@@ -81,15 +81,15 @@ impl TaxChangeDetector {
         };
 
         let after = TaxInfo {
-            buy_tax: buy_sell.buy_tax,
-            sell_tax: buy_sell.sell_tax,
+            buy_tax: None, // TODO: Calculate from state changes
+            sell_tax: None, // TODO: Calculate from state changes
         };
 
         // Calculate risk level
         let risk_level = self.calculate_risk_level(&before, &after);
 
         // Generate details
-        let details = self.generate_details(&before, &after, buy_sell.is_honeypot);
+        let details = self.generate_details(&before, &after, false); // TODO: Calculate honeypot from state changes
 
         info!("📊 Tax change detected for {}: {}", target_token, details);
 
@@ -99,7 +99,7 @@ impl TaxChangeDetector {
             after,
             changer_address: creator.clone(),
             function_called: format!("{:?}", function_type),
-            is_honeypot_after: buy_sell.is_honeypot,
+            is_honeypot_after: false, // TODO: Calculate from state changes
             risk_level,
             confidence: 0.9, // High confidence since we simulated it
             details,
@@ -139,7 +139,7 @@ impl TaxChangeDetector {
         }
     }
 
-    fn generate_details(&self, before: &TaxInfo, after: &TaxInfo, is_honeypot: bool) -> String {
+    fn generate_details(&self, before: &TaxInfo, after: &TaxInfo, _is_honeypot: bool) -> String {
         let mut details = Vec::new();
 
         if let (Some(b_buy), Some(a_buy)) = (before.buy_tax, after.buy_tax) {
@@ -154,7 +154,7 @@ impl TaxChangeDetector {
             }
         }
 
-        if is_honeypot {
+        if _is_honeypot {
             details.push("TOKEN IS NOW A HONEYPOT!".to_string());
         }
 

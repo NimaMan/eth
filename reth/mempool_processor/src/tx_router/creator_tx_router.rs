@@ -58,7 +58,8 @@ impl CreatorTransactionRouter {
             [0x36, 0x0c, 0x42, 0xf8] => CreatorFunctionType::MaxWalletLimit, // setLimits
             
             _ => {
-                let selector_hex = hex::encode(selector);
+                let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
+                    selector[0], selector[1], selector[2], selector[3]);
                 CreatorFunctionType::Other(selector_hex)
             }
         }

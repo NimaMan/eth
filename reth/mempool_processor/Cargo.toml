@@ -180,6 +180,10 @@ path = "examples/simulator/benchmark_direct_reth_simulation.rs"
 name = "test_buy_sell_simulator"
 path = "examples/simulator/test_buy_sell_simulator.rs"
 
+[[example]]
+name = "test_specific_tx_simulation"
+path = "examples/simulator/test_specific_tx_simulation.rs"
+
 
 # TxSimulator Examples
 [[example]]
@@ -250,6 +254,14 @@ name = "full_pipeline_signal_detection"
 path = "examples/signal_detector/full_pipeline_signal_detection.rs"
 
 [[example]]
+name = "simulation_only"
+path = "examples/signal_detector/simulation_only.rs"
+
+[[example]]
+name = "simulation_pipeline"
+path = "examples/signal_detector/simulation_pipeline.rs"
+
+[[example]]
 name = "read_token_data_from_storage"
 path = "examples/token_parameter_extraction/read_token_data_from_storage.rs"
 
@@ -283,6 +295,22 @@ path = "examples/token_tracking/zmq_connection_example.rs"
 name = "test_unified_cache"
 path = "examples/token_tracking/test_unified_cache.rs"
 
+[[example]]
+name = "inspect_creator_info"
+path = "examples/token_tracking/inspect_creator_info.rs"
+
+[[example]]
+name = "get_token_info"
+path = "examples/token_tracking/get_token_info.rs"
+
 
 
 # Using crates.io versions - no patches needed
+
+[[example]]
+name = "test_unified_simulator"
+path = "examples/simulator/test_unified_simulator.rs"
+
+[[example]]
+name = "test_simulation_with_known_tokens"
+path = "examples/test_simulation_with_known_tokens.rs"
