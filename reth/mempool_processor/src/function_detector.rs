@@ -213,9 +213,9 @@ impl FunctionDetector {
         }
         
         let tx_hash = &ipc_tx.hash;
-        let from = format!("0x{}", hex::encode(&ipc_tx.from));
+        let from = checksum_address(&hex::encode(&ipc_tx.from));
         let to = ipc_tx.to.as_ref()
-            .map(|addr| format!("0x{}", hex::encode(addr)))
+            .map(|addr| checksum_address(&hex::encode(addr)))
             .unwrap_or_else(|| "contract_creation".to_string());
         let value = format!("0x{:x}", ipc_tx.value);
         let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
@@ -240,14 +240,13 @@ impl FunctionDetector {
             if selector == &hex_to_bytes("095ea7b3") {
                 // Check if this is an LP token approval
                 let to_address = tx.to.as_ref()
-                    .map(|addr| format!("0x{}", hex::encode(addr)))
+                    .map(|addr| checksum_address(&hex::encode(addr)))
                     .unwrap_or_else(|| "contract_creation".to_string());
                     
                 let is_lp_approval = if let Some(ref cache) = self.token_cache {
-                    let to_checksum = checksum_address(&to_address.trim_start_matches("0x"));
                     tokio::task::block_in_place(|| {
                         tokio::runtime::Handle::current().block_on(async {
-                            cache.pools.is_pool_address(&to_checksum).await
+                            cache.pools.is_pool_address(&to_address).await
                         })
                     })
                 } else {
@@ -345,10 +344,9 @@ impl FunctionDetector {
             // Try to get the actual token address from creator cache
             let token_address = if let Some(ref cache) = self.token_cache {
                 // Use tokio runtime to run async function
-                let from_checksum = checksum_address(&from.trim_start_matches("0x"));
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        cache.get_token_for_creator(&from_checksum).await
+                        cache.get_token_for_creator(from).await
                             .map(|token_info| token_info.token_address)
                     })
                 })
@@ -405,10 +403,9 @@ impl FunctionDetector {
         if selector_bytes == &hex_to_bytes("095ea7b3") {
             // This is an approve function - check if it's an LP token approval
             let is_lp_approval = if let Some(ref cache) = self.token_cache {
-                let to_checksum = checksum_address(&to.trim_start_matches("0x"));
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        cache.pools.is_pool_address(&to_checksum).await
+                        cache.pools.is_pool_address(to).await
                     })
                 })
             } else {

@@ -202,9 +202,11 @@ impl SimulationManager {
                         result.pool_address = pool_addr;
                         result.sequence_result = seq_result;
                     }
-                    Err(e) => {
+                    Err((e, partial_tx_changes)) => {
                         result.error = Some(e);
                         result.debug_info = Some(format!("Failed during buy/sell simulation"));
+                        // Preserve any transaction state changes even if buy/sell failed
+                        result.tx_state_changes = partial_tx_changes;
                     }
                 }
             }
@@ -217,15 +219,20 @@ impl SimulationManager {
         result.simulation_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         
         // Send results to signal manager
-        // TEMPORARILY COMMENTED OUT FOR SIMULATION-ONLY TESTING
-        // let mut signal_manager = self.signal_manager.lock().await;
-        // signal_manager.process_simulation_result(&result).await;
+        info!("📤 Sending simulation result to signal manager for TX {}", result.request.tx.hash);
+        info!("  Result has error: {}, has buy_sell: {}", 
+            result.error.is_some(), 
+            result.buy_sell_result.is_some()
+        );
+        let mut signal_manager = self.signal_manager.lock().await;
+        let signals = signal_manager.process_simulation_result(&result).await;
+        info!("  Signal manager returned {} signals", signals.len());
         
         result
     }
 
     /// Simulate transaction followed by buy/sell sequence
-    async fn simulate_tx_with_buy_sell(&self, request: &SimulationRequest) -> Result<(Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>, BuySellResult, alloy_primitives::Address, Option<alloy_primitives::Address>, Option<SequenceSimulationResult>), String> {
+    async fn simulate_tx_with_buy_sell(&self, request: &SimulationRequest) -> Result<(Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>, BuySellResult, alloy_primitives::Address, Option<alloy_primitives::Address>, Option<SequenceSimulationResult>), (String, Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>)> {
         // Extract token address from category
         let token_address_str = match &request.category {
             TransactionCategory::CreatorTransaction { target_token, creator, .. } => {
@@ -236,7 +243,7 @@ impl SimulationManager {
                         if let Some(token_info) = self.token_cache.get_token_for_creator(creator).await {
                             token_info.token_address.clone()
                         } else {
-                            return Err(format!("No token address found for creator {}", creator));
+                            return Err((format!("No token address found for creator {}", creator), None));
                         }
                     }
                 }
@@ -245,16 +252,13 @@ impl SimulationManager {
                 // For new contracts, the contract address IS the token address
                 contract_address.clone()
             }
-            _ => return Err("Category doesn't support buy/sell simulation".to_string()),
+            _ => return Err(("Category doesn't support buy/sell simulation".to_string(), None)),
         };
-
-        info!("  Extracted token address: {}", token_address_str);
         
         // Convert string addresses to alloy Address type
         let token_address = token_address_str.trim_start_matches("0x")
             .parse::<alloy_primitives::Address>()
-            .map_err(|e| format!("Invalid token address: {}", e))?;
-        info!("  Parsed token address: {:?}", token_address);
+            .map_err(|e| (format!("Invalid token address: {}", e), None))?;
             
         // Try to find pool address from token cache
         let pool_info = self.token_cache.get_primary_pool(&token_address_str).await;
@@ -283,28 +287,23 @@ impl SimulationManager {
         };
         
         
-        let tx_call_request = reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data)
-            .map_err(|e| format!("Failed to convert transaction: {}", e))?;
+        let mut tx_call_request = reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data)
+            .map_err(|e| (format!("Failed to convert transaction: {}", e), None))?;
+        
+        // Remove nonce to let the sequential simulator manage it automatically
+        tx_call_request.nonce = None;
         
         // Store request details for error reporting
         let tx_details = format!(
-            "Original TX: from={:?}, to={:?}, value={:?}, nonce={:?}, gas={:?}, gas_price={:?}",
-            tx_call_request.from, tx_call_request.to, tx_call_request.value, 
-            tx_call_request.nonce, tx_call_request.gas, tx_call_request.gas_price
+            "Original TX: from={:?}, to={:?}",
+            tx_call_request.from, tx_call_request.to
         );
         
         info!("  Calling buy_sell_simulator.simulate_sequence_with_tx()...");
         info!("    Token: {:?}", token_address);
         info!("    Pool: {:?}", pool_address);
-        info!("    Block: {:?}", block_number);
-        info!("    CallRequest details:");
-        info!("      - from: {:?}", tx_call_request.from);
-        info!("      - to: {:?}", tx_call_request.to);
-        info!("      - value: {:?}", tx_call_request.value);
-        info!("      - data: {} bytes", tx_call_request.data.as_ref().map(|d| d.len()).unwrap_or(0));
-        info!("      - gas: {:?}", tx_call_request.gas);
-        info!("      - gas_price: {:?}", tx_call_request.gas_price);
-        info!("      - nonce: {:?}", tx_call_request.nonce);
+        info!("    from: {:?}", tx_call_request.from);
+        info!("    to: {:?}", tx_call_request.to);
         
         // Run the sequential simulation: TX -> Buy -> Approve -> Sell
         match self.unified_simulator.simulate_sequence_with_tx(
@@ -336,20 +335,7 @@ impl SimulationManager {
                 info!("  ERROR in sequence simulation: {}", e);
                 info!("  Error details: {:?}", e);
                 let error_msg = format!("{}", e);
-                // Store the error details in debug_info
-                let mut result = SimulationResult {
-                    request: request.clone(),
-                    tx_state_changes: None,
-                    buy_sell_result: None,
-                    error: Some(error_msg.clone()),
-                    simulation_time_ms: 0.0,
-                    token_address: Some(token_address),
-                    pool_address: if pool_address.is_zero() { None } else { Some(pool_address) },
-                    sequence_result: None,
-                    debug_info: Some(format!("Block: {:?}, Token: {}, Pool: {}, Error: {}", 
-                        block_number, token_address, pool_address, e)),
-                };
-                Err(error_msg)
+                Err((error_msg, None))
             }
         }
     }

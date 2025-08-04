@@ -16,6 +16,9 @@ use std::collections::HashMap;
 use alloy_primitives::Address;
 use reth_tx_simulator::AddressStateChange;
 use hex;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct TaxSignal {
@@ -46,6 +49,8 @@ pub struct TaxDetector {
     honeypot_threshold: f64,
     /// Threshold for suspicious tax difference (default: 20%)
     suspicious_difference_threshold: f64,
+    /// Path to the log file
+    log_file_path: Option<PathBuf>,
 }
 
 impl TaxDetector {
@@ -54,6 +59,16 @@ impl TaxDetector {
             high_tax_threshold: 25.0,
             honeypot_threshold: 50.0,
             suspicious_difference_threshold: 20.0,
+            log_file_path: None,
+        }
+    }
+    
+    pub fn with_log_path(log_path: PathBuf) -> Self {
+        Self {
+            high_tax_threshold: 25.0,
+            honeypot_threshold: 50.0,
+            suspicious_difference_threshold: 20.0,
+            log_file_path: Some(log_path),
         }
     }
 
@@ -114,21 +129,26 @@ impl TaxDetector {
         };
         
         if is_honeypot {
-            let details = if let Some(buy_sell) = &sim_result.buy_sell_result {
+            let (details, buy_tax_for_signal, sell_tax_for_signal) = if let Some(buy_sell) = &sim_result.buy_sell_result {
                 if !buy_sell.can_sell {
-                    "Honeypot detected! Cannot sell tokens".to_string()
+                    // Can't sell, so sell tax is None (not 0)
+                    let buy_tax = if buy_sell.can_buy { calculated_buy_tax } else { None };
+                    ("Honeypot detected! Cannot sell tokens".to_string(), buy_tax, None)
                 } else {
-                    format!("Honeypot detected! Sell tax: {:.1}%", calculated_sell_tax.unwrap_or(100.0))
+                    // High sell tax case
+                    (format!("Honeypot detected! Sell tax: {:.1}%", calculated_sell_tax.unwrap_or(100.0)), 
+                     calculated_buy_tax, 
+                     calculated_sell_tax)
                 }
             } else {
-                "Honeypot detected!".to_string()
+                ("Honeypot detected!".to_string(), None, None)
             };
             
             signals.push(TaxSignal {
                 token_address: token_address.clone(),
                 signal_type: TaxSignalType::Honeypot,
-                buy_tax: calculated_buy_tax,
-                sell_tax: calculated_sell_tax,
+                buy_tax: buy_tax_for_signal,
+                sell_tax: sell_tax_for_signal,
                 details,
                 confidence: 0.95,
             });
@@ -176,6 +196,36 @@ impl TaxDetector {
         // Log summary if any signals detected
         if !signals.is_empty() {
             info!("💸 Tax detector found {} signals for token {}", signals.len(), token_address);
+            
+            // Log to file if path is configured
+            if let Some(ref log_path) = self.log_file_path {
+                for signal in &signals {
+                    if let Ok(mut file) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log_path)
+                    {
+                        let timestamp = chrono::Local::now();
+                        let buy_tax_str = signal.buy_tax
+                            .map(|t| format!("{:.1}%", t))
+                            .unwrap_or_else(|| "None".to_string());
+                        let sell_tax_str = signal.sell_tax
+                            .map(|t| format!("{:.1}%", t))
+                            .unwrap_or_else(|| "None".to_string());
+                            
+                        writeln!(file, "[{}] TX: {} | Token: {} | Type: {:?} | Buy Tax: {} | Sell Tax: {} | Confidence: {:.2} | Details: {}",
+                            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                            sim_result.request.tx.hash,
+                            signal.token_address,
+                            signal.signal_type,
+                            buy_tax_str,
+                            sell_tax_str,
+                            signal.confidence,
+                            signal.details
+                        ).ok();
+                    }
+                }
+            }
         }
 
         signals

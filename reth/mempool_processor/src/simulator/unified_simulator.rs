@@ -200,4 +200,9 @@ impl UnifiedSimulator {
     pub fn get_buyer_address(&self) -> Address {
         self.sequential_simulator.get_buyer_address()
     }
+    
+    /// Get access to the single transaction simulator
+    pub fn single_tx_simulator(&self) -> &RethTxSimulator {
+        &self.single_simulator
+    }
 }

@@ -170,17 +170,22 @@ impl SequentialBuySellSimulator {
             nonce: None,
         };
         
-        // First simulate just the buy to get tokens received
-        let mut sequence = vec![buy_request.clone()];
-        if let Some(tx) = given_tx.clone() {
-            sequence.insert(0, tx);
-        }
+        // Start timing
+        let start_time = Instant::now();
         
+        // Build initial sequence with given tx (if any) and buy
+        let mut initial_sequence = Vec::new();
+        if let Some(tx) = given_tx.clone() {
+            initial_sequence.push(tx);
+        }
+        initial_sequence.push(buy_request.clone());
+        
+        // Run initial simulation with stop_on_failure: false to get all results
         let initial_result = self.simulator.simulate_transaction_sequence(
-            sequence,
+            initial_sequence.clone(),
             SequentialSimulationOptions {
                 at_block: block_number,
-                stop_on_failure: true,
+                stop_on_failure: false, // Continue even if transactions fail
                 auto_increment_nonces: true,
                 gas_limit_per_tx: None,
             }
@@ -189,22 +194,72 @@ impl SequentialBuySellSimulator {
         // Extract the buy result index (0 if no given tx, 1 if given tx exists)
         let buy_index = if given_tx.is_some() { 1 } else { 0 };
         
-        // Check if buy succeeded
-        if !initial_result.results.get(buy_index).map(|r| r.success).unwrap_or(false) {
-            return Err(eyre::eyre!("Buy transaction failed"));
-        }
+        // Check if buy succeeded and extract tokens received
+        let (buy_succeeded, tokens_received) = if let Some(buy_result) = initial_result.results.get(buy_index) {
+            if buy_result.success {
+                let tokens = buy_result.state_changes
+                    .get(&self.config.buyer_address)
+                    .and_then(|changes| {
+                        let token_addr_str = format!("{:#x}", token_address);
+                        changes.token_net.get(&token_addr_str).copied()
+                    })
+                    .unwrap_or(I256::ZERO);
+                (!tokens.is_zero(), tokens)
+            } else {
+                (false, I256::ZERO)
+            }
+        } else {
+            (false, I256::ZERO)
+        };
         
-        // Extract tokens received from buy
-        let tokens_received = initial_result.results[buy_index].state_changes
-            .get(&self.config.buyer_address)
-            .and_then(|changes| {
-                let token_addr_str = format!("{:#x}", token_address);
-                changes.token_net.get(&token_addr_str).copied()
-            })
-            .unwrap_or(I256::ZERO);
-        
-        if tokens_received.is_zero() {
-            return Err(eyre::eyre!("No tokens received from buy transaction"));
+        // If buy failed or no tokens received, return partial results
+        if !buy_succeeded {
+            let given_tx_result = if given_tx.is_some() {
+                Some(TransactionSimulationResult {
+                    success: initial_result.results[0].success,
+                    gas_used: initial_result.results[0].gas_used,
+                    revert_reason: initial_result.results[0].revert_reason.clone(),
+                    state_changes: initial_result.results[0].state_changes.clone(),
+                })
+            } else {
+                None
+            };
+            
+            let buy_result = if let Some(buy_res) = initial_result.results.get(buy_index) {
+                TransactionSimulationResult {
+                    success: buy_res.success,
+                    gas_used: buy_res.gas_used,
+                    revert_reason: buy_res.revert_reason.clone(),
+                    state_changes: buy_res.state_changes.clone(),
+                }
+            } else {
+                TransactionSimulationResult {
+                    success: false,
+                    gas_used: 0,
+                    revert_reason: Some("Buy transaction not executed".to_string()),
+                    state_changes: HashMap::new(),
+                }
+            };
+            
+            // Return with empty approve/sell results
+            return Ok(SequenceSimulationResult {
+                given_tx_result,
+                buy_result,
+                approve_result: TransactionSimulationResult {
+                    success: false,
+                    gas_used: 0,
+                    revert_reason: Some("Skipped due to buy failure".to_string()),
+                    state_changes: HashMap::new(),
+                },
+                sell_result: TransactionSimulationResult {
+                    success: false,
+                    gas_used: 0,
+                    revert_reason: Some("Skipped due to buy failure".to_string()),
+                    state_changes: HashMap::new(),
+                },
+                simulation_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+                block_number: block_number.unwrap_or(0),
+            });
         }
         
         // Build approve transaction

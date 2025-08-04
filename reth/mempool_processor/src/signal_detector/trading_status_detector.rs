@@ -5,6 +5,9 @@
 use crate::simulator::{BuySellResult, SimulationResult};
 use crate::tx_router::CreatorFunctionType;
 use tracing::info;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct TradingStatusSignal {
@@ -32,12 +35,22 @@ pub enum TradingStatusChange {
 pub struct TradingStatusDetector {
     /// Whether to check buy/sell after trading enable
     verify_trading_works: bool,
+    /// Path to the log file
+    log_file_path: Option<PathBuf>,
 }
 
 impl TradingStatusDetector {
     pub fn new() -> Self {
         Self {
             verify_trading_works: true,
+            log_file_path: None,
+        }
+    }
+    
+    pub fn with_log_path(log_path: PathBuf) -> Self {
+        Self {
+            verify_trading_works: true,
+            log_file_path: Some(log_path),
         }
     }
 
@@ -97,6 +110,26 @@ impl TradingStatusDetector {
         };
 
         info!("🚦 {} for token {}", details, target_token);
+        
+        // Log to file if path is configured
+        if let Some(ref log_path) = self.log_file_path {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
+                let timestamp = chrono::Local::now();
+                writeln!(file, "[{}] TX: {} | Token: {} | Executor: {} | Function: {:?} | Status: {:?} | Details: {}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    sim_result.request.tx.hash,
+                    target_token,
+                    executor,
+                    function_type,
+                    status_change,
+                    details
+                ).ok();
+            }
+        }
 
         Some(TradingStatusSignal {
             token_address: target_token.clone(),

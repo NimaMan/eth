@@ -327,7 +327,9 @@ async fn main() -> Result<()> {
     
     // 7. Simulation manager (now includes signal detection and publishing)
     info!("📦 Starting simulation manager with integrated signal detection and publishing...");
-    let signal_config = SignalManagerConfig::default();
+    let signal_config = SignalManagerConfig {
+        log_dir: signals_dir.clone(),
+    };
     let simulation_manager = SimulationManager::new(
         unified_simulator,
         token_cache.clone(),
@@ -463,7 +465,7 @@ async fn main() -> Result<()> {
                 priority: classification.priority,
                 simulation_type: match &classification.category {
                     TransactionCategory::ContractCreation { .. } => SimulationType::TransactionWithBuySell,
-                    TransactionCategory::CreatorTransaction { .. } => SimulationType::TransactionOnly,
+                    TransactionCategory::CreatorTransaction { .. } => SimulationType::TransactionWithBuySell,
                     _ => SimulationType::TransactionOnly,
                 },
                 tx_hash: H256::from_slice(

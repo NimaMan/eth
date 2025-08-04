@@ -123,7 +123,7 @@ impl TransactionRouter {
         
         ClassificationResult {
             category: TransactionCategory::ContractCreation {
-                deployer: format!("0x{}", hex::encode(&tx.from)),
+                deployer: checksum_address(&hex::encode(&tx.from)),
                 contract_address: "pending".to_string(), // Will be determined after execution
                 is_token,
                 has_liquidity_in_calldata: has_liquidity,
@@ -182,9 +182,9 @@ impl TransactionRouter {
 
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
-                creator: format!("0x{}", hex::encode(&tx.from)),
+                creator: checksum_address(&hex::encode(&tx.from)),
                 target_address: tx.to.as_ref()
-                    .map(|t| format!("0x{}", hex::encode(t)))
+                    .map(|t| checksum_address(&hex::encode(t)))
                     .unwrap_or_else(|| "none".to_string()),
                 target_token,
                 function_type,
