@@ -36,9 +36,11 @@ use mempool_processor::{
     signal_detector::{SignalManagerConfig},
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
+    database::{MempoolTimestampTracker, TrackerConfig},
 };
 use ethers::types::H256;
 use hex;
+use sqlx::postgres::PgPoolOptions;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -69,6 +71,10 @@ struct Args {
     /// Performance report interval in seconds
     #[arg(long, default_value = "60")]
     report_interval: u64,
+    
+    /// Database URL for mempool timestamp tracking (optional)
+    #[arg(long, env = "DATABASE_URL")]
+    database_url: Option<String>,
 }
 
 /// Performance metrics tracker
@@ -297,7 +303,28 @@ async fn main() -> Result<()> {
     ipc_client.start().await?;
     info!("✅ IPC client connected");
     
-    // 3. Function detector
+    // 3. Mempool timestamp tracker (optional)
+    let mempool_tracker = if let Some(db_url) = &args.database_url {
+        info!("📝 Initializing mempool timestamp tracker...");
+        
+        // Create database connection pool
+        let db_pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(db_url)
+            .await?;
+        
+        // Create tracker with default config
+        let tracker_config = TrackerConfig::default();
+        let tracker = MempoolTimestampTracker::new(db_pool, tracker_config).await?;
+        
+        info!("✅ Mempool timestamp tracker ready");
+        Some(tracker)
+    } else {
+        info!("⚠️  Mempool timestamp tracking disabled (no DATABASE_URL)");
+        None
+    };
+    
+    // 4. Function detector
     info!("🔍 Initializing function detector...");
     // Create function detector with custom log directory
     let detector_log_dir = run_dir.join("function_detector");
@@ -415,6 +442,13 @@ async fn main() -> Result<()> {
         }
         
         consecutive_empty = 0;
+        
+        // Record mempool timestamps for all transactions (non-blocking)
+        if let Some(ref tracker) = mempool_tracker {
+            for tx in &new_txs {
+                tracker.record_transaction(tx.hash.clone()).await;
+            }
+        }
         
         // Process batch through pipeline
         let batch_start = Instant::now();

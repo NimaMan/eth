@@ -13,6 +13,7 @@ use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use super::{SimulationQueue, UnifiedSimulator, SequenceSimulationResult};
 use std::collections::HashMap;
+use hex;
 
 /// Types of simulation to perform
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -191,7 +192,10 @@ impl SimulationManager {
         // 2. Run buy/sell tests
         
         match &request.category {
-            TransactionCategory::ContractCreation { .. } | 
+            TransactionCategory::ContractCreation { .. } => {
+                // TODO: Handle contract creation properly
+                result.error = Some("Contract creation simulation not implemented yet".to_string());
+            }
             TransactionCategory::CreatorTransaction { .. } => {
                 // Run combined tx + buy/sell simulation
                 match self.simulate_tx_with_buy_sell(&request).await {
@@ -248,9 +252,20 @@ impl SimulationManager {
                     }
                 }
             }
-            TransactionCategory::ContractCreation { contract_address, .. } => {
-                // For new contracts, the contract address IS the token address
-                contract_address.clone()
+            TransactionCategory::ContractCreation { contract_address, deployer, .. } => {
+                // For contract creation, the sequential simulator will:
+                // 1. Execute the contract creation transaction (deploying the contract)
+                // 2. The contract will then exist at its address
+                // 3. Then run buy/sell tests on the deployed contract
+                
+                if contract_address == "pending" {
+                    // We need to calculate the deterministic address where the contract will be deployed
+                    // This is deterministic based on deployer + nonce
+                    // For now, let's skip the buy/sell test and just simulate the creation
+                    return Err(("Contract creation: address calculation not implemented yet".to_string(), None));
+                } else {
+                    contract_address.clone()
+                }
             }
             _ => return Err(("Category doesn't support buy/sell simulation".to_string(), None)),
         };
@@ -292,6 +307,16 @@ impl SimulationManager {
         
         // Remove nonce to let the sequential simulator manage it automatically
         tx_call_request.nonce = None;
+        
+        // Override gas price to prevent GasPriceLessThanBasefee errors
+        // When simulating mempool transactions at latest block, the base fee may have increased
+        // Use a high gas price to ensure simulation succeeds (100 gwei)
+        let override_gas_price = 100_000_000_000u128; // 100 gwei
+        tx_call_request.gas_price = Some(override_gas_price);
+        tx_call_request.max_fee_per_gas = Some(override_gas_price);
+        tx_call_request.max_priority_fee_per_gas = Some(2_000_000_000u128); // 2 gwei priority
+        
+        info!("  Overriding gas price to {} gwei to prevent base fee errors", override_gas_price / 1_000_000_000);
         
         // Store request details for error reporting
         let tx_details = format!(
@@ -339,6 +364,7 @@ impl SimulationManager {
             }
         }
     }
+
 
     /// Get manager statistics
     pub async fn get_stats(&self) -> ManagerStats {

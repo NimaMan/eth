@@ -195,7 +195,8 @@ impl SignalManager {
         
         // Add visual separator for new transaction
         self.log_activity("", "");  // Empty line
-        self.log_activity("", &format!("══════════════════════ TX: {} ══════════════════════", &result.request.tx.hash[0..16]));
+        self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════════════"));
+        self.log_activity("", &format!("TX: {}", result.request.tx.hash));
         
         self.log_activity("RECEIVED", &format!(
             "Category: {:?} | {} | BuySell: {}",
@@ -591,7 +592,7 @@ impl SignalManager {
         }
         
         // Add closing separator
-        self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════"));
+        self.log_activity("", &format!("══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════"));
         
         signals
     }

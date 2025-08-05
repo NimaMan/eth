@@ -69,6 +69,7 @@ toml            = "0.8"
 hex             = "0.4"
 fastrand        = "2.0"
 tiny-keccak     = { version = "2.0", features = ["keccak"] }
+rlp             = "0.5"
 
 # PostgreSQL Client for database logging
 tokio-postgres  = "0.7"
@@ -118,6 +119,9 @@ revm-inspectors = "0.19.1"
 
 # For examples
 jsonrpsee = { version = "0.24", features = ["http-client"] }
+
+# Database support
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
 
 [lib]
 name = "mempool_processor"
@@ -183,6 +187,22 @@ path = "examples/simulator/test_buy_sell_simulator.rs"
 [[example]]
 name = "test_specific_tx_simulation"
 path = "examples/simulator/test_specific_tx_simulation.rs"
+
+[[example]]
+name = "test_imag_token_simulation"
+path = "examples/simulator/specific_tokens/test_imag_token_simulation.rs"
+
+[[example]]
+name = "test_imag_sell_transaction"
+path = "examples/simulator/specific_tokens/test_imag_sell_transaction.rs"
+
+[[example]]
+name = "test_groge_token_simulation"
+path = "examples/simulator/specific_tokens/test_groge_token_simulation.rs"
+
+[[example]]
+name = "test_liquidity_removal_simulation"
+path = "examples/test_liquidity_removal_simulation.rs"
 
 
 # TxSimulator Examples
@@ -314,3 +334,7 @@ path = "examples/simulator/test_unified_simulator.rs"
 [[example]]
 name = "test_simulation_with_known_tokens"
 path = "examples/test_simulation_with_known_tokens.rs"
+
+[[example]]
+name = "contract_creation_detection_simple"
+path = "examples/contract_creation_detection_simple.rs"

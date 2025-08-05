@@ -5,6 +5,7 @@
 
 pub mod scam_prediction_writer;
 pub mod trading_event_writer;
+pub mod mempool_timestamp_tracker;
 
 pub use scam_prediction_writer::ScamPredictionWriter;
 pub use trading_event_writer::{
@@ -13,3 +14,4 @@ pub use trading_event_writer::{
     CreatorActionEvent,
     MempoolSignal
 };
+pub use mempool_timestamp_tracker::{MempoolTimestampTracker, TrackerConfig};
