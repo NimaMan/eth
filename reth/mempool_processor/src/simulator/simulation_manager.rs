@@ -289,9 +289,15 @@ impl SimulationManager {
             alloy_primitives::Address::ZERO
         };
         
-        // Get current block number (simulate at latest)
-        let block_number = None; // Use latest block
-        info!("  Using block number: {:?}", block_number);
+        // Get current block number - simulate at latest minus a few blocks for safety
+        // This gives time for state changes from recently included transactions
+        let latest_block = self.unified_simulator.get_latest_block().unwrap_or(0);
+        let simulation_block = if latest_block > 3 {
+            Some(latest_block - 3) // Simulate 3 blocks back for state consistency
+        } else {
+            Some(latest_block)
+        };
+        info!("  Latest block: {}, simulating at block: {:?}", latest_block, simulation_block);
         
         // Create the transaction CallRequest
         let full_tx = crate::mempool_fetcher::FullTransaction {
@@ -349,7 +355,7 @@ impl SimulationManager {
             Some(tx_call_request.clone()),
             token_address,
             pool_address,
-            block_number
+            simulation_block
         ).await {
             Ok(result) => Ok(result),
             Err(e) => {
@@ -374,7 +380,7 @@ impl SimulationManager {
                         Some(tx_call_request.clone()),
                         token_address,
                         pool_address,
-                        block_number
+                        simulation_block
                     ).await
                 } else {
                     Err(e)
@@ -409,17 +415,13 @@ impl SimulationManager {
                 
                 // Log detailed error information for debugging
                 if e.to_string().contains("LackOfFundForMaxFee") {
-                    error!("LackOfFundForMaxFee error detected!");
-                    error!("Transaction details:");
-                    error!("  TX hash: {}", request.tx.hash);
-                    error!("  From: {:?}", tx_call_request.from);
-                    error!("  To: {:?}", tx_call_request.to);
-                    error!("  Value: {:?}", tx_call_request.value);
-                    error!("  Gas: {:?}", tx_call_request.gas);
-                    error!("  Gas price: {:?}", tx_call_request.gas_price);
-                    error!("  Max fee per gas: {:?}", tx_call_request.max_fee_per_gas);
-                    error!("Raw IPC transaction data:");
-                    error!("{}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
+                    warn!("LackOfFundForMaxFee error - transaction already executed on chain?");
+                    warn!("  TX hash: {}", request.tx.hash);
+                    warn!("  From: {:?}", tx_call_request.from);
+                    warn!("  Value: {:?} ETH", tx_call_request.value.map(|v| format!("{:.6}", v.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)).unwrap_or_else(|| "0".to_string()));
+                    warn!("  Simulating at block: {:?} (latest: {})", simulation_block, latest_block);
+                    warn!("  This likely means the transaction was already included in a recent block");
+                    // Don't log full transaction data for balance errors
                 }
                 
                 let error_msg = format!("{}", e);
