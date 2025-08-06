@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::any::TypeId;
 use tokio::sync::Mutex;
-use tracing::{info, debug, warn};
+use tracing::{info, debug, warn, error};
 use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
@@ -305,18 +305,32 @@ impl SimulationManager {
         let mut tx_call_request = reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data)
             .map_err(|e| (format!("Failed to convert transaction: {}", e), None))?;
         
+        // Log the parsed call request for debugging
+        info!("  Parsed CallRequest:");
+        info!("    from: {:?}", tx_call_request.from);
+        info!("    to: {:?}", tx_call_request.to);
+        info!("    value: {:?}", tx_call_request.value);
+        info!("    gas: {:?}", tx_call_request.gas);
+        info!("    gas_price: {:?}", tx_call_request.gas_price);
+        info!("    max_fee_per_gas: {:?}", tx_call_request.max_fee_per_gas);
+        info!("    data length: {} bytes", tx_call_request.data.as_ref().map(|d| d.len()).unwrap_or(0));
+        
+        // Check if gas is missing - this should never happen for mined transactions
+        if tx_call_request.gas.is_none() {
+            error!("WARNING: Gas limit is None for mined transaction!");
+            error!("Raw IPC data: {}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
+            // Return error instead of using fallback
+            return Err(("Gas limit missing from transaction - parsing error".to_string(), None));
+        }
+        
         // Remove nonce to let the sequential simulator manage it automatically
         tx_call_request.nonce = None;
         
-        // Override gas price to prevent GasPriceLessThanBasefee errors
-        // When simulating mempool transactions at latest block, the base fee may have increased
-        // Use a high gas price to ensure simulation succeeds (100 gwei)
-        let override_gas_price = 100_000_000_000u128; // 100 gwei
-        tx_call_request.gas_price = Some(override_gas_price);
-        tx_call_request.max_fee_per_gas = Some(override_gas_price);
-        tx_call_request.max_priority_fee_per_gas = Some(2_000_000_000u128); // 2 gwei priority
+        // Store original gas prices for retry logic
+        let original_gas_price = tx_call_request.gas_price;
+        let original_max_fee = tx_call_request.max_fee_per_gas;
         
-        info!("  Overriding gas price to {} gwei to prevent base fee errors", override_gas_price / 1_000_000_000);
+        info!("  Using original gas prices from transaction");
         
         // Store request details for error reporting
         let tx_details = format!(
@@ -330,13 +344,46 @@ impl SimulationManager {
         info!("    from: {:?}", tx_call_request.from);
         info!("    to: {:?}", tx_call_request.to);
         
-        // Run the sequential simulation: TX -> Buy -> Approve -> Sell
-        match self.unified_simulator.simulate_sequence_with_tx(
-            Some(tx_call_request),
+        // Try simulation with original gas price first
+        let simulation_result = match self.unified_simulator.simulate_sequence_with_tx(
+            Some(tx_call_request.clone()),
             token_address,
             pool_address,
             block_number
         ).await {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // Check if it's a base fee error
+                let error_str = e.to_string();
+                if error_str.contains("GasPriceLessThanBasefee") || error_str.contains("base fee") {
+                    info!("  Base fee error detected, retrying with 3x gas price");
+                    
+                    // Triple the gas prices and retry
+                    let new_gas_price = original_gas_price.map(|p| p * 3);
+                    let new_max_fee = original_max_fee.map(|p| p * 3);
+                    
+                    tx_call_request.gas_price = new_gas_price;
+                    tx_call_request.max_fee_per_gas = new_max_fee;
+                    tx_call_request.max_priority_fee_per_gas = Some(2_000_000_000u128); // 2 gwei priority
+                    
+                    info!("  Retrying with increased gas prices: {:?} gwei", 
+                        new_gas_price.map(|p| p / 1_000_000_000));
+                    
+                    // Retry with higher gas price
+                    self.unified_simulator.simulate_sequence_with_tx(
+                        Some(tx_call_request.clone()),
+                        token_address,
+                        pool_address,
+                        block_number
+                    ).await
+                } else {
+                    Err(e)
+                }
+            }
+        };
+        
+        // Process the result
+        match simulation_result {
             Ok(result) => {
                 info!("  Buy/sell simulation completed successfully:");
                 info!("    Given TX: {:?}", result.given_tx_result.as_ref().map(|r| r.success));
@@ -359,6 +406,22 @@ impl SimulationManager {
             Err(e) => {
                 info!("  ERROR in sequence simulation: {}", e);
                 info!("  Error details: {:?}", e);
+                
+                // Log detailed error information for debugging
+                if e.to_string().contains("LackOfFundForMaxFee") {
+                    error!("LackOfFundForMaxFee error detected!");
+                    error!("Transaction details:");
+                    error!("  TX hash: {}", request.tx.hash);
+                    error!("  From: {:?}", tx_call_request.from);
+                    error!("  To: {:?}", tx_call_request.to);
+                    error!("  Value: {:?}", tx_call_request.value);
+                    error!("  Gas: {:?}", tx_call_request.gas);
+                    error!("  Gas price: {:?}", tx_call_request.gas_price);
+                    error!("  Max fee per gas: {:?}", tx_call_request.max_fee_per_gas);
+                    error!("Raw IPC transaction data:");
+                    error!("{}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
+                }
+                
                 let error_msg = format!("{}", e);
                 Err((error_msg, None))
             }

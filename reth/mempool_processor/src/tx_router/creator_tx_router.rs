@@ -18,8 +18,9 @@ impl CreatorTransactionRouter {
 
     /// Identify the type of function being called
     pub fn identify_function(&self, tx: &MempoolTransaction) -> CreatorFunctionType {
-        if tx.input.len() < 4 {
-            return CreatorFunctionType::Other("unknown".to_string());
+        // Check if this is a simple ETH transfer (no input data or empty input)
+        if tx.input.is_empty() || tx.input.len() < 4 {
+            return CreatorFunctionType::Other("eth_transfer".to_string());
         }
 
         let selector = &tx.input[0..4];

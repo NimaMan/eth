@@ -164,13 +164,16 @@ impl TransactionRouter {
             (None, false)
         };
 
+        // Check if this is just an ETH transfer from a creator
+        let is_eth_transfer = matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
+        
         let priority = match &function_type {
             CreatorFunctionType::TaxModification => SimulationPriority::Critical,
             CreatorFunctionType::TradingControl => SimulationPriority::Critical,
             CreatorFunctionType::OwnershipChange => SimulationPriority::High,
             CreatorFunctionType::LiquidityManagement => SimulationPriority::High,
             CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
-            CreatorFunctionType::Other(_) => SimulationPriority::Normal,
+            CreatorFunctionType::Other(_) => SimulationPriority::Low,
         };
 
         let requires_buy_sell = matches!(
@@ -190,7 +193,8 @@ impl TransactionRouter {
                 function_type,
             },
             priority,
-            requires_simulation: true,
+            // Don't simulate simple ETH transfers from creators
+            requires_simulation: !is_eth_transfer,
             requires_buy_sell_test: requires_buy_sell,
         }
     }

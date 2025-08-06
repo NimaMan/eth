@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::PgPool, Pool, Postgres, Row};
+use sqlx::{postgres::{PgPool, PgPoolOptions}, Pool, Postgres, Row};
 use chrono::{DateTime, Utc};
 use tracing::{info, warn, error, debug};
 use eyre::Result;
@@ -48,6 +48,16 @@ pub struct MempoolTimestampTracker {
 }
 
 impl MempoolTimestampTracker {
+    /// Create a new tracker with default database connection
+    pub async fn new_with_defaults(config: TrackerConfig) -> Result<Self> {
+        let db_url = super::get_default_database_url();
+        let db_pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&db_url)
+            .await?;
+        Self::new(db_pool, config).await
+    }
+    
     /// Create a new tracker and spawn background worker
     pub async fn new(db_pool: PgPool, config: TrackerConfig) -> Result<Self> {
         let (sender, receiver) = mpsc::channel(config.channel_size);

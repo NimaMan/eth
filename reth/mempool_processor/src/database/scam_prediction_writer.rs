@@ -24,6 +24,17 @@ pub struct ScamPredictionWriter {
 }
 
 impl ScamPredictionWriter {
+    /// Create a new scam prediction writer with default database connection
+    pub async fn new_with_defaults() -> Result<Self> {
+        Self::new(
+            super::DEFAULT_DB_USER,
+            super::DEFAULT_DB_PASSWORD,
+            super::DEFAULT_DB_HOST,
+            super::DEFAULT_DB_PORT,
+            super::DEFAULT_DB_NAME,
+        ).await
+    }
+    
     /// Create a new scam prediction writer with the provided connection information
     pub async fn new(
         user: &str,

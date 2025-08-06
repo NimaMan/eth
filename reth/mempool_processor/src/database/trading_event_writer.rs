@@ -61,6 +61,17 @@ pub struct TradingEventWriter {
 }
 
 impl TradingEventWriter {
+    /// Create a new trading event writer with default database connection
+    pub async fn new_with_defaults() -> Result<Self> {
+        Self::new(
+            super::DEFAULT_DB_USER,
+            super::DEFAULT_DB_PASSWORD,
+            super::DEFAULT_DB_HOST,
+            super::DEFAULT_DB_PORT,
+            super::DEFAULT_DB_NAME,
+        ).await
+    }
+    
     pub async fn new(
         user: &str,
         password: &str,
