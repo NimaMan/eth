@@ -289,15 +289,9 @@ impl SimulationManager {
             alloy_primitives::Address::ZERO
         };
         
-        // Get current block number - simulate at latest minus a few blocks for safety
-        // This gives time for state changes from recently included transactions
-        let latest_block = self.unified_simulator.get_latest_block().unwrap_or(0);
-        let simulation_block = if latest_block > 3 {
-            Some(latest_block - 3) // Simulate 3 blocks back for state consistency
-        } else {
-            Some(latest_block)
-        };
-        info!("  Latest block: {}, simulating at block: {:?}", latest_block, simulation_block);
+        // Get current block number (simulate at latest)
+        let block_number = None; // Use latest block
+        info!("  Using block number: {:?}", block_number);
         
         // Create the transaction CallRequest
         let full_tx = crate::mempool_fetcher::FullTransaction {
@@ -355,7 +349,7 @@ impl SimulationManager {
             Some(tx_call_request.clone()),
             token_address,
             pool_address,
-            simulation_block
+            block_number
         ).await {
             Ok(result) => Ok(result),
             Err(e) => {
@@ -380,7 +374,7 @@ impl SimulationManager {
                         Some(tx_call_request.clone()),
                         token_address,
                         pool_address,
-                        simulation_block
+                        block_number
                     ).await
                 } else {
                     Err(e)
@@ -415,13 +409,10 @@ impl SimulationManager {
                 
                 // Log detailed error information for debugging
                 if e.to_string().contains("LackOfFundForMaxFee") {
-                    warn!("LackOfFundForMaxFee error - transaction already executed on chain?");
+                    warn!("LackOfFundForMaxFee error");
                     warn!("  TX hash: {}", request.tx.hash);
                     warn!("  From: {:?}", tx_call_request.from);
                     warn!("  Value: {:?} ETH", tx_call_request.value.map(|v| format!("{:.6}", v.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)).unwrap_or_else(|| "0".to_string()));
-                    warn!("  Simulating at block: {:?} (latest: {})", simulation_block, latest_block);
-                    warn!("  This likely means the transaction was already included in a recent block");
-                    // Don't log full transaction data for balance errors
                 }
                 
                 let error_msg = format!("{}", e);
