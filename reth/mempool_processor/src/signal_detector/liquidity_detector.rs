@@ -206,10 +206,10 @@ impl LiquidityDetector {
         }
     }
     
-    /// Check if drain is significant enough to be a scam (>60% drain OR <0.3 ETH remaining)
+    /// Check if drain is significant enough to be a scam (>60% drain OR <=0.3 ETH remaining)
     fn is_scam_drain(&self, drain_result: &DrainResult) -> bool {
         drain_result.drain_percent > self.scam_drain_threshold * 100.0 || 
-        drain_result.new_reserve < self.min_eth_threshold
+        drain_result.new_reserve <= self.min_eth_threshold
     }
     
 }

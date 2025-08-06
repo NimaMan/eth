@@ -9,12 +9,14 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
-use tracing::{info, debug, warn};
+use tracing::{info, debug, warn, error};
 use alloy_primitives::Address;
 use reth_tx_simulator::AddressStateChange;
+use tokio::sync::Mutex;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
 use crate::common::address::checksum_address;
+use crate::signal_publisher::SignalPublisher;
 use hex;
 
 use super::{
@@ -23,6 +25,7 @@ use super::{
     TradingStatusDetector, TradingStatusSignal,
     trading_status_detector::TradingStatusChange,
     TaxDetector, TaxSignal, TaxSignalType,
+    LpApprovalDetector, LpApprovalSignal,
     Signal,
 };
 
@@ -49,8 +52,10 @@ pub struct SignalManager {
     stablecoin_detector: StablecoinDetector,
     trading_status_detector: TradingStatusDetector,
     tax_detector: TaxDetector,
+    lp_approval_detector: LpApprovalDetector,
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
+    publisher: Option<Arc<Mutex<SignalPublisher>>>,
 }
 
 impl SignalManager {
@@ -85,8 +90,10 @@ impl SignalManager {
             stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::with_log_path(trading_log_path),
             tax_detector: TaxDetector::with_log_path(tax_log_path),
+            lp_approval_detector: LpApprovalDetector::new(),
             token_cache: None,
             signal_log_path,
+            publisher: None,
         }
     }
     
@@ -94,6 +101,11 @@ impl SignalManager {
     pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
         self.token_cache = Some(token_cache.clone());
         self.liquidity_detector.set_token_cache(token_cache);
+    }
+    
+    /// Set the signal publisher
+    pub fn set_publisher(&mut self, publisher: Arc<Mutex<SignalPublisher>>) {
+        self.publisher = Some(publisher);
     }
     
     /// Log activity to the signal_manager.log file
@@ -423,26 +435,16 @@ impl SignalManager {
             }
         }
         
-        // STEP 3: Liquidity and Stablecoin detectors (currently disabled)
-        // TODO: Enable after tax detector is verified working
-        /*
-        // Get state changes from buy/sell result for other detectors
-        let state_changes = result.buy_sell_result.as_ref()
-            .and_then(|bs| bs.buy_state_changes.as_ref());
-        
-        // Run liquidity detection if we have state changes
-        if let Some(state_changes) = state_changes {
-            let from_address = if let Ok(bytes) = hex::decode(&result.request.tx.from) {
-                if let Ok(addr) = alloy_primitives::Address::try_from(bytes.as_slice()) {
-                    addr
-                } else {
-                    return signals; // Invalid from address
-                }
-            } else {
-                return signals; // Invalid from address hex
-            };
+        // STEP 3: Liquidity detector - Check for pool drains and liquidity removals
+        // Use tx_state_changes which has the actual transaction state changes
+        if let Some(ref state_changes) = result.tx_state_changes {
+            let from_address_result = hex::decode(&result.request.tx.from)
+                .ok()
+                .and_then(|bytes| alloy_primitives::Address::try_from(bytes.as_slice()).ok());
             
+            if let Some(from_address) = from_address_result {
             
+            // Run liquidity detection
             let liquidity_signals = self.liquidity_detector.detect(
                 &result.request.tx.hash,
                 from_address,
@@ -452,51 +454,54 @@ impl SignalManager {
             // Convert liquidity signals to the Signal enum
             for liq_signal in liquidity_signals {
                 match liq_signal.signal_type {
-                    super::LiquiditySignalType::ScamDetected => {
-                        signals.push(Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
-                            tx_hash: liq_signal.tx_hash,
-                            pool_address: liq_signal.pool_address,
-                            token_address: liq_signal.token_address,
-                            scammer_address: liq_signal.from_address,
+                    super::liquidity_detector::SignalType::ScamDetected => {
+                        let scam_signal = Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
+                            tx_hash: liq_signal.tx_hash.clone(),
+                            pool_address: liq_signal.pool_address.clone(),
+                            token_address: liq_signal.token_address.clone(),
+                            scammer_address: liq_signal.from_address.clone(),
                             eth_drained: liq_signal.eth_change.abs(),
                             eth_remaining: liq_signal.remaining_liquidity,
                             drain_percentage: liq_signal.percentage_change,
                             timestamp: chrono::Utc::now().timestamp() as u64,
                             block_number: 0,
-                        }));
+                        });
+                        
+                        self.log_activity("LIQUIDITY_SCAM_DETECTED", &format!(
+                            "Pool: {} | ETH drained: {:.4} | Remaining: {:.4} | Drain %: {:.1}%",
+                            liq_signal.pool_address,
+                            liq_signal.eth_change.abs(),
+                            liq_signal.remaining_liquidity,
+                            liq_signal.percentage_change
+                        ));
+                        
+                        signals.push(scam_signal);
                     }
-                    super::LiquiditySignalType::LiquidityRemoval => {
-                        // Could add LiquidityRemoval signal if needed
+                    super::liquidity_detector::SignalType::LiquidityRemoval => {
+                        // Log liquidity removal but don't create a signal yet
+                        self.log_activity("LIQUIDITY_REMOVAL", &format!(
+                            "Pool: {} | ETH removed: {:.4} | Remaining: {:.4} | Type: {:?}",
+                            liq_signal.pool_address,
+                            liq_signal.eth_change.abs(),
+                            liq_signal.remaining_liquidity,
+                            liq_signal.change_type
+                        ));
                         info!("💧 Liquidity removal detected: {}", liq_signal.details);
                     }
                 }
             }
-            
-            // Run stablecoin detection
-            let to_address = result.request.tx.to.as_ref()
-                .and_then(|to| hex::decode(to).ok())
-                .and_then(|bytes| alloy_primitives::Address::try_from(bytes.as_slice()).ok());
-            
-            let stablecoin_signals = self.stablecoin_detector.detect(
-                &result.request.tx.hash,
-                from_address,
-                to_address,
-                state_changes,
-            ).await;
-            
-            if !stablecoin_signals.is_empty() {
-                info!("💰 Found {} stablecoin signals", stablecoin_signals.len());
+            } else {
+                // Log that we couldn't parse the from address
+                self.log_activity("LIQUIDITY_ERROR", "Invalid from address - skipping liquidity detection");
             }
         }
-        */
         
         // Log all detected signals
         for signal in &signals {
             self.log_signal(signal);
         }
         
-        // STEP 4: Check for pool state changes in the transaction itself
-        // Log any pools that are affected by this transaction
+        // STEP 4: Log pool state changes for debugging (detection is done by LiquidityDetector)
         if let Some(ref state_changes) = result.tx_state_changes {
             if let Some(ref token_cache) = self.token_cache {
                 let mut pool_changes = Vec::new();
@@ -509,9 +514,7 @@ impl SignalManager {
                     // Check if this address is a tracked pool
                     if let Some(pool_state) = token_cache.get_pool_by_address(&address_str).await {
                         // Get ETH balance change from eth_net field
-                        // eth_net is I256 (signed) in wei units
                         let eth_change_wei = state_change.eth_net;
-                        // Convert to f64 in ETH units using to_string()
                         let eth_change = eth_change_wei.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
                         
                         pool_changes.push(format!(
@@ -525,7 +528,7 @@ impl SignalManager {
                     }
                 }
                 
-                // Log pool changes if any were found
+                // Log pool changes if any were found (for debugging only)
                 if !pool_changes.is_empty() {
                     self.log_activity("POOL_STATE_CHANGES", &format!(
                         "From: {} | Affected pools: {}",
@@ -535,46 +538,6 @@ impl SignalManager {
                     
                     for pool_change in &pool_changes {
                         self.log_activity("POOL_CHANGE_DETAIL", pool_change);
-                    }
-                    
-                    // Check for liquidity removal - negative ETH change in pool
-                    for (address, state_change) in state_changes {
-                        let address_bytes: &[u8] = address.as_ref();
-                        let address_str = format!("0x{}", hex::encode(address_bytes));
-                        
-                        if let Some(pool_state) = token_cache.get_pool_by_address(&address_str).await {
-                            let eth_change_wei = state_change.eth_net;
-                            let eth_change = eth_change_wei.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
-                            
-                            // Check if pool will have less than 0.2 ETH after this transaction
-                            let eth_remaining = pool_state.eth_reserve + eth_change;
-                            if eth_remaining < 0.2 && eth_change < 0.0 { // Pool drained below 0.2 ETH
-                                let drain_percentage = (eth_change.abs() / pool_state.eth_reserve) * 100.0;
-                                
-                                // Create scam detection signal for liquidity removal
-                                signals.push(Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
-                                    tx_hash: result.request.tx.hash.clone(),
-                                    pool_address: address_str.clone(),
-                                    token_address: pool_state.token_address.clone(),
-                                    scammer_address: checksum_address(&hex::encode(&result.request.tx.from)),
-                                    eth_drained: eth_change.abs(),
-                                    eth_remaining,
-                                    drain_percentage,
-                                    timestamp: chrono::Utc::now().timestamp() as u64,
-                                    block_number: 0,
-                                }));
-                                
-                                self.log_activity("LIQUIDITY_REMOVAL_DETECTED", &format!(
-                                    "Pool: {} | ETH remaining: {:.4} | ETH drained: {:.4} | Drain %: {:.1}%",
-                                    address_str,
-                                    eth_remaining,
-                                    eth_change.abs(),
-                                    drain_percentage
-                                ));
-                                
-                                self.log_signal(&signals[signals.len() - 1]);
-                            }
-                        }
                     }
                 }
             }
@@ -587,14 +550,74 @@ impl SignalManager {
                 "Total signals detected: {}",
                 signals.len()
             ));
+            
+            // Publish all detected signals immediately
+            if let Some(ref publisher) = self.publisher {
+                let mut pub_guard = publisher.lock().await;
+                for signal in &signals {
+                    if let Err(e) = pub_guard.publish(signal.clone()).await {
+                        error!("Failed to publish signal: {}", e);
+                    }
+                }
+                info!("✅ Published {} signals", signals.len());
+            }
         } else {
             self.log_activity("NO_SIGNALS", "No signals detected");
         }
-        
-        // Add closing separator
-        self.log_activity("", &format!("══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════"));
-        
         signals
+    }
+    
+    /// Detect LP approval signals from non-simulated transactions
+    pub async fn detect_lp_approval(
+        &mut self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+        category: &crate::tx_router::TransactionCategory,
+    ) {
+        // Log the transaction receipt
+        self.log_activity("LP_APPROVAL_CHECK", &format!("TX: {}", tx.hash));
+        
+        // Check for LP approval
+        if let Some(lp_signal) = self.lp_approval_detector.detect_from_transaction(tx, category) {
+            self.log_activity("LP_APPROVAL_DETECTED", &format!(
+                "Creator: {} | LP Token: {} | Router: {} | Amount: {}",
+                lp_signal.creator,
+                lp_signal.lp_token_address,
+                lp_signal.router_address,
+                lp_signal.amount
+            ));
+            
+            // Log the critical warning
+            warn!("🚨🚨🚨 RUG PULL SETUP DETECTED 🚨🚨🚨");
+            warn!("Transaction: {}", lp_signal.tx_hash);
+            warn!("Creator {} is preparing to remove liquidity!", lp_signal.creator);
+            
+            // Publish the signal immediately if we have a publisher
+            if let Some(ref publisher) = self.publisher {
+                // Create a scam detection signal for LP approval (rug pull setup)
+                let signal = Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
+                    tx_hash: lp_signal.tx_hash,
+                    pool_address: lp_signal.lp_token_address.clone(),
+                    token_address: lp_signal.lp_token_address,
+                    scammer_address: lp_signal.creator,
+                    eth_drained: 0.0, // Not drained yet, just approved
+                    eth_remaining: 0.0, // Unknown until actual removal
+                    drain_percentage: 0.0, // Will be 100% when executed
+                    timestamp: chrono::Utc::now().timestamp() as u64,
+                    block_number: 0,
+                });
+                
+                // Log the signal
+                self.log_signal(&signal);
+                
+                // Publish it
+                let mut pub_guard = publisher.lock().await;
+                if let Err(e) = pub_guard.publish(signal).await {
+                    error!("Failed to publish LP approval signal: {}", e);
+                }
+            }
+        } else {
+            self.log_activity("LP_APPROVAL_CHECK", "Not an LP approval");
+        }
     }
     
 }
