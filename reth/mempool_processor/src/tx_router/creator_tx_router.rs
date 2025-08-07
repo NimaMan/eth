@@ -5,7 +5,9 @@
 use std::sync::Arc;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
+use crate::common::address::checksum_address;
 use super::CreatorFunctionType;
+use hex;
 
 pub struct CreatorTransactionRouter {
     token_cache: Option<Arc<TokenTrackingCache>>,
@@ -24,6 +26,11 @@ impl CreatorTransactionRouter {
         }
 
         let selector = &tx.input[0..4];
+        
+        // Special handling for approve - check if it's LP token approval
+        if selector == &[0x09, 0x5e, 0xa7, 0xb3] {
+            return self.classify_approve(tx);
+        }
         
         match selector {
             // Tax modification functions
@@ -64,5 +71,56 @@ impl CreatorTransactionRouter {
                 CreatorFunctionType::Other(selector_hex)
             }
         }
+    }
+    
+    /// Classify approve() calls - determine if it's LP token approval for rug pull
+    fn classify_approve(&self, tx: &MempoolTransaction) -> CreatorFunctionType {
+        // Check if we have enough data for approve(address,uint256)
+        if tx.input.len() < 68 {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+        
+        // Extract spender address from input data (bytes 4-36)
+        let spender_bytes = &tx.input[16..36]; // Skip 12 bytes of padding
+        let spender_hex = hex::encode(spender_bytes);
+        
+        // Known DEX routers that handle liquidity removal
+        const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
+        const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+        
+        // Check if spender is a known router
+        let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER) ||
+                                 spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+        
+        // Only check pool if router is being approved
+        if !is_router_approval {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+        
+        // Check if the approve is being called on an LP token contract
+        if let Some(to_bytes) = &tx.to {
+            let to_addr = hex::encode(to_bytes);
+            
+            if let Some(ref cache) = self.token_cache {
+                let from_addr = checksum_address(&hex::encode(&tx.from));
+                
+                // Get the token created by this address
+                if let Some(token_info) = futures::executor::block_on(cache.get_token_for_creator(&from_addr)) {
+                    // Get all pools for this token
+                    let pools = futures::executor::block_on(cache.get_pools_for_token(&token_info.token_address));
+                    
+                    // Check if the 'to' address is one of the pool addresses
+                    for (pool_addr, _pool_state) in pools {
+                        if to_addr.eq_ignore_ascii_case(&pool_addr) {
+                            // Creator is approving router to spend LP tokens = rug pull setup
+                            return CreatorFunctionType::LiquidityManagement;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Regular approval (not LP token or not to router)
+        CreatorFunctionType::Other("approve".to_string())
     }
 }

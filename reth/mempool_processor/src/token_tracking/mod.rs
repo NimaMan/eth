@@ -117,6 +117,7 @@ impl TokenTrackingSubscriber {
                             eth_reserve: pool_info.denom_reserve,
                             token_reserve: pool_info.token_reserve,
                             token_address: checksum_address(&token_address),
+                            pool_type: pool_info.pool_type,
                             block_number: pool_info.latest_block_number,
                             update_time: pool_info.last_update_time.unwrap_or(0.0),
                         };
@@ -228,6 +229,7 @@ impl TokenTrackingSubscriber {
                                     eth_reserve: pool_info.denom_reserve,
                                     token_reserve: pool_info.token_reserve,
                                     token_address: checksum_address(token_address),
+                                    pool_type: pool_info.pool_type.clone(),
                                     block_number: pool_info.latest_block_number,
                                     update_time: pool_info.last_update_time.unwrap_or(0.0),
                                 };

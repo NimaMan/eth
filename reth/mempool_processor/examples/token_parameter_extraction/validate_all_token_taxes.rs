@@ -5,7 +5,7 @@
 ///
 /// Usage: cargo run --example validate_all_token_taxes
 
-use mempool_processor::token_tracking::TokenTrackingSubscriber;
+use mempool_processor::token_tracking::{TokenTrackingCache, TokenTrackingSubscriber};
 use mempool_processor::simulator::{SequentialBuySellSimulator, BuySellSimulatorConfig};
 use mempool_processor::token_parameter_extraction::{
     calculate_buy_tax_from_movements,
@@ -18,6 +18,7 @@ use std::io::Write;
 use eyre::Result;
 use chrono::Local;
 use tracing::{info, warn, error};
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 #[tokio::main]
@@ -48,19 +49,19 @@ async fn main() -> Result<()> {
         .open(&csv_path)?;
     
     // Write CSV header
-    writeln!(csv_file, "token_address,pool_address,pool_type,pool_eth_reserve,can_buy,can_sell,buy_tax,sell_tax,error_msg")?;
+    writeln!(csv_file, "token_address,pool_address,pool_eth_reserve,can_buy,can_sell,buy_tax,sell_tax,error_msg")?;
     info!("📝 Logging results to: {}", csv_path);
     
     // Initialize TokenTrackingCache and subscriber
     info!("📡 Initializing token tracking cache and subscribing to pool updates...");
-    let mut subscriber = TokenTrackingSubscriber::new(eth_threshold);
+    let subscriber = TokenTrackingSubscriber::new(eth_threshold);
     let cache = subscriber.get_cache();
     
     // Start subscription in background
     let cache_clone = cache.clone();
     tokio::spawn(async move {
-        if let Err(e) = subscriber.start_listening().await {
-            error!("Failed to start listening to pool updates: {}", e);
+        if let Err(e) = subscriber.subscribe_to_pool_updates().await {
+            error!("Failed to subscribe to pool updates: {}", e);
         }
     });
     
@@ -100,18 +101,13 @@ async fn main() -> Result<()> {
     for (pool_address_str, pool_state) in all_pools.iter() {
         processed += 1;
         
-        // Debug: log pool_type for first few pools
-        if processed <= 5 {
-            info!("DEBUG: Pool {} has pool_type: '{}'", pool_address_str, pool_state.pool_type);
-        }
-        
         // Parse addresses
         let pool_address = match Address::from_str(pool_address_str) {
             Ok(addr) => addr,
             Err(e) => {
                 error!("Invalid pool address {}: {}", pool_address_str, e);
-                writeln!(csv_file, "{},{},{},{},false,false,,,Invalid pool address",
-                    pool_state.token_address, pool_address_str, pool_state.pool_type, pool_state.eth_reserve)?;
+                writeln!(csv_file, "{},{},{},false,false,,,Invalid pool address",
+                    pool_state.token_address, pool_address_str, pool_state.eth_reserve)?;
                 errors += 1;
                 continue;
             }
@@ -121,8 +117,8 @@ async fn main() -> Result<()> {
             Ok(addr) => addr,
             Err(e) => {
                 error!("Invalid token address {}: {}", pool_state.token_address, e);
-                writeln!(csv_file, "{},{},{},{},false,false,,,Invalid token address",
-                    pool_state.token_address, pool_address_str, pool_state.pool_type, pool_state.eth_reserve)?;
+                writeln!(csv_file, "{},{},{},false,false,,,Invalid token address",
+                    pool_state.token_address, pool_address_str, pool_state.eth_reserve)?;
                 errors += 1;
                 continue;
             }
@@ -132,8 +128,8 @@ async fn main() -> Result<()> {
         if pool_state.eth_reserve < 0.01 {
             info!("⏭️ Skipping pool {} - insufficient liquidity ({:.4} ETH)",
                 pool_address_str, pool_state.eth_reserve);
-            writeln!(csv_file, "{},{},{},{},false,false,,,Insufficient liquidity",
-                pool_state.token_address, pool_address_str, pool_state.pool_type, pool_state.eth_reserve)?;
+            writeln!(csv_file, "{},{},{},false,false,,,Insufficient liquidity",
+                pool_state.token_address, pool_address_str, pool_state.eth_reserve)?;
             continue;
         }
         
@@ -194,10 +190,9 @@ async fn main() -> Result<()> {
                 let sell_tax_str = sell_tax.map(|t| format!("{:.2}", t)).unwrap_or_else(|| "".to_string());
                 
                 // Write to CSV
-                writeln!(csv_file, "{},{},{},{:.4},{},{},{},{},{}",
+                writeln!(csv_file, "{},{},{:.4},{},{},{},{},{}",
                     pool_state.token_address,
                     pool_address_str,
-                    pool_state.pool_type,
                     pool_state.eth_reserve,
                     can_buy,
                     can_sell,
@@ -223,10 +218,9 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 error!("Simulation error for {}: {}", pool_state.token_address, e);
-                writeln!(csv_file, "{},{},{},{:.4},false,false,,,Simulation error: {}",
+                writeln!(csv_file, "{},{},{:.4},false,false,,,Simulation error: {}",
                     pool_state.token_address,
                     pool_address_str,
-                    pool_state.pool_type,
                     pool_state.eth_reserve,
                     e
                 )?;

@@ -167,11 +167,16 @@ impl TransactionRouter {
         // Check if this is just an ETH transfer from a creator
         let is_eth_transfer = matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
         
+        // Check if this is an approve function (LP token approval to router)
+        let is_lp_approve = matches!(&function_type, CreatorFunctionType::LiquidityManagement) 
+            && tx.input.len() >= 4 
+            && &tx.input[0..4] == &[0x09, 0x5e, 0xa7, 0xb3];
+        
         let priority = match &function_type {
             CreatorFunctionType::TaxModification => SimulationPriority::Critical,
             CreatorFunctionType::TradingControl => SimulationPriority::Critical,
             CreatorFunctionType::OwnershipChange => SimulationPriority::High,
-            CreatorFunctionType::LiquidityManagement => SimulationPriority::High,
+            CreatorFunctionType::LiquidityManagement => SimulationPriority::Critical, // LP approvals are critical
             CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
             CreatorFunctionType::Other(_) => SimulationPriority::Low,
         };
@@ -181,7 +186,7 @@ impl TransactionRouter {
             CreatorFunctionType::TaxModification | 
             CreatorFunctionType::TradingControl |
             CreatorFunctionType::MaxWalletLimit
-        );
+        ) && !is_lp_approve; // LP approvals don't need buy/sell test
 
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
@@ -193,8 +198,8 @@ impl TransactionRouter {
                 function_type,
             },
             priority,
-            // Don't simulate simple ETH transfers from creators
-            requires_simulation: !is_eth_transfer,
+            // Don't simulate ETH transfers or LP approvals
+            requires_simulation: !is_eth_transfer && !is_lp_approve,
             requires_buy_sell_test: requires_buy_sell,
         }
     }

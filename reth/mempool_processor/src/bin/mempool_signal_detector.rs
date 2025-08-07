@@ -31,9 +31,9 @@ use tracing_subscriber::Layer;
 use mempool_processor::{
     mempool_fetcher::NonBlockingIpcClient,
     function_detector::FunctionDetector,
-    tx_router::{TransactionRouter, TransactionCategory},
+    tx_router::{TransactionRouter, TransactionCategory, CreatorFunctionType},
     simulator::{SimulationManager, SimulationRequest, SimulationType, UnifiedSimulator, BuySellSimulatorConfig},
-    signal_detector::{SignalManagerConfig},
+    signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     database::{MempoolTimestampTracker, TrackerConfig},
@@ -360,7 +360,8 @@ async fn main() -> Result<()> {
     let simulation_manager = SimulationManager::new(
         unified_simulator,
         token_cache.clone(),
-        signal_config,
+        signal_config.clone(),
+        signal_publisher.clone(),
         args.sim_workers
     );
     
@@ -487,8 +488,16 @@ async fn main() -> Result<()> {
                 }
             }
             
-            // Only simulate high-priority transactions
+            // Handle non-simulated transactions (like LP approvals)
             if !classification.requires_simulation {
+                // Check if this is an LP approval that needs direct signal detection
+                if let TransactionCategory::CreatorTransaction { 
+                    function_type: CreatorFunctionType::LiquidityManagement, 
+                    .. 
+                } = &classification.category {
+                    // Route LP approval through simulation manager (no simulation, just detection)
+                    simulation_manager.detect_lp_approval(&tx, &classification.category).await;
+                }
                 continue;
             }
             

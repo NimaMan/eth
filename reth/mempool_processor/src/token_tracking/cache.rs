@@ -438,6 +438,7 @@ mod tests {
             eth_reserve: 5.0,
             token_reserve: 10000.0,
             token_address: "0xabcdef1234567890abcdef1234567890abcdef12".to_string(),
+            pool_type: "V2".to_string(),
             block_number: 12345,
             update_time: 1626000000.0,
         };
@@ -473,6 +474,7 @@ mod tests {
             eth_reserve: 10.0,
             token_reserve: 20000.0,
             token_address: token_address.clone(),
+            pool_type: "V2".to_string(),
             block_number: 12345,
             update_time: 1626000000.0,
         };
@@ -514,6 +516,7 @@ mod tests {
             eth_reserve: 5.0,
             token_reserve: 10000.0,
             token_address: token1.clone(),
+            pool_type: "V2".to_string(),
             block_number: 12345,
             update_time: 1626000000.0,
         });
@@ -522,6 +525,7 @@ mod tests {
             eth_reserve: 10.0,
             token_reserve: 20000.0,
             token_address: token2.clone(),
+            pool_type: "V3".to_string(),
             block_number: 12346,
             update_time: 1626000001.0,
         });

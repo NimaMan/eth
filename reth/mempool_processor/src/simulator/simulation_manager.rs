@@ -10,7 +10,9 @@ use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
+use crate::signal_publisher::SignalPublisher;
 use crate::token_tracking::TokenTrackingCache;
+use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, UnifiedSimulator, SequenceSimulationResult};
 use std::collections::HashMap;
 use hex;
@@ -95,10 +97,12 @@ impl SimulationManager {
         unified_simulator: Arc<UnifiedSimulator>,
         token_cache: Arc<TokenTrackingCache>,
         signal_config: SignalManagerConfig,
+        publisher: Arc<TokioMutex<SignalPublisher>>,
         max_concurrent: usize,
     ) -> Self {
         let mut signal_manager = SignalManager::new(signal_config);
         signal_manager.set_token_cache(token_cache.clone());
+        signal_manager.set_publisher(publisher);
         
         Self {
             unified_simulator,
@@ -121,6 +125,18 @@ impl SimulationManager {
         Ok(())
     }
 
+    /// Handle LP approval detection without simulation
+    pub async fn detect_lp_approval(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+        category: &crate::tx_router::TransactionCategory,
+    ) -> Vec<crate::signal_detector::Signal> {
+        let mut signal_manager = self.signal_manager.lock().await;
+        signal_manager.detect_lp_approval(tx, category).await;
+        // Return empty vec for now, signals are published internally
+        Vec::new()
+    }
+    
     /// Process pending simulations
     pub async fn process_queue(&self) -> Vec<SimulationResult> {
         let mut results = Vec::new();

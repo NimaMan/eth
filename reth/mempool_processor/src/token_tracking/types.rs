@@ -221,6 +221,9 @@ pub struct PoolUpdate {
     /// Address of the token in this pool
     pub token_address: String,
     
+    /// Pool type (V2, V3, V4)
+    pub pool_type: String,
+    
     /// Ethereum block number when this pool data was observed
     #[serde(alias = "latest_block_number")]
     pub block_number: u64,
@@ -229,6 +232,7 @@ pub struct PoolUpdate {
     #[serde(default)]
     pub update_time: f64,
 }
+
 
 /// Legacy message format
 #[derive(Debug, Clone, Deserialize)]
@@ -256,6 +260,9 @@ pub struct PoolState {
     
     /// Address of the token in this pool
     pub token_address: String,
+    
+    /// Pool type (V2, V3, V4)
+    pub pool_type: String,
     
     /// Ethereum block number when this pool data was last updated
     pub last_updated_block: u64,
@@ -285,6 +292,7 @@ impl From<PoolUpdate> for PoolState {
             eth_reserve: update.eth_reserve,
             token_reserve: update.token_reserve,
             token_address: update.token_address,
+            pool_type: update.pool_type,
             last_updated_block: update.block_number,
             last_updated_time: update.update_time,
             received_at: std::time::Instant::now(),
