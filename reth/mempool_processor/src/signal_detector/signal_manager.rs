@@ -438,9 +438,8 @@ impl SignalManager {
         // STEP 3: Liquidity detector - Check for pool drains and liquidity removals
         // Use tx_state_changes which has the actual transaction state changes
         if let Some(ref state_changes) = result.tx_state_changes {
-            let from_address_result = hex::decode(&result.request.tx.from)
-                .ok()
-                .and_then(|bytes| alloy_primitives::Address::try_from(bytes.as_slice()).ok());
+            // tx.from is already bytes (Vec<u8>), no need to decode
+            let from_address_result = alloy_primitives::Address::try_from(result.request.tx.from.as_slice()).ok();
             
             if let Some(from_address) = from_address_result {
             
