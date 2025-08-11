@@ -3,18 +3,15 @@
 /// This module provides database connectivity and utilities for the mempool processor.
 /// It includes connection management, query execution, and specialized logging functionality.
 
-pub mod scam_prediction_writer;
-pub mod trading_event_writer;
 pub mod mempool_timestamp_tracker;
+pub mod trading_signal_writer;
+pub mod liquidity_removal_signal_writer;
+pub mod lp_approval_signal_writer;
 
-pub use scam_prediction_writer::ScamPredictionWriter;
-pub use trading_event_writer::{
-    TradingEventWriter, 
-    TradingEnabledEvent, 
-    CreatorActionEvent,
-    MempoolSignal
-};
 pub use mempool_timestamp_tracker::{MempoolTimestampTracker, TrackerConfig};
+pub use trading_signal_writer::{TradingSignalWriter, TradingSignalRecord, WriterConfig as SignalWriterConfig};
+pub use liquidity_removal_signal_writer::{LiquidityRemovalSignalWriter, LiquidityRemovalSignalRecord};
+pub use lp_approval_signal_writer::{LpApprovalSignalWriter, LpApprovalSignalRecord};
 
 /// Default database connection parameters
 pub const DEFAULT_DB_HOST: &str = "localhost";

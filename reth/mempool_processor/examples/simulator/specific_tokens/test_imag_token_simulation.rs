@@ -8,6 +8,7 @@
 /// Block: 23031190
 
 use mempool_processor::simulator::UnifiedSimulator;
+use mempool_processor::common::address::alloy_address_to_checksum;
 use std::sync::Arc;
 use tracing::{info, error};
 use alloy_primitives::Address;
@@ -85,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Check buy state changes
             if let Some(buyer_changes) = result.buy_result.state_changes.get(&buyer_address) {
                 info!("\n  Buy State Changes for Buyer:");
-                let token_addr_str = format!("{:#x}", token_address);
+                let token_addr_str = alloy_address_to_checksum(token_address);
                 if let Some(token_balance) = buyer_changes.token_net.get(&token_addr_str) {
                     info!("    - Token Balance Change: {}", token_balance);
                 }
@@ -95,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Check sell state changes
             if let Some(buyer_changes) = result.sell_result.state_changes.get(&buyer_address) {
                 info!("\n  Sell State Changes for Buyer:");
-                let token_addr_str = format!("{:#x}", token_address);
+                let token_addr_str = alloy_address_to_checksum(token_address);
                 if let Some(token_balance) = buyer_changes.token_net.get(&token_addr_str) {
                     info!("    - Token Balance Change: {}", token_balance);
                 }

@@ -10,6 +10,7 @@
 use alloy_primitives::{Address, U256, I256};
 use reth_tx_simulator::AddressStateChange;
 use std::collections::HashMap;
+use crate::common::address::alloy_address_to_checksum;
 
 /// Calculate buy tax from state changes
 /// 
@@ -39,8 +40,8 @@ pub fn calculate_buy_tax(
     let pool_changes = state_changes.get(pool_address)?;
     let buyer_changes = state_changes.get(buyer_address)?;
     
-    // Get the token address string for lookup
-    let token_addr_str = format!("{:#x}", token_address);
+    // Get the checksummed token address string for lookup
+    let token_addr_str = alloy_address_to_checksum(*token_address);
     
     // Get tokens sent by pool (negative value in token_net)
     let pool_token_change = pool_changes.token_net.get(&token_addr_str)?;

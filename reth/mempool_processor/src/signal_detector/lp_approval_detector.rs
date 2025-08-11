@@ -20,6 +20,13 @@ pub struct LpApprovalSignal {
     pub router_address: String,
     pub amount: U256,
     pub timestamp: i64,
+    // Additional fields for database
+    pub token_address: String,
+    pub pool_address: String,
+    pub spender_address: String,
+    pub amount_approved: Option<f64>,
+    pub previous_allowance: Option<f64>,
+    pub creator_address: String,
 }
 
 pub struct LpApprovalDetector {
@@ -77,6 +84,13 @@ impl LpApprovalDetector {
                         router_address: router_hex.clone(),
                         amount,
                         timestamp: Utc::now().timestamp(),
+                        // Additional fields for database
+                        token_address: target_address.clone(), // LP token for now
+                        pool_address: target_address.clone(), // LP token acts as pool identifier
+                        spender_address: router_hex.clone(),
+                        amount_approved: Some(amount.to_string().parse::<f64>().unwrap_or(0.0)),
+                        previous_allowance: None, // TODO: Get from state changes
+                        creator_address: creator.clone(),
                     };
                     
                     // Log the warning

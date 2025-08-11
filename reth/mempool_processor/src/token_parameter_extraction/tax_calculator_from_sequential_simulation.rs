@@ -11,6 +11,7 @@ use eyre::Result;
 use alloy_primitives::{Address, U256, I256, Bytes};
 use reth_tx_simulator::{RethTxSimulator, CallRequest, state_change_calculator::AddressStateChange, SequentialSimulationOptions};
 use std::collections::HashMap;
+use crate::common::address::alloy_address_to_checksum;
 
 pub struct TokenInfo {
     pub address: Address,
@@ -110,7 +111,7 @@ impl TaxCalculator {
         
         if let Some(buyer_changes) = buy_result.state_changes.get(&buyer_address) {
             for (token_key, amount) in &buyer_changes.token_net {
-                let token_addr_str = format!("{:#x}", token_info.address);
+                let token_addr_str = alloy_address_to_checksum(token_info.address);
                 if token_key == &token_addr_str && *amount > I256::ZERO {
                     // Convert I256 to U256 (positive value)
                     tokens_received = amount.unsigned_abs();
@@ -241,7 +242,7 @@ impl TaxCalculator {
                 
                 // Check if buyer got any tokens
                 if let Some(buyer_changes) = buy_tx.state_changes.get(&buyer_address) {
-                    let token_addr_str = format!("{:#x}", token_info.address);
+                    let token_addr_str = alloy_address_to_checksum(token_info.address);
                     let tokens = buyer_changes.token_net.get(&token_addr_str);
                     println!("\n      Buyer token balance change: {:?}", tokens);
                 }
@@ -305,8 +306,8 @@ impl TaxCalculator {
         if let Some(buyer_changes) = state_changes.get(buyer_address) {
             // Find the token balance change
             for (token_key, amount) in &buyer_changes.token_net {
-                // The key format is the token address in hex format (0x...)
-                let token_addr_str = format!("{:#x}", token_address);
+                // The key format is the checksummed token address (0x...)
+                let token_addr_str = alloy_address_to_checksum(*token_address);
                 if token_key == &token_addr_str {
                     if *amount > I256::ZERO {
                         // Now we have the EXACT U256 amount - no conversion needed!

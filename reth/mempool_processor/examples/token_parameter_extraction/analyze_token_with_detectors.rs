@@ -18,6 +18,7 @@ use mempool_processor::signal_detector::{
 };
 use mempool_processor::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
 use mempool_processor::config::MempoolProcessorConfig;
+use mempool_processor::common::address::alloy_address_to_checksum;
 use alloy_primitives::{Address, U256, I256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_sol_types::{SolCall, SolValue};
@@ -262,7 +263,7 @@ async fn main() -> Result<()> {
             
             // Extract tokens received
             let tokens_received = if result.buy_result.success {
-                let token_addr_str = format!("{:#x}", token_address);
+                let token_addr_str = alloy_address_to_checksum(token_address);
                 result.buy_result.state_changes
                     .get(&config.buyer_address)
                     .and_then(|changes| changes.token_net.get(&token_addr_str).copied())

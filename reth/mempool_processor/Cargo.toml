@@ -121,7 +121,8 @@ revm-inspectors = "0.19.1"
 jsonrpsee = { version = "0.24", features = ["http-client"] }
 
 # Database support
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "rust_decimal"] }
+rust_decimal = { version = "1.0", features = ["serde-float"] }
 
 [lib]
 name = "mempool_processor"
@@ -136,6 +137,7 @@ reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
 [[bin]]
 name = "mempool_signal_detector"
 path = "src/bin/mempool_signal_detector.rs"
+
 
 # Examples
 
@@ -322,6 +324,10 @@ path = "examples/token_tracking/inspect_creator_info.rs"
 [[example]]
 name = "get_token_info"
 path = "examples/token_tracking/get_token_info.rs"
+
+[[example]]
+name = "token_pool_csv_logger"
+path = "examples/token_tracking/token_pool_csv_logger.rs"
 
 
 

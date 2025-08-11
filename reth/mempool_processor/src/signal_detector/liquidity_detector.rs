@@ -18,6 +18,7 @@ pub struct LiquiditySignal {
     pub signal_type: SignalType,
     pub pool_address: String,
     pub token_address: String,
+    pub pool_type: String,  // Added pool type (V2, V3, V4)
     pub change_type: LiquidityChangeType,
     pub eth_change: f64,
     pub percentage_change: f64,
@@ -25,6 +26,13 @@ pub struct LiquiditySignal {
     pub from_address: String,
     pub tx_hash: String,
     pub details: String,
+    // Additional fields for database
+    pub eth_removed: Option<f64>,
+    pub token_removed: Option<f64>,
+    pub remaining_eth: Option<f64>,
+    pub remaining_token: Option<f64>,
+    pub removal_percentage: Option<f64>,
+    pub creator_address: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,7 +177,8 @@ impl LiquidityDetector {
         Some(LiquiditySignal {
             signal_type,
             pool_address: address_str,
-            token_address: pool_state.token_address,
+            token_address: pool_state.token_address.clone(),
+            pool_type: pool_state.pool_type.clone(),  // Include pool type
             change_type,
             eth_change: eth_change_f64,
             percentage_change: drain_result.drain_percent,
@@ -177,6 +186,13 @@ impl LiquidityDetector {
             from_address: alloy_address_to_checksum(from_address),
             tx_hash: tx_hash.to_string(),
             details,
+            // Additional fields for database
+            eth_removed: Some(eth_change_f64.abs()),
+            token_removed: None, // TODO: Calculate from state changes
+            remaining_eth: Some(drain_result.new_reserve),
+            remaining_token: None, // TODO: Calculate from state changes
+            removal_percentage: Some(drain_result.drain_percent),
+            creator_address: alloy_address_to_checksum(from_address), // Use from_address as creator for now
         })
     }
     

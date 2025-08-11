@@ -51,14 +51,14 @@ impl SignalRouter {
         }
     }
     
-    /// Add a high priority token
+    /// Add a high priority token (expects checksummed address)
     pub fn add_high_priority_token(&mut self, token: String) {
-        self.high_priority_tokens.insert(token.to_lowercase());
+        self.high_priority_tokens.insert(token);
     }
     
-    /// Add a watchlist address
+    /// Add a watchlist address (expects checksummed address)
     pub fn add_watchlist_address(&mut self, address: String) {
-        self.watchlist_addresses.insert(address.to_lowercase());
+        self.watchlist_addresses.insert(address);
     }
     
     /// Add a custom routing rule
@@ -75,13 +75,13 @@ impl SignalRouter {
             }
         }
         
-        // Check if this is a high priority token
-        let is_high_priority = self.high_priority_tokens.contains(&signal.base.token_address.to_lowercase());
+        // Check if this is a high priority token (using checksummed addresses)
+        let is_high_priority = self.high_priority_tokens.contains(&signal.base.token_address);
         
-        // Check if addresses are on watchlist
-        let is_watchlist = self.watchlist_addresses.contains(&signal.base.from_address.to_lowercase()) ||
+        // Check if addresses are on watchlist (using checksummed addresses)
+        let is_watchlist = self.watchlist_addresses.contains(&signal.base.from_address) ||
                           signal.base.to_address.as_ref()
-                              .map(|addr| self.watchlist_addresses.contains(&addr.to_lowercase()))
+                              .map(|addr| self.watchlist_addresses.contains(addr))
                               .unwrap_or(false);
         
         // Base routing on signal type
@@ -185,7 +185,7 @@ impl RoutingRule for ScamPatternRule {
         // Check if signal data contains known scam function
         match &signal.data {
             super::message_types::SignalData::CreatorAction(data) => {
-                if self.scam_functions.contains(&data.function_name.to_lowercase()) {
+                if self.scam_functions.contains(&data.function_name) {
                     return Some(RoutingDecision {
                         publish_immediately: true,
                         requires_simulation: false,
