@@ -3,12 +3,17 @@ name    = "tx_processor"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+python = ["pyo3", "pyo3-asyncio"]
+
 # Clean TX Processor - Rust alternative to Python eth_block_processor
 # Uses reth_tx_simulator for all transaction simulation
 
 [lib]
 name = "tx_processor"
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]  # Add cdylib for Python bindings
 
 # Clean tx_processor examples
 # Examples that actually exist
@@ -50,3 +55,14 @@ reth-primitives = { path = "../reth/crates/primitives" }
 reth-db = { path = "../reth/crates/storage/db" }
 reth-chainspec = { path = "../reth/crates/chainspec" }
 alloy-consensus = "1.0.20"
+
+# Python binding dependencies
+[dependencies.pyo3]
+version = "0.20"
+features = ["extension-module", "abi3-py39"]
+optional = true
+
+[dependencies.pyo3-asyncio]
+version = "0.20"
+features = ["attributes", "tokio-runtime"]
+optional = true
