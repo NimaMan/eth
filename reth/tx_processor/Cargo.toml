@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = []
-python = ["pyo3", "pyo3-asyncio"]
+python = ["pyo3", "pyo3-asyncio", "rayon", "num_cpus"]
 
 # Clean TX Processor - Rust alternative to Python eth_block_processor
 # Uses reth_tx_simulator for all transaction simulation
@@ -65,4 +65,12 @@ optional = true
 [dependencies.pyo3-asyncio]
 version = "0.20"
 features = ["attributes", "tokio-runtime"]
+optional = true
+
+[dependencies.rayon]
+version = "1.7"
+optional = true
+
+[dependencies.num_cpus]
+version = "1.16"
 optional = true
