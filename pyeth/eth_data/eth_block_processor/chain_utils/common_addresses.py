@@ -210,7 +210,7 @@ STABLECOINS_ADDRESS_BY_NAME = {
     "ZUSD": "0xc56c2b7e71B54d38Aab6d52E94a04Cbfa8F604fA"
 }
 STABLECOINS_NAME_BY_ADDRESS = {v: k for k, v in STABLECOINS_ADDRESS_BY_NAME.items()}
-
+DENOM_ADDRESSES = {**DENOM_ADDRESSES, **STABLECOINS_NAME_BY_ADDRESS}
 
 addresses_by_name = {
     'zero_address': '0x0000000000000000000000000000000000000000',
@@ -255,28 +255,6 @@ denominator_names_by_address = {v: k for k, v in denominator_addresses_by_name.i
 denominator_byte_addresses_by_name = {key: byte_addresses_by_name[key] for key in denominator_addresses_by_name}
 
 denominator_names_by_byte_address = {v: k for k, v in denominator_byte_addresses_by_name.items()}
-
-denominator_balance_slots = {
-    'WETH': 3,
-    'USDC': 9,
-    'USDT': 2,
-    'DAI': 2
-}
-
-denominator_allowance_slots = {
-    'WETH': 4,
-    'DAI': 3
-}
-
-known_denom_decimals = {
-    'WETH': 18,
-    'USDC': 6,
-    'USDT': 6,
-    'DAI': 18,
-    'UNI-V2': 18
-}
-
-denominator_decimal_by_address = {k: known_denom_decimals[v] for k, v in denominator_names_by_address.items()}
 
 
 fee_recipients = {
@@ -379,7 +357,6 @@ fee_recipients = {
 fee_recipients_set = set(fee_recipients.keys())
 
 
-
 sandwich_attackers = [
     "0xae2Fc483527B8EF99EB5D9B44875F005ba1FaE13",   
     ]
@@ -394,3 +371,119 @@ alleged_mr_beast_wallet = ["0x9e67D018488aD636B538e4158E9e7577F2ECac12",
                            "0x2c071Af9dCeFB7155659B662480CbB8679977394",
                            "0x4f7B657a2cAe7A8808Df1D889838d5Da33007ae8",
 ]
+
+
+# CEX (Centralized Exchange) addresses
+CEX_ADDRESSES_BY_NAME = {}
+CEX_NAMES_BY_ADDRESS = {}
+
+# Try to load CEX addresses from database
+try:
+    import os
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    
+    # Database connection parameters
+    db_params = {
+        'host': os.getenv('POSTGRES_HOST', 'localhost'),
+        'port': os.getenv('POSTGRES_PORT', '5432'),
+        'database': os.getenv('POSTGRES_DB', 'eth_db'),
+        'user': os.getenv('POSTGRES_USER', 'postgres'),
+        'password': os.getenv('POSTGRES_PASSWORD', 'postgres')
+    }
+    
+    # Connect to database and fetch CEX addresses
+    with psycopg2.connect(**db_params) as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Fetch all CEX addresses from the database
+            cur.execute("""
+                SELECT address, name 
+                FROM eth_db.addresses 
+                WHERE entity_category = 'CEX' 
+                   OR name ILIKE '%exchange%'
+                   OR name IN ('Binance', 'Coinbase', 'Kraken', 'Huobi', 'OKX', 'KuCoin', 
+                              'Bybit', 'Gate.io', 'Bitfinex', 'Gemini', 'Bitstamp')
+                ORDER BY name
+            """)
+            
+            for row in cur.fetchall():
+                address = Web3.to_checksum_address(row['address'])
+                name = row['name']
+                
+                # Clean up name for consistency
+                if name:
+                    name = name.strip()
+                    # Add to dictionaries
+                    CEX_ADDRESSES_BY_NAME[name] = address
+                    CEX_NAMES_BY_ADDRESS[address] = name
+    
+    print(f"Loaded {len(CEX_ADDRESSES_BY_NAME)} CEX addresses from database")
+    
+except Exception as e:
+    print(f"Warning: Could not load CEX addresses from database: {e}")
+    
+    # Fallback to hardcoded major CEX addresses
+    CEX_ADDRESSES_BY_NAME = {
+        # Binance
+        'Binance 1': '0xF977814e90dA44bFA03b6295A0616a897441aceC',
+        'Binance 2': '0x28C6c06298d514Db089934071355E5743bf21d60',
+        'Binance 3': '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549',
+        'Binance 4': '0xDFd5293D8e347dFE59E90eFd55b2956a1343963d',
+        'Binance 5': '0x56Eddb7aa87536c09CCc2793473599fD21A8b17F',
+        'Binance 6': '0x9696f59E4d72E237BE84fFD425DCaD154Bf96976',
+        'Binance 7': '0x4976A4A02f38326660D17bf34b431dC6e2eb2327',
+        'Binance 8': '0xd88B55467f58Af508dBfDC597E8Ebd2Ad2De49b3',
+        'Binance 14': '0x708396f17127c42383E3b9014072679b2F60B82f',
+        'Binance 15': '0xE0F0CfDe7Ee664943906f17F7f14342E76A5CeC7',
+        
+        # Coinbase
+        'Coinbase 1': '0x71660c4005BA85c37ccec55d0C4493E66Fe775d3',
+        'Coinbase 2': '0x503828976D22510aad0201ac7EC88293211D23Da',
+        'Coinbase 3': '0xA090e606E30bD747d4E6245a1517EbE430F0057e',
+        'Coinbase 4': '0x062c2e1fC9fEB61eb6E1Ea82AD9CcDB0F5D2A5F1',
+        'Coinbase 5': '0x02466E547BFDAb679fC49e96bBfc62B9747D997C',
+        
+        # Kraken
+        'Kraken 1': '0x267be1C1D684F78cb4F6a176C4911b741E4Ffdc0',
+        'Kraken 2': '0xAe2D4617c862309A3d75A0fFB358c7a5009c673F',
+        'Kraken 3': '0x43984D578803891Dfa9706BDEee6078D80cFC79E',
+        'Kraken 4': '0x66c57bF505A85A74609D2C83E94Aabb26d691E1F',
+        
+        # OKX
+        'OKX 1': '0x6cC5F688a315f3dC28A7781717a9A798a59fDA7b',
+        'OKX 2': '0x236F9F97e0E62388479bf9E5BA4889e46B0273C3',
+        
+        # Huobi
+        'Huobi 1': '0xDc76CD25977E0a5Ae17155770273aD58648900D3',
+        'Huobi 2': '0xAb5C66752a9e8167967685F1450532fB96d5d24f',
+        'Huobi 3': '0xE93381fB4c4F14bDa253907b18faD305D799241a',
+        
+        # KuCoin
+        'KuCoin 1': '0xD6216fC19DB775Df9774a6E33526131dA7D19a2c',
+        'KuCoin 2': '0x0d380082B303eeFD92945e6f1b35E785EbABD2B6',
+        
+        # Gate.io
+        'Gate.io 1': '0x0D0707963952f2fBA59dD06f2b425ace40b492Fe',
+        'Gate.io 2': '0x7793cD85c11a924478d358D49b05b37E91B5810F',
+        
+        # Bitfinex
+        'Bitfinex 1': '0x876EabF441B2EE5B5b0554Fd502a8E0600950cFa',
+        'Bitfinex 2': '0x742d35Cc6634C0532925a3b844Bc9e7595f89590',
+        
+        # Bybit
+        'Bybit 1': '0xf89d7b9c864f589bbF53a82105107622B35EaA40',
+        
+        # Gemini
+        'Gemini 1': '0x5f65f7b609678448494De4C87521CdF6cEf1e932',
+        'Gemini 2': '0x61EDCDf5bb737ADffE5043706e7C5bb1f1a56eEA',
+    }
+    
+    CEX_NAMES_BY_ADDRESS = {v: k for k, v in CEX_ADDRESSES_BY_NAME.items()}
+
+
+# Add CEX addresses to the main dictionaries
+addresses_by_name.update(CEX_ADDRESSES_BY_NAME)
+names_by_address.update(CEX_NAMES_BY_ADDRESS)
+
+# Create a set of CEX addresses for quick lookup
+CEX_ADDRESSES_SET = set(CEX_NAMES_BY_ADDRESS.keys())
