@@ -181,6 +181,7 @@ impl TradingStatusDetector {
                     buy_tax.unwrap_or(-1.0),  // -1 indicates not calculated
                     sell_tax.unwrap_or(-1.0)   // -1 indicates not calculated
                 ).ok();
+                writeln!(file, "").ok(); // Add empty line for readability
             }
         }
     }

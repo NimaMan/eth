@@ -91,6 +91,7 @@ impl SignalManager {
         
         // Create detector-specific log files
         let trading_log_path = config.log_dir.join("trading_enabled.log");
+        let simulation_results_log_path = config.log_dir.join("simulation_results.log");
         let tax_log_path = config.log_dir.join("tax_signals.log");
         let signal_log_path = config.log_dir.join("signal_manager.log");
         
@@ -110,7 +111,7 @@ impl SignalManager {
             config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
             stablecoin_detector: StablecoinDetector::new(),
-            trading_status_detector: TradingStatusDetector::with_config(trading_log_path, config.min_liquidity_threshold),
+            trading_status_detector: TradingStatusDetector::with_config(simulation_results_log_path, config.min_liquidity_threshold),
             tax_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
             lp_approval_detector: LpApprovalDetector::new(),
             token_cache: None,
@@ -240,12 +241,21 @@ impl SignalManager {
         self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════════════"));
         self.log_activity("", &format!("TX: {}", result.request.tx.hash));
         
-        self.log_activity("RECEIVED", &format!(
-            "Category: {:?} | {} | BuySell: {}",
-            result.request.category,
-            error_msg,
-            result.buy_sell_result.is_some()
-        ));
+        // Skip logging for contract creation transactions to reduce noise
+        if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+            let buysell_status = if let Some(ref bs) = result.buy_sell_result {
+                format!("SimulationRan(can_buy:{}, can_sell:{})", bs.can_buy, bs.can_sell)
+            } else {
+                "NoSimulation".to_string()
+            };
+            
+            self.log_activity("RECEIVED", &format!(
+                "Category: {:?} | {} | BuySell: {}",
+                result.request.category,
+                error_msg,
+                buysell_status
+            ));
+        }
         
         // Log creator token info if this is a creator transaction
         if let crate::tx_router::TransactionCategory::CreatorTransaction { creator, target_token, target_address, function_type, .. } = &result.request.category {
@@ -318,7 +328,10 @@ impl SignalManager {
             )
         } else {
             // No buy/sell simulation
-            self.log_activity("NO_BUY_SELL", "No buy/sell result");
+            // Skip logging for contract creation transactions to reduce noise  
+            if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+                self.log_activity("NO_BUY_SELL", "No buy/sell result");
+            }
             
             // Still check pool state changes even without buy/sell simulation
             // This will detect liquidity removals
@@ -367,20 +380,26 @@ impl SignalManager {
                 .map(|pt| format!(" | Pool: {}", pt))
                 .unwrap_or_else(|| "".to_string());
             
-            self.log_activity("TAX_RESULT", &format!(
-                "Buy: {} | Sell: {} | Can Buy: {} | Can Sell: {} | Signals: {}{}",
-                buy_tax_str,
-                sell_tax_str,
-                buy_sell.can_buy,
-                buy_sell.can_sell,
-                tax_signals.len(),
-                pool_type_str
-            ));
+            // Skip tax result logging for contract creation transactions to reduce noise
+            if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+                self.log_activity("TAX_RESULT", &format!(
+                    "Buy: {} | Sell: {} | Can Buy: {} | Can Sell: {} | Signals: {}{}",
+                    buy_tax_str,
+                    sell_tax_str,
+                    buy_sell.can_buy,
+                    buy_sell.can_sell,
+                    tax_signals.len(),
+                    pool_type_str
+                ));
+            }
         } else {
-            self.log_activity("TAX_RESULT", &format!(
-                "Found {} tax signals (no buy/sell result)",
-                tax_signals.len()
-            ));
+            // Skip tax result logging for contract creation transactions to reduce noise
+            if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+                self.log_activity("TAX_RESULT", &format!(
+                    "Found {} tax signals (no buy/sell result)",
+                    tax_signals.len()
+                ));
+            }
         }
         
         // Extract tax values from tax signals for use in trading status
@@ -396,35 +415,65 @@ impl SignalManager {
             
             match tax_signal.signal_type {
                 TaxSignalType::HighTaxOrHoneypot { cant_sell, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold } => {
-                    // Create pool-specific tax signal
-                    let pool_address = result.pool_address
-                        .map(|addr| format!("0x{}", hex::encode(addr)))
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let pool_type = result.pool_type.clone()
-                        .unwrap_or_else(|| "V2".to_string());
-                    
-                    // Extract creator from category
-                    let creator_address = match &result.request.category {
-                        crate::tx_router::TransactionCategory::CreatorTransaction { creator, .. } => creator.clone(),
-                        _ => "unknown".to_string(),
+                    // Check trading status from token cache before logging TAX_SIGNAL
+                    let should_log_tax_signal = if let Some(ref token_cache) = self.token_cache {
+                        // Check if trading is already enabled for this token
+                        if let Some(token_info) = token_cache.get_token(&tax_signal.token_address).await {
+                            if token_info.trading_enabled {
+                                // Trading is enabled - always log TAX_SIGNAL
+                                true
+                            } else {
+                                // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
+                                if let Some(ref bs) = result.buy_sell_result {
+                                    bs.can_buy || bs.can_sell
+                                } else {
+                                    false
+                                }
+                            }
+                        } else {
+                            // Token not in cache - log if we can buy/sell
+                            if let Some(ref bs) = result.buy_sell_result {
+                                bs.can_buy || bs.can_sell
+                            } else {
+                                false
+                            }
+                        }
+                    } else {
+                        // No token cache - log all TAX_SIGNALS
+                        true
                     };
-                    
-                    signals.push(Signal::TaxSignal(crate::signal_detector::types::TaxSignalRecord {
-                        tx_hash: result.request.tx.hash.clone(),
-                        token_address: tax_signal.token_address.clone(),
-                        pool_address,
-                        pool_type,
-                        creator_address,
-                        signal_type: "HighTaxOrHoneypot".to_string(),
-                        signal_details: tax_signal.details.clone(),
-                        confidence: tax_signal.confidence,
-                        buy_tax: tax_signal.buy_tax,
-                        sell_tax: tax_signal.sell_tax,
-                        buy_tax_exceeds_threshold,
-                        sell_tax_exceeds_threshold,
-                        cant_sell,
-                        timestamp: chrono::Utc::now().timestamp() as u64,
-                    }));
+
+                    if should_log_tax_signal {
+                        // Create pool-specific tax signal
+                        let pool_address = result.pool_address
+                            .map(|addr| format!("0x{}", hex::encode(addr)))
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let pool_type = result.pool_type.clone()
+                            .unwrap_or_else(|| "V2".to_string());
+                        
+                        // Extract creator from category
+                        let creator_address = match &result.request.category {
+                            crate::tx_router::TransactionCategory::CreatorTransaction { creator, .. } => creator.clone(),
+                            _ => "unknown".to_string(),
+                        };
+                        
+                        signals.push(Signal::TaxSignal(crate::signal_detector::types::TaxSignalRecord {
+                            tx_hash: result.request.tx.hash.clone(),
+                            token_address: tax_signal.token_address.clone(),
+                            pool_address,
+                            pool_type,
+                            creator_address,
+                            signal_type: "HighTaxOrHoneypot".to_string(),
+                            signal_details: tax_signal.details.clone(),
+                            confidence: tax_signal.confidence,
+                            buy_tax: tax_signal.buy_tax,
+                            sell_tax: tax_signal.sell_tax,
+                            buy_tax_exceeds_threshold,
+                            sell_tax_exceeds_threshold,
+                            cant_sell,
+                            timestamp: chrono::Utc::now().timestamp() as u64,
+                        }));
+                    }
                 }
                 _ => {
                     // Log other tax signals but don't convert to specific signal types yet
@@ -483,14 +532,17 @@ impl SignalManager {
             }
         } else {
             // No trading signal detected - log what we found
-            if let Some(ref buy_sell) = result.buy_sell_result {
-                self.log_activity("TRADING_STATUS", &format!(
-                    "No change | Can Buy: {} | Can Sell: {}",
-                    buy_sell.can_buy,
-                    buy_sell.can_sell
-                ));
-            } else {
-                self.log_activity("TRADING_STATUS", "No change (no buy/sell result)");
+            // Skip trading status logging for contract creation transactions to reduce noise
+            if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+                if let Some(ref buy_sell) = result.buy_sell_result {
+                    self.log_activity("TRADING_STATUS", &format!(
+                        "No change | Can Buy: {} | Can Sell: {}",
+                        buy_sell.can_buy,
+                        buy_sell.can_sell
+                    ));
+                } else {
+                    self.log_activity("TRADING_STATUS", "No change (no buy/sell result)");
+                }
             }
         }
         
@@ -623,7 +675,10 @@ impl SignalManager {
                 info!("✅ Published {} signals", signals.len());
             }
         } else {
-            self.log_activity("NO_SIGNALS", "No signals detected");
+            // Skip no signals logging for contract creation transactions to reduce noise
+            if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+                self.log_activity("NO_SIGNALS", "No signals detected");
+            }
         }
         signals
     }

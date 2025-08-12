@@ -323,6 +323,7 @@ impl SignalPublisher {
                     "[{}] TRADING_ENABLED | Token: {} | Creator: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
                     timestamp, s.token_address, s.creator_address, s.buy_tax, s.sell_tax, s.tx_hash
                 )?;
+                writeln!(self.log_files.trading_enabled, "")?; // Add empty line for readability
                 self.log_files.trading_enabled.flush()?;
             }
             Signal::TaxSignal(s) => {
@@ -330,8 +331,9 @@ impl SignalPublisher {
                     self.log_files.tax_signals,
                     "[{}] TAX_SIGNAL | Token: {} | Pool: {} | Type: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
                     timestamp, s.token_address, s.pool_address, s.signal_type,
-                    s.buy_tax.unwrap_or(0.0), s.sell_tax.unwrap_or(0.0), s.tx_hash
+                    s.buy_tax.unwrap_or(-1.0), s.sell_tax.unwrap_or(-1.0), s.tx_hash
                 )?;
+                writeln!(self.log_files.tax_signals, "")?; // Add empty line for readability
                 self.log_files.tax_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
@@ -343,6 +345,7 @@ impl SignalPublisher {
                     "[{}] LIQUIDITY_REMOVAL | Pool: {} | Function: {} | Remover: {} | TxHash: {}{}",
                     timestamp, s.pool_address, s.function_name, s.remover_address, s.tx_hash, eth_info
                 )?;
+                writeln!(self.log_files.liquidity_removal, "")?; // Add empty line for readability
                 self.log_files.liquidity_removal.flush()?;
             }
             Signal::ScamDetection(s) => {
@@ -352,6 +355,7 @@ impl SignalPublisher {
                     timestamp, s.pool_address, s.token_address, s.scammer_address, 
                     s.eth_drained, s.drain_percentage, s.eth_remaining, s.tx_hash
                 )?;
+                writeln!(self.log_files.scam_detection, "")?; // Add empty line for readability
                 self.log_files.scam_detection.flush()?;
             }
         }
