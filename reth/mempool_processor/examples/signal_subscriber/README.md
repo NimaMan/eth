@@ -1,90 +1,54 @@
-# Signal Subscriber Examples
+# Signal Subscriber
 
-This directory contains examples of how to subscribe to real-time signals from the mempool signal detector.
+Simple Python subscriber for testing mempool processor signals via ZMQ.
 
-## Overview
+## Usage
 
-The mempool signal detector publishes two types of signals via ZMQ:
-- **Liquidity Removal** signals when liquidity is being removed from DEX pools
-- **Trading Enabled** signals when new tokens enable trading
-
-Signals are published to `tcp://127.0.0.1:5556` as JSON messages.
-
-## Signal Format
-
-Each signal contains the following fields:
-```json
-{
-    "alert_type": "liquidity_removal",  // or "trading_enabled"
-    "function_name": "removeLiquidityETH",
-    "tx_hash": "0x...",
-    "from_address": "0x...",
-    "to_address": "0x...",
-    "value": "0x0",
-    "gas_price": "0x...",
-    "selector": "02751cec",
-    "timestamp": "2025-07-09 07:29:48.032",
-    "detection_latency_us": 0
-}
-```
-
-## Python Example
-
-### Requirements
 ```bash
-pip install pyzmq
+python signal_subscriber.py
 ```
 
-### Running
-```bash
-python3 zmq_subscriber.py
-```
+## Environment Variables
 
-## Rust Example
+- `SIGNAL_ENDPOINT`: ZMQ endpoint (default: `tcp://127.0.0.1:5557`)
 
-### Building
-```bash
-cd /home/nima/code/crypto/rust/mempool_processor/examples/signal_subscriber
-cargo build --release
-```
+## Multiple Consumers
 
-### Running
-```bash
-cargo run --release
-```
+This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent consumers:
+- Database writers can consume signals
+- eth_kartal can consume signals  
+- Multiple monitoring tools can consume simultaneously
+- Each consumer receives all published signals independently
+
+## Signal Types Supported
+
+- Tax detection signals (current format)
+- Liquidity removal signals
+- Trading enabled signals  
+- Stablecoin signals
+- LP approval signals
+- JSON-formatted signals (future)
 
 ## Example Output
 
 ```
-================================================================================
-Mempool Signal Detector - ZMQ Subscriber Example
-================================================================================
-[2025-07-09 09:30:00] Connected to ZMQ publisher at tcp://127.0.0.1:5556
-Waiting for signals...
+======================================================================
+🚀 Mempool Processor - Signal Subscriber
+======================================================================
+📡 Connected to signal publisher: tcp://127.0.0.1:5557
+🔄 Waiting for signals... (Press Ctrl+C to stop)
 
-[2025-07-09 09:31:15] SIGNAL RECEIVED! #1
-  Type: LIQUIDITY_REMOVAL
-  Function: removeLiquidityETH
-  TX Hash: 0xabc123...
-  From: 0x123...
-  To: 0x7a250d5630b4cf539739df2c5dacb4c659f2488d
-  Value: 0x0
-  Gas Price: 0x5f5e100
-  Selector: 02751cec
-  Timestamp: 2025-07-09 09:31:15.123
---------------------------------------------------------------------------------
+📨 TAX Signal #1 [14:10:46]
+   [2025-08-12 14:10:46.355] TAX_SIGNAL | Token: 0xc334... | Pool: 0x67fa... | Type: HighTaxOrHoneypot | BuyTax: 0% | SellTax: 0%
+------------------------------------------------------------
+📨 TAX Signal #2 [14:12:05] 
+   [2025-08-12 14:12:05.876] TAX_DETECTION | TX: 0xba4b... | Token: 0xc334... | can_buy: false | can_sell: false | buy_tax: -1.0%
+------------------------------------------------------------
 ```
 
-## Integration with eth_kartal
+## Integration Notes
 
-The `eth_kartal` module can subscribe to these signals to:
-1. React to liquidity removal events in real-time
-2. Monitor new token launches when trading is enabled
-3. Trigger automated trading strategies based on these signals
-
-## Performance
-
-The signal detector operates with:
-- Average IPC detection latency: ~0.005ms
-- Average function detection time: ~0.050ms
-- Maximum latencies typically under 1ms
+- **Database Writers**: Can consume signals to store detection results
+- **eth_kartal**: Can consume signals for automated trading decisions
+- **Monitoring**: Multiple monitoring tools can run simultaneously
+- **Real-time**: Signals are published as soon as detected (microsecond latency)

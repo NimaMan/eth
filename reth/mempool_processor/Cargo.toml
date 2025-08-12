@@ -270,6 +270,10 @@ path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
 name = "analyze_tax_for_block_range"
 path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
 
+[[example]]
+name = "validate_all_token_taxes"
+path = "examples/token_parameter_extraction/validate_all_token_taxes.rs"
+
 # Signal Detector Examples
 [[example]]
 name = "full_pipeline_signal_detection"
