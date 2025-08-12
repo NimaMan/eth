@@ -7,9 +7,7 @@ pub mod mempool_fetcher;
 pub mod token_tracking;
 pub mod common;
 pub mod config;
-pub mod database;
-pub mod token_parameter_extraction;
-pub mod publishers;
+pub mod db_writers;
 
 // Signal processing modules
 pub mod function_detector;

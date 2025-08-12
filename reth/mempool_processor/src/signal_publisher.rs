@@ -17,7 +17,7 @@ use eyre::Result;
 use super::signal_detector::{Signal, TradingEnabledSignal, LiquidityRemovalSignal};
 use super::signal_detector::types::TaxSignalRecord;
 // Database imports disabled for now
-// use crate::database::{TradingEventWriter, TradingEnabledEvent, CreatorActionEvent};
+// use crate::db_writers::{TradingEventWriter, TradingEnabledEvent, CreatorActionEvent};
 
 /// Configuration for signal publishing
 #[derive(Debug, Clone)]
@@ -114,7 +114,7 @@ impl SignalPublisher {
         let db_sender = if config.enable_database {
             let (sender, receiver) = mpsc::channel(config.db_channel_buffer_size);
             // Use hardcoded database URL from database module
-            let db_url = Some(crate::database::get_default_database_url());
+            let db_url = Some(crate::db_writers::get_default_database_url());
             Self::spawn_db_writer(db_url, receiver, stats.clone()).await?;
             Some(sender)
         } else {
@@ -172,9 +172,9 @@ impl SignalPublisher {
     ) -> Result<()> {
         if let Some(db_url) = database_url {
             // Create the signal writers
-            let signal_writer_config = crate::database::SignalWriterConfig::default();
-            let trading_writer = crate::database::TradingSignalWriter::new_with_defaults(signal_writer_config).await?;
-            let tax_writer = crate::database::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await?;
+            let signal_writer_config = crate::db_writers::SignalWriterConfig::default();
+            let trading_writer = crate::db_writers::TradingSignalWriter::new_with_defaults(signal_writer_config).await?;
+            let tax_writer = crate::db_writers::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await?;
             
             tokio::spawn(async move {
                 info!("🗄️ Database writer task started");
@@ -185,7 +185,7 @@ impl SignalPublisher {
                         Signal::TradingEnabled(ref s) => {
                             use rust_decimal::Decimal;
                             
-                            let record = crate::database::TradingSignalRecord {
+                            let record = crate::db_writers::TradingSignalRecord {
                                 token_address: s.token_address.clone(),
                                 pool_address: s.pool_address.clone(),
                                 pool_type: s.pool_type.clone(),
@@ -209,7 +209,7 @@ impl SignalPublisher {
                             debug!("Written trading_enabled signal to database");
                         }
                         Signal::TaxSignal(ref s) => {
-                            let record = crate::database::TaxSignalRecord {
+                            let record = crate::db_writers::TaxSignalRecord {
                                 token_address: s.token_address.clone(),
                                 pool_address: s.pool_address.clone(),
                                 pool_type: s.pool_type.clone(),

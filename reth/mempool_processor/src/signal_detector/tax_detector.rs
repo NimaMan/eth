@@ -10,7 +10,7 @@
 /// - Suspicious tax patterns
 
 use crate::simulator::SimulationResult;
-use crate::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
+use crate::token_tracking::{calculate_buy_tax, calculate_sell_tax};
 use crate::config::TaxDetectionConfig;
 use tracing::{info, debug};
 use std::collections::HashMap;

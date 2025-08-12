@@ -236,13 +236,12 @@ impl SignalManager {
             "Success".to_string()
         };
         
-        // Add visual separator for new transaction
-        self.log_activity("", "");  // Empty line
-        self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════════════"));
-        self.log_activity("", &format!("TX: {}", result.request.tx.hash));
-        
         // Skip logging for contract creation transactions to reduce noise
         if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
+            // Add visual separator for new transaction
+            self.log_activity("", "");  // Empty line
+            self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════════════"));
+            self.log_activity("", &format!("TX: {}", result.request.tx.hash));
             let buysell_status = if let Some(ref bs) = result.buy_sell_result {
                 format!("SimulationRan(can_buy:{}, can_sell:{})", bs.can_buy, bs.can_sell)
             } else {

@@ -5,14 +5,12 @@
 pub mod types;
 pub mod cache;
 pub mod address_tracking_cache;
-pub mod signal_integration;
-pub mod trading_status_updater;
+pub mod token_parameter_extraction;
 
 // Re-export commonly used types
 pub use cache::{PoolStateCache, TokenTrackingCache};
 pub use address_tracking_cache::{AddressTrackingCache, AddressRole};
-pub use signal_integration::SignalIntegration;
-pub use trading_status_updater::TradingStatusUpdater;
+pub use token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
 
 
 use zmq;
