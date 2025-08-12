@@ -1,13 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "core_types",
-    "data_access", 
-    "api_layer",
-    "tests_integration",
-    "eth_db_fetcher",
-    "fundflownetwork",
-    "tx_ranking_system"
+    "src/core_types",
+    "src/eth_db_fetcher",
+    "src/fundflownetwork",
+    "src/fundflownetwork_py"
 ]
 
 [workspace.dependencies]
