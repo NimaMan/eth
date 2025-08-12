@@ -338,6 +338,22 @@ name = "test_unified_simulator"
 path = "examples/simulator/test_unified_simulator.rs"
 
 [[example]]
+name = "debug_scout_token_simulation"
+path = "examples/simulation_debug/debug_scout_token_simulation.rs"
+
+[[example]]
+name = "investigate_scout_token"
+path = "examples/simulation_debug/investigate_scout_token.rs"
+
+[[example]]
+name = "test_multiple_addresses"
+path = "examples/simulation_debug/test_multiple_addresses.rs"
+
+[[example]]
+name = "test_buy_amounts"
+path = "examples/simulation_debug/test_buy_amounts.rs"
+
+[[example]]
 name = "test_simulation_with_known_tokens"
 path = "examples/test_simulation_with_known_tokens.rs"
 

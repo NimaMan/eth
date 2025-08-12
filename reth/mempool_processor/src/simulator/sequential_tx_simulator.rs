@@ -71,7 +71,7 @@ pub struct BuySellSimulatorConfig {
 impl Default for BuySellSimulatorConfig {
     fn default() -> Self {
         Self {
-            test_buy_amount: U256::from(100_000_000_000_000_000u64), // 0.1 ETH
+            test_buy_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH (reduced from 0.1)
             router_address: Address::from([0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D]), // Uniswap V2
             weth_address: Address::from([0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2]), // WETH
             gas_limit: 300_000,
@@ -203,41 +203,60 @@ impl SequentialBuySellSimulator {
             }
         };
         
-        let buy_request = CallRequest {
-            from: Some(self.config.buyer_address),
-            to: Some(router_address),
-            value: Some(self.config.test_buy_amount),
-            data: Some(buy_calldata),
-            gas: Some(self.config.gas_limit),
-            gas_price: Some(self.config.gas_price),
-            max_fee_per_gas: None,
-            max_priority_fee_per_gas: None,
-            nonce: None,
-        };
+        // Try with default amount first, then retry with smaller amount if TRANSFER_FAILED
+        let mut buy_amount = self.config.test_buy_amount;
+        let mut attempts = 0;
         
-        // Start timing
-        let start_time = Instant::now();
-        
-        // Build initial sequence with given tx (if any) and buy
-        let mut initial_sequence = Vec::new();
-        if let Some(tx) = given_tx.clone() {
-            initial_sequence.push(tx);
-        }
-        initial_sequence.push(buy_request.clone());
-        
-        // Run initial simulation with stop_on_failure: false to get all results
-        let initial_result = self.simulator.simulate_transaction_sequence(
-            initial_sequence.clone(),
-            SequentialSimulationOptions {
-                at_block: block_number,
-                stop_on_failure: false, // Continue even if transactions fail
-                auto_increment_nonces: true,
-                gas_limit_per_tx: None,
+        let (initial_result, buy_index) = loop {
+            attempts += 1;
+            
+            let buy_request = CallRequest {
+                from: Some(self.config.buyer_address),
+                to: Some(router_address),
+                value: Some(buy_amount),
+                data: Some(buy_calldata.clone()),
+                gas: Some(self.config.gas_limit),
+                gas_price: Some(self.config.gas_price),
+                max_fee_per_gas: None,
+                max_priority_fee_per_gas: None,
+                nonce: None,
+            };
+            
+            // Build initial sequence with given tx (if any) and buy
+            let mut initial_sequence = Vec::new();
+            if let Some(tx) = given_tx.clone() {
+                initial_sequence.push(tx);
             }
-        ).await?;
-        
-        // Extract the buy result index (0 if no given tx, 1 if given tx exists)
-        let buy_index = if given_tx.is_some() { 1 } else { 0 };
+            initial_sequence.push(buy_request.clone());
+            
+            // Run initial simulation with stop_on_failure: false to get all results
+            let result = self.simulator.simulate_transaction_sequence(
+                initial_sequence.clone(),
+                SequentialSimulationOptions {
+                    at_block: block_number,
+                    stop_on_failure: false, // Continue even if transactions fail
+                    auto_increment_nonces: true,
+                    gas_limit_per_tx: None,
+                }
+            ).await?;
+            
+            // Check if buy failed with TRANSFER_FAILED and we can retry
+            let buy_idx = if given_tx.is_some() { 1 } else { 0 };
+            if let Some(buy_result) = result.results.get(buy_idx) {
+                if !buy_result.success && attempts == 1 {
+                    if let Some(ref reason) = buy_result.revert_reason {
+                        if reason.contains("TRANSFER_FAILED") {
+                            // Try with smaller amount (0.001 ETH)
+                            buy_amount = U256::from(1_000_000_000_000_000u64);
+                            continue;
+                        }
+                    }
+                }
+            }
+            
+            // Return the result and buy index
+            break (result, buy_idx);
+        };
         
         // Check if buy succeeded and extract tokens received
         let (buy_succeeded, tokens_received) = if let Some(buy_result) = initial_result.results.get(buy_index) {
@@ -357,6 +376,19 @@ impl SequentialBuySellSimulator {
             to: Some(router_address),
             value: Some(U256::ZERO),
             data: Some(sell_calldata),
+            gas: Some(self.config.gas_limit),
+            gas_price: Some(self.config.gas_price),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            nonce: None,
+        };
+        
+        // Recreate buy request with successful amount (from the loop above)
+        let buy_request = CallRequest {
+            from: Some(self.config.buyer_address),
+            to: Some(router_address),
+            value: Some(buy_amount), // Use the amount that worked
+            data: Some(buy_calldata),
             gas: Some(self.config.gas_limit),
             gas_price: Some(self.config.gas_price),
             max_fee_per_gas: None,
