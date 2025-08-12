@@ -3,7 +3,7 @@
 /// Detects changes in token buy/sell taxes
 
 use crate::simulator::{BuySellResult, SimulationResult};
-use crate::tx_router::CreatorFunctionType;
+use crate::function_detector::CreatorFunctionType;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]

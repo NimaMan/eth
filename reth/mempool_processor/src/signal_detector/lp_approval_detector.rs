@@ -4,7 +4,8 @@
 /// which is typically the precursor to a rug pull (liquidity removal)
 
 use crate::mempool_fetcher::MempoolTransaction;
-use crate::tx_router::{TransactionCategory, CreatorFunctionType};
+use crate::tx_router::TransactionCategory;
+use crate::function_detector::CreatorFunctionType;
 use tracing::{info, warn};
 use alloy_primitives::{Address, U256};
 use std::fs::OpenOptions;
@@ -51,11 +52,11 @@ impl LpApprovalDetector {
         tx: &MempoolTransaction,
         category: &TransactionCategory,
     ) -> Option<LpApprovalSignal> {
-        // Only process creator transactions with liquidity management
+        // Only process creator transactions with LP approval
         if let TransactionCategory::CreatorTransaction { 
             creator, 
             target_address, 
-            function_type: CreatorFunctionType::LiquidityManagement,
+            function_type: CreatorFunctionType::LiquidityPoolApproval,
             .. 
         } = category {
             // Verify this is an approve function
@@ -84,9 +85,9 @@ impl LpApprovalDetector {
                         router_address: router_hex.clone(),
                         amount,
                         timestamp: Utc::now().timestamp(),
-                        // Additional fields for database
-                        token_address: target_address.clone(), // LP token for now
-                        pool_address: target_address.clone(), // LP token acts as pool identifier
+                        // Additional fields for database  
+                        token_address: target_address.clone(), // Will be resolved to actual token via LP token
+                        pool_address: target_address.clone(), // LP token address IS the pool address
                         spender_address: router_hex.clone(),
                         amount_approved: Some(amount.to_string().parse::<f64>().unwrap_or(0.0)),
                         previous_allowance: None, // TODO: Get from state changes

@@ -318,7 +318,7 @@ impl SimplifiedSimulationManager {
                 if let (Some(token_addr), Some(pool_addr)) = (token_address, pool_address) {
                     // Create call request for the transaction
                     let tx_call_request = if request.simulation_type == SimulationType::TransactionWithBuySell {
-                        match reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data) {
+                        match mempool_processor::common::convert::ipc_to_call_request(&full_tx.tx_data) {
                             Ok(call) => Some(call),
                             Err(e) => {
                                 result.error = Some(format!("Failed to convert transaction: {}", e));

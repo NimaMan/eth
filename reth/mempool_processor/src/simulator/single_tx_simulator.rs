@@ -3,7 +3,8 @@
 /// This module integrates reth_tx_simulator for ultra-fast transaction simulation
 /// by bypassing RPC and using direct database access.
 
-use reth_tx_simulator::{RethTxSimulator, CallRequest, ipc_to_call_request, AddressStateChange};
+use reth_tx_simulator::{RethTxSimulator, CallRequest, AddressStateChange};
+use crate::common::convert::ipc_to_call_request;
 use crate::mempool_fetcher::FullTransaction;
 use eyre::Result;
 use std::sync::Arc;

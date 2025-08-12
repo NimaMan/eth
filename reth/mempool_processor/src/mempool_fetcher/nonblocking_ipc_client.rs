@@ -22,6 +22,7 @@ pub struct MempoolTransaction {
     pub value: ethers::types::U256,
     pub gas_price: Option<ethers::types::U256>,
     pub functions: Vec<String>, // ["transfer", "liquidity_removal", etc.]
+    pub function_category: Option<crate::function_detector::CreatorFunctionType>, // Function category from detector
 }
 
 pub struct NonBlockingIpcClient {
@@ -209,6 +210,7 @@ impl NonBlockingIpcClient {
                                                 value,
                                                 gas_price,
                                                 functions: Vec::new(), // Will be populated by function detector
+                                                function_category: None, // Will be populated by function detector
                                             };
                                             
                                             match tx_sender.try_send(tx) {

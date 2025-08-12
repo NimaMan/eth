@@ -11,6 +11,7 @@
 
 use crate::simulator::SimulationResult;
 use crate::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
+use crate::config::TaxDetectionConfig;
 use tracing::{info, debug};
 use std::collections::HashMap;
 use alloy_primitives::Address;
@@ -19,6 +20,7 @@ use hex;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use chrono;
 
 #[derive(Debug, Clone)]
 pub struct TaxSignal {
@@ -32,10 +34,14 @@ pub struct TaxSignal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaxSignalType {
-    /// High tax detected (but not honeypot level)
-    HighTax { buy: bool, sell: bool },
-    /// Honeypot pattern detected (sell tax > 50%)
-    Honeypot,
+    /// High tax or honeypot detected - consolidated signal
+    /// Covers: high buy tax, high sell tax, honeypot (can't sell)
+    /// Per-pool and per-token detection
+    HighTaxOrHoneypot { 
+        buy_tax_exceeds_threshold: bool, 
+        sell_tax_exceeds_threshold: bool, 
+        cant_sell: bool 
+    },
     /// Tax change detected (requires historical data)
     TaxChange { before_buy: f64, before_sell: f64, after_buy: f64, after_sell: f64 },
     /// Suspicious tax pattern (e.g., low buy, high sell)
@@ -43,31 +49,23 @@ pub enum TaxSignalType {
 }
 
 pub struct TaxDetector {
-    /// Threshold for high tax warning (default: 25%)
-    high_tax_threshold: f64,
-    /// Threshold for honeypot detection (default: 50%)
-    honeypot_threshold: f64,
-    /// Threshold for suspicious tax difference (default: 20%)
-    suspicious_difference_threshold: f64,
+    /// Tax detection configuration
+    config: TaxDetectionConfig,
     /// Path to the log file
     log_file_path: Option<PathBuf>,
 }
 
 impl TaxDetector {
-    pub fn new() -> Self {
+    pub fn new(config: TaxDetectionConfig) -> Self {
         Self {
-            high_tax_threshold: 25.0,
-            honeypot_threshold: 50.0,
-            suspicious_difference_threshold: 20.0,
+            config,
             log_file_path: None,
         }
     }
     
-    pub fn with_log_path(log_path: PathBuf) -> Self {
+    pub fn with_log_path(config: TaxDetectionConfig, log_path: PathBuf) -> Self {
         Self {
-            high_tax_threshold: 25.0,
-            honeypot_threshold: 50.0,
-            suspicious_difference_threshold: 20.0,
+            config,
             log_file_path: Some(log_path),
         }
     }
@@ -109,11 +107,26 @@ impl TaxDetector {
             // Calculate buy tax if we have the state changes and addresses
             if let (Some(buy_changes), Some(token_addr), Some(pool_addr)) = (&buy_sell.buy_state_changes, &sim_result.token_address, &sim_result.pool_address) {
                 buy_tax = calculate_buy_tax(buy_changes, pool_addr, &buyer_address, token_addr);
+                if buy_tax.is_none() {
+                    debug!("Buy tax calculation returned None for token {:?} pool {:?}", token_addr, pool_addr);
+                }
+            } else {
+                info!("Missing data for buy tax calculation - buy_changes: {}, token_addr: {}, pool_addr: {}", 
+                    buy_sell.buy_state_changes.is_some(), 
+                    sim_result.token_address.is_some(), 
+                    sim_result.pool_address.is_some());
             }
             
             // Calculate sell tax if we have the state changes and addresses
             if let (Some(sell_changes), Some(pool_addr)) = (&buy_sell.sell_state_changes, &sim_result.pool_address) {
                 sell_tax = calculate_sell_tax(sell_changes, pool_addr, &buyer_address);
+                if sell_tax.is_none() {
+                    debug!("Sell tax calculation returned None for pool {:?}", pool_addr);
+                }
+            } else {
+                info!("Missing data for sell tax calculation - sell_changes: {}, pool_addr: {}", 
+                    buy_sell.sell_state_changes.is_some(), 
+                    sim_result.pool_address.is_some());
             }
             
             (buy_tax, sell_tax)
@@ -121,67 +134,49 @@ impl TaxDetector {
             (None, None)
         };
 
-        // Check for honeypot - either can't sell or sell tax is too high
-        let is_honeypot = if let Some(buy_sell) = &sim_result.buy_sell_result {
-            !buy_sell.can_sell || calculated_sell_tax.unwrap_or(0.0) >= self.honeypot_threshold
-        } else {
-            false
-        };
-        
-        if is_honeypot {
-            let (details, buy_tax_for_signal, sell_tax_for_signal) = if let Some(buy_sell) = &sim_result.buy_sell_result {
-                if !buy_sell.can_sell {
-                    // Can't sell, so sell tax is None (not 0)
-                    let buy_tax = if buy_sell.can_buy { calculated_buy_tax } else { None };
-                    ("Honeypot detected! Cannot sell tokens".to_string(), buy_tax, None)
-                } else {
-                    // High sell tax case
-                    (format!("Honeypot detected! Sell tax: {:.1}%", calculated_sell_tax.unwrap_or(100.0)), 
-                     calculated_buy_tax, 
-                     calculated_sell_tax)
-                }
-            } else {
-                ("Honeypot detected!".to_string(), None, None)
-            };
-            
-            signals.push(TaxSignal {
-                token_address: token_address.clone(),
-                signal_type: TaxSignalType::Honeypot,
-                buy_tax: buy_tax_for_signal,
-                sell_tax: sell_tax_for_signal,
-                details,
-                confidence: 0.95,
-            });
-            return signals; // Honeypot overrides other signals
-        }
+        // Always log the tax calculation results
+        self.log_tax_detection(&token_address, sim_result, calculated_buy_tax, calculated_sell_tax);
 
-        // Check for high taxes
-        let high_buy = calculated_buy_tax.unwrap_or(0.0) >= self.high_tax_threshold;
-        let high_sell = calculated_sell_tax.unwrap_or(0.0) >= self.high_tax_threshold;
+        // Check for high taxes or honeypot patterns - consolidated detection
+        let cant_sell = sim_result.buy_sell_result.as_ref().map(|bs| !bs.can_sell).unwrap_or(false);
+        let buy_tax_exceeds_threshold = calculated_buy_tax.unwrap_or(0.0) >= self.config.max_acceptable_buy_tax as f64;
+        let sell_tax_exceeds_threshold = calculated_sell_tax.unwrap_or(0.0) >= self.config.max_acceptable_sell_tax as f64;
         
-        if high_buy || high_sell {
-            let details = match (high_buy, high_sell) {
-                (true, true) => format!("High taxes detected - Buy: {:.1}%, Sell: {:.1}%", 
+        // Generate consolidated high tax/honeypot signal if any condition is met
+        if buy_tax_exceeds_threshold || sell_tax_exceeds_threshold || cant_sell {
+            let details = match (buy_tax_exceeds_threshold, sell_tax_exceeds_threshold, cant_sell) {
+                (_, _, true) => "Honeypot detected! Cannot sell tokens".to_string(),
+                (true, true, _) => format!("High taxes - Buy: {:.1}%, Sell: {:.1}%", 
                     calculated_buy_tax.unwrap_or(0.0), calculated_sell_tax.unwrap_or(0.0)),
-                (true, false) => format!("High buy tax: {:.1}%", calculated_buy_tax.unwrap_or(0.0)),
-                (false, true) => format!("High sell tax: {:.1}%", calculated_sell_tax.unwrap_or(0.0)),
-                _ => unreachable!(),
+                (true, false, _) => format!("High buy tax: {:.1}%", calculated_buy_tax.unwrap_or(0.0)),
+                (false, true, _) => format!("High sell tax: {:.1}%", calculated_sell_tax.unwrap_or(0.0)),
+                _ => "Tax issue detected".to_string(),
             };
 
             signals.push(TaxSignal {
                 token_address: token_address.clone(),
-                signal_type: TaxSignalType::HighTax { buy: high_buy, sell: high_sell },
+                signal_type: TaxSignalType::HighTaxOrHoneypot { 
+                    buy_tax_exceeds_threshold, 
+                    sell_tax_exceeds_threshold, 
+                    cant_sell 
+                },
                 buy_tax: calculated_buy_tax,
                 sell_tax: calculated_sell_tax,
                 details,
-                confidence: 0.9,
+                confidence: if cant_sell { 0.95 } else { 0.9 },
             });
+            
+            // If can't sell (honeypot), return early (don't check other patterns)
+            if cant_sell {
+                return signals;
+            }
         }
 
-        // Check for suspicious patterns
+        // Check for suspicious patterns (only if no high tax/honeypot detected)
         if let (Some(buy_tax), Some(sell_tax)) = (calculated_buy_tax, calculated_sell_tax) {
-            // Low buy tax with high sell tax is suspicious
-            if buy_tax <= 5.0 && sell_tax >= buy_tax + self.suspicious_difference_threshold {
+            // Low buy tax with high sell tax difference is suspicious
+            let suspicious_difference_threshold = 20.0; // Configurable if needed later
+            if buy_tax <= 5.0 && sell_tax >= buy_tax + suspicious_difference_threshold {
                 signals.push(TaxSignal {
                     token_address: token_address.clone(),
                     signal_type: TaxSignalType::SuspiciousPattern,
@@ -195,8 +190,6 @@ impl TaxDetector {
 
         // Log summary if any signals detected
         if !signals.is_empty() {
-            info!("💸 Tax detector found {} signals for token {}", signals.len(), token_address);
-            
             // Log to file if path is configured
             if let Some(ref log_path) = self.log_file_path {
                 for signal in &signals {
@@ -231,6 +224,43 @@ impl TaxDetector {
         signals
     }
 
+    /// Log tax detection results for debugging and monitoring
+    fn log_tax_detection(&self, token_address: &str, sim_result: &SimulationResult, buy_tax: Option<f64>, sell_tax: Option<f64>) {
+        if let Some(ref log_path) = self.log_file_path {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
+                let timestamp = chrono::Local::now();
+                
+                // Extract pool address if available
+                let pool_address = sim_result.pool_address
+                    .map(|addr| format!("0x{}", hex::encode(addr)))
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                // Extract buy/sell capabilities
+                let (can_buy, can_sell) = if let Some(buy_sell) = &sim_result.buy_sell_result {
+                    (buy_sell.can_buy, buy_sell.can_sell)
+                } else {
+                    (false, false)
+                };
+                
+                writeln!(file, 
+                    "[{}] TAX_DETECTION | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {:.1}% | sell_tax: {:.1}%",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    sim_result.request.tx.hash,
+                    token_address,
+                    pool_address,
+                    can_buy,
+                    can_sell,
+                    buy_tax.unwrap_or(-1.0),  // -1 indicates not calculated
+                    sell_tax.unwrap_or(-1.0)   // -1 indicates not calculated
+                ).ok();
+            }
+        }
+    }
+
     /// Calculate taxes directly from state changes
     /// This can be used when we want to bypass pre-calculated values
     pub fn calculate_taxes_from_state_changes(
@@ -253,34 +283,22 @@ impl TaxDetector {
     }
 
     /// Check if taxes indicate a honeypot
-    pub fn is_honeypot(&self, buy_tax: Option<f64>, sell_tax: Option<f64>, can_sell: bool) -> bool {
-        // If sell fails, it's a honeypot
-        if !can_sell {
-            return true;
-        }
-        
-        // If sell tax is above honeypot threshold
-        if let Some(sell) = sell_tax {
-            if sell >= self.honeypot_threshold {
-                return true;
-            }
-        }
-        
-        false
+    pub fn is_honeypot(&self, _buy_tax: Option<f64>, _sell_tax: Option<f64>, can_sell: bool) -> bool {
+        // Primary honeypot indicator: can't sell at all
+        !can_sell
     }
 
     /// Determine if trading should be enabled based on taxes
     pub fn should_enable_trading(&self, buy_tax: Option<f64>, sell_tax: Option<f64>) -> bool {
-        // Don't enable if it's a honeypot
+        // Don't enable if taxes are too high
         if let Some(sell) = sell_tax {
-            if sell >= self.honeypot_threshold {
+            if sell >= self.config.max_acceptable_sell_tax as f64 {
                 return false;
             }
         }
         
-        // Don't enable if taxes are extremely high
         if let Some(buy) = buy_tax {
-            if buy >= self.honeypot_threshold {
+            if buy >= self.config.max_acceptable_buy_tax as f64 {
                 return false;
             }
         }
@@ -291,6 +309,7 @@ impl TaxDetector {
 
 impl Default for TaxDetector {
     fn default() -> Self {
-        Self::new()
+        use crate::config::TaxDetectionConfig;
+        Self::new(TaxDetectionConfig::default())
     }
 }

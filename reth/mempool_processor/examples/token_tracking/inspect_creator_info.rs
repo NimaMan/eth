@@ -1,13 +1,31 @@
 /// Inspect Creator and Token Information
 ///
-/// Get comprehensive token information for creator addresses and analyze pools
+/// Get comprehensive token information for creator addresses and analyze pools.
+/// Includes functionality to export all creator tokens and their pools to CSV.
+///
+/// Algorithm:
+/// 1. Connect to token tracking cache via ZMQ subscriber
+/// 2. For a given creator address, retrieve all created tokens
+/// 3. For each token, collect all associated pools with reserves and price ratios
+/// 4. Display comprehensive information in console
+/// 5. Optionally export all data to CSV with complete pool information
+/// 6. Calculate price ratios (denom_reserve / token_reserve) for each pool
+/// 7. Track per-pool trading enabled status and other pool-specific metadata
 
 use std::time::Duration;
+use std::fs::File;
+use std::io::Write;
+use std::collections::HashMap;
 use clap::Parser;
 use eyre::Result;
-use tracing::info;
+use tracing::{info, warn, debug, error};
+use chrono::Utc;
+use serde_json;
+use zmq;
 
-use mempool_processor::token_tracking::TokenTrackingSubscriber;
+use mempool_processor::token_tracking::{TokenTrackingSubscriber, types::{TokenQueryResponse, TokenInfo, PoolInfo}};
+
+const ZMQ_REP_ENDPOINT: &str = "tcp://localhost:5558";
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -22,6 +40,14 @@ struct Args {
     /// Show detailed pool information
     #[arg(long, default_value = "false")]
     detailed: bool,
+    
+    /// Export creator's tokens and pools to CSV
+    #[arg(long, default_value = "false")]
+    export_csv: bool,
+    
+    /// Fetch all tokens from Python cache (comprehensive export)
+    #[arg(long, default_value = "false")]
+    export_all: bool,
 }
 
 #[tokio::main]
@@ -65,12 +91,17 @@ async fn main() -> Result<()> {
     info!("\n🔍 Checking creator cache...");
     let all_creators = token_cache.get_all_creators().await;
     
-    if all_creators.contains(&args.creator) {
+    // Get tokens by creator (will be empty if not a creator)
+    let tokens_by_creator = if all_creators.contains(&args.creator) {
         info!("✅ Found address in creators set!");
-        
-        // Get all tokens created by this address
-        let tokens_by_creator = token_cache.get_tokens_by_creator(&args.creator).await;
-        info!("\n📊 Total tokens created by this address: {}", tokens_by_creator.len());
+        let tokens = token_cache.get_tokens_by_creator(&args.creator).await;
+        info!("\n📊 Total tokens created by this address: {}", tokens.len());
+        tokens
+    } else {
+        Vec::new()
+    };
+    
+    if !tokens_by_creator.is_empty() {
         
         // Display information for each token
         for (idx, token_address) in tokens_by_creator.iter().enumerate() {
@@ -184,7 +215,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-    } else {
+    } else if !all_creators.contains(&args.creator) {
         info!("❌ Creator not found in cache");
         info!("   This could mean:");
         info!("   - The address hasn't created any tokens");
@@ -241,6 +272,229 @@ async fn main() -> Result<()> {
     }
     
     info!("\n✅ Inspection complete!");
+    
+    // Export to CSV if requested
+    if args.export_csv || args.export_all {
+        info!("\n📊 Exporting data to CSV...");
+        
+        let mut token_data_to_export = HashMap::new();
+        
+        if args.export_all {
+            // Export all tokens from Python cache
+            match request_all_tokens().await {
+                Ok(response) => {
+                    if response.status == "success" {
+                        if let Some(data) = response.data {
+                            token_data_to_export = data;
+                            info!("✅ Retrieved {} tokens from Python cache", token_data_to_export.len());
+                        }
+                    } else {
+                        error!("Failed to get all tokens: {}", response.error.unwrap_or("Unknown error".to_string()));
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to request all tokens: {}", e);
+                }
+            }
+        } else {
+            // Export only creator's tokens
+            for token_address in &tokens_by_creator {
+                if let Some(token_info) = token_cache.get_token(&token_address).await {
+                    token_data_to_export.insert(token_address.clone(), token_info);
+                }
+            }
+        }
+        
+        if !token_data_to_export.is_empty() {
+            let csv_filename = if args.export_all {
+                format!("all_tokens_pools_{}.csv", Utc::now().format("%Y%m%d_%H%M%S"))
+            } else {
+                format!("creator_{}_tokens_pools_{}.csv", 
+                    &args.creator[2..8], // First 6 chars after 0x
+                    Utc::now().format("%Y%m%d_%H%M%S"))
+            };
+            
+            match write_token_pool_csv(&token_data_to_export, &csv_filename) {
+                Ok(_) => info!("✅ CSV file written: {}", csv_filename),
+                Err(e) => error!("Failed to write CSV: {}", e),
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+async fn request_all_tokens() -> Result<TokenQueryResponse, Box<dyn std::error::Error>> {
+    info!("Connecting to Python REP socket at {}", ZMQ_REP_ENDPOINT);
+    
+    let context = zmq::Context::new();
+    let requester = context.socket(zmq::REQ)?;
+    requester.connect(ZMQ_REP_ENDPOINT)?;
+    
+    // Create request for all tokens
+    let request = serde_json::json!({
+        "type": "get_all_tokens"
+    });
+    
+    info!("Sending get_all_tokens request");
+    requester.send(&request.to_string(), 0)?;
+    
+    // Receive response
+    let response_str = match requester.recv_string(0) {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return Err(format!("ZMQ string conversion error: {:?}", e).into()),
+        Err(e) => return Err(format!("ZMQ recv error: {:?}", e).into()),
+    };
+    
+    debug!("Received response: {} bytes", response_str.len());
+    
+    // Parse response
+    let response: TokenQueryResponse = serde_json::from_str(&response_str)?;
+    
+    Ok(response)
+}
+
+fn write_token_pool_csv(token_data: &HashMap<String, TokenInfo>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = File::create(filename)?;
+    
+    // Write CSV header with all relevant fields
+    writeln!(file, "token_address,token_symbol,token_name,token_decimals,total_supply,creator_address,current_owner,ownership_renounced,creation_block,creation_txn,latest_activity_block,is_scam_token,scam_label_token,pool_address,pool_type,denom_address,denom_currency,denom_reserve,token_reserve,pool_trading_enabled,pool_trading_enabled_block,pool_trading_enabled_txn,is_scam_pool,scam_label_pool,price_ratio,fee_tier,pool_id,latest_block_number,last_update_time")?;
+    
+    let mut total_records = 0;
+    let mut tokens_processed = 0;
+    
+    // Process each token
+    for (token_address, token_info) in token_data {
+        tokens_processed += 1;
+        
+        // If token has no pools, write one record with token info only
+        if token_info.pools.is_empty() {
+            write_token_record(&mut file, token_address, token_info, None, None)?;
+            total_records += 1;
+        } else {
+            // Write one record for each token-pool pair
+            for (pool_address, pool_info) in &token_info.pools {
+                write_token_record(&mut file, token_address, token_info, Some(pool_address), Some(pool_info))?;
+                total_records += 1;
+            }
+        }
+        
+        if tokens_processed % 100 == 0 {
+            debug!("Processed {} tokens, {} records", tokens_processed, total_records);
+        }
+    }
+    
+    info!("✅ CSV export complete: {} tokens, {} token-pool records", tokens_processed, total_records);
+    
+    Ok(())
+}
+
+fn write_token_record(
+    file: &mut File, 
+    token_address: &str, 
+    token_info: &TokenInfo, 
+    pool_address: Option<&String>, 
+    pool_info: Option<&PoolInfo>
+) -> Result<(), Box<dyn std::error::Error>> {
+    
+    // Escape CSV field values
+    let escape_csv = |s: &str| -> String {
+        if s.contains(',') || s.contains('"') || s.contains('\n') {
+            format!("\"{}\"", s.replace("\"", "\"\""))
+        } else {
+            s.to_string()
+        }
+    };
+    
+    // Token fields
+    let token_symbol = token_info.symbol.as_deref().unwrap_or("").to_string();
+    let token_name = token_info.name.as_deref().unwrap_or("").to_string();
+    let token_decimals = token_info.decimals.map(|d| d.to_string()).unwrap_or_else(|| "".to_string());
+    let total_supply = token_info.total_supply.as_deref().unwrap_or("").to_string();
+    let scam_label_token = token_info.scam_label.as_deref().unwrap_or("").to_string();
+    
+    // Pool fields (empty if no pool)
+    let pool_addr = pool_address.map(|s| s.as_str()).unwrap_or("");
+    let pool_type = pool_info.map(|p| p.pool_type.as_str()).unwrap_or("");
+    let denom_address = pool_info.map(|p| p.denom_address.as_str()).unwrap_or("");
+    let denom_currency = pool_info.map(|p| p.denom_currency.as_str()).unwrap_or("");
+    let denom_reserve = pool_info.map(|p| p.denom_reserve.to_string()).unwrap_or_else(|| "".to_string());
+    let token_reserve = pool_info.map(|p| p.token_reserve.to_string()).unwrap_or_else(|| "".to_string());
+    
+    // Per-pool trading enabled fields
+    let pool_trading_enabled = pool_info
+        .and_then(|p| p.trading_enabled)
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| "".to_string());
+    let pool_trading_enabled_block = pool_info
+        .and_then(|p| p.trading_enabled_block)
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| "".to_string());
+    let pool_trading_enabled_txn = pool_info
+        .and_then(|p| p.trading_enabled_txn.as_deref())
+        .unwrap_or("");
+    
+    // Pool scam fields
+    let is_scam_pool = pool_info.map(|p| p.is_scam.to_string()).unwrap_or_else(|| "".to_string());
+    let scam_label_pool = pool_info.and_then(|p| p.scam_label.as_deref()).unwrap_or("");
+    
+    // Pool-specific fields
+    let fee_tier = pool_info
+        .and_then(|p| p.fee_tier)
+        .map(|f| f.to_string())
+        .unwrap_or_else(|| "".to_string());
+    let pool_id = pool_info.and_then(|p| p.pool_id.as_deref()).unwrap_or("");
+    let latest_block_number = pool_info.map(|p| p.latest_block_number.to_string()).unwrap_or_else(|| "".to_string());
+    let last_update_time = pool_info
+        .and_then(|p| p.last_update_time)
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "".to_string());
+    
+    // Calculate price ratio (denom_reserve / token_reserve if both > 0)
+    let price_ratio = if let Some(pool) = pool_info {
+        if pool.token_reserve > 0.0 && pool.denom_reserve > 0.0 {
+            (pool.denom_reserve / pool.token_reserve).to_string()
+        } else {
+            "".to_string()
+        }
+    } else {
+        "".to_string()
+    };
+    
+    // Write the CSV record
+    writeln!(
+        file,
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        escape_csv(token_address),
+        escape_csv(&token_symbol),
+        escape_csv(&token_name),
+        token_decimals,
+        escape_csv(&total_supply),
+        escape_csv(&token_info.creator_address),
+        escape_csv(&token_info.current_owner),
+        token_info.ownership_renounced,
+        token_info.creation_block,
+        escape_csv(&token_info.creation_txn),
+        token_info.latest_activity_block,
+        token_info.is_scam,
+        escape_csv(&scam_label_token),
+        escape_csv(pool_addr),
+        escape_csv(pool_type),
+        escape_csv(denom_address),
+        escape_csv(denom_currency),
+        denom_reserve,
+        token_reserve,
+        pool_trading_enabled,
+        pool_trading_enabled_block,
+        escape_csv(pool_trading_enabled_txn),
+        is_scam_pool,
+        escape_csv(scam_label_pool),
+        price_ratio,
+        fee_tier,
+        escape_csv(pool_id),
+        latest_block_number,
+        last_update_time
+    )?;
     
     Ok(())
 }

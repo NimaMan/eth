@@ -44,6 +44,15 @@ pub struct PoolInfo {
     
     /// Reason for scam classification
     pub scam_label: Option<String>,
+    
+    /// Whether trading is enabled on this specific pool
+    pub trading_enabled: Option<bool>,
+    
+    /// Block when trading was enabled on this pool
+    pub trading_enabled_block: Option<u64>,
+    
+    /// Transaction hash when trading was enabled on this pool
+    pub trading_enabled_txn: Option<String>,
 }
 
 /// Token information including all its pools
@@ -62,11 +71,13 @@ pub struct TokenInfo {
     #[serde(alias = "creation_tx")]
     pub creation_txn: String,
     
-    /// Whether trading is enabled
+    /// DEPRECATED: Trading is now tracked per-pool, not per-token
+    /// Check PoolInfo.trading_enabled for pool-specific status
+    #[serde(default)]
     pub trading_enabled: bool,
     
-    /// Transaction hash when trading was enabled
-    #[serde(alias = "trading_enabled_tx")]
+    /// DEPRECATED: Use pool-level tracking
+    #[serde(alias = "trading_enabled_tx", default)]
     pub trading_enabled_txn: Option<String>,
     
     /// Current owner address

@@ -1,6 +1,15 @@
-# Mempool Signal Detection Architecture
+# Mempool Signal Detector Service
 
-This document explains the complete architecture of the mempool signal detection system, from transaction ingestion through signal generation and publishing, including the data transformation at each stage.
+## Overview
+
+The **mempool_signal_detector** is a production-grade service that implements a complete signal detection pipeline for Ethereum mempool transactions. It receives transactions from Reth IPC, detects function signatures, routes transactions by category, simulates relevant transactions, detects signals (trading enabled, liquidity removal, honeypots), and publishes signals via ZMQ and logs.
+
+This service operates with strict performance targets:
+- Function detection: <10μs per transaction
+- TX routing: <5μs per transaction  
+- Simulation: <50ms per transaction (Reth bottleneck)
+- Signal detection: <1ms per result
+- End-to-end: <100ms for critical signals
 
 ## High-Level Architecture
 
@@ -556,6 +565,117 @@ The system generates three simple binary signals:
 3. **Alert Systems**: Monitor critical severity signals
 4. **Research Tools**: Query historical database
 
+## Command Line Arguments
+
+The service accepts the following command-line arguments:
+
+```bash
+mempool_signal_detector [OPTIONS]
+
+OPTIONS:
+    --ipc-path <PATH>           IPC socket path [env: IPC_PATH] [default: /tmp/reth.ipc]
+    --reth-db-path <PATH>       Reth database path for simulations [env: RETH_DB_PATH] 
+                                [default: /home/nima/.local/share/reth/mainnet]
+    --log-dir <PATH>            Log directory base path [default: /home/nima/code/crypto/logs/mempool]
+    --batch-size <SIZE>         Batch size for transaction processing [default: 100]
+    --sim-workers <COUNT>       Simulation worker threads [default: 10]
+    -v, --verbose               Enable verbose logging
+    --report-interval <SECS>    Performance report interval in seconds [default: 60]
+    --database-url <URL>        Database URL for mempool timestamp tracking [env: DATABASE_URL]
+```
+
+## Service Components
+
+### 1. Token Tracking Subscriber
+- Starts immediately on service launch
+- Maintains real-time cache of token pools and creators
+- 0.1 ETH threshold for tracking
+- Provides context for signal detection decisions
+
+### 2. IPC Client (NonBlockingIpcClient)
+- Connects to Reth node via Unix socket
+- Zero-copy transaction parsing
+- Auto-reconnection on failure
+- Maintains sub-millisecond latency
+
+### 3. Mempool Timestamp Tracker (Optional)
+- Records transaction arrival times when DATABASE_URL is provided
+- Tracks mempool timestamps for analysis
+- Uses PostgreSQL connection pool (max 5 connections)
+
+### 4. Function Detector
+- Identifies function signatures in transaction calldata
+- Maintains cache of known signatures
+- Custom log directory for function detection logs
+
+### 5. Transaction Router
+- Classifies transactions into categories
+- Assigns simulation priorities
+- Determines which transactions require simulation
+
+### 6. Unified Simulator
+- Single database connection for all simulations
+- Configurable buy/sell testing parameters
+- Direct Reth database access for performance
+
+### 7. Signal Publisher
+- Publishes signals to ZMQ endpoints
+- Writes structured logs to signal directory
+- Integrated with simulation manager
+
+### 8. Simulation Manager
+- Manages concurrent simulation workers
+- Integrates signal detection and publishing
+- Priority-based queue processing
+- Automatic signal detection on simulation completion
+
+## Performance Metrics
+
+The service tracks detailed performance metrics:
+
+### Transaction Metrics
+- Total processed transactions
+- Contract creations count
+- Creator actions count
+- DEX interactions count
+- Regular transactions count
+
+### Simulation Metrics
+- Simulations submitted
+- Simulations completed
+- Simulation errors
+- Simulation timing (avg/max/p99)
+
+### Signal Counts
+- Trading enabled signals
+- Liquidity removal signals
+- Honeypot signals
+- Tax change signals
+
+### Latency Tracking
+- Detection latencies (maintains last 5000 samples)
+- Routing latencies (maintains last 5000 samples)
+- Simulation times (maintains last 500 samples)
+
+## Log Output Structure
+
+The service creates a timestamped run directory with the following structure:
+
+```
+/home/nima/code/crypto/logs/mempool/signal_detector_YYYY-MM-DD_HH-MM-SS/
+├── signal_detector.log          # Main service logs
+├── simulation.log               # Simulation-specific logs
+├── summary.log                  # High-level metrics summary
+├── performance.log              # Detailed performance metrics
+├── simulation_results.log       # Individual simulation results
+├── function_detector/           # Function detection logs
+│   └── ...
+└── signals/                     # Signal output directory
+    ├── trading_enabled.log
+    ├── high_tax_warnings.log
+    └── liquidity_removals.log
+```
+
 ## Monitoring & Operations
 
 ### Health Checks
@@ -563,6 +683,7 @@ The system generates three simple binary signals:
 - Queue depths (should be <1000)
 - Simulation success rate (>80%)
 - Publishing latency (<10ms)
+- Token cache population status
 
 ### Key Metrics
 ```
@@ -587,6 +708,24 @@ publisher_queue_depth{endpoint="tcp://127.0.0.1:5556"}
 2. Check creator cache updates
 3. Confirm simulation success
 4. Monitor publisher errors
+
+## Graceful Shutdown
+
+The service implements graceful shutdown handling:
+- Responds to SIGTERM and Ctrl+C signals
+- Completes in-flight simulations
+- Writes final statistics to summary log
+- Properly closes all connections and file handles
+- Aborts background token subscriber task
+
+## Adaptive Backoff
+
+The main processing loop implements adaptive backoff when no transactions are available:
+- 1-10 empty batches: 100μs sleep
+- 11-100 empty batches: 1ms sleep
+- >100 empty batches: 10ms sleep
+
+This ensures efficient CPU usage while maintaining low latency for new transactions.
 
 ## Future Enhancements
 

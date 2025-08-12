@@ -7,11 +7,13 @@ pub mod mempool_timestamp_tracker;
 pub mod trading_signal_writer;
 pub mod liquidity_removal_signal_writer;
 pub mod lp_approval_signal_writer;
+pub mod tax_signal_writer;
 
 pub use mempool_timestamp_tracker::{MempoolTimestampTracker, TrackerConfig};
 pub use trading_signal_writer::{TradingSignalWriter, TradingSignalRecord, WriterConfig as SignalWriterConfig};
 pub use liquidity_removal_signal_writer::{LiquidityRemovalSignalWriter, LiquidityRemovalSignalRecord};
 pub use lp_approval_signal_writer::{LpApprovalSignalWriter, LpApprovalSignalRecord};
+pub use tax_signal_writer::{TaxSignalWriter, TaxSignalRecord};
 
 /// Default database connection parameters
 pub const DEFAULT_DB_HOST: &str = "localhost";

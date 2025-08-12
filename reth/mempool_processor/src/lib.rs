@@ -14,7 +14,6 @@ pub mod publishers;
 // Signal processing modules
 pub mod function_detector;
 pub mod signal_detector;
-pub mod signal_generator;
 pub mod signal_publisher;
 pub mod simulator;
 pub mod tx_router;
@@ -31,7 +30,6 @@ pub mod tx_simulator {
         AddressStateChange,
         BatchSimulationOptions,
         BatchSimulationResult,
-        ipc_to_call_request,
     };
     
     // Re-export tx_processor if available

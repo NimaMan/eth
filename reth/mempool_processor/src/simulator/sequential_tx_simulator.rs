@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use alloy_primitives::{Address, Bytes, U256, I256};
 use reth_tx_simulator::{RethTxSimulator, CallRequest, AddressStateChange};
+use crate::common::address::alloy_address_to_checksum;
 use reth_tx_simulator::SequentialSimulationOptions;
 
 /// Result of a single transaction in the sequence
@@ -136,7 +137,19 @@ impl SequentialBuySellSimulator {
         pool_address: Address,
         block_number: Option<u64>,
     ) -> Result<SequenceSimulationResult> {
-        self.simulate_sequence_with_tx(None, token_address, pool_address, block_number).await
+        // Default to V2 for backward compatibility
+        self.simulate_sequence_with_pool_type(token_address, pool_address, "V2", block_number).await
+    }
+    
+    /// Simulate a buy/sell sequence with specific pool type
+    pub async fn simulate_sequence_with_pool_type(
+        &self,
+        token_address: Address,
+        pool_address: Address,
+        pool_type: &str,
+        block_number: Option<u64>,
+    ) -> Result<SequenceSimulationResult> {
+        self.simulate_sequence_with_tx_and_pool_type(None, token_address, pool_address, pool_type, block_number).await
     }
     
     /// Simulate a sequence with an optional given transaction first
@@ -148,19 +161,51 @@ impl SequentialBuySellSimulator {
         pool_address: Address,
         block_number: Option<u64>,
     ) -> Result<SequenceSimulationResult> {
+        // Default to V2 for backward compatibility
+        self.simulate_sequence_with_tx_and_pool_type(given_tx, token_address, pool_address, "V2", block_number).await
+    }
+    
+    /// Simulate a sequence with an optional given transaction first and specific pool type
+    /// Sequence: [Given TX] → Buy → Approve → Sell
+    pub async fn simulate_sequence_with_tx_and_pool_type(
+        &self,
+        given_tx: Option<CallRequest>,
+        token_address: Address,
+        pool_address: Address,
+        pool_type: &str,
+        block_number: Option<u64>,
+    ) -> Result<SequenceSimulationResult> {
         let start_time = Instant::now();
         
-        // Build buy transaction
-        let buy_calldata = self.encode_swap_exact_eth_for_tokens(
-            U256::ZERO, // min tokens out
-            vec![self.config.weth_address, token_address],
-            self.config.buyer_address,
-            U256::from(9999999999u64),
-        );
+        // Select router based on pool type
+        let router_address = self.get_router_for_pool_type(pool_type);
+        
+        // Build buy transaction based on pool type
+        let buy_calldata = match pool_type {
+            "V3" | "V4" => {
+                // For V3/V4, we still use V2 router for now as V3 requires more complex encoding
+                // TODO: Implement proper V3 exactInputSingle encoding
+                self.encode_swap_exact_eth_for_tokens(
+                    U256::ZERO, // min tokens out
+                    vec![self.config.weth_address, token_address],
+                    self.config.buyer_address,
+                    U256::from(9999999999u64),
+                )
+            },
+            _ => {
+                // V2 or unknown types use V2 method
+                self.encode_swap_exact_eth_for_tokens(
+                    U256::ZERO, // min tokens out
+                    vec![self.config.weth_address, token_address],
+                    self.config.buyer_address,
+                    U256::from(9999999999u64),
+                )
+            }
+        };
         
         let buy_request = CallRequest {
             from: Some(self.config.buyer_address),
-            to: Some(self.config.router_address),
+            to: Some(router_address),
             value: Some(self.config.test_buy_amount),
             data: Some(buy_calldata),
             gas: Some(self.config.gas_limit),
@@ -200,7 +245,7 @@ impl SequentialBuySellSimulator {
                 let tokens = buy_result.state_changes
                     .get(&self.config.buyer_address)
                     .and_then(|changes| {
-                        let token_addr_str = format!("{:#x}", token_address);
+                        let token_addr_str = alloy_address_to_checksum(token_address);
                         changes.token_net.get(&token_addr_str).copied()
                     })
                     .unwrap_or(I256::ZERO);
@@ -258,7 +303,7 @@ impl SequentialBuySellSimulator {
                     state_changes: HashMap::new(),
                 },
                 simulation_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
-                block_number: block_number.unwrap_or(0),
+                block_number: block_number.unwrap_or(0), // 0 indicates mempool tx (no block yet)
             });
         }
         
@@ -269,7 +314,7 @@ impl SequentialBuySellSimulator {
         } else {
             return Err(eyre::eyre!("Negative tokens received, this should not happen"));
         };
-        let approve_calldata = self.encode_approve(self.config.router_address, tokens_received_u256);
+        let approve_calldata = self.encode_approve(router_address, tokens_received_u256);
         let approve_request = CallRequest {
             from: Some(self.config.buyer_address),
             to: Some(token_address),
@@ -282,18 +327,34 @@ impl SequentialBuySellSimulator {
             nonce: None,
         };
         
-        // Build sell transaction
-        let sell_calldata = self.encode_swap_exact_tokens_for_eth(
-            tokens_received_u256,
-            U256::ZERO, // min ETH out
-            vec![token_address, self.config.weth_address],
-            self.config.buyer_address,
-            U256::from(9999999999u64),
-        );
+        // Build sell transaction based on pool type
+        let sell_calldata = match pool_type {
+            "V3" | "V4" => {
+                // For V3/V4, we still use V2 router for now as V3 requires more complex encoding
+                // TODO: Implement proper V3 exactOutputSingle encoding
+                self.encode_swap_exact_tokens_for_eth(
+                    tokens_received_u256,
+                    U256::ZERO, // min ETH out
+                    vec![token_address, self.config.weth_address],
+                    self.config.buyer_address,
+                    U256::from(9999999999u64),
+                )
+            },
+            _ => {
+                // V2 or unknown types use V2 method
+                self.encode_swap_exact_tokens_for_eth(
+                    tokens_received_u256,
+                    U256::ZERO, // min ETH out
+                    vec![token_address, self.config.weth_address],
+                    self.config.buyer_address,
+                    U256::from(9999999999u64),
+                )
+            }
+        };
         
         let sell_request = CallRequest {
             from: Some(self.config.buyer_address),
-            to: Some(self.config.router_address),
+            to: Some(router_address),
             value: Some(U256::ZERO),
             data: Some(sell_calldata),
             gas: Some(self.config.gas_limit),
@@ -456,6 +517,25 @@ impl SequentialBuySellSimulator {
         }
         
         Bytes::from(data)
+    }
+    
+    /// Get the appropriate router address based on pool type
+    fn get_router_for_pool_type(&self, pool_type: &str) -> Address {
+        match pool_type {
+            "V3" | "Uniswap-V3" => {
+                // Uniswap V3 SwapRouter
+                Address::from([0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0, 0x15, 0x7C, 0x05, 0x86, 0x15, 0x64])
+            },
+            "V4" | "Uniswap-V4" => {
+                // For V4, we use V3 router for now as V4 is still in development
+                // TODO: Update when V4 router is deployed
+                Address::from([0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0, 0x15, 0x7C, 0x05, 0x86, 0x15, 0x64])
+            },
+            _ => {
+                // Default to V2 router for "V2", "Uniswap-V2", or any unknown type
+                self.config.router_address
+            }
+        }
     }
     
     /// Encode approve(spender, amount) function call

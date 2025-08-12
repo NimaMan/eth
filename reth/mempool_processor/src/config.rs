@@ -78,9 +78,6 @@ pub struct TaxDetectionConfig {
     /// Maximum acceptable sell tax (percentage)
     pub max_acceptable_sell_tax: u8,
     
-    /// Honeypot sell tax threshold (percentage)
-    pub honeypot_sell_threshold: u8,
-    
     /// Alert on any tax change
     pub alert_on_any_change: bool,
     
@@ -91,11 +88,27 @@ pub struct TaxDetectionConfig {
     pub min_change_threshold: u8,
 }
 
+impl Default for TaxDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_acceptable_buy_tax: 30,
+            max_acceptable_sell_tax: 30,
+            alert_on_any_change: false,
+            alert_only_increases: true,
+            min_change_threshold: 5,
+        }
+    }
+}
+
 /// Signal detection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignalDetectionConfig {
     /// Minimum ETH in pool to track
     pub min_pool_eth: f64,
+    
+    /// Minimum ETH liquidity to consider trading already enabled
+    pub min_liquidity_threshold: f64,
     
     /// Scam detection ETH threshold
     pub scam_eth_threshold: f64,
@@ -213,7 +226,6 @@ impl Default for MempoolProcessorConfig {
                 enabled: true,
                 max_acceptable_buy_tax: 30,
                 max_acceptable_sell_tax: 30,
-                honeypot_sell_threshold: 50,
                 alert_on_any_change: false,
                 alert_only_increases: true,
                 min_change_threshold: 5,
@@ -221,6 +233,7 @@ impl Default for MempoolProcessorConfig {
             
             signal_detection: SignalDetectionConfig {
                 min_pool_eth: 0.7,
+                min_liquidity_threshold: 0.5,  // 0.5 ETH minimum to consider trading enabled
                 scam_eth_threshold: 0.3,
                 scam_percentage_threshold: 60.0,
                 liquidity_warning_percentage: 20.0,
@@ -297,9 +310,11 @@ impl MempoolProcessorConfig {
             config.database.enabled = true;
         }
         
-        if let Ok(threshold) = std::env::var("MEMPOOL_TAX_HONEYPOT_THRESHOLD") {
+        // Honeypot threshold removed - now determined by can't sell condition
+        
+        if let Ok(threshold) = std::env::var("MEMPOOL_MIN_LIQUIDITY_THRESHOLD") {
             if let Ok(val) = threshold.parse() {
-                config.tax_detection.honeypot_sell_threshold = val;
+                config.signal_detection.min_liquidity_threshold = val;
             }
         }
         

@@ -15,6 +15,29 @@ use zmq::{Context, Socket};
 use serde::{Serialize, Deserialize};
 use crate::token_tracking::TokenTrackingCache;
 use crate::common::address::checksum_address;
+use hex;
+use futures;
+
+/// Types of functions called by creators
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreatorFunctionType {
+    TaxModification,
+    TradingControl,
+    OwnershipChange,
+    LiquidityAddition,      // Adding liquidity to pool
+    LiquidityRemoval,       // Removing liquidity from pool
+    LiquidityPoolApproval,  // LP token approval to router (rug pull setup)
+    MaxWalletLimit,
+    Other(String),
+}
+
+/// Function detection result with category
+#[derive(Debug, Clone)]
+pub struct FunctionDetectionResult {
+    pub function_name: String,
+    pub function_type: CreatorFunctionType,
+    pub selector: String,
+}
 
 lazy_static! {
     /// Log directory path - initialized once at startup
@@ -223,7 +246,7 @@ impl FunctionDetector {
         self.detect_all(tx_hash, &from, &to, &value, &gas_price, &ipc_tx.input);
     }
     
-    /// Process batch of transactions and return with function information
+    /// Process batch of transactions and return with function information and categories
     pub fn detect_batch(&self, mut transactions: Vec<crate::mempool_fetcher::MempoolTransaction>) -> Vec<crate::mempool_fetcher::MempoolTransaction> {
         for tx in transactions.iter_mut() {
             let mut functions = Vec::new();
@@ -235,44 +258,16 @@ impl FunctionDetector {
             }
             
             let selector = &tx.input[0..4];
+            let selector_hex = hex::encode(selector);
             
-            // Check for approve function first - needs special handling for LP tokens
-            if selector == &hex_to_bytes("095ea7b3") {
-                // Check if this is an LP token approval
-                let to_address = tx.to.as_ref()
-                    .map(|addr| checksum_address(&hex::encode(addr)))
-                    .unwrap_or_else(|| "contract_creation".to_string());
-                    
-                let is_lp_approval = if let Some(ref cache) = self.token_cache {
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            cache.pools.is_pool_address(&to_address).await
-                        })
-                    })
-                } else {
-                    false
-                };
-                
-                if is_lp_approval {
-                    functions.push("approve (LP Token)".to_string());
-                }
+            // Detect function and categorize it
+            let detection_result = self.detect_and_categorize(tx, selector, &selector_hex);
+            
+            if let Some(result) = detection_result {
+                functions.push(result.function_name.clone());
+                // Store the function type for router to use
+                tx.function_category = Some(result.function_type);
             }
-            
-            // Check liquidity removal
-            if let Some(function_name) = self.liquidity_removal.detect(selector) {
-                functions.push(function_name.to_string());
-            }
-            
-            // Check trading enabled
-            if let Some(function_name) = self.trading_enabled.detect(selector) {
-                functions.push(function_name.to_string());
-            }
-            
-            // Check swaps
-            if let Some(function_name) = self.swap.detect(selector) {
-                functions.push(function_name.to_string());
-            }
-            
             
             // Still call the existing detection for logging and ZMQ publishing
             self.detect_from_ipc(&tx);
@@ -281,6 +276,144 @@ impl FunctionDetector {
         }
         
         transactions
+    }
+    
+    /// Detect and categorize a function call
+    fn detect_and_categorize(&self, tx: &crate::mempool_fetcher::MempoolTransaction, selector: &[u8], selector_hex: &str) -> Option<FunctionDetectionResult> {
+        // Check if this is a simple ETH transfer (no input data or empty input)
+        if tx.input.is_empty() || tx.input.len() < 4 {
+            return Some(FunctionDetectionResult {
+                function_name: "eth_transfer".to_string(),
+                function_type: CreatorFunctionType::Other("eth_transfer".to_string()),
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check for approve function first - needs special handling for LP tokens
+        if selector == &hex_to_bytes("095ea7b3") {
+            let approve_type = self.classify_approve(tx);
+            return Some(FunctionDetectionResult {
+                function_name: "approve".to_string(),
+                function_type: approve_type,
+                selector: selector_hex.to_string(),
+            });
+        }
+        
+        // Check liquidity removal functions
+        if let Some(function_name) = self.liquidity_removal.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::LiquidityRemoval,
+                selector: selector_hex.to_string(),
+            });
+        }
+        
+        // Check trading enabled functions
+        if let Some(function_name) = self.trading_enabled.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::TradingControl,
+                selector: selector_hex.to_string(),
+            });
+        }
+        
+        // Check swap functions
+        if let Some(function_name) = self.swap.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::Other(function_name.to_string()),
+                selector: selector_hex.to_string(),
+            });
+        }
+        
+        // Check for other known functions by name mapping
+        if let Some(function_type) = self.map_function_name_to_type(selector_hex) {
+            return Some(FunctionDetectionResult {
+                function_name: format!("unknown_{}", selector_hex),
+                function_type,
+                selector: selector_hex.to_string(),
+            });
+        }
+        
+        // Unknown function
+        Some(FunctionDetectionResult {
+            function_name: format!("unknown_{}", selector_hex),
+            function_type: CreatorFunctionType::Other(selector_hex.to_string()),
+            selector: selector_hex.to_string(),
+        })
+    }
+    
+    /// Map function selectors to types based on known signatures
+    fn map_function_name_to_type(&self, selector_hex: &str) -> Option<CreatorFunctionType> {
+        match selector_hex {
+            // Tax modification functions
+            "715018a6" | "70a08231" => Some(CreatorFunctionType::TaxModification),
+            
+            // Trading control functions  
+            "8a8c523c" | "c9567bf9" => Some(CreatorFunctionType::TradingControl),
+            
+            // Ownership functions
+            "f2fde38b" | "8da5cb5b" => Some(CreatorFunctionType::OwnershipChange),
+            
+            // Liquidity additions
+            "e8e33700" | "f305d719" => Some(CreatorFunctionType::LiquidityAddition),
+            
+            // Max wallet/tx limits
+            "a9059cbb" => Some(CreatorFunctionType::MaxWalletLimit),
+            
+            _ => None
+        }
+    }
+    
+    /// Classify approve() calls - determine if it's LP token approval for rug pull
+    fn classify_approve(&self, tx: &crate::mempool_fetcher::MempoolTransaction) -> CreatorFunctionType {
+        // Check if we have enough data for approve(address,uint256)
+        if tx.input.len() < 68 {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+        
+        // Extract spender address from input data (bytes 4-36)
+        let spender_bytes = &tx.input[16..36]; // Skip 12 bytes of padding
+        let spender_hex = hex::encode(spender_bytes);
+        
+        // Known DEX routers that handle liquidity removal
+        const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
+        const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+        
+        // Check if spender is a known router
+        let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER) ||
+                                 spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+        
+        // Only check pool if router is being approved
+        if !is_router_approval {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+        
+        // Check if the approve is being called on an LP token contract
+        if let Some(to_bytes) = &tx.to {
+            let to_addr = hex::encode(to_bytes);
+            
+            if let Some(ref cache) = self.token_cache {
+                let from_addr = checksum_address(&hex::encode(&tx.from));
+                
+                // Get the token created by this address
+                if let Some(token_info) = futures::executor::block_on(cache.get_token_for_creator(&from_addr)) {
+                    // Get all pools for this token
+                    let pools = futures::executor::block_on(cache.get_pools_for_token(&token_info.token_address));
+                    
+                    // Check if the 'to' address is one of the pool addresses
+                    for (pool_addr, _pool_state) in pools {
+                        if to_addr.eq_ignore_ascii_case(&pool_addr) {
+                            // Creator is approving router to spend LP tokens = rug pull setup
+                            return CreatorFunctionType::LiquidityPoolApproval;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Regular approval (not LP token or not to router)
+        CreatorFunctionType::Other("approve".to_string())
     }
     
     /// Internal function to detect all function types with extracted details

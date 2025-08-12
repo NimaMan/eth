@@ -1,7 +1,22 @@
 /// Signal Manager
 /// 
 /// Coordinates all signal detectors to analyze simulation results and emit signals.
-/// This module acts as the main entry point for signal detection from state changes.
+/// 
+/// KEY ARCHITECTURE - PER-POOL SIGNAL GENERATION:
+/// - Receives SimulationResult for EACH pool independently
+/// - Each signal is a function of (token_address, pool_address)
+/// - A token with 3 pools generates 3 separate signals
+/// - Each signal contains pool-specific data:
+///   * pool_address: Unique identifier for the pool
+///   * pool_type: V2, V3, or V4
+///   * Tax values specific to that pool
+///   * Liquidity metrics for that pool
+/// 
+/// Signal Types (all per-pool):
+/// - TradingEnabled: Trading activated on a specific pool
+/// - HighTaxWarning: High taxes detected on a specific pool
+/// - ScamDetection: Liquidity drain from a specific pool
+/// - LiquidityRemoval: Liquidity removed from a specific pool
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +32,7 @@ use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
 use crate::common::address::checksum_address;
 use crate::signal_publisher::SignalPublisher;
+use crate::config::TaxDetectionConfig;
 use hex;
 
 use super::{
@@ -34,12 +50,18 @@ use super::{
 pub struct SignalManagerConfig {
     /// Log directory for signal outputs
     pub log_dir: PathBuf,
+    /// Minimum ETH liquidity to consider trading already enabled (default: 0.5 ETH)
+    pub min_liquidity_threshold: f64,
+    /// Tax detection configuration
+    pub tax_detection: TaxDetectionConfig,
 }
 
 impl Default for SignalManagerConfig {
     fn default() -> Self {
         Self {
             log_dir: PathBuf::from("logs/signals"),
+            min_liquidity_threshold: 0.5, // 0.5 ETH minimum liquidity
+            tax_detection: TaxDetectionConfig::default(),
         }
     }
 }
@@ -85,11 +107,11 @@ impl SignalManager {
         }
         
         Self {
-            config,
+            config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
             stablecoin_detector: StablecoinDetector::new(),
-            trading_status_detector: TradingStatusDetector::with_log_path(trading_log_path),
-            tax_detector: TaxDetector::with_log_path(tax_log_path),
+            trading_status_detector: TradingStatusDetector::with_config(trading_log_path, config.min_liquidity_threshold),
+            tax_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
             lp_approval_detector: LpApprovalDetector::new(),
             token_cache: None,
             signal_log_path,
@@ -100,7 +122,8 @@ impl SignalManager {
     /// Set the token tracking cache
     pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
         self.token_cache = Some(token_cache.clone());
-        self.liquidity_detector.set_token_cache(token_cache);
+        self.liquidity_detector.set_token_cache(token_cache.clone());
+        self.trading_status_detector.set_token_cache(token_cache.clone());
     }
     
     /// Set the signal publisher
@@ -143,25 +166,22 @@ impl SignalManager {
                         s.sell_tax
                     )
                 }
-                Signal::HighTaxWarning(s) => {
-                    let buy_tax_str = if s.buy_tax == 255 { 
-                        "None".to_string() 
-                    } else { 
-                        format!("{}%", s.buy_tax) 
-                    };
-                    let sell_tax_str = if s.sell_tax == 255 { 
-                        "None".to_string() 
-                    } else { 
-                        format!("{}%", s.sell_tax) 
-                    };
+                Signal::TaxSignal(s) => {
+                    let buy_tax_str = s.buy_tax
+                        .map(|tax| format!("{:.1}%", tax))
+                        .unwrap_or_else(|| "None".to_string());
+                    let sell_tax_str = s.sell_tax
+                        .map(|tax| format!("{:.1}%", tax))
+                        .unwrap_or_else(|| "None".to_string());
                     
-                    format!("[{}] SIGNAL_DETECTED | HIGH_TAX_WARNING | {} | token: {} | buy_tax: {} | sell_tax: {} | type: {:?}",
+                    format!("[{}] SIGNAL_DETECTED | TAX_SIGNAL | {} | token: {} | pool: {} | buy_tax: {} | sell_tax: {} | type: {}",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                         s.tx_hash,
                         s.token_address,
+                        s.pool_address,
                         buy_tax_str,
                         sell_tax_str,
-                        s.warning_type
+                        s.signal_type
                     )
                 }
                 Signal::ScamDetection(s) => {
@@ -188,6 +208,11 @@ impl SignalManager {
     }
     
     /// Process simulation result to detect signals
+    /// 
+    /// CRITICAL: This function is called ONCE PER POOL
+    /// - Each pool's SimulationResult is processed independently
+    /// - Generates signals specific to the (token, pool) pair
+    /// - Pool address and type are extracted from the result
     pub async fn process_simulation_result(
         &mut self,
         result: &SimulationResult,
@@ -200,7 +225,12 @@ impl SignalManager {
         
         // Log to signal_manager.log
         let error_msg = if let Some(ref err) = result.error {
-            format!("Error: {}", err)
+            // Check if it's the expected "not implemented" message
+            if err.contains("Contract creation simulation not implemented") {
+                format!("Warning: {}", err)
+            } else {
+                format!("Error: {}", err)
+            }
         } else {
             "Success".to_string()
         };
@@ -218,7 +248,7 @@ impl SignalManager {
         ));
         
         // Log creator token info if this is a creator transaction
-        if let crate::tx_router::TransactionCategory::CreatorTransaction { creator, target_token, .. } = &result.request.category {
+        if let crate::tx_router::TransactionCategory::CreatorTransaction { creator, target_token, target_address, function_type, .. } = &result.request.category {
             if let Some(ref token_cache) = self.token_cache {
                 // Get all tokens created by this creator - need to checksum the address
                 let checksummed_creator = ethers::utils::to_checksum(&ethers::types::Address::from_str(creator).unwrap_or_default(), None);
@@ -241,6 +271,25 @@ impl SignalManager {
                         token_info,
                         target_token
                     ));
+                    
+                    // Check if this is an approve on a pool/LP token
+                    if matches!(function_type, crate::function_detector::CreatorFunctionType::Other(s) if s == "approve") {
+                        // Check if target_address matches any of the pools
+                        for token in &creator_tokens {
+                            let pools = token_cache.get_pools_for_token(token).await;
+                            for (pool_addr, pool_state) in pools {
+                                if target_address.eq_ignore_ascii_case(&pool_addr) {
+                                    self.log_activity("LP_TOKEN_APPROVAL", &format!(
+                                        "🚨 Creator approving LP tokens! | Pool: {} | Token: {} | Liquidity: {:.2} ETH",
+                                        pool_addr,
+                                        token,
+                                        pool_state.eth_reserve
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     self.log_activity("CREATOR_INFO", &format!(
                         "Creator: {} | No tokens tracked | Target: {:?}",
@@ -313,13 +362,19 @@ impl SignalManager {
                 "0%".to_string()
             };
             
+            // Include pool type if available
+            let pool_type_str = result.pool_type.as_ref()
+                .map(|pt| format!(" | Pool: {}", pt))
+                .unwrap_or_else(|| "".to_string());
+            
             self.log_activity("TAX_RESULT", &format!(
-                "Buy: {} | Sell: {} | Can Buy: {} | Can Sell: {} | Signals: {}",
+                "Buy: {} | Sell: {} | Can Buy: {} | Can Sell: {} | Signals: {}{}",
                 buy_tax_str,
                 sell_tax_str,
                 buy_sell.can_buy,
                 buy_sell.can_sell,
-                tax_signals.len()
+                tax_signals.len(),
+                pool_type_str
             ));
         } else {
             self.log_activity("TAX_RESULT", &format!(
@@ -340,46 +395,35 @@ impl SignalManager {
             }
             
             match tax_signal.signal_type {
-                TaxSignalType::Honeypot => {
-                    // Convert to high tax warning with honeypot type
-                    // Use 255 to represent "None/Unknown" tax
-                    let buy_tax_u8 = tax_signal.buy_tax
-                        .map(|t| t.min(254.0) as u8)
-                        .unwrap_or(255);
-                    let sell_tax_u8 = tax_signal.sell_tax
-                        .map(|t| t.min(254.0) as u8)
-                        .unwrap_or(255);
-                        
-                    signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
-                        tx_hash: result.request.tx.hash.clone(),
-                        token_address: tax_signal.token_address.clone(),
-                        creator_address: None,
-                        buy_tax: buy_tax_u8,
-                        sell_tax: sell_tax_u8,
-                        warning_type: crate::signal_detector::TaxWarningType::PotentialHoneypot,
-                        timestamp: chrono::Utc::now().timestamp() as u64,
-                        block_number: 0,
-                    }));
-                }
-                TaxSignalType::HighTax { buy, sell } => {
-                    // Convert to high tax warning
-                    let warning_type = if sell && tax_signal.sell_tax.unwrap_or(0.0) > 50.0 {
-                        crate::signal_detector::TaxWarningType::PotentialHoneypot
-                    } else if buy {
-                        crate::signal_detector::TaxWarningType::HighBuyTax
-                    } else {
-                        crate::signal_detector::TaxWarningType::HighSellTax
+                TaxSignalType::HighTaxOrHoneypot { cant_sell, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold } => {
+                    // Create pool-specific tax signal
+                    let pool_address = result.pool_address
+                        .map(|addr| format!("0x{}", hex::encode(addr)))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let pool_type = result.pool_type.clone()
+                        .unwrap_or_else(|| "V2".to_string());
+                    
+                    // Extract creator from category
+                    let creator_address = match &result.request.category {
+                        crate::tx_router::TransactionCategory::CreatorTransaction { creator, .. } => creator.clone(),
+                        _ => "unknown".to_string(),
                     };
                     
-                    signals.push(Signal::HighTaxWarning(crate::signal_detector::HighTaxWarningSignal {
+                    signals.push(Signal::TaxSignal(crate::signal_detector::types::TaxSignalRecord {
                         tx_hash: result.request.tx.hash.clone(),
                         token_address: tax_signal.token_address.clone(),
-                        creator_address: None,
-                        buy_tax: (tax_signal.buy_tax.unwrap_or(0.0)) as u8,
-                        sell_tax: (tax_signal.sell_tax.unwrap_or(0.0)) as u8,
-                        warning_type,
+                        pool_address,
+                        pool_type,
+                        creator_address,
+                        signal_type: "HighTaxOrHoneypot".to_string(),
+                        signal_details: tax_signal.details.clone(),
+                        confidence: tax_signal.confidence,
+                        buy_tax: tax_signal.buy_tax,
+                        sell_tax: tax_signal.sell_tax,
+                        buy_tax_exceeds_threshold,
+                        sell_tax_exceeds_threshold,
+                        cant_sell,
                         timestamp: chrono::Utc::now().timestamp() as u64,
-                        block_number: 0,
                     }));
                 }
                 _ => {
@@ -390,11 +434,18 @@ impl SignalManager {
         }
         
         // STEP 2: Trading status detector (ACTIVE) - Now with tax values
-        // Check for trading status changes
-        if let Some(trading_signal) = self.trading_status_detector.detect(result) {
+        // Check for trading status changes or detect already-enabled trading
+        if let Some(trading_signal) = self.trading_status_detector.detect(result, calculated_buy_tax, calculated_sell_tax).await {
             // Always log what we detected
             let status_msg = match trading_signal.status_change {
-                TradingStatusChange::TradingEnabled => "Trading Enabled",
+                TradingStatusChange::TradingEnabled => {
+                    // Check if this is a detection of already-enabled trading
+                    if trading_signal.details.contains("ALREADY ENABLED") {
+                        "Trading Detected (Already Enabled)"
+                    } else {
+                        "Trading Enabled"
+                    }
+                },
                 TradingStatusChange::TradingDisabled => "Trading Disabled",
                 TradingStatusChange::TradingPaused => "Trading Paused",
                 TradingStatusChange::NoChange => "No Change",
@@ -409,15 +460,23 @@ impl SignalManager {
             
             match trading_signal.status_change {
                 TradingStatusChange::TradingEnabled => {
-                    // Trading status detector will log to its own file
+                    // CRITICAL: Create pool-specific trading enabled signal
+                    // Each pool gets its own signal with unique pool_address
+                    let pool_address = result.pool_address
+                        .map(|addr| format!("0x{}", hex::encode(addr)))
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let pool_type = result.pool_type.clone()
+                        .unwrap_or_else(|| "V2".to_string());
+                    
                     signals.push(Signal::TradingEnabled(crate::signal_detector::TradingEnabledSignal {
                         tx_hash: result.request.tx.hash.clone(),
                         token_address: trading_signal.token_address.clone(),
+                        pool_address,  // Now includes the specific pool
+                        pool_type,     // Pool type (V2, V3, V4)
                         creator_address: trading_signal.executor.clone(),
                         buy_tax: calculated_buy_tax.unwrap_or(0.0) as u8,
                         sell_tax: calculated_sell_tax.unwrap_or(0.0) as u8,
                         timestamp: chrono::Utc::now().timestamp() as u64,
-                        block_number: 0,
                     }));
                 }
                 _ => {}
@@ -454,21 +513,23 @@ impl SignalManager {
             for liq_signal in liquidity_signals {
                 match liq_signal.signal_type {
                     super::liquidity_detector::SignalType::ScamDetected => {
+                        // Pool-specific scam detection (liquidity drain from THIS pool)
                         let scam_signal = Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
                             tx_hash: liq_signal.tx_hash.clone(),
                             pool_address: liq_signal.pool_address.clone(),
+                            pool_type: liq_signal.pool_type.clone(),  // Include pool type
                             token_address: liq_signal.token_address.clone(),
                             scammer_address: liq_signal.from_address.clone(),
                             eth_drained: liq_signal.eth_change.abs(),
                             eth_remaining: liq_signal.remaining_liquidity,
                             drain_percentage: liq_signal.percentage_change,
                             timestamp: chrono::Utc::now().timestamp() as u64,
-                            block_number: 0,
                         });
                         
                         self.log_activity("LIQUIDITY_SCAM_DETECTED", &format!(
-                            "Pool: {} | ETH drained: {:.4} | Remaining: {:.4} | Drain %: {:.1}%",
+                            "Pool: {} | Type: {} | ETH drained: {:.4} | Remaining: {:.4} | Drain %: {:.1}%",
                             liq_signal.pool_address,
+                            liq_signal.pool_type,
                             liq_signal.eth_change.abs(),
                             liq_signal.remaining_liquidity,
                             liq_signal.percentage_change
@@ -479,8 +540,9 @@ impl SignalManager {
                     super::liquidity_detector::SignalType::LiquidityRemoval => {
                         // Log liquidity removal but don't create a signal yet
                         self.log_activity("LIQUIDITY_REMOVAL", &format!(
-                            "Pool: {} | ETH removed: {:.4} | Remaining: {:.4} | Type: {:?}",
+                            "Pool: {} | Type: {} | ETH removed: {:.4} | Remaining: {:.4} | Change: {:?}",
                             liq_signal.pool_address,
+                            liq_signal.pool_type,
                             liq_signal.eth_change.abs(),
                             liq_signal.remaining_liquidity,
                             liq_signal.change_type
@@ -592,17 +654,28 @@ impl SignalManager {
             
             // Publish the signal immediately if we have a publisher
             if let Some(ref publisher) = self.publisher {
+                // Get pool type from cache if available
+                let pool_type = if let Some(ref token_cache) = self.token_cache {
+                    if let Some(pool_state) = token_cache.get_pool_by_address(&lp_signal.lp_token_address).await {
+                        pool_state.pool_type.clone()
+                    } else {
+                        "V2".to_string() // Default to V2 if unknown
+                    }
+                } else {
+                    "V2".to_string()
+                };
+                
                 // Create a scam detection signal for LP approval (rug pull setup)
                 let signal = Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
                     tx_hash: lp_signal.tx_hash,
                     pool_address: lp_signal.lp_token_address.clone(),
+                    pool_type,  // Include pool type
                     token_address: lp_signal.lp_token_address,
                     scammer_address: lp_signal.creator,
                     eth_drained: 0.0, // Not drained yet, just approved
                     eth_remaining: 0.0, // Unknown until actual removal
                     drain_percentage: 0.0, // Will be 100% when executed
                     timestamp: chrono::Utc::now().timestamp() as u64,
-                    block_number: 0,
                 });
                 
                 // Log the signal

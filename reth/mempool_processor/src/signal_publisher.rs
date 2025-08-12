@@ -14,7 +14,8 @@ use std::path::PathBuf;
 use chrono::Utc;
 use eyre::Result;
 
-use super::signal_detector::{Signal, TradingEnabledSignal, HighTaxWarningSignal, LiquidityRemovalSignal};
+use super::signal_detector::{Signal, TradingEnabledSignal, LiquidityRemovalSignal};
+use super::signal_detector::types::TaxSignalRecord;
 // Database imports disabled for now
 // use crate::database::{TradingEventWriter, TradingEnabledEvent, CreatorActionEvent};
 
@@ -27,8 +28,6 @@ pub struct SignalPublisherConfig {
     pub log_dir: String,
     /// Enable database writing
     pub enable_database: bool,
-    /// Database connection string
-    pub database_url: Option<String>,
     /// Database channel buffer size
     pub db_channel_buffer_size: usize,
 }
@@ -40,7 +39,6 @@ impl SignalPublisherConfig {
             zmq_endpoint: "tcp://127.0.0.1:5556".to_string(),
             log_dir: log_dir.to_string(),
             enable_database: false,
-            database_url: None,
             db_channel_buffer_size: 1000,
         }
     }
@@ -76,7 +74,7 @@ pub struct SignalPublisher {
 /// Log file handles
 struct LogFiles {
     trading_enabled: std::fs::File,
-    high_tax: std::fs::File,
+    tax_signals: std::fs::File,
     liquidity_removal: std::fs::File,
     scam_detection: std::fs::File,
 }
@@ -104,6 +102,9 @@ impl SignalPublisher {
         zmq_socket.bind(&config.zmq_endpoint)?;
         info!("📡 ZMQ publisher bound to {}", config.zmq_endpoint);
         
+        // Give ZMQ time to establish the socket (slow joiner problem)
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        
         // Create log directory and files
         std::fs::create_dir_all(&config.log_dir)?;
         let log_files = Self::create_log_files(&config.log_dir)?;
@@ -112,7 +113,9 @@ impl SignalPublisher {
         // Setup non-blocking database writer if enabled
         let db_sender = if config.enable_database {
             let (sender, receiver) = mpsc::channel(config.db_channel_buffer_size);
-            Self::spawn_db_writer(config.database_url.clone(), receiver, stats.clone()).await?;
+            // Use hardcoded database URL from database module
+            let db_url = Some(crate::database::get_default_database_url());
+            Self::spawn_db_writer(db_url, receiver, stats.clone()).await?;
             Some(sender)
         } else {
             None
@@ -138,10 +141,10 @@ impl SignalPublisher {
             .append(true)
             .open(log_dir.join("trading_enabled.log"))?;
             
-        let high_tax = OpenOptions::new()
+        let tax_signals = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(log_dir.join("high_tax_warnings.log"))?;
+            .open(log_dir.join("tax_signals.log"))?;
             
         let liquidity_removal = OpenOptions::new()
             .create(true)
@@ -155,26 +158,89 @@ impl SignalPublisher {
         
         Ok(LogFiles {
             trading_enabled,
-            high_tax,
+            tax_signals,
             liquidity_removal,
             scam_detection,
         })
     }
     
-    /// Spawn non-blocking database writer task (disabled for now)
+    /// Spawn non-blocking database writer task
     async fn spawn_db_writer(
         database_url: Option<String>, 
         mut receiver: mpsc::Receiver<Signal>,
         stats: Arc<PublisherStats>
     ) -> Result<()> {
-        if let Some(_db_url) = database_url {
+        if let Some(db_url) = database_url {
+            // Create the signal writers
+            let signal_writer_config = crate::database::SignalWriterConfig::default();
+            let trading_writer = crate::database::TradingSignalWriter::new_with_defaults(signal_writer_config).await?;
+            let tax_writer = crate::database::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await?;
+            
             tokio::spawn(async move {
-                info!("🗄️ Database writer task started (disabled - signals will be dropped)");
+                info!("🗄️ Database writer task started");
                 
-                while let Some(_signal) = receiver.recv().await {
-                    // Database writing disabled for now
-                    stats.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    debug!("Database writing disabled - signal dropped");
+                while let Some(signal) = receiver.recv().await {
+                    // Convert signal to database record and write
+                    match signal {
+                        Signal::TradingEnabled(ref s) => {
+                            use rust_decimal::Decimal;
+                            
+                            let record = crate::database::TradingSignalRecord {
+                                token_address: s.token_address.clone(),
+                                pool_address: s.pool_address.clone(),
+                                pool_type: s.pool_type.clone(),
+                                denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
+                                denom_currency: Some("WETH".to_string()),
+                                detection_timestamp: chrono::Utc::now(),
+                                detection_tx_hash: s.tx_hash.clone(),
+                                price_ratio: None,
+                                denom_reserve_at_signal: None,
+                                token_reserve_at_signal: None,
+                                buy_tax_at_signal: Some(Decimal::from(s.buy_tax)),
+                                sell_tax_at_signal: Some(Decimal::from(s.sell_tax)),
+                                total_supply: None,
+                                owner_address: None,
+                                creator_address: s.creator_address.clone(),
+                                signal_source: "mempool".to_string(),
+                            };
+                            
+                            trading_writer.write_signal(record).await;
+                            stats.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            debug!("Written trading_enabled signal to database");
+                        }
+                        Signal::TaxSignal(ref s) => {
+                            let record = crate::database::TaxSignalRecord {
+                                token_address: s.token_address.clone(),
+                                pool_address: s.pool_address.clone(),
+                                pool_type: s.pool_type.clone(),
+                                denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
+                                denom_currency: Some("WETH".to_string()),
+                                detection_timestamp: chrono::Utc::now(),
+                                detection_tx_hash: s.tx_hash.clone(),
+                                signal_type: s.signal_type.clone(),
+                                signal_details: s.signal_details.clone(),
+                                confidence: Some(rust_decimal::Decimal::from_f64_retain(s.confidence).unwrap_or_default()),
+                                buy_tax_at_signal: s.buy_tax.map(|tax| rust_decimal::Decimal::from_f64_retain(tax).unwrap_or_default()),
+                                sell_tax_at_signal: s.sell_tax.map(|tax| rust_decimal::Decimal::from_f64_retain(tax).unwrap_or_default()),
+                                buy_tax_exceeds_threshold: s.buy_tax_exceeds_threshold,
+                                sell_tax_exceeds_threshold: s.sell_tax_exceeds_threshold,
+                                cant_sell: s.cant_sell,
+                                creator_address: s.creator_address.clone(),
+                                signal_source: "mempool".to_string(),
+                            };
+                            
+                            if let Err(e) = tax_writer.write_signal(record) {
+                                error!("Failed to write tax signal to database: {}", e);
+                            } else {
+                                stats.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                debug!("Written tax_signal to database");
+                            }
+                        }
+                        _ => {
+                            // TODO: Handle other signal types
+                            debug!("Signal type not yet supported for database writing: {:?}", signal);
+                        }
+                    }
                 }
                 warn!("Database writer task terminated");
             });
@@ -223,27 +289,27 @@ impl SignalPublisher {
     fn publish_zmq(&self, signal: &Signal) -> Result<()> {
         let (topic, json_data) = match signal {
             Signal::TradingEnabled(s) => ("trading_enabled", serde_json::to_string(s)?),
-            Signal::HighTaxWarning(s) => ("high_tax_warning", serde_json::to_string(s)?),
+            Signal::TaxSignal(s) => ("tax_signal", serde_json::to_string(s)?),
             Signal::LiquidityRemoval(s) => ("liquidity_removal", serde_json::to_string(s)?),
             Signal::ScamDetection(s) => ("scam_detection", serde_json::to_string(s)?),
         };
         
-        match self.zmq_socket.send_multipart(&[topic.as_bytes(), json_data.as_bytes()], zmq::DONTWAIT) {
+        // Log what we're about to send
+        info!("Sending ZMQ message - Topic: '{}', Data length: {} bytes", topic, json_data.len());
+        
+        // Try without DONTWAIT first to ensure message is sent
+        match self.zmq_socket.send_multipart(&[topic.as_bytes(), json_data.as_bytes()], 0) {
             Ok(_) => {
                 self.stats.zmq_published.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                debug!("Published {} signal to ZMQ", topic);
-            }
-            Err(zmq::Error::EAGAIN) => {
-                warn!("ZMQ send buffer full, signal dropped");
-                self.stats.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                info!("✅ Successfully published {} signal to ZMQ", topic);
+                Ok(())
             }
             Err(e) => {
-                error!("ZMQ publish failed: {}", e);
+                error!("ZMQ publish failed with error: {:?}", e);
                 self.stats.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Err(eyre::eyre!("Failed to publish to ZMQ: {}", e))
             }
         }
-        
-        Ok(())
     }
     
     /// Write signal to log files (fast)
@@ -259,13 +325,14 @@ impl SignalPublisher {
                 )?;
                 self.log_files.trading_enabled.flush()?;
             }
-            Signal::HighTaxWarning(s) => {
+            Signal::TaxSignal(s) => {
                 writeln!(
-                    self.log_files.high_tax,
-                    "[{}] HIGH_TAX | Token: {} | Type: {:?} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
-                    timestamp, s.token_address, s.warning_type, s.buy_tax, s.sell_tax, s.tx_hash
+                    self.log_files.tax_signals,
+                    "[{}] TAX_SIGNAL | Token: {} | Pool: {} | Type: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
+                    timestamp, s.token_address, s.pool_address, s.signal_type,
+                    s.buy_tax.unwrap_or(0.0), s.sell_tax.unwrap_or(0.0), s.tx_hash
                 )?;
-                self.log_files.high_tax.flush()?;
+                self.log_files.tax_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
                 let eth_info = s.estimated_eth_removed

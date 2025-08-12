@@ -347,7 +347,7 @@ async fn simulate_buy_sell_direct(
     let block_number = None; // Will use latest
     
     // Create transaction CallRequest
-    let tx_call_request = match reth_tx_simulator::ipc_to_call_request(&tx.tx_data) {
+    let tx_call_request = match mempool_processor::common::convert::ipc_to_call_request(&tx.tx_data) {
         Ok(call) => call,
         Err(e) => {
             writeln!(log_file, "❌ Failed to convert transaction: {}", e).unwrap();

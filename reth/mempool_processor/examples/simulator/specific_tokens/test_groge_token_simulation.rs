@@ -116,9 +116,10 @@ fn display_results(result: &mempool_processor::simulator::SequenceSimulationResu
     // Check buy state changes
     if let Some(buyer_changes) = result.buy_result.state_changes.get(&buyer_address) {
         info!("\n  Buy State Changes:");
-        // Find GROGE token balance
+        // Find GROGE token balance (use checksummed address comparison)
+        let groge_token_checksum = "0x01D103F117C99E5C99c32Aa6C19F4861ef7a60b7";
         for (token_addr, balance) in &buyer_changes.token_net {
-            if token_addr.to_lowercase().contains("01d103f117c99e5c99c32aa6c19f4861ef7a60b7") {
+            if token_addr == groge_token_checksum {
                 info!("    - GROGE Balance Change: {}", balance);
             }
         }

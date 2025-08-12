@@ -143,8 +143,13 @@ async fn main() -> Result<()> {
             pool_address_str
         );
         
-        // Run buy/sell simulation
-        match simulator.simulate_sequence(token_address, pool_address, None).await {
+        // Run buy/sell simulation with the correct pool type
+        match simulator.simulate_sequence_with_pool_type(
+            token_address, 
+            pool_address, 
+            &pool_state.pool_type,
+            None
+        ).await {
             Ok(result) => {
                 let can_buy = result.buy_result.success;
                 let can_sell = result.sell_result.success;

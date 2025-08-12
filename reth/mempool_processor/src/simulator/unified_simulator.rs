@@ -131,7 +131,7 @@ impl UnifiedSimulator {
     
     /// Simulate a single transaction from mempool
     pub async fn simulate_single_tx(&self, tx: &FullTransaction) -> Result<SimulationResult> {
-        use reth_tx_simulator::ipc_to_call_request;
+        use crate::common::convert::ipc_to_call_request;
         
         // Convert IPC transaction to CallRequest
         let call_request = ipc_to_call_request(&tx.tx_data)?;
@@ -152,7 +152,7 @@ impl UnifiedSimulator {
     
     /// Simulate transaction and get state changes
     pub async fn simulate_with_state_changes(&self, tx: &FullTransaction) -> Result<StateChangeResult> {
-        use reth_tx_simulator::ipc_to_call_request;
+        use crate::common::convert::ipc_to_call_request;
         
         let call_request = ipc_to_call_request(&tx.tx_data)?;
         let latest_block = self.get_latest_block()?;
@@ -193,6 +193,20 @@ impl UnifiedSimulator {
     ) -> Result<SequenceSimulationResult> {
         self.sequential_simulator
             .simulate_sequence_with_tx(given_tx, token_address, pool_address, block_number)
+            .await
+    }
+    
+    /// Simulate a sequence with an initial transaction and specific pool type
+    pub async fn simulate_sequence_with_tx_and_pool_type(
+        &self,
+        given_tx: Option<CallRequest>,
+        token_address: Address,
+        pool_address: Address,
+        pool_type: &str,
+        block_number: Option<u64>,
+    ) -> Result<SequenceSimulationResult> {
+        self.sequential_simulator
+            .simulate_sequence_with_tx_and_pool_type(given_tx, token_address, pool_address, pool_type, block_number)
             .await
     }
     

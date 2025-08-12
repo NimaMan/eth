@@ -31,16 +31,17 @@ use tracing_subscriber::Layer;
 use mempool_processor::{
     mempool_fetcher::NonBlockingIpcClient,
     function_detector::FunctionDetector,
-    tx_router::{TransactionRouter, TransactionCategory, CreatorFunctionType},
+    tx_router::{TransactionRouter, TransactionCategory},
+    function_detector::CreatorFunctionType,
     simulator::{SimulationManager, SimulationRequest, SimulationType, UnifiedSimulator, BuySellSimulatorConfig},
     signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     database::{MempoolTimestampTracker, TrackerConfig},
+    config::MempoolProcessorConfig,
 };
 use ethers::types::H256;
 use hex;
-use sqlx::postgres::PgPoolOptions;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -71,10 +72,6 @@ struct Args {
     /// Performance report interval in seconds
     #[arg(long, default_value = "60")]
     report_interval: u64,
-    
-    /// Database URL for mempool timestamp tracking (optional)
-    #[arg(long, env = "DATABASE_URL")]
-    database_url: Option<String>,
 }
 
 /// Performance metrics tracker
@@ -303,26 +300,16 @@ async fn main() -> Result<()> {
     ipc_client.start().await?;
     info!("✅ IPC client connected");
     
-    // 3. Mempool timestamp tracker (optional)
-    let mempool_tracker = if let Some(db_url) = &args.database_url {
-        info!("📝 Initializing mempool timestamp tracker...");
-        
-        // Create database connection pool
-        let db_pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(db_url)
-            .await?;
-        
-        // Create tracker with default config
-        let tracker_config = TrackerConfig::default();
-        let tracker = MempoolTimestampTracker::new(db_pool, tracker_config).await?;
-        
-        info!("✅ Mempool timestamp tracker ready");
-        Some(tracker)
-    } else {
-        info!("⚠️  Mempool timestamp tracking disabled (no DATABASE_URL)");
-        None
-    };
+    // 3. Database services (each with their own hardcoded connections)
+    info!("📝 Initializing database services...");
+    
+    // Create mempool timestamp tracker with its hardcoded connection
+    let tracker_config = TrackerConfig::default();
+    let mempool_tracker = Some(MempoolTimestampTracker::new_with_defaults(tracker_config).await?);
+    info!("✅ Mempool timestamp tracker ready (using eth_db)");
+    
+    // Trading signal writer is now integrated into SignalPublisher
+    // Database writing happens automatically when signals are published
     
     // 4. Function detector
     info!("🔍 Initializing function detector...");
@@ -348,14 +335,21 @@ async fn main() -> Result<()> {
     info!("📡 Initializing signal publisher...");
     let signals_dir = run_dir.join("signals");
     std::fs::create_dir_all(&signals_dir)?;
-    let publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    let mut publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    // Enable database writing (connection is hardcoded in the module)
+    publisher_config.enable_database = true;
     let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
-    info!("✅ Signal publisher ready");
+    info!("✅ Signal publisher ready with database writing enabled");
     
     // 7. Simulation manager (now includes signal detection and publishing)
     info!("📦 Starting simulation manager with integrated signal detection and publishing...");
+    // Load configuration (from file or defaults)
+    let config = MempoolProcessorConfig::from_env();
+    
     let signal_config = SignalManagerConfig {
         log_dir: signals_dir.clone(),
+        min_liquidity_threshold: config.signal_detection.min_liquidity_threshold,
+        tax_detection: config.tax_detection,
     };
     let simulation_manager = SimulationManager::new(
         unified_simulator,
@@ -366,7 +360,6 @@ async fn main() -> Result<()> {
     );
     
     // Note: set_metric_counters has been removed from SimulationManager
-    
     info!("✅ Simulation manager ready with {} workers, signal detection and publishing", args.sim_workers);
     
     info!("\n🏃 Starting main processing loop...\n");
@@ -388,11 +381,6 @@ async fn main() -> Result<()> {
     writeln!(summary_file, "  Batch Size: {}", args.batch_size)?;
     writeln!(summary_file, "  Simulation Workers: {}", args.sim_workers)?;
     writeln!(summary_file, "  Report Interval: {}s", args.report_interval)?;
-    writeln!(summary_file, "\nPerformance Targets:")?;
-    writeln!(summary_file, "  Function Detection: <10μs")?;
-    writeln!(summary_file, "  TX Routing: <5μs")?;
-    writeln!(summary_file, "  Simulation: <50ms")?;
-    writeln!(summary_file, "  End-to-end: <100ms")?;
     writeln!(summary_file, "\n===================================")?;
     writeln!(summary_file, "Real-time Metrics:\n")?;
     
@@ -451,17 +439,11 @@ async fn main() -> Result<()> {
             }
         }
         
-        // Process batch through pipeline
-        let batch_start = Instant::now();
-        
         // Step 1: Function detection
-        let detection_start = Instant::now();
         let transactions_with_functions = function_detector.detect_batch(new_txs);
-        let detection_time = detection_start.elapsed();
         
         // Step 2: Process each transaction
         for tx in transactions_with_functions {
-            let tx_start = Instant::now();
             metrics.total_processed.fetch_add(1, Ordering::Relaxed);
             
             // Record detection latency
@@ -469,21 +451,15 @@ async fn main() -> Result<()> {
             metrics.add_detection_latency(Duration::from_nanos(detection_latency_ns as u64)).await;
             
             // Transaction routing
-            let routing_start = Instant::now();
             let classification = tx_router.classify(&tx).await;
-            let routing_time = routing_start.elapsed();
-            metrics.add_routing_latency(routing_time).await;
             
-            // Update category metrics
+            // Skip regular transactions we don't care about
             match &classification.category {
-                TransactionCategory::ContractCreation { .. } => {
-                    metrics.contract_creations.fetch_add(1, Ordering::Relaxed);
-                }
+                TransactionCategory::ContractCreation { .. } |
                 TransactionCategory::CreatorTransaction { .. } => {
-                    metrics.creator_actions.fetch_add(1, Ordering::Relaxed);
+                    // Process these transactions
                 }
                 _ => {
-                    metrics.regular_txs.fetch_add(1, Ordering::Relaxed);
                     continue; // Skip non-relevant transactions
                 }
             }
@@ -492,7 +468,7 @@ async fn main() -> Result<()> {
             if !classification.requires_simulation {
                 // Check if this is an LP approval that needs direct signal detection
                 if let TransactionCategory::CreatorTransaction { 
-                    function_type: CreatorFunctionType::LiquidityManagement, 
+                    function_type: CreatorFunctionType::LiquidityPoolApproval, 
                     .. 
                 } = &classification.category {
                     // Route LP approval through simulation manager (no simulation, just detection)

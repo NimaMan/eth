@@ -1,6 +1,23 @@
 /// Simulation Manager
 /// 
-/// Manages transaction simulations based on priority and type
+/// Manages transaction simulations on a PER-POOL basis.
+/// 
+/// Key Architecture:
+/// - Each token can have multiple pools (WETH/TOKEN, USDC/TOKEN, etc.)
+/// - Each pool is simulated INDEPENDENTLY
+/// - Each pool generates its own signal with pool-specific data
+/// - Signal = f(token_address, pool_address)
+/// 
+/// Flow for CreatorTransaction:
+/// 1. Extract token address from transaction
+/// 2. Get ALL pools for the token from cache
+/// 3. Filter to V2 pools (V3/V4 not yet supported)
+/// 4. FOR EACH POOL:
+///    - Run transaction simulation
+///    - Run buy/sell simulation for THIS pool
+///    - Create pool-specific SimulationResult
+///    - Send to signal manager
+///    - Generate unique signal for (token, pool) pair
 
 use std::sync::Arc;
 use std::any::TypeId;
@@ -9,8 +26,7 @@ use tracing::{info, debug, warn, error};
 use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
-use crate::signal_detector::{SignalManager, SignalManagerConfig};
-use crate::signal_publisher::SignalPublisher;
+use crate::signal_detector::{SignalManager, SignalManagerConfig, Signal, TradingEnabledSignal};
 use crate::token_tracking::TokenTrackingCache;
 use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, UnifiedSimulator, SequenceSimulationResult};
@@ -49,6 +65,7 @@ pub struct SimulationResult {
     // Addresses needed for tax calculation
     pub token_address: Option<alloy_primitives::Address>,
     pub pool_address: Option<alloy_primitives::Address>,
+    pub pool_type: Option<String>,  // Pool type (V2, V3, V4)
     // Full sequence simulation details for debugging
     pub sequence_result: Option<SequenceSimulationResult>,
     // Debug info for error analysis
@@ -97,7 +114,7 @@ impl SimulationManager {
         unified_simulator: Arc<UnifiedSimulator>,
         token_cache: Arc<TokenTrackingCache>,
         signal_config: SignalManagerConfig,
-        publisher: Arc<TokioMutex<SignalPublisher>>,
+        publisher: Arc<TokioMutex<crate::signal_publisher::SignalPublisher>>,
         max_concurrent: usize,
     ) -> Self {
         let mut signal_manager = SignalManager::new(signal_config);
@@ -199,6 +216,7 @@ impl SimulationManager {
             simulation_time_ms: 0.0,
             token_address: None,
             pool_address: None,
+            pool_type: None,
             sequence_result: None,
             debug_info: None,
         };
@@ -210,23 +228,75 @@ impl SimulationManager {
         match &request.category {
             TransactionCategory::ContractCreation { .. } => {
                 // TODO: Handle contract creation properly
+                warn!("Contract creation simulation not implemented yet for TX {}", request.tx.hash);
                 result.error = Some("Contract creation simulation not implemented yet".to_string());
             }
             TransactionCategory::CreatorTransaction { .. } => {
-                // Run combined tx + buy/sell simulation
-                match self.simulate_tx_with_buy_sell(&request).await {
-                    Ok((tx_state_changes, bs_result, token_addr, pool_addr, seq_result)) => {
-                        result.tx_state_changes = tx_state_changes;
-                        result.buy_sell_result = Some(bs_result);
-                        result.token_address = Some(token_addr);
-                        result.pool_address = pool_addr;
-                        result.sequence_result = seq_result;
-                    }
-                    Err((e, partial_tx_changes)) => {
-                        result.error = Some(e);
-                        result.debug_info = Some(format!("Failed during buy/sell simulation"));
-                        // Preserve any transaction state changes even if buy/sell failed
-                        result.tx_state_changes = partial_tx_changes;
+                // CRITICAL: Run simulation for EACH pool independently
+                // Each pool will generate its own signal
+                let all_results = self.simulate_tx_with_buy_sell_all_pools(&request).await;
+                
+                if all_results.is_empty() {
+                    // No pools to simulate
+                    result.error = Some("No pools found for token".to_string());
+                    result.debug_info = Some(format!("No pools available for simulation"));
+                    
+                    // Still send to signal manager even with no pools
+                    info!("📤 Sending no-pools result to signal manager for TX {}", result.request.tx.hash);
+                    let mut signal_manager = self.signal_manager.lock().await;
+                    let signals = signal_manager.process_simulation_result(&result).await;
+                    info!("  Signal manager returned {} signals", signals.len());
+                } else {
+                    // CRITICAL: Process each pool's result INDEPENDENTLY
+                    // Each pool gets its own SimulationResult and signal
+                    for (pool_idx, pool_result) in all_results.into_iter().enumerate() {
+                        // Create a UNIQUE SimulationResult for THIS pool
+                        let mut pool_specific_result = SimulationResult {
+                            request: request.clone(),
+                            tx_state_changes: None,
+                            buy_sell_result: None,
+                            error: None,
+                            simulation_time_ms: result.simulation_time_ms,
+                            token_address: None,
+                            pool_address: None,
+                            pool_type: None,
+                            sequence_result: None,
+                            debug_info: None,
+                        };
+                        
+                        match pool_result {
+                            Ok((tx_state_changes, bs_result, token_addr, pool_addr, pool_type, seq_result)) => {
+                                pool_specific_result.tx_state_changes = tx_state_changes;
+                                pool_specific_result.buy_sell_result = Some(bs_result);
+                                pool_specific_result.token_address = Some(token_addr);
+                                pool_specific_result.pool_address = pool_addr;
+                                pool_specific_result.pool_type = pool_type;
+                                pool_specific_result.sequence_result = seq_result;
+                            }
+                            Err((e, partial_tx_changes)) => {
+                                pool_specific_result.error = Some(e);
+                                pool_specific_result.debug_info = Some(format!("Failed during buy/sell simulation for pool {}", pool_idx));
+                                // Preserve any transaction state changes even if buy/sell failed
+                                pool_specific_result.tx_state_changes = partial_tx_changes;
+                            }
+                        }
+                        
+                        // Send each pool's results to signal manager separately
+                        info!("📤 Sending pool-specific result to signal manager for TX {} (pool {})", 
+                            pool_specific_result.request.tx.hash, pool_idx);
+                        info!("  Pool address: {:?}", pool_specific_result.pool_address);
+                        info!("  Result has error: {}, has buy_sell: {}", 
+                            pool_specific_result.error.is_some(), 
+                            pool_specific_result.buy_sell_result.is_some()
+                        );
+                        let mut signal_manager = self.signal_manager.lock().await;
+                        let signals = signal_manager.process_simulation_result(&pool_specific_result).await;
+                        info!("  Signal manager returned {} signals for pool {}", signals.len(), pool_idx);
+                        
+                        // Keep the last successful result as the overall result (for backward compatibility)
+                        if pool_specific_result.error.is_none() {
+                            result = pool_specific_result;
+                        }
                     }
                 }
             }
@@ -238,21 +308,36 @@ impl SimulationManager {
 
         result.simulation_time_ms = start.elapsed().as_secs_f64() * 1000.0;
         
-        // Send results to signal manager
-        info!("📤 Sending simulation result to signal manager for TX {}", result.request.tx.hash);
-        info!("  Result has error: {}, has buy_sell: {}", 
-            result.error.is_some(), 
-            result.buy_sell_result.is_some()
-        );
-        let mut signal_manager = self.signal_manager.lock().await;
-        let signals = signal_manager.process_simulation_result(&result).await;
-        info!("  Signal manager returned {} signals", signals.len());
+        // For non-CreatorTransaction types, send to signal manager
+        // (CreatorTransaction already sends per-pool signals above)
+        match &request.category {
+            TransactionCategory::CreatorTransaction { .. } => {
+                // Already handled per-pool above
+            }
+            _ => {
+                // Send results to signal manager for other transaction types
+                info!("📤 Sending simulation result to signal manager for TX {}", result.request.tx.hash);
+                info!("  Result has error: {}, has buy_sell: {}", 
+                    result.error.is_some(), 
+                    result.buy_sell_result.is_some()
+                );
+                let mut signal_manager = self.signal_manager.lock().await;
+                let signals = signal_manager.process_simulation_result(&result).await;
+                info!("  Signal manager returned {} signals", signals.len());
+            }
+        }
         
         result
     }
 
-    /// Simulate transaction followed by buy/sell sequence
-    async fn simulate_tx_with_buy_sell(&self, request: &SimulationRequest) -> Result<(Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>, BuySellResult, alloy_primitives::Address, Option<alloy_primitives::Address>, Option<SequenceSimulationResult>), (String, Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>)> {
+    /// Simulate transaction followed by buy/sell sequence for ALL pools
+    /// 
+    /// CRITICAL: This function processes EACH pool independently:
+    /// - Each pool gets its own simulation
+    /// - Each pool's results are collected separately
+    /// - Returns a Vec with one result per pool
+    /// - Failed pools don't affect successful ones
+    async fn simulate_tx_with_buy_sell_all_pools(&self, request: &SimulationRequest) -> Vec<Result<(Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>, BuySellResult, alloy_primitives::Address, Option<alloy_primitives::Address>, Option<String>, Option<SequenceSimulationResult>), (String, Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>)>> {
         // Extract token address from category
         let token_address_str = match &request.category {
             TransactionCategory::CreatorTransaction { target_token, creator, .. } => {
@@ -263,7 +348,7 @@ impl SimulationManager {
                         if let Some(token_info) = self.token_cache.get_token_for_creator(creator).await {
                             token_info.token_address.clone()
                         } else {
-                            return Err((format!("No token address found for creator {}", creator), None));
+                            return vec![Err((format!("No token address found for creator {}", creator), None))];
                         }
                     }
                 }
@@ -278,165 +363,219 @@ impl SimulationManager {
                     // We need to calculate the deterministic address where the contract will be deployed
                     // This is deterministic based on deployer + nonce
                     // For now, let's skip the buy/sell test and just simulate the creation
-                    return Err(("Contract creation: address calculation not implemented yet".to_string(), None));
+                    return vec![Err(("Contract creation: address calculation not implemented yet".to_string(), None))];
                 } else {
                     contract_address.clone()
                 }
             }
-            _ => return Err(("Category doesn't support buy/sell simulation".to_string(), None)),
+            _ => return vec![Err(("Category doesn't support buy/sell simulation".to_string(), None))],
         };
         
         // Convert string addresses to alloy Address type
-        let token_address = token_address_str.trim_start_matches("0x")
-            .parse::<alloy_primitives::Address>()
-            .map_err(|e| (format!("Invalid token address: {}", e), None))?;
+        let token_address = match token_address_str.trim_start_matches("0x")
+            .parse::<alloy_primitives::Address>() {
+            Ok(addr) => addr,
+            Err(e) => return vec![Err((format!("Invalid token address: {}", e), None))],
+        };
             
-        // Try to find pool address from token cache
-        let pool_info = self.token_cache.get_primary_pool(&token_address_str).await;
-        let pool_address = if let Some(pool) = pool_info {
-            let addr = pool.pool_address.trim_start_matches("0x")
-                .parse::<alloy_primitives::Address>()
-                .unwrap_or(alloy_primitives::Address::ZERO);
-            info!("  Found pool address from cache: {:?}", addr);
-            addr
-        } else {
-            // If we don't have a pool yet (new token), we'll discover it during simulation
-            info!("  No pool found in cache, using ZERO address");
-            alloy_primitives::Address::ZERO
-        };
+        // Get ALL pools for the token from cache
+        let all_pools = self.token_cache.get_pools_for_token(&token_address_str).await;
         
-        // Get current block number (simulate at latest)
-        let block_number = None; // Use latest block
-        info!("  Using block number: {:?}", block_number);
-        
-        // Create the transaction CallRequest
-        let full_tx = crate::mempool_fetcher::FullTransaction {
-            hash: request.tx.hash.clone(),
-            tx_data: request.tx.data.clone(),
-            detection_time: std::time::Instant::now(),
-            latency_ns: request.tx.detection_ns,
-        };
-        
-        
-        let mut tx_call_request = reth_tx_simulator::ipc_to_call_request(&full_tx.tx_data)
-            .map_err(|e| (format!("Failed to convert transaction: {}", e), None))?;
-        
-        // Log the parsed call request for debugging
-        info!("  Parsed CallRequest:");
-        info!("    from: {:?}", tx_call_request.from);
-        info!("    to: {:?}", tx_call_request.to);
-        info!("    value: {:?}", tx_call_request.value);
-        info!("    gas: {:?}", tx_call_request.gas);
-        info!("    gas_price: {:?}", tx_call_request.gas_price);
-        info!("    max_fee_per_gas: {:?}", tx_call_request.max_fee_per_gas);
-        info!("    data length: {} bytes", tx_call_request.data.as_ref().map(|d| d.len()).unwrap_or(0));
-        
-        // Check if gas is missing - this should never happen for mined transactions
-        if tx_call_request.gas.is_none() {
-            error!("WARNING: Gas limit is None for mined transaction!");
-            error!("Raw IPC data: {}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
-            // Return error instead of using fallback
-            return Err(("Gas limit missing from transaction - parsing error".to_string(), None));
+        if all_pools.is_empty() {
+            info!("  No pools found in cache for token {}", token_address_str);
+            return vec![];  // Return empty vector, no pools to simulate
         }
         
-        // Remove nonce to let the sequential simulator manage it automatically
-        tx_call_request.nonce = None;
+        info!("  Found {} pools for token", all_pools.len());
         
-        // Store original gas prices for retry logic
-        let original_gas_price = tx_call_request.gas_price;
-        let original_max_fee = tx_call_request.max_fee_per_gas;
-        
-        info!("  Using original gas prices from transaction");
-        
-        // Store request details for error reporting
-        let tx_details = format!(
-            "Original TX: from={:?}, to={:?}",
-            tx_call_request.from, tx_call_request.to
-        );
-        
-        info!("  Calling buy_sell_simulator.simulate_sequence_with_tx()...");
-        info!("    Token: {:?}", token_address);
-        info!("    Pool: {:?}", pool_address);
-        info!("    from: {:?}", tx_call_request.from);
-        info!("    to: {:?}", tx_call_request.to);
-        
-        // Try simulation with original gas price first
-        let simulation_result = match self.unified_simulator.simulate_sequence_with_tx(
-            Some(tx_call_request.clone()),
-            token_address,
-            pool_address,
-            block_number
-        ).await {
-            Ok(result) => Ok(result),
-            Err(e) => {
-                // Check if it's a base fee error
-                let error_str = e.to_string();
-                if error_str.contains("GasPriceLessThanBasefee") || error_str.contains("base fee") {
-                    info!("  Base fee error detected, retrying with 3x gas price");
-                    
-                    // Triple the gas prices and retry
-                    let new_gas_price = original_gas_price.map(|p| p * 3);
-                    let new_max_fee = original_max_fee.map(|p| p * 3);
-                    
-                    tx_call_request.gas_price = new_gas_price;
-                    tx_call_request.max_fee_per_gas = new_max_fee;
-                    tx_call_request.max_priority_fee_per_gas = Some(2_000_000_000u128); // 2 gwei priority
-                    
-                    info!("  Retrying with increased gas prices: {:?} gwei", 
-                        new_gas_price.map(|p| p / 1_000_000_000));
-                    
-                    // Retry with higher gas price
-                    self.unified_simulator.simulate_sequence_with_tx(
-                        Some(tx_call_request.clone()),
-                        token_address,
-                        pool_address,
-                        block_number
-                    ).await
-                } else {
-                    Err(e)
+        // Filter to only V2 pools (V3/V4 not supported yet)
+        let v2_pools: Vec<_> = all_pools.into_iter()
+            .filter(|(pool_addr_str, pool_state)| {
+                let is_v2 = pool_state.pool_type != "V3" && pool_state.pool_type != "V4" && 
+                           pool_state.pool_type != "Uniswap-V3" && pool_state.pool_type != "Uniswap-V4";
+                if !is_v2 {
+                    info!("  Skipping {} pool {} (not supported)", pool_state.pool_type, pool_addr_str);
                 }
-            }
-        };
+                is_v2
+            })
+            .collect();
         
-        // Process the result
-        match simulation_result {
-            Ok(result) => {
-                info!("  Buy/sell simulation completed successfully:");
-                info!("    Given TX: {:?}", result.given_tx_result.as_ref().map(|r| r.success));
-                info!("    Buy TX: {}", result.buy_result.success);
-                info!("    Sell TX: {}", result.sell_result.success);
-                
-                // Extract transaction state changes
-                let tx_state_changes = result.given_tx_result.as_ref().map(|tx| tx.state_changes.clone());
-                
-                // Create buy/sell result with raw simulation data
-                let bs_result = BuySellResult {
-                    can_buy: result.buy_result.success,
-                    can_sell: result.sell_result.success,
-                    buy_state_changes: Some(result.buy_result.state_changes.clone()),
-                    sell_state_changes: Some(result.sell_result.state_changes.clone()),
-                };
-                
-                Ok((tx_state_changes, bs_result, token_address, if pool_address.is_zero() { None } else { Some(pool_address) }, Some(result)))
-            }
-            Err(e) => {
-                info!("  ERROR in sequence simulation: {}", e);
-                info!("  Error details: {:?}", e);
-                
-                // Log detailed error information for debugging
-                if e.to_string().contains("LackOfFundForMaxFee") {
-                    warn!("LackOfFundForMaxFee error");
-                    warn!("  TX hash: {}", request.tx.hash);
-                    warn!("  From: {:?}", tx_call_request.from);
-                    warn!("  Value: {:?} ETH", tx_call_request.value.map(|v| format!("{:.6}", v.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)).unwrap_or_else(|| "0".to_string()));
-                }
-                
-                let error_msg = format!("{}", e);
-                Err((error_msg, None))
-            }
+        if v2_pools.is_empty() {
+            info!("  No V2 pools found for token");
+            return vec![];  // Return empty vector, no V2 pools to simulate
         }
+        
+        info!("  Will simulate {} V2 pools", v2_pools.len());
+        
+        // Results vector to collect all pool simulations
+        let mut results = Vec::new();
+        
+        // CRITICAL LOOP: Simulate each pool INDEPENDENTLY
+        // Each iteration produces a separate result for signal generation
+        for (pool_idx, (pool_addr_str, pool_state)) in v2_pools.into_iter().enumerate() {
+            let pool_address = match pool_addr_str.trim_start_matches("0x")
+                .parse::<alloy_primitives::Address>() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    results.push(Err((format!("Invalid pool address {}: {}", pool_addr_str, e), None)));
+                    continue;
+                }
+            };
+            
+            let pool_type = Some(pool_state.pool_type.clone());
+            info!("  [Pool {}] Simulating pool: {:?} (Type: {}, ETH: {:.6})", 
+                pool_idx, pool_address, pool_state.pool_type, pool_state.eth_reserve);
+        
+            // Get current block number (simulate at latest)
+            let block_number = None; // Use latest block
+            info!("  Using block number: {:?}", block_number);
+            
+            // Create the transaction CallRequest
+            let full_tx = crate::mempool_fetcher::FullTransaction {
+                hash: request.tx.hash.clone(),
+                tx_data: request.tx.data.clone(),
+                detection_time: std::time::Instant::now(),
+                latency_ns: request.tx.detection_ns,
+            };
+            
+            let mut tx_call_request = match crate::common::convert::ipc_to_call_request(&full_tx.tx_data) {
+                Ok(req) => req,
+                Err(e) => {
+                    results.push(Err((format!("Failed to convert transaction: {}", e), None)));
+                    continue;
+                }
+            };
+            
+            // Log the parsed call request for debugging
+            info!("  [Pool {}] Parsed CallRequest:", pool_idx);
+            info!("    from: {:?}", tx_call_request.from);
+            info!("    to: {:?}", tx_call_request.to);
+            info!("    value: {:?}", tx_call_request.value);
+            info!("    gas: {:?}", tx_call_request.gas);
+            info!("    gas_price: {:?}", tx_call_request.gas_price);
+            info!("    max_fee_per_gas: {:?}", tx_call_request.max_fee_per_gas);
+            info!("    data length: {} bytes", tx_call_request.data.as_ref().map(|d| d.len()).unwrap_or(0));
+            
+            // Check if gas is missing - this should never happen for mined transactions
+            if tx_call_request.gas.is_none() {
+                error!("WARNING: Gas limit is None for mined transaction!");
+                error!("Raw IPC data: {}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
+                results.push(Err(("Gas limit missing from transaction - parsing error".to_string(), None)));
+                continue;
+            }
+            
+            // Remove nonce to let the sequential simulator manage it automatically
+            tx_call_request.nonce = None;
+            
+            // Store original gas prices for retry logic
+            let original_gas_price = tx_call_request.gas_price;
+            let original_max_fee = tx_call_request.max_fee_per_gas;
+            
+            info!("  [Pool {}] Using original gas prices from transaction", pool_idx);
+            
+            // Store request details for error reporting
+            let _tx_details = format!(
+                "Original TX: from={:?}, to={:?}",
+                tx_call_request.from, tx_call_request.to
+            );
+            
+            info!("  [Pool {}] Calling buy_sell_simulator.simulate_sequence_with_tx()...", pool_idx);
+            info!("    Token: {:?}", token_address);
+            info!("    Pool: {:?}", pool_address);
+            info!("    from: {:?}", tx_call_request.from);
+            info!("    to: {:?}", tx_call_request.to);
+            
+            // Try simulation with original gas price first
+            // Use pool_type if available, otherwise default to V2
+            let simulation_result = match if let Some(ref pt) = pool_type {
+                self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
+                    Some(tx_call_request.clone()),
+                    token_address,
+                    pool_address,
+                    pt,
+                    block_number
+                ).await
+            } else {
+                self.unified_simulator.simulate_sequence_with_tx(
+                    Some(tx_call_request.clone()),
+                    token_address,
+                    pool_address,
+                    block_number
+                ).await
+            } {
+                Ok(result) => Ok(result),
+                Err(e) => {
+                    // Check if it's a base fee error
+                    let error_str = e.to_string();
+                    if error_str.contains("GasPriceLessThanBasefee") || error_str.contains("base fee") {
+                        info!("  Base fee error detected, retrying with 3x gas price");
+                        
+                        // Triple the gas prices and retry
+                        let new_gas_price = original_gas_price.map(|p| p * 3);
+                        let new_max_fee = original_max_fee.map(|p| p * 3);
+                        
+                        tx_call_request.gas_price = new_gas_price;
+                        tx_call_request.max_fee_per_gas = new_max_fee;
+                        tx_call_request.max_priority_fee_per_gas = Some(2_000_000_000u128); // 2 gwei priority
+                        
+                        info!("  Retrying with increased gas prices: {:?} gwei", 
+                            new_gas_price.map(|p| p / 1_000_000_000));
+                        
+                        // Retry with higher gas price
+                        if let Some(ref pt) = pool_type {
+                            self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
+                                Some(tx_call_request.clone()),
+                                token_address,
+                                pool_address,
+                                pt,
+                                block_number
+                            ).await
+                        } else {
+                            self.unified_simulator.simulate_sequence_with_tx(
+                                Some(tx_call_request.clone()),
+                                token_address,
+                                pool_address,
+                                block_number
+                            ).await
+                        }
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
+            
+            // Process the result
+            match simulation_result {
+                Ok(result) => {
+                    info!("  [Pool {}] Buy/sell simulation completed successfully:", pool_idx);
+                    info!("    Given TX: {:?}", result.given_tx_result.as_ref().map(|r| r.success));
+                    info!("    Buy TX: {}", result.buy_result.success);
+                    info!("    Sell TX: {}", result.sell_result.success);
+                    
+                    // Extract transaction state changes
+                    let tx_state_changes = result.given_tx_result.as_ref().map(|tx| tx.state_changes.clone());
+                    
+                    // Create buy/sell result with raw simulation data
+                    let bs_result = BuySellResult {
+                        can_buy: result.buy_result.success,
+                        can_sell: result.sell_result.success,
+                        buy_state_changes: Some(result.buy_result.state_changes.clone()),
+                        sell_state_changes: Some(result.sell_result.state_changes.clone()),
+                    };
+                    
+                    results.push(Ok((tx_state_changes, bs_result, token_address, if pool_address.is_zero() { None } else { Some(pool_address) }, pool_type.clone(), Some(result))));
+                }
+                Err(e) => {
+                    info!("  [Pool {}] ERROR in sequence simulation: {}", pool_idx, e);
+                    info!("  Error details: {:?}", e);                    
+                    let error_msg = format!("Pool {}: {}", pool_idx, e);
+                    results.push(Err((error_msg, None)));
+                }
+            }
+        }  // End of for loop
+        
+        results
     }
-
 
     /// Get manager statistics
     pub async fn get_stats(&self) -> ManagerStats {

@@ -38,16 +38,8 @@ pub enum TransactionCategory {
     },
 }
 
-/// Types of functions called by creators
-#[derive(Debug, Clone, PartialEq)]
-pub enum CreatorFunctionType {
-    TaxModification,
-    TradingControl,
-    OwnershipChange,
-    LiquidityManagement,
-    MaxWalletLimit,
-    Other(String),
-}
+// CreatorFunctionType moved to function_detector module
+pub use crate::function_detector::CreatorFunctionType;
 
 
 /// Classification result with priority
@@ -96,7 +88,6 @@ impl TransactionRouter {
             
         if tx.to.is_none() || to_str == "0x0" || to_str.is_empty() {
             let result = self.classify_contract_creation(tx).await;
-            debug!("Classified contract creation in {:?}", start.elapsed());
             return result;
         }
 
@@ -105,15 +96,11 @@ impl TransactionRouter {
             let from_addr = checksum_address(&hex::encode(&tx.from));
             if cache.is_creator(&from_addr).await {
                 let result = self.classify_creator_transaction(tx).await;
-                debug!("Classified creator transaction in {:?}", start.elapsed());
                 return result;
             }
         }
-
-
-        // Default to regular transaction
+        // If not a creator or contract creation, classify as regular transaction
         let result = self.classify_regular_transaction(tx).await;
-        trace!("Classified regular transaction in {:?}", start.elapsed());
         result
     }
 
@@ -136,57 +123,40 @@ impl TransactionRouter {
 
     /// Classify creator transaction
     async fn classify_creator_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
-        let function_type = self.creator_router.identify_function(tx);
+        let function_type = self.creator_router.get_function_type(tx);
         
         // Get the token created by this creator
-        let (target_token, is_interacting_with_own_token) = if let Some(ref cache) = self.token_cache {
+        let target_token = if let Some(ref cache) = self.token_cache {
             let from_addr = checksum_address(&hex::encode(&tx.from));
             
             // Get token info for this creator
             if let Some(token_info) = cache.get_token_for_creator(&from_addr).await {
-                // Check if the target address is the token itself
-                if let Some(to_bytes) = &tx.to {
-                    let to_addr = checksum_address(&hex::encode(to_bytes));
-                    if to_addr.eq_ignore_ascii_case(&token_info.token_address) {
-                        (Some(token_info.token_address.clone()), true)
-                    } else {
-                        // Creator is interacting with something else (like a pool)
-                        // Still return the token address for context
-                        (Some(token_info.token_address.clone()), false)
-                    }
-                } else {
-                    (Some(token_info.token_address.clone()), false)
-                }
+                // Return the token address for context
+                Some(token_info.token_address.clone())
             } else {
-                (None, false)
+                None
             }
         } else {
-            (None, false)
+            None
         };
 
         // Check if this is just an ETH transfer from a creator
         let is_eth_transfer = matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
         
-        // Check if this is an approve function (LP token approval to router)
-        let is_lp_approve = matches!(&function_type, CreatorFunctionType::LiquidityManagement) 
-            && tx.input.len() >= 4 
-            && &tx.input[0..4] == &[0x09, 0x5e, 0xa7, 0xb3];
-        
+        // ALL creator transactions get high priority except ETH transfers
         let priority = match &function_type {
             CreatorFunctionType::TaxModification => SimulationPriority::Critical,
             CreatorFunctionType::TradingControl => SimulationPriority::Critical,
             CreatorFunctionType::OwnershipChange => SimulationPriority::High,
-            CreatorFunctionType::LiquidityManagement => SimulationPriority::Critical, // LP approvals are critical
+            CreatorFunctionType::LiquidityAddition => SimulationPriority::High,    // Less critical
+            CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical,  // Potential rug pull!
+            CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
             CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
-            CreatorFunctionType::Other(_) => SimulationPriority::Low,
+            CreatorFunctionType::Other(_) => SimulationPriority::High, // Changed from Low to High
         };
 
-        let requires_buy_sell = matches!(
-            function_type,
-            CreatorFunctionType::TaxModification | 
-            CreatorFunctionType::TradingControl |
-            CreatorFunctionType::MaxWalletLimit
-        ) && !is_lp_approve; // LP approvals don't need buy/sell test
+        // ALL creator transactions get buy/sell test except ETH transfers
+        let requires_buy_sell = !is_eth_transfer;
 
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
@@ -198,8 +168,8 @@ impl TransactionRouter {
                 function_type,
             },
             priority,
-            // Don't simulate ETH transfers or LP approvals
-            requires_simulation: !is_eth_transfer && !is_lp_approve,
+            // Simulate EVERYTHING from creators except ETH transfers
+            requires_simulation: !is_eth_transfer,
             requires_buy_sell_test: requires_buy_sell,
         }
     }
