@@ -37,7 +37,7 @@ use mempool_processor::{
     signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
-    database::{MempoolTimestampTracker, TrackerConfig},
+    db_writers::{MempoolTimestampTracker, TrackerConfig},
     config::MempoolProcessorConfig,
 };
 use ethers::types::H256;

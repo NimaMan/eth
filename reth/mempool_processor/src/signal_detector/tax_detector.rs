@@ -13,9 +13,7 @@ use crate::simulator::SimulationResult;
 use crate::token_tracking::{calculate_buy_tax, calculate_sell_tax};
 use crate::config::TaxDetectionConfig;
 use tracing::{info, debug};
-use std::collections::HashMap;
 use alloy_primitives::Address;
-use reth_tx_simulator::AddressStateChange;
 use hex;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -261,26 +259,6 @@ impl TaxDetector {
         }
     }
 
-    /// Calculate taxes directly from state changes
-    /// This can be used when we want to bypass pre-calculated values
-    pub fn calculate_taxes_from_state_changes(
-        &self,
-        state_changes: &HashMap<Address, AddressStateChange>,
-        pool_address: &Address,
-        buyer_address: &Address,
-        token_address: &Address,
-    ) -> (Option<f64>, Option<f64>) {
-        // Calculate buy tax
-        let buy_tax = calculate_buy_tax(state_changes, pool_address, buyer_address, token_address);
-        
-        // For sell tax, we'd need the sell transaction state changes
-        // This is just for buy transaction
-        let sell_tax = None;
-        
-        debug!("Calculated taxes - Buy: {:?}%, Sell: {:?}%", buy_tax, sell_tax);
-        
-        (buy_tax, sell_tax)
-    }
 
     /// Check if taxes indicate a honeypot
     pub fn is_honeypot(&self, _buy_tax: Option<f64>, _sell_tax: Option<f64>, can_sell: bool) -> bool {

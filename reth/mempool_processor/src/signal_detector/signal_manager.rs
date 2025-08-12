@@ -522,8 +522,8 @@ impl SignalManager {
                         pool_address,  // Now includes the specific pool
                         pool_type,     // Pool type (V2, V3, V4)
                         creator_address: trading_signal.executor.clone(),
-                        buy_tax: calculated_buy_tax.unwrap_or(0.0) as u8,
-                        sell_tax: calculated_sell_tax.unwrap_or(0.0) as u8,
+                        buy_tax: calculated_buy_tax.unwrap_or(0.0),
+                        sell_tax: calculated_sell_tax.unwrap_or(0.0),
                         timestamp: chrono::Utc::now().timestamp() as u64,
                     }));
                 }

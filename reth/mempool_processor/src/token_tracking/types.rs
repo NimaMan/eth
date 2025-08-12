@@ -97,11 +97,11 @@ pub struct TokenInfo {
     
     /// Current buy tax percentage (0-100)
     #[serde(skip)]
-    pub buy_tax: Option<u8>,
+    pub buy_tax: Option<f64>,
     
     /// Current sell tax percentage (0-100)
     #[serde(skip)]
-    pub sell_tax: Option<u8>,
+    pub sell_tax: Option<f64>,
     
     /// Last tax update transaction hash
     pub last_tax_update_txn: Option<String>,

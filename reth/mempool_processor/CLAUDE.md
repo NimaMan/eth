@@ -6,125 +6,149 @@ The mempool processor is a high-performance system designed to:
 1. **Receive transactions** from Ethereum mempool via IPC
 2. **Detect function signatures** in transaction calldata
 3. **Simulate transactions** to analyze state changes
-4. **Identify signals** (liquidity removals, trading enabled, scams)
+4. **Identify signals** (liquidity removals, trading enabled, scams, tax detection)
 5. **Process as fast as possible** (currently 2-7μs detection latency)
 
-## Critical Implementation Notes
-
-### Performance Optimizations
-
-#### String Operations Issue
-The system currently has inefficient hex encoding/decoding:
-```rust
-// CURRENT (inefficient):
-let selector = hex::encode(&input_data[0..4]); // Allocates new string
-self.signatures.get(selector) // String comparison
-
-// BETTER:
-let selector_bytes = &input_data[0..4];
-self.signatures_bytes.get(selector_bytes) // Direct byte comparison
-```
-
-This happens hundreds of times per second. Consider:
-- Using byte arrays for signature storage
-- Pre-computing hex strings if needed
-- Caching frequently used conversions
-
-#### IPC Performance
-- Non-blocking I/O is properly implemented
-- Buffer reuse prevents allocations
-- Zero-copy parsing where possible
-
-### Current Architecture Flow
+## Current Module Structure
+## Architecture Flow
 
 ```
 1. IPC Client (NonBlockingIpcClient)
    ↓ Raw bytes
 2. Transaction Parser
    ↓ Parsed transaction
-3. Function Detector
-   ↓ Transaction + detected functions
-4. Simulator Processor
-   ↓ Simulation results
-5. Signal Detector
-   ↓ Detected signals
-6. Publishers (ZMQ/Logs)
+3. Function Detector + TX Router
+   ↓ Categorized transaction
+4. Simulation Manager
+   ↓ Simulation results (buy/sell, state changes)
+5. Signal Manager
+   ↓ Detected signals (tax, trading, liquidity, scam)
+6. Signal Publisher
+   ↓ ZMQ + Log files
+7. DB Writers (optional)
 ```
 
-### Key Components
+### Core Processing Pipeline
+```
+src/
+├── bin/
+│   └── mempool_signal_detector.rs      # Main service binary
+├── mempool_fetcher/                    # Transaction ingestion
+│   ├── nonblocking_ipc_client.rs       # Reth IPC client
+│   └── full_transaction.rs             # Transaction parsing
+├── function_detector/                  # Function signature detection
+│   └── function_detector.rs            # 4-byte selector matching
+├── tx_router/                         # Transaction categorization
+│   ├── tx_router.rs                   # Main routing logic
+│   └── creator_tx_router.rs           # Token creator detection
+├── simulator/                         # Transaction simulation
+│   ├── simulation_manager.rs          # Batch simulation
+│   ├── sequential_tx_simulator.rs     # Buy/sell tax simulation
+│   └── unified_simulator.rs           # State change analysis
+├── signal_detector/                   # Signal generation (ACTIVE)
+│   ├── signal_manager.rs              # Central signal coordinator
+│   ├── tax_detector.rs                # Tax calculation & honeypot detection
+│   ├── trading_status_detector.rs     # Trading enabled detection  
+│   ├── liquidity_detector.rs          # Pool drain detection
+│   ├── stablecoin_detector.rs         # Stablecoin activity
+│   ├── lp_approval_detector.rs        # LP approval tracking
+│   └── types.rs                       # Signal type definitions
+├── token_tracking/                    # Token state management (ACTIVE)
+│   ├── cache.rs                       # Token/pool caches
+│   ├── address_tracking_cache.rs      # Creator address tracking
+│   └── token_parameter_extraction/    # Tax calculation functions
+│       ├── tax_calculator.rs          # Buy/sell tax functions (USED)
+│       └── tax_calculator_from_...    # Alternate approach (unused)
+├── signal_publisher.rs                # Log & ZMQ publishing (ACTIVE)
+├── db_writers/                       # Database persistence
+│   ├── trading_signal_writer.rs       # Trading enabled signals
+│   ├── tax_signal_writer.rs           # Tax signals
+│   └── liquidity_removal_...rs        # Liquidity signals
+└── config.rs                         # Configuration types
+```
 
-#### 1. NonBlockingIpcClient (`mempool_fetcher/nonblocking_ipc_client.rs`)
-- Connects to Reth IPC socket
-- Uses `tokio::net::UnixStream` for async I/O
-- Parses transactions using custom zero-copy parser
-- Auto-reconnects on connection loss
 
-#### 2. FunctionDetector (`signal_engine/function_detector.rs`)
-- Checks 4-byte function selectors
-- Currently detects:
-  - Trading enabled: `0x8a8c523c` (enableTrading), `0xc9567bf9` (openTrading)
-  - Liquidity removals: 10 different signatures
-  - Swaps: 24 different signatures
-- Uses HashMap lookup (O(1))
+## Key Components
 
-#### 3. SimulatorProcessor (`tx_simulator/simulator_processor.rs`)
-- Batches transactions for simulation
-- Filters out simple transfers
-- Uses Reth's transaction simulator
-- Handles nonce conflicts with retry logic
+### 1. Signal Detection Pipeline (ACTIVE)
 
-#### 4. SignalDetector (`tx_simulator/signal_detector.rs`)
-- Analyzes simulation results
-- Detects scams (>60% pool drain OR <0.3 ETH remaining)
-- Tracks stablecoin burns/mints
-- Publishes to ZMQ (tcp://127.0.0.1:5557)
+**SignalManager** (`signal_detector/signal_manager.rs`):
+- Central coordinator for all signal types
+- Processes simulation results from each pool
+- Applies trading status filtering for TAX_SIGNAL
+- Generates per-pool signals for (token_address, pool_address) pairs
+- Implements contract creation noise reduction
 
-### Critical Issues to Fix
+**TaxDetector** (`signal_detector/tax_detector.rs`):
+- Calculates buy/sell taxes from state changes
+- Uses `token_tracking::calculate_buy_tax()` and `calculate_sell_tax()`
+- Detects high taxes and honeypot patterns
+- Returns -1% when calculation fails (not 0%)
 
-#### 1. Error Handling
-**Problem**: Extensive use of `unwrap()` causing panics
+**TradingStatusDetector** (`signal_detector/trading_status_detector.rs`):
+- Detects trading enabled signals when taxes are reasonable (<25%)
+- Logs simulation results to `simulation_results.log`
+- Checks token cache for existing trading status
+
+### 2. Token Tracking System (ACTIVE)
+
+**TokenTrackingCache** (`token_tracking/cache.rs`):
+- Maintains token metadata and trading status
+- Used by signal manager for trading status filtering
+- ZMQ subscriber for Python publisher updates
+
+**Tax Calculation** (`token_tracking/token_parameter_extraction/tax_calculator.rs`):
+- Core functions: `calculate_buy_tax()`, `calculate_sell_tax()`
+- Analyzes token movements in state changes
+- Used by tax_detector.rs for accurate tax computation
+
+### 3. Logging & Publishing
+
+**SignalPublisher** (`signal_publisher.rs`):
+- Writes to separate log files per signal type:
+  - `trading_enabled.log` - TRADING_ENABLED entries only
+  - `tax_signals.log` - TAX_SIGNAL entries (shows -1% for failed calculations)
+  - `liquidity_removals.log` - Pool drain signals
+  - `scam_detections.log` - Scam alerts
+- ZMQ multipart publishing to tcp://127.0.0.1:5557
+- Database writing via db_writers/ (optional)
+- **NEW**: Empty lines between signals for readability
+
+**TradingStatusDetector Logging**:
+- `simulation_results.log` - SIMULATION_RESULT entries (separate from trading_enabled.log)
+- **NEW**: Enhanced BuySell field shows actual results: "SimulationRan(can_buy:true, can_sell:false)"
+
+## Critical Implementation Notes
+
+### Tax Detection Algorithm
 ```rust
-// CURRENT (bad):
-let from = hex::decode(&tx.from).unwrap(); // PANIC!
-
-// FIXED:
-let from = hex::decode(&tx.from)
-    .context("Invalid from address hex")?;
+// Tax calculation pipeline:
+1. Simulate buy transaction → state changes
+2. Calculate tokens received vs expected (calculate_buy_tax)
+3. Simulate sell transaction → state changes  
+4. Calculate ETH received vs expected (calculate_sell_tax)
+5. Generate TAX_SIGNAL only if:
+   - trading_enabled = true, OR
+   - trading_enabled = false AND (can_buy OR can_sell)
+6. Skip TAX_SIGNAL if honeypot (can't buy/sell and trading disabled)
 ```
 
-#### 2. Silent Failures
-**Problem**: Errors logged but processing continues
-```rust
-// CURRENT (bad):
-if let Err(e) = simulator.process(tx).await {
-    warn!("Simulation failed: {}", e);
-    // Continues to next transaction!
-}
+### Signal Generation Rules
+- **Per-pool signals**: Each (token, pool) pair generates independent signals
+- **Trading status filtering**: Uses token cache to reduce honeypot noise
+- **Tax thresholds**: Buy tax >25%, sell tax >25%, or can't sell = signal
+- **Simulation fallback**: 0.01 ETH buy amount, fallback to 0.001 ETH on failure
 
-// FIXED:
-simulator.process(tx).await
-    .map_err(|e| {
-        error!("Critical simulation failure: {}", e);
-        ProcessingError::SimulationFailed(e)
-    })?;
-```
+### Performance Optimizations
+- Non-blocking IPC with connection recovery
+- Batch simulation (20 transactions per batch)
+- Token cache for trading status lookups
+- ZMQ publishing with configurable buffer sizes
+- Direct tax calculation from state changes (no RPC calls)
 
-#### 3. Database Safety
-**Problem**: SQL injection risk
-```rust
-// CURRENT (vulnerable):
-let query = format!("INSERT INTO {} VALUES ({})", table, values);
+## Configuration
 
-// FIXED:
-sqlx::query!("INSERT INTO transactions (hash, from_addr) VALUES ($1, $2)")
-    .bind(&tx_hash)
-    .bind(&from_address)
-    .execute(&pool).await?;
-```
-
-### Configuration Requirements
-
-#### Essential Environment Variables
+### Essential Environment Variables
 ```bash
 # IPC connection (required)
 RETH_IPC_PATH=/tmp/reth.ipc
@@ -133,101 +157,21 @@ RETH_IPC_PATH=/tmp/reth.ipc
 ETH_RPC_URL=http://localhost:8545
 
 # Database (optional)
-DATABASE_URL=postgresql://user:pass@localhost/db
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db
 ```
 
-#### Hard-coded Values to Extract
-- Buffer sizes: `50000` (channel size)
-- Timeouts: `Duration::from_secs(120)`
-- Thresholds: `0.3` ETH minimum, `60%` drain threshold
-- Batch sizes: `20` transactions per batch
+### Key Configuration Values
+- **Simulation amounts**: 0.01 ETH primary, 0.001 ETH fallback
+- **Tax thresholds**: 25% for buy/sell tax warnings
+- **Channel buffer**: 50,000 transactions
+- **ZMQ endpoint**: tcp://127.0.0.1:5557
 
-### Performance Metrics
-
-Current performance from production logs:
-- **Detection Latency**: 2-7μs average, 40μs max
-- **Transactions Processed**: 70,000+ per day
-- **Simulation Success Rate**: ~85% (nonce conflicts cause failures)
-- **Memory Usage**: ~500MB steady state
-
-### Testing Strategy
-
-#### Unit Tests Needed
-1. Function detector accuracy
-2. State change calculation
-3. Scam detection logic
-4. Error handling paths
-
-#### Integration Tests Needed
-1. Full pipeline test
-2. Simulation failure handling
-3. Network disconnection recovery
-4. High load scenarios
-
-### Monitoring Requirements
-
-#### Key Metrics to Track
-1. **Latency Percentiles**: p50, p95, p99
-2. **Error Rates**: By component and error type
-3. **Queue Depths**: Channel utilization
-4. **Resource Usage**: CPU, memory, network
-
-#### Alerting Thresholds
-- Detection latency > 50μs (degraded)
-- Error rate > 1% (warning)
-- Queue depth > 40,000 (capacity risk)
-- Any panic (critical)
-
-### Security Considerations
-
-1. **Input Validation**: All external data must be validated
-2. **Resource Limits**: Prevent DoS through queue limits
-3. **Access Control**: IPC socket permissions
-4. **Credential Management**: Use secure storage for DB passwords
-
-### Future Improvements
-
-1. **Connection Pooling**: For database operations
-2. **Caching Layer**: For frequently accessed data
-3. **Horizontal Scaling**: Multiple instances with coordination
-4. **Advanced Signals**: MEV detection, sandwich attacks
-
-### Development Guidelines
-
-1. **No `unwrap()`**: Use proper error handling
-2. **Async All The Way**: Don't block the runtime
-3. **Measure Everything**: Add metrics for new features
-4. **Test Edge Cases**: Especially error paths
-5. **Document Assumptions**: Make implicit knowledge explicit
-
-### Common Pitfalls
-
-1. **Hex String Allocations**: Use bytes where possible
-2. **Blocking Operations**: Keep async runtime clear
-3. **Unbounded Growth**: Set limits on all collections
-4. **Silent Failures**: Always propagate critical errors
-5. **Hard-coded Paths**: Use configuration for all paths
-
-### Quick Debugging
-
-```bash
-# Check IPC connection
-nc -U /tmp/reth.ipc
-
-# Monitor performance
-tail -f logs/mempool/signal_detector_*/signal_detector.log
-
-# Check ZMQ messages
-python examples/signal_subscriber/zmq_subscriber.py
-
-# Database queries
-psql $DATABASE_URL -c "SELECT COUNT(*) FROM transactions"
-```
 
 ## Notes for Future Development
 
-- The 50K channel size is not a concern - system handles it well
-- Focus on reliability over micro-optimizations
-- The simulation pipeline is the bottleneck, not detection
-- Pool state must be kept synchronized with Python publisher
+- Simulation manager is the bottleneck, not signal detection
+- Pool state synchronization with Python publisher is critical  
 - Transaction ordering matters for nonce handling
+- Consider V3/V4 pool support (currently V2 only)
+- The 50K channel buffer size works well in practice
+- Focus on reliability over micro-optimizations

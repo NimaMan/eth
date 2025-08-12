@@ -28,8 +28,8 @@ pub struct TradingEnabledSignal {
     pub pool_address: String,  // Each signal is for a specific pool
     pub pool_type: String,      // V2, V3, V4
     pub creator_address: String,
-    pub buy_tax: u8,
-    pub sell_tax: u8,
+    pub buy_tax: f64,
+    pub sell_tax: f64,
     pub timestamp: u64,
 }
 
@@ -44,8 +44,8 @@ pub struct HighTaxWarningSignal {
     pub pool_address: String,    // Pool-specific tax warning
     pub pool_type: String,       // V2, V3, V4
     pub creator_address: Option<String>,
-    pub buy_tax: u8,
-    pub sell_tax: u8,
+    pub buy_tax: f64,
+    pub sell_tax: f64,
     pub warning_type: TaxWarningType,
     pub timestamp: u64,
 }

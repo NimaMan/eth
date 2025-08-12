@@ -179,7 +179,7 @@ impl TokenTrackingCache {
     }
     
     /// Update token tax information
-    pub async fn update_token_tax(&self, token_address: &str, buy_tax: Option<u8>, sell_tax: Option<u8>) {
+    pub async fn update_token_tax(&self, token_address: &str, buy_tax: Option<f64>, sell_tax: Option<f64>) {
         let mut tokens_guard = self.tokens.write().await;
         
         if let Some(token_info) = tokens_guard.get_mut(token_address) {
@@ -261,9 +261,9 @@ impl TokenTrackingCache {
     pub async fn update_token(&self, mut token_info: super::types::TokenInfo) {
         let token_address = token_info.token_address.clone();
         
-        // Convert Python tax values (0-100 float) to u8
-        token_info.buy_tax = token_info.buy_tax_python.map(|t| t.round() as u8);
-        token_info.sell_tax = token_info.sell_tax_python.map(|t| t.round() as u8);
+        // Convert Python tax values (0-100 float) to f64 (no precision loss)
+        token_info.buy_tax = token_info.buy_tax_python.map(|t| t as f64);
+        token_info.sell_tax = token_info.sell_tax_python.map(|t| t as f64);
         
         // Update the pre-computed sets
         let mut all_creators_guard = self.all_creators.write().await;
