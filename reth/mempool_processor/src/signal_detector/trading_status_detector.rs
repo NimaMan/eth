@@ -193,9 +193,12 @@ impl TradingStatusDetector {
             if let Some((_, pool_state)) = cache.get_pools_for_token(token_address).await.into_iter()
                 .find(|(addr, _)| addr == pool_address) 
             {
-                // Check if this pool has significant liquidity (indicates trading is working)
-                if pool_state.eth_reserve > self.min_liquidity_threshold {
-                    return true;
+                // Check the actual trading_enabled flag for this pool
+                if let Some(trading_enabled) = pool_state.trading_enabled {
+                    if trading_enabled {
+                        debug!("Pool {} already has trading_enabled=true in cache", pool_address);
+                        return true;
+                    }
                 }
             }
         }
