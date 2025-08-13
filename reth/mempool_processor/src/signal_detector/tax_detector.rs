@@ -96,8 +96,8 @@ impl TaxDetector {
 
         // Calculate taxes from raw state changes
         let (calculated_buy_tax, calculated_sell_tax) = if let Some(buy_sell) = &sim_result.buy_sell_result {
-            // Get buyer address from simulator (hardcoded for now)
-            let buyer_address = alloy_primitives::Address::from_slice(&hex::decode("70997970C51812dc3A010C7d01b50e0d17dc79C8").unwrap_or_default());
+            // Get buyer address from simulator (hardcoded for now - must match simulator config)
+            let buyer_address = alloy_primitives::Address::from_slice(&hex::decode("0C96c602b1b332B8AB2093E5d72D804a24bd5689").unwrap_or_default());
             
             let mut buy_tax = None;
             let mut sell_tax = None;
