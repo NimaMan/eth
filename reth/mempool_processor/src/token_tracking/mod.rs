@@ -114,12 +114,12 @@ impl TokenTrackingSubscriber {
                     // Extract pools from this token
                     for (pool_address, pool_info) in token_info.pools {
                         let pool_update = types::PoolUpdate {
-                            eth_reserve: pool_info.denom_reserve,
+                            eth_reserve: pool_info.eth_reserve,
                             token_reserve: pool_info.token_reserve,
                             token_address: checksum_address(&token_address),
                             pool_type: pool_info.pool_type,
-                            block_number: pool_info.latest_block_number,
-                            update_time: pool_info.last_update_time.unwrap_or(0.0),
+                            block_number: pool_info.last_updated_block,
+                            update_time: pool_info.last_updated_time,
                         };
                         
                         // Store with checksummed pool address
@@ -226,12 +226,12 @@ impl TokenTrackingSubscriber {
                             // Extract pools from this token
                             for (pool_address, pool_info) in token_info.pools.iter() {
                                 let pool_update = types::PoolUpdate {
-                                    eth_reserve: pool_info.denom_reserve,
+                                    eth_reserve: pool_info.eth_reserve,
                                     token_reserve: pool_info.token_reserve,
                                     token_address: checksum_address(token_address),
                                     pool_type: pool_info.pool_type.clone(),
-                                    block_number: pool_info.latest_block_number,
-                                    update_time: pool_info.last_update_time.unwrap_or(0.0),
+                                    block_number: pool_info.last_updated_block,
+                                    update_time: pool_info.last_updated_time,
                                 };
                                 
                                 // Store with checksummed pool address

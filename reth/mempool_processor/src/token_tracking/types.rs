@@ -5,55 +5,7 @@
 use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::HashMap;
 
-/// Pool-specific information within a token
-#[derive(Debug, Clone, Deserialize)]
-pub struct PoolInfo {
-    /// Pool contract address
-    pub pool_address: String,
-    
-    /// Pool type (V2, V3, V4)
-    pub pool_type: String,
-    
-    /// Currency of the denomination (usually ETH or stablecoin)
-    pub denom_currency: String,
-    
-    /// Address of the denomination token
-    pub denom_address: String,
-    
-    /// Current denomination reserve in the pool
-    pub denom_reserve: f64,
-    
-    /// Current token reserve in the pool
-    pub token_reserve: f64,
-    
-    /// Block number of latest update
-    pub latest_block_number: u64,
-    
-    /// Unix timestamp of last update
-    /// TODO: Remove Option once Python publisher is updated to always send this field
-    pub last_update_time: Option<f64>,
-    
-    /// Pool ID for V4 pools
-    pub pool_id: Option<String>,
-    
-    /// Fee tier (for V3/V4 pools)
-    pub fee_tier: Option<u32>,
-    
-    /// Whether this pool is identified as a scam
-    pub is_scam: bool,
-    
-    /// Reason for scam classification
-    pub scam_label: Option<String>,
-    
-    /// Whether trading is enabled on this specific pool
-    pub trading_enabled: Option<bool>,
-    
-    /// Block when trading was enabled on this pool
-    pub trading_enabled_block: Option<u64>,
-    
-    /// Transaction hash when trading was enabled on this pool
-    pub trading_enabled_txn: Option<String>,
-}
+// PoolInfo removed - using unified PoolState instead
 
 /// Token information including all its pools
 #[derive(Debug, Clone, Deserialize)]
@@ -107,7 +59,7 @@ pub struct TokenInfo {
     pub last_tax_update_txn: Option<String>,
     
     /// Map of pool addresses to pool information
-    pub pools: HashMap<String, PoolInfo>,
+    pub pools: HashMap<String, PoolState>,
     
     /// Token metadata
     #[serde(alias = "token_symbol")]
@@ -259,9 +211,9 @@ pub struct PoolUpdatesMessage {
     pub data: HashMap<String, PoolUpdate>,
 }
 
-/// Represents a simplified pool state for storage in the pool state cache.
-/// This contains just the essential information needed for scam detection.
-#[derive(Debug, Clone)]
+/// Represents complete pool state for storage in the pool state cache.
+/// Contains all information about a pool including trading status and scam flags.
+#[derive(Debug, Clone, Deserialize)]
 pub struct PoolState {
     /// Current ETH reserve level in the pool
     pub eth_reserve: f64,
@@ -282,7 +234,35 @@ pub struct PoolState {
     pub last_updated_time: f64,
     
     /// System timestamp when we received this update (for staleness checks)
+    #[serde(skip, default = "std::time::Instant::now")]
     pub received_at: std::time::Instant,
+    
+    /// Currency of the denomination (usually ETH or stablecoin)
+    pub denom_currency: Option<String>,
+    
+    /// Address of the denomination token
+    pub denom_address: Option<String>,
+    
+    /// Pool ID for V4 pools
+    pub pool_id: Option<String>,
+    
+    /// Fee tier (for V3/V4 pools)
+    pub fee_tier: Option<u32>,
+    
+    /// Whether this pool is identified as a scam
+    pub is_scam: bool,
+    
+    /// Reason for scam classification
+    pub scam_label: Option<String>,
+    
+    /// Whether trading is enabled on this specific pool
+    pub trading_enabled: Option<bool>,
+    
+    /// Block when trading was enabled on this pool
+    pub trading_enabled_block: Option<u64>,
+    
+    /// Transaction hash when trading was enabled on this pool
+    pub trading_enabled_txn: Option<String>,
 }
 
 impl PoolState {
@@ -307,6 +287,16 @@ impl From<PoolUpdate> for PoolState {
             last_updated_block: update.block_number,
             last_updated_time: update.update_time,
             received_at: std::time::Instant::now(),
+            // Additional fields from PoolInfo - set defaults for now
+            denom_currency: None,
+            denom_address: None,
+            pool_id: None,
+            fee_tier: None,
+            is_scam: false,
+            scam_label: None,
+            trading_enabled: None,
+            trading_enabled_block: None,
+            trading_enabled_txn: None,
         }
     }
 }

@@ -331,12 +331,12 @@ impl TokenTrackingCache {
     }
     
     /// Get the primary pool for a token (highest liquidity)
-    pub async fn get_primary_pool(&self, token_address: &str) -> Option<super::types::PoolInfo> {
+    pub async fn get_primary_pool(&self, token_address: &str) -> Option<super::types::PoolState> {
         let tokens_guard = self.tokens.read().await;
         if let Some(token_info) = tokens_guard.get(token_address) {
             // Find pool with highest ETH reserve
             token_info.pools.values()
-                .max_by(|a, b| a.denom_reserve.partial_cmp(&b.denom_reserve).unwrap())
+                .max_by(|a, b| a.eth_reserve.partial_cmp(&b.eth_reserve).unwrap())
                 .cloned()
         } else {
             None
