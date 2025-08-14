@@ -5,9 +5,7 @@
 use std::sync::Arc;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
-use crate::common::address::checksum_address;
 use super::CreatorFunctionType;
-use hex;
 
 pub struct CreatorTransactionRouter {
     token_cache: Option<Arc<TokenTrackingCache>>,

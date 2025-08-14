@@ -6,7 +6,7 @@
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::TransactionCategory;
 use crate::function_detector::CreatorFunctionType;
-use tracing::{info, warn};
+use tracing::warn;
 use alloy_primitives::{Address, U256};
 use std::fs::OpenOptions;
 use std::io::Write;

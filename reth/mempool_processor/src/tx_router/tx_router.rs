@@ -4,7 +4,6 @@
 /// characteristics and assigns processing priorities
 
 use std::sync::Arc;
-use tracing::{debug, trace};
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
 use crate::common::address::checksum_address;
@@ -132,7 +131,7 @@ impl TransactionRouter {
             // Get token info for this creator
             if let Some(token_info) = cache.get_token_for_creator(&from_addr).await {
                 // Return the token address for context
-                Some(token_info.token_address.clone())
+                Some(token_info.address.clone())
             } else {
                 None
             }

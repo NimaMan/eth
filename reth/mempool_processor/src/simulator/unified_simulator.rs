@@ -16,9 +16,9 @@ use reth_provider::ProviderFactory;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_db::DatabaseEnv;
-use reth_chainspec::{ChainSpec, ChainSpecBuilder};
+use reth_chainspec::ChainSpecBuilder;
 use reth_provider::providers::StaticFileProvider;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 
 use reth_tx_simulator::{RethTxSimulator, CallRequest};
 use crate::mempool_fetcher::FullTransaction;

@@ -1,20 +1,13 @@
-/// Trading Signal Database Writer
-/// 
-/// Non-blocking writer that records trading enabled signals to the database.
-/// Uses a background task with batched inserts to avoid blocking the main processing pipeline.
-
-use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::{PgPool, PgPoolOptions}, Pool, Postgres};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use tracing::{info, error, debug};
 use eyre::Result;
 use rust_decimal::Decimal;
 
-use crate::signal_detector::{TradingStatusSignal, trading_status_detector::TradingStatusChange};
+use crate::signal_detector::TradingStatusSignal;
 
 /// Trading signal record for database insertion
 #[derive(Debug, Clone)]
@@ -273,12 +266,12 @@ async fn flush_signals(
             .bind(&record.denom_currency)
             .bind(record.detection_timestamp)
             .bind(&record.detection_tx_hash)
-            .bind(record.price_ratio.as_ref().map(|d| d.to_string()))
-            .bind(record.denom_reserve_at_signal.as_ref().map(|d| d.to_string()))
-            .bind(record.token_reserve_at_signal.as_ref().map(|d| d.to_string()))
-            .bind(record.buy_tax_at_signal.as_ref().map(|d| d.to_string()))
-            .bind(record.sell_tax_at_signal.as_ref().map(|d| d.to_string()))
-            .bind(record.total_supply.as_ref().map(|d| d.to_string()))
+            .bind(record.price_ratio)
+            .bind(record.denom_reserve_at_signal)
+            .bind(record.token_reserve_at_signal)
+            .bind(record.buy_tax_at_signal)
+            .bind(record.sell_tax_at_signal)
+            .bind(record.total_supply)
             .bind(&record.owner_address)
             .bind(&record.creator_address)
             .bind(&record.signal_source);

@@ -1,15 +1,9 @@
-/// Tax Signal Database Writer
-/// 
-/// Non-blocking writer that records tax signals to the database.
-/// Uses a background task with batched inserts to avoid blocking the main processing pipeline.
-
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::{PgPool, PgPoolOptions}, Pool, Postgres};
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use tracing::{info, error};
 use eyre::Result;
 use rust_decimal::Decimal;
 

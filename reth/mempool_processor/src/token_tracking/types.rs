@@ -1,407 +1,339 @@
-// token_tracking/types.rs
+// types_v2.rs - Unified, efficient types for token tracking
 //
-// Type definitions for token and pool data structures from Python ZMQ publisher
+// Core principles:
+// 1. Single source of truth for each concept
+// 2. Arc-wrapped for zero-copy sharing
+// 3. Proper type aliases for clarity
+// 4. Serde compatibility with Python
 
-use serde::{Deserialize, Serialize, Deserializer};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-// PoolInfo removed - using unified PoolState instead
+/// Type alias for Ethereum addresses (checksummed hex strings)
+pub type Address = String;
 
-/// Token information including all its pools
+/// Type alias for transaction hashes
+pub type TxHash = String;
+
+/// Type alias for block numbers
+pub type BlockNumber = u64;
+
+/// Pool types in the ecosystem
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PoolType {
+    #[serde(rename = "UNISWAP-V2")]
+    UniswapV2,
+    #[serde(rename = "UNISWAP-V3")]
+    UniswapV3,
+    #[serde(rename = "UNISWAP-V4")]
+    UniswapV4,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Complete token information - single source of truth
 #[derive(Debug, Clone, Deserialize)]
-pub struct TokenInfo {
-    /// Token contract address
-    pub token_address: String,
-    
-    /// Creator wallet address
-    pub creator_address: String,
-    
-    /// Block when token was created
-    pub creation_block: u64,
-    
-    /// Transaction hash of token creation
-    #[serde(alias = "creation_tx")]
-    pub creation_txn: String,
-    
-    /// DEPRECATED: Trading is now tracked per-pool, not per-token
-    /// Check PoolInfo.trading_enabled for pool-specific status
-    #[serde(default)]
-    pub trading_enabled: bool,
-    
-    /// DEPRECATED: Use pool-level tracking
-    #[serde(alias = "trading_enabled_tx", default)]
-    pub trading_enabled_txn: Option<String>,
-    
-    /// Current owner address
-    pub current_owner: String,
-    
-    /// Whether ownership is renounced
-    pub ownership_renounced: bool,
-    
-    /// Whether token is marked as scam
-    pub is_scam: bool,
-    
-    /// Scam classification reason
-    pub scam_label: Option<String>,
-    
-    /// Block of latest activity
-    pub latest_activity_block: u64,
-    
-    /// Current buy tax percentage (0-100)
-    #[serde(skip)]
-    pub buy_tax: Option<f64>,
-    
-    /// Current sell tax percentage (0-100)
-    #[serde(skip)]
-    pub sell_tax: Option<f64>,
-    
-    /// Last tax update transaction hash
-    pub last_tax_update_txn: Option<String>,
-    
-    /// Map of pool addresses to pool information
-    pub pools: HashMap<String, PoolState>,
-    
-    /// Token metadata
+pub struct Token {
+    // Identity
+    #[serde(alias = "token_address")]
+    pub address: Address,
     #[serde(alias = "token_symbol")]
-    pub symbol: Option<String>,
+    pub symbol: String,
     #[serde(alias = "token_name")]
-    pub name: Option<String>,
+    pub name: String,
     #[serde(alias = "token_decimals")]
-    pub decimals: Option<u8>,
+    pub decimals: u8,
     #[serde(deserialize_with = "deserialize_supply")]
     pub total_supply: Option<String>,
     
-    /// Tax setter addresses (list from Python)
+    // Ownership
+    pub creator_address: Address,
+    pub current_owner: Address,
     #[serde(default)]
-    pub tax_setter_addresses: Vec<String>,
+    pub tax_setter_addresses: Vec<Address>,
+    pub ownership_renounced: bool,
+    #[serde(default)]
+    pub renouncement_block: Option<BlockNumber>,
     
-    /// Derived tax setter addresses  
-    #[serde(skip)]
-    pub buy_tax_setter: Option<String>,
-    #[serde(skip)]
-    pub sell_tax_setter: Option<String>,
-    
-    /// Current buy tax from Python
+    // Tax state - from Python (0-100 range)
     #[serde(alias = "current_buy_tax")]
-    pub buy_tax_python: Option<f64>,
-    
-    /// Current sell tax from Python  
+    pub buy_tax: Option<f64>,
     #[serde(alias = "current_sell_tax")]
-    pub sell_tax_python: Option<f64>,
+    pub sell_tax: Option<f64>,
+    #[serde(default)]
+    pub tax_risk_score: f64,
+    #[serde(default)]
+    pub last_tax_change_block: Option<BlockNumber>,
     
-    /// Simulation results from Rust
-    pub simulation_data: Option<SimulationData>,
+    // Tax history
+    #[serde(default)]
+    pub tax_history: Vec<TaxChange>,
+    #[serde(default)]
+    pub pending_tax_changes: Vec<PendingTaxChange>,
+    
+    // Metadata
+    pub creation_block: BlockNumber,
+    #[serde(alias = "creation_tx")]
+    pub creation_txn: TxHash,
+    #[serde(default)]
+    pub creation_timestamp: Option<f64>,
+    pub latest_activity_block: BlockNumber,
+    
+    // Scam detection
+    pub is_scam: bool,
+    pub scam_label: Option<String>,
+    
+    // Cached computations (not from Python)
+    #[serde(skip)]
+    pub primary_pool: Option<Address>,
+    #[serde(skip)]
+    pub total_liquidity: f64,
+}
+
+/// Complete pool information - single source of truth
+#[derive(Debug, Clone, Deserialize)]
+pub struct Pool {
+    // Identity
+    #[serde(alias = "pool_address")]
+    pub address: Address,
+    #[serde(default)] // Not provided when nested in token
+    pub token_address: Address,
+    pub pool_type: PoolType,
+    
+    // Reserves
+    pub token_reserve: f64,
+    #[serde(alias = "denom_reserve")]
+    pub eth_reserve: f64,
+    pub denom_currency: String,
+    pub denom_address: Address,
+    
+    // Trading state (per-pool, not per-token)
+    #[serde(default)]
+    pub trading_enabled: bool,
+    pub trading_enabled_block: Option<BlockNumber>,
+    pub trading_enabled_txn: Option<TxHash>,
+    
+    // Metadata
+    pub fee_tier: Option<u32>,
+    pub pool_id: Option<String>,
+    #[serde(alias = "latest_block_number")]
+    pub last_updated_block: BlockNumber,
+    #[serde(alias = "last_update_time")]
+    pub last_updated_time: f64,
+    
+    // Scam detection
+    pub is_scam: bool,
+    pub scam_label: Option<String>,
+    
+    // System metadata (not from Python)
+    #[serde(skip, default = "std::time::Instant::now")]
+    pub received_at: std::time::Instant,
+}
+
+/// Tax change record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaxChange {
+    pub block_number: BlockNumber,
+    pub timestamp: f64,
+    pub transaction_hash: TxHash,
+    pub changer_address: Address,
+    pub old_buy_tax: f64,
+    pub new_buy_tax: f64,
+    pub old_sell_tax: f64,
+    pub new_sell_tax: f64,
+}
+
+/// Pending tax change from mempool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTaxChange {
+    pub transaction_hash: TxHash,
+    pub from_address: Address,
+    pub predicted_buy_tax: f64,
+    pub predicted_sell_tax: f64,
+    pub confidence: f64,
+    #[serde(default)]
+    pub detection_timestamp: Option<f64>,
+    #[serde(default)]
+    pub function_selector: Option<String>,
+}
+
+/// Update message from Python
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUpdate {
+    pub message_type: String,
+    pub token_count: usize,
+    pub block_number: BlockNumber,
+    pub timestamp: f64,
+    pub data: std::collections::HashMap<Address, TokenWithPools>,
+}
+
+/// Token with embedded pools (as sent by Python)
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenWithPools {
+    // All Token fields
+    #[serde(flatten)]
+    pub token: Token,
+    
+    // Pools mapped by address
+    pub pools: std::collections::HashMap<Address, Pool>,
+}
+
+/// Cache configuration
+#[derive(Debug, Clone)]
+pub struct CacheConfig {
+    pub max_tokens: usize,
+    pub max_pools: usize,
+    pub eth_threshold: f64,
+    pub evict_scam_first: bool,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: 10_000,
+            max_pools: 100_000,
+            eth_threshold: 0.1,
+            evict_scam_first: true,
+        }
+    }
 }
 
 /// Custom deserializer for total_supply that handles both strings and numbers
 fn deserialize_supply<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
-    D: Deserializer<'de>,
+    D: serde::Deserializer<'de>,
 {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StringOrNumber {
-        String(String),
-        Number(f64),
+    use serde::de::{self, Visitor};
+    
+    struct SupplyVisitor;
+    
+    impl<'de> Visitor<'de> for SupplyVisitor {
+        type Value = Option<String>;
+        
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string, number, or null")
+        }
+        
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+        
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(InnerSupplyVisitor)
+        }
     }
-
-    match Option::<StringOrNumber>::deserialize(deserializer)? {
-        Some(StringOrNumber::String(s)) => Ok(Some(s)),
-        Some(StringOrNumber::Number(n)) => Ok(Some(n.to_string())),
-        None => Ok(None),
+    
+    struct InnerSupplyVisitor;
+    
+    impl<'de> Visitor<'de> for InnerSupplyVisitor {
+        type Value = Option<String>;
+        
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or number")
+        }
+        
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+        
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
+        
+        fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v.to_string()))
+        }
     }
+    
+    deserializer.deserialize_option(SupplyVisitor)
 }
 
-/// Simulation results data structure
+// ===== ZMQ Message Types (for Python communication) =====
+
+/// Pool update from Python (legacy format)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationData {
-    /// Whether buy transactions succeed
-    pub can_buy: bool,
-    
-    /// Whether sell transactions succeed
-    pub can_sell: bool,
-    
-    /// Measured buy tax from simulation
-    pub measured_buy_tax: Option<f64>,
-    
-    /// Measured sell tax from simulation
-    pub measured_sell_tax: Option<f64>,
-    
-    /// Whether token is detected as honeypot
-    pub is_honeypot: bool,
-    
-    /// Block number when simulation was last run
-    pub last_simulated_block: u64,
-    
-    /// Error message if simulation failed
-    pub simulation_error: Option<String>,
-}
-
-/// Message format for token updates from Python
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenUpdatesMessage {
-    /// Message type: "full_update" or "block_update"
-    #[serde(rename = "type")]
-    pub message_type: String,
-    
-    /// Unix timestamp when message was created
-    pub timestamp: f64,
-    
-    /// Number of tokens in this update
-    pub token_count: usize,
-    
-    /// Map of token addresses to their information
-    pub data: HashMap<String, TokenInfo>,
-}
-
-/// Response format for REP socket queries
-#[derive(Debug, Clone, Deserialize)]
-pub struct TokenQueryResponse {
-    /// Status: "success" or "error"
-    pub status: String,
-    
-    /// Number of tokens returned
-    pub count: Option<usize>,
-    
-    /// Error message if status is "error"
-    pub error: Option<String>,
-    
-    /// Token data if successful
-    pub data: Option<HashMap<String, TokenInfo>>,
-}
-
-// Keep legacy types for backward compatibility
-/// Legacy pool update structure
-#[derive(Debug, Clone, Deserialize)]
 pub struct PoolUpdate {
-    /// Current ETH reserve level in the pool
-    #[serde(alias = "denom_reserve")]
     pub eth_reserve: f64,
-    
-    /// Current token reserve level in the pool
     pub token_reserve: f64,
-    
-    /// Address of the token in this pool
-    pub token_address: String,
-    
-    /// Pool type (V2, V3, V4)
-    pub pool_type: String,
-    
-    /// Ethereum block number when this pool data was observed
-    #[serde(alias = "latest_block_number")]
-    pub block_number: u64,
-    
-    /// Unix timestamp when the update was processed
-    #[serde(default)]
+    pub token_address: Address,
+    pub pool_type: PoolType,
+    pub block_number: BlockNumber,
     pub update_time: f64,
 }
 
-
-/// Legacy message format
+/// Bulk pool updates message
 #[derive(Debug, Clone, Deserialize)]
 pub struct PoolUpdatesMessage {
-    /// Message type, expected to be "token_updates"
-    #[serde(rename = "type")]
     pub message_type: String,
-    
-    /// Unix timestamp when the message was created
+    pub pool_count: usize,
+    pub block_number: BlockNumber,
     pub timestamp: f64,
-    
-    /// Map of pool addresses to their current state
-    pub data: HashMap<String, PoolUpdate>,
+    pub data: std::collections::HashMap<Address, PoolUpdate>,
 }
 
-/// Represents complete pool state for storage in the pool state cache.
-/// Contains all information about a pool including trading status and scam flags.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PoolState {
-    /// Current ETH reserve level in the pool
-    #[serde(alias = "denom_reserve")]
-    pub eth_reserve: f64,
-    
-    /// Current token reserve level in the pool
-    pub token_reserve: f64,
-    
-    /// Address of the token in this pool (not provided when nested in TokenInfo)
-    #[serde(default)]
-    pub token_address: String,
-    
-    /// Pool type (V2, V3, V4)
-    pub pool_type: String,
-    
-    /// Ethereum block number when this pool data was last updated
-    #[serde(alias = "latest_block_number")]
-    pub last_updated_block: u64,
-    
-    /// Unix timestamp when the pool state was last updated
-    #[serde(alias = "last_update_time")]
-    pub last_updated_time: f64,
-    
-    /// System timestamp when we received this update (for staleness checks)
-    #[serde(skip, default = "std::time::Instant::now")]
-    pub received_at: std::time::Instant,
-    
-    /// Currency of the denomination (usually ETH or stablecoin)
-    pub denom_currency: Option<String>,
-    
-    /// Address of the denomination token
-    pub denom_address: Option<String>,
-    
-    /// Pool ID for V4 pools
-    pub pool_id: Option<String>,
-    
-    /// Fee tier (for V3/V4 pools)
-    pub fee_tier: Option<u32>,
-    
-    /// Whether this pool is identified as a scam
-    pub is_scam: bool,
-    
-    /// Reason for scam classification
-    pub scam_label: Option<String>,
-    
-    /// Whether trading is enabled on this specific pool
-    pub trading_enabled: Option<bool>,
-    
-    /// Block when trading was enabled on this pool
-    pub trading_enabled_block: Option<u64>,
-    
-    /// Transaction hash when trading was enabled on this pool
-    pub trading_enabled_txn: Option<String>,
-}
-
-impl PoolState {
-    /// Check if this pool state is stale (older than the specified duration)
-    pub fn is_stale(&self, max_age: std::time::Duration) -> bool {
-        self.received_at.elapsed() > max_age
-    }
-    
-    /// Get the age of this pool state
-    pub fn age(&self) -> std::time::Duration {
-        self.received_at.elapsed()
-    }
-}
-
-impl From<PoolUpdate> for PoolState {
-    fn from(update: PoolUpdate) -> Self {
-        Self {
-            eth_reserve: update.eth_reserve,
-            token_reserve: update.token_reserve,
-            token_address: update.token_address,
-            pool_type: update.pool_type,
-            last_updated_block: update.block_number,
-            last_updated_time: update.update_time,
-            received_at: std::time::Instant::now(),
-            // Additional fields from PoolInfo - set defaults for now
-            denom_currency: None,
-            denom_address: None,
-            pool_id: None,
-            fee_tier: None,
-            is_scam: false,
-            scam_label: None,
-            trading_enabled: None,
-            trading_enabled_block: None,
-            trading_enabled_txn: None,
-        }
-    }
-}
-
-/// Represents basic token creator information.
-#[derive(Debug, Clone, Deserialize)]
+/// Token creator information
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenCreator {
-    /// Ethereum address of the token creator
-    pub creator_address: String,
-    
-    /// Address of the token created
-    pub token_address: String,
-    
-    /// Block number when the token was created
-    pub creation_block: u64,
-    
-    /// Transaction hash where the token was created
-    pub creation_tx_hash: String,
-    
-    /// Unix timestamp when the token was created
+    pub creator_address: Address,
+    pub token_address: Address,
+    pub creation_block: BlockNumber,
+    pub creation_tx_hash: TxHash,
     pub creation_time: f64,
-    
-    /// Whether this creator uses private mempool (true) or public mempool (false)
     pub uses_private_mempool: bool,
 }
 
-/// Message format for token creator updates from Python.
+/// Single creator update message
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenCreatorMessage {
-    /// Message type, expected to be "token_creator_update"
-    #[serde(rename = "type")]
     pub message_type: String,
-    
-    /// Unix timestamp when the message was created
-    pub timestamp: f64,
-    
-    /// Token creator information
     pub creator: TokenCreator,
 }
 
-/// Message format for bulk token creator data requests.
+/// Bulk creators update message
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenCreatorsMessage {
-    /// Message type, expected to be "token_creators"
-    #[serde(rename = "type")]
     pub message_type: String,
-    
-    /// Unix timestamp when the message was created
+    pub creator_count: usize,
+    pub data: std::collections::HashMap<Address, TokenCreator>,
+}
+
+/// Token-centric updates message (new format)
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUpdatesMessage {
+    pub message_type: String,
+    pub token_count: usize,
+    pub block_number: BlockNumber,
     pub timestamp: f64,
-    
-    /// Map of token addresses to their creator information
-    /// Keys are token contract addresses (as hex strings)
-    /// Values are the creator information for each token
-    pub data: HashMap<String, TokenCreator>,
+    pub data: std::collections::HashMap<Address, TokenWithPools>,
 }
 
-/// Observed transaction from a creator for mempool visibility tracking
-#[derive(Debug, Clone)]
-pub struct ObservedTransaction {
-    pub tx_hash: String,
-    pub block_number: Option<u64>,
-    pub function_name: String,
-    pub timestamp: u64,
-    pub seen_in_mempool: bool,
+/// Response to token query requests
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenQueryResponse {
+    pub status: String,
+    pub count: Option<usize>,
+    pub error: Option<String>,
+    pub data: Option<std::collections::HashMap<Address, TokenWithPools>>,
 }
 
-/// Represents the current state of a token creator in the cache.
-#[derive(Debug, Clone)]
+/// Creator state information (unused but kept for compatibility)
+#[derive(Debug, Clone, Deserialize)]
 pub struct TokenCreatorState {
-    /// Token creator information
-    pub creator: TokenCreator,
-    
-    /// System timestamp when we received this creator info (for staleness checks)
-    pub received_at: std::time::Instant,
-    
-    /// Observed transactions from this creator
-    pub observed_transactions: Vec<ObservedTransaction>,
-    
-    /// Mempool usage pattern (None = unknown, Some(true) = private, Some(false) = public)
-    pub mempool_usage_determined: Option<bool>,
+    pub address: Address,
+    pub block_number: BlockNumber,
+    pub timestamp: f64,
 }
-
-impl TokenCreatorState {
-    /// Check if this creator state is stale (older than the specified duration)
-    pub fn is_stale(&self, max_age: std::time::Duration) -> bool {
-        self.received_at.elapsed() > max_age
-    }
-    
-    /// Get the age of this creator state
-    pub fn age(&self) -> std::time::Duration {
-        self.received_at.elapsed()
-    }
-}
-
-impl From<TokenCreator> for TokenCreatorState {
-    fn from(creator: TokenCreator) -> Self {
-        Self {
-            creator,
-            received_at: std::time::Instant::now(),
-            observed_transactions: Vec::new(),
-            mempool_usage_determined: None,
-        }
-    }
-} 

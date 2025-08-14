@@ -1,17 +1,3 @@
-/// Buy/Sell Sequence Simulator
-/// 
-/// This module provides transaction sequence simulation for tokens.
-/// It runs sequences like: [Given TX] → Buy → Approve → Sell
-/// and returns raw simulation results with state changes for analysis.
-/// 
-/// The simulator focuses purely on execution and returns raw data.
-/// Signal detectors will analyze the state changes to determine:
-/// - Tax rates
-/// - Honeypot status
-/// - Trading enabled status
-/// - Other market signals
-
-use async_trait::async_trait;
 use eyre::Result;
 use std::time::Instant;
 use std::sync::Arc;

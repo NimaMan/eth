@@ -399,11 +399,11 @@ impl FunctionDetector {
                 // Get the token created by this address
                 if let Some(token_info) = futures::executor::block_on(cache.get_token_for_creator(&from_addr)) {
                     // Get all pools for this token
-                    let pools = futures::executor::block_on(cache.get_pools_for_token(&token_info.token_address));
+                    let pools = futures::executor::block_on(cache.get_pools_for_token(&token_info.address));
                     
                     // Check if the 'to' address is one of the pool addresses
-                    for (pool_addr, _pool_state) in pools {
-                        if to_addr.eq_ignore_ascii_case(&pool_addr) {
+                    for pool in pools {
+                        if to_addr.eq_ignore_ascii_case(&pool.address) {
                             // Creator is approving router to spend LP tokens = rug pull setup
                             return CreatorFunctionType::LiquidityPoolApproval;
                         }
@@ -479,8 +479,8 @@ impl FunctionDetector {
                 // Use tokio runtime to run async function
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        cache.get_token_for_creator(from).await
-                            .map(|token_info| token_info.token_address)
+                        cache.get_token_for_creator(&from.to_string()).await
+                            .map(|token_info| token_info.address.clone())
                     })
                 })
             } else {
@@ -538,7 +538,7 @@ impl FunctionDetector {
             let is_lp_approval = if let Some(ref cache) = self.token_cache {
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        cache.pools.is_pool_address(to).await
+                        cache.is_pool(&to.to_string()).await
                     })
                 })
             } else {

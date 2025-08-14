@@ -1,170 +1,164 @@
 # Token Tracking Module
 
-This module provides a real-time cache of token and pool information, subscribing to updates from the Python token tracker via ZMQ.
+Real-time cache system for token, pool, and creator state management with Python-Rust synchronization via ZMQ.
 
-## Overview
+## Current Architecture
 
-The token tracking system maintains a comprehensive cache of:
-- All tracked tokens with their metadata, ownership, and tax information
-- All liquidity pools and their current reserves
-- All "creator" addresses (token creators, owners, tax setters) for fast lookup
-- Simulation results (can buy/sell, measured taxes, honeypot detection)
-
-## Architecture
-
+### Data Flow
 ```
-Python Token Tracker (ZMQ Publisher)
-         ↓
-TokenTrackingSubscriber (ZMQ Subscriber)
-         ↓
+Python Token Tracker (postgresql + chain state)
+    ↓ [ZMQ PUB on port 5557 - real-time updates]
+    ↓ [ZMQ REP on port 5558 - initial bulk load]
+TokenTrackingSubscriber 
+    ↓ [Deserialize with field aliasing]
 TokenTrackingCache
-    ├── tokens: HashMap<String, TrackedToken>
-    ├── all_creators: HashSet  // All authority addresses
-    └── all_pools: HashSet     // All pool addresses
+    ├── tokens: HashMap<String, TokenInfo>      # 368 tokens
+    ├── pools: PoolStateCache                   # 379 pools  
+    ├── all_creators: HashSet<String>           # 289 creators
+    └── all_pools: HashSet<String>              # Pool addresses
 ```
 
-## Key Components
+### Critical Usage Points
 
-### TrackedToken
-Represents a single token with all its information:
-- Basic metadata (symbol, name, decimals, supply)
-- Authority addresses (creator, owner, tax setters)
-- Trading status and tax rates
-- Associated pools with liquidity reserves
-- Simulation results from Rust (can buy/sell, honeypot status)
-
-### TokenTrackingCache
-The main cache that:
-- Subscribes to Python updates via ZMQ
-- Maintains fast HashSets for mempool transaction filtering
-- Stores simulation results from the Rust simulation engine
-- Provides methods to query tokens, pools, and authority addresses
-
-## Usage
-
-### Basic Usage
+#### 1. Transaction Routing (Hot Path - 12k tx/sec)
 ```rust
-use mempool_processor::token_tracking::{TokenTrackingSubscriber, TokenTrackingCache};
-
-// Create subscriber with ETH threshold
-let mut subscriber = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
-let cache = subscriber.get_cache();
-
-// Start listening in background
-tokio::spawn(async move {
-    subscriber.start_listening().await.unwrap();
-});
-
-// Use the cache
-let creators = cache.get_all_creators().await;
-let pools = cache.get_all_pools().await;
-let token_addresses = cache.get_all_token_addresses().await;
-```
-
-### Checking Addresses in Mempool Processing
-```rust
-// Fast O(1) lookup to check if address is a token authority
-if cache.is_creator(&tx.from).await {
-    // This is a creator/owner/tax setter transaction
-    classify_as_creator_transaction(&tx);
-}
-
-// Check if any state change affects a pool
-let all_pools = cache.get_all_pools().await;
-for (address, _) in simulation_result.state_changes {
-    if all_pools.contains(&address) {
-        // Pool liquidity was affected
+// tx_router.rs - Determines if transaction is from token creator
+if cache.is_creator(&from_addr).await {  // O(1) HashSet lookup
+    // Route as CreatorTransaction for simulation
+    if let Some(token) = cache.get_token_for_creator(&from_addr).await {
+        // Categorize transaction type
     }
 }
 ```
 
-### Getting Token Information
+#### 2. Signal Detection
 ```rust
-// Get full token information
-if let Some(token) = cache.get_token("0x...").await {
-    println!("Token: {} ({})", token.symbol.unwrap_or_default(), token.name.unwrap_or_default());
-    println!("Creator: {}", token.creator_address);
-    println!("Owner: {}", token.current_owner);
-    println!("Buy Tax: {:?}%", token.buy_tax);
-    println!("Pools: {}", token.pools.len());
-    
-    // Check simulation results
-    if let Some(sim_data) = token.simulation_data {
-        println!("Can Buy: {}", sim_data.can_buy);
-        println!("Can Sell: {}", sim_data.can_sell);
-        println!("Is Honeypot: {}", sim_data.is_honeypot);
-    }
-}
-
-// Get primary pool (highest liquidity)
-if let Some(pool) = cache.get_primary_pool("0x...").await {
-    println!("Primary pool: {} with {} ETH", pool.pool_address, pool.denom_reserve);
-}
-```
-
-### Updating Simulation Results
-```rust
-use mempool_processor::token_tracking::SimulationData;
-
-// After running buy/sell simulation
-let sim_data = SimulationData {
-    can_buy: true,
-    can_sell: false,
-    measured_buy_tax: Some(5.0),
-    measured_sell_tax: None,
-    is_honeypot: true,
-    last_simulated_block: 12345678,
-    simulation_error: None,
-};
-
-cache.set_simulation_results("0x...", sim_data).await;
-```
-
-### Getting All Token Addresses
-```rust
-// Get all unique token addresses in the system
-let all_tokens = cache.get_all_token_addresses().await;
-println!("Tracking {} tokens", all_tokens.len());
-
-// Process each token
-for token_address in all_tokens {
-    if let Some(token_info) = cache.get_token(&token_address).await {
-        // Process token...
+// signal_manager.rs - Process simulation results
+let pools = token_cache.get_pools_for_token(&token).await;  // O(n) - loads ALL pools!
+for (pool_addr, pool_state) in pools {
+    // Generate signals per pool
+    if pool_state.trading_enabled {
+        // Generate TAX_SIGNAL
     }
 }
 ```
 
-## Data Flow
+#### 3. Liquidity Detection
+```rust
+// liquidity_detector.rs - Check pool reserves
+if let Some(pool) = cache.pools.get_pool(&pool_addr).await {
+    if pool.eth_reserve < threshold {
+        // Generate LIQUIDITY_REMOVAL signal
+    }
+}
+```
 
-1. **Python → Rust**: Token updates arrive via ZMQ with:
-   - Token metadata and ownership
-   - Current tax rates from contract reads
-   - Pool addresses and reserves
-   - Trading status
+## Current Problems
 
-2. **Rust Simulations → Cache**: Simulation results are stored:
-   - Can buy/sell status from actual swap attempts
-   - Measured tax rates from simulations
-   - Honeypot detection
-   - Simulation errors
+### Performance Issues
+1. **Excessive Cloning**: `get_token()` returns cloned TokenInfo (>1KB per call)
+2. **O(n) Searches**: `get_pools_for_token()` loads ALL 100K pools then filters
+3. **Lock Contention**: Repeated lock acquisition in loops
+4. **Memory Waste**: No limit on tokens HashMap (could grow unbounded)
 
-3. **Cache → Signal Detection**: The cache provides:
-   - Fast lookups for transaction classification
-   - Pool addresses for liquidity monitoring
-   - Combined Python + simulation data for signal generation
+### Data Consistency Issues
+1. **Field Mismatches**: Python sends `denom_reserve`, Rust expects `eth_reserve`
+2. **Missing Fields**: `token_address` not provided in nested pools
+3. **Type Confusion**: Two different `TokenInfo` types (cache.rs vs types.rs)
 
-## Performance Considerations
+### Measured Impact
+- Without cache: 0 simulations, 0 signals in 12 minutes
+- With cache: 2-5 simulations/sec, proper signal generation
+- Cache load time: ~3 seconds for 368 tokens from Python
 
-- Pre-computed HashSets enable O(1) lookups for address checking
-- Cache size limits prevent unbounded growth (100K pools, 50K tokens)
-- Scam tokens are evicted after 5000 blocks of inactivity
-- All updates are done under async locks for thread safety
+## Field Mapping (Python → Rust)
 
-## Example: Token Cache Inspector
+### Pool Fields
+```
+Python                  → Rust (with serde aliases)
+denom_reserve          → eth_reserve
+latest_block_number    → last_updated_block  
+last_update_time       → last_updated_time
+pool_address           → (nested, no token_address field)
+```
 
-See `examples/token_cache_inspector.rs` for a complete example that:
-- Connects to the token cache
-- Lists all authority addresses (creators/owners/tax setters)
-- Lists all tracked pools
-- Displays detailed information for 10 sample tokens
-- Shows all token addresses in the system
+### Token Fields
+```
+Python sends complete TokenInfo with:
+- creator_address, tax_setter_addresses
+- current_buy_tax, current_sell_tax (0-100 range)
+- pools: HashMap<pool_address, PoolInfo>
+- tax_history: Vec<TaxChange>
+```
+
+## Cache Statistics (Production)
+- **Tokens**: 368 active tokens
+- **Pools**: 379 pools (368 above 0.1 ETH threshold)
+- **Creators**: 289 unique addresses (creators + owners + tax setters)
+- **Memory Usage**: ~50MB for full cache
+- **Update Frequency**: Block-level updates from Python (~12 sec)
+
+## API Usage Examples
+
+### Check if address is creator (FAST - O(1))
+```rust
+if token_cache.is_creator(&address).await {
+    // This is a token creator/owner/tax setter
+}
+```
+
+### Get token information (SLOW - clones entire struct)
+```rust
+if let Some(token) = token_cache.get_token(&token_address).await {
+    // Access token.creator_address, token.buy_tax, etc
+}
+```
+
+### Get pools for token (VERY SLOW - O(n))
+```rust
+let pools = token_cache.get_pools_for_token(&token_address).await;
+// Returns Vec<(String, PoolState)> - all pools for this token
+```
+
+## Configuration
+
+### ZMQ Endpoints
+- **SUB**: tcp://localhost:5557 (real-time updates from Python)
+- **REQ**: tcp://localhost:5558 (initial bulk load request)
+
+### Cache Limits
+- **Pools**: 100,000 max (LRU eviction)
+- **Tokens**: Unlimited (PROBLEM - should be bounded)
+- **ETH Threshold**: 0.1 ETH (pools below this are ignored)
+
+## Testing
+
+### Verify Cache Population
+```bash
+# Run the CSV logger to check cache contents
+cargo run --example token_pool_csv_logger
+
+# Output: token_pool_data_YYYYMMDD_HHMMSS.csv
+# Should show 368 tokens, 379 pools
+```
+
+### Check Signal Detection
+```bash
+# Monitor signal generation
+tail -f logs/mempool/signal_detector_*/signals/tax_signals.log
+```
+
+## Known Issues
+
+1. **Startup Dependency**: Must wait for Python publisher to be running
+2. **Field Evolution**: Python schema changes break Rust deserialization
+3. **No Backpressure**: Can't handle Python sending faster than processing
+4. **Memory Growth**: Token HashMap has no eviction policy
+
+## Future Improvements
+
+See [DESIGN.md](./DESIGN.md) for proposed new architecture with:
+- Zero-copy access patterns
+- O(1) indexed lookups for all queries
+- Memory-bounded collections
+- Unified type system

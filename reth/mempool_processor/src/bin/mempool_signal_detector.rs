@@ -290,7 +290,7 @@ async fn main() -> Result<()> {
     info!("⏳ Waiting for token cache population...");
     tokio::time::sleep(Duration::from_secs(3)).await;
     
-    let initial_pools = token_cache.pools.get_pool_count().await;
+    let initial_pools = token_cache.get_pool_count().await;
     let initial_creators = token_cache.get_creator_count().await;
     info!("✅ Token cache initialized: {} pools, {} creators", initial_pools, initial_creators);
     
@@ -602,7 +602,7 @@ async fn main() -> Result<()> {
             }
             
             // Update cache statistics
-            let current_pools = token_cache.pools.get_pool_count().await;
+            let current_pools = token_cache.get_pool_count().await;
             let current_creators = token_cache.get_creator_count().await;
             if current_pools != initial_pools || current_creators != initial_creators {
                 info!("📊 Token cache updated: {} pools (+{}), {} creators (+{})", 

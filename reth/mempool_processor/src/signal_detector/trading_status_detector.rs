@@ -189,16 +189,17 @@ impl TradingStatusDetector {
     /// Check if trading is already enabled for this token/pool combination
     async fn is_trading_already_enabled(&self, token_address: &str, pool_address: &str) -> bool {
         if let Some(ref cache) = self.token_cache {
-            // Get pool state from cache
-            if let Some((_, pool_state)) = cache.get_pools_for_token(token_address).await.into_iter()
-                .find(|(addr, _)| addr == pool_address) 
+            // Get all pools for this token
+            let pools = cache.get_pools_for_token(&token_address.to_string()).await;
+            
+            // Find the specific pool
+            if let Some(pool_state) = pools.iter()
+                .find(|p| p.address == pool_address) 
             {
                 // Check the actual trading_enabled flag for this pool
-                if let Some(trading_enabled) = pool_state.trading_enabled {
-                    if trading_enabled {
-                        debug!("Pool {} already has trading_enabled=true in cache", pool_address);
-                        return true;
-                    }
+                if pool_state.trading_enabled {
+                    debug!("Pool {} already has trading_enabled=true in cache", pool_address);
+                    return true;
                 }
             }
         }

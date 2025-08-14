@@ -33,6 +33,9 @@ chrono          = { version = "0.4", features = ["serde"] }
 # Concurrency
 parking_lot     = "0.12"
 
+# LRU cache for bounded memory management
+lru             = "0.12"
+
 # Signal handling
 ctrlc           = "3.4"
 
@@ -309,25 +312,12 @@ name = "test_token_cache"
 path = "examples/token_tracking/test_token_cache.rs"
 
 [[example]]
-name = "token_cache_inspector"
-path = "examples/token_tracking/token_cache_inspector.rs"
-[[example]]
-name = "address_role_detection_example"
-path = "examples/token_tracking/address_role_detection_example.rs"
-[[example]]
-name = "zmq_connection_example"
-path = "examples/token_tracking/zmq_connection_example.rs"
+name = "export_all_tokens_from_cache_to_csv"
+path = "examples/token_tracking/export_all_tokens_from_cache_to_csv.rs"
 [[example]]
 name = "test_unified_cache"
 path = "examples/token_tracking/test_unified_cache.rs"
 
-[[example]]
-name = "inspect_creator_info"
-path = "examples/token_tracking/inspect_creator_info.rs"
-
-[[example]]
-name = "get_token_info"
-path = "examples/token_tracking/get_token_info.rs"
 
 [[example]]
 name = "token_pool_csv_logger"

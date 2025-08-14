@@ -6,7 +6,7 @@
 /// - Complete pool drains indicating potential scams
 
 use std::collections::HashMap;
-use tracing::{info, debug, warn};
+use tracing::info;
 use alloy_primitives::{Address, I256};
 use reth_tx_simulator::AddressStateChange;
 use crate::common::address::alloy_address_to_checksum;
@@ -136,7 +136,7 @@ impl LiquidityDetector {
         
         // Step 1: Check if this address is a tracked pool
         let pool_state = if let Some(ref token_cache) = self.token_cache {
-            token_cache.pools.get_pool(&address_str).await?
+            token_cache.get_pool(&address_str).await?
         } else {
             // Without token cache, we can't determine if this is a pool
             return None;
@@ -178,7 +178,7 @@ impl LiquidityDetector {
             signal_type,
             pool_address: address_str,
             token_address: pool_state.token_address.clone(),
-            pool_type: pool_state.pool_type.clone(),  // Include pool type
+            pool_type: format!("{:?}", pool_state.pool_type),  // Convert enum to string
             change_type,
             eth_change: eth_change_f64,
             percentage_change: drain_result.drain_percent,
@@ -197,7 +197,7 @@ impl LiquidityDetector {
     }
     
     /// Calculate drain metrics for a pool
-    fn calculate_drain_metrics(&self, pool_state: &crate::token_tracking::types::PoolState, eth_change: f64) -> DrainResult {
+    fn calculate_drain_metrics(&self, pool_state: &crate::token_tracking::types::Pool, eth_change: f64) -> DrainResult {
         let current_reserve = pool_state.eth_reserve;
         
         // If pool already has 0 or very low reserves, skip percentage calculation

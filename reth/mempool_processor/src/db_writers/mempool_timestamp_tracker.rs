@@ -5,13 +5,12 @@
 /// Only updates transactions that already exist in the database (from block processing).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::{PgPool, PgPoolOptions}, Pool, Postgres, Row};
+use sqlx::{postgres::{PgPool, PgPoolOptions}, Row};
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use tracing::{info, error, debug};
 use eyre::Result;
 
 /// Update request for mempool timestamp

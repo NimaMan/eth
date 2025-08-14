@@ -20,18 +20,16 @@
 ///    - Generate unique signal for (token, pool) pair
 
 use std::sync::Arc;
-use std::any::TypeId;
 use tokio::sync::Mutex;
-use tracing::{info, debug, warn, error};
+use tracing::{info, warn, error};
 use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
-use crate::signal_detector::{SignalManager, SignalManagerConfig, Signal, TradingEnabledSignal};
+use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, UnifiedSimulator, SequenceSimulationResult};
 use std::collections::HashMap;
-use hex;
 
 /// Types of simulation to perform
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -346,14 +344,14 @@ impl SimulationManager {
                     None => {
                         // Try to get token from cache if not provided by router
                         if let Some(token_info) = self.token_cache.get_token_for_creator(creator).await {
-                            token_info.token_address.clone()
+                            token_info.address.clone()
                         } else {
                             return vec![Err((format!("No token address found for creator {}", creator), None))];
                         }
                     }
                 }
             }
-            TransactionCategory::ContractCreation { contract_address, deployer, .. } => {
+            TransactionCategory::ContractCreation { contract_address,  .. } => {
                 // For contract creation, the sequential simulator will:
                 // 1. Execute the contract creation transaction (deploying the contract)
                 // 2. The contract will then exist at its address
@@ -390,11 +388,11 @@ impl SimulationManager {
         
         // Filter to only V2 pools (V3/V4 not supported yet)
         let v2_pools: Vec<_> = all_pools.into_iter()
-            .filter(|(pool_addr_str, pool_state)| {
-                let is_v2 = pool_state.pool_type != "V3" && pool_state.pool_type != "V4" && 
-                           pool_state.pool_type != "Uniswap-V3" && pool_state.pool_type != "Uniswap-V4";
+            .filter(|pool_state| {
+                use crate::token_tracking::PoolType;
+                let is_v2 = matches!(pool_state.pool_type, PoolType::UniswapV2 | PoolType::Unknown);
                 if !is_v2 {
-                    info!("  Skipping {} pool {} (not supported)", pool_state.pool_type, pool_addr_str);
+                    info!("  Skipping {:?} pool {} (not supported)", pool_state.pool_type, pool_state.address);
                 }
                 is_v2
             })
@@ -412,19 +410,19 @@ impl SimulationManager {
         
         // CRITICAL LOOP: Simulate each pool INDEPENDENTLY
         // Each iteration produces a separate result for signal generation
-        for (pool_idx, (pool_addr_str, pool_state)) in v2_pools.into_iter().enumerate() {
-            let pool_address = match pool_addr_str.trim_start_matches("0x")
+        for (pool_idx, pool_state) in v2_pools.into_iter().enumerate() {
+            let pool_address = match pool_state.address.trim_start_matches("0x")
                 .parse::<alloy_primitives::Address>() {
                 Ok(addr) => addr,
                 Err(e) => {
-                    results.push(Err((format!("Invalid pool address {}: {}", pool_addr_str, e), None)));
+                    results.push(Err((format!("Invalid pool address {}: {}", pool_state.address, e), None)));
                     continue;
                 }
             };
             
-            let pool_type = Some(pool_state.pool_type.clone());
+            let pool_type = format!("{:?}", pool_state.pool_type);
             info!("  [Pool {}] Simulating pool: {:?} (Type: {}, ETH: {:.6})", 
-                pool_idx, pool_address, pool_state.pool_type, pool_state.eth_reserve);
+                pool_idx, pool_address, &pool_type, pool_state.eth_reserve);
         
             // Get current block number (simulate at latest)
             let block_number = None; // Use latest block
@@ -486,23 +484,14 @@ impl SimulationManager {
             info!("    to: {:?}", tx_call_request.to);
             
             // Try simulation with original gas price first
-            // Use pool_type if available, otherwise default to V2
-            let simulation_result = match if let Some(ref pt) = pool_type {
-                self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
-                    Some(tx_call_request.clone()),
-                    token_address,
-                    pool_address,
-                    pt,
-                    block_number
-                ).await
-            } else {
-                self.unified_simulator.simulate_sequence_with_tx(
-                    Some(tx_call_request.clone()),
-                    token_address,
-                    pool_address,
-                    block_number
-                ).await
-            } {
+            // Use pool_type string
+            let simulation_result = match self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
+                Some(tx_call_request.clone()),
+                token_address,
+                pool_address,
+                &pool_type,
+                block_number
+            ).await {
                 Ok(result) => Ok(result),
                 Err(e) => {
                     // Check if it's a base fee error
@@ -522,22 +511,13 @@ impl SimulationManager {
                             new_gas_price.map(|p| p / 1_000_000_000));
                         
                         // Retry with higher gas price
-                        if let Some(ref pt) = pool_type {
-                            self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
-                                Some(tx_call_request.clone()),
-                                token_address,
-                                pool_address,
-                                pt,
-                                block_number
-                            ).await
-                        } else {
-                            self.unified_simulator.simulate_sequence_with_tx(
-                                Some(tx_call_request.clone()),
-                                token_address,
-                                pool_address,
-                                block_number
-                            ).await
-                        }
+                        self.unified_simulator.simulate_sequence_with_tx_and_pool_type(
+                            Some(tx_call_request.clone()),
+                            token_address,
+                            pool_address,
+                            &pool_type,
+                            block_number
+                        ).await
                     } else {
                         Err(e)
                     }
@@ -563,7 +543,7 @@ impl SimulationManager {
                         sell_state_changes: Some(result.sell_result.state_changes.clone()),
                     };
                     
-                    results.push(Ok((tx_state_changes, bs_result, token_address, if pool_address.is_zero() { None } else { Some(pool_address) }, pool_type.clone(), Some(result))));
+                    results.push(Ok((tx_state_changes, bs_result, token_address, if pool_address.is_zero() { None } else { Some(pool_address) }, Some(pool_type.clone()), Some(result))));
                 }
                 Err(e) => {
                     info!("  [Pool {}] ERROR in sequence simulation: {}", pool_idx, e);

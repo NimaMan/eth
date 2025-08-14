@@ -1,32 +1,9 @@
-/// Signal Manager
-/// 
-/// Coordinates all signal detectors to analyze simulation results and emit signals.
-/// 
-/// KEY ARCHITECTURE - PER-POOL SIGNAL GENERATION:
-/// - Receives SimulationResult for EACH pool independently
-/// - Each signal is a function of (token_address, pool_address)
-/// - A token with 3 pools generates 3 separate signals
-/// - Each signal contains pool-specific data:
-///   * pool_address: Unique identifier for the pool
-///   * pool_type: V2, V3, or V4
-///   * Tax values specific to that pool
-///   * Liquidity metrics for that pool
-/// 
-/// Signal Types (all per-pool):
-/// - TradingEnabled: Trading activated on a specific pool
-/// - HighTaxWarning: High taxes detected on a specific pool
-/// - ScamDetection: Liquidity drain from a specific pool
-/// - LiquidityRemoval: Liquidity removed from a specific pool
-
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
-use tracing::{info, debug, warn, error};
-use alloy_primitives::Address;
-use reth_tx_simulator::AddressStateChange;
+use tracing::{info, warn, error};
 use tokio::sync::Mutex;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
@@ -36,12 +13,12 @@ use crate::config::TaxDetectionConfig;
 use hex;
 
 use super::{
-    LiquidityDetector, LiquiditySignal,
-    StablecoinDetector, StablecoinSignal,
-    TradingStatusDetector, TradingStatusSignal,
+    LiquidityDetector,
+    StablecoinDetector,
+    TradingStatusDetector,
     trading_status_detector::TradingStatusChange,
-    TaxDetector, TaxSignal, TaxSignalType,
-    LpApprovalDetector, LpApprovalSignal,
+    TaxDetector, TaxSignalType,
+    LpApprovalDetector,
     Signal,
 };
 
@@ -69,9 +46,9 @@ impl Default for SignalManagerConfig {
 
 /// Signal manager that coordinates all detectors
 pub struct SignalManager {
-    config: SignalManagerConfig,
+    _config: SignalManagerConfig,
     liquidity_detector: LiquidityDetector,
-    stablecoin_detector: StablecoinDetector,
+    _stablecoin_detector: StablecoinDetector,
     trading_status_detector: TradingStatusDetector,
     tax_detector: TaxDetector,
     lp_approval_detector: LpApprovalDetector,
@@ -108,9 +85,9 @@ impl SignalManager {
         }
         
         Self {
-            config: config.clone(),
+            _config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
-            stablecoin_detector: StablecoinDetector::new(),
+            _stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::with_config(simulation_results_log_path, config.min_liquidity_threshold),
             tax_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
             lp_approval_detector: LpApprovalDetector::new(),
@@ -265,12 +242,12 @@ impl SignalManager {
                 if !creator_tokens.is_empty() {
                     let mut token_info_parts = Vec::new();
                     for token in &creator_tokens {
-                        let pools = token_cache.get_pools_for_token(token).await;
+                        let pools = token_cache.get_pools_for_token(&token.address).await;
                         let pool_count = pools.len();
                         let total_liquidity: f64 = pools.iter()
-                            .map(|(_, pool)| pool.eth_reserve)
+                            .map(|pool| pool.eth_reserve)
                             .sum();
-                        token_info_parts.push(format!("{} (pools: {}, liquidity: {:.2} ETH)", token, pool_count, total_liquidity));
+                        token_info_parts.push(format!("{} (pools: {}, liquidity: {:.2} ETH)", token.address, pool_count, total_liquidity));
                     }
                     let token_info = token_info_parts.join(", ");
                     
@@ -285,13 +262,13 @@ impl SignalManager {
                     if matches!(function_type, crate::function_detector::CreatorFunctionType::Other(s) if s == "approve") {
                         // Check if target_address matches any of the pools
                         for token in &creator_tokens {
-                            let pools = token_cache.get_pools_for_token(token).await;
-                            for (pool_addr, pool_state) in pools {
-                                if target_address.eq_ignore_ascii_case(&pool_addr) {
+                            let pools = token_cache.get_pools_for_token(&token.address).await;
+                            for pool_state in pools {
+                                if target_address.eq_ignore_ascii_case(&pool_state.address) {
                                     self.log_activity("LP_TOKEN_APPROVAL", &format!(
                                         "🚨 Creator approving LP tokens! | Pool: {} | Token: {} | Liquidity: {:.2} ETH",
-                                        pool_addr,
-                                        token,
+                                        pool_state.address,
+                                        token.address,
                                         pool_state.eth_reserve
                                     ));
                                     break;
@@ -416,24 +393,19 @@ impl SignalManager {
                 TaxSignalType::HighTaxOrHoneypot { cant_sell, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold } => {
                     // Check trading status from token cache before logging TAX_SIGNAL
                     let should_log_tax_signal = if let Some(ref token_cache) = self.token_cache {
-                        // Check if trading is already enabled for this token
-                        if let Some(token_info) = token_cache.get_token(&tax_signal.token_address).await {
-                            if token_info.trading_enabled {
-                                // Trading is enabled - always log TAX_SIGNAL
-                                true
-                            } else {
-                                // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
-                                if let Some(ref bs) = result.buy_sell_result {
-                                    bs.can_buy || bs.can_sell
-                                } else {
-                                    false
-                                }
-                            }
+                        // Check if trading is enabled on any pool for this token
+                        let pools = token_cache.get_pools_for_token(&tax_signal.token_address).await;
+                        let trading_enabled = pools.iter().any(|p| p.trading_enabled);
+                        
+                        if trading_enabled {
+                            // Trading is enabled - always log TAX_SIGNAL
+                            true
                         } else {
-                            // Token not in cache - log if we can buy/sell
+                            // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
                             if let Some(ref bs) = result.buy_sell_result {
                                 bs.can_buy || bs.can_sell
                             } else {
+                                // Can't determine buy/sell capability - skip
                                 false
                             }
                         }
@@ -711,7 +683,7 @@ impl SignalManager {
                 // Get pool type from cache if available
                 let pool_type = if let Some(ref token_cache) = self.token_cache {
                     if let Some(pool_state) = token_cache.get_pool_by_address(&lp_signal.lp_token_address).await {
-                        pool_state.pool_type.clone()
+                        format!("{:?}", pool_state.pool_type)
                     } else {
                         "V2".to_string() // Default to V2 if unknown
                     }

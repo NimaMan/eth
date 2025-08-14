@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use chrono::{DateTime, Utc};
-use tracing::{info, warn, error, debug};
+use tracing::{info, error};
 use eyre::Result;
 use rust_decimal::Decimal;
 

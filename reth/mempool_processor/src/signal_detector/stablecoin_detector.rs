@@ -4,7 +4,7 @@
 /// Tracks 30+ stablecoins including USDC, USDT, DAI, and others.
 
 use std::collections::{HashMap, HashSet};
-use tracing::{info, debug};
+use tracing::info;
 use lazy_static::lazy_static;
 use alloy_primitives::{Address, I256};
 use reth_tx_simulator::AddressStateChange;

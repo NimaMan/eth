@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
-use serde::Serialize;
 use zmq::{Context, Socket};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -14,8 +13,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use eyre::Result;
 
-use super::signal_detector::{Signal, TradingEnabledSignal, LiquidityRemovalSignal};
-use super::signal_detector::types::TaxSignalRecord;
+use super::signal_detector::Signal;
 // Database imports disabled for now
 // use crate::db_writers::{TradingEventWriter, TradingEnabledEvent, CreatorActionEvent};
 
@@ -171,21 +169,44 @@ impl SignalPublisher {
         stats: Arc<PublisherStats>
     ) -> Result<()> {
         if let Some(db_url) = database_url {
-            // Create the signal writers
-            let signal_writer_config = crate::db_writers::SignalWriterConfig::default();
-            let trading_writer = crate::db_writers::TradingSignalWriter::new_with_defaults(signal_writer_config).await?;
-            let tax_writer = crate::db_writers::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await?;
-            
+            // Spawn database writer task without blocking on connection
+            let stats_clone = stats.clone();
             tokio::spawn(async move {
-                info!("🗄️ Database writer task started");
+                info!("🗄️ Starting database writer task...");
+                
+                // Try to create the signal writers
+                let signal_writer_config = crate::db_writers::SignalWriterConfig::default();
+                let trading_writer = match crate::db_writers::TradingSignalWriter::new_with_defaults(signal_writer_config).await {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        error!("Failed to create trading signal writer: {}", e);
+                        None
+                    }
+                };
+                
+                let tax_writer = match crate::db_writers::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await {
+                    Ok(w) => Some(w),
+                    Err(e) => {
+                        error!("Failed to create tax signal writer: {}", e);
+                        None
+                    }
+                };
+                
+                if trading_writer.is_none() && tax_writer.is_none() {
+                    error!("❌ Database writers failed to initialize - database writing disabled");
+                    return;
+                }
+                
+                info!("✅ Database writer task started successfully");
                 
                 while let Some(signal) = receiver.recv().await {
                     // Convert signal to database record and write
                     match signal {
                         Signal::TradingEnabled(ref s) => {
-                            use rust_decimal::Decimal;
-                            
-                            let record = crate::db_writers::TradingSignalRecord {
+                            if let Some(ref writer) = trading_writer {
+                                
+                                
+                                let record = crate::db_writers::TradingSignalRecord {
                                 token_address: s.token_address.clone(),
                                 pool_address: s.pool_address.clone(),
                                 pool_type: s.pool_type.clone(),
@@ -204,9 +225,10 @@ impl SignalPublisher {
                                 signal_source: "mempool".to_string(),
                             };
                             
-                            trading_writer.write_signal(record).await;
-                            stats.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            debug!("Written trading_enabled signal to database");
+                                writer.write_signal(record).await;
+                                stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                debug!("Written trading_enabled signal to database");
+                            }
                         }
                         Signal::TaxSignal(ref s) => {
                             let record = crate::db_writers::TaxSignalRecord {
@@ -229,11 +251,13 @@ impl SignalPublisher {
                                 signal_source: "mempool".to_string(),
                             };
                             
-                            if let Err(e) = tax_writer.write_signal(record) {
-                                error!("Failed to write tax signal to database: {}", e);
-                            } else {
-                                stats.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                debug!("Written tax_signal to database");
+                            if let Some(ref writer) = tax_writer {
+                                if let Err(e) = writer.write_signal(record) {
+                                    error!("Failed to write tax signal to database: {}", e);
+                                } else {
+                                    stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    debug!("Written tax_signal to database");
+                                }
                             }
                         }
                         _ => {
