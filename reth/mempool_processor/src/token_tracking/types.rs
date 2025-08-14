@@ -216,21 +216,25 @@ pub struct PoolUpdatesMessage {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PoolState {
     /// Current ETH reserve level in the pool
+    #[serde(alias = "denom_reserve")]
     pub eth_reserve: f64,
     
     /// Current token reserve level in the pool
     pub token_reserve: f64,
     
-    /// Address of the token in this pool
+    /// Address of the token in this pool (not provided when nested in TokenInfo)
+    #[serde(default)]
     pub token_address: String,
     
     /// Pool type (V2, V3, V4)
     pub pool_type: String,
     
     /// Ethereum block number when this pool data was last updated
+    #[serde(alias = "latest_block_number")]
     pub last_updated_block: u64,
     
     /// Unix timestamp when the pool state was last updated
+    #[serde(alias = "last_update_time")]
     pub last_updated_time: f64,
     
     /// System timestamp when we received this update (for staleness checks)

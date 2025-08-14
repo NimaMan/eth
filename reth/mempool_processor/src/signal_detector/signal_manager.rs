@@ -151,7 +151,7 @@ impl SignalManager {
     /// Log a signal to the signal_manager.log file
     fn log_signal(&self, signal: &Signal) {
         if let Ok(mut file) = OpenOptions::new()
-            .create(false)
+            .create(true)
             .append(true)
             .open(&self.signal_log_path)
         {
