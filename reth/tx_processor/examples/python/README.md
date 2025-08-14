@@ -50,7 +50,7 @@ cd /home/nima/code/crypto/rust/tx_processor
 maturin develop
 ```
 
-2. The module will be available as `tx_processor_py`
+2. The module will be available as `rs_tx_processor`
 
 ## Integration with Scammer Detection
 
@@ -66,7 +66,10 @@ The Rust processor is designed to work seamlessly with the scammer detection pip
 ### TxProcessor
 
 ```python
-processor = tx_processor_py.TxProcessor(reth_datadir)
+import rs_tx_processor
+
+# No need to specify reth_datadir - it's hardcoded in the module
+processor = rs_tx_processor.TxProcessor()
 ```
 
 #### Methods:

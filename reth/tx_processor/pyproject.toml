@@ -3,7 +3,7 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "tx_processor_py"
+name = "rs_tx_processor"
 version = "0.1.0"
 description = "High-performance Rust transaction processor for Python"
 authors = [{name = "TX Processor Team"}]
@@ -19,5 +19,5 @@ classifiers = [
 
 [tool.maturin]
 features = ["python"]
-module-name = "tx_processor_py"
+module-name = "rs_tx_processor"
 python-source = "python"

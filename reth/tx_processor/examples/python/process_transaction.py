@@ -8,14 +8,14 @@ from Python. This example processes a real transaction that has:
 - 2 internal transactions
 """
 
-import tx_processor_py
+import rs_tx_processor
 
 def main():
     print("🚀 Rust Transaction Processor - Python Example")
     print("=" * 50)
     
-    # Initialize the processor with Reth data directory
-    processor = tx_processor_py.TxProcessor("/home/nima/.local/share/reth/mainnet")
+    # Initialize the processor (reth_datadir is hardcoded)
+    processor = rs_tx_processor.TxProcessor()
     print(f"\n✅ Initialized: {processor}")
     
     # Real transaction hash from Rust examples

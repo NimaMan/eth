@@ -10,7 +10,7 @@ import sys
 import time
 sys.path.insert(0, '/home/nima/code/crypto/rust/tx_processor/target/debug')
 
-import tx_processor_py
+import rs_tx_processor
 
 def format_address(addr: str) -> str:
     """Format address to shortened form"""
@@ -22,8 +22,8 @@ def main():
     print("🚀 Batch Transaction Processing Example")
     print("=" * 50)
     
-    # Initialize processor
-    processor = tx_processor_py.TxProcessor("/home/nima/.local/share/reth/mainnet")
+    # Initialize processor (reth_datadir is hardcoded)
+    processor = rs_tx_processor.TxProcessor()
     print(f"\n✅ Initialized: {processor}")
     
     # Real transaction hashes from various scenarios

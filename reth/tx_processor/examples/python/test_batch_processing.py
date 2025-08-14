@@ -3,7 +3,7 @@
 Test batch processing performance with parallel execution
 """
 
-import tx_processor_py
+import rs_tx_processor
 import time
 
 # Test transactions (mix of valid and complex)
@@ -18,9 +18,8 @@ test_hashes = [
 def test_batch_processing():
     """Test different batch processing methods"""
     
-    # Initialize processor
-    reth_datadir = "/home/nima/.local/share/reth/mainnet"
-    processor = tx_processor_py.TxProcessor(reth_datadir)
+    # Initialize processor (no reth_datadir needed - it's hardcoded)
+    processor = rs_tx_processor.TxProcessor()
     
     print("🚀 Testing Batch Processing Performance")
     print("=" * 60)

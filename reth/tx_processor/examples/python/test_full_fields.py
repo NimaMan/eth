@@ -3,10 +3,10 @@
 Test that all fields are properly exposed in Python bindings
 """
 
-import tx_processor_py
+import rs_tx_processor
 
-reth_datadir = "/home/nima/.local/share/reth/mainnet"
-tx_processor = tx_processor_py.TxProcessor(reth_datadir)
+# No need to specify reth_datadir anymore - it's hardcoded
+tx_processor = rs_tx_processor.TxProcessor()
 
 # Process the test transaction
 tx_hash = "0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7"

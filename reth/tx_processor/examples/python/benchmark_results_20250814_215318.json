@@ -1,0 +1,45 @@
+{
+  "timestamp": "2025-08-14T21:53:18.985311",
+  "total_transactions": 1000,
+  "results": [
+    {
+      "implementation": "Rust (tx_processor)",
+      "total_transactions": 1000,
+      "successful": 540,
+      "failed": 460,
+      "error_types": {
+        "RuntimeError": 460
+      },
+      "total_time": 0.7578330039978027,
+      "avg_time_per_tx": 0.001273721754895868,
+      "median_time_per_tx": 0.0004056207835674286,
+      "min_time": 0.00011783372610807419,
+      "max_time": 0.1071089319884777,
+      "std_dev": 0.004965988781784278,
+      "throughput_per_sec": 712.5580400316871
+    },
+    {
+      "implementation": "Rust BATCH (tx_processor)",
+      "total_transactions": 1000,
+      "successful": 540,
+      "failed": 460,
+      "total_time": 0.5828332901000977,
+      "avg_time_per_tx": 0.0005828332901000976,
+      "throughput_per_sec": 926.5085045283853
+    },
+    {
+      "implementation": "Python (eth_block_processor)",
+      "total_transactions": 1000,
+      "successful": 1000,
+      "failed": 0,
+      "error_types": {},
+      "total_time": 11.116021633148193,
+      "avg_time_per_tx": 0.011112875947728753,
+      "median_time_per_tx": 0.008921117521822453,
+      "min_time": 0.003085763193666935,
+      "max_time": 0.09385142661631107,
+      "std_dev": 0.007722361319578901,
+      "throughput_per_sec": 89.96024234227653
+    }
+  ]
+}

@@ -14,13 +14,13 @@ import os
 sys.path.insert(0, '/home/nima/code/crypto/rust/tx_processor/target/debug')
 sys.path.insert(0, '/home/nima/code/crypto/py')
 
-import tx_processor_py
+import rs_tx_processor
 
 def measure_rust_performance(tx_hash: str, iterations: int = 10):
     """
     Measure Rust processor performance.
     """
-    processor = tx_processor_py.TxProcessor("/home/nima/.local/share/reth/mainnet")
+    processor = rs_tx_processor.TxProcessor()
     
     # Warm up
     processor.process_transaction(tx_hash)

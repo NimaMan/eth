@@ -6,7 +6,6 @@ use pyo3::prelude::*;
 use alloy_primitives::{B256, Address};
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use rayon::prelude::*;
 
 use crate::TxProcessor;
@@ -15,33 +14,37 @@ use super::processed_transaction::PyProcessedTransaction;
 /// Python wrapper for TxProcessor
 #[pyclass(name = "TxProcessor")]
 pub struct PyTxProcessor {
-    inner: Arc<Mutex<TxProcessor>>,
+    inner: Arc<TxProcessor>,  // Remove Mutex - TxProcessor operations are read-only
     runtime: Arc<tokio::runtime::Runtime>,
+    reth_datadir: String,  // Store the path to create new instances for parallel processing
 }
 
 #[pymethods]
 impl PyTxProcessor {
     /// Create new TxProcessor instance
     /// 
-    /// Args:
-    ///     reth_datadir: Path to Reth data directory (e.g., "/home/user/.local/share/reth/mainnet")
+    /// No arguments needed - uses hardcoded Reth data directory
     #[new]
-    fn new(reth_datadir: String) -> PyResult<Self> {
+    fn new() -> PyResult<Self> {
+        // Hardcoded reth_datadir
+        let reth_datadir = "/home/nima/.local/share/reth/mainnet";
+        
         // Create tokio runtime for async operations
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 format!("Failed to create runtime: {}", e)
             ))?;
         
-        // Create TxProcessor (TxProcessor::new is not async, it's a regular function)
-        let processor = TxProcessor::new(&reth_datadir)
+        // Create TxProcessor with hardcoded path
+        let processor = TxProcessor::new(reth_datadir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 format!("Failed to create TxProcessor: {}", e)
             ))?;
         
         Ok(Self {
-            inner: Arc::new(Mutex::new(processor)),
+            inner: Arc::new(processor),  // No mutex needed
             runtime: Arc::new(runtime),
+            reth_datadir: reth_datadir.to_string(),
         })
     }
     
@@ -60,10 +63,9 @@ impl PyTxProcessor {
                 format!("Invalid transaction hash: {}", e)
             ))?;
         
-        // Process transaction
+        // Process transaction (no lock needed)
         let processor = self.inner.clone();
         let result = self.runtime.block_on(async move {
-            let processor = processor.lock().await;
             processor.process_transaction_by_hash(hash).await
         }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
             format!("Failed to process transaction: {}", e)
@@ -80,7 +82,7 @@ impl PyTxProcessor {
     /// Returns:
     ///     List of ProcessedTransaction objects (in same order as input)
     /// 
-    /// Note: Uses parallel processing with a safe default of 4 workers
+    /// Note: Uses parallel processing with shared database connection to avoid EAGAIN errors
     fn process_transactions_batch(&self, py: Python, tx_hashes: Vec<String>) -> PyResult<Vec<PyProcessedTransaction>> {
         // Parse transaction hashes first (fail fast on invalid input)
         let hashes: Result<Vec<B256>, _> = tx_hashes
@@ -95,47 +97,60 @@ impl PyTxProcessor {
             format!("Invalid transaction hash: {}", e)
         ))?;
         
-        // Clone Arc references for parallel processing
+        // Clone the shared processor - this is cheap because internals use Arc
         let processor = self.inner.clone();
-        let runtime = self.runtime.clone();
         
         // Release GIL for parallel processing
         py.allow_threads(|| {
-            // Set a safe thread pool size (4 workers by default)
-            // This prevents overwhelming the system while still providing good parallelism
+            // Set thread pool size to 4 workers
             rayon::ThreadPoolBuilder::new()
                 .num_threads(4)
                 .build()
                 .ok();
             
-            // Process transactions in parallel using rayon
-            let results: Vec<_> = hashes
+            // Process transactions in parallel chunks to reduce lock contention
+            // Each thread processes multiple transactions to amortize lock overhead
+            let chunk_size = (hashes.len() + 3) / 4; // Divide work into 4 chunks
+            let chunks: Vec<_> = hashes.chunks(chunk_size).collect();
+            
+            let results: Vec<Vec<_>> = chunks
                 .par_iter()
-                .map(|&hash| {
-                    // Each thread gets its own processor handle
+                .map(|chunk| {
+                    // Each thread processes its chunk of transactions
                     let processor = processor.clone();
                     
-                    // Run async processing in the shared runtime
-                    runtime.block_on(async move {
-                        let processor = processor.lock().await;
-                        processor.process_transaction_by_hash(hash).await
-                    })
+                    // Create one runtime per thread
+                    let runtime = match tokio::runtime::Runtime::new() {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            eprintln!("Failed to create runtime: {}", e);
+                            return vec![];
+                        }
+                    };
+                    
+                    // Process all transactions in this chunk
+                    let mut chunk_results = Vec::new();
+                    for &hash in chunk.iter() {
+                        let processor = processor.clone();
+                        let result = runtime.block_on(async move {
+                            // No lock needed - direct access
+                            processor.process_transaction_by_hash(hash).await
+                        });
+                        
+                        match result {
+                            Ok(ptx) => chunk_results.push(Some(PyProcessedTransaction::from_processed_transaction(ptx))),
+                            Err(e) => {
+                                eprintln!("Error processing transaction: {}", e);
+                                chunk_results.push(None);
+                            }
+                        }
+                    }
+                    chunk_results
                 })
                 .collect();
             
-            // Convert successful results, keeping order
-            let mut processed = Vec::with_capacity(results.len());
-            for (i, result) in results.into_iter().enumerate() {
-                match result {
-                    Ok(ptx) => processed.push(Some(PyProcessedTransaction::from_processed_transaction(ptx))),
-                    Err(e) => {
-                        eprintln!("Error processing transaction at index {}: {}", i, e);
-                        processed.push(None);
-                    }
-                }
-            }
-            
-            Ok(processed.into_iter().flatten().collect())
+            // Flatten results while preserving order
+            Ok(results.into_iter().flatten().flatten().collect())
         })
     }
     
@@ -199,7 +214,6 @@ impl PyTxProcessor {
                     .map(|(idx, hash, original)| {
                         let processor = processor.clone();
                         let result = runtime.block_on(async move {
-                            let processor = processor.lock().await;
                             processor.process_transaction_by_hash(*hash).await
                         });
                         (*idx, original.clone(), result)
@@ -212,7 +226,6 @@ impl PyTxProcessor {
                     .map(|(idx, hash, original)| {
                         let processor = processor.clone();
                         let result = runtime.block_on(async move {
-                            let processor = processor.lock().await;
                             processor.process_transaction_by_hash(*hash).await
                         });
                         (*idx, original.clone(), result)
@@ -298,7 +311,7 @@ impl PyTxProcessor {
         // Get transactions for address
         let processor = self.inner.clone();
         let results = self.runtime.block_on(async move {
-            let _processor = processor.lock().await;
+            let _processor = processor;
             
             // This would need to be implemented in the main TxProcessor
             // For now, return empty list as placeholder

@@ -7,15 +7,15 @@ import sys
 
 # Test import
 try:
-    import tx_processor_py
-    print("✅ Successfully imported tx_processor_py")
+    import rs_tx_processor
+    print("✅ Successfully imported rs_tx_processor")
 except ImportError as e:
     print(f"❌ Failed to import: {e}")
     sys.exit(1)
 
 # Test initialization
 try:
-    processor = tx_processor_py.TxProcessor("/home/nima/.local/share/reth/mainnet")
+    processor = rs_tx_processor.TxProcessor()
     print(f"✅ Successfully initialized: {processor}")
 except Exception as e:
     print(f"❌ Failed to initialize: {e}")

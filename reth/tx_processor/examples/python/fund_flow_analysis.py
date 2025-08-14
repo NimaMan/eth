@@ -15,7 +15,7 @@ import networkx as nx
 sys.path.insert(0, '/home/nima/code/crypto/rust/tx_processor/target/debug')
 sys.path.insert(0, '/home/nima/code/crypto/qarqa_tweet')
 
-import tx_processor_py
+import rs_tx_processor
 from qarqa_tweet.data_providers.fund_flow_network import FundFlowNetworkBuilder
 from qarqa_tweet.data_providers.address_activity_provider import AddressActivityProvider
 
@@ -25,8 +25,8 @@ class RustTransactionProvider:
     Drop-in replacement for ProcessedTransactionProvider.
     """
     
-    def __init__(self, reth_datadir: str = "/home/nima/.local/share/reth/mainnet"):
-        self.processor = tx_processor_py.TxProcessor(reth_datadir)
+    def __init__(self):
+        self.processor = rs_tx_processor.TxProcessor()
         self._cache = {}
     
     def get_transactions_for_address(self, address: str, start_block: int, end_block: int) -> List[Dict]:

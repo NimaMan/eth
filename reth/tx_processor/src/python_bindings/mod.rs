@@ -7,15 +7,15 @@
 use pyo3::prelude::*;
 
 pub mod processed_transaction;
-#[path = "tx_processor_py.rs"]
-pub mod tx_proc_impl;  // Rename to avoid conflict
+pub mod rs_tx_processor;
 
 use processed_transaction::PyProcessedTransaction;
-use tx_proc_impl::PyTxProcessor;
+use rs_tx_processor::PyTxProcessor;
 
 /// Initialize the Python module
 #[pymodule]
-fn tx_processor_py(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+#[pyo3(name = "rs_tx_processor")]
+fn rs_tx_processor_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyProcessedTransaction>()?;
     m.add_class::<PyTxProcessor>()?;
     Ok(())

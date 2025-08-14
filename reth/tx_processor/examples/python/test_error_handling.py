@@ -4,22 +4,22 @@ Test error handling in tx_processor_py module
 """
 
 import sys
-import tx_processor_py
+import rs_tx_processor
 
 print("🧪 Testing Error Handling")
 print("=" * 40)
 
-# Test 1: Invalid Reth data directory
-print("\n1. Testing invalid data directory:")
+# Test 1: Initialize processor (reth_datadir is now hardcoded)
+print("\n1. Testing processor initialization:")
 try:
-    processor = tx_processor_py.TxProcessor("/invalid/path/to/reth")
-    print("❌ Should have failed with invalid path")
+    processor = rs_tx_processor.TxProcessor()
+    print("✅ Processor initialized successfully (with hardcoded path)")
 except Exception as e:
-    print(f"✅ Correctly raised error: {type(e).__name__}")
+    print(f"❌ Failed to initialize: {type(e).__name__}")
     print(f"   Message: {str(e)[:100]}...")
+    sys.exit(1)
 
-# Test 2: Valid processor
-processor = tx_processor_py.TxProcessor("/home/nima/.local/share/reth/mainnet")
+# Test 2: Testing invalid transaction hash
 print("\n2. Testing invalid transaction hash:")
 
 # Test 2a: Malformed hash
