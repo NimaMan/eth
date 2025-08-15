@@ -5,7 +5,7 @@
 
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -121,17 +121,34 @@ impl TradingStatusDetector {
 
         // Check if taxes are reasonable (below threshold)
         // If taxes are too high, trading is not really "enabled" in a practical sense
-        if let Some(buy_t) = buy_tax {
-            if buy_t > self.tax_threshold {
+        // IMPORTANT: If tax calculation fails (None), we cannot generate a TRADING_ENABLED signal
+        match buy_tax {
+            Some(buy_t) if buy_t > self.tax_threshold => {
                 debug!("Token {} pool {} - Buy tax too high: {:.1}%", token_address, pool_address, buy_t);
                 return None;
             }
+            None => {
+                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: buy tax calculation failed", 
+                      token_address, pool_address);
+                return None;
+            }
+            Some(buy_t) => {
+                debug!("Token {} pool {} - Buy tax acceptable: {:.1}%", token_address, pool_address, buy_t);
+            }
         }
         
-        if let Some(sell_t) = sell_tax {
-            if sell_t > self.tax_threshold {
+        match sell_tax {
+            Some(sell_t) if sell_t > self.tax_threshold => {
                 debug!("Token {} pool {} - Sell tax too high: {:.1}%", token_address, pool_address, sell_t);
                 return None;
+            }
+            None => {
+                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: sell tax calculation failed", 
+                      token_address, pool_address);
+                return None;
+            }
+            Some(sell_t) => {
+                debug!("Token {} pool {} - Sell tax acceptable: {:.1}%", token_address, pool_address, sell_t);
             }
         }
         

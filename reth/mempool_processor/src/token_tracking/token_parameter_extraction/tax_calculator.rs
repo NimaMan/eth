@@ -11,6 +11,16 @@ use alloy_primitives::{Address, U256, I256};
 use reth_tx_simulator::AddressStateChange;
 use std::collections::HashMap;
 use crate::common::address::alloy_address_to_checksum;
+use tracing::{error, debug, warn};
+
+/// Result of tax calculation
+#[derive(Debug, Clone)]
+pub enum TaxCalculationResult {
+    /// Successfully calculated tax (0-100%)
+    Calculated(f64),
+    /// Failed to determine tax due to invalid simulation results
+    InvalidSimulation { reason: String },
+}
 
 /// Calculate buy tax from state changes
 /// 
@@ -30,38 +40,75 @@ use crate::common::address::alloy_address_to_checksum;
 /// * `token_address` - The address of the token being bought
 ///
 /// # Returns
-/// * `Option<f64>` - The calculated buy tax percentage (0-100), or None if calculation fails
+/// * `TaxCalculationResult` - Either Calculated(0-100) or InvalidSimulation with reason
 pub fn calculate_buy_tax(
     state_changes: &HashMap<Address, AddressStateChange>,
     pool_address: &Address,
     buyer_address: &Address,
     token_address: &Address,
-) -> Option<f64> {
-    let pool_changes = state_changes.get(pool_address)?;
-    let buyer_changes = state_changes.get(buyer_address)?;
+) -> TaxCalculationResult {
+    // Check if pool is in state changes
+    let pool_changes = match state_changes.get(pool_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Pool address {} not found in state changes", pool_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
+    
+    // Check if buyer is in state changes
+    let buyer_changes = match state_changes.get(buyer_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Buyer address {} not found in state changes", buyer_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
     // Get the checksummed token address string for lookup
     let token_addr_str = alloy_address_to_checksum(*token_address);
     
     // Get tokens sent by pool (negative value in token_net)
-    let pool_token_change = pool_changes.token_net.get(&token_addr_str)?;
+    let pool_token_change = match pool_changes.token_net.get(&token_addr_str) {
+        Some(change) => change,
+        None => {
+            let reason = format!("Token {} not found in pool's token_net. Available tokens: {:?}", 
+                   token_addr_str, pool_changes.token_net.keys().collect::<Vec<_>>());
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
     // Pool loses tokens, so the value should be negative
     // We need the absolute value
     let tokens_from_pool = if *pool_token_change >= I256::ZERO {
-        // This shouldn't happen in a normal buy, pool should lose tokens
-        return None;
+        let reason = format!("Pool token change is positive or zero ({}) - pool should lose tokens in a buy", 
+               pool_token_change);
+        warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+        return TaxCalculationResult::InvalidSimulation { reason };
     } else {
         // Convert negative to positive by subtracting from zero
         pool_token_change.wrapping_neg()
     };
     
     // Get tokens received by buyer (positive value in token_net)
-    let tokens_to_buyer = buyer_changes.token_net.get(&token_addr_str)?;
+    let tokens_to_buyer = match buyer_changes.token_net.get(&token_addr_str) {
+        Some(change) => change,
+        None => {
+            let reason = format!("Token {} not found in buyer's token_net. Available tokens: {:?}", 
+                   token_addr_str, buyer_changes.token_net.keys().collect::<Vec<_>>());
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
-    // Buyer should receive tokens (positive value)
+    // Check if buyer received any tokens
     if tokens_to_buyer.is_zero() {
-        return None;
+        // This is 100% tax (honeypot) - buyer got nothing
+        debug!("Buy tax calc: Buyer received 0 tokens while pool sent {} - this is 100% tax", tokens_from_pool);
+        return TaxCalculationResult::Calculated(100.0);
     }
     
     // Calculate tax percentage
@@ -72,9 +119,11 @@ pub fn calculate_buy_tax(
     
     if from_pool_f64 > 0.0 {
         let tax_percent = (1.0 - (to_buyer_f64 / from_pool_f64)) * 100.0;
-        Some(tax_percent.max(0.0))
+        TaxCalculationResult::Calculated(tax_percent.max(0.0))
     } else {
-        None
+        let reason = "Pool sent zero tokens - invalid simulation state".to_string();
+        warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+        TaxCalculationResult::InvalidSimulation { reason }
     }
 }
 
@@ -95,14 +144,31 @@ pub fn calculate_buy_tax(
 /// * `seller_address` - The address of the seller
 ///
 /// # Returns
-/// * `Option<f64>` - The calculated sell tax percentage (0-100), or None if calculation fails
+/// * `TaxCalculationResult` - Either Calculated(0-100) or InvalidSimulation with reason
 pub fn calculate_sell_tax(
     state_changes: &HashMap<Address, AddressStateChange>,
     pool_address: &Address,
     seller_address: &Address,
-) -> Option<f64> {
-    let pool_changes = state_changes.get(pool_address)?;
-    let seller_changes = state_changes.get(seller_address)?;
+) -> TaxCalculationResult {
+    // Check if pool is in state changes
+    let pool_changes = match state_changes.get(pool_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Pool address {} not found in state changes", pool_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
+    
+    // Check if seller is in state changes
+    let seller_changes = match state_changes.get(seller_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Seller address {} not found in state changes", seller_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
     // Get ETH sent by pool (negative value in eth_net)
     let pool_eth_change = pool_changes.eth_net;
@@ -110,8 +176,10 @@ pub fn calculate_sell_tax(
     // Pool loses ETH, so the value should be negative
     // We need the absolute value
     let eth_from_pool = if pool_eth_change >= I256::ZERO {
-        // This shouldn't happen in a normal sell, pool should lose ETH
-        return None;
+        let reason = format!("Pool ETH change is positive or zero ({}) - pool should lose ETH in a sell", 
+               pool_eth_change);
+        warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+        return TaxCalculationResult::InvalidSimulation { reason };
     } else {
         // Convert negative to positive by subtracting from zero
         pool_eth_change.wrapping_neg()
@@ -120,9 +188,11 @@ pub fn calculate_sell_tax(
     // Get ETH received by seller (positive value in eth_net)
     let eth_to_seller = seller_changes.eth_net;
     
-    // Seller should receive ETH (positive value)
+    // Check if seller received any ETH
     if eth_to_seller.is_zero() {
-        return None;
+        // This is 100% tax (honeypot) - seller got nothing
+        debug!("Sell tax calc: Seller received 0 ETH while pool sent {} - this is 100% tax", eth_from_pool);
+        return TaxCalculationResult::Calculated(100.0);
     }
     
     // Calculate tax percentage
@@ -133,9 +203,11 @@ pub fn calculate_sell_tax(
     
     if from_pool_f64 > 0.0 {
         let tax_percent = (1.0 - (to_seller_f64 / from_pool_f64)) * 100.0;
-        Some(tax_percent.max(0.0))
+        TaxCalculationResult::Calculated(tax_percent.max(0.0))
     } else {
-        None
+        let reason = "Pool sent zero ETH - invalid simulation state".to_string();
+        warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+        TaxCalculationResult::InvalidSimulation { reason }
     }
 }
 
@@ -147,9 +219,23 @@ pub fn calculate_buy_tax_from_movements(
     state_changes: &HashMap<Address, AddressStateChange>,
     pool_address: &Address,
     buyer_address: &Address,
-) -> Option<f64> {
-    let pool_changes = state_changes.get(pool_address)?;
-    let buyer_changes = state_changes.get(buyer_address)?;
+) -> TaxCalculationResult {
+    let pool_changes = match state_changes.get(pool_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Pool address {} not found in state changes", pool_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
+    let buyer_changes = match state_changes.get(buyer_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Buyer address {} not found in state changes", buyer_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
     // Find the token address by checking buyer's incoming tokens
     for (token_addr, buyer_token_movements) in &buyer_changes.movements.tokens {
@@ -174,14 +260,16 @@ pub fn calculate_buy_tax_from_movements(
                     
                     if from_pool_f64 > 0.0 {
                         let tax_percent = (1.0 - (to_buyer_f64 / from_pool_f64)) * 100.0;
-                        return Some(tax_percent.max(0.0));
+                        return TaxCalculationResult::Calculated(tax_percent.max(0.0));
                     }
                 }
             }
         }
     }
     
-    None
+    let reason = "No token movements found in state changes".to_string();
+    warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+    TaxCalculationResult::InvalidSimulation { reason }
 }
 
 /// Calculate sell tax using movements data (alternative method)
@@ -192,9 +280,23 @@ pub fn calculate_sell_tax_from_movements(
     state_changes: &HashMap<Address, AddressStateChange>,
     pool_address: &Address,
     seller_address: &Address,
-) -> Option<f64> {
-    let pool_changes = state_changes.get(pool_address)?;
-    let seller_changes = state_changes.get(seller_address)?;
+) -> TaxCalculationResult {
+    let pool_changes = match state_changes.get(pool_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Pool address {} not found in state changes", pool_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
+    let seller_changes = match state_changes.get(seller_address) {
+        Some(changes) => changes,
+        None => {
+            let reason = format!("Seller address {} not found in state changes", seller_address);
+            warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+            return TaxCalculationResult::InvalidSimulation { reason };
+        }
+    };
     
     // Calculate ETH received by seller
     let eth_to_seller: U256 = seller_changes.movements.denom.incoming
@@ -216,12 +318,14 @@ pub fn calculate_sell_tax_from_movements(
             
             if from_pool_f64 > 0.0 {
                 let tax_percent = (1.0 - (to_seller_f64 / from_pool_f64)) * 100.0;
-                return Some(tax_percent.max(0.0));
+                return TaxCalculationResult::Calculated(tax_percent.max(0.0));
             }
         }
     }
     
-    None
+    let reason = "No ETH movements found in state changes".to_string();
+    warn!("INVALID_SIMULATION_RESULTS: {}", reason);
+    TaxCalculationResult::InvalidSimulation { reason }
 }
 
 #[cfg(test)]

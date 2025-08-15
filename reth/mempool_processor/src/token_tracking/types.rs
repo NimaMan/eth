@@ -124,6 +124,10 @@ pub struct Pool {
     pub is_scam: bool,
     pub scam_label: Option<String>,
     
+    // LP token approval tracking (V2 pools only)
+    #[serde(default)]
+    pub lp_tokens_approved_percentage: Option<f64>,
+    
     // System metadata (not from Python)
     #[serde(skip, default = "std::time::Instant::now")]
     pub received_at: std::time::Instant,

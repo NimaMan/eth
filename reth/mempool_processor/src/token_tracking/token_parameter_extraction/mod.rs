@@ -11,6 +11,7 @@ pub use tax_calculator::{
     calculate_sell_tax,
     calculate_buy_tax_from_movements,
     calculate_sell_tax_from_movements,
+    TaxCalculationResult,
 };
 pub use tax_calculator_from_sequential_simulation::{TaxCalculator, TokenInfo, PoolReserves};
 // pub use token_info_fetcher::TokenInfoFetcher;

@@ -277,6 +277,18 @@ path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
 name = "validate_all_token_taxes"
 path = "examples/token_parameter_extraction/validate_all_token_taxes.rs"
 
+[[example]]
+name = "analyze_tax_multi_router"
+path = "examples/token_parameter_extraction/analyze_tax_multi_router.rs"
+
+[[example]]
+name = "find_whitelisted_addresses"
+path = "examples/token_parameter_extraction/find_whitelisted_addresses.rs"
+
+[[example]]
+name = "verify_exclusion_storage"
+path = "examples/token_parameter_extraction/verify_exclusion_storage.rs"
+
 # Signal Detector Examples
 [[example]]
 name = "full_pipeline_signal_detection"

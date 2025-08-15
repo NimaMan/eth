@@ -52,8 +52,14 @@ impl TaxCalculator {
         _reserves: &PoolReserves,
         block_number: u64,
     ) -> Result<(f64, f64, U256, U256)> {  // Returns (buy_tax, sell_tax, tokens_bought, tokens_sold)
-        // Create buy transaction: 0.1 ETH -> tokens
-        let buy_amount = U256::from(100_000_000_000_000_000u64); // 0.1 ETH
+        // Get base fee for this block to set appropriate gas prices (required for post-London)
+        let base_fee = self.simulator.get_base_fee_at_block(block_number)?;
+        
+        // Set gas prices based on base fee (use 3x to ensure simulation succeeds)
+        let gas_price = base_fee.saturating_mul(3);
+        
+        // Create buy transaction: 0.01 ETH -> tokens
+        let buy_amount = U256::from(10_000_000_000_000_000u64); // 0.01 ETH
         let buy_calldata = self.encode_swap_exact_eth_for_tokens(
             U256::ZERO, // min tokens out
             vec![
@@ -70,7 +76,7 @@ impl TaxCalculator {
             value: Some(buy_amount),
             data: Some(buy_calldata),
             gas: Some(300000),
-            gas_price: Some(20_000_000_000),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
@@ -133,7 +139,7 @@ impl TaxCalculator {
             value: Some(U256::ZERO),
             data: Some(approve_calldata),
             gas: Some(100000),
-            gas_price: Some(20_000_000_000),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
@@ -170,7 +176,7 @@ impl TaxCalculator {
             value: Some(U256::ZERO),
             data: Some(sell_calldata),
             gas: Some(300000),
-            gas_price: Some(20_000_000_000),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,

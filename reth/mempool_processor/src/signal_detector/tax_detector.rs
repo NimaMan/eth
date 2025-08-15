@@ -10,9 +10,9 @@
 /// - Suspicious tax patterns
 
 use crate::simulator::SimulationResult;
-use crate::token_tracking::{calculate_buy_tax, calculate_sell_tax};
+use crate::token_tracking::{calculate_buy_tax, calculate_sell_tax, TaxCalculationResult};
 use crate::config::TaxDetectionConfig;
-use tracing::{info, debug};
+use tracing::{info, debug, error, warn};
 use alloy_primitives::Address;
 use hex;
 use std::fs::OpenOptions;
@@ -104,12 +104,23 @@ impl TaxDetector {
             
             // Calculate buy tax if we have the state changes and addresses
             if let (Some(buy_changes), Some(token_addr), Some(pool_addr)) = (&buy_sell.buy_state_changes, &sim_result.token_address, &sim_result.pool_address) {
-                buy_tax = calculate_buy_tax(buy_changes, pool_addr, &buyer_address, token_addr);
-                if buy_tax.is_none() {
-                    debug!("Buy tax calculation returned None for token {:?} pool {:?}", token_addr, pool_addr);
+                debug!("Calculating buy tax for token {} pool {} with {} state changes", 
+                       token_addr, pool_addr, buy_changes.len());
+                debug!("State change addresses: {:?}", buy_changes.keys().collect::<Vec<_>>());
+                
+                match calculate_buy_tax(buy_changes, pool_addr, &buyer_address, token_addr) {
+                    TaxCalculationResult::Calculated(tax) => {
+                        debug!("Buy tax calculated successfully: {:.2}%", tax);
+                        buy_tax = Some(tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        warn!("Buy tax calculation failed for token {} pool {}: {}", 
+                              token_addr, pool_addr, reason);
+                        buy_tax = None;
+                    }
                 }
             } else {
-                info!("Missing data for buy tax calculation - buy_changes: {}, token_addr: {}, pool_addr: {}", 
+                error!("Missing data for buy tax calculation - buy_changes: {}, token_addr: {}, pool_addr: {}", 
                     buy_sell.buy_state_changes.is_some(), 
                     sim_result.token_address.is_some(), 
                     sim_result.pool_address.is_some());
@@ -117,12 +128,23 @@ impl TaxDetector {
             
             // Calculate sell tax if we have the state changes and addresses
             if let (Some(sell_changes), Some(pool_addr)) = (&buy_sell.sell_state_changes, &sim_result.pool_address) {
-                sell_tax = calculate_sell_tax(sell_changes, pool_addr, &buyer_address);
-                if sell_tax.is_none() {
-                    debug!("Sell tax calculation returned None for pool {:?}", pool_addr);
+                debug!("Calculating sell tax for pool {} with {} state changes", 
+                       pool_addr, sell_changes.len());
+                debug!("State change addresses: {:?}", sell_changes.keys().collect::<Vec<_>>());
+                
+                match calculate_sell_tax(sell_changes, pool_addr, &buyer_address) {
+                    TaxCalculationResult::Calculated(tax) => {
+                        debug!("Sell tax calculated successfully: {:.2}%", tax);
+                        sell_tax = Some(tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        warn!("Sell tax calculation failed for pool {}: {}", 
+                              pool_addr, reason);
+                        sell_tax = None;
+                    }
                 }
             } else {
-                info!("Missing data for sell tax calculation - sell_changes: {}, pool_addr: {}", 
+                error!("Missing data for sell tax calculation - sell_changes: {}, pool_addr: {}", 
                     buy_sell.sell_state_changes.is_some(), 
                     sim_result.pool_address.is_some());
             }

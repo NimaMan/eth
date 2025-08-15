@@ -12,7 +12,7 @@ pub use cache::{TokenTrackingCache, CacheStats, UpdateResult};
 pub use types::CacheConfig;
 pub use types::{Token, Pool, Address, TokenUpdate, TokenWithPools, PoolType};
 pub use address_tracking_cache::{AddressTrackingCache, AddressRole};
-pub use token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
+pub use token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax, TaxCalculationResult};
 
 
 use zmq;

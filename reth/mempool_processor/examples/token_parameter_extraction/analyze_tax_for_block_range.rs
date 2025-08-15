@@ -9,7 +9,7 @@
 /// - Calculated taxes
 /// - Any errors or restrictions
 
-use mempool_processor::token_parameter_extraction::{TaxCalculator, TokenInfo, PoolReserves};
+use mempool_processor::token_tracking::token_parameter_extraction::{TaxCalculator, TokenInfo, PoolReserves};
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_sol_types::{SolCall, SolValue};
@@ -211,7 +211,7 @@ async fn main() -> Result<()> {
             Ok((buy_tax, sell_tax, tokens_bought, tokens_sold)) => {
                 let elapsed_ms = start_time.elapsed().as_secs_f64() * 1000.0;
                 if sell_tax >= 0.0 {
-                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | SUCCESS | {:.1}% | {:.1} | -", 
+                    writeln!(log_file, "{} | 0.01 ETH | {} | {:.1}% | {} | SUCCESS | {:.1}% | {:.1} | -", 
                         block_number, tokens_bought, buy_tax, tokens_sold, sell_tax, elapsed_ms)?;
                     println!("✅ Buy: {:.1}%, Sell: {:.1}% (Bought: {}, Sold: {}) - {:.1}ms", 
                         buy_tax, sell_tax, 
@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
                         format_token_amount(tokens_sold, token_info.decimals),
                         elapsed_ms);
                 } else {
-                    writeln!(log_file, "{} | 0.1 ETH | {} | {:.1}% | {} | FAILED | - | {:.1} | Transfer failed", 
+                    writeln!(log_file, "{} | 0.01 ETH | {} | {:.1}% | {} | FAILED | - | {:.1} | Transfer failed", 
                         block_number, tokens_bought, buy_tax, tokens_sold, elapsed_ms)?;
                     println!("❌ Buy: {:.1}%, Sell: FAILED (Bought: {}, Tried: {}) - {:.1}ms", 
                         buy_tax, 

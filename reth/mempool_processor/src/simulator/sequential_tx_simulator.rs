@@ -61,7 +61,7 @@ impl Default for BuySellSimulatorConfig {
             router_address: Address::from([0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D]), // Uniswap V2
             weth_address: Address::from([0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2]), // WETH
             gas_limit: 300_000,
-            gas_price: 20_000_000_000u128, // 20 gwei
+            gas_price: 100_000_000_000u128, // 100 gwei - fallback only, should use block-specific base fee
             buyer_address: Address::from([0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D, 0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89]), // Fixed test address
         }
     }
@@ -163,6 +163,17 @@ impl SequentialBuySellSimulator {
     ) -> Result<SequenceSimulationResult> {
         let start_time = Instant::now();
         
+        // Get base fee for dynamic gas pricing
+        let gas_price = if let Some(block) = block_number {
+            // For specific blocks, get the actual base fee (required for post-London)
+            let base_fee = self.simulator.get_base_fee_at_block(block)
+                .map_err(|e| eyre::eyre!("Failed to get base fee for block {}: {}", block, e))?;
+            base_fee.saturating_mul(3) // 3x base fee to ensure simulation succeeds
+        } else {
+            // Use config gas price only when no block is specified
+            self.config.gas_price
+        };
+        
         // Select router based on pool type
         let router_address = self.get_router_for_pool_type(pool_type);
         
@@ -202,7 +213,7 @@ impl SequentialBuySellSimulator {
                 value: Some(buy_amount),
                 data: Some(buy_calldata.clone()),
                 gas: Some(self.config.gas_limit),
-                gas_price: Some(self.config.gas_price),
+                gas_price: Some(gas_price),
                 max_fee_per_gas: None,
                 max_priority_fee_per_gas: None,
                 nonce: None,
@@ -326,7 +337,7 @@ impl SequentialBuySellSimulator {
             value: Some(U256::ZERO),
             data: Some(approve_calldata),
             gas: Some(self.config.gas_limit),
-            gas_price: Some(self.config.gas_price),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
@@ -363,7 +374,7 @@ impl SequentialBuySellSimulator {
             value: Some(U256::ZERO),
             data: Some(sell_calldata),
             gas: Some(self.config.gas_limit),
-            gas_price: Some(self.config.gas_price),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
@@ -376,7 +387,7 @@ impl SequentialBuySellSimulator {
             value: Some(buy_amount), // Use the amount that worked
             data: Some(buy_calldata),
             gas: Some(self.config.gas_limit),
-            gas_price: Some(self.config.gas_price),
+            gas_price: Some(gas_price),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
