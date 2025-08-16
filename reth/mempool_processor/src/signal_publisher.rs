@@ -344,8 +344,8 @@ impl SignalPublisher {
             Signal::TradingEnabled(s) => {
                 writeln!(
                     self.log_files.trading_enabled,
-                    "[{}] TRADING_ENABLED | Token: {} | Creator: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
-                    timestamp, s.token_address, s.creator_address, s.buy_tax, s.sell_tax, s.tx_hash
+                    "[{}] TRADING_ENABLED | Token: {} | Pool: {} | PoolType: {} | Creator: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
+                    timestamp, s.token_address, s.pool_address, s.pool_type, s.creator_address, s.buy_tax, s.sell_tax, s.tx_hash
                 )?;
                 writeln!(self.log_files.trading_enabled, "")?; // Add empty line for readability
                 self.log_files.trading_enabled.flush()?;

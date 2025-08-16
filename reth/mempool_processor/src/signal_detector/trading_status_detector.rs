@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub struct TradingStatusSignal {
     pub token_address: String,
     pub pool_address: String,
+    pub pool_type: String,  // Pool type (UniswapV2, UniswapV3, etc.)
     pub status_change: TradingStatusChange,
     pub executor: String,
     pub can_trade_after: bool,
@@ -82,33 +83,52 @@ impl TradingStatusDetector {
 
     /// Detect trading enabled signals from simulation results
     /// Triggers when: can_buy && can_sell && taxes <= threshold && not already enabled
-    /// Tax values should be provided from tax_detector, not calculated here
-    pub async fn detect(&self, sim_result: &SimulationResult, buy_tax: Option<f64>, sell_tax: Option<f64>) -> Option<TradingStatusSignal> {
+    /// Tax values are extracted from sim_result.buy_sell_result (calculated in simulation_manager)
+    pub async fn detect(&self, sim_result: &SimulationResult, _buy_tax: Option<f64>, _sell_tax: Option<f64>) -> Option<TradingStatusSignal> {
         // Get buy/sell results from simulation
         let buy_sell = sim_result.buy_sell_result.as_ref()?;
         
         // Extract transaction details
         let tx_hash = &sim_result.request.tx.hash;
         
-        // Extract token/pool info from transaction category
-        let (token_address, pool_address, executor) = match &sim_result.request.category {
-            crate::tx_router::TransactionCategory::CreatorTransaction { 
-                creator, 
-                target_token,
-                target_address,
-                .. 
-            } => {
-                let token = target_token.as_ref()?;
-                // Use target_address as pool address
-                (token.clone(), target_address.clone(), creator.clone())
+        // Extract token/pool info from simulation result - MUST use the actual pool from simulation
+        let token_address = if let Some(token_addr) = &sim_result.token_address {
+            format!("{:?}", token_addr)
+        } else {
+            // Fallback to transaction category if not in sim result
+            match &sim_result.request.category {
+                crate::tx_router::TransactionCategory::CreatorTransaction { target_token, .. } => {
+                    target_token.as_ref()?.clone()
+                }
+                crate::tx_router::TransactionCategory::ContractCreation { contract_address, .. } => {
+                    contract_address.clone()
+                }
+                _ => return None,
             }
-            crate::tx_router::TransactionCategory::ContractCreation { contract_address, deployer, .. } => {
-                // For contract creation, the contract itself might be the token
-                (contract_address.clone(), "unknown".to_string(), deployer.clone())
-            }
+        };
+        
+        // CRITICAL: Use pool address from simulation result, NOT from transaction category
+        let pool_address = if let Some(pool_addr) = &sim_result.pool_address {
+            format!("{:?}", pool_addr)
+        } else {
+            warn!("No pool address in simulation result for token {}", token_address);
+            return None;
+        };
+        
+        // Get pool type from simulation result
+        let pool_type = sim_result.pool_type.as_ref().unwrap_or(&"Unknown".to_string()).clone();
+        
+        // Get executor from transaction category
+        let executor = match &sim_result.request.category {
+            crate::tx_router::TransactionCategory::CreatorTransaction { creator, .. } => creator.clone(),
+            crate::tx_router::TransactionCategory::ContractCreation { deployer, .. } => deployer.clone(),
             _ => return None,
         };
 
+        // Extract tax values from simulation result (calculated in simulation_manager)
+        let buy_tax = buy_sell.buy_tax;
+        let sell_tax = buy_sell.sell_tax;
+        
         // Always log simulation results for debugging (now includes tax values)
         self.log_simulation_result(&token_address, &pool_address, buy_sell, tx_hash, buy_tax, sell_tax);
         
@@ -128,8 +148,12 @@ impl TradingStatusDetector {
                 return None;
             }
             None => {
-                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: buy tax calculation failed", 
-                      token_address, pool_address);
+                // Show the specific error if available
+                let error_detail = buy_sell.buy_tax_error.as_ref()
+                    .map(|e| format!(": {}", e))
+                    .unwrap_or_default();
+                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: buy tax calculation failed{}", 
+                      token_address, pool_address, error_detail);
                 return None;
             }
             Some(buy_t) => {
@@ -143,8 +167,12 @@ impl TradingStatusDetector {
                 return None;
             }
             None => {
-                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: sell tax calculation failed", 
-                      token_address, pool_address);
+                // Show the specific error if available
+                let error_detail = buy_sell.sell_tax_error.as_ref()
+                    .map(|e| format!(": {}", e))
+                    .unwrap_or_default();
+                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: sell tax calculation failed{}", 
+                      token_address, pool_address, error_detail);
                 return None;
             }
             Some(sell_t) => {
@@ -167,6 +195,7 @@ impl TradingStatusDetector {
         Some(TradingStatusSignal {
             token_address: token_address.to_string(),
             pool_address: pool_address.to_string(),
+            pool_type: pool_type.clone(),
             status_change: TradingStatusChange::TradingEnabled,
             executor,
             can_trade_after: true,
@@ -187,16 +216,35 @@ impl TradingStatusDetector {
                 .open(log_path)
             {
                 let timestamp = chrono::Local::now();
+                
+                // Format buy tax: show percentage if calculated, or error if failed
+                let buy_tax_str = match buy_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => match &buy_sell.buy_tax_error {
+                        Some(error) => format!("ERROR: {}", error),
+                        None => "ERROR: Unknown".to_string()
+                    }
+                };
+                
+                // Format sell tax: show percentage if calculated, or error if failed
+                let sell_tax_str = match sell_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => match &buy_sell.sell_tax_error {
+                        Some(error) => format!("ERROR: {}", error),
+                        None => "ERROR: Unknown".to_string()
+                    }
+                };
+                
                 writeln!(file, 
-                    "[{}] SIMULATION_RESULT | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {:.1}% | sell_tax: {:.1}%",
+                    "[{}] SIMULATION_RESULT | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
                     timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                     tx_hash,
                     token_address,
                     pool_address,
                     buy_sell.can_buy,
                     buy_sell.can_sell,
-                    buy_tax.unwrap_or(-1.0),  // -1 indicates not calculated
-                    sell_tax.unwrap_or(-1.0)   // -1 indicates not calculated
+                    buy_tax_str,
+                    sell_tax_str
                 ).ok();
                 writeln!(file, "").ok(); // Add empty line for readability
             }

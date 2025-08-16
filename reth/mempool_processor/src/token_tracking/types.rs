@@ -318,7 +318,8 @@ pub struct TokenCreatorsMessage {
 /// Token-centric updates message (new format)
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenUpdatesMessage {
-    pub message_type: String,
+    #[serde(rename = "type")]
+    pub message_type: String,  // Python sends "type", we call it message_type
     pub token_count: usize,
     pub block_number: BlockNumber,
     pub timestamp: f64,

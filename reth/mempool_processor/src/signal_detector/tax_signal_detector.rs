@@ -10,11 +10,7 @@
 /// - Suspicious tax patterns
 
 use crate::simulator::SimulationResult;
-use crate::token_tracking::{calculate_buy_tax, calculate_sell_tax, TaxCalculationResult};
 use crate::config::TaxDetectionConfig;
-use tracing::{info, debug, error, warn};
-use alloy_primitives::Address;
-use hex;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -79,11 +75,11 @@ impl TaxDetector {
         };
 
         // Extract token and pool addresses
-        let (token_address, pool_address) = match &sim_result.request.category {
+        let (token_address, _pool_address) = match &sim_result.request.category {
             crate::tx_router::TransactionCategory::CreatorTransaction { target_token, .. } => {
                 if let Some(token) = target_token {
                     // Need to find pool address - for now we'll use the one from simulation
-                    (token.clone(), None::<Address>)
+                    (token.clone(), None::<alloy_primitives::Address>)
                 } else {
                     return signals;
                 }
@@ -94,65 +90,9 @@ impl TaxDetector {
             _ => return signals,
         };
 
-        // Calculate taxes from raw state changes
-        let (calculated_buy_tax, calculated_sell_tax) = if let Some(buy_sell) = &sim_result.buy_sell_result {
-            // Get buyer address from simulator (hardcoded for now - must match simulator config)
-            let buyer_address = alloy_primitives::Address::from_slice(&hex::decode("0C96c602b1b332B8AB2093E5d72D804a24bd5689").unwrap_or_default());
-            
-            let mut buy_tax = None;
-            let mut sell_tax = None;
-            
-            // Calculate buy tax if we have the state changes and addresses
-            if let (Some(buy_changes), Some(token_addr), Some(pool_addr)) = (&buy_sell.buy_state_changes, &sim_result.token_address, &sim_result.pool_address) {
-                debug!("Calculating buy tax for token {} pool {} with {} state changes", 
-                       token_addr, pool_addr, buy_changes.len());
-                debug!("State change addresses: {:?}", buy_changes.keys().collect::<Vec<_>>());
-                
-                match calculate_buy_tax(buy_changes, pool_addr, &buyer_address, token_addr) {
-                    TaxCalculationResult::Calculated(tax) => {
-                        debug!("Buy tax calculated successfully: {:.2}%", tax);
-                        buy_tax = Some(tax);
-                    }
-                    TaxCalculationResult::InvalidSimulation { reason } => {
-                        warn!("Buy tax calculation failed for token {} pool {}: {}", 
-                              token_addr, pool_addr, reason);
-                        buy_tax = None;
-                    }
-                }
-            } else {
-                error!("Missing data for buy tax calculation - buy_changes: {}, token_addr: {}, pool_addr: {}", 
-                    buy_sell.buy_state_changes.is_some(), 
-                    sim_result.token_address.is_some(), 
-                    sim_result.pool_address.is_some());
-            }
-            
-            // Calculate sell tax if we have the state changes and addresses
-            if let (Some(sell_changes), Some(pool_addr)) = (&buy_sell.sell_state_changes, &sim_result.pool_address) {
-                debug!("Calculating sell tax for pool {} with {} state changes", 
-                       pool_addr, sell_changes.len());
-                debug!("State change addresses: {:?}", sell_changes.keys().collect::<Vec<_>>());
-                
-                match calculate_sell_tax(sell_changes, pool_addr, &buyer_address) {
-                    TaxCalculationResult::Calculated(tax) => {
-                        debug!("Sell tax calculated successfully: {:.2}%", tax);
-                        sell_tax = Some(tax);
-                    }
-                    TaxCalculationResult::InvalidSimulation { reason } => {
-                        warn!("Sell tax calculation failed for pool {}: {}", 
-                              pool_addr, reason);
-                        sell_tax = None;
-                    }
-                }
-            } else {
-                error!("Missing data for sell tax calculation - sell_changes: {}, pool_addr: {}", 
-                    buy_sell.sell_state_changes.is_some(), 
-                    sim_result.pool_address.is_some());
-            }
-            
-            (buy_tax, sell_tax)
-        } else {
-            (None, None)
-        };
+        // Get tax values directly from simulation result (calculated in simulation_manager)
+        let calculated_buy_tax = buy_sell.buy_tax;
+        let calculated_sell_tax = buy_sell.sell_tax;
 
         // Always log the tax calculation results
         self.log_tax_detection(&token_address, sim_result, calculated_buy_tax, calculated_sell_tax);
@@ -259,23 +199,41 @@ impl TaxDetector {
                     .map(|addr| format!("0x{}", hex::encode(addr)))
                     .unwrap_or_else(|| "unknown".to_string());
                 
-                // Extract buy/sell capabilities
-                let (can_buy, can_sell) = if let Some(buy_sell) = &sim_result.buy_sell_result {
-                    (buy_sell.can_buy, buy_sell.can_sell)
+                // Extract buy/sell capabilities and error messages
+                let (can_buy, can_sell, buy_tax_error, sell_tax_error) = if let Some(buy_sell) = &sim_result.buy_sell_result {
+                    (buy_sell.can_buy, buy_sell.can_sell, buy_sell.buy_tax_error.clone(), buy_sell.sell_tax_error.clone())
                 } else {
-                    (false, false)
+                    (false, false, None, None)
+                };
+                
+                // Format buy tax: show percentage if calculated, or error if failed
+                let buy_tax_str = match buy_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => match buy_tax_error {
+                        Some(error) => format!("ERROR: {}", error),
+                        None => "ERROR: Unknown".to_string()
+                    }
+                };
+                
+                // Format sell tax: show percentage if calculated, or error if failed  
+                let sell_tax_str = match sell_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => match sell_tax_error {
+                        Some(error) => format!("ERROR: {}", error),
+                        None => "ERROR: Unknown".to_string()
+                    }
                 };
                 
                 writeln!(file, 
-                    "[{}] TAX_DETECTION | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {:.1}% | sell_tax: {:.1}%",
+                    "[{}] TAX_DETECTION | TX: {} | Token: {} | Pool: {} | can_buy: {} | can_sell: {} | buy_tax: {} | sell_tax: {}",
                     timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                     sim_result.request.tx.hash,
                     token_address,
                     pool_address,
                     can_buy,
                     can_sell,
-                    buy_tax.unwrap_or(-1.0),  // -1 indicates not calculated
-                    sell_tax.unwrap_or(-1.0)   // -1 indicates not calculated
+                    buy_tax_str,
+                    sell_tax_str
                 ).ok();
             }
         }

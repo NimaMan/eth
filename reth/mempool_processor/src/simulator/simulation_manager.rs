@@ -26,7 +26,7 @@ use ethers::types::H256;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::{TransactionCategory, SimulationPriority};
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
-use crate::token_tracking::TokenTrackingCache;
+use crate::token_tracking::{TokenTrackingCache, calculate_buy_tax, calculate_sell_tax, TaxCalculationResult};
 use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, UnifiedSimulator, SequenceSimulationResult};
 use std::collections::HashMap;
@@ -75,9 +75,14 @@ pub struct SimulationResult {
 pub struct BuySellResult {
     pub can_buy: bool,
     pub can_sell: bool,
-    // Raw state changes for tax calculation in signal manager
+    // Raw state changes for tax calculation in signal manager (kept for debugging)
     pub buy_state_changes: Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>,
     pub sell_state_changes: Option<HashMap<alloy_primitives::Address, reth_tx_simulator::AddressStateChange>>,
+    // Tax calculation results (calculated immediately after simulation)
+    pub buy_tax: Option<f64>,      // 0-100% or None if calculation failed
+    pub sell_tax: Option<f64>,     // 0-100% or None if calculation failed
+    pub buy_tax_error: Option<String>,   // Error message if buy tax calculation failed
+    pub sell_tax_error: Option<String>,  // Error message if sell tax calculation failed
 }
 
 /// Manager for transaction simulations
@@ -535,12 +540,51 @@ impl SimulationManager {
                     // Extract transaction state changes
                     let tx_state_changes = result.given_tx_result.as_ref().map(|tx| tx.state_changes.clone());
                     
-                    // Create buy/sell result with raw simulation data
+                    // Get buyer address from simulator
+                    let buyer_address = self.unified_simulator.get_buyer_address();
+                    
+                    // Calculate buy tax immediately after buy simulation
+                    let (buy_tax, buy_tax_error) = if result.buy_result.success {
+                        match calculate_buy_tax(&result.buy_result.state_changes, &pool_address, &buyer_address, &token_address) {
+                            TaxCalculationResult::Calculated(tax) => {
+                                info!("    Buy tax calculated: {:.2}%", tax);
+                                (Some(tax), None)
+                            }
+                            TaxCalculationResult::InvalidSimulation { reason } => {
+                                warn!("    Buy tax calculation failed: {}", reason);
+                                (None, Some(reason))
+                            }
+                        }
+                    } else {
+                        (None, Some("Buy simulation failed".to_string()))
+                    };
+                    
+                    // Calculate sell tax immediately after sell simulation
+                    let (sell_tax, sell_tax_error) = if result.sell_result.success {
+                        match calculate_sell_tax(&result.sell_result.state_changes, &pool_address, &buyer_address) {
+                            TaxCalculationResult::Calculated(tax) => {
+                                info!("    Sell tax calculated: {:.2}%", tax);
+                                (Some(tax), None)
+                            }
+                            TaxCalculationResult::InvalidSimulation { reason } => {
+                                warn!("    Sell tax calculation failed: {}", reason);
+                                (None, Some(reason))
+                            }
+                        }
+                    } else {
+                        (None, Some("Sell simulation failed".to_string()))
+                    };
+                    
+                    // Create buy/sell result with tax calculation results
                     let bs_result = BuySellResult {
                         can_buy: result.buy_result.success,
                         can_sell: result.sell_result.success,
                         buy_state_changes: Some(result.buy_result.state_changes.clone()),
                         sell_state_changes: Some(result.sell_result.state_changes.clone()),
+                        buy_tax,
+                        sell_tax,
+                        buy_tax_error,
+                        sell_tax_error,
                     };
                     
                     results.push(Ok((tx_state_changes, bs_result, token_address, if pool_address.is_zero() { None } else { Some(pool_address) }, Some(pool_type.clone()), Some(result))));

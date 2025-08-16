@@ -50,7 +50,7 @@ pub struct SignalManager {
     liquidity_detector: LiquidityDetector,
     _stablecoin_detector: StablecoinDetector,
     trading_status_detector: TradingStatusDetector,
-    tax_detector: TaxDetector,
+    tax_signal_detector: TaxDetector,
     lp_approval_detector: LpApprovalDetector,
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
@@ -89,7 +89,7 @@ impl SignalManager {
             liquidity_detector: LiquidityDetector::new(),
             _stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::with_config(simulation_results_log_path, config.min_liquidity_threshold),
-            tax_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
+            tax_signal_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
             lp_approval_detector: LpApprovalDetector::new(),
             token_cache: None,
             signal_log_path,
@@ -314,41 +314,50 @@ impl SignalManager {
             (None::<f64>, None::<f64>, false, false)
         };
         
-        // STEP 1: Tax detector (NOW ACTIVE) - Run first to get tax values
-        let tax_signals = self.tax_detector.detect(result);
+        // STEP 1: Tax detector (NOW ACTIVE) - Run to get tax signals
+        let tax_signals = self.tax_signal_detector.detect(result);
+        
+        // Extract tax values from simulation result (calculated in simulation_manager)
+        let (calculated_buy_tax, calculated_sell_tax) = if let Some(ref buy_sell) = result.buy_sell_result {
+            (buy_sell.buy_tax, buy_sell.sell_tax)
+        } else {
+            (None, None)
+        };
         
         // Always log tax detection results, even if no signals
         if let Some(ref buy_sell) = result.buy_sell_result {
-            // Extract tax values from the detector results or buy/sell simulation
-            let mut detected_buy_tax = 0.0;
-            let mut detected_sell_tax = 0.0;
-            
-            // First check if tax signals were found and have values
-            for tax_signal in &tax_signals {
-                if let Some(buy_tax) = tax_signal.buy_tax {
-                    detected_buy_tax = buy_tax;
-                }
-                if let Some(sell_tax) = tax_signal.sell_tax {
-                    detected_sell_tax = sell_tax;
-                }
-            }
-            
             // Log more detailed information about the detection
             // If can't buy/sell, show tax as None instead of 0%
             let buy_tax_str = if !buy_sell.can_buy {
                 "None".to_string()
-            } else if detected_buy_tax > 0.0 {
-                format!("{:.1}%", detected_buy_tax)
             } else {
-                "0%".to_string()
+                match buy_sell.buy_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => {
+                        // Show the error reason if available
+                        if let Some(ref error) = buy_sell.buy_tax_error {
+                            format!("Failed: {}", error)
+                        } else {
+                            "Failed".to_string()
+                        }
+                    }
+                }
             };
             
             let sell_tax_str = if !buy_sell.can_sell {
                 "None".to_string()
-            } else if detected_sell_tax > 0.0 {
-                format!("{:.1}%", detected_sell_tax)
             } else {
-                "0%".to_string()
+                match buy_sell.sell_tax {
+                    Some(tax) => format!("{:.1}%", tax),
+                    None => {
+                        // Show the error reason if available
+                        if let Some(ref error) = buy_sell.sell_tax_error {
+                            format!("Failed: {}", error)
+                        } else {
+                            "Failed".to_string()
+                        }
+                    }
+                }
             };
             
             // Include pool type if available
@@ -378,17 +387,8 @@ impl SignalManager {
             }
         }
         
-        // Extract tax values from tax signals for use in trading status
-        let mut calculated_buy_tax = None;
-        let mut calculated_sell_tax = None;
-        
+        // Process tax signals to create actual signal records
         for tax_signal in &tax_signals {
-            // Store the tax values for trading status signal
-            if tax_signal.buy_tax.is_some() || tax_signal.sell_tax.is_some() {
-                calculated_buy_tax = tax_signal.buy_tax;
-                calculated_sell_tax = tax_signal.sell_tax;
-            }
-            
             match tax_signal.signal_type {
                 TaxSignalType::HighTaxOrHoneypot { cant_sell, buy_tax_exceeds_threshold, sell_tax_exceeds_threshold } => {
                     // Check trading status from token cache before logging TAX_SIGNAL

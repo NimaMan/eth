@@ -142,6 +142,12 @@ impl LiquidityDetector {
             return None;
         };
         
+        // Skip pools with very low initial liquidity (< 0.1 ETH)
+        // These are likely already dead pools, not worth monitoring
+        if pool_state.eth_reserve < 0.1 {
+            return None;
+        }
+        
         // Step 2: Check if there's negative ETH change (drain)
         let eth_change = changes.eth_net;
         if eth_change >= I256::ZERO {

@@ -10,7 +10,7 @@ use mempool_processor::simulator::{
     SequentialBuySellSimulator,
     BuySellSimulatorConfig,
 };
-use mempool_processor::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
+use mempool_processor::token_tracking::{calculate_buy_tax, calculate_sell_tax, TaxCalculationResult};
 use alloy_primitives::{Address, U256, I256};
 use std::str::FromStr;
 use eyre::Result;
@@ -128,13 +128,18 @@ async fn main() -> Result<()> {
             
             // Calculate and show buy tax
             if result.buy_result.success {
-                if let Some(buy_tax) = calculate_buy_tax(
+                match calculate_buy_tax(
                     &result.buy_result.state_changes,
                     &aitai_pool,
                     &config.buyer_address,
                     &aitai_token,
                 ) {
-                    println!("     Buy Tax: {:.2}%", buy_tax);
+                    TaxCalculationResult::Calculated(buy_tax) => {
+                        println!("     Buy Tax: {:.2}%", buy_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Buy Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
@@ -151,12 +156,17 @@ async fn main() -> Result<()> {
             
             // Calculate and show sell tax
             if result.sell_result.success {
-                if let Some(sell_tax) = calculate_sell_tax(
+                match calculate_sell_tax(
                     &result.sell_result.state_changes,
                     &aitai_pool,
                     &config.buyer_address,
                 ) {
-                    println!("     Sell Tax: {:.2}%", sell_tax);
+                    TaxCalculationResult::Calculated(sell_tax) => {
+                        println!("     Sell Tax: {:.2}%", sell_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Sell Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
@@ -192,13 +202,18 @@ async fn main() -> Result<()> {
             
             // Calculate and show buy tax
             if result.buy_result.success {
-                if let Some(buy_tax) = calculate_buy_tax(
+                match calculate_buy_tax(
                     &result.buy_result.state_changes,
                     &zerot_pool,
                     &config.buyer_address,
                     &zerot_token,
                 ) {
-                    println!("     Buy Tax: {:.2}%", buy_tax);
+                    TaxCalculationResult::Calculated(buy_tax) => {
+                        println!("     Buy Tax: {:.2}%", buy_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Buy Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
@@ -215,12 +230,17 @@ async fn main() -> Result<()> {
             
             // Calculate and show sell tax
             if result.sell_result.success {
-                if let Some(sell_tax) = calculate_sell_tax(
+                match calculate_sell_tax(
                     &result.sell_result.state_changes,
                     &zerot_pool,
                     &config.buyer_address,
                 ) {
-                    println!("     Sell Tax: {:.2}%", sell_tax);
+                    TaxCalculationResult::Calculated(sell_tax) => {
+                        println!("     Sell Tax: {:.2}%", sell_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Sell Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
@@ -247,25 +267,35 @@ async fn main() -> Result<()> {
             // Buy transaction results (show summary only for brevity)
             println!("\n   Buy Transaction: {}", if result.buy_result.success { "Success" } else { "Failed" });
             if result.buy_result.success {
-                if let Some(buy_tax) = calculate_buy_tax(
+                match calculate_buy_tax(
                     &result.buy_result.state_changes,
                     &zerot_pool,
                     &config.buyer_address,
                     &zerot_token,
                 ) {
-                    println!("     Buy Tax: {:.2}%", buy_tax);
+                    TaxCalculationResult::Calculated(buy_tax) => {
+                        println!("     Buy Tax: {:.2}%", buy_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Buy Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
             // Sell transaction results
             println!("   Sell Transaction: {}", if result.sell_result.success { "Success" } else { "Failed" });
             if result.sell_result.success {
-                if let Some(sell_tax) = calculate_sell_tax(
+                match calculate_sell_tax(
                     &result.sell_result.state_changes,
                     &zerot_pool,
                     &config.buyer_address,
                 ) {
-                    println!("     Sell Tax: {:.2}%", sell_tax);
+                    TaxCalculationResult::Calculated(sell_tax) => {
+                        println!("     Sell Tax: {:.2}%", sell_tax);
+                    }
+                    TaxCalculationResult::InvalidSimulation { reason } => {
+                        println!("     Sell Tax: Failed to calculate - {}", reason);
+                    }
                 }
             }
             
