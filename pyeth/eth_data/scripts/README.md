@@ -1,23 +1,51 @@
-# Ethereum Live Block Processor Scripts
+# ETH Data Scripts
 
-This directory contains scripts and systemd service files for running the Ethereum Live Block Processor as a system service.
+This directory contains scripts for running and managing ETH Data components.
 
-## Overview
+## Directory Structure
 
-The Live Block Processor continuously monitors the Ethereum blockchain, processing new blocks in real-time and storing transaction data in PostgreSQL. It uses the latest `eth_data` package (formerly `eth_block_processor`).
+```
+scripts/
+├── services/                  # Service management (see services/README.md)
+│   ├── systemd/              # Service definition files
+│   ├── install_service.sh    # Service installer
+│   ├── manage_service.sh     # Quick management
+│   ├── migrate_service.sh    # Migration tool
+│   └── service_manager.sh    # Master service manager
+├── process_blocks_live.py    # Live block processor script
+├── run_live_processor.sh     # Development runner
+└── provide_tx_service/       # Transaction validation service
+```
 
-## Files
+## Quick Start
 
-### Service Files
-- `systemd/eth-live-block-processor.service` - Systemd service definition file
+### For Service Management
 
-### Management Scripts
-- `install_service.sh` - Install/update/manage the systemd service (requires sudo)
-- `manage_service.sh` - Quick service management (start/stop/restart/logs)
-- `run_live_processor.sh` - Run the processor directly for testing/development
+All service-related operations are in the `services/` directory:
 
-### Core Script
-- `process_blocks_live.py` - Main Python script that runs the Live Block Processor
+```bash
+cd services/
+
+# Install and start the Live Block Processor service
+sudo ./install_service.sh install
+
+# Or use the master manager for all services
+./service_manager.sh
+```
+
+See [services/README.md](services/README.md) for detailed service documentation.
+
+### For Development
+
+Run the processor directly without systemd:
+```bash
+./run_live_processor.sh
+```
+
+## Core Scripts
+
+### process_blocks_live.py
+Main Python script that runs the Live Block Processor. Monitors new blocks and processes transactions in real-time.
 
 ## Installation
 
