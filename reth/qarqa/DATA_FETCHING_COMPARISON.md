@@ -285,7 +285,7 @@ let token_transfers = extract_token_transfers(&result.logs);
    - Token transfers are stored as JSON in `address_transactions.token_transfers` column
    - Internal transfers are extracted by the Python block processor from transaction traces
 
-2. **Python Block Processor Role**: The Python `eth_block_processor` is crucial:
+2. **Python Block Processor Role**: The Python `eth_data` is crucial:
    - Parses transaction logs into typed events (ERC20Transfer, UniswapV2Swap, etc.)
    - Extracts internal transactions from traces
    - Creates `ProcessedTransaction` objects with comprehensive data

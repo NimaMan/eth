@@ -59,7 +59,7 @@ The Rust QARQA implementation currently:
 ## How the Python System Works
 
 ```python
-# Python eth_block_processor flow:
+# Python eth_data flow:
 1. Fetch transaction from node
 2. Get transaction receipt (for logs)
 3. Get transaction traces (for internal transfers)
