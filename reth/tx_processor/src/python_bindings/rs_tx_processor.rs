@@ -16,7 +16,6 @@ use super::processed_transaction::PyProcessedTransaction;
 pub struct PyTxProcessor {
     inner: Arc<TxProcessor>,  // Remove Mutex - TxProcessor operations are read-only
     runtime: Arc<tokio::runtime::Runtime>,
-    reth_datadir: String,  // Store the path to create new instances for parallel processing
 }
 
 #[pymethods]
@@ -44,7 +43,6 @@ impl PyTxProcessor {
         Ok(Self {
             inner: Arc::new(processor),  // No mutex needed
             runtime: Arc::new(runtime),
-            reth_datadir: reth_datadir.to_string(),
         })
     }
     

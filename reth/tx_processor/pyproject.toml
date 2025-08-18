@@ -20,4 +20,3 @@ classifiers = [
 [tool.maturin]
 features = ["python"]
 module-name = "rs_tx_processor"
-python-source = "python"

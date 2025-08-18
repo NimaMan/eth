@@ -5,6 +5,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PySet};
 use crate::data_models::transaction::ProcessedTransaction;
+use crate::utils::to_checksum_address;
 use alloy_primitives::U256;
 use serde_json::Value as JsonValue;
 
@@ -98,9 +99,9 @@ impl PyProcessedTransaction {
             block_number: ptx.block_number,
             block_timestamp: ptx.block_timestamp,
             txn_index: ptx.txn_index,
-            from_address: format!("0x{}", hex::encode(ptx.from_address)),
-            to_address: ptx.to_address.map(|a| format!("0x{}", hex::encode(a))),
-            contract_address: ptx.contract_address.map(|a| format!("0x{}", hex::encode(a))),
+            from_address: to_checksum_address(&ptx.from_address),
+            to_address: ptx.to_address.map(|a| to_checksum_address(&a)),
+            contract_address: ptx.contract_address.map(|a| to_checksum_address(&a)),
             value: ptx.value.to_string(),
             status: ptx.status.clone(),
             nonce: ptx.nonce,
@@ -122,8 +123,8 @@ impl PyProcessedTransaction {
         
         for internal_tx in &self.inner.internal_transactions {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", format!("0x{}", hex::encode(internal_tx.from_address)))?;
-            dict.set_item("to_address", format!("0x{}", hex::encode(internal_tx.to_address)))?;
+            dict.set_item("from_address", to_checksum_address(&internal_tx.from_address))?;
+            dict.set_item("to_address", to_checksum_address(&internal_tx.to_address))?;
             dict.set_item("value", internal_tx.value.to_string())?;
             dict.set_item("gas_used", internal_tx.gas_used)?;
             dict.set_item("trace_type", &internal_tx.trace_type)?;
@@ -142,9 +143,9 @@ impl PyProcessedTransaction {
         
         for transfer in &self.inner.erc20_transfers {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", format!("0x{}", hex::encode(transfer.from_address)))?;
-            dict.set_item("to_address", format!("0x{}", hex::encode(transfer.to_address)))?;
-            dict.set_item("token_address", format!("0x{}", hex::encode(transfer.token_address)))?;
+            dict.set_item("from_address", to_checksum_address(&transfer.from_address))?;
+            dict.set_item("to_address", to_checksum_address(&transfer.to_address))?;
+            dict.set_item("token_address", to_checksum_address(&transfer.token_address))?;
             dict.set_item("amount", transfer.amount.to_string())?;
             dict.set_item("log_index", transfer.log_index)?;
             list.append(dict)?;
@@ -160,8 +161,8 @@ impl PyProcessedTransaction {
         
         for transfer in &self.inner.eth_transfers {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", format!("0x{}", hex::encode(transfer.from_address)))?;
-            dict.set_item("to_address", format!("0x{}", hex::encode(transfer.to_address)))?;
+            dict.set_item("from_address", to_checksum_address(&transfer.from_address))?;
+            dict.set_item("to_address", to_checksum_address(&transfer.to_address))?;
             dict.set_item("amount", transfer.amount.to_string())?;
             list.append(dict)?;
         }
@@ -176,9 +177,9 @@ impl PyProcessedTransaction {
         
         for transfer in &self.inner.erc721_transfers {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", format!("0x{}", hex::encode(transfer.from_address)))?;
-            dict.set_item("to_address", format!("0x{}", hex::encode(transfer.to_address)))?;
-            dict.set_item("token_address", format!("0x{}", hex::encode(transfer.token_address)))?;
+            dict.set_item("from_address", to_checksum_address(&transfer.from_address))?;
+            dict.set_item("to_address", to_checksum_address(&transfer.to_address))?;
+            dict.set_item("token_address", to_checksum_address(&transfer.token_address))?;
             dict.set_item("token_id", transfer.token_id.to_string())?;
             dict.set_item("log_index", transfer.log_index)?;
             list.append(dict)?;
@@ -194,9 +195,9 @@ impl PyProcessedTransaction {
         
         for transfer in &self.inner.erc1155_transfers {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", format!("0x{}", hex::encode(transfer.from_address)))?;
-            dict.set_item("to_address", format!("0x{}", hex::encode(transfer.to_address)))?;
-            dict.set_item("token_address", format!("0x{}", hex::encode(transfer.token_address)))?;
+            dict.set_item("from_address", to_checksum_address(&transfer.from_address))?;
+            dict.set_item("to_address", to_checksum_address(&transfer.to_address))?;
+            dict.set_item("token_address", to_checksum_address(&transfer.token_address))?;
             // ERC1155 has token_ids and amounts as arrays
             let token_ids: Vec<String> = transfer.token_ids.iter().map(|id| id.to_string()).collect();
             let amounts: Vec<String> = transfer.amounts.iter().map(|amt| amt.to_string()).collect();
@@ -216,7 +217,7 @@ impl PyProcessedTransaction {
         
         for sync in &self.inner.uniswap_v2_syncs {
             let dict = PyDict::new(py);
-            dict.set_item("pair_address", format!("0x{}", hex::encode(sync.pair_address)))?;
+            dict.set_item("pair_address", to_checksum_address(&sync.pair_address))?;
             dict.set_item("reserve0", sync.reserve0.to_string())?;
             dict.set_item("reserve1", sync.reserve1.to_string())?;
             dict.set_item("log_index", sync.log_index)?;
@@ -233,9 +234,9 @@ impl PyProcessedTransaction {
         
         for swap in &self.inner.uniswap_v2_swaps {
             let dict = PyDict::new(py);
-            dict.set_item("pair_address", format!("0x{}", hex::encode(swap.pair_address)))?;
-            dict.set_item("sender", format!("0x{}", hex::encode(swap.sender)))?;
-            dict.set_item("to", format!("0x{}", hex::encode(swap.to)))?;
+            dict.set_item("pair_address", to_checksum_address(&swap.pair_address))?;
+            dict.set_item("sender", to_checksum_address(&swap.sender))?;
+            dict.set_item("to", to_checksum_address(&swap.to))?;
             dict.set_item("amount0_in", swap.amount0_in.to_string())?;
             dict.set_item("amount1_in", swap.amount1_in.to_string())?;
             dict.set_item("amount0_out", swap.amount0_out.to_string())?;
@@ -254,9 +255,9 @@ impl PyProcessedTransaction {
         
         for approval in &self.inner.approvals {
             let dict = PyDict::new(py);
-            dict.set_item("owner", format!("0x{}", hex::encode(approval.owner)))?;
-            dict.set_item("spender", format!("0x{}", hex::encode(approval.spender)))?;
-            dict.set_item("token_address", format!("0x{}", hex::encode(approval.token_address)))?;
+            dict.set_item("owner", to_checksum_address(&approval.owner))?;
+            dict.set_item("spender", to_checksum_address(&approval.spender))?;
+            dict.set_item("token_address", to_checksum_address(&approval.token_address))?;
             dict.set_item("amount", approval.amount.to_string())?;
             dict.set_item("log_index", approval.log_index)?;
             list.append(dict)?;
@@ -272,8 +273,8 @@ impl PyProcessedTransaction {
         
         for mint in &self.inner.mints {
             let dict = PyDict::new(py);
-            dict.set_item("pair_address", format!("0x{}", hex::encode(mint.pair_address)))?;
-            dict.set_item("sender", format!("0x{}", hex::encode(mint.sender)))?;
+            dict.set_item("pair_address", to_checksum_address(&mint.pair_address))?;
+            dict.set_item("sender", to_checksum_address(&mint.sender))?;
             dict.set_item("amount0", mint.amount0.to_string())?;
             dict.set_item("amount1", mint.amount1.to_string())?;
             dict.set_item("log_index", mint.log_index)?;
@@ -290,8 +291,8 @@ impl PyProcessedTransaction {
         
         for burn in &self.inner.burns {
             let dict = PyDict::new(py);
-            dict.set_item("pair_address", format!("0x{}", hex::encode(burn.pair_address)))?;
-            dict.set_item("sender", format!("0x{}", hex::encode(burn.sender)))?;
+            dict.set_item("pair_address", to_checksum_address(&burn.pair_address))?;
+            dict.set_item("sender", to_checksum_address(&burn.sender))?;
             dict.set_item("amount", burn.amount.to_string())?;
             dict.set_item("log_index", burn.log_index)?;
             list.append(dict)?;
@@ -309,13 +310,13 @@ impl PyProcessedTransaction {
             let dict = PyDict::new(py);
             // DepositAction has complex optional fields
             if let Some(sender) = deposit.sender {
-                dict.set_item("sender", format!("0x{}", hex::encode(sender)))?;
+                dict.set_item("sender", to_checksum_address(&sender))?;
             }
             if let Some(amount) = deposit.amount {
                 dict.set_item("amount", amount.to_string())?;
             }
             if let Some(pair_addr) = deposit.pair_address {
-                dict.set_item("pair_address", format!("0x{}", hex::encode(pair_addr)))?;
+                dict.set_item("pair_address", to_checksum_address(&pair_addr))?;
             }
             if let Some(log_idx) = deposit.log_index {
                 dict.set_item("log_index", log_idx)?;
@@ -333,7 +334,7 @@ impl PyProcessedTransaction {
         
         for withdraw in &self.inner.withdraws {
             let dict = PyDict::new(py);
-            dict.set_item("sender", format!("0x{}", hex::encode(withdraw.sender)))?;
+            dict.set_item("sender", to_checksum_address(&withdraw.sender))?;
             dict.set_item("amount", withdraw.amount.to_string())?;
             dict.set_item("log_index", withdraw.log_index)?;
             list.append(dict)?;
@@ -348,7 +349,7 @@ impl PyProcessedTransaction {
         let set = PySet::empty(py)?;
         
         for addr in &self.inner.unique_addresses {
-            set.add(format!("0x{}", hex::encode(addr)))?;
+            set.add(to_checksum_address(&addr))?;
         }
         
         Ok(set.into())
@@ -360,7 +361,7 @@ impl PyProcessedTransaction {
         let set = PySet::empty(py)?;
         
         for addr in &self.inner.erc20_contracts {
-            set.add(format!("0x{}", hex::encode(addr)))?;
+            set.add(to_checksum_address(&addr))?;
         }
         
         Ok(set.into())
@@ -373,9 +374,9 @@ impl PyProcessedTransaction {
         
         for event in &self.inner.pair_events {
             let dict = PyDict::new(py);
-            dict.set_item("pair_address", format!("0x{}", hex::encode(event.pair_address)))?;
-            dict.set_item("token0", format!("0x{}", hex::encode(event.token0)))?;
-            dict.set_item("token1", format!("0x{}", hex::encode(event.token1)))?;
+            dict.set_item("pair_address", to_checksum_address(&event.pair_address))?;
+            dict.set_item("token0", to_checksum_address(&event.token0))?;
+            dict.set_item("token1", to_checksum_address(&event.token1))?;
             dict.set_item("log_index", event.log_index)?;
             list.append(dict)?;
         }
@@ -390,9 +391,9 @@ impl PyProcessedTransaction {
         
         for event in &self.inner.owner_events {
             let dict = PyDict::new(py);
-            dict.set_item("contract_address", format!("0x{}", hex::encode(event.contract_address)))?;
-            dict.set_item("previous_owner", format!("0x{}", hex::encode(event.previous_owner)))?;
-            dict.set_item("new_owner", format!("0x{}", hex::encode(event.new_owner)))?;
+            dict.set_item("contract_address", to_checksum_address(&event.contract_address))?;
+            dict.set_item("previous_owner", to_checksum_address(&event.previous_owner))?;
+            dict.set_item("new_owner", to_checksum_address(&event.new_owner))?;
             dict.set_item("log_index", event.log_index)?;
             list.append(dict)?;
         }
@@ -407,7 +408,7 @@ impl PyProcessedTransaction {
         
         for event in &self.inner.contract_creation_events {
             let dict = PyDict::new(py);
-            dict.set_item("contract_address", format!("0x{}", hex::encode(event.contract_address)))?;
+            dict.set_item("contract_address", to_checksum_address(&event.contract_address))?;
             dict.set_item("contract_type", &event.contract_type)?;
             dict.set_item("symbol", &event.symbol)?;
             dict.set_item("decimals", event.decimals)?;
@@ -428,7 +429,7 @@ impl PyProcessedTransaction {
         
         for event in &self.inner.trading_enabled_events {
             let dict = PyDict::new(py);
-            dict.set_item("token_address", format!("0x{}", hex::encode(event.token_address)))?;
+            dict.set_item("token_address", to_checksum_address(&event.token_address))?;
             dict.set_item("log_index", event.log_index)?;
             list.append(dict)?;
         }
@@ -443,7 +444,7 @@ impl PyProcessedTransaction {
         
         for event in &self.inner.trading_disabled_events {
             let dict = PyDict::new(py);
-            dict.set_item("token_address", format!("0x{}", hex::encode(event.token_address)))?;
+            dict.set_item("token_address", to_checksum_address(&event.token_address))?;
             dict.set_item("log_index", event.log_index)?;
             list.append(dict)?;
         }
@@ -458,9 +459,9 @@ impl PyProcessedTransaction {
         
         for pool in &self.inner.uniswap_v3_pools {
             let dict = PyDict::new(py);
-            dict.set_item("pool_address", format!("0x{}", hex::encode(pool.pool)))?;
-            dict.set_item("token0", format!("0x{}", hex::encode(pool.token0)))?;
-            dict.set_item("token1", format!("0x{}", hex::encode(pool.token1)))?;
+            dict.set_item("pool_address", to_checksum_address(&pool.pool))?;
+            dict.set_item("token0", to_checksum_address(&pool.token0))?;
+            dict.set_item("token1", to_checksum_address(&pool.token1))?;
             dict.set_item("fee", pool.fee)?;
             dict.set_item("tick_spacing", pool.tick_spacing)?;
             dict.set_item("log_index", pool.log_index)?;
@@ -557,9 +558,9 @@ impl PyProcessedTransaction {
         
         for swap in &self.inner.uniswap_v3_swaps {
             let dict = PyDict::new(py);
-            dict.set_item("pool_address", format!("0x{}", hex::encode(swap.pool_address)))?;
-            dict.set_item("sender", format!("0x{}", hex::encode(swap.sender)))?;
-            dict.set_item("recipient", format!("0x{}", hex::encode(swap.recipient)))?;
+            dict.set_item("pool_address", to_checksum_address(&swap.pool_address))?;
+            dict.set_item("sender", to_checksum_address(&swap.sender))?;
+            dict.set_item("recipient", to_checksum_address(&swap.recipient))?;
             dict.set_item("amount0", swap.amount0.to_string())?;
             dict.set_item("amount1", swap.amount1.to_string())?;
             dict.set_item("sqrt_price_x96", swap.sqrt_price_x96.to_string())?;
@@ -596,7 +597,7 @@ impl PyProcessedTransaction {
         let dict = PyDict::new(py);
         
         for (addr, value) in &self.inner.latest_states {
-            let addr_str = format!("0x{}", hex::encode(addr));
+            let addr_str = to_checksum_address(&addr);
             // Convert serde_json::Value to nested Python dict
             let py_value = json_to_python(py, &value)?;
             dict.set_item(addr_str, py_value)?;
@@ -611,7 +612,7 @@ impl PyProcessedTransaction {
         let dict = PyDict::new(py);
         
         for (addr, value) in &self.inner.state_changes {
-            let addr_str = format!("0x{}", hex::encode(addr));
+            let addr_str = to_checksum_address(&addr);
             // Convert serde_json::Value to nested Python dict
             let py_value = json_to_python(py, &value)?;
             dict.set_item(addr_str, py_value)?;

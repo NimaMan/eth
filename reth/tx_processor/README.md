@@ -1,6 +1,6 @@
 # TX Processor
 
-High-performance Rust implementation for processing Ethereum transactions, designed as a drop-in replacement for Python's eth_block_processor.txn module.
+High-performance Rust implementation for processing Ethereum transactions, designed as a drop-in replacement for Python's eth_data.tx_processor module.
 
 ## Quick Start
 
@@ -35,6 +35,26 @@ let tx = processor.process_transaction_by_hash(hash).await?;
 let tx = processor.process_unsigned_transaction(call_request).await?;
 ```
 
+## Python Bindings
+
+The module includes Python bindings for integration with existing Python codebases:
+
+```bash
+# Install maturin (build tool)
+pip install maturin
+
+# Build and install the Python module
+maturin develop --release
+
+# Use in Python
+import rs_tx_processor
+
+processor = rs_tx_processor.TxProcessor()
+tx = processor.process_transaction("0x...")
+```
+
+See `examples/python/` for usage examples.
+
 ## Documentation
 
 See [tx_processor.md](tx_processor.md) for detailed technical documentation including:
@@ -47,6 +67,7 @@ See [tx_processor.md](tx_processor.md) for detailed technical documentation incl
 
 - Synced Reth node with local database
 - Rust 1.70+
+- Python 3.9+ (for Python bindings)
 
 ## Troubleshooting
 

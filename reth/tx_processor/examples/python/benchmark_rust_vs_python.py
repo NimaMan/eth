@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Real Performance Benchmark: Rust tx_processor vs Python eth_block_processor
+Performance Benchmark: Rust tx_processor vs Python eth_data
 
 This script:
 1. Fetches 100 random transaction hashes from the database
@@ -12,19 +12,15 @@ import sys
 import time
 import json
 import psycopg2
-import random
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
 import statistics
-import traceback
-
-# Add paths
-sys.path.insert(0, '/home/nima/code/crypto/py/eth_block_processor')
 
 import rs_tx_processor
 from web3 import Web3
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
+from eth_data.txn.txn_processor import TransactionProcessor
+from eth_data.txn.txn_data_fetcher import TransactionDataFetcher
+
 
 def fetch_random_tx_hashes_from_db(count: int = 1000) -> List[str]:
     """
@@ -73,6 +69,7 @@ def fetch_random_tx_hashes_from_db(count: int = 1000) -> List[str]:
         print("Using fallback transaction list...")
         return fetch_fallback_tx_hashes(count)
 
+
 def fetch_fallback_tx_hashes(count: int) -> List[str]:
     """
     Fallback: Fetch recent transaction hashes from the Ethereum node
@@ -112,7 +109,7 @@ def fetch_fallback_tx_hashes(count: int) -> List[str]:
 
 def benchmark_python_implementation(tx_hashes: List[str], sample_size: int = None) -> Dict[str, Any]:
     """
-    Benchmark Python eth_block_processor implementation
+    Benchmark Python eth_data implementation
     """
     if sample_size:
         tx_hashes = tx_hashes[:sample_size]
@@ -176,7 +173,7 @@ def benchmark_python_implementation(tx_hashes: List[str], sample_size: int = Non
     
     if times:
         return {
-            "implementation": "Python (eth_block_processor)",
+            "implementation": "Python (eth_data)",
             "total_transactions": len(tx_hashes),
             "successful": successes,
             "failed": failures,
@@ -191,7 +188,7 @@ def benchmark_python_implementation(tx_hashes: List[str], sample_size: int = Non
         }
     else:
         return {
-            "implementation": "Python (eth_block_processor)",
+            "implementation": "Python (eth_data)",
             "error": "No successful transactions processed",
             "failures": failures,
             "error_types": error_types
@@ -428,7 +425,7 @@ def main():
         print("\n⚠️ Skipping Python benchmark (set RUN_PYTHON=True to enable)")
         # Add estimated Python performance based on known benchmarks
         results.append({
-            "implementation": "Python (eth_block_processor) - ESTIMATED",
+            "implementation": "Python (eth_data) - ESTIMATED",
             "total_transactions": len(tx_hashes),
             "successful": len(tx_hashes),
             "failed": 0,

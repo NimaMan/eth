@@ -10,36 +10,24 @@ The Rust tx_processor provides **10-40x performance improvement** over the Pytho
 
 ## Examples
 
-### 1. `process_transaction.py`
-Basic example showing how to process a single transaction and access all the decoded data.
-
-Using real transaction: `0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7`
-- 5 ERC20 transfers
-- 2 internal transactions
+### 1. `benchmark_rust_vs_python.py`
+Comprehensive performance benchmark comparing Rust and Python implementations with real transactions.
+- Tests 1000 random transactions from database
+- Measures individual and batch processing speeds
+- Provides detailed performance metrics
 
 ```bash
-python process_transaction.py
+python benchmark_rust_vs_python.py
 ```
 
-### 2. `batch_processing.py`
-Demonstrates batch processing for high-throughput scenarios. Process hundreds of transactions efficiently.
+### 2. `validate_rust_python_compatibility.py`
+Validates that both implementations produce identical results for the same transactions.
+- Compares all fields of ProcessedTransaction
+- Ensures drop-in compatibility
+- Tests with various transaction types
 
 ```bash
-python batch_processing.py
-```
-
-### 3. `fund_flow_analysis.py`
-Integration with fund flow network analysis for tracking scammer funds. Shows how to replace the slow Python ProcessedTransactionProvider with Rust backend.
-
-```bash
-python fund_flow_analysis.py
-```
-
-### 4. `performance_comparison.py`
-Measures actual performance difference between Rust and Python implementations.
-
-```bash
-python performance_comparison.py
+python validate_rust_python_compatibility.py
 ```
 
 ## Setup

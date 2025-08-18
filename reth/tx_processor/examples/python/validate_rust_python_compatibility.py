@@ -1,35 +1,21 @@
 #!/usr/bin/env python3
 """
-Audit Comparison: Rust tx_processor vs Python eth_block_processor
+Validate Compatibility: Rust tx_processor vs Python eth_data
 
 This script compares the outputs of both implementations to verify they produce
 identical results for the same transactions.
 """
 
-import sys
 import json
 import time
 from typing import Dict, Any, List
-from deepdiff import DeepDiff
-import rs_tx_processor
-
-# Add Python eth_block_processor path
-sys.path.insert(0, '/home/nima/code/crypto/py/eth_block_processor')
-
 from web3 import Web3
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
+from deepdiff import DeepDiff
 
-def normalize_address(addr: Any) -> str:
-    """Normalize address to checksum format"""
-    if addr is None:
-        return None
-    if isinstance(addr, str):
-        # Handle '0x' prefix variations
-        if addr.lower().startswith('0x0x'):
-            addr = '0x' + addr[4:]
-        return Web3.to_checksum_address(addr)
-    return str(addr)
+import rs_tx_processor
+from eth_data.txn.txn_processor import TransactionProcessor
+from eth_data.txn.txn_data_fetcher import TransactionDataFetcher
+
 
 def normalize_value(value: Any) -> str:
     """Normalize numeric values to string for comparison"""
@@ -43,11 +29,11 @@ def normalize_processed_tx(tx_dict: Dict) -> Dict:
     """Normalize a processed transaction dictionary for comparison"""
     normalized = {}
     
-    # Normalize addresses
+    # Keep addresses as-is (they should already be checksum)
     address_fields = ['from_address', 'to_address', 'contract_address']
     for field in address_fields:
         if field in tx_dict:
-            normalized[field] = normalize_address(tx_dict[field])
+            normalized[field] = tx_dict[field]
     
     # Normalize numeric values
     numeric_fields = ['value', 'gas_price', 'gas_used', 'txn_fee', 'bribe_amount']
@@ -76,7 +62,7 @@ def normalize_processed_tx(tx_dict: Dict) -> Dict:
                     norm_event = {}
                     for k, v in event.items():
                         if 'address' in k.lower():
-                            norm_event[k] = normalize_address(v)
+                            norm_event[k] = v  # Keep addresses as-is (should be checksum)
                         elif k in ['amount', 'value', 'reserve0', 'reserve1']:
                             norm_event[k] = normalize_value(v)
                         else:
@@ -95,12 +81,12 @@ def normalize_processed_tx(tx_dict: Dict) -> Dict:
     if 'unique_addresses' in tx_dict:
         addrs = tx_dict['unique_addresses']
         if isinstance(addrs, (set, list)):
-            normalized['unique_addresses'] = sorted([normalize_address(a) for a in addrs if a])
+            normalized['unique_addresses'] = sorted([a for a in addrs if a])
     
     if 'erc20_contracts' in tx_dict:
         contracts = tx_dict['erc20_contracts']
         if isinstance(contracts, (set, list)):
-            normalized['erc20_contracts'] = sorted([normalize_address(a) for a in contracts if a])
+            normalized['erc20_contracts'] = sorted([a for a in contracts if a])
     
     return normalized
 
@@ -242,7 +228,7 @@ def main():
     """Run comprehensive audit"""
     print("🔍 TX Processor Implementation Audit")
     print("=" * 80)
-    print("Comparing Rust tx_processor vs Python eth_block_processor")
+    print("Comparing Rust tx_processor vs Python eth_data")
     print("=" * 80)
     
     # Test transactions covering different scenarios

@@ -28,6 +28,7 @@ pub use data_models::{ProcessedTransaction, TransactionFees};
 pub mod processing;
 pub mod transaction_loader;
 pub mod config;
+pub mod utils;
 pub mod retry_utils;
 
 // Export TxProcessor for external use
@@ -346,6 +347,13 @@ pub mod tx_processor {
                 processed_tx.unique_addresses.insert(transfer.to_address);
             }
             
+            // Collect addresses from ERC20 approvals
+            for approval in &processed_tx.approvals {
+                processed_tx.erc20_contracts.insert(approval.token_address);
+                processed_tx.unique_addresses.insert(approval.owner);
+                processed_tx.unique_addresses.insert(approval.spender);
+            }
+            
             // Collect ERC721 contract addresses
             for transfer in &processed_tx.erc721_transfers {
                 processed_tx.erc721_contracts.insert(transfer.token_address);
@@ -372,6 +380,8 @@ pub mod tx_processor {
             }
             
             for pool in &processed_tx.uniswap_v3_pools {
+                processed_tx.erc20_contracts.insert(pool.token0);
+                processed_tx.erc20_contracts.insert(pool.token1);
                 processed_tx.unique_addresses.insert(pool.token0);
                 processed_tx.unique_addresses.insert(pool.token1);
                 processed_tx.unique_addresses.insert(pool.pool);
@@ -566,6 +576,19 @@ pub mod tx_processor {
                 processed_tx.erc20_contracts.insert(transfer.token_address);
                 processed_tx.unique_addresses.insert(transfer.from_address);
                 processed_tx.unique_addresses.insert(transfer.to_address);
+            }
+            
+            // Collect addresses from ERC20 approvals
+            for approval in &processed_tx.approvals {
+                processed_tx.erc20_contracts.insert(approval.token_address);
+                processed_tx.unique_addresses.insert(approval.owner);
+                processed_tx.unique_addresses.insert(approval.spender);
+            }
+            
+            // Collect ERC20 contracts from Uniswap V3 pools
+            for pool in &processed_tx.uniswap_v3_pools {
+                processed_tx.erc20_contracts.insert(pool.token0);
+                processed_tx.erc20_contracts.insert(pool.token1);
             }
             
             // Classify transaction

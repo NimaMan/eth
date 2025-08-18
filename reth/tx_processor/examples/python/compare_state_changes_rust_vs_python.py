@@ -5,22 +5,18 @@ import json
 import sys
 from typing import Dict, Any, Tuple
 
-def normalize_address(addr: str) -> str:
-    """Normalize address to lowercase for comparison."""
-    return addr.lower()
-
 def compare_eth_changes(rust_data: Dict, python_data: Dict) -> Tuple[bool, str]:
     """Compare ETH net changes between Rust and Python."""
     differences = []
     
-    # Get all unique addresses from both
-    rust_addresses = {normalize_address(k) for k in rust_data.keys()}
-    python_addresses = {normalize_address(k) for k in python_data.get('state_changes', {}).keys()}
+    # Get all unique addresses from both (addresses should already be checksum)
+    rust_addresses = set(rust_data.keys())
+    python_addresses = set(python_data.get('state_changes', {}).keys())
     all_addresses = rust_addresses | python_addresses
     
     for addr in sorted(all_addresses):
-        rust_addr = next((k for k in rust_data.keys() if normalize_address(k) == addr), None)
-        python_addr = next((k for k in python_data.get('state_changes', {}).keys() if normalize_address(k) == addr), None)
+        rust_addr = addr if addr in rust_data else None
+        python_addr = addr if addr in python_data.get('state_changes', {}) else None
         
         rust_eth = rust_data.get(rust_addr, {}).get('eth_net', 0)
         python_eth = python_data.get('state_changes', {}).get(python_addr, {}).get('eth_net', 0)
@@ -39,21 +35,21 @@ def compare_token_changes(rust_data: Dict, python_data: Dict) -> Tuple[bool, str
     """Compare token net changes between Rust and Python."""
     differences = []
     
-    # Token addresses to names
+    # Token addresses to names (using checksum addresses)
     token_map = {
-        "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
-        "0xdac17f958d2ee523a2206206994597c13d831ec7": "USDT",
-        "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH"
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48": "USDC",
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7": "USDT",
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "WETH"
     }
     
-    # Get all addresses
+    # Get all addresses (addresses should already be checksum)
     all_addresses = set()
-    all_addresses.update(normalize_address(k) for k in rust_data.keys())
-    all_addresses.update(normalize_address(k) for k in python_data.get('state_changes', {}).keys())
+    all_addresses.update(rust_data.keys())
+    all_addresses.update(python_data.get('state_changes', {}).keys())
     
     for addr in sorted(all_addresses):
-        rust_addr = next((k for k in rust_data.keys() if normalize_address(k) == addr), None)
-        python_addr = next((k for k in python_data.get('state_changes', {}).keys() if normalize_address(k) == addr), None)
+        rust_addr = addr if addr in rust_data else None
+        python_addr = addr if addr in python_data.get('state_changes', {}) else None
         
         rust_tokens = rust_data.get(rust_addr, {}).get('token_net', {})
         python_tokens = python_data.get('state_changes', {}).get(python_addr, {}).get('token_net', {})
