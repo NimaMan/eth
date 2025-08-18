@@ -90,32 +90,41 @@ pub struct PublisherStats {
 impl SignalPublisher {
     /// Create new signal publisher
     pub async fn new(config: SignalPublisherConfig) -> Result<Self> {
+        info!("SignalPublisher::new() starting...");
         let stats = Arc::new(PublisherStats::default());
         
         // Setup ZMQ socket
+        info!("Creating ZMQ context...");
         let context = Context::new();
         let zmq_socket = context.socket(zmq::PUB)?;
         zmq_socket.set_sndhwm(10000)?;
         zmq_socket.set_linger(0)?;
+        info!("Binding ZMQ socket to {}...", config.zmq_endpoint);
         zmq_socket.bind(&config.zmq_endpoint)?;
         info!("📡 ZMQ publisher bound to {}", config.zmq_endpoint);
         
         // Give ZMQ time to establish the socket (slow joiner problem)
+        info!("Waiting 100ms for ZMQ socket...");
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         
         // Create log directory and files
+        info!("Creating log directory: {}", config.log_dir);
         std::fs::create_dir_all(&config.log_dir)?;
         let log_files = Self::create_log_files(&config.log_dir)?;
         info!("📁 Signal log directory: {}", config.log_dir);
         
         // Setup non-blocking database writer if enabled
         let db_sender = if config.enable_database {
+            info!("Setting up database writer...");
             let (sender, receiver) = mpsc::channel(config.db_channel_buffer_size);
             // Use hardcoded database URL from database module
             let db_url = Some(crate::db_writers::get_default_database_url());
+            info!("Spawning database writer task...");
             Self::spawn_db_writer(db_url, receiver, stats.clone()).await?;
+            info!("Database writer spawned");
             Some(sender)
         } else {
+            info!("Database writing disabled");
             None
         };
         

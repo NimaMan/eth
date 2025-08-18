@@ -187,10 +187,9 @@ impl ServiceMetrics {
         let rate = total as f64 / elapsed.as_secs_f64();
         
         format!(
-            "TX: {} ({:.1}/s) | Detect: {}μs/{}μs | Route: {}μs/{}μs | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims:{}/{} | Signals: TE:{} LR:{} HP:{} TC:{}",
+            "TX: {} ({:.1}/s) | Detect: {}μs/{}μs | Sim: {:.1}ms/{:.1}ms | CC:{} CA:{} | Sims:{}/{} | Signals: TE:{} LR:{} HP:{} TC:{}",
             total, rate,
             avg_detect.as_micros(), max_detect.as_micros(),
-            avg_route.as_micros(), max_route.as_micros(),
             avg_sim.as_secs_f64() * 1000.0, max_sim.as_secs_f64() * 1000.0,
             creations, creator_actions,
             sims_completed, sim_errors,

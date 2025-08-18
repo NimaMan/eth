@@ -115,7 +115,7 @@ impl TransactionRouter {
                 has_liquidity_in_calldata: has_liquidity,
             },
             priority: if is_token { SimulationPriority::High } else { SimulationPriority::Low },
-            requires_simulation: is_token,
+            requires_simulation: false, // Skip simulation for contract creations
             requires_buy_sell_test: false, // Can't test until deployed
         }
     }
