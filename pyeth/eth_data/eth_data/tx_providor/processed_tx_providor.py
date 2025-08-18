@@ -5,27 +5,26 @@ A clean provider that uses existing processors to fetch and process transactions
 No code duplication - just orchestrates the existing components.
 """
 
-from typing import Dict, List, Optional, Any
+from typing import Dict, List
 from web3 import Web3
-from eth_data.tx_processor.txn_processor import TransactionProcessor
+from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.blockchain.block_fetcher import BlockFetcher
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
 from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
-import logging
 
 
 class ProcessedTxProvider:
     """Provider for fetching and processing transactions using existing processors."""
     
-    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = True, eth_state_change_threshold: float = 0, logger: Optional[logging.Logger] = None):
+    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = True, eth_state_change_threshold: float = 0, logger = None):
         if w3 is None:
             self.w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         else:
             self.w3 = w3
             
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger
         self.calculate_state_changes = calculate_state_changes
         
         # Initialize processors
