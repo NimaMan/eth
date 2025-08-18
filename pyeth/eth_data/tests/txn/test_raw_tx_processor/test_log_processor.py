@@ -1,7 +1,7 @@
 import pytest
 from hexbytes import HexBytes
-from eth_block_processor.txn.txn_log_processor import TransactionLogProcessor
-from eth_block_processor.data_models.receipt_models import *
+from eth_data.tx_processor.tx_log_processor import TransactionLogProcessor
+from eth_data.tx_processor.data_models.receipt_models import *
 from web3 import Web3
 
 

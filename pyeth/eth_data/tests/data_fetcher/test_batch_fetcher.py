@@ -8,7 +8,7 @@ import pytest
 from web3 import Web3
 import os
 import time
-from eth_block_processor.txn.txn_data_fetcher import TransactionBatchDataFetcher
+from eth_data.tx_processor.tx_data_fetcher import TransactionBatchDataFetcher
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,8 @@ import asyncio
 import time
 from typing import List, Dict, Any
 
-from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.blockchain.block_processor import BlockProcessor
+from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
 
 # Configuration
 NODE_URL = "http://127.0.0.1:8545"  # Adjust if your node URL is different
@@ -122,4 +122,4 @@ async def test_processor_performance_comparison(block_processor: BlockProcessor)
     print("---")
 
 # To run this test: navigate to the root directory and run:
-# pytest py/eth_block_processor/tests/blocks/test_block_processor_performance.py -s 
+# pytest py/eth_data/tests/blocks/test_block_processor_performance.py -s 

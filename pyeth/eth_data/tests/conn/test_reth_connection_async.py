@@ -1,7 +1,7 @@
 import asyncio
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
-from eth_block_processor.utils.logger import get_logger
+from eth_data.utils.logger import get_logger
 import pytest
 
 

@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import List, Dict, Any
 
-from eth_block_processor.blockchain.block_fetcher import BlockFetcher
+from eth_data.blockchain.block_fetcher import BlockFetcher
 
 # Configuration
 NODE_URL = "http://127.0.0.1:8545"  # Adjust if your node URL is different
@@ -135,5 +135,5 @@ async def test_fetch_performance_comparison(block_fetcher: BlockFetcher):
     assert True
 
 # To run this test: navigate to the root directory and run:
-# pytest py/eth_block_processor/tests/blocks/test_block_fetcher_performance.py -s
+# pytest py/eth_data/tests/blocks/test_block_fetcher_performance.py -s
 # The '-s' flag ensures print statements are shown. 

@@ -3,7 +3,7 @@
 Setup script for the Transaction Validation Service
 
 This script ensures the Python path is correctly configured so the validation
-service can import the eth_block_processor modules from the parent directory.
+service can import the eth_data modules from the parent directory.
 """
 
 import sys
@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 def setup_python_path():
-    """Add the eth_block_processor package to Python path"""
+    """Add the eth_data package to Python path"""
     # Get the package root (two levels up from scripts/services)
     service_dir = Path(__file__).parent
     package_root = service_dir.parent.parent
@@ -26,12 +26,12 @@ def setup_python_path():
     
     # Verify imports work
     try:
-        from eth_block_processor.txn.txn_processor import TransactionProcessor
-        from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-        print("✅ Successfully imported eth_block_processor modules")
+        from eth_data.tx_processor.tx_processor import TransactionProcessor
+        from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+        print("✅ Successfully imported eth_data modules")
         return True
     except ImportError as e:
-        print(f"❌ Failed to import eth_block_processor modules: {e}")
+        print(f"❌ Failed to import eth_data modules: {e}")
         print(f"   Current Python path: {sys.path}")
         print(f"   Package root: {package_root}")
         return False

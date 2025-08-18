@@ -8,7 +8,7 @@ Objective: Verify correct parsing of set tax transactions including:
 """
 
 import asyncio
-from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
+from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 
 
 def test_set_tax(txn_analyzer, txn_data_fetcher):

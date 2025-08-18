@@ -19,7 +19,7 @@ The validation service provides transaction processing and state change analysis
 ## 🚀 **Quick Setup**
 
 ```bash
-cd /home/nima/code/crypto/py/eth_block_processor/scripts/provide_tx_service
+cd /home/nima/code/crypto/py/eth_data/scripts/provide_tx_service
 
 # Install as system service (one-time setup)
 sudo ./scripts/install_system_service.sh
@@ -36,7 +36,7 @@ sudo ./scripts/install_system_service.sh
 - **Port**: `18000` (non-conflicting with common services)
 - **URL**: `http://127.0.0.1:18000`
 - **User**: `nima` (your user account)
-- **Working Directory**: `/home/nima/code/crypto/py/eth_block_processor/scripts/provide_tx_service`
+- **Working Directory**: `/home/nima/code/crypto/py/eth_data/scripts/provide_tx_service`
 - **Environment**: Conda `qw` environment activated
 - **Memory Limit**: 2GB
 - **CPU Limit**: 200% (2 cores)
@@ -119,7 +119,7 @@ sudo kill -9 <PID>
 ### Permission Issues
 ```bash
 # Check file permissions
-ls -la /home/nima/code/crypto/py/eth_block_processor/scripts/provide_tx_service/
+ls -la /home/nima/code/crypto/py/eth_data/scripts/provide_tx_service/
 
 # Fix if needed
 chmod +x scripts/*.sh

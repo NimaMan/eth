@@ -5,8 +5,8 @@ Tests the ability to calculate state changes from processed transactions,
 particularly focusing on basic ETH transfers that were previously missed.
 """
 from web3 import Web3
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.txn.txn_processor import TransactionProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_processor import TransactionProcessor
 
 
 class TestProcessedTxStateDiffCalculator:

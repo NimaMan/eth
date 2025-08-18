@@ -8,9 +8,9 @@ Objective: Verify correct parsing of Uniswap V2 add liquidity transaction includ
 """
 
 import asyncio
-from eth_block_processor.data_models.receipt_models import *
-from eth_block_processor.data_models.trace_models import *
-from eth_block_processor.data_models.txn_models import *
+from eth_data.tx_processor.data_models.receipt_models import *
+from eth_data.tx_processor.data_models.trace_models import *
+from eth_data.tx_processor.data_models.txn_models import *
 
 
 def test_add_liquidity(txn_analyzer, txn_data_fetcher):

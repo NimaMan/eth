@@ -1,10 +1,10 @@
 import pytest
 import asyncio
 from web3 import Web3
-from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.data_models.trace_models import InternalTransaction
-from eth_block_processor.data_models.txn_models import (
+from eth_data.tx_processor.tx_trace_processor import TransactionTraceProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.data_models.trace_models import InternalTransaction
+from eth_data.tx_processor.data_models.txn_models import (
     ProcessedTransaction, 
     TransactionFees,
     ERC20Transfer,

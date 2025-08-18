@@ -2,8 +2,8 @@ import asyncio
 import pytest
 import pytest_asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
-from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_block_processor.utils.logger import get_logger
+from eth_data.blockchain.block_processor import BlockProcessor
+from eth_data.utils.logger import get_logger
 
 logger = get_logger(name="test_block_processor", log_folder="tests")
 

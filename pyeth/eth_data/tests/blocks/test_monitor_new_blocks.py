@@ -1,6 +1,6 @@
 import asyncio
-from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
-from eth_block_processor.utils.logger import get_logger
+from eth_data.blockchain.live_block_processor import LiveBlockProcessor
+from eth_data.utils.logger import get_logger
 import pytest
 
 # Initialize the logger

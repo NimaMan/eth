@@ -13,8 +13,8 @@ This bridges the gap between historical analysis and mempool prediction.
 
 import asyncio
 from web3 import Web3
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_processor import TransactionProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 import json
 
 async def simulate_historical_transaction():

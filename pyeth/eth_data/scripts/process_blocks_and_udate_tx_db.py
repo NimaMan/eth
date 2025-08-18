@@ -1,12 +1,12 @@
 import asyncio
 from tqdm import tqdm
-from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_block_processor.utils.logger import get_logger
+from eth_data.blockchain.block_processor import BlockProcessor
+from eth_data.utils.logger import get_logger
 from datetime import datetime, timezone
 from sqlalchemy import text
 from web3 import Web3
 from sarigoz.utils.time_block_converter import TimeBlockConverter
-from sarigoz.data.db.eth_db_conn import get_db_engine
+from eth_data.database.eth_db_conn import get_db_engine
 
 
 async def process_blocks_in_range(

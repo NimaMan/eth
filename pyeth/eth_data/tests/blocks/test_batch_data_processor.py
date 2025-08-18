@@ -1,11 +1,11 @@
-from eth_block_processor.txn.txn_processor import TransactionProcessor
+from eth_data.tx_processor.tx_processor import TransactionProcessor
 import pytest
 import json
 import asyncio
 from web3 import Web3
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
-from eth_block_processor.blockchain.block_fetcher import BlockFetcher
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
+from eth_data.blockchain.block_fetcher import BlockFetcher
 
 
 @pytest.mark.asyncio

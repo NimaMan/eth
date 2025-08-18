@@ -4,11 +4,11 @@ import pytest
 import asyncio
 from aiohttp import ClientSession, TCPConnector
 from web3 import Web3
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.txn.txn_trace_processor import TransactionTraceProcessor
-from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
-from eth_block_processor.blockchain.block_processor import BlockProcessor
+from eth_data.tx_processor.tx_processor import TransactionProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_trace_processor import TransactionTraceProcessor
+from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
+from eth_data.blockchain.block_processor import BlockProcessor
 
 
 @pytest.fixture(scope="session")

@@ -2,8 +2,8 @@ import asyncio
 import signal
 import sys
 
-from eth_block_processor.blockchain.live_block_processor import LiveBlockProcessor
-from eth_block_processor.utils.logger import get_logger
+from eth_data.blockchain.live_block_processor import LiveBlockProcessor
+from eth_data.utils.logger import get_logger
 
 
 logger = get_logger(name="live_block_processor")

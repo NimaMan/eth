@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
-NAME="eth_block_processor"
-VERSION="0.4.0"
+NAME="eth_data"
+VERSION="0.5.0"
 # To install the library, run the following
 #
 # python setup.py install
@@ -15,7 +15,7 @@ REQUIRES=[
 setup(
     name=NAME,
     version=VERSION,
-    description="eth_block_processor",
+    description="eth_data",
     author="Nima",
     author_email="",
     url="",
@@ -26,7 +26,7 @@ setup(
     package_data={'': ['abis/*.json', 'apis/api_keys/*.yaml', 'db/config.yaml']},
     include_package_data=True,
     long_description="""\
-    eth_block_processor provides ...
+    eth_data provides ...
     """
 )
 

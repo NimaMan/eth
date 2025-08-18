@@ -17,8 +17,8 @@ Test Flow:
 import asyncio
 import pytest
 import orjson
-from eth_block_processor.blockchain.block_processor import BlockProcessor
-from eth_block_processor.blockchain.live_block_processor import transaction_serializer
+from eth_data.blockchain.block_processor import BlockProcessor
+from eth_data.blockchain.live_block_processor import transaction_serializer
 
 # Define test blocks as constants
 TEST_BLOCK_NUMBER_1 = 22003306

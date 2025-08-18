@@ -5,7 +5,7 @@ Transaction Analyzer Test Suite - Real Transaction Tests
 import pytest
 import asyncio
 import numpy as np
-from eth_block_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
+from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
 
 @pytest.fixture
 def expected_eth_transfer():

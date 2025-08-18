@@ -3,7 +3,7 @@
 import pytest
 import asyncio
 import numpy as np
-from eth_block_processor.data_models.txn_models import *
+from eth_data.tx_processor.data_models.txn_models import *
 
 @pytest.fixture
 def expected_contract_creation():

@@ -1,1 +1,15 @@
 web3==7.6.1
+# Validation Service Dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+orjson==3.9.10
+
+# Core dependencies (from main package)
+web3==7.6.1
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+
+# Optional for production deployment
+gunicorn==21.2.0
+python-multipart==0.0.6

@@ -30,10 +30,10 @@ import orjson
 # Add parent package to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
-from eth_block_processor.txn.txn_batch_processor import TransactionBatchProcessor
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_processor.tx_processor import TransactionProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
+from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
 
 # Configure logging directly since we may not have logger utils
 logging.basicConfig(level=logging.INFO)

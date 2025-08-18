@@ -12,7 +12,7 @@ Objective:
 import asyncio
 import signal
 from web3 import Web3
-from eth_block_processor.blockchain.mempool_processor import MempoolProcessor
+from eth_data.blockchain.mempool_processor import MempoolProcessor
 from eth_token.utils.logger import get_logger
 
 

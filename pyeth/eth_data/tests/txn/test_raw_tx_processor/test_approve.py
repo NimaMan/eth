@@ -9,9 +9,9 @@ Objective: Verify correct parsing of LP token approval transactions including:
 """
 
 import asyncio
-from eth_block_processor.data_models.receipt_models import *
-from eth_block_processor.data_models.trace_models import *
-from eth_block_processor.data_models.txn_models import *
+from eth_data.tx_processor.data_models.receipt_models import *
+from eth_data.tx_processor.data_models.trace_models import *
+from eth_data.tx_processor.data_models.txn_models import *
 
 def test_approve_lp(txn_analyzer, txn_data_fetcher):
     """Test that both sync and async analysis match the expected approval details"""
