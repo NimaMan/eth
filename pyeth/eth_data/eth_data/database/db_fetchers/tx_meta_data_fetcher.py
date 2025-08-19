@@ -1,44 +1,134 @@
-# py/sarigoz/sarigoz/data/fetchers/tx_meta_data_fetcher.py
-
 """
-Postgres Transaction Data Fetcher
----------------------------------
+Transaction Metadata Fetcher
+----------------------------
 
-This module provides a class to fetch transaction-related data specifically
-from the PostgreSQL database defined by the schema in eth_db_data_models.py.
-It encapsulates SQLAlchemy queries (using text() for potential performance)
-for retrieving transaction hashes associated with addresses and block numbers
-associated with transaction hashes.
+Fetches transaction-related metadata from PostgreSQL eth_db database.
+Provides methods to retrieve transaction hashes, block mappings, and 
+transaction details for addresses and blocks.
+
+All methods return native Python dictionaries and lists (no pandas).
+Logging uses eth_data.utils.logger for error handling only.
 """
 
-import logging
 from typing import List, Dict, Optional, Tuple
-
-# Use text for raw SQL execution
+from datetime import datetime
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.engine import Engine
 
-# Assuming your models are accessible like this
-from eth_data.database.schema.eth_db_data_models import Address # Still needed for address_id lookup
-from eth_data.database.eth_db_conn import get_db_engine, get_db_session_maker # Added get_db_session
+from eth_data.database.schema.eth_db_data_models import Address
+from eth_data.database.eth_db_conn import get_db_session_maker
+from eth_data.utils.logger import get_logger
 
 
-class TxMetaDataFetcher: # Renamed class
+class TxMetaDataFetcher:
     """
-    Fetches transaction data from the PostgreSQL database (eth_db) using raw SQL via text().
+    Fetches transaction metadata from PostgreSQL eth_db database.
+    Returns native Python types (dicts/lists) for all operations.
     """
 
-    def __init__(self, logger=None):
-        """
-        Initializes the fetcher.
-
-        Args:
-            logger: An optional logger instance.
-        """
-        # Use get_db_session for session management
+    def __init__(self):
+        """Initialize the fetcher with database connection and logger."""
         self.Session = get_db_session_maker(db='eth_db')
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
+
+    def get_tx_hashes_for_address(
+        self,
+        address: str,
+        start_block: Optional[int] = None,
+        end_block: Optional[int] = None,
+        num_blocks: Optional[int] = None
+    ) -> List[str]:
+        """
+        Get transaction hashes for an address with optional filters.
+        
+        Args:
+            address: Checksummed Ethereum address
+            start_block: Optional starting block number (inclusive)
+            end_block: Optional ending block number (inclusive)  
+            num_blocks: Optional limit to N most recent blocks
+            
+        Returns:
+            List of transaction hashes
+        """
+        try:
+            with self.Session() as session:
+                # Find address_id
+                address_id_query = select(Address.address_id).where(Address.address == address)
+                address_id = session.execute(address_id_query).scalar_one_or_none()
+                
+                if address_id is None:
+                    return []
+                
+                # Build query
+                params = {"address_id": address_id}
+                sql_query = """
+                    SELECT DISTINCT t.tx_hash
+                    FROM eth_db.transactions t
+                    JOIN eth_db.tx_participants tp ON t.tx_hash = tp.tx_hash
+                    WHERE tp.address_id = :address_id
+                """
+                
+                # Add block filters
+                if start_block is not None:
+                    sql_query += " AND t.block_number >= :start_block"
+                    params["start_block"] = start_block
+                if end_block is not None:
+                    sql_query += " AND t.block_number <= :end_block"
+                    params["end_block"] = end_block
+                    
+                # Add num_blocks filter
+                if num_blocks is not None and num_blocks > 0:
+                    block_conditions = ""
+                    if start_block is not None:
+                        block_conditions += " AND sub_t.block_number >= :start_block"
+                    if end_block is not None:
+                        block_conditions += " AND sub_t.block_number <= :end_block"
+                        
+                    sql_query += f"""
+                        AND t.block_number IN (
+                            SELECT DISTINCT sub_t.block_number
+                            FROM eth_db.transactions sub_t
+                            JOIN eth_db.tx_participants sub_tp ON sub_t.tx_hash = sub_tp.tx_hash
+                            WHERE sub_tp.address_id = :address_id
+                              {block_conditions}
+                            ORDER BY sub_t.block_number DESC
+                            LIMIT :num_blocks
+                        )
+                    """
+                    params["num_blocks"] = num_blocks
+                
+                sql_query += " ORDER BY t.block_number, t.tx_hash"
+                
+                results = session.execute(text(sql_query), params).fetchall()
+                return [row[0] for row in results]
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching tx hashes for address {address}: {e}")
+            return []
+
+    def get_tx_hashes_from_block_number(self, block_number: int) -> List[str]:
+        """
+        Get all transaction hashes from a specific block.
+        
+        Args:
+            block_number: Block number
+            
+        Returns:
+            List of transaction hashes in the block
+        """
+        try:
+            with self.Session() as session:
+                sql_query = """
+                    SELECT tx_hash
+                    FROM eth_db.transactions
+                    WHERE block_number = :block_number
+                    ORDER BY tx_index
+                """
+                results = session.execute(text(sql_query), {"block_number": block_number}).fetchall()
+                return [row[0] for row in results]
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching tx hashes for block {block_number}: {e}")
+            return []
 
     def get_tx_hashes_and_blocks_for_address(
         self,
@@ -48,35 +138,27 @@ class TxMetaDataFetcher: # Renamed class
         num_blocks: Optional[int] = None
     ) -> List[Tuple[str, int]]:
         """
-        Retrieves a list of (transaction hash, block number) tuples associated
-        with a given address. Optionally filters by block range and/or limits
-        to the latest 'num_blocks' containing transactions for the address.
-
+        Get (transaction_hash, block_number) tuples for an address.
+        
         Args:
-            address_str: The checksummed Ethereum address string.
-            start_block: Optional starting block number (inclusive).
-            end_block: Optional ending block number (inclusive).
-            num_blocks: Optional. If provided, limit results to transactions
-                        within the 'num_blocks' most recent blocks associated
-                        with the address (respecting start/end block filters).
-
+            address_str: Checksummed Ethereum address
+            start_block: Optional starting block number (inclusive)
+            end_block: Optional ending block number (inclusive)
+            num_blocks: Optional limit to N most recent blocks
+            
         Returns:
-            A list of (transaction_hash, block_number) tuples, ordered by block number.
-            Returns an empty list if the address is not found or on error.
+            List of (tx_hash, block_number) tuples
         """
-        tx_data = []
         try:
             with self.Session() as session:
-                # 1. Find the address_id
+                # Find address_id
                 address_id_query = select(Address.address_id).where(Address.address == address_str)
-                address_id_result = session.execute(address_id_query).scalar_one_or_none()
-
-                if address_id_result is None:
-                    self.logger.warning(f"Address {address_str} not found in the database.")
+                address_id = session.execute(address_id_query).scalar_one_or_none()
+                
+                if address_id is None:
                     return []
-                address_id = address_id_result
-
-                # 2. Build the main SQL query and parameters
+                
+                # Build query
                 params = {"address_id": address_id}
                 sql_query = """
                     SELECT t.tx_hash, t.block_number
@@ -84,66 +166,58 @@ class TxMetaDataFetcher: # Renamed class
                     JOIN eth_db.tx_participants tp ON t.tx_hash = tp.tx_hash
                     WHERE tp.address_id = :address_id
                 """
-
-                # Add block range conditions
-                block_conditions = "" # For use in subquery
+                
+                # Add block filters
                 if start_block is not None:
-                    block_conditions += " AND sub_t.block_number >= :start_block" # For subquery
-                    sql_query += " AND t.block_number >= :start_block" # For main query
+                    sql_query += " AND t.block_number >= :start_block"
                     params["start_block"] = start_block
                 if end_block is not None:
-                    block_conditions += " AND sub_t.block_number <= :end_block" # For subquery
-                    sql_query += " AND t.block_number <= :end_block" # For main query
+                    sql_query += " AND t.block_number <= :end_block"
                     params["end_block"] = end_block
-
-                # Add subquery to filter by latest N blocks IF num_blocks is provided
+                    
+                # Add num_blocks filter
                 if num_blocks is not None and num_blocks > 0:
+                    block_conditions = ""
+                    if start_block is not None:
+                        block_conditions += " AND sub_t.block_number >= :start_block"
+                    if end_block is not None:
+                        block_conditions += " AND sub_t.block_number <= :end_block"
+                        
                     sql_query += f"""
                         AND t.block_number IN (
                             SELECT DISTINCT sub_t.block_number
                             FROM eth_db.transactions sub_t
                             JOIN eth_db.tx_participants sub_tp ON sub_t.tx_hash = sub_tp.tx_hash
                             WHERE sub_tp.address_id = :address_id
-                              {block_conditions} -- Apply range filters here too
+                              {block_conditions}
                             ORDER BY sub_t.block_number DESC
                             LIMIT :num_blocks
                         )
                     """
                     params["num_blocks"] = num_blocks
-                    # Note: start/end block params are already in 'params' if needed
-
-                sql_query += " ORDER BY t.block_number" # Final ordering
-
-                # Execute using text()
+                
+                sql_query += " ORDER BY t.block_number, t.tx_hash"
+                
                 results = session.execute(text(sql_query), params).fetchall()
-                # Create list of tuples directly from results
-                tx_data = [(row[0], row[1]) for row in results if row[1] is not None] # Ensure block number is not null
-
+                return [(row[0], row[1]) for row in results if row[1] is not None]
+                
         except Exception as e:
-            self.logger.error(f"Error fetching tx hashes and blocks for address {address_str}: {e}", exc_info=True)
-            # Return empty list on error
+            self.logger.error(f"Error fetching tx hashes and blocks for address {address_str}: {e}")
+            return []
 
-        return tx_data
-
-    def get_block_number_for_tx_hashes(
-        self,
-        tx_hashes: List[str]
-    ) -> Dict[str, int]:
+    def get_block_number_for_tx_hashes(self, tx_hashes: List[str]) -> Dict[str, int]:
         """
-        Retrieves the block number for each transaction hash in the provided list
-        using a raw SQL query.
-
+        Get block numbers for a list of transaction hashes.
+        
         Args:
-            tx_hashes: A list of transaction hash strings.
-
+            tx_hashes: List of transaction hash strings
+            
         Returns:
-            A dictionary mapping transaction hashes to their block numbers.
-            Hashes not found in the database will be omitted.
+            Dict mapping tx_hash -> block_number
         """
         if not tx_hashes:
             return {}
-
-        tx_to_block_map: Dict[str, int] = {}
+            
         try:
             with self.Session() as session:
                 sql_query = """
@@ -153,256 +227,303 @@ class TxMetaDataFetcher: # Renamed class
                 """
                 params = {"tx_hashes": tuple(tx_hashes)}
                 results = session.execute(text(sql_query), params).fetchall()
-                for tx_hash, block_number in results:
-                    if block_number is not None:
-                        tx_to_block_map[tx_hash] = block_number
+                return {tx_hash: block_number for tx_hash, block_number in results if block_number is not None}
+                
         except Exception as e:
-            self.logger.error(f"Error fetching block numbers for transactions: {e}", exc_info=True)
-        return tx_to_block_map
+            self.logger.error(f"Error fetching block numbers for transactions: {e}")
+            return {}
 
-    # --- Add back the other methods from the original file --- 
-    def get_transaction_by_hash(self, tx_hash):
+    def get_tx_meta_data_by_hash(self, tx_hash: str) -> Optional[Dict]:
         """
-        Get details about a specific transaction.
+        Get basic transaction metadata by hash.
         
         Args:
             tx_hash: Transaction hash
             
         Returns:
-            dict: Transaction details or None
+            Dict with transaction details or None if not found
         """
-        # Ensure Session is imported and self.Session is initialized correctly
-        from datetime import datetime
-        with self.Session() as session:
-            query = text("""
-                SELECT 
-                    t.tx_hash,
-                    t.block_number,
-                    a_from.address as from_address, -- Join to get address string
-                    a_to.address as to_address,     -- Join to get address string
-                    t.value,
-                    t.status,
-                    b.block_timestamp
-                FROM 
-                    eth_db.transactions t
-                LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
-                LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id 
-                LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number -- Assuming block timestamp is in blocks table
-                WHERE 
-                    t.tx_hash = :tx_hash
-            """)
-
-            result = session.execute(query, {"tx_hash": tx_hash})
-            row = result.fetchone()
-            if row:
-                 # Using _mapping for potential robustness with different result types
-                row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
-                return {
-                    "tx_hash": row_map.get('tx_hash'),
-                    "block_number": row_map.get('block_number'),
-                    "from_address": row_map.get('from_address'),
-                    "to_address": row_map.get('to_address'),
-                    "value": row_map.get('value'),
-                    "status": row_map.get('status'),
-                    "timestamp": datetime.fromtimestamp(row_map['block_timestamp']) if row_map.get('block_timestamp') else None
-                }
+        try:
+            with self.Session() as session:
+                query = text("""
+                    SELECT 
+                        t.tx_hash,
+                        t.block_number,
+                        a_from.address as from_address,
+                        a_to.address as to_address,
+                        t.value,
+                        t.status,
+                        b.block_timestamp
+                    FROM 
+                        eth_db.transactions t
+                    LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
+                    LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id 
+                    LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
+                    WHERE 
+                        t.tx_hash = :tx_hash
+                """)
+                
+                result = session.execute(query, {"tx_hash": tx_hash})
+                row = result.fetchone()
+                if row:
+                    row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                    return {
+                        "tx_hash": row_map.get('tx_hash'),
+                        "block_number": row_map.get('block_number'),
+                        "from_address": row_map.get('from_address'),
+                        "to_address": row_map.get('to_address'),
+                        "value": row_map.get('value'),
+                        "status": row_map.get('status'),
+                        "timestamp": datetime.fromtimestamp(row_map['block_timestamp']) if row_map.get('block_timestamp') else None
+                    }
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching transaction {tx_hash}: {e}")
             return None
 
-    def get_transaction_participants(self, tx_hash):
+    def get_tx_participants(self, tx_hash: str) -> List[Dict]:
         """
-        Get all participants involved in a transaction.
+        Get all address participants for a transaction.
         
         Args:
             tx_hash: Transaction hash
             
         Returns:
-            list: Addresses involved in the transaction with their details
+            List of participant address details
         """
-        # Ensure TxParticipant and Address models are imported
-        with self.Session() as session:
-            query = text("""
-                SELECT 
-                    a.address,
-                    a.is_contract,
-                    a.total_realized_profit,
-                    a.total_volume,
-                    a.scam_ratio
-                FROM 
-                    eth_db.tx_participants tp
-                JOIN
-                    eth_db.addresses a ON tp.address_id = a.address_id -- Join based on address_id
-                WHERE 
-                    tp.tx_hash = :tx_hash
-            """)
+        try:
+            with self.Session() as session:
+                query = text("""
+                    SELECT 
+                        a.address,
+                        a.is_contract,
+                        a.total_realized_profit,
+                        a.total_volume,
+                        a.scam_ratio
+                    FROM 
+                        eth_db.tx_participants tp
+                    JOIN
+                        eth_db.addresses a ON tp.address_id = a.address_id
+                    WHERE 
+                        tp.tx_hash = :tx_hash
+                """)
+                
+                result = session.execute(query, {"tx_hash": tx_hash})
+                participants = []
+                for row in result.fetchall():
+                    row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                    participants.append({
+                        "address": row_map.get('address'),
+                        "is_contract": row_map.get('is_contract'),
+                        "total_realized_profit": row_map.get('total_realized_profit'),
+                        "total_volume": row_map.get('total_volume'),
+                        "scam_ratio": row_map.get('scam_ratio')
+                    })
+                return participants
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching participants for transaction {tx_hash}: {e}")
+            return []
 
-            result = session.execute(query, {"tx_hash": tx_hash})
-            participants = []
-            for row in result.fetchall():
-                row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
-                participants.append({
-                    "address": row_map.get('address'),
-                    "is_contract": row_map.get('is_contract'),
-                    "total_realized_profit": row_map.get('total_realized_profit'),
-                    "total_volume": row_map.get('total_volume'),
-                    "scam_ratio": row_map.get('scam_ratio')
-                })
-            return participants
-
-    def get_transactions_by_block(self, block_number, limit=100, offset=0):
+    def get_tx_by_block(self, block_number: int, limit: int = 100, offset: int = 0) -> List[Dict]:
         """
-        Get transactions in a specific block.
+        Get transactions in a specific block as list of dicts.
         
         Args:
             block_number: Block number
-            limit: Maximum number of transactions to return
+            limit: Maximum number of transactions
             offset: Number of transactions to skip
             
         Returns:
-            pandas.DataFrame: Transactions in the block
+            List of transaction dicts
         """
-        import pandas as pd # Import pandas locally
-        from datetime import datetime
-        with self.Session() as session:
-            query = text("""
-                SELECT 
-                    t.tx_hash,
-                    a_from.address as from_address,
-                    a_to.address as to_address,
-                    t.value,
-                    t.status,
-                    b.block_timestamp
-                FROM 
-                    eth_db.transactions t
-                LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
-                LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id
-                LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
-                WHERE 
-                    t.block_number = :block_number
-                ORDER BY 
-                    t.tx_index -- Assuming tx_index exists for ordering within block
-                LIMIT :limit OFFSET :offset
-            """)
-
-            result = session.execute(
-                query, 
-                {"block_number": block_number, "limit": limit, "offset": offset}
-            )
-            
-            columns = ['tx_hash', 'from_address', 'to_address', 'value', 'status', 'timestamp']
-            df = pd.DataFrame(result.fetchall(), columns=columns)
-            
-            if 'timestamp' in df.columns and not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', errors='coerce')
+        try:
+            with self.Session() as session:
+                query = text("""
+                    SELECT 
+                        t.tx_hash,
+                        a_from.address as from_address,
+                        a_to.address as to_address,
+                        t.value,
+                        t.status,
+                        b.block_timestamp
+                    FROM 
+                        eth_db.transactions t
+                    LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
+                    LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id
+                    LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
+                    WHERE 
+                        t.block_number = :block_number
+                    ORDER BY 
+                        t.tx_index
+                    LIMIT :limit OFFSET :offset
+                """)
                 
-            return df
+                result = session.execute(
+                    query, 
+                    {"block_number": block_number, "limit": limit, "offset": offset}
+                )
+                
+                transactions = []
+                for row in result.fetchall():
+                    row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                    tx_dict = {
+                        "tx_hash": row_map.get('tx_hash'),
+                        "from_address": row_map.get('from_address'),
+                        "to_address": row_map.get('to_address'),
+                        "value": row_map.get('value'),
+                        "status": row_map.get('status'),
+                        "timestamp": datetime.fromtimestamp(row_map['block_timestamp']) if row_map.get('block_timestamp') else None
+                    }
+                    transactions.append(tx_dict)
+                return transactions
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching transactions for block {block_number}: {e}")
+            return []
 
-    def get_transactions_by_timeframe(self, start_date=None, end_date=None, limit=100, offset=0):
+    def get_tx_by_timeframe(
+        self, 
+        start_date: Optional[datetime] = None, 
+        end_date: Optional[datetime] = None, 
+        limit: int = 100, 
+        offset: int = 0
+    ) -> List[Dict]:
         """
-        Get transactions within a specific time period.
+        Get transactions within a time period as list of dicts.
         
         Args:
-            start_date: Optional start date (datetime)
-            end_date: Optional end date (datetime)
-            limit: Maximum number of transactions to return
+            start_date: Optional start date
+            end_date: Optional end date
+            limit: Maximum number of transactions
             offset: Number of transactions to skip
             
         Returns:
-            pandas.DataFrame: Transactions in the time period
+            List of transaction dicts
         """
-        import pandas as pd
-        from datetime import datetime
-        start_timestamp = int(start_date.timestamp()) if start_date else None
-        end_timestamp = int(end_date.timestamp()) if end_date else None
-        
-        with self.Session() as session:
-            query = text("""
-                SELECT 
-                    t.tx_hash,
-                    t.block_number,
-                    a_from.address as from_address,
-                    a_to.address as to_address,
-                    t.value,
-                    t.status,
-                    b.block_timestamp
-                FROM 
-                    eth_db.transactions t
-                LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
-                LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id
-                LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
-                WHERE 
-                    (:start_timestamp IS NULL OR b.block_timestamp >= :start_timestamp)
-                    AND (:end_timestamp IS NULL OR b.block_timestamp <= :end_timestamp)
-                ORDER BY 
-                    b.block_timestamp DESC, t.tx_index -- Added tx_index for consistent ordering
-                LIMIT :limit OFFSET :offset
-            """)
-
-            result = session.execute(
-                query, 
-                {"start_timestamp": start_timestamp, "end_timestamp": end_timestamp, "limit": limit, "offset": offset}
-            )
+        try:
+            start_timestamp = int(start_date.timestamp()) if start_date else None
+            end_timestamp = int(end_date.timestamp()) if end_date else None
             
-            columns = ['tx_hash', 'block_number', 'from_address', 'to_address', 'value', 'status', 'timestamp']
-            df = pd.DataFrame(result.fetchall(), columns=columns)
-            
-            if 'timestamp' in df.columns and not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', errors='coerce')
+            with self.Session() as session:
+                query = text("""
+                    SELECT 
+                        t.tx_hash,
+                        t.block_number,
+                        a_from.address as from_address,
+                        a_to.address as to_address,
+                        t.value,
+                        t.status,
+                        b.block_timestamp
+                    FROM 
+                        eth_db.transactions t
+                    LEFT JOIN eth_db.addresses a_from ON t.from_address_id = a_from.address_id
+                    LEFT JOIN eth_db.addresses a_to ON t.to_address_id = a_to.address_id
+                    LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
+                    WHERE 
+                        (:start_timestamp IS NULL OR b.block_timestamp >= :start_timestamp)
+                        AND (:end_timestamp IS NULL OR b.block_timestamp <= :end_timestamp)
+                    ORDER BY 
+                        b.block_timestamp DESC, t.tx_index
+                    LIMIT :limit OFFSET :offset
+                """)
                 
-            return df
+                result = session.execute(
+                    query, 
+                    {
+                        "start_timestamp": start_timestamp, 
+                        "end_timestamp": end_timestamp, 
+                        "limit": limit, 
+                        "offset": offset
+                    }
+                )
+                
+                transactions = []
+                for row in result.fetchall():
+                    row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                    tx_dict = {
+                        "tx_hash": row_map.get('tx_hash'),
+                        "block_number": row_map.get('block_number'),
+                        "from_address": row_map.get('from_address'),
+                        "to_address": row_map.get('to_address'),
+                        "value": row_map.get('value'),
+                        "status": row_map.get('status'),
+                        "timestamp": datetime.fromtimestamp(row_map['block_timestamp']) if row_map.get('block_timestamp') else None
+                    }
+                    transactions.append(tx_dict)
+                return transactions
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching transactions by timeframe: {e}")
+            return []
 
-    def get_transactions_by_address_pair(self, from_address, to_address, limit=100, offset=0):
+    def get_tx_by_address_pair(
+        self, 
+        from_address: str, 
+        to_address: str, 
+        limit: int = 100, 
+        offset: int = 0
+    ) -> List[Dict]:
         """
-        Get transactions between two addresses.
+        Get transactions between two specific addresses as list of dicts.
         
         Args:
-            from_address: Sender address string
-            to_address: Recipient address string
-            limit: Maximum number of transactions to return
+            from_address: Sender address
+            to_address: Recipient address
+            limit: Maximum number of transactions
             offset: Number of transactions to skip
             
         Returns:
-            pandas.DataFrame: Transactions between the two addresses
+            List of transaction dicts
         """
-        import pandas as pd
-        from datetime import datetime
-        with self.Session() as session:
-             # Find address IDs first
-            from_id_q = select(Address.address_id).where(Address.address == from_address)
-            to_id_q = select(Address.address_id).where(Address.address == to_address)
-            from_id = session.execute(from_id_q).scalar_one_or_none()
-            to_id = session.execute(to_id_q).scalar_one_or_none()
-
-            if from_id is None or to_id is None:
-                 self.logger.warning(f"Could not find DB entry for one or both addresses: {from_address}, {to_address}")
-                 return pd.DataFrame(columns=['tx_hash', 'block_number', 'value', 'status', 'timestamp'])
-
-            query = text("""
-                SELECT 
-                    t.tx_hash,
-                    t.block_number,
-                    t.value,
-                    t.status,
-                    b.block_timestamp
-                FROM 
-                    eth_db.transactions t
-                LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
-                WHERE 
-                    t.from_address_id = :from_id 
-                    AND t.to_address_id = :to_id
-                ORDER BY 
-                    b.block_timestamp DESC, t.tx_index
-                LIMIT :limit OFFSET :offset
-            """)
-
-            result = session.execute(
-                query, 
-                {"from_id": from_id, "to_id": to_id, "limit": limit, "offset": offset}
-            )
-            
-            columns = ['tx_hash', 'block_number', 'value', 'status', 'timestamp']
-            df = pd.DataFrame(result.fetchall(), columns=columns)
-            
-            if 'timestamp' in df.columns and not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', errors='coerce')
+        try:
+            with self.Session() as session:
+                # Find address IDs
+                from_id_q = select(Address.address_id).where(Address.address == from_address)
+                to_id_q = select(Address.address_id).where(Address.address == to_address)
+                from_id = session.execute(from_id_q).scalar_one_or_none()
+                to_id = session.execute(to_id_q).scalar_one_or_none()
                 
-            return df
+                if from_id is None or to_id is None:
+                    return []
+                
+                query = text("""
+                    SELECT 
+                        t.tx_hash,
+                        t.block_number,
+                        t.value,
+                        t.status,
+                        b.block_timestamp
+                    FROM 
+                        eth_db.transactions t
+                    LEFT JOIN eth_db.blocks b ON t.block_number = b.block_number
+                    WHERE 
+                        t.from_address_id = :from_id 
+                        AND t.to_address_id = :to_id
+                    ORDER BY 
+                        b.block_timestamp DESC, t.tx_index
+                    LIMIT :limit OFFSET :offset
+                """)
+                
+                result = session.execute(
+                    query, 
+                    {"from_id": from_id, "to_id": to_id, "limit": limit, "offset": offset}
+                )
+                
+                transactions = []
+                for row in result.fetchall():
+                    row_map = row._mapping if hasattr(row, '_mapping') else dict(zip(result.keys(), row))
+                    tx_dict = {
+                        "tx_hash": row_map.get('tx_hash'),
+                        "block_number": row_map.get('block_number'),
+                        "value": row_map.get('value'),
+                        "status": row_map.get('status'),
+                        "timestamp": datetime.fromtimestamp(row_map['block_timestamp']) if row_map.get('block_timestamp') else None
+                    }
+                    transactions.append(tx_dict)
+                return transactions
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching transactions between {from_address} and {to_address}: {e}")
+            return []

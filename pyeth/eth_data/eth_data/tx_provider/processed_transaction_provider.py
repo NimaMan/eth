@@ -143,7 +143,7 @@ class RustProcessedTransactionProvider:
         block_tx_hashes = {}
         try:
             for block_num in uncached_blocks:
-                tx_hashes = self.tx_meta_data_fetcher.get_transaction_hashes_from_block_number(block_num)
+                tx_hashes = self.tx_meta_data_fetcher.get_tx_hashes_from_block_number(block_num)
                 if tx_hashes:
                     block_tx_hashes[block_num] = tx_hashes
                 else:
@@ -264,7 +264,7 @@ class RustProcessedTransactionProvider:
         """
         try:
             # Get transaction hashes for the address from database
-            tx_hashes = self.tx_meta_data_fetcher.get_transaction_hashes_for_address(
+            tx_hashes = self.tx_meta_data_fetcher.get_tx_hashes_for_address(
                 address=address,
                 start_block=start_block,
                 end_block=end_block,
