@@ -5,7 +5,7 @@ Test script for Rust-based ProcessedTransactionProvider
 
 import sys
 import asyncio
-from eth_data.tx_providor.processed_transaction_provider import RustProcessedTransactionProvider
+from eth_data.tx_provider.processed_transaction_provider import RustProcessedTransactionProvider
 
 def test_basic_functionality():
     """Test basic functionality of the Rust provider."""

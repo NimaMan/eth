@@ -47,7 +47,7 @@ except ImportError as e:
         "cd /home/nima/code/crypto/rust/tx_processor && maturin develop --release"
     ) from e
 
-from eth_data.database.fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
+from eth_data.database.db_fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
 
 
 class RustProcessedTransactionProvider:

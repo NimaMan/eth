@@ -232,6 +232,11 @@ class Pool(Base):
     scam_block = Column(Integer)
     scam_tx_hash = Column(String(66))
     
+    # Trading enabled fields
+    trading_enabled = Column(Boolean, default=False)
+    trading_enabled_block = Column(BigInteger)
+    trading_enabled_txn = Column(String(66))
+    
     # Relationships
     token = relationship("Token", back_populates="pools")
 

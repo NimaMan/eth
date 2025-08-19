@@ -111,14 +111,13 @@ class TokenStatusWriter:
                     text("""
                     INSERT INTO eth_db.tokens 
                     (contract_address, creator_address_id, is_scam, scam_label, 
-                     creation_txn, trading_enabled_txn)
+                     creation_txn)
                     VALUES (:contract_address, :creator_address_id, :is_scam, :scam_label,
-                            :creation_txn, :trading_enabled_txn)
+                            :creation_txn)
                     ON CONFLICT (contract_address) DO UPDATE SET
                         is_scam = EXCLUDED.is_scam,
                         scam_label = EXCLUDED.scam_label,
                         creation_txn = COALESCE(EXCLUDED.creation_txn, tokens.creation_txn),
-                        trading_enabled_txn = COALESCE(EXCLUDED.trading_enabled_txn, tokens.trading_enabled_txn),
                         creator_address_id = COALESCE(EXCLUDED.creator_address_id, tokens.creator_address_id)
                     """),
                     {
@@ -126,8 +125,7 @@ class TokenStatusWriter:
                         "creator_address_id": creator_address_id,
                         "is_scam": token_data["is_scam"],
                         "scam_label": token_data["scam_label"],
-                        "creation_txn": token_data.get("creation_txn"),
-                        "trading_enabled_txn": token_data.get("trading_enabled_txn")
+                        "creation_txn": token_data.get("creation_txn")
                     }
                     )
                     session.commit()
@@ -314,14 +312,13 @@ class TokenStatusWriter:
                         text("""
                         INSERT INTO eth_db.tokens 
                         (contract_address, creator_address_id, is_scam, scam_label, 
-                         creation_txn, trading_enabled_txn)
+                         creation_txn)
                         VALUES (:contract_address, :creator_address_id, :is_scam, :scam_label,
-                                :creation_txn, :trading_enabled_txn)
+                                :creation_txn)
                         ON CONFLICT (contract_address) DO UPDATE SET
                             is_scam = EXCLUDED.is_scam,
                             scam_label = EXCLUDED.scam_label,
                             creation_txn = COALESCE(EXCLUDED.creation_txn, tokens.creation_txn),
-                            trading_enabled_txn = COALESCE(EXCLUDED.trading_enabled_txn, tokens.trading_enabled_txn),
                             creator_address_id = COALESCE(EXCLUDED.creator_address_id, tokens.creator_address_id)
                         """),
                         {
@@ -329,8 +326,7 @@ class TokenStatusWriter:
                             "creator_address_id": creator_address_id,
                             "is_scam": token_data["is_scam"],
                             "scam_label": token_data["scam_label"],
-                            "creation_txn": token_data.get("creation_txn"),
-                            "trading_enabled_txn": token_data.get("trading_enabled_txn")
+                            "creation_txn": token_data.get("creation_txn")
                         }
                     )
                     

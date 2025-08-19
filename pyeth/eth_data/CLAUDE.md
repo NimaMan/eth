@@ -1,5 +1,33 @@
 # ETH Data Module Documentation
 
+## Claude MCP Integration
+
+**IMPORTANT: This module provides Claude Code with native Ethereum investigation tools via MCP (Model Context Protocol)**
+
+### Available MCP Tools
+- `get_processed_tx_from_hash`: Investigate transactions with full details (events, internal txs, state changes)
+- `get_processed_txs_for_address`: Get all transactions for an address with filtering
+- `process_block`: Process entire blocks with comprehensive analysis  
+- `trace_fund_flow`: Trace fund flows across multiple transaction hops
+
+### MCP Server Status
+- **Location**: `/home/nima/code/crypto/py/eth_data/mcp_server/`
+- **Protocol Version**: `2024-11-05` (required for Claude Code compatibility)
+- **Performance**: 91.5x faster via Rust backend integration
+- **Configuration**: Auto-configured in `~/.claude.json` and `~/.claude/settings.local.json`
+
+### Usage Examples
+```
+> What happened in transaction 0x5c89f223...?
+> Show recent transactions for 0xd8dA6BF2...
+> Process block 20000000 and analyze
+> Trace fund flow from 0x... with depth 3
+```
+
+**Setup Documentation**: See `/home/nima/code/crypto/py/eth_data/mcp_server/README.md` for complete installation and troubleshooting guide.
+
+---
+
 ## Module Overview
 
 **eth_data** (formerly eth_block_processor) is a comprehensive Python package for processing, analyzing, and storing Ethereum blockchain data. It provides high-performance transaction processing, real-time block monitoring, and sophisticated data analysis capabilities.
