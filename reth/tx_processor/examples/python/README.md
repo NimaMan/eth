@@ -1,84 +1,110 @@
-# Python Examples for Rust tx_processor
+# ethtx Python Examples
 
-These examples demonstrate how to use the high-performance Rust transaction processor from Python.
+Clean, focused examples demonstrating the high-performance Ethereum transaction toolkit.
 
-## Performance Benefits
+## 📁 Structure (7 Essential Examples)
 
-The Rust tx_processor provides **10-40x performance improvement** over the Python implementation:
-- **Rust**: 500-1000 transactions/second
-- **Python**: 25-100 transactions/second
-
-## Examples
-
-### 1. `benchmark_rust_vs_python.py`
-Comprehensive performance benchmark comparing Rust and Python implementations with real transactions.
-- Tests 1000 random transactions from database
-- Measures individual and batch processing speeds
-- Provides detailed performance metrics
-
-```bash
-python benchmark_rust_vs_python.py
+```
+python/
+├── processor/              # Transaction processing
+│   ├── performance_benchmark.py  # Speed comparison: 91.5x faster
+│   └── batch_optimization.py     # Batch processing techniques
+│
+├── simulator/              # Transaction simulation
+│   ├── basic_simulation.py       # ETH transfers, state changes
+│   └── mev_analysis.py          # MEV detection, sandwich attacks
+│
+├── builder/                # Transaction building
+│   └── transaction_building.py   # Build without ABI knowledge
+│
+└── integration/            # Complete demonstrations
+    ├── complete_demo.py          # All features demonstration
+    └── test_all_features.py      # Comprehensive test suite
 ```
 
-### 2. `validate_rust_python_compatibility.py`
-Validates that both implementations produce identical results for the same transactions.
-- Compares all fields of ProcessedTransaction
-- Ensures drop-in compatibility
-- Tests with various transaction types
+## 🚀 Quick Start
 
-```bash
-python validate_rust_python_compatibility.py
-```
-
-## Setup
-
-1. Build the Rust module:
+### 1. Build Module
 ```bash
 cd /home/nima/code/crypto/rust/tx_processor
-maturin develop
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/eth_db"
+maturin develop --release --features python
 ```
 
-2. The module will be available as `rs_tx_processor`
+### 2. Test Installation
+```bash
+python3 integration/test_all_features.py
+```
 
-## Integration with Scammer Detection
+### 3. Run Key Examples
 
-The Rust processor is designed to work seamlessly with the scammer detection pipeline:
+#### See Everything Work Together
+```bash
+python3 integration/complete_demo.py
+```
 
-1. **Real-time Processing**: Process mempool transactions as they arrive
-2. **Fund Flow Analysis**: Build networks 10-40x faster
-3. **Pattern Detection**: Identify scammer patterns in real-time
-4. **Report Generation**: Generate reports with comprehensive transaction data
+#### Build Transactions Easily
+```bash
+python3 builder/transaction_building.py
+```
 
-## API Reference
+#### Simulate Transactions
+```bash
+python3 simulator/basic_simulation.py
+```
+
+## 📊 Components
 
 ### TxProcessor
+- **Purpose**: Process historical transactions from Reth DB
+- **Speed**: ~1825 tx/sec (91.5x faster than Python)
+- **Examples**: `processor/performance_benchmark.py`
 
+### Simulator
+- **Purpose**: Test transactions before sending
+- **Features**: Gas prediction, state changes, MEV detection
+- **Examples**: `simulator/basic_simulation.py`, `simulator/mev_analysis.py`
+
+### TxBuilder
+- **Purpose**: Build transactions without ABI knowledge
+- **Features**: Token symbols, smart decimals, protocol names
+- **Example**: `builder/transaction_building.py`
+
+## 💡 Usage Examples
+
+### Process Transactions
 ```python
-import rs_tx_processor
-
-# No need to specify reth_datadir - it's hardcoded in the module
-processor = rs_tx_processor.TxProcessor()
+import ethtx
+processor = ethtx.TxProcessor()
+tx = processor.process_transaction("0xabc...")
 ```
 
-#### Methods:
-- `process_transaction(tx_hash)` - Process single transaction
-- `process_transactions_batch(tx_hashes)` - Process multiple transactions
-- `get_stats()` - Get processor statistics
+### Simulate Before Sending
+```python
+simulator = ethtx.Simulator()
+result = simulator.simulate_transaction({
+    "from": "0x...",
+    "to": "0x...",
+    "value": "1000000000000000000"
+})
+```
 
-### ProcessedTransaction
+### Build Transactions
+```python
+builder = ethtx.TxBuilder.mainnet()
+tx = builder.erc20_transfer("USDC", from_addr, to_addr, "1000.0")
+```
 
-Returned transaction object with properties:
-- `hash`, `block_number`, `block_timestamp`
-- `from_address`, `to_address`, `value`
-- `erc20_transfers` - List of ERC20 transfer events
-- `internal_transactions` - List of internal ETH transfers
-- `unique_addresses` - All addresses involved
-- `fees` - Gas price, gas used, total fee
-- `to_dict()` - Convert to dictionary
+## 📈 Performance
 
-## Real Transaction Hashes for Testing
+| Component | Speed | Use Case |
+|-----------|-------|----------|
+| TxProcessor | 1825 tx/sec | Historical analysis |
+| Simulator | ~1ms/tx | Pre-flight checks |
+| TxBuilder | Instant | Transaction creation |
 
-From the Rust examples, these are real mainnet transactions you can use:
-- `0x6a904d36e7f808fb08f7dcd04d1b2132a34ca6697b910a93013117d97fe98dd7` - Complex DeFi (5 ERC20, 2 internal)
+## 🔧 Requirements
 
-Add more transaction hashes from your database or monitoring system for testing.
+- Python 3.9+
+- Reth database at `/home/nima/.local/share/reth/mainnet`
+- PostgreSQL (for some features)

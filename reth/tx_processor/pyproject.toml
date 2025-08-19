@@ -3,9 +3,9 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "rs_tx_processor"
-version = "0.1.0"
-description = "High-performance Rust transaction processor for Python"
+name = "ethtx"
+version = "0.2.0"
+description = "Ethereum transaction processing, simulation, and building toolkit"
 authors = [{name = "TX Processor Team"}]
 requires-python = ">=3.9"
 classifiers = [
@@ -19,4 +19,4 @@ classifiers = [
 
 [tool.maturin]
 features = ["python"]
-module-name = "rs_tx_processor"
+module-name = "ethtx"

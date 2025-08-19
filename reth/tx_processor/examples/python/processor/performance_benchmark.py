@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Tuple
 from datetime import datetime
 import statistics
 
-import rs_tx_processor
+import ethtx
 from web3 import Web3
 from eth_data.txn.txn_processor import TransactionProcessor
 from eth_data.txn.txn_data_fetcher import TransactionDataFetcher
@@ -203,7 +203,7 @@ def benchmark_rust_implementation(tx_hashes: List[str], sample_size: int = None)
     
     print(f"\n🦀 Benchmarking Rust implementation with {len(tx_hashes)} transactions...")
     
-    processor = rs_tx_processor.TxProcessor()
+    processor = ethtx.TxProcessor()
     
     times = []
     successes = 0
@@ -266,7 +266,7 @@ def benchmark_rust_batch_implementation(tx_hashes: List[str]) -> Dict[str, Any]:
     """
     print(f"\n🦀 Benchmarking Rust BATCH implementation with {len(tx_hashes)} transactions...")
     
-    processor = rs_tx_processor.TxProcessor()
+    processor = ethtx.TxProcessor()
     
     try:
         start_total = time.time()

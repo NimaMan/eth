@@ -1,17 +1,17 @@
 [package]
-name    = "tx_processor"
-version = "0.1.0"
+name    = "ethtx"
+version = "0.2.0"
 edition = "2021"
 
 [features]
 default = []
-python = ["pyo3", "pyo3-asyncio", "rayon", "num_cpus"]
+python = ["pyo3", "pyo3-asyncio", "rayon", "num_cpus", "tx_builder"]
 
 # Clean TX Processor - Rust alternative to Python eth_data
 # Uses reth_tx_simulator for all transaction simulation
 
 [lib]
-name = "tx_processor"
+name = "ethtx"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]  # Add cdylib for Python bindings
 
@@ -34,6 +34,9 @@ path = "examples/process_transaction_by_hash.rs"
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
+
+# Transaction builder for user-friendly transaction construction
+tx_builder = { path = "../tx_builder", features = ["python"], optional = true }
 
 # Basic dependencies
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
