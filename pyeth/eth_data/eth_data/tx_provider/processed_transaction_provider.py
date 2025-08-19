@@ -34,9 +34,7 @@ Compatibility:
 
 from typing import List, Dict, Any, Optional, Set
 from collections import OrderedDict
-from tqdm import tqdm
-from web3 import Web3
-import sys
+
 
 # Import Rust tx_processor bindings
 try:
@@ -47,16 +45,11 @@ except ImportError as e:
         "cd /home/nima/code/crypto/rust/tx_processor && maturin develop --release"
     ) from e
 
+
 from eth_data.database.db_fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
 
 
 class RustProcessedTransactionProvider:
-    """
-    High-performance transaction provider using Rust tx_processor.
-    
-    Provides 91.5x faster transaction processing compared to Python implementation
-    while maintaining full API compatibility with existing fund flow network code.
-    """
 
     def __init__(self, 
                  reth_datadir: str = "/home/nima/.local/share/reth/mainnet",
@@ -144,12 +137,7 @@ class RustProcessedTransactionProvider:
                 uncached_blocks.append(block_num)
         
         if not uncached_blocks:
-            if self.logger:
-                self.logger.debug(f"All {len(target_block_numbers)} blocks found in cache")
             return results
-        
-        if self.logger:
-            self.logger.info(f"Processing {len(uncached_blocks)} uncached blocks with Rust tx_processor")
         
         # Get transaction hashes for uncached blocks
         block_tx_hashes = {}
@@ -159,8 +147,6 @@ class RustProcessedTransactionProvider:
                 if tx_hashes:
                     block_tx_hashes[block_num] = tx_hashes
                 else:
-                    if self.logger:
-                        self.logger.warning(f"No transactions found for block {block_num}")
                     results[block_num] = []
         except Exception as e:
             if self.logger:
@@ -171,9 +157,6 @@ class RustProcessedTransactionProvider:
         # Process transactions using Rust tx_processor in batches
         for block_num, tx_hashes in block_tx_hashes.items():
             try:
-                if self.logger:
-                    self.logger.debug(f"Processing block {block_num} with {len(tx_hashes)} transactions")
-                
                 # Use batch processing for efficiency with rs_tx_processor
                 processed_txs = self.tx_processor.process_transactions_batch(tx_hashes)
                 
@@ -181,9 +164,6 @@ class RustProcessedTransactionProvider:
                 results[block_num] = processed_txs
                 self.processed_block_cache[block_num] = processed_txs
                 self._update_tx_cache(processed_txs)
-                
-                if self.logger:
-                    self.logger.debug(f"Processed block {block_num}: {len(processed_txs)} transactions")
                     
             except Exception as e:
                 if self.logger:
@@ -224,12 +204,7 @@ class RustProcessedTransactionProvider:
                 uncached_hashes.append(tx_hash)
         
         if not uncached_hashes:
-            if self.logger:
-                self.logger.debug(f"All {len(tx_hashes)} transactions found in cache")
             return results
-        
-        if self.logger:
-            self.logger.info(f"Processing {len(uncached_hashes)} uncached transactions with Rust tx_processor")
         
         # Process uncached transactions in batch
         try:
@@ -297,12 +272,7 @@ class RustProcessedTransactionProvider:
             )
             
             if not tx_hashes:
-                if self.logger:
-                    self.logger.debug(f"No transactions found for address {address[:10]}...")
                 return []
-            
-            if self.logger:
-                self.logger.info(f"Fetching {len(tx_hashes)} transactions for address {address[:10]}...")
             
             # Process transactions using batch processing
             return self.get_processed_transactions_from_tx_hashes(tx_hashes)
@@ -319,9 +289,6 @@ class RustProcessedTransactionProvider:
         Args:
             block_numbers: List of block numbers to pre-load
         """
-        if self.logger:
-            self.logger.info(f"Pre-loading {len(block_numbers)} blocks into cache")
-        
         # Use async method but run synchronously for compatibility
         import asyncio
         try:
