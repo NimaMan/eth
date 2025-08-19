@@ -1,1 +1,1 @@
-from eth_block_processor.chain_utils.common_addresses import *
+from eth_data.chain_utils.common_addresses import *
