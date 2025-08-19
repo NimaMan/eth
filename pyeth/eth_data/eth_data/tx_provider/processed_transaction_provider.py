@@ -10,7 +10,7 @@ to the Rust tx_processor Python bindings, enabling efficient fund flow network a
 
 Algorithm:
 1. Phase 1: Transaction Collection
-   - Uses rs_tx_processor.TxProcessor for high-speed transaction processing
+   - Uses ethtx.TxProcessor for high-speed transaction processing
    - Maintains same caching structure as original ProcessedTransactionProvider
    - Processes transactions in parallel batches for optimal throughput
 
@@ -36,13 +36,13 @@ from typing import List, Dict, Any, Optional, Set
 from collections import OrderedDict
 
 
-# Import Rust tx_processor bindings
+# Import Rust tx_processor bindings (now called ethtx)
 try:
-    import rs_tx_processor
+    import ethtx
 except ImportError as e:
     raise ImportError(
-        "rs_tx_processor not available. Please install with: "
-        "cd /home/nima/code/crypto/rust/tx_processor && maturin develop --release"
+        "ethtx not available. Please install with: "
+        "cd /home/nima/code/crypto/rust/tx_processor && maturin develop --release --features python"
     ) from e
 
 
@@ -70,8 +70,8 @@ class RustProcessedTransactionProvider:
         
         # Initialize Rust tx_processor
         try:
-            # Note: rs_tx_processor.TxProcessor() uses hardcoded path internally
-            self.tx_processor = rs_tx_processor.TxProcessor()
+            # Note: ethtx.TxProcessor() uses hardcoded path internally
+            self.tx_processor = ethtx.TxProcessor()
             if self.logger:
                 self.logger.info("Initialized Rust tx_processor with hardcoded path: /home/nima/.local/share/reth/mainnet")
         except Exception as e:
@@ -157,7 +157,7 @@ class RustProcessedTransactionProvider:
         # Process transactions using Rust tx_processor in batches
         for block_num, tx_hashes in block_tx_hashes.items():
             try:
-                # Use batch processing for efficiency with rs_tx_processor
+                # Use batch processing for efficiency with ethtx
                 processed_txs = self.tx_processor.process_transactions_batch(tx_hashes)
                 
                 # Cache and store results

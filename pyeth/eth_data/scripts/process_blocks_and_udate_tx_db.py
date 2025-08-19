@@ -167,4 +167,4 @@ def run_process_blocks_in_range(
 
 
 if __name__ == "__main__":
-    update_tx_db_with_missing_blocks(start_date_str="2025-01-01")
+    update_tx_db_with_missing_blocks(start_date_str="2024-11-15")

@@ -16,7 +16,6 @@ from sqlalchemy import select, text
 
 from eth_data.database.schema.eth_db_data_models import Address
 from eth_data.database.eth_db_conn import get_db_session_maker
-from eth_data.utils.logger import get_logger
 
 
 class TxMetaDataFetcher:
@@ -25,10 +24,10 @@ class TxMetaDataFetcher:
     Returns native Python types (dicts/lists) for all operations.
     """
 
-    def __init__(self):
+    def __init__(self, logger):
         """Initialize the fetcher with database connection and logger."""
         self.Session = get_db_session_maker(db='eth_db')
-        self.logger = get_logger(__name__)
+        self.logger = logger
 
     def get_tx_hashes_for_address(
         self,

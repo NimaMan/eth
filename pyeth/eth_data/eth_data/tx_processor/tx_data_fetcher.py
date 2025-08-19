@@ -3,13 +3,13 @@ from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import aiohttp
 
-# Import rs_tx_processor for direct database access (10-40x faster than RPC)
+# Import ethtx for direct database access (10-40x faster than RPC)
 try:
-    import rs_tx_processor
+    import ethtx
     RS_TX_PROCESSOR_AVAILABLE = True
 except ImportError:
     RS_TX_PROCESSOR_AVAILABLE = False
-    print("Warning: rs_tx_processor not available. Falling back to RPC calls.")
+    print("Warning: ethtx not available. Falling back to RPC calls.")
 
 
 class TransactionDataFetcher:
@@ -54,14 +54,14 @@ class TransactionBatchDataFetcher:
         self.w3 = w3
         self.endpoint_url = w3.provider.endpoint_uri
         
-        # Initialize rs_tx_processor if available for massive speedup
+        # Initialize ethtx if available for massive speedup
         if RS_TX_PROCESSOR_AVAILABLE:
             try:
-                self.rust_processor = rs_tx_processor.TxProcessor()
+                self.rust_processor = ethtx.TxProcessor()
                 self.use_rust = True
-                print("✅ Using rs_tx_processor for 10-40x performance improvement")
+                print("✅ Using ethtx for 10-40x performance improvement")
             except Exception as e:
-                print(f"Warning: Failed to initialize rs_tx_processor: {e}")
+                print(f"Warning: Failed to initialize ethtx: {e}")
                 self.use_rust = False
         else:
             self.use_rust = False
@@ -128,7 +128,7 @@ class TransactionBatchDataFetcher:
         
     async def fetch_transaction_list_data(self, tx_hashes: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         """
-        Efficiently fetch complete transaction data using rs_tx_processor (10-40x faster) 
+        Efficiently fetch complete transaction data using ethtx (10-40x faster) 
         or fallback to RPC calls.
         
         Args:
@@ -140,12 +140,12 @@ class TransactionBatchDataFetcher:
         if not tx_hashes:
             return {}, {}, {}
         
-        # Use rs_tx_processor if available (10-40x faster than RPC)
+        # Use ethtx if available (10-40x faster than RPC)
         if self.use_rust:
             try:
                 return await self._fetch_with_rust_processor(tx_hashes)
             except Exception as e:
-                print(f"Warning: rs_tx_processor failed, falling back to RPC: {e}")
+                print(f"Warning: ethtx failed, falling back to RPC: {e}")
                 # Fall through to RPC method
         
         # Fallback to original RPC implementation
@@ -153,7 +153,7 @@ class TransactionBatchDataFetcher:
     
     async def _fetch_with_rust_processor(self, tx_hashes: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         """
-        Fetch transaction data using rs_tx_processor for massive speedup.
+        Fetch transaction data using ethtx for massive speedup.
         """
         loop = asyncio.get_event_loop()
         
