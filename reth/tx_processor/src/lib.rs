@@ -740,6 +740,94 @@ pub mod tx_processor {
             })
         }
         
+        /// Get ETH balance for an address at a specific block
+        /// Uses state access through provider factory
+        pub async fn get_balance(&self, address: Address, block_number: Option<u64>) -> Result<U256> {
+            let simulator = &self.simulator;
+            
+            // Get block number to query at
+            let block_number = if let Some(bn) = block_number {
+                bn
+            } else {
+                simulator.get_latest_block()?
+            };
+            
+            // Get provider at block
+            let provider = simulator.provider_factory()
+                .history_by_block_number(block_number.into())
+                .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
+            
+            // Get account info
+            let account_info = provider.basic_account(&address)
+                .map_err(|e| eyre::eyre!("Failed to get account info: {}", e))?;
+            
+            Ok(account_info.map(|a| a.balance).unwrap_or(U256::ZERO))
+        }
+        
+        /// Get nonce for an address at a specific block
+        /// Uses state access through provider factory
+        pub async fn get_nonce(&self, address: Address, block_number: Option<u64>) -> Result<u64> {
+            let simulator = &self.simulator;
+            
+            // Get block number to query at
+            let block_number = if let Some(bn) = block_number {
+                bn
+            } else {
+                simulator.get_latest_block()?
+            };
+            
+            // Get provider at block
+            let provider = simulator.provider_factory()
+                .history_by_block_number(block_number.into())
+                .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
+            
+            // Get account info
+            let account_info = provider.basic_account(&address)
+                .map_err(|e| eyre::eyre!("Failed to get account info: {}", e))?;
+            
+            Ok(account_info.map(|a| a.nonce).unwrap_or(0))
+        }
+        
+        /// Get ERC20 token balance for an address
+        /// Reads directly from storage using standard ERC20 balance mapping
+        pub async fn get_token_balance(&self, token: Address, holder: Address, block_number: Option<u64>) -> Result<U256> {
+            let simulator = &self.simulator;
+            
+            // Get block number to query at
+            let block_number = if let Some(bn) = block_number {
+                bn
+            } else {
+                simulator.get_latest_block()?
+            };
+            
+            // Get provider at block
+            let provider = simulator.provider_factory()
+                .history_by_block_number(block_number.into())
+                .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
+            
+            // Calculate storage slot for balance mapping
+            // Standard ERC20 balance mapping is at slot 0
+            // balanceOf[address] = keccak256(abi.encode(address, uint256(0)))
+            use tiny_keccak::{Hasher, Keccak};
+            
+            let mut encoded = [0u8; 64];
+            encoded[12..32].copy_from_slice(holder.as_slice());
+            // slot 0 for standard ERC20 balances
+            
+            let mut hasher = Keccak::v256();
+            hasher.update(&encoded);
+            let mut slot = [0u8; 32];
+            hasher.finalize(&mut slot);
+            
+            let storage_key = B256::from(slot);
+            
+            // Read storage
+            let value = provider.storage(token, storage_key)
+                .map_err(|e| eyre::eyre!("Failed to read storage: {}", e))?;
+            
+            Ok(value.unwrap_or(U256::ZERO))
+        }
+        
         /// Process an unsigned transaction (without fetching from DB) and return ProcessedTransaction
         /// This simulates the transaction and extracts all transfers, DEX events, and classifications
         pub async fn process_unsigned_transaction(&self, call_request: CallRequest) -> Result<ProcessedTransaction> {

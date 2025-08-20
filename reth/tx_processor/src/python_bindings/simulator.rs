@@ -128,6 +128,82 @@ impl PySimulator {
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
     
+    /// Get ETH balance for an address
+    /// 
+    /// Args:
+    ///     address (str): Ethereum address
+    ///     block_number (int, optional): Block number to query at (default: latest)
+    /// 
+    /// Returns:
+    ///     str: Balance in wei as string
+    pub fn get_balance(&self, address: &str, block_number: Option<u64>) -> PyResult<String> {
+        let addr = Address::from_str(address.trim_start_matches("0x"))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid address: {}", e)
+            ))?;
+        
+        let tx_processor = self.tx_processor.clone();
+        let balance = self.runtime.block_on(async move {
+            tx_processor.get_balance(addr, block_number).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to get balance: {}", e)
+        ))?;
+        
+        Ok(balance.to_string())
+    }
+    
+    /// Get nonce for an address
+    /// 
+    /// Args:
+    ///     address (str): Ethereum address
+    ///     block_number (int, optional): Block number to query at (default: latest)
+    /// 
+    /// Returns:
+    ///     int: Account nonce
+    pub fn get_nonce(&self, address: &str, block_number: Option<u64>) -> PyResult<u64> {
+        let addr = Address::from_str(address.trim_start_matches("0x"))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid address: {}", e)
+            ))?;
+        
+        let tx_processor = self.tx_processor.clone();
+        self.runtime.block_on(async move {
+            tx_processor.get_nonce(addr, block_number).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to get nonce: {}", e)
+        ))
+    }
+    
+    /// Get ERC20 token balance for an address
+    /// 
+    /// Args:
+    ///     token_address (str): ERC20 token contract address
+    ///     holder_address (str): Address to check balance for
+    ///     block_number (int, optional): Block number to query at (default: latest)
+    /// 
+    /// Returns:
+    ///     str: Token balance as string (in token's smallest unit)
+    pub fn get_token_balance(&self, token_address: &str, holder_address: &str, block_number: Option<u64>) -> PyResult<String> {
+        let token = Address::from_str(token_address.trim_start_matches("0x"))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid token address: {}", e)
+            ))?;
+        
+        let holder = Address::from_str(holder_address.trim_start_matches("0x"))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid holder address: {}", e)
+            ))?;
+        
+        let tx_processor = self.tx_processor.clone();
+        let balance = self.runtime.block_on(async move {
+            tx_processor.get_token_balance(token, holder, block_number).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to get token balance: {}", e)
+        ))?;
+        
+        Ok(balance.to_string())
+    }
+    
     /// Build a transaction from simple parameters
     /// 
     /// This is a convenience method for creating transactions without

@@ -2,6 +2,11 @@
 use alloy_primitives::Address;
 use tiny_keccak::{Hasher, Keccak};
 
+/// Convert an alloy Address to EIP-55 checksum format string
+pub fn alloy_address_to_checksum(address: Address) -> String {
+    to_checksum_address(&address)
+}
+
 /// Convert an address to EIP-55 checksum format
 pub fn to_checksum_address(address: &Address) -> String {
     let hex = hex::encode(address.as_slice());
