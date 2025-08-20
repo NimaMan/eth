@@ -6,7 +6,7 @@ Demonstrates using ChainQuery for direct database queries without simulation.
 ChainQuery provides efficient access to blockchain state.
 """
 
-import ethtx
+import pyreth
 import time
 
 def format_wei(wei_str, decimals=18):
@@ -29,7 +29,7 @@ def main():
     
     # Initialize ChainQuery
     print("\nInitializing ChainQuery...")
-    query = ethtx.ChainQuery()
+    query = pyreth.ChainQuery()
     print(f"Connected to: {query}")
     
     # Get latest block

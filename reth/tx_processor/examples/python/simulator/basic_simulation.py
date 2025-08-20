@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Basic usage example for the Simulator functionality within ethtx
+Basic usage example for the Simulator functionality within pyreth
 
 This example demonstrates:
 1. Single transaction simulation
@@ -11,12 +11,12 @@ This example demonstrates:
 This example was migrated from reth_tx_simulator/python/examples/basic_usage.py
 """
 
-import ethtx
+import pyreth
 
 def main():
     # Initialize simulator
     try:
-        sim = ethtx.Simulator()
+        sim = pyreth.Simulator()
         print(f"✅ Initialized simulator")
         print(f"📊 Latest block: {sim.get_latest_block()}")
     except Exception as e:
@@ -139,12 +139,12 @@ def main():
         print(f"❌ Historical simulation failed: {e}")
     
     print("\n🎉 Simulator examples completed!")
-    print("   All simulator functionality is now part of ethtx module")
+    print("   All simulator functionality is now part of pyreth module")
 
 if __name__ == "__main__":
     try:
         main()
     except ImportError:
-        print("❌ ethtx module not built. Please run:")
+        print("❌ pyreth module not built. Please run:")
         print("   cd /home/nima/code/crypto/rust/tx_processor")
         print("   maturin develop --release --features python")

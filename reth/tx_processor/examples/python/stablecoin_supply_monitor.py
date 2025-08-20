@@ -6,7 +6,7 @@ Gets the latest total supply of all major stablecoins using ChainQuery.
 Uses the stablecoin addresses from eth_data common_addresses.
 """
 
-import ethtx
+import pyreth
 import time
 from datetime import datetime
 
@@ -99,7 +99,7 @@ def main():
     
     # Initialize ChainQuery
     print("\nInitializing ChainQuery...")
-    query = ethtx.ChainQuery()
+    query = pyreth.ChainQuery()
     
     # Get latest block
     latest_block = query.get_latest_block()

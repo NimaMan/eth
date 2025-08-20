@@ -6,7 +6,7 @@ Demonstrates fetching a transaction and simulating a buy-approve-sell sequence
 using the exact configuration from mempool_processor's sequential_tx_simulator.
 """
 
-import ethtx
+import pyreth
 import json
 
 # Configuration from mempool_processor
@@ -58,7 +58,7 @@ def encode_swap_exact_tokens_for_eth(token_address, buyer_address, amount_in, am
     )
 
 def main():
-    sim = ethtx.Simulator()
+    sim = pyreth.Simulator()
     
     print("=" * 60)
     print("Simulate TX Buy-Sell Sequence")

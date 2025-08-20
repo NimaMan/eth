@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Complete demonstration of the ethtx module
+Complete demonstration of the pyreth module
 
 This example shows all functionality:
 1. TxProcessor - Process historical transactions
@@ -14,9 +14,9 @@ This consolidates examples from:
 """
 
 try:
-    import ethtx
+    import pyreth
 except ImportError:
-    print("❌ ethtx module not built. Please run:")
+    print("❌ pyreth module not built. Please run:")
     print("   cd /home/nima/code/crypto/rust/tx_processor")
     print("   maturin develop --release --features python")
     print("\nNote: Module was renamed from rs_tx_processor to ethtx")
@@ -29,7 +29,7 @@ def demo_tx_processor():
     print("="*60)
     
     try:
-        processor = ethtx.TxProcessor()
+        processor = pyreth.TxProcessor()
         print(f"✅ TxProcessor initialized")
         print(f"   Database: /home/nima/.local/share/reth/mainnet")
         
@@ -65,7 +65,7 @@ def demo_simulator():
     print("="*60)
     
     try:
-        simulator = ethtx.Simulator()
+        simulator = pyreth.Simulator()
         print(f"✅ Simulator initialized")
         print(f"📊 Latest block: {simulator.get_latest_block()}")
         
@@ -133,7 +133,7 @@ def demo_tx_builder():
     
     try:
         # Initialize builder for mainnet
-        builder = ethtx.TxBuilder.mainnet()
+        builder = pyreth.TxBuilder.mainnet()
         print(f"✅ TxBuilder initialized for Ethereum mainnet")
         
         # Example addresses
@@ -209,7 +209,7 @@ def demo_complete_workflow():
     try:
         # Step 1: Build transaction
         print("\n📝 Step 1: Build transaction")
-        builder = ethtx.TxBuilder.mainnet()
+        builder = pyreth.TxBuilder.mainnet()
         from_addr = "0x742d35Cc6134C0532925a3b8C17ebb6F5E9DFcf4"
         to_addr = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
         
@@ -220,7 +220,7 @@ def demo_complete_workflow():
         
         # Step 2: Simulate transaction
         print("\n🔬 Step 2: Simulate before sending")
-        simulator = ethtx.Simulator()
+        simulator = pyreth.Simulator()
         
         # Convert to simulator format
         sim_tx = {
@@ -247,7 +247,7 @@ def demo_complete_workflow():
         # Step 3: After mining, process transaction
         print("\n📊 Step 3: After mining, analyze transaction")
         print("   (Would use TxProcessor with actual tx_hash)")
-        # processor = ethtx.TxProcessor()
+        # processor = pyreth.TxProcessor()
         # processed = processor.process_transaction(tx_hash)
         
     except Exception as e:
@@ -255,7 +255,7 @@ def demo_complete_workflow():
 
 def main():
     print("\n" + "="*70)
-    print("           🚀 ethtx - Complete Ethereum Transaction Toolkit")
+    print("           🚀 pyreth - Complete Ethereum Transaction Toolkit")
     print("="*70)
     print("\nPreviously: rs_tx_processor (verbose)")
     print("Now: ethtx (clean, professional)")

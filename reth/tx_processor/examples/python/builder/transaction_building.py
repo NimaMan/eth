@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Example usage of the TxBuilder functionality within ethtx
+Example usage of the TxBuilder functionality within pyreth
 
 This demonstrates how to use the user-friendly transaction builder
 from Python without needing to understand ABI encoding or contract addresses.
@@ -8,17 +8,17 @@ from Python without needing to understand ABI encoding or contract addresses.
 This example was migrated from tx_builder/examples/python_usage_example.py
 """
 
-import ethtx
+import pyreth
 
 def main():
     """
-    Example showing how TxBuilder is used within ethtx
+    Example showing how TxBuilder is used within pyreth
     """
     
-    print("=== ethtx.TxBuilder Usage Example ===\n")
+    print("=== pyreth.TxBuilder Usage Example ===\n")
     
     # Create a transaction builder for mainnet
-    builder = ethtx.TxBuilder.mainnet()
+    builder = pyreth.TxBuilder.mainnet()
     
     # Example addresses (using actual mainnet addresses)
     from_address = "0x742d35Cc6134C0532925a3b8C17ebb6F5E9DFcf4"
@@ -69,13 +69,13 @@ def main():
     print()
     
     print("✅ TxBuilder integration successful!")
-    print("   This functionality is now part of the unified ethtx module")
+    print("   This functionality is now part of the unified pyreth module")
 
 if __name__ == "__main__":
     try:
         main()
     except ImportError:
-        print("❌ ethtx module not built. Please run:")
+        print("❌ pyreth module not built. Please run:")
         print("   cd /home/nima/code/crypto/rust/tx_processor")
         print("   maturin develop --release --features python")
     except Exception as e:

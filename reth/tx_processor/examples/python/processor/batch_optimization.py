@@ -10,7 +10,7 @@ that provides 10-40x performance improvement.
 import asyncio
 from typing import Dict, List, Tuple, Any, Optional
 from web3 import Web3
-import ethtx
+import pyreth
 
 
 class TransactionBatchDataFetcher:
@@ -29,7 +29,7 @@ class TransactionBatchDataFetcher:
             w3: Web3 instance (kept for compatibility, but not used for fetching)
         """
         self.w3 = w3
-        self.processor = ethtx.TxProcessor()
+        self.processor = pyreth.TxProcessor()
         # Keep endpoint_url for compatibility
         self.endpoint_url = getattr(w3.provider, 'endpoint_uri', None) if w3.provider else None
         
@@ -112,7 +112,7 @@ class TransactionBatchDataFetcher:
         
     async def fetch_transaction_list_data(self, tx_hashes: List[str]) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         """
-        Efficiently fetch complete transaction data using ethtx.
+        Efficiently fetch complete transaction data using pyreth.
         
         This method uses the Rust processor for direct database access,
         eliminating the need for RPC calls and providing 10-40x speedup.
@@ -260,7 +260,7 @@ class TransactionBatchDataFetcher:
 
 
 # Async wrapper for synchronous batch processing
-async def process_transactions_async(processor: ethtx.TxProcessor, tx_hashes: List[str]) -> List:
+async def process_transactions_async(processor: pyreth.TxProcessor, tx_hashes: List[str]) -> List:
     """
     Async wrapper for rs_tx_processor batch processing.
     

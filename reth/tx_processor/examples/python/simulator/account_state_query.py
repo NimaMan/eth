@@ -8,11 +8,11 @@ Demonstrates how to query account state including:
 - ERC20 token balances
 """
 
-import ethtx
+import pyreth
 
 def main():
     # Initialize simulator
-    sim = ethtx.Simulator()
+    sim = pyreth.Simulator()
     
     # Example addresses
     VITALIK = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"  # vitalik.eth

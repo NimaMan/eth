@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MEV Analysis Example using ethtx.Simulator
+MEV Analysis Example using pyreth.Simulator
 
 This example demonstrates how to analyze MEV (Maximum Extractable Value)
 opportunities using transaction simulation.
@@ -13,13 +13,13 @@ Features:
 This example was migrated from reth_tx_simulator/python/examples/mev_analysis.py
 """
 
-import ethtx
+import pyreth
 
 def main():
     # Initialize simulator
     try:
-        sim = ethtx.Simulator()
-        print(f"🔍 MEV Analysis Tool (using ethtx)")
+        sim = pyreth.Simulator()
+        print(f"🔍 MEV Analysis Tool (using pyreth)")
         print(f"📊 Latest block: {sim.get_latest_block()}")
     except Exception as e:
         print(f"❌ Failed to initialize: {e}")
@@ -160,17 +160,17 @@ def main():
     print("  4. Repay flash loan + fee")
     print("  5. Keep profit")
     
-    print("\n💡 Use ethtx.TxBuilder to construct complex DeFi transactions")
-    print("   builder = ethtx.TxBuilder.mainnet()")
+    print("\n💡 Use pyreth.TxBuilder to construct complex DeFi transactions")
+    print("   builder = pyreth.TxBuilder.mainnet()")
     print("   flash_loan_tx = builder.aave_flash_loan(...)")
     
     print("\n🎉 MEV Analysis examples completed!")
-    print("   All functionality now available through unified ethtx module")
+    print("   All functionality now available through unified pyreth module")
 
 if __name__ == "__main__":
     try:
         main()
     except ImportError:
-        print("❌ ethtx module not built. Please run:")
+        print("❌ pyreth module not built. Please run:")
         print("   cd /home/nima/code/crypto/rust/tx_processor")
         print("   maturin develop --release --features python")
