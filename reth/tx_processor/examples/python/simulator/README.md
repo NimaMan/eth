@@ -4,7 +4,7 @@ Examples demonstrating transaction simulation capabilities using ethtx.Simulator
 
 ## Examples
 
-### 01_basic_simulation.py
+### basic_simulation.py
 Basic transaction simulation examples:
 - Simple ETH transfers
 - ERC20 operations
@@ -12,7 +12,7 @@ Basic transaction simulation examples:
 - State change analysis
 - Historical block simulation
 
-### 02_mev_analysis.py
+### mev_analysis.py
 MEV (Maximum Extractable Value) opportunity detection:
 - Sandwich attack simulation
 - Arbitrage opportunity detection
@@ -20,12 +20,13 @@ MEV (Maximum Extractable Value) opportunity detection:
 - Profit calculation with gas costs
 - Front-running and back-running strategies
 
-### 03_simulator_integration_test.py
-Integration testing for the simulator:
-- Complex transaction sequences
-- Error handling scenarios
-- Gas estimation accuracy
-- State persistence validation
+### tx_buy_sell_sequence.py
+Advanced sequential simulation using real transactions:
+- Fetch existing transactions from database by hash
+- Build buy-approve-sell sequences
+- Use mempool_processor configuration
+- Calculate buy/sell taxes
+- Verify state persistence in sequences
 
 ## Usage
 
@@ -56,6 +57,11 @@ tx = sim.build_transaction(
     value="1.0",  # ETH amount as string
     gas_limit=21000
 )
+
+# Fetch existing transaction from database
+existing_tx = sim.build_transaction_from_hash("0xabc123...")
+# Use in sequential simulation
+results = sim.simulate_sequence_with_details([existing_tx, approve_tx, sell_tx])
 ```
 
 ## Features

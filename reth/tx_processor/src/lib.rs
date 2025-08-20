@@ -43,11 +43,13 @@ pub mod tx_processor {
     use super::*;
     use crate::processing::{LogDecoder, DecodedEvent, TransactionClassifier};
     use crate::data_models::{ProcessedTransaction, TransactionFees};
+    use crate::data_models::transaction::ETHTransfer;
     use crate::data_models::events::InternalTransaction;
     use crate::transaction_loader::TransactionLoader;
     use eyre::Result;
     use std::collections::HashMap;
-    use alloy_primitives::{Address, B256, U256, Log as AlloyLog};
+    use alloy_primitives::{Address, B256, U256, Bytes, Log as AlloyLog};
+    use serde_json;
     
     /// TX Processor that uses direct Reth database access (no RPC)
     pub struct TxProcessor {
@@ -103,9 +105,6 @@ pub mod tx_processor {
         }
         
         /// Get the latest block number from the database
-        pub fn get_latest_block(&self) -> Result<u64> {
-            self.simulator.get_latest_block()
-        }
         
         /// Load a transaction by hash using intelligent simulation
         /// This method fetches from DB and only simulates when needed
@@ -129,6 +128,7 @@ pub mod tx_processor {
                     nonce,
                     logs,
                     gas_limit,
+                    None, // No state changes from DB load
                 ).await
             } else {
                 Err(eyre::eyre!("Transaction loader not initialized"))
@@ -169,6 +169,7 @@ pub mod tx_processor {
             nonce: u64,
             logs: Vec<AlloyLog>,
             gas_limit: u64,
+            state_changes: Option<HashMap<Address, serde_json::Value>>,
         ) -> Result<ProcessedTransaction> {
             // Create base transaction
             let mut processed_tx = ProcessedTransaction::new(
@@ -179,13 +180,28 @@ pub mod tx_processor {
                 from,
                 to,
                 value,
-                status,
+                status.clone(),
                 nonce,
                 input.clone(),
             );
             
             // Set fees
             processed_tx.fees = TransactionFees::new(gas_price, gas_used);
+            
+            // Add ETH transfer for simple transfers (non-zero value transactions)
+            // This matches the Python implementation's _extract_eth_transfers logic
+            if value > U256::ZERO && to.is_some() {
+                // Check if it's a simple ETH transfer (no input data or failed transaction)
+                let is_simple_transfer = input.is_empty() || status != "success";
+                
+                if is_simple_transfer {
+                    processed_tx.eth_transfers.push(ETHTransfer {
+                        from_address: from,
+                        to_address: to.unwrap(),
+                        amount: value,
+                    });
+                }
+            }
             
             // Decode logs into events
             for log in logs.iter() {
@@ -462,6 +478,11 @@ pub mod tx_processor {
                 }
             }
             
+            // Add state changes if provided
+            if let Some(state_changes) = state_changes {
+                processed_tx.state_changes = state_changes;
+            }
+            
             Ok(processed_tx)
         }
         
@@ -478,16 +499,245 @@ pub mod tx_processor {
             Ok(results)
         }
         
+        /// Get the latest block number
+        pub async fn get_latest_block(&self) -> Result<u64> {
+            self.simulator.get_latest_block()
+        }
+        
+        /// Get the base fee for the latest block
+        pub async fn get_latest_base_fee(&self) -> Result<u128> {
+            let latest_block = self.simulator.get_latest_block()?;
+            self.simulator.get_base_fee_at_block(latest_block)
+        }
+        
+        /// Get the base fee for a specific block
+        pub async fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
+            self.simulator.get_base_fee_at_block(block_number)
+        }
+        
+        /// Simulate a sequence of transactions
+        pub async fn simulate_transaction_sequence(
+            &self, 
+            transactions: Vec<CallRequest>, 
+            options: reth_tx_simulator::SequentialSimulationOptions
+        ) -> Result<reth_tx_simulator::SequentialSimulationResult> {
+            self.simulator.simulate_transaction_sequence(transactions, options).await
+        }
+        
+        /// Simulate a sequence and return ProcessedTransaction for each (or error info)
+        pub async fn simulate_sequence_with_details(
+            &self,
+            transactions: Vec<CallRequest>,
+            options: reth_tx_simulator::SequentialSimulationOptions
+        ) -> Result<Vec<Result<ProcessedTransaction>>> {
+            let block_number = options.at_block.unwrap_or_else(|| {
+                self.simulator.get_latest_block().unwrap_or(0)
+            });
+            
+            let mut results = Vec::new();
+            
+            // Clone transactions for the zip operation later
+            let transactions_for_processing = transactions.clone();
+            
+            // Use sequential simulation to maintain state
+            let seq_result = self.simulator.simulate_transaction_sequence(transactions, options).await?;
+            
+            // Process each transaction result
+            for (idx, (tx_request, tx_result)) in transactions_for_processing.into_iter().zip(seq_result.results.iter()).enumerate() {
+                if tx_result.success {
+                    // Successful transaction - create ProcessedTransaction
+                    let tx_hash = B256::random();
+                    let from = tx_request.from.unwrap_or(Address::ZERO);
+                    let to = tx_request.to;
+                    let value = tx_request.value.unwrap_or(U256::ZERO);
+                    let input = tx_request.data.clone().unwrap_or(Bytes::new()).to_vec();
+                    let gas_price = U256::from(tx_request.gas_price.unwrap_or(20_000_000_000u128));
+                    let gas_used = tx_result.gas_used;
+                    let nonce = tx_request.nonce.unwrap_or(0);
+                    let gas_limit = tx_request.gas.unwrap_or(3_000_000);
+                    
+                    let block_timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    
+                    // Convert state changes if available
+                    let state_changes_json = if !tx_result.state_changes.is_empty() {
+                        Some(tx_result.state_changes.iter().map(|(addr, change)| {
+                            let mut change_map = serde_json::Map::new();
+                            if !change.eth_net.is_zero() {
+                                change_map.insert("eth_net".to_string(), serde_json::json!(change.eth_net.to_string()));
+                            }
+                            for (token_symbol_or_addr, balance_change) in &change.token_net {
+                                change_map.insert(token_symbol_or_addr.clone(), serde_json::json!(balance_change.to_string()));
+                            }
+                            (*addr, serde_json::Value::Object(change_map))
+                        }).collect())
+                    } else {
+                        None
+                    };
+                    
+                    // Create ProcessedTransaction
+                    let processed = self.process_transaction_from_raw_data(
+                        tx_hash,
+                        block_number,
+                        block_timestamp,
+                        idx as u64,
+                        from,
+                        to,
+                        value,
+                        input,
+                        gas_price,
+                        gas_used,
+                        "success".to_string(),
+                        nonce,
+                        tx_result.logs.clone(),
+                        gas_limit,
+                        state_changes_json,
+                    ).await?;
+                    
+                    results.push(Ok(processed));
+                } else {
+                    // Failed transaction - return error with details
+                    let error_msg = tx_result.revert_reason.clone()
+                        .unwrap_or_else(|| format!("Transaction {} failed with gas used: {}", idx, tx_result.gas_used));
+                    results.push(Err(eyre::eyre!(error_msg)));
+                }
+            }
+            
+            Ok(results)
+        }
+        
         // ===== Transaction Processing Methods =====
-        // We have 3 ways to get a ProcessedTransaction:
+        // We have 4 ways to get a ProcessedTransaction:
         // 1. process_transaction_by_hash() - Give it a hash, it fetches from DB
         // 2. process_unsigned_transaction() - Give it unsigned tx data (CallRequest)
         // 3. process_transaction_from_raw_data() - Give it all the data manually
+        // 4. simulate_and_process_transaction() - Simulate and process in one call
+        
+        /// Simulate and process a transaction in one call
+        /// This is the main entry point for Python bindings to simulate transactions
+        pub async fn simulate_and_process_transaction(
+            &self,
+            call_request: CallRequest,
+            block_number: Option<u64>,
+        ) -> Result<ProcessedTransaction> {
+            // Get the block number for simulation (default to latest)
+            let sim_block = if let Some(block) = block_number {
+                block
+            } else {
+                self.simulator.get_latest_block()?
+            };
+            
+            // Simulate with full trace to get logs, internal transactions, and state changes
+            let full_result = self.simulator
+                .simulate_unsigned_transaction_with_full_trace_at_block(call_request.clone(), sim_block)
+                .await?;
+            
+            // Create a mock transaction hash for the simulated transaction
+            let tx_hash = B256::random();
+            
+            // Extract transaction parameters
+            let from = call_request.from.unwrap_or(Address::ZERO);
+            let to = call_request.to;
+            let value = call_request.value.unwrap_or(U256::ZERO);
+            let input = call_request.data.clone().unwrap_or(Bytes::new()).to_vec();
+            let gas_price = U256::from(call_request.gas_price.unwrap_or(20_000_000_000u128)); // Default 20 gwei
+            let gas_used = full_result.gas_used;
+            let status = if full_result.success { "success".to_string() } else { "failed".to_string() };
+            let nonce = call_request.nonce.unwrap_or(0);
+            let gas_limit = call_request.gas.unwrap_or(3_000_000);
+            
+            // Use current timestamp for simulation (this is approximate)
+            let block_timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            
+            // Convert state changes from AddressStateChange to serde_json::Value
+            let state_changes_json: HashMap<Address, serde_json::Value> = full_result.state_changes
+                .into_iter()
+                .map(|(addr, change)| {
+                    let mut change_map = serde_json::Map::new();
+                    
+                    // Add ETH balance change if non-zero
+                    if !change.eth_net.is_zero() {
+                        change_map.insert("eth_net".to_string(), serde_json::json!(change.eth_net.to_string()));
+                    }
+                    
+                    // Add token balance changes (token_net is a HashMap<String, I256>)
+                    for (token_symbol_or_addr, balance_change) in change.token_net {
+                        // Use the token symbol/address as the key directly
+                        change_map.insert(token_symbol_or_addr, serde_json::json!(balance_change.to_string()));
+                    }
+                    
+                    (addr, serde_json::Value::Object(change_map))
+                })
+                .collect();
+            
+            // Process the transaction with all data
+            self.process_transaction_from_raw_data(
+                tx_hash,
+                sim_block,
+                block_timestamp,
+                0, // tx_index
+                from,
+                to,
+                value,
+                input,
+                gas_price,
+                gas_used,
+                status,
+                nonce,
+                full_result.logs,
+                gas_limit,
+                Some(state_changes_json),
+            ).await
+        }
         
         /// Process a transaction by its hash - fetches from DB and returns ProcessedTransaction
         pub async fn process_transaction_by_hash(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
             // Use the transaction loader to fetch and process transaction
             self.load_transaction(tx_hash).await
+        }
+        
+        /// Get transaction data as CallRequest for simulation by hash
+        /// This fetches transaction from DB and returns it in a format ready for simulation
+        pub async fn get_transaction_for_simulation(&self, tx_hash: B256) -> Result<CallRequest> {
+            // Check if we have transaction loader
+            let loader = self.transaction_loader.as_ref()
+                .ok_or_else(|| eyre::eyre!("Transaction loader not available"))?;
+            
+            // Load transaction data from DB
+            let (
+                _tx_hash,
+                _block_number,
+                _timestamp,
+                _tx_index,
+                from,
+                to,
+                value,
+                input,
+                gas_price,
+                _gas_used,
+                _status,
+                nonce,
+                _logs,
+                gas_limit,
+            ) = loader.load_transaction_data(tx_hash).await?;
+            
+            // Build CallRequest from transaction data
+            Ok(CallRequest {
+                from: Some(from),
+                to,
+                value: Some(value),
+                data: if input.is_empty() { None } else { Some(Bytes::from(input)) },
+                gas: Some(gas_limit),
+                gas_price: Some(gas_price.try_into().unwrap_or(20_000_000_000)),
+                nonce: Some(nonce),
+                max_fee_per_gas: None,
+                max_priority_fee_per_gas: None,
+            })
         }
         
         /// Process an unsigned transaction (without fetching from DB) and return ProcessedTransaction

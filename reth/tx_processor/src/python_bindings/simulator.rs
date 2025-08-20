@@ -8,13 +8,13 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use alloy_primitives::{Address, U256, Bytes};
+use alloy_primitives::{Address, U256, Bytes, B256};
 use std::str::FromStr;
 
-use crate::{RethTxSimulator, CallRequest};
+use crate::{CallRequest, TxProcessor};
+use super::processed_transaction::PyProcessedTransaction;
 use reth_tx_simulator::SequentialSimulationOptions;
 
 /// Python wrapper for RethTxSimulator
@@ -25,37 +25,10 @@ use reth_tx_simulator::SequentialSimulationOptions;
 ///   result = sim.simulate_transaction({...})
 #[pyclass(name = "Simulator")]
 pub struct PySimulator {
-    simulator: Arc<RethTxSimulator>,
     runtime: Arc<Runtime>,
+    tx_processor: Arc<TxProcessor>,
 }
 
-/// Result for single transaction simulation
-#[pyclass]
-#[derive(Clone)]
-pub struct PySimulationResult {
-    #[pyo3(get)]
-    pub success: bool,
-    
-    #[pyo3(get)]
-    pub gas_used: u64,
-    
-    #[pyo3(get)]
-    pub revert_reason: Option<String>,
-    
-    #[pyo3(get)]
-    pub state_changes: HashMap<String, PyAddressStateChange>,
-}
-
-/// State changes for a specific address
-#[pyclass]
-#[derive(Clone)]
-pub struct PyAddressStateChange {
-    #[pyo3(get)]
-    pub eth_net: f64,
-    
-    #[pyo3(get)]
-    pub token_net: HashMap<String, f64>,
-}
 
 /// Result for sequential simulation
 #[pyclass]
@@ -106,22 +79,53 @@ impl PySimulator {
     pub fn new() -> PyResult<Self> {
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";
         
-        let simulator = RethTxSimulator::new(reth_datadir)
+        let runtime = Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
         
-        let runtime = Runtime::new()
+        // Create TxProcessor which contains its own simulator
+        let tx_processor = TxProcessor::new(reth_datadir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
             
         Ok(Self {
-            simulator: Arc::new(simulator),
             runtime: Arc::new(runtime),
+            tx_processor: Arc::new(tx_processor),
         })
     }
     
     /// Get latest block number
     pub fn get_latest_block(&self) -> PyResult<u64> {
-        self.simulator.get_latest_block()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+        // Use the TxProcessor's method to get latest block
+        let tx_processor = self.tx_processor.clone();
+        self.runtime.block_on(async move {
+            tx_processor.get_latest_block().await
+        })
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+    
+    /// Get the base fee for the latest block
+    /// 
+    /// Returns the base fee in wei (EIP-1559 base fee)
+    pub fn get_latest_base_fee(&self) -> PyResult<u128> {
+        let tx_processor = self.tx_processor.clone();
+        self.runtime.block_on(async move {
+            tx_processor.get_latest_base_fee().await
+        })
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+    
+    /// Get the base fee for a specific block
+    /// 
+    /// Args:
+    ///     block_number (int): The block number to get base fee for
+    ///     
+    /// Returns:
+    ///     int: Base fee in wei
+    pub fn get_base_fee_at_block(&self, block_number: u64) -> PyResult<u128> {
+        let tx_processor = self.tx_processor.clone();
+        self.runtime.block_on(async move {
+            tx_processor.get_base_fee_at_block(block_number).await
+        })
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
     
     /// Build a transaction from simple parameters
@@ -199,48 +203,44 @@ impl PySimulator {
     ///     block_number (int, optional): Block number to simulate at (default: latest)
     ///     
     /// Returns:
-    ///     PySimulationResult: Simulation results with state changes
-    pub fn simulate_transaction(&self, transaction: &PyDict, block_number: Option<u64>) -> PyResult<PySimulationResult> {
+    ///     ProcessedTransaction: Full transaction details with events and internal transactions
+    pub fn simulate_transaction(&self, transaction: &PyDict, block_number: Option<u64>) -> PyResult<PyProcessedTransaction> {
+        // Just call simulate_and_process - they should be the same
+        self.simulate_and_process(transaction, block_number)
+    }
+    
+    /// Simulate a transaction and return ProcessedTransaction
+    /// 
+    /// This method simulates a transaction and processes the result into a full
+    /// ProcessedTransaction object with decoded events, internal transactions, and state changes.
+    /// 
+    /// Args:
+    ///     transaction (dict): Transaction parameters
+    ///         - from: sender address (str)
+    ///         - to: recipient address (str, optional for contract creation)
+    ///         - value: value in wei (str or int, optional, default 0)
+    ///         - data: transaction data (str, optional, default empty)
+    ///         - gas: gas limit (int, optional, default 3000000)
+    ///         - gas_price: gas price in wei (int, optional, default 20 gwei)
+    ///         - nonce: transaction nonce (int, optional, will auto-detect)
+    ///     block_number (int, optional): Block number to simulate at (default: latest)
+    ///     
+    /// Returns:
+    ///     ProcessedTransaction: Full transaction details with events and internal transactions
+    pub fn simulate_and_process(&self, transaction: &PyDict, block_number: Option<u64>) -> PyResult<PyProcessedTransaction> {
+        // Convert Python dict to CallRequest
         let call_request = dict_to_call_request(transaction)?;
         
-        let result = if let Some(block) = block_number {
-            self.runtime.block_on(async {
-                self.simulator.simulate_unsigned_transaction_with_call_trace_at_block(call_request, block).await
-            })
-        } else {
-            self.runtime.block_on(async {
-                self.simulator.simulate_unsigned_transaction_with_call_trace(call_request).await
-            })
-        };
+        // Call the Rust core method that handles all the logic
+        let tx_processor = self.tx_processor.clone();
+        let processed_tx = self.runtime.block_on(async move {
+            tx_processor.simulate_and_process_transaction(call_request, block_number).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to process transaction: {}", e)
+        ))?;
         
-        match result {
-            Ok(state_changes) => {
-                let mut py_state_changes = HashMap::new();
-                
-                for (addr, changes) in state_changes {
-                    let addr_str = format!("{:?}", addr);
-                    py_state_changes.insert(addr_str, PyAddressStateChange {
-                        eth_net: i256_to_f64(changes.eth_net),
-                        token_net: changes.token_net.into_iter()
-                            .map(|(k, v)| (k, i256_to_f64(v)))
-                            .collect(),
-                    });
-                }
-                
-                Ok(PySimulationResult {
-                    success: true,
-                    gas_used: 0, // TODO: Add gas tracking
-                    revert_reason: None,
-                    state_changes: py_state_changes,
-                })
-            },
-            Err(e) => Ok(PySimulationResult {
-                success: false,
-                gas_used: 0,
-                revert_reason: Some(e.to_string()),
-                state_changes: HashMap::new(),
-            }),
-        }
+        // Convert to Python type
+        Ok(PyProcessedTransaction::from_processed_transaction(processed_tx))
     }
     
     /// Simulate a sequence of transactions
@@ -278,8 +278,9 @@ impl PySimulator {
             SequentialSimulationOptions::default()
         };
         
-        let result = self.runtime.block_on(async {
-            self.simulator.simulate_transaction_sequence(call_requests, sim_options).await
+        let tx_processor = self.tx_processor.clone();
+        let result = self.runtime.block_on(async move {
+            tx_processor.simulate_transaction_sequence(call_requests, sim_options).await
         });
         
         match result {
@@ -304,6 +305,321 @@ impl PySimulator {
             },
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string())),
         }
+    }
+    
+    /// Simulate a sequence of transactions and return ProcessedTransaction for each
+    /// 
+    /// This method runs a sequence simulation and returns a ProcessedTransaction object
+    /// for each successful transaction, or an error message for failed transactions.
+    /// 
+    /// Args:
+    ///     transactions (list): List of transaction dictionaries
+    ///     options (dict, optional): Sequential simulation options
+    ///         - stop_on_failure: Stop if any transaction fails (bool, default: True)
+    ///         - auto_increment_nonces: Auto-increment nonces (bool, default: True)
+    ///         - at_block: Block number to simulate at (int, optional)
+    ///         
+    /// Returns:
+    ///     list: List where each element is either a ProcessedTransaction (success) 
+    ///           or an error dict with 'error' key (failure)
+    pub fn simulate_sequence_with_details(&self, transactions: Vec<&PyDict>, options: Option<&PyDict>) -> PyResult<Vec<PyObject>> {
+        // Convert transactions
+        let mut call_requests = Vec::new();
+        for tx_dict in transactions {
+            call_requests.push(dict_to_call_request(tx_dict)?);
+        }
+        
+        // Parse options
+        let sim_options = if let Some(opts) = options {
+            SequentialSimulationOptions {
+                stop_on_failure: opts.get_item("stop_on_failure")?
+                    .map(|v| v.extract::<bool>()).transpose()?
+                    .unwrap_or(true),
+                auto_increment_nonces: opts.get_item("auto_increment_nonces")?
+                    .map(|v| v.extract::<bool>()).transpose()?
+                    .unwrap_or(true),
+                at_block: opts.get_item("at_block")?
+                    .map(|v| v.extract::<u64>()).transpose()?,
+                gas_limit_per_tx: None,
+            }
+        } else {
+            SequentialSimulationOptions::default()
+        };
+        
+        let tx_processor = self.tx_processor.clone();
+        let results = self.runtime.block_on(async move {
+            tx_processor.simulate_sequence_with_details(call_requests, sim_options).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to simulate sequence: {}", e)
+        ))?;
+        
+        // Convert results to Python objects
+        Python::with_gil(|py| {
+            let mut py_results = Vec::new();
+            
+            for result in results {
+                match result {
+                    Ok(processed_tx) => {
+                        // Convert ProcessedTransaction to Python
+                        let py_tx = PyProcessedTransaction::from_processed_transaction(processed_tx);
+                        py_results.push(py_tx.into_py(py));
+                    },
+                    Err(error) => {
+                        // Create error dict
+                        let error_dict = PyDict::new(py);
+                        error_dict.set_item("error", error.to_string())?;
+                        py_results.push(error_dict.into_py(py));
+                    }
+                }
+            }
+            
+            Ok(py_results)
+        })
+    }
+    
+    /// Build an ERC20 approve transaction
+    /// 
+    /// Args:
+    ///     from_address (str): Sender address
+    ///     token_address (str): ERC20 token contract address
+    ///     spender (str): Address to approve
+    ///     amount (str or int): Amount to approve (in token units, not wei)
+    ///     
+    /// Returns:
+    ///     dict: Approve transaction ready for simulation
+    pub fn build_approve(
+        &self,
+        from_address: &str,
+        token_address: &str,
+        spender: &str,
+        amount: &str,
+    ) -> PyResult<Py<PyDict>> {
+        // Build approve(address,uint256) calldata
+        let spender_clean = spender.trim_start_matches("0x").to_lowercase();
+        let amount_hex = if amount.starts_with("0x") {
+            amount.trim_start_matches("0x").to_string()
+        } else {
+            // Convert decimal string to hex
+            let amount_int = amount.parse::<u128>()
+                .map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid amount"))?;
+            format!("{:064x}", amount_int)
+        };
+        
+        let calldata = format!(
+            "0x095ea7b3{:0>24}{}{}", 
+            "0".repeat(24),
+            spender_clean,
+            amount_hex
+        );
+        
+        self.build_transaction(
+            from_address,
+            Some(token_address),
+            None,  // No ETH value for approve
+            Some(&calldata),
+            Some(50000),  // Standard gas for approve
+            None,
+            None,
+        )
+    }
+    
+    /// Build a Uniswap V2 swap transaction
+    /// 
+    /// Args:
+    ///     from_address (str): Sender address
+    ///     router_address (str): Uniswap V2 Router address (default: 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D)
+    ///     token_in (str): Input token address (use "ETH" for ETH)
+    ///     token_out (str): Output token address (use "ETH" for ETH)
+    ///     amount_in (str): Amount to swap (in wei for ETH, token units for tokens)
+    ///     amount_out_min (str): Minimum output amount (default: 0)
+    ///     
+    /// Returns:
+    ///     dict: Swap transaction ready for simulation
+    #[pyo3(signature = (from_address, token_in, token_out, amount_in, router_address=None, amount_out_min=None))]
+    pub fn build_swap(
+        &self,
+        from_address: &str,
+        token_in: &str,
+        token_out: &str,
+        amount_in: &str,
+        router_address: Option<&str>,
+        amount_out_min: Option<&str>,
+    ) -> PyResult<Py<PyDict>> {
+        let router = router_address.unwrap_or("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D");
+        let weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
+        
+        // Determine swap type and build calldata
+        let is_eth_in = token_in.to_uppercase() == "ETH";
+        let is_eth_out = token_out.to_uppercase() == "ETH";
+        
+        // Convert amounts to hex
+        let amount_in_hex = if amount_in.starts_with("0x") {
+            amount_in.trim_start_matches("0x").to_string()
+        } else {
+            let amount = amount_in.parse::<u128>()
+                .map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid amount_in"))?;
+            format!("{:064x}", amount)
+        };
+        
+        let amount_out_min_hex = if let Some(min) = amount_out_min {
+            if min.starts_with("0x") {
+                min.trim_start_matches("0x").to_string()
+            } else {
+                let amount = min.parse::<u128>()
+                    .map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid amount_out_min"))?;
+                format!("{:064x}", amount)
+            }
+        } else {
+            "0".repeat(64)  // Default to 0 minimum
+        };
+        
+        // Generate deadline (20 minutes from now)
+        let deadline = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 1200;
+        let deadline_hex = format!("{:064x}", deadline);
+        
+        let (method_id, value, calldata) = if is_eth_in && !is_eth_out {
+            // ETH -> Token: swapExactETHForTokens
+            let path = vec![weth_address, token_out];
+            let calldata = format!(
+                "0x7ff36ab5{}{:0>64}{:0>64}{}{:064x}{}{}",
+                amount_out_min_hex,
+                "80",  // path offset
+                &from_address.trim_start_matches("0x").to_lowercase(),
+                deadline_hex,
+                path.len(),
+                "0".repeat(24) + &weth_address.trim_start_matches("0x").to_lowercase(),
+                "0".repeat(24) + &token_out.trim_start_matches("0x").to_lowercase(),
+            );
+            ("swapExactETHForTokens", Some(amount_in), calldata)
+        } else if !is_eth_in && is_eth_out {
+            // Token -> ETH: swapExactTokensForETH
+            let path = vec![token_in, weth_address];
+            let calldata = format!(
+                "0x18cbafe5{}{}{:0>64}{:0>64}{}{:064x}{}{}",
+                amount_in_hex,
+                amount_out_min_hex,
+                "a0",  // path offset
+                &from_address.trim_start_matches("0x").to_lowercase(),
+                deadline_hex,
+                path.len(),
+                "0".repeat(24) + &token_in.trim_start_matches("0x").to_lowercase(),
+                "0".repeat(24) + &weth_address.trim_start_matches("0x").to_lowercase(),
+            );
+            ("swapExactTokensForETH", None, calldata)
+        } else if !is_eth_in && !is_eth_out {
+            // Token -> Token: swapExactTokensForTokens
+            let path = vec![token_in, weth_address, token_out];  // Usually goes through WETH
+            let calldata = format!(
+                "0x38ed1739{}{}{:0>64}{:0>64}{}{:064x}{}{}{}",
+                amount_in_hex,
+                amount_out_min_hex,
+                "a0",  // path offset
+                &from_address.trim_start_matches("0x").to_lowercase(),
+                deadline_hex,
+                path.len(),
+                "0".repeat(24) + &token_in.trim_start_matches("0x").to_lowercase(),
+                "0".repeat(24) + &weth_address.trim_start_matches("0x").to_lowercase(),
+                "0".repeat(24) + &token_out.trim_start_matches("0x").to_lowercase(),
+            );
+            ("swapExactTokensForTokens", None, calldata)
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("Cannot swap ETH to ETH"));
+        };
+        
+        self.build_transaction(
+            from_address,
+            Some(router),
+            value,
+            Some(&calldata),
+            Some(200000),  // Standard gas for swaps
+            None,
+            None,
+        )
+    }
+    
+    /// Build a transaction from a hash for simulation
+    /// 
+    /// Fetches an existing transaction from the database and returns it
+    /// in a format ready for simulation. Useful for replaying transactions
+    /// or building sequential simulations from real transactions.
+    /// 
+    /// Args:
+    ///     tx_hash (str): Transaction hash to fetch (0x prefixed hex string)
+    ///     
+    /// Returns:
+    ///     dict: Transaction dictionary ready for simulation with all parameters
+    ///     
+    /// Example:
+    ///     ```python
+    ///     # Fetch an existing swap transaction
+    ///     tx = sim.build_transaction_from_hash("0xabc123...")
+    ///     
+    ///     # Use it in a sequence with other transactions
+    ///     approve_tx = sim.build_approve(...)
+    ///     sell_tx = sim.build_swap(...)
+    ///     
+    ///     results = sim.simulate_sequence_with_details([tx, approve_tx, sell_tx])
+    ///     ```
+    pub fn build_transaction_from_hash(&self, tx_hash: &str) -> PyResult<Py<PyDict>> {
+        use alloy_primitives::B256;
+        use std::str::FromStr;
+        
+        // Parse transaction hash
+        let hash = B256::from_str(tx_hash)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Invalid transaction hash: {}", e)
+            ))?;
+        
+        // Fetch transaction data from DB
+        let tx_processor = self.tx_processor.clone();
+        let call_request = self.runtime.block_on(async move {
+            tx_processor.get_transaction_for_simulation(hash).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to fetch transaction: {}", e)
+        ))?;
+        
+        // Convert CallRequest to Python dict
+        Python::with_gil(|py| {
+            let tx_dict = PyDict::new(py);
+            
+            // Add from address (required)
+            if let Some(from) = call_request.from {
+                tx_dict.set_item("from", crate::utils::checksum::alloy_address_to_checksum(from))?;
+            }
+            
+            // Add to address (optional)
+            if let Some(to) = call_request.to {
+                tx_dict.set_item("to", crate::utils::checksum::alloy_address_to_checksum(to))?;
+            }
+            
+            // Add value
+            if let Some(value) = call_request.value {
+                tx_dict.set_item("value", value.to_string())?;
+            } else {
+                tx_dict.set_item("value", "0")?;
+            }
+            
+            // Add data
+            if let Some(data) = call_request.data {
+                tx_dict.set_item("data", format!("0x{}", hex::encode(data)))?;
+            } else {
+                tx_dict.set_item("data", "0x")?;
+            }
+            
+            // Add gas parameters
+            tx_dict.set_item("gas", call_request.gas.unwrap_or(3_000_000))?;
+            tx_dict.set_item("gas_price", call_request.gas_price.unwrap_or(20_000_000_000))?;
+            
+            // Add nonce if present
+            if let Some(nonce) = call_request.nonce {
+                tx_dict.set_item("nonce", nonce)?;
+            }
+            
+            Ok(tx_dict.into())
+        })
     }
     
     /// Get simulator version information
@@ -387,8 +703,3 @@ fn dict_to_call_request(tx_dict: &PyDict) -> PyResult<CallRequest> {
     })
 }
 
-/// Convert I256 to f64 for Python compatibility
-fn i256_to_f64(value: alloy_primitives::I256) -> f64 {
-    let value_str = value.to_string();
-    value_str.parse().unwrap_or(0.0)
-}

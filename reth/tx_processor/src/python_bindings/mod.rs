@@ -12,7 +12,7 @@ pub mod simulator;
 
 use processed_transaction::PyProcessedTransaction;
 use rs_tx_processor::PyTxProcessor;
-use simulator::{PySimulator, PySimulationResult, PySequentialResult, PyTransactionResult, PyAddressStateChange};
+use simulator::{PySimulator, PySequentialResult, PyTransactionResult};
 
 // Import TxBuilder from tx_builder crate
 #[cfg(feature = "python")]
