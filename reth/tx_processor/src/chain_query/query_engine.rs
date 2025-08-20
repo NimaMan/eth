@@ -92,12 +92,12 @@ impl ChainQuery {
     
     /// Get ERC20 token balance
     pub async fn get_token_balance(&self, token: Address, holder: Address, block_number: Option<u64>) -> Result<U256> {
-        self.token.get_balance(token, holder, block_number).await
+        self.token.get_erc20_balance(token, holder, block_number).await
     }
     
     /// Get ERC20 total supply
-    pub async fn get_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
-        self.token.get_total_supply(token, block_number).await
+    pub async fn get_token_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
+        self.token.get_erc20_total_supply(token, block_number).await
     }
     
     /// Get storage value at specific slot

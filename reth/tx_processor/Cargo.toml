@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 default = []
-python = ["pyo3", "pyo3-asyncio", "rayon", "num_cpus", "tx_builder"]
 
 # Clean TX Processor - Rust alternative to Python eth_data
 # Uses reth_tx_simulator for all transaction simulation
@@ -13,7 +12,7 @@ python = ["pyo3", "pyo3-asyncio", "rayon", "num_cpus", "tx_builder"]
 [lib]
 name = "ethtx"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]  # Add cdylib for Python bindings
+crate-type = ["rlib"]  # Library only, no Python bindings
 
 # Clean tx_processor examples
 # Examples that actually exist
@@ -35,8 +34,6 @@ path = "examples/process_transaction_by_hash.rs"
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
 
-# Transaction builder for user-friendly transaction construction
-tx_builder = { path = "../tx_builder", features = ["python"], optional = true }
 
 # Basic dependencies
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
@@ -44,6 +41,7 @@ eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
+hex-literal = "0.4"
 alloy-primitives = "1.1.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -60,21 +58,3 @@ reth-db = { path = "../reth/crates/storage/db" }
 reth-chainspec = { path = "../reth/crates/chainspec" }
 alloy-consensus = "1.0.20"
 
-# Python binding dependencies
-[dependencies.pyo3]
-version = "0.20"
-features = ["extension-module", "abi3-py39"]
-optional = true
-
-[dependencies.pyo3-asyncio]
-version = "0.20"
-features = ["attributes", "tokio-runtime"]
-optional = true
-
-[dependencies.rayon]
-version = "1.7"
-optional = true
-
-[dependencies.num_cpus]
-version = "1.16"
-optional = true

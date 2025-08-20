@@ -36,8 +36,6 @@ pub mod chain_query;
 pub use tx_processor::TxProcessor;
 
 // Python bindings module (only included when building for Python)
-#[cfg(feature = "python")]
-pub mod python_bindings;
 
 /// TX Processor functionality using Direct Reth
 pub mod tx_processor {

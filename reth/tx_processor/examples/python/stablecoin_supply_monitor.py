@@ -116,7 +116,7 @@ def main():
         
         try:
             # Get total supply
-            supply = query.get_total_supply(address)
+            supply = query.get_token_total_supply(address)
             query_time = (time.time() - start) * 1000
             query_times.append(query_time)
             
@@ -191,7 +191,7 @@ def main():
     for name, (address, decimals) in STABLECOINS.items():
         if "USD" in name or name in ["DAI", "FRAX", "LUSD", "GHO", "MKUSD", "sUSD", "DOLA"]:
             try:
-                supply = query.get_total_supply(address)
+                supply = query.get_token_total_supply(address)
                 usd_value = int(supply) / (10 ** decimals)
                 if usd_value > 0:
                     usd_supplies.append((name, usd_value))

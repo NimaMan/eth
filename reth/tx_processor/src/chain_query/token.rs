@@ -7,6 +7,7 @@ use eyre::Result;
 use reth_tx_simulator::RethTxSimulator;
 use std::sync::Arc;
 use tiny_keccak::{Hasher, Keccak};
+use hex_literal::hex;
 
 /// Token information structure
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ impl TokenQuery {
     }
     
     /// Get ERC20 token balance for a holder
-    pub async fn get_balance(&self, token: Address, holder: Address, block_number: Option<u64>) -> Result<U256> {
+    pub async fn get_erc20_balance(&self, token: Address, holder: Address, block_number: Option<u64>) -> Result<U256> {
         // Get block number to query at
         let block_number = if let Some(bn) = block_number {
             bn
@@ -55,72 +56,57 @@ impl TokenQuery {
         Ok(value.unwrap_or(U256::ZERO))
     }
     
-    /// Get ERC20 total supply
-    pub async fn get_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
-        // Get block number to query at
-        let block_number = if let Some(bn) = block_number {
-            bn
-        } else {
-            self.simulator.get_latest_block()?
-        };
+    /// Get ERC20 total supply by calling totalSupply() function
+    pub async fn get_erc20_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
+        // Build totalSupply() call - function selector is 0x18160ddd
+        let total_supply_selector = hex_literal::hex!("18160ddd");
+        let data = RethTxSimulator::encode_view_function_call(total_supply_selector);
         
-        // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
-            .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
+        // Simulate the view function call
+        let result = self.simulator.simulate_view_function(
+            token,
+            data,
+            block_number,
+        ).await?;
         
-        // Total supply is typically at slot 2 for standard ERC20
-        // Try common slots: 2 (OpenZeppelin), 1, 0
-        let common_slots = [2u64, 1, 0];
-        
-        for slot in common_slots {
-            let storage_key = B256::from(U256::from(slot));
-            if let Ok(Some(value)) = provider.storage(token, storage_key) {
-                // Check if value looks like a reasonable total supply
-                // (not 0, not max uint256, within reasonable range)
-                if value > U256::ZERO && value < U256::from(10u128.pow(30)) {
-                    return Ok(value);
-                }
-            }
+        // Check if call was successful
+        if !result.success {
+            return Ok(U256::ZERO);
         }
         
-        // If not found in common slots, return 0
-        Ok(U256::ZERO)
+        // Parse the result as U256
+        Ok(RethTxSimulator::decode_uint256_result(&result.output))
     }
     
-    /// Get ERC20 decimals
-    pub async fn get_decimals(&self, token: Address, block_number: Option<u64>) -> Result<u8> {
-        // Get block number to query at
-        let block_number = if let Some(bn) = block_number {
-            bn
-        } else {
-            self.simulator.get_latest_block()?
-        };
+    /// Get ERC20 decimals by calling decimals() function
+    pub async fn get_erc20_decimals(&self, token: Address, block_number: Option<u64>) -> Result<u8> {
+        // Build decimals() call - function selector is 0x313ce567
+        let decimals_selector = hex_literal::hex!("313ce567");
+        let data = RethTxSimulator::encode_view_function_call(decimals_selector);
         
-        // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
-            .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
+        // Simulate the view function call
+        let result = self.simulator.simulate_view_function(
+            token,
+            data,
+            block_number,
+        ).await?;
         
-        // Decimals are typically stored at different slots depending on implementation
-        // Common slots: 8 (common packed slot), 3, 4
-        let common_slots = [8u64, 3, 4];
-        
-        for slot in common_slots {
-            let storage_key = B256::from(U256::from(slot));
-            if let Ok(Some(value)) = provider.storage(token, storage_key) {
-                // Decimals should be a small number (typically 6, 8, 18)
-                let bytes = value.to_be_bytes_vec();
-                if let Some(&last_byte) = bytes.last() {
-                    if last_byte <= 36 && last_byte > 0 {  // Reasonable decimal range
-                        return Ok(last_byte);
-                    }
-                }
-            }
+        // Check if call was successful
+        if !result.success {
+            // Default to 18 if call fails (most common)
+            return Ok(18);
         }
         
-        // Default to 18 if not found (most common)
-        Ok(18)
+        // Parse the result as uint8
+        let decimals = RethTxSimulator::decode_uint8_result(&result.output);
+        
+        // Validate decimals is in reasonable range
+        if decimals > 0 && decimals <= 36 {
+            Ok(decimals)
+        } else {
+            // Default to 18 if invalid
+            Ok(18)
+        }
     }
     
     /// Get ERC20 symbol (returns address as string if cannot decode)
