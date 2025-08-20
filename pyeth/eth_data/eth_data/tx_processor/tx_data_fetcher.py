@@ -3,9 +3,9 @@ from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import aiohttp
 
-# Import ethtx for direct database access (10-40x faster than RPC)
+# Import pyreth for direct database access (10-40x faster than RPC)
 try:
-    import ethtx
+    import pyreth
     RS_TX_PROCESSOR_AVAILABLE = True
 except ImportError:
     RS_TX_PROCESSOR_AVAILABLE = False

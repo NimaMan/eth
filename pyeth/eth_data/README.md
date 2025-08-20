@@ -64,7 +64,7 @@ graph TD
 - Takes a block number as input.
 - Uses `BlockFetcher` to retrieve the full block data, including the list of transaction objects.
 - Delegates the processing of the block's transactions to the `TransactionBatchProcessor`.
-- Optionally, it can save the final processed transactions to a database via a `TransactionWriter` (from the `sarigoz` project).
+- Optionally, it can save the final processed transactions to a database via a `TransactionWriter` (from the `baygus` project).
 
 ### `TransactionBatchProcessor`
 - **Responsibility**: To efficiently process all transactions within a single block.
@@ -141,4 +141,4 @@ The system is configured via parameters passed to the `LiveBlockProcessor`, typi
 
 ### Dependencies
 - **Core**: `web3.py`, `aio_pika` (for RabbitMQ), `orjson`.
-- **`sarigoz`**: This module has a dependency on the `sarigoz` project for database writing (`TransactionWriter`) and stablecoin analysis. This means it is designed to work as part of a larger analytics ecosystem and is not fully standalone.
+- **`baygus`**: This module has a dependency on the `baygus` project for database writing (`TransactionWriter`) and stablecoin analysis. This means it is designed to work as part of a larger analytics ecosystem and is not fully standalone.

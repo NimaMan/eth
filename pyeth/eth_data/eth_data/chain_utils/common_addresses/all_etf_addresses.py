@@ -1170,8 +1170,9 @@ ETF_ADDRESSES_BY_NAME = {
     '21Shares CETH_7': '0xff1dBB9e1D2e15B70869ab3BcBe7c1ac09048882',
 
 }
+# Total: 1151 ETF addresses
 
 # Reverse mapping
 ETF_NAMES_BY_ADDRESS = {v: k for k, v in ETF_ADDRESSES_BY_NAME.items()}
 
-# Total: 1151 ETF addresses
+ETF_ADDRESSES_SET = set(ETF_ADDRESSES_BY_NAME.values())

@@ -107,8 +107,8 @@ from web3 import Web3
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
 from eth_data.blockchain.block_fetcher import BlockFetcher
 from eth_data.database.writers.transaction_writer import TransactionWriter 
-from sarigoz.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
-from sarigoz.etfs.etf_analyzer import BlockLevelETFAnalyzer
+from baygus.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
+from baygus.etfs.etf_analyzer import BlockLevelETFAnalyzer
 
 
 class BlockProcessor:

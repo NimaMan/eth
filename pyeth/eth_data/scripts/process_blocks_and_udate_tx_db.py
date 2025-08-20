@@ -5,7 +5,7 @@ from eth_data.utils.logger import get_logger
 from datetime import datetime, timezone
 from sqlalchemy import text
 from web3 import Web3
-from sarigoz.utils.time_block_converter import TimeBlockConverter
+from baygus.utils.time_block_converter import TimeBlockConverter
 from eth_data.database.eth_db_conn import get_db_engine
 
 

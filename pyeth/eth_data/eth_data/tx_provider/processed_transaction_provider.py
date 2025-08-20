@@ -10,7 +10,7 @@ to the Rust tx_processor Python bindings, enabling efficient fund flow network a
 
 Algorithm:
 1. Phase 1: Transaction Collection
-   - Uses ethtx.TxProcessor for high-speed transaction processing
+   - Uses pyreth.TxProcessor for high-speed transaction processing
    - Maintains same caching structure as original ProcessedTransactionProvider
    - Processes transactions in parallel batches for optimal throughput
 
@@ -36,15 +36,14 @@ from typing import List, Dict, Any, Optional, Set
 from collections import OrderedDict
 
 
-# Import Rust tx_processor bindings (now called ethtx)
+# Import Rust tx_processor bindings (now called pyreth)
 try:
-    import ethtx
+    import pyreth
 except ImportError as e:
     raise ImportError(
-        "ethtx not available. Please install with: "
-        "cd /home/nima/code/crypto/rust/tx_processor && maturin develop --release --features python"
+        "pyreth not available. Please install with: "
+        "cd /home/nima/code/crypto/rust/pyreth && maturin develop --release"
     ) from e
-
 
 from eth_data.database.db_fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
 
@@ -70,8 +69,8 @@ class RustProcessedTransactionProvider:
         
         # Initialize Rust tx_processor
         try:
-            # Note: ethtx.TxProcessor() uses hardcoded path internally
-            self.tx_processor = ethtx.TxProcessor()
+            # Note: pyreth.TxProcessor() uses hardcoded path internally
+            self.tx_processor = pyreth.TxProcessor()
             if self.logger:
                 self.logger.info("Initialized Rust tx_processor with hardcoded path: /home/nima/.local/share/reth/mainnet")
         except Exception as e:

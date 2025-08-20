@@ -336,5 +336,5 @@ sudo ./migrate_service.sh
 
 - **eth_token**: Token discovery and management
 - **qarqa**: Fund flow network analysis
-- **sarigoz**: Web interface for data visualization
+- **baygus**: Web interface for data visualization
 - **kara_qarqa**: Content generation and alerts

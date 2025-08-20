@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 import os
 from typing import Optional
-from sarigoz.utils.logger import get_logger
+from baygus.utils.logger import get_logger
 
 # Global engine cache for connection reuse
 _engines = {}
@@ -32,7 +32,7 @@ def get_db_engine(db: str = 'eth_db', pool_size: int = 10, max_overflow: int = 2
         'host': os.getenv('DB_HOST', 'localhost'),
         'port': os.getenv('DB_PORT', '5432'),
         'db': db,
-        'name': 'sarigoz'
+        'name': 'baygus'
     }
     
     connection_url = 'postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}?application_name={name}'.format(**db_config)
@@ -47,7 +47,7 @@ def get_db_engine(db: str = 'eth_db', pool_size: int = 10, max_overflow: int = 2
         pool_recycle=3600,   # Recycle connections every hour
         connect_args={
             'client_encoding': 'utf8',
-            'application_name': 'sarigoz_address_profile',
+            'application_name': 'baygus_address_profile',
             'connect_timeout': 10,
         },
         echo=False,  # Set to True for SQL debugging

@@ -23,7 +23,7 @@ from typing import List, Dict, Optional, Union
 import numpy as np
 import math
 from eth_data.database.schema.eth_db_data_models import Address
-from sarigoz.utils.time_block_converter import TimeBlockConverter
+from baygus.utils.time_block_converter import TimeBlockConverter
 from web3 import Web3
 
 
