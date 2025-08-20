@@ -1,0 +1,47 @@
+[package]
+name = "pyreth"
+version = "0.1.0"
+edition = "2021"
+authors = ["PyReth Team"]
+description = "Python bindings for Reth-based Ethereum tools"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/pyreth"
+readme = "README.md"
+
+[lib]
+name = "pyreth"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["python"]
+python = ["pyo3", "pyo3-asyncio", "tx_builder"]
+
+[dependencies]
+# Core Reth-based dependencies (without Python features)
+ethtx = { path = "../tx_processor", default-features = false }
+reth_tx_simulator = { path = "../reth_tx_simulator" }
+tx_builder = { path = "../tx_builder", default-features = false, features = ["python"], optional = true }
+
+# Python bindings
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"], optional = true }
+pyo3-asyncio = { version = "0.20", features = ["tokio-runtime"], optional = true }
+
+# Async runtime
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+
+# Core dependencies
+eyre = "0.6"
+tracing = "0.1"
+alloy-primitives = "1.1.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+hex-literal = "0.4"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+# Performance
+rayon = "1.10"
+num_cpus = "1.16"
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
