@@ -328,13 +328,13 @@ impl SignalPublisher {
         };
         
         // Log what we're about to send
-        info!("Sending ZMQ message - Topic: '{}', Data length: {} bytes", topic, json_data.len());
+        debug!("Sending ZMQ message - Topic: '{}', Data length: {} bytes", topic, json_data.len());
         
         // Try without DONTWAIT first to ensure message is sent
         match self.zmq_socket.send_multipart(&[topic.as_bytes(), json_data.as_bytes()], 0) {
             Ok(_) => {
                 self.stats.zmq_published.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                info!("✅ Successfully published {} signal to ZMQ", topic);
+                debug!("Published {} signal to ZMQ", topic);
                 Ok(())
             }
             Err(e) => {

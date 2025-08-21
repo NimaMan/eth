@@ -54,7 +54,7 @@ struct Args {
     reth_db_path: String,
     
     /// Log directory base path
-    #[arg(long, default_value = "/home/nima/code/crypto/logs/mempool")]
+    #[arg(long, default_value = "/home/nima/code/crypto/rust/mempool_processor/logs")]
     log_dir: String,
     
     /// Batch size for transaction processing

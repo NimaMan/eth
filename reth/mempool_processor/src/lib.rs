@@ -31,6 +31,6 @@ pub mod tx_simulator {
     };
     
     // Re-export tx_processor if available
-    pub use tx_processor::{TxProcessor, ProcessedTransaction};
+    // pub use tx_processor::{TxProcessor, ProcessedTransaction};
 }
 

@@ -24,6 +24,7 @@ pub mod simulation_queue;
 pub mod sequential_tx_simulator;
 pub mod single_tx_simulator;
 pub mod unified_simulator;
+pub mod liquidity_removal_simulator;
 
 pub use simulation_manager::{
     SimulationManager,
@@ -47,3 +48,7 @@ pub use single_tx_simulator::{
     mempool_tx_to_call_request,
 };
 pub use unified_simulator::UnifiedSimulator;
+pub use liquidity_removal_simulator::{
+    LiquidityRemovalSimulator,
+    LiquidityRemovalResult,
+};

@@ -90,7 +90,7 @@ tokio-tungstenite = "0.20"
 
 # Reth direct integration for ultra-fast simulation
 reth_tx_simulator = { path = "../reth_tx_simulator" }
-tx_processor = { path = "../tx_processor" }
+# tx_processor = { path = "../tx_processor" }
 reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
 reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
 reth-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/reth" }

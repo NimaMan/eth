@@ -281,7 +281,7 @@ async fn flush_signals(
         Ok(result) => {
             let rows_affected = result.rows_affected();
             stats.written += rows_affected;
-            info!("✅ Wrote {} trading enabled signals to database", rows_affected);
+            debug!("Wrote {} trading enabled signals to database", rows_affected);
             pending.clear();
         }
         Err(e) => {

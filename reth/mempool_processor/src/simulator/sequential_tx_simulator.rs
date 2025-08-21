@@ -6,6 +6,7 @@ use alloy_primitives::{Address, Bytes, U256, I256};
 use reth_tx_simulator::{RethTxSimulator, CallRequest, AddressStateChange};
 use crate::common::address::alloy_address_to_checksum;
 use reth_tx_simulator::SequentialSimulationOptions;
+use tracing::info;
 
 /// Result of a single transaction in the sequence
 #[derive(Debug, Clone)]
@@ -162,6 +163,16 @@ impl SequentialBuySellSimulator {
         block_number: Option<u64>,
     ) -> Result<SequenceSimulationResult> {
         let start_time = Instant::now();
+        
+        // Log actual block being used
+        let actual_block = if block_number.is_none() {
+            let latest = self.simulator.get_latest_block()?;
+            info!("  Using latest block: {}", latest);
+            latest
+        } else {
+            block_number.unwrap()
+        };
+        info!("  Simulating at block {} (requested: {:?})", actual_block, block_number);
         
         // Get base fee for dynamic gas pricing
         let gas_price = if let Some(block) = block_number {

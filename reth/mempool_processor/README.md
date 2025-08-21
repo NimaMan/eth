@@ -725,7 +725,7 @@ cargo run --example test_buy_sell_simulator
 ### **External Systems**
 - **[eth_kartal](../eth_kartal)**: Transaction execution engine
 - **[revm_tx_simulator](../revm_tx_simulator)**: Alternative simulator
-- **[sarigoz](../../py/sarigoz)**: Web analytics dashboard
+- **[baygus](../../py/baygus)**: Web analytics dashboard
 
 ### **Data Sources**
 - **Reth Node**: Primary mempool and RPC data

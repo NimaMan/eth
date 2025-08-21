@@ -3,13 +3,14 @@ use std::sync::Arc;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use tokio::sync::Mutex;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
 use crate::common::address::checksum_address;
 use crate::signal_publisher::SignalPublisher;
 use crate::config::TaxDetectionConfig;
+use crate::tx_router::{TransactionCategory, CreatorFunctionType};
 use hex;
 
 use super::{
@@ -519,18 +520,136 @@ impl SignalManager {
         
         // STEP 3: Liquidity detector - Check for pool drains and liquidity removals
         // Use tx_state_changes which has the actual transaction state changes
+        
+        // Critical debug logging for liquidity removal
+        if matches!(result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
+            self.log_activity("TX_STATE_DEBUG", &format!(
+                "TX {} | tx_state_changes present: {} | count: {}",
+                result.request.tx.hash,
+                result.tx_state_changes.is_some(),
+                result.tx_state_changes.as_ref().map_or(0, |sc| sc.len())
+            ));
+        }
+        
         if let Some(ref state_changes) = result.tx_state_changes {
+            // Log state changes for liquidity removal transactions
+            if matches!(result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
+                self.log_activity("STATE_CHANGES", &format!("TX {} has {} address changes", 
+                    result.request.tx.hash, state_changes.len()));
+                
+                // Log each address that was modified
+                for (address, changes) in state_changes.iter() {
+                    // Check if this is a pool address
+                    let is_pool = if let Some(pool_addr) = &result.pool_address {
+                        address == pool_addr
+                    } else {
+                        false
+                    };
+                    
+                    if is_pool {
+                        self.log_activity("POOL_STATE_CHANGE", &format!(
+                            "Pool {} | ETH net: {:?} | Token changes: {}",
+                            address, changes.eth_net, changes.token_net.len()
+                        ));
+                        
+                        // Log token changes if any
+                        for (token, amount) in changes.token_net.iter().take(5) {
+                            self.log_activity("POOL_TOKEN_CHANGE", &format!(
+                                "  Token {} = {:?}",
+                                token, amount
+                            ));
+                        }
+                    }
+                }
+            }
+            
             // tx.from is already bytes (Vec<u8>), no need to decode
             let from_address_result = alloy_primitives::Address::try_from(result.request.tx.from.as_slice()).ok();
             
             if let Some(from_address) = from_address_result {
             
-            // Run liquidity detection
-            let liquidity_signals = self.liquidity_detector.detect(
-                &result.request.tx.hash,
-                from_address,
-                state_changes,
-            ).await;
+            // Check if we have a liquidity removal result (from dedicated simulator)
+            let liquidity_signals = if let Some(ref removal_result) = result.liquidity_removal_result {
+                // Use the new dedicated detection method for liquidity removals
+                info!("💧 Using dedicated liquidity removal detection for TX {}", result.request.tx.hash);
+                
+                // If simulation failed, log it
+                if !removal_result.success {
+                    // Write to liquidity_removals.log file directly
+                    let liquidity_log_path = self.signal_log_path.parent()
+                        .unwrap_or(std::path::Path::new("."))
+                        .join("liquidity_removals.log");
+                    
+                    if let Ok(mut file) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&liquidity_log_path)
+                    {
+                        let timestamp = chrono::Local::now();
+                        let token_str = result.token_address
+                            .map(|a| {
+                                let bytes: &[u8] = a.as_ref();
+                                checksum_address(&hex::encode(bytes))
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        let pool_str = result.pool_address
+                            .map(|a| {
+                                let bytes: &[u8] = a.as_ref();
+                                checksum_address(&hex::encode(bytes))
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        let from_bytes: &[u8] = from_address.as_ref();
+                        let remover_str = checksum_address(&hex::encode(from_bytes));
+                        
+                        writeln!(file, "[{}] REMOVAL_FAILED | Pool: {} | Token: {} | Remover: {} | Reason: {} | TxHash: {}",
+                            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                            pool_str,
+                            token_str,
+                            remover_str,
+                            removal_result.revert_reason.as_ref().unwrap_or(&"Unknown error".to_string()),
+                            result.request.tx.hash
+                        ).ok();
+                        writeln!(file, "").ok(); // Empty line for readability
+                        file.flush().ok();
+                    }
+                    
+                    // Also log to signal_manager.log
+                    self.log_activity("LIQUIDITY_REMOVAL_FAILED", &format!(
+                        "TX: {} | Reason: {}",
+                        result.request.tx.hash,
+                        removal_result.revert_reason.as_ref().unwrap_or(&"Unknown error".to_string())
+                    ));
+                    
+                    // And log to error for simulation.log
+                    error!("❌ LIQUIDITY_REMOVAL_FAILED | TX: {} | Reason: {}", 
+                        result.request.tx.hash,
+                        removal_result.revert_reason.as_ref().unwrap_or(&"Unknown error".to_string())
+                    );
+                }
+                
+                if let Some(token_addr) = result.token_address {
+                    if let Some(signal) = self.liquidity_detector.detect_from_removal_result(
+                        &result.request.tx.hash,
+                        from_address,
+                        removal_result,
+                        token_addr,
+                    ).await {
+                        vec![signal]
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    warn!("No token address available for liquidity removal detection");
+                    vec![]
+                }
+            } else {
+                // Use the standard detection method (for non-liquidity-removal transactions)
+                self.liquidity_detector.detect(
+                    &result.request.tx.hash,
+                    from_address,
+                    state_changes,
+                ).await
+            };
             
             // Convert liquidity signals to the Signal enum
             for liq_signal in liquidity_signals {
@@ -549,6 +668,31 @@ impl SignalManager {
                             timestamp: chrono::Utc::now().timestamp() as u64,
                         });
                         
+                        // Also write to liquidity_removals.log for successful scams
+                        let liquidity_log_path = self.signal_log_path.parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .join("liquidity_removals.log");
+                        
+                        if let Ok(mut file) = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&liquidity_log_path)
+                        {
+                            let timestamp = chrono::Local::now();
+                            writeln!(file, "[{}] SCAM_DETECTED | Pool: {} | Token: {} | Scammer: {} | Drained: {:.2} ETH ({:.1}%) | Remaining: {:.2} ETH | TxHash: {}",
+                                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                                liq_signal.pool_address,
+                                liq_signal.token_address,
+                                liq_signal.from_address,
+                                liq_signal.eth_change.abs(),
+                                liq_signal.percentage_change,
+                                liq_signal.remaining_liquidity,
+                                liq_signal.tx_hash
+                            ).ok();
+                            writeln!(file, "").ok(); // Empty line for readability
+                            file.flush().ok();
+                        }
+                        
                         self.log_activity("LIQUIDITY_SCAM_DETECTED", &format!(
                             "Pool: {} | Type: {} | ETH drained: {:.4} | Remaining: {:.4} | Drain %: {:.1}%",
                             liq_signal.pool_address,
@@ -561,6 +705,31 @@ impl SignalManager {
                         signals.push(scam_signal);
                     }
                     super::liquidity_detector::SignalType::LiquidityRemoval => {
+                        // Write to liquidity_removals.log for non-scam removals
+                        let liquidity_log_path = self.signal_log_path.parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .join("liquidity_removals.log");
+                        
+                        if let Ok(mut file) = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&liquidity_log_path)
+                        {
+                            let timestamp = chrono::Local::now();
+                            writeln!(file, "[{}] LIQUIDITY_REMOVAL | Pool: {} | Token: {} | Remover: {} | Removed: {:.2} ETH ({:.1}%) | Remaining: {:.2} ETH | TxHash: {}",
+                                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                                liq_signal.pool_address,
+                                liq_signal.token_address,
+                                liq_signal.from_address,
+                                liq_signal.eth_change.abs(),
+                                liq_signal.percentage_change,
+                                liq_signal.remaining_liquidity,
+                                liq_signal.tx_hash
+                            ).ok();
+                            writeln!(file, "").ok(); // Empty line for readability
+                            file.flush().ok();
+                        }
+                        
                         // Log liquidity removal but don't create a signal yet
                         self.log_activity("LIQUIDITY_REMOVAL", &format!(
                             "Pool: {} | Type: {} | ETH removed: {:.4} | Remaining: {:.4} | Change: {:?}",
@@ -629,7 +798,7 @@ impl SignalManager {
         
         // Also log a summary for this simulation
         if !signals.is_empty() {
-            info!("📢 Detected {} signals for TX {}", signals.len(), result.request.tx.hash);
+            debug!("Detected {} signals for TX {}", signals.len(), result.request.tx.hash);
             self.log_activity("SIGNALS_SUMMARY", &format!(
                 "Total signals detected: {}",
                 signals.len()
@@ -643,7 +812,7 @@ impl SignalManager {
                         error!("Failed to publish signal: {}", e);
                     }
                 }
-                info!("✅ Published {} signals", signals.len());
+                debug!("Published {} signals", signals.len());
             }
         } else {
             // Skip no signals logging for contract creation transactions to reduce noise

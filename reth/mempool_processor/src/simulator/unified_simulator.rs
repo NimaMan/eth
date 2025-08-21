@@ -30,7 +30,7 @@ use super::single_tx_simulator::{SimulationResult, StateChangeResult};
 /// Unified simulator that manages both single and sequential simulations
 pub struct UnifiedSimulator {
     /// The underlying Reth simulator for single transactions
-    single_simulator: RethTxSimulator,
+    single_simulator: Arc<RethTxSimulator>,
     /// The sequential buy/sell simulator
     sequential_simulator: SequentialBuySellSimulator,
 }
@@ -62,7 +62,7 @@ impl UnifiedSimulator {
         );
         
         // Create both simulators using the same provider factory
-        let single_simulator = RethTxSimulator::with_provider_factory(provider_factory.clone())?;
+        let single_simulator = Arc::new(RethTxSimulator::with_provider_factory(provider_factory.clone())?);
         let sequential_simulator = RethTxSimulator::with_provider_factory(provider_factory)?;
         
         // Wrap the sequential simulator
@@ -105,7 +105,7 @@ impl UnifiedSimulator {
         );
         
         // Create both simulators using the same provider factory
-        let single_simulator = RethTxSimulator::with_provider_factory(provider_factory.clone())?;
+        let single_simulator = Arc::new(RethTxSimulator::with_provider_factory(provider_factory.clone())?);
         let sequential_simulator = RethTxSimulator::with_provider_factory(provider_factory)?;
         
         // Wrap the sequential simulator with custom config
@@ -218,5 +218,11 @@ impl UnifiedSimulator {
     /// Get access to the single transaction simulator
     pub fn single_tx_simulator(&self) -> &RethTxSimulator {
         &self.single_simulator
+    }
+    
+    /// Get the underlying Reth simulator as Arc for sharing
+    pub fn get_reth_simulator(&self) -> Arc<RethTxSimulator> {
+        // Return the Arc directly
+        self.single_simulator.clone()
     }
 }
