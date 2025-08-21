@@ -165,14 +165,11 @@ impl SequentialBuySellSimulator {
         let start_time = Instant::now();
         
         // Log actual block being used
-        let actual_block = if block_number.is_none() {
-            let latest = self.simulator.get_latest_block()?;
-            info!("  Using latest block: {}", latest);
-            latest
+        if block_number.is_none() {
+            info!("  Using latest available block (None = let simulator choose)");
         } else {
-            block_number.unwrap()
-        };
-        info!("  Simulating at block {} (requested: {:?})", actual_block, block_number);
+            info!("  Simulating at specific block {} (requested: {:?})", block_number.unwrap(), block_number);
+        }
         
         // Get base fee for dynamic gas pricing
         let gas_price = if let Some(block) = block_number {

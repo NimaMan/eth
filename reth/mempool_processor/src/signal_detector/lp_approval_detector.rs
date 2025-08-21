@@ -10,6 +10,7 @@ use tracing::warn;
 use alloy_primitives::{Address, U256};
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::Path;
 use chrono::Utc;
 
 /// Signal for LP token approval (rug pull setup)
@@ -35,12 +36,13 @@ pub struct LpApprovalDetector {
 }
 
 impl LpApprovalDetector {
-    pub fn new() -> Self {
-        // Create log file for LP approval warnings
+    pub fn new(log_dir: &Path) -> Self {
+        // Create log file for LP approval warnings in the signals directory
+        let log_path = log_dir.join("lp_approval_warnings.log");
         let log_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open("logs/lp_approval_warnings.log")
+            .open(log_path)
             .ok();
             
         Self { log_file }

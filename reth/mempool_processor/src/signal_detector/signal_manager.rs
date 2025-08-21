@@ -36,8 +36,12 @@ pub struct SignalManagerConfig {
 
 impl Default for SignalManagerConfig {
     fn default() -> Self {
+        // Create a timestamped directory for test/example runs
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
+        let log_dir = PathBuf::from(format!("logs/test_signals_{}", timestamp));
+        
         Self {
-            log_dir: PathBuf::from("logs/signals"),
+            log_dir,
             min_liquidity_threshold: 0.5, // 0.5 ETH minimum liquidity
             tax_detection: TaxDetectionConfig::default(),
         }
@@ -91,7 +95,7 @@ impl SignalManager {
             _stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::with_config(simulation_results_log_path, config.min_liquidity_threshold),
             tax_signal_detector: TaxDetector::with_log_path(config.tax_detection.clone(), tax_log_path),
-            lp_approval_detector: LpApprovalDetector::new(),
+            lp_approval_detector: LpApprovalDetector::new(&config.log_dir),
             token_cache: None,
             signal_log_path,
             publisher: None,
@@ -204,9 +208,11 @@ impl SignalManager {
         
         // Log to signal_manager.log
         let error_msg = if let Some(ref err) = result.error {
-            // Check if it's the expected "not implemented" message
+            // Check if it's an expected informational message
             if err.contains("Contract creation simulation not implemented") {
                 format!("Warning: {}", err)
+            } else if err.contains("No pools found for token") {
+                format!("Info: {}", err)
             } else {
                 format!("Error: {}", err)
             }
