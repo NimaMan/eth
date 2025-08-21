@@ -17,8 +17,8 @@ default = ["python"]
 python = ["pyo3", "pyo3-asyncio", "tx_builder"]
 
 [dependencies]
-# Core Reth-based dependencies (without Python features)
-ethtx = { path = "../tx_processor", default-features = false }
+# Core Reth-based dependencies
+ethtx = { path = "../tx_processor" }
 reth_tx_simulator = { path = "../reth_tx_simulator" }
 tx_builder = { path = "../tx_builder", default-features = false, features = ["python"], optional = true }
 
