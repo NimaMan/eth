@@ -22,7 +22,8 @@ use reth_tx_simulator::SequentialSimulationOptions;
 /// 
 /// Usage:
 ///   import pyreth
-///   sim = pyreth.Simulator()
+///   reth = pyreth.PyReth()
+///   sim = reth.simulator()
 ///   result = sim.simulate_transaction({...})
 #[pyclass(name = "Simulator")]
 pub struct PySimulator {
@@ -30,6 +31,18 @@ pub struct PySimulator {
     tx_processor: Arc<TxProcessor>,
 }
 
+impl PySimulator {
+    /// Create from shared processor instance (used by PyReth)
+    pub fn from_shared(processor: Arc<TxProcessor>) -> Self {
+        let runtime = Runtime::new()
+            .expect("Failed to create runtime");
+        
+        Self {
+            runtime: Arc::new(runtime),
+            tx_processor: processor,
+        }
+    }
+}
 
 /// Result for sequential simulation
 #[pyclass]
@@ -75,9 +88,11 @@ pub struct PyTransactionResult {
 impl PySimulator {
     /// Initialize simulator with Reth database
     /// 
-    /// Uses the same hardcoded path as TxProcessor for consistency
+    /// DEPRECATED: Use PyReth().simulator() instead to avoid multiple database connections
     #[new]
     pub fn new() -> PyResult<Self> {
+        eprintln!("WARNING: Creating standalone Simulator is deprecated. Use PyReth().simulator() instead.");
+        
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";
         
         let runtime = Runtime::new()

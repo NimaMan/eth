@@ -43,5 +43,9 @@ tiny-keccak = { version = "2.0", features = ["keccak"] }
 rayon = "1.10"
 num_cpus = "1.16"
 
+# Singleton pattern
+once_cell = "1.19"
+parking_lot = "0.12"
+
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

@@ -2,12 +2,25 @@
 
 Python examples demonstrating pyreth module usage.
 
-## Examples
+## Directory Structure
 
-- **stablecoin_supplies.py** - Get current stablecoin total supplies
-- **python/basic_usage.py** - Introduction to all pyreth components  
-- **python/query_examples.py** - Comprehensive ChainQuery examples
-- **python/chain_query_demo.py** - Interactive ChainQuery demonstration
+### `/python/` - Basic Python Usage
+- `basic_usage.py` - Introduction to all pyreth components
+- `chain_query_demo.py` - Interactive ChainQuery demonstration
+- `query_examples.py` - Comprehensive ChainQuery examples
+
+### `/simulation/` - Transaction Simulation
+- **`resimulate_transaction.py`** - Function to re-simulate ProcessedTransaction objects
+
+### `/tx_analysis/` - Transaction Analysis
+- `investigate_liquidity_txs.py` - Investigate specific liquidity removal transactions
+- `analyze_liquidity_removal.py` - Detailed analysis of liquidity removal patterns
+
+### `/chain_query/` - Blockchain Queries
+- `stablecoin_supplies.py` - Get current stablecoin total supplies
+
+### `/ipy/` - IPython/Jupyter Examples
+- Interactive notebook examples
 
 ## Installation
 
@@ -16,7 +29,24 @@ cd /home/nima/code/crypto/rust/pyreth
 maturin develop --release
 ```
 
-## Usage
+## Key Function: `resimulate_transaction()`
+
+Located in `/simulation/resimulate_transaction.py`, this function allows re-simulating any ProcessedTransaction:
+
+```python
+from simulation.resimulate_transaction import resimulate_transaction
+import pyreth
+
+# Get original transaction
+processor = pyreth.TxProcessor()
+tx = processor.process_transaction("0x...")
+
+# Re-simulate at different block
+simulator = pyreth.Simulator()
+new_tx = resimulate_transaction(tx, simulator, block_number=12345678)
+```
+
+## Basic Usage
 
 ```python
 import pyreth

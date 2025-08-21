@@ -8,27 +8,45 @@ use alloy_primitives::{Address, B256, U256};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::chain_query::ChainQuery;
+use ethtx::TxProcessor;
 
 /// Python wrapper for ChainQuery
 /// 
 /// Usage:
 ///   import pyreth
-///   query = pyreth.ChainQuery()
-///   balance = query.get_balance("0x...")
+///   query = pyreth.ChainQuery()  # DEPRECATED
+///   # OR (preferred):
+///   reth = pyreth.PyReth()
+///   query = reth.chain_query()
 #[pyclass(name = "ChainQuery")]
 pub struct PyChainQuery {
-    inner: Arc<ChainQuery>,
+    // Use the ChainQuery from TxProcessor when shared, standalone when created directly
+    inner: Arc<ethtx::chain_query::ChainQuery>,
     runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl PyChainQuery {
+    /// Create from shared TxProcessor instance (used by PyReth)
+    pub fn from_shared(processor: Arc<TxProcessor>) -> Self {
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create runtime");
+        
+        Self {
+            inner: processor.chain_query.clone(),
+            runtime: Arc::new(runtime),
+        }
+    }
 }
 
 #[pymethods]
 impl PyChainQuery {
     /// Create new ChainQuery instance
     /// 
-    /// No arguments needed - uses hardcoded Reth data directory
+    /// DEPRECATED: Use PyReth().chain_query() instead to avoid multiple database connections
     #[new]
     fn new() -> PyResult<Self> {
+        eprintln!("WARNING: Creating standalone ChainQuery is deprecated. Use PyReth().chain_query() instead.");
+        
         // Hardcoded reth_datadir
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";
         
@@ -39,7 +57,7 @@ impl PyChainQuery {
             ))?;
         
         // Create ChainQuery
-        let chain_query = ChainQuery::new(reth_datadir)
+        let chain_query = ethtx::chain_query::ChainQuery::new(reth_datadir)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
                 format!("Failed to create ChainQuery: {}", e)
             ))?;

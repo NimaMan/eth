@@ -12,11 +12,13 @@ pub mod processed_transaction;
 pub mod tx_processor;
 pub mod simulator;
 pub mod chain_query;
+pub mod pyreth_instance;
 
 use processed_transaction::PyProcessedTransaction;
 use tx_processor::PyTxProcessor;
 use simulator::{PySimulator, PySequentialResult, PyTransactionResult};
 use chain_query::PyChainQuery;
+use pyreth_instance::{PyRethInstance, clear_singleton, is_singleton_initialized};
 
 // Import TxBuilder from tx_builder crate
 #[cfg(feature = "python")]
@@ -26,6 +28,13 @@ use tx_builder::python_bindings::PyTxBuilder;
 #[pymodule]
 #[pyo3(name = "pyreth")]
 fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    // Main singleton instance for shared database connection
+    m.add_class::<PyRethInstance>()?;
+    
+    // Utility functions for singleton management
+    m.add_function(wrap_pyfunction!(clear_singleton, m)?)?;
+    m.add_function(wrap_pyfunction!(is_singleton_initialized, m)?)?;
+    
     // Chain query class for direct DB access
     m.add_class::<PyChainQuery>()?;
     

@@ -18,13 +18,28 @@ pub struct PyTxProcessor {
     runtime: Arc<tokio::runtime::Runtime>,
 }
 
+impl PyTxProcessor {
+    /// Create from shared processor instance (used by PyReth)
+    pub fn from_shared(processor: Arc<TxProcessor>) -> Self {
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create runtime");
+        
+        Self {
+            inner: processor,
+            runtime: Arc::new(runtime),
+        }
+    }
+}
+
 #[pymethods]
 impl PyTxProcessor {
     /// Create new TxProcessor instance
     /// 
-    /// No arguments needed - uses hardcoded Reth data directory
+    /// DEPRECATED: Use PyReth().tx_processor() instead to avoid multiple database connections
     #[new]
     fn new() -> PyResult<Self> {
+        eprintln!("WARNING: Creating standalone TxProcessor is deprecated. Use PyReth().tx_processor() instead.");
+        
         // Hardcoded reth_datadir
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";
         
