@@ -88,7 +88,7 @@ pub mod tx_processor {
             let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<_>>>::new(
                 db.clone(),
                 chain_spec.clone(),
-                StaticFileProvider::read_only(static_files_path, true)?,
+                StaticFileProvider::read_only(static_files_path, false)?, // Don't watch files - Reth is already watching
             );
             
             // Use shared provider factory for both simulator and loader

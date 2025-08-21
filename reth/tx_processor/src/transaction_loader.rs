@@ -38,7 +38,7 @@ impl TransactionLoader {
         let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
             db.clone(),
             chain_spec.clone(),
-            StaticFileProvider::read_only(static_files_path, true)?,
+            StaticFileProvider::read_only(static_files_path, false)?, // Don't watch files - Reth is already watching
         );
         
         Ok(Self {
