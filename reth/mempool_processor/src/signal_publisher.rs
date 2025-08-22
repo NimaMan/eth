@@ -75,6 +75,7 @@ struct LogFiles {
     tax_signals: std::fs::File,
     liquidity_removal: std::fs::File,
     scam_detection: std::fs::File,
+    lp_approval: std::fs::File,
 }
 
 /// Publisher statistics
@@ -163,11 +164,17 @@ impl SignalPublisher {
             .append(true)
             .open(log_dir.join("scam_detections.log"))?;
         
+        let lp_approval = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join("lp_approval_signals.log"))?;
+        
         Ok(LogFiles {
             trading_enabled,
             tax_signals,
             liquidity_removal,
             scam_detection,
+            lp_approval,
         })
     }
     
@@ -390,6 +397,15 @@ impl SignalPublisher {
                 )?;
                 writeln!(self.log_files.scam_detection, "")?; // Add empty line for readability
                 self.log_files.scam_detection.flush()?;
+            }
+            Signal::LpApproval(s) => {
+                writeln!(
+                    self.log_files.lp_approval,
+                    "[{}] LP_APPROVAL | Creator: {} | LP Token: {} | Router: {} | Amount: {} | TxHash: {}",
+                    timestamp, s.creator, s.lp_token_address, s.router_address, s.amount, s.tx_hash
+                )?;
+                writeln!(self.log_files.lp_approval, "")?; // Add empty line for readability
+                self.log_files.lp_approval.flush()?;
             }
         }
         

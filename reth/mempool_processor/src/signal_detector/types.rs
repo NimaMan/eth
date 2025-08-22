@@ -7,6 +7,7 @@
 /// - Each signal contains pool-specific metrics
 
 use serde::{Serialize, Deserialize};
+use super::LpApprovalSignal;
 
 /// Binary signal types emitted by detectors
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ pub enum Signal {
     TaxSignal(TaxSignalRecord),
     LiquidityRemoval(LiquidityRemovalSignal),
     ScamDetection(ScamDetectionSignal),
+    LpApproval(LpApprovalSignal),
 }
 
 /// Trading enabled signal

@@ -178,6 +178,16 @@ impl SignalManager {
                         s.drain_percentage
                     )
                 }
+                Signal::LpApproval(s) => {
+                    format!("[{}] SIGNAL_DETECTED | LP_APPROVAL | {} | creator: {} | lp_token: {} | router: {} | amount: {}",
+                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        s.tx_hash,
+                        s.creator,
+                        s.lp_token_address,
+                        s.router_address,
+                        s.amount
+                    )
+                }
                 _ => {
                     format!("[{}] SIGNAL_DETECTED | UNKNOWN_SIGNAL | {:?}",
                         timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -866,26 +876,22 @@ impl SignalManager {
                     "V2".to_string()
                 };
                 
-                // Create a scam detection signal for LP approval (rug pull setup)
-                let signal = Signal::ScamDetection(crate::signal_detector::ScamDetectionSignal {
-                    tx_hash: lp_signal.tx_hash,
-                    pool_address: lp_signal.lp_token_address.clone(),
-                    pool_type,  // Include pool type
-                    token_address: lp_signal.lp_token_address,
-                    scammer_address: lp_signal.creator,
-                    eth_drained: 0.0, // Not drained yet, just approved
-                    eth_remaining: 0.0, // Unknown until actual removal
-                    drain_percentage: 0.0, // Will be 100% when executed
-                    timestamp: chrono::Utc::now().timestamp() as u64,
-                });
+                // Create an LP approval signal
+                let signal = Signal::LpApproval(lp_signal.clone());
                 
                 // Log the signal
                 self.log_signal(&signal);
                 
+                // Also log the database write attempt (for tracking)
+                self.lp_approval_detector.log_db_write(&lp_signal, true);
+                
                 // Publish it
                 let mut pub_guard = publisher.lock().await;
-                if let Err(e) = pub_guard.publish(signal).await {
+                if let Err(e) = pub_guard.publish(signal.clone()).await {
                     error!("Failed to publish LP approval signal: {}", e);
+                    self.lp_approval_detector.log_db_write(&lp_signal, false);
+                } else {
+                    info!("Successfully published LP approval signal for {}", lp_signal.tx_hash);
                 }
             }
         } else {

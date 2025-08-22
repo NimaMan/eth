@@ -12,14 +12,37 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use chrono::Utc;
+use serde::{Serialize, Deserialize};
+
+/// Custom serialization for U256
+mod u256_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use alloy_primitives::U256;
+    
+    pub fn serialize<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+    
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<U256, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<U256>().map_err(serde::de::Error::custom)
+    }
+}
 
 /// Signal for LP token approval (rug pull setup)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LpApprovalSignal {
     pub tx_hash: String,
     pub creator: String,
     pub lp_token_address: String,
     pub router_address: String,
+    #[serde(with = "u256_serde")]
     pub amount: U256,
     pub timestamp: i64,
     // Additional fields for database
@@ -37,8 +60,8 @@ pub struct LpApprovalDetector {
 
 impl LpApprovalDetector {
     pub fn new(log_dir: &Path) -> Self {
-        // Create log file for LP approval warnings in the signals directory
-        let log_path = log_dir.join("lp_approval_warnings.log");
+        // Create log file for LP approval signals in the signals directory
+        let log_path = log_dir.join("lp_approval_signals.log");
         let log_file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -117,12 +140,30 @@ impl LpApprovalDetector {
     fn log_approval_warning(&mut self, signal: &LpApprovalSignal) {
         if let Some(ref mut file) = self.log_file {
             let log_entry = format!(
-                "[{}] WARN: Creator {} approved router {} to spend {} LP tokens of pool {} (tx: {})\n",
+                "[{}] LP_APPROVAL_SIGNAL | Creator: {} | LP Token: {} | Router: {} | Amount: {} | TxHash: {}\n",
                 Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
                 signal.creator,
+                signal.lp_token_address,
                 signal.router_address,
                 signal.amount,
-                signal.lp_token_address,
+                signal.tx_hash
+            );
+            
+            let _ = file.write_all(log_entry.as_bytes());
+            let _ = file.flush();
+        }
+    }
+    
+    /// Log database write for tracking
+    pub fn log_db_write(&mut self, signal: &LpApprovalSignal, success: bool) {
+        if let Some(ref mut file) = self.log_file {
+            let status = if success { "SUCCESS" } else { "FAILED" };
+            let log_entry = format!(
+                "[{}] LP_APPROVAL_DB_WRITE_{} | Token: {} | Pool: {} | TxHash: {}\n",
+                Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                status,
+                signal.token_address,
+                signal.pool_address,
                 signal.tx_hash
             );
             
