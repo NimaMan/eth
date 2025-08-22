@@ -190,96 +190,28 @@ impl SignalPublisher {
             tokio::spawn(async move {
                 info!("🗄️ Starting database writer task...");
                 
-                // Try to create the signal writers
-                let signal_writer_config = crate::db_writers::SignalWriterConfig::default();
-                let trading_writer = match crate::db_writers::TradingSignalWriter::new_with_defaults(signal_writer_config).await {
-                    Ok(w) => Some(w),
+                // Create unified signal writer
+                let unified_writer = match crate::db_writers::UnifiedSignalWriter::new(&db_url).await {
+                    Ok(w) => {
+                        info!("✅ Unified signal writer initialized");
+                        info!("  {}", w.get_status());
+                        w
+                    }
                     Err(e) => {
-                        error!("Failed to create trading signal writer: {}", e);
-                        None
+                        error!("❌ Failed to initialize unified signal writer: {}", e);
+                        return;
                     }
                 };
-                
-                let tax_writer = match crate::db_writers::TaxSignalWriter::new(&db_url, 50, std::time::Duration::from_secs(5)).await {
-                    Ok(w) => Some(w),
-                    Err(e) => {
-                        error!("Failed to create tax signal writer: {}", e);
-                        None
-                    }
-                };
-                
-                if trading_writer.is_none() && tax_writer.is_none() {
-                    error!("❌ Database writers failed to initialize - database writing disabled");
-                    return;
-                }
                 
                 info!("✅ Database writer task started successfully");
                 
                 while let Some(signal) = receiver.recv().await {
-                    // Convert signal to database record and write
-                    match signal {
-                        Signal::TradingEnabled(ref s) => {
-                            if let Some(ref writer) = trading_writer {
-                                
-                                
-                                let record = crate::db_writers::TradingSignalRecord {
-                                token_address: s.token_address.clone(),
-                                pool_address: s.pool_address.clone(),
-                                pool_type: s.pool_type.clone(),
-                                denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
-                                denom_currency: Some("WETH".to_string()),
-                                detection_timestamp: chrono::Utc::now(),
-                                detection_tx_hash: s.tx_hash.clone(),
-                                price_ratio: None,
-                                denom_reserve_at_signal: None,
-                                token_reserve_at_signal: None,
-                                buy_tax_at_signal: Some(rust_decimal::Decimal::from_f64_retain(s.buy_tax).unwrap_or_default()),
-                                sell_tax_at_signal: Some(rust_decimal::Decimal::from_f64_retain(s.sell_tax).unwrap_or_default()),
-                                total_supply: None,
-                                owner_address: None,
-                                creator_address: s.creator_address.clone(),
-                                signal_source: "mempool".to_string(),
-                            };
-                            
-                                writer.write_signal(record).await;
-                                stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                debug!("Written trading_enabled signal to database");
-                            }
-                        }
-                        Signal::TaxSignal(ref s) => {
-                            let record = crate::db_writers::TaxSignalRecord {
-                                token_address: s.token_address.clone(),
-                                pool_address: s.pool_address.clone(),
-                                pool_type: s.pool_type.clone(),
-                                denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
-                                denom_currency: Some("WETH".to_string()),
-                                detection_timestamp: chrono::Utc::now(),
-                                detection_tx_hash: s.tx_hash.clone(),
-                                signal_type: s.signal_type.clone(),
-                                signal_details: s.signal_details.clone(),
-                                confidence: Some(rust_decimal::Decimal::from_f64_retain(s.confidence).unwrap_or_default()),
-                                buy_tax_at_signal: s.buy_tax.map(|tax| rust_decimal::Decimal::from_f64_retain(tax).unwrap_or_default()),
-                                sell_tax_at_signal: s.sell_tax.map(|tax| rust_decimal::Decimal::from_f64_retain(tax).unwrap_or_default()),
-                                buy_tax_exceeds_threshold: s.buy_tax_exceeds_threshold,
-                                sell_tax_exceeds_threshold: s.sell_tax_exceeds_threshold,
-                                cant_sell: s.cant_sell,
-                                creator_address: s.creator_address.clone(),
-                                signal_source: "mempool".to_string(),
-                            };
-                            
-                            if let Some(ref writer) = tax_writer {
-                                if let Err(e) = writer.write_signal(record) {
-                                    error!("Failed to write tax signal to database: {}", e);
-                                } else {
-                                    stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    debug!("Written tax_signal to database");
-                                }
-                            }
-                        }
-                        _ => {
-                            // TODO: Handle other signal types
-                            debug!("Signal type not yet supported for database writing: {:?}", signal);
-                        }
+                    // Use unified writer to handle all signal types
+                    if let Err(e) = unified_writer.write_signal(signal).await {
+                        error!("Failed to write signal to database: {}", e);
+                        stats_clone.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    } else {
+                        stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
                 warn!("Database writer task terminated");
