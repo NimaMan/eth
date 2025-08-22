@@ -332,6 +332,7 @@ impl SignalPublisher {
             Signal::TaxSignal(s) => ("tax_signal", serde_json::to_string(s)?),
             Signal::LiquidityRemoval(s) => ("liquidity_removal", serde_json::to_string(s)?),
             Signal::ScamDetection(s) => ("scam_detection", serde_json::to_string(s)?),
+            Signal::LpApproval(s) => ("lp_approval", serde_json::to_string(s)?),
         };
         
         // Log what we're about to send

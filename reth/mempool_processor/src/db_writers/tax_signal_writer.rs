@@ -159,7 +159,7 @@ impl TaxSignalWriter {
         for record in &records {
             let result = sqlx::query(
                 r#"
-                INSERT INTO signals.tax_signals (
+                INSERT INTO live_trading.tax_signals (
                     token_address, pool_address, pool_type, denom_address, denom_currency,
                     detection_timestamp, detection_tx_hash,
                     signal_type, signal_details, confidence,
