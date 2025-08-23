@@ -1,5 +1,5 @@
 [package]
-name    = "ethtx"
+name    = "tx_processor"
 version = "0.2.0"
 edition = "2021"
 
@@ -10,7 +10,7 @@ default = []
 # Uses reth_tx_simulator for all transaction simulation
 
 [lib]
-name = "ethtx"
+name = "tx_processor"
 path = "src/lib.rs"
 crate-type = ["rlib"]  # Library only, no Python bindings
 
@@ -29,6 +29,46 @@ path = "examples/simulation/test_simulate_unsigned_transaction.rs"
 name = "process_transaction_by_hash"
 path = "examples/process_transaction_by_hash.rs"
 
+[[example]]
+name = "single_pass_token_trading_simulation"
+path = "examples/single_pass_token_trading_simulation.rs"
+
+# Pool analysis examples
+[[example]]
+name = "erc20_pool_basic_analysis"
+path = "examples/pool_analysis/erc20_pool_basic_analysis.rs"
+
+[[example]]
+name = "erc20_pool_liquidity_removal_simple"
+path = "examples/pool_analysis/erc20_pool_liquidity_removal_simple.rs"
+
+[[example]]
+name = "erc20_pool_tax_demo"
+path = "examples/pool_analysis/erc20_pool_tax_demo.rs"
+
+[[example]]
+name = "erc20_pool_uniswap_v3"
+path = "examples/pool_analysis/erc20_pool_uniswap_v3.rs"
+
+[[example]]
+name = "erc20_pool_usdc_v2"
+path = "examples/pool_analysis/erc20_pool_usdc_v2.rs"
+
+[[example]]
+name = "erc20_pool_with_enable_tx"
+path = "examples/pool_analysis/erc20_pool_with_enable_tx.rs"
+
+[[example]]
+name = "token_trading_viability_simulation"
+path = "examples/pool_analysis/token_trading_viability_simulation.rs"
+
+[[example]]
+name = "erc20_pool_moo_token"
+path = "examples/pool_analysis/erc20_pool_moo_token.rs"
+
+[[example]]
+name = "erc20_pool_block_range_analysis"
+path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
 
 [dependencies]
 # Use the new Direct Reth Transaction Simulator

@@ -15,7 +15,7 @@ pub use reth_tx_simulator::{
     CallRequest,
     SimulationResult,
     DetailedSimulationResult,
-    AddressStateChange,
+    AddressBalanceChange,
     BatchSimulationResult,
     BatchSimulationOptions,
 };
@@ -31,6 +31,17 @@ pub mod config;
 pub mod utils;
 pub mod retry_utils;
 pub mod chain_query;
+
+// Export ERC20 token trading viability module
+pub mod erc20_token_trading_viability;
+pub use erc20_token_trading_viability::{
+    OptionalSetupBuyApproveSellTokenSimulator,
+    OptionalSetupBuyApproveSellResult,
+};
+
+// Export sequential simulation modules
+pub mod chain_state_persisting_sequential_tx_simulator;
+pub use chain_state_persisting_sequential_tx_simulator::ChainStatePersistingSequentialTxSimulator;
 
 // Export TxProcessor for external use
 pub use tx_processor::TxProcessor;
@@ -145,13 +156,13 @@ pub mod tx_processor {
         
         /// Simulate an unsigned transaction and return only state changes (ETH and token balance changes)
         /// This is a wrapper around reth_tx_simulator's simulate_unsigned_transaction_with_call_trace
-        pub async fn simulate_unsigned_transaction_with_state_changes(&self, call_request: CallRequest) -> Result<HashMap<Address, AddressStateChange>> {
+        pub async fn simulate_unsigned_transaction_with_address_balance_changes(&self, call_request: CallRequest) -> Result<HashMap<Address, AddressBalanceChange>> {
             self.simulator.simulate_unsigned_transaction_with_call_trace(call_request).await
         }
         
         /// Simulate an unsigned transaction and return logs + state changes + execution details
         /// This is a wrapper around reth_tx_simulator's simulate_transaction_detailed
-        pub async fn simulate_unsigned_transaction_with_logs_and_state_changes(
+        pub async fn simulate_unsigned_transaction_with_logs_and_address_balance_changes(
             &self,
             call_request: CallRequest,
             block_number: Option<u64>,
@@ -177,7 +188,7 @@ pub mod tx_processor {
             nonce: u64,
             logs: Vec<AlloyLog>,
             gas_limit: u64,
-            state_changes: Option<HashMap<Address, serde_json::Value>>,
+            address_balance_changes: Option<HashMap<Address, serde_json::Value>>,
         ) -> Result<ProcessedTransaction> {
             // Create base transaction
             let mut processed_tx = ProcessedTransaction::new(
@@ -452,9 +463,9 @@ pub mod tx_processor {
                 let simulation_block = block_number.saturating_sub(1);
                 match self.simulator.simulate_unsigned_transaction_with_full_trace_at_block_using_provider(&self.provider_factory, call_request, simulation_block).await {
                     Ok(full_result) => {
-                        // Convert state changes to JSON format for storage
-                        for (addr, changes) in full_result.state_changes {
-                            processed_tx.state_changes.insert(
+                        // Convert address balance changes to JSON format for storage
+                        for (addr, changes) in full_result.address_balance_changes {
+                            processed_tx.address_balance_changes.insert(
                                 addr,
                                 serde_json::json!({
                                     "eth_net": changes.eth_net,
@@ -486,9 +497,9 @@ pub mod tx_processor {
                 }
             }
             
-            // Add state changes if provided
-            if let Some(state_changes) = state_changes {
-                processed_tx.state_changes = state_changes;
+            // Add address balance changes if provided
+            if let Some(address_balance_changes) = address_balance_changes {
+                processed_tx.address_balance_changes = address_balance_changes;
             }
             
             Ok(processed_tx)
@@ -496,11 +507,11 @@ pub mod tx_processor {
         
         /// Process multiple transactions in batch with parallel execution
         /// This replaces Python's simulate_transactions_batch()
-        pub async fn process_batch(&self, requests: Vec<CallRequest>) -> Result<Vec<Result<HashMap<Address, AddressStateChange>>>> {
+        pub async fn process_batch(&self, requests: Vec<CallRequest>) -> Result<Vec<Result<HashMap<Address, AddressBalanceChange>>>> {
             use futures::future::join_all;
             
             let futures = requests.into_iter().map(|request| {
-                self.simulate_unsigned_transaction_with_state_changes(request)
+                self.simulate_unsigned_transaction_with_address_balance_changes(request)
             });
             
             let results = join_all(futures).await;
@@ -569,9 +580,9 @@ pub mod tx_processor {
                         .unwrap_or_default()
                         .as_secs();
                     
-                    // Convert state changes if available
-                    let state_changes_json = if !tx_result.state_changes.is_empty() {
-                        Some(tx_result.state_changes.iter().map(|(addr, change)| {
+                    // Convert address balance changes if available
+                    let address_balance_changes_json = if !tx_result.address_balance_changes.is_empty() {
+                        Some(tx_result.address_balance_changes.iter().map(|(addr, change)| {
                             let mut change_map = serde_json::Map::new();
                             if !change.eth_net.is_zero() {
                                 change_map.insert("eth_net".to_string(), serde_json::json!(change.eth_net.to_string()));
@@ -601,7 +612,7 @@ pub mod tx_processor {
                         nonce,
                         tx_result.logs.clone(),
                         gas_limit,
-                        state_changes_json,
+                        address_balance_changes_json,
                     ).await?;
                     
                     results.push(Ok(processed));
@@ -662,8 +673,8 @@ pub mod tx_processor {
                 .unwrap_or_default()
                 .as_secs();
             
-            // Convert state changes from AddressStateChange to serde_json::Value
-            let state_changes_json: HashMap<Address, serde_json::Value> = full_result.state_changes
+            // Convert address balance changes from AddressBalanceChange to serde_json::Value
+            let address_balance_changes_json: HashMap<Address, serde_json::Value> = full_result.address_balance_changes
                 .into_iter()
                 .map(|(addr, change)| {
                     let mut change_map = serde_json::Map::new();
@@ -699,7 +710,7 @@ pub mod tx_processor {
                 nonce,
                 full_result.logs,
                 gas_limit,
-                Some(state_changes_json),
+                Some(address_balance_changes_json),
             ).await
         }
         
@@ -773,7 +784,7 @@ pub mod tx_processor {
             let latest_block = self.simulator.get_latest_block()?;
             
             // Simulate with full trace to get logs and internal transactions
-            let detailed_result = self.simulate_unsigned_transaction_with_logs_and_state_changes(call_request.clone(), Some(latest_block)).await?;
+            let detailed_result = self.simulate_unsigned_transaction_with_logs_and_address_balance_changes(call_request.clone(), Some(latest_block)).await?;
             
             // Create ProcessedTransaction with simulated data (dummy values for block info since it's unsigned)
             let mut processed_tx = ProcessedTransaction::new(
@@ -830,9 +841,9 @@ pub mod tx_processor {
                 }
             }
             
-            // Extract state changes from detailed result
-            for (addr, changes) in detailed_result.state_changes {
-                processed_tx.state_changes.insert(
+            // Extract address balance changes from detailed result
+            for (addr, changes) in detailed_result.address_balance_changes {
+                processed_tx.address_balance_changes.insert(
                     addr,
                     serde_json::json!({
                         "eth_net": changes.eth_net,

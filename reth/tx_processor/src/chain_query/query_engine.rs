@@ -73,6 +73,11 @@ impl ChainQuery {
         &self.simulator
     }
     
+    /// Get shared simulator for trading simulation
+    pub fn get_simulator(&self) -> Arc<RethTxSimulator> {
+        self.simulator.clone()
+    }
+    
     // Convenience methods that delegate to specialized modules
     
     /// Get ETH balance for an address

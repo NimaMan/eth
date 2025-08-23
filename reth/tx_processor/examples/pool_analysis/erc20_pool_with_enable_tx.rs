@@ -1,0 +1,77 @@
+/// Example: Analyze token that requires enable trading transaction
+/// 
+/// This example shows how to analyze a token that needs a prior transaction
+/// (like enable trading) before buy/sell can occur.
+
+use eyre::Result;
+use std::sync::Arc;
+use alloy_primitives::{Address, U256, B256};
+use tx_processor::{TxProcessor, chain_query::ChainQuery};
+use tx_processor::erc20_token_trading_viability::{
+    analyze_pool_viability,
+    PoolViabilityConfig,
+    PoolType,
+};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    println!("Token Trading Viability with Enable Trading TX");
+    println!("==============================================");
+    
+    let reth_datadir = std::env::var("RETH_DATADIR")
+        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
+    
+    // Create components
+    let chain_query = Arc::new(ChainQuery::new(&reth_datadir)?);
+    let simulator = chain_query.get_simulator();
+    let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
+    
+    // Example: Get the enable trading transaction first
+    // In a real scenario, you'd fetch this from the blockchain
+    let enable_tx_hash: B256 = "0x1234...".parse().unwrap_or(B256::ZERO);
+    
+    // You would fetch the actual transaction like this:
+    // let prior_tx = tx_processor.process_transaction_by_hash(enable_tx_hash).await?;
+    
+    // For demo, we'll proceed without a prior tx
+    let token_address: Address = "0x6982508145454Ce325dDbE47a25d4ec3d2311933".parse()?;
+    let pool_address: Address = "0xA43fe16908251ee70EF74718545e4FE6C5cCEc9f".parse()?;
+    
+    // Configure with prior transaction
+    let mut config = PoolViabilityConfig::new(
+        token_address,
+        pool_address,
+        PoolType::UniswapV2,
+    )
+    .with_test_amount(U256::from(10_000_000_000_000_000u64));
+    
+    // If you had the prior tx:
+    // config = config.with_prior_tx(prior_tx);
+    
+    println!("Analyzing token that may require enable trading...");
+    
+    match analyze_pool_viability(simulator, tx_processor, config).await {
+        Ok(result) => {
+            println!("\nResults:");
+            println!("  Tradeable: {}", result.is_tradeable);
+            
+            if !result.is_tradeable {
+                println!("  Failure: {:?}", result.failure_reason);
+                println!("\nThis token likely requires an enable trading transaction first.");
+                println!("Steps to analyze:");
+                println!("1. Find the enable trading transaction hash");
+                println!("2. Process it with tx_processor.process_transaction_by_hash()");
+                println!("3. Pass it to config.with_prior_tx()");
+                println!("4. Re-run the analysis");
+            } else {
+                println!("  Buy Tax: {:.2}%", result.buy_tax_percent);
+                println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
+            }
+        }
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+    
+    Ok(())
+}

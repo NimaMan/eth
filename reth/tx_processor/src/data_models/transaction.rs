@@ -87,7 +87,7 @@ pub struct ProcessedTransaction {
     
     // Generic events and state
     pub other_events: Vec<HashMap<String, serde_json::Value>>,
-    pub state_changes: HashMap<Address, serde_json::Value>,
+    pub address_balance_changes: HashMap<Address, serde_json::Value>,
     pub latest_states: HashMap<Address, serde_json::Value>,
     pub input: Vec<u8>,
 }
@@ -155,7 +155,7 @@ impl ProcessedTransaction {
             trading_enabled_events: Vec::new(),
             trading_disabled_events: Vec::new(),
             other_events: Vec::new(),
-            state_changes: HashMap::new(),
+            address_balance_changes: HashMap::new(),
             latest_states: HashMap::new(),
             input,
         }

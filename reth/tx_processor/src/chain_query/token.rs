@@ -7,7 +7,7 @@ use eyre::Result;
 use reth_tx_simulator::RethTxSimulator;
 use std::sync::Arc;
 use tiny_keccak::{Hasher, Keccak};
-use hex_literal::hex;
+// use hex_literal::hex; // Commented out unused import
 
 /// Token information structure
 #[derive(Debug, Clone)]

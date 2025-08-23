@@ -2,7 +2,7 @@
 /// 
 /// Provides methods for querying block information including timestamps, base fees, and headers
 
-use alloy_primitives::{U256, B256};
+// use alloy_primitives::{U256, B256}; // Commented out unused imports
 use eyre::Result;
 use reth_tx_simulator::RethTxSimulator;
 use std::sync::Arc;

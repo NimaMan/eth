@@ -1,7 +1,7 @@
 /// Test simulate_unsigned_transaction function
 /// 
 /// This example tests the simulate_unsigned_transaction function using a real transaction
-/// and compares the simulation results with expected state changes.
+/// and compares the simulation results with expected address balance changes.
 
 use tx_processor::{TxProcessor, CallRequest};
 use alloy_primitives::{Address, U256, Bytes, B256};
@@ -40,13 +40,13 @@ async fn main() -> Result<()> {
     // Simulate the unsigned transaction at one block before the original transaction
     // Original transaction was at block 22939570, so simulate at 22939569
     let simulation_block = 22939569;
-    let processed_tx = match processor.simulate_unsigned_transaction_with_logs_and_state_changes(call_request.clone(), Some(simulation_block)).await {
+    let processed_tx = match processor.simulate_unsigned_transaction_with_logs_and_address_balance_changes(call_request.clone(), Some(simulation_block)).await {
         Ok(detailed_result) => {
             println!("✅ Detailed simulation at block {} successful!", simulation_block);
             println!("   Success: {}", detailed_result.success);
             println!("   Gas used: {}", detailed_result.gas_used);
             println!("   Logs count: {}", detailed_result.logs.len());
-            println!("   State changes count: {}", detailed_result.state_changes.len());
+            println!("   Address balance changes count: {}", detailed_result.address_balance_changes.len());
             
             // For testing, create a minimal ProcessedTransaction with the simulation results
             let mut test_tx = tx_processor::ProcessedTransaction::new(
@@ -62,9 +62,9 @@ async fn main() -> Result<()> {
                 call_request.data.map(|d| d.to_vec()).unwrap_or_default(),
             );
             
-            // Add state changes
-            for (addr, changes) in detailed_result.state_changes {
-                test_tx.state_changes.insert(
+            // Add address balance changes
+            for (addr, changes) in detailed_result.address_balance_changes {
+                test_tx.address_balance_changes.insert(
                     addr,
                     serde_json::json!({
                         "eth_net": changes.eth_net,
@@ -117,9 +117,9 @@ async fn main() -> Result<()> {
         println!("     Amount1Out: {}", swap.amount1_out);
     }
     
-    // Print state changes
-    println!("\n📋 State Changes ({}):", processed_tx.state_changes.len());
-    for (addr, changes) in &processed_tx.state_changes {
+    // Print address balance changes
+    println!("\n📋 Address Balance Changes ({}):", processed_tx.address_balance_changes.len());
+    for (addr, changes) in &processed_tx.address_balance_changes {
         println!("  Address: {:?}", addr);
         println!("  Changes: {}", serde_json::to_string_pretty(changes)?);
     }
@@ -176,8 +176,8 @@ async fn main() -> Result<()> {
         println!("❌ Unexpected transaction type: {}", processed_tx.txn_type);
     }
     
-    // Expected state changes with actual values (from your provided ProcessedTransaction)
-    let expected_state_changes = vec![
+    // Expected address balance changes with actual values (from your provided ProcessedTransaction)
+    let expected_address_balance_changes = vec![
         (
             Address::from_str("0x6D356ab697B0AB2A871B6Be79073A35664340440")?, // from_address
             (-551826815374445.0, 0.01939941893084146) // (token_net, eth_net)
@@ -197,10 +197,10 @@ async fn main() -> Result<()> {
     ];
     
     let mut state_value_checks_passed = 0;
-    let mut total_state_checks = expected_state_changes.len();
+    let mut total_state_checks = expected_address_balance_changes.len();
     
-    for (addr, (expected_token_net, expected_eth_net)) in expected_state_changes {
-        if let Some(state_change) = processed_tx.state_changes.get(&addr) {
+    for (addr, (expected_token_net, expected_eth_net)) in expected_address_balance_changes {
+        if let Some(state_change) = processed_tx.address_balance_changes.get(&addr) {
             println!("✅ State change found for address: {:?}", addr);
             
             // Parse the state change JSON to get eth_net and token_net
@@ -252,7 +252,7 @@ async fn main() -> Result<()> {
     if state_value_checks_passed == total_state_checks {
         println!("\n🎉 Test PASSED: All state change values match exactly!");
     } else if state_value_checks_passed >= 3 {
-        println!("\n⚠️  Test PARTIAL: Most state changes match, some differences found");
+        println!("\n⚠️  Test PARTIAL: Most address balance changes match, some differences found");
     } else {
         println!("\n❌ Test FAILED: State change values don't match expected results");
     }
