@@ -29,7 +29,12 @@ use crate::TxProcessor;
 use crate::chain_state_persisting_sequential_tx_simulator::ChainStatePersistingSequentialTxSimulator;
 use crate::erc20_token_trading_viability::{
     pool_adapters::PoolAdapter,
-    tax_calculator::{calculate_buy_tax, calculate_sell_tax, extract_eth_received, TaxCalculationResult},
+    tax_calculator::{
+        calculate_buy_tax_from_processed_transaction, 
+        calculate_sell_tax_from_processed_transaction, 
+        extract_eth_received_from_processed_transaction, 
+        TaxCalculationResult
+    },
 };
 
 /// Simulates the exact sequence: [optional_setup_tx] -> buy_tokens_with_eth -> approve_token_spending -> sell_all_tokens_for_eth
@@ -162,9 +167,43 @@ impl OptionalSetupBuyApproveSellTokenSimulator {
         // Clone immediately to end the mutable borrow
         let buy_result = buy_result_ref.clone();
         
-        // Check if buy transaction failed and return early
+        // Check if buy transaction failed and return early with failure details
         if buy_result.status != "1" {
-            return Err(eyre::eyre!("Buy transaction failed - token may have trading disabled or other restrictions"));
+            // Buy failed - return result indicating trading is not enabled
+            // Extract the failure reason from the transaction
+            let failure_reason = self.extract_failure_reason_from_transaction(&buy_result);
+            
+            // Create placeholder transactions for approve and sell since they weren't executed
+            let empty_approve = ProcessedTransaction::empty_failed(
+                trader_wallet_address,
+                Some(token_contract_address),
+                buyer_nonce + 1,
+                "Skipped: buy transaction failed"
+            );
+            
+            let empty_sell = ProcessedTransaction::empty_failed(
+                trader_wallet_address,
+                Some(pool_adapter.router_address()),
+                buyer_nonce + 2,
+                "Skipped: buy transaction failed"
+            );
+            
+            return Ok(OptionalSetupBuyApproveSellResult {
+                setup_tx_result,
+                token_buy_result: buy_result,
+                token_approve_result: empty_approve,
+                token_sell_result: empty_sell,
+                tokens_bought_amount: U256::ZERO,
+                eth_spent_on_tokens: eth_amount_to_spend_on_tokens,
+                eth_received_from_selling_tokens: U256::ZERO,
+                buy_tax_percentage: -1.0,
+                sell_tax_percentage: -1.0,
+                all_transactions_succeeded: false,
+                token_is_tradeable: false,
+                total_gas_used: self.chain_state_simulator.get_cumulative_gas_used(),
+                simulation_block_number,
+                failure_reason: Some(failure_reason),
+            });
         }
         
         // Step 3: Extract exact token amount received from buy transaction
@@ -174,8 +213,6 @@ impl OptionalSetupBuyApproveSellTokenSimulator {
             trader_wallet_address,
         )?;
         
-        eprintln!("DEBUG: Extracted tokens_bought_amount = {}", tokens_bought_amount);
-        eprintln!("DEBUG: Buy tx status = {}", buy_result.status);
         
         // Step 4: Build and simulate approve transaction for exact token amount with explicit nonce
         let mut approve_tx = pool_adapter.build_approve_transaction(
@@ -212,23 +249,35 @@ impl OptionalSetupBuyApproveSellTokenSimulator {
         // Clone immediately to end the mutable borrow
         let sell_result = sell_result_ref.clone();
         
-        // Step 6: Calculate tax percentages from address balance changes
-        let buy_tax_percentage = self.calculate_buy_tax_from_processed_transaction(
-            &buy_result, // Use reference to cloned data
+        // Step 6: Calculate tax percentages using centralized tax calculator
+        let buy_tax_percentage = match calculate_buy_tax_from_processed_transaction(
+            &buy_result,
             &liquidity_pool_address,
             &trader_wallet_address,
             &token_contract_address,
-        );
+        ) {
+            TaxCalculationResult::Calculated(tax) => tax,
+            TaxCalculationResult::InvalidSimulation { reason } => {
+                tracing::warn!("Buy tax calculation failed: {}", reason);
+                -1.0 // Indicates calculation failed
+            }
+        };
         
-        let sell_tax_percentage = self.calculate_sell_tax_from_processed_transaction(
-            &sell_result, // Use reference to cloned data
+        let sell_tax_percentage = match calculate_sell_tax_from_processed_transaction(
+            &sell_result,
             &liquidity_pool_address,
             &trader_wallet_address,
-        );
+        ) {
+            TaxCalculationResult::Calculated(tax) => tax,
+            TaxCalculationResult::InvalidSimulation { reason } => {
+                tracing::warn!("Sell tax calculation failed: {}", reason);
+                -1.0 // Indicates calculation failed
+            }
+        };
         
-        // Step 7: Extract ETH received from selling tokens
-        let eth_received_from_selling_tokens = self.extract_eth_received_from_sell_transaction(
-            &sell_result, // Use reference to cloned data
+        // Step 7: Extract ETH received from selling tokens using centralized function
+        let eth_received_from_selling_tokens = extract_eth_received_from_processed_transaction(
+            &sell_result,
             &trader_wallet_address,
         );
         
@@ -341,100 +390,6 @@ impl OptionalSetupBuyApproveSellTokenSimulator {
         Ok(U256::ZERO)
     }
     
-    /// Calculate buy tax percentage from processed transaction
-    fn calculate_buy_tax_from_processed_transaction(
-        &self,
-        buy_tx_result: &ProcessedTransaction,
-        pool_address: &Address,
-        trader_address: &Address,
-        token_address: &Address,
-    ) -> f64 {
-        // Convert ProcessedTransaction address_balance_changes back to the format needed by tax calculator
-        let address_balance_changes = self.convert_processed_tx_to_balance_changes(buy_tx_result);
-        
-        match calculate_buy_tax(&address_balance_changes, pool_address, trader_address, token_address) {
-            TaxCalculationResult::Calculated(tax) => tax,
-            TaxCalculationResult::InvalidSimulation { reason } => {
-                tracing::warn!("Buy tax calculation failed: {}", reason);
-                -1.0 // Indicates calculation failed
-            }
-        }
-    }
-    
-    /// Calculate sell tax percentage from processed transaction
-    fn calculate_sell_tax_from_processed_transaction(
-        &self,
-        sell_tx_result: &ProcessedTransaction,
-        pool_address: &Address,
-        trader_address: &Address,
-    ) -> f64 {
-        let address_balance_changes = self.convert_processed_tx_to_balance_changes(sell_tx_result);
-        
-        match calculate_sell_tax(&address_balance_changes, pool_address, trader_address) {
-            TaxCalculationResult::Calculated(tax) => tax,
-            TaxCalculationResult::InvalidSimulation { reason } => {
-                tracing::warn!("Sell tax calculation failed: {}", reason);
-                -1.0 // Indicates calculation failed
-            }
-        }
-    }
-    
-    /// Extract ETH received from sell transaction
-    fn extract_eth_received_from_sell_transaction(
-        &self,
-        sell_tx_result: &ProcessedTransaction,
-        trader_address: &Address,
-    ) -> U256 {
-        let address_balance_changes = self.convert_processed_tx_to_balance_changes(sell_tx_result);
-        
-        extract_eth_received(&address_balance_changes, trader_address)
-    }
-    
-    /// Convert ProcessedTransaction address_balance_changes to the format expected by tax calculator
-    fn convert_processed_tx_to_balance_changes(
-        &self,
-        processed_tx: &ProcessedTransaction,
-    ) -> std::collections::HashMap<Address, reth_tx_simulator::AddressBalanceChange> {
-        use std::collections::HashMap;
-        use alloy_primitives::I256;
-        
-        let mut result = HashMap::new();
-        
-        for (addr, balance_change_json) in &processed_tx.address_balance_changes {
-            if let Ok(eth_net_str) = serde_json::from_value::<String>(
-                balance_change_json.get("eth_net").unwrap_or(&serde_json::Value::String("0".to_string())).clone()
-            ) {
-                let eth_net = eth_net_str.parse::<i128>().unwrap_or(0);
-                
-                let mut token_net = HashMap::new();
-                if let Some(token_net_json) = balance_change_json.get("token_net") {
-                    if let Ok(token_net_map) = serde_json::from_value::<HashMap<String, String>>(token_net_json.clone()) {
-                        for (token, amount_str) in token_net_map {
-                            let amount = amount_str.parse::<i128>().unwrap_or(0);
-                            token_net.insert(token, I256::try_from(amount).unwrap_or(I256::ZERO));
-                        }
-                    }
-                }
-                
-                let balance_change = reth_tx_simulator::AddressBalanceChange {
-                    eth_net: I256::try_from(eth_net).unwrap_or(I256::ZERO),
-                    token_net,
-                    movements: reth_tx_simulator::address_balance_change_calculator::AddressMovementsSummary {
-                        denom: reth_tx_simulator::address_balance_change_calculator::AddressMovements {
-                            incoming: std::collections::BTreeMap::new(),
-                            outgoing: std::collections::BTreeMap::new(),
-                        },
-                        tokens: HashMap::new(),
-                    },
-                };
-                
-                result.insert(*addr, balance_change);
-            }
-        }
-        
-        result
-    }
-    
     /// Determine the reason why trading failed
     fn determine_failure_reason(
         &self,
@@ -442,12 +397,41 @@ impl OptionalSetupBuyApproveSellTokenSimulator {
         sell_result: &ProcessedTransaction,
     ) -> String {
         if buy_result.status != "1" {
-            "Buy transaction failed - token may have trading disabled or other restrictions".to_string()
+            "Buy transaction failed".to_string()
         } else if sell_result.status != "1" {
-            "Sell transaction failed - token may prevent selling or have cooldown period".to_string()
+            "Sell transaction failed".to_string()
         } else {
             "Unknown trading failure".to_string()
         }
+    }
+    
+    /// Extract the actual failure reason from a failed transaction
+    /// This attempts to get the EVM error or revert reason if available
+    fn extract_failure_reason_from_transaction(&self, tx: &ProcessedTransaction) -> String {
+        // Since ProcessedTransaction doesn't have direct access to revert reason,
+        // we can at least provide more context about the failed transaction
+        // In the future, we could enhance ProcessedTransaction to include error details
+        
+        // Check if there are any events that might indicate the failure
+        // For now, we'll provide a descriptive message based on transaction details
+        if tx.status != "1" {
+            // Check if value transfer failed (insufficient balance)
+            if tx.value > U256::ZERO {
+                return format!("Transaction failed: Possible insufficient balance for {} ETH transfer", 
+                    format!("{:.6}", tx.value.to_string().parse::<f64>().unwrap_or(0.0) / 1e18));
+            }
+            
+            // Check if no gas was used (transaction reverted immediately)
+            if tx.fees.gas_used == 0 {
+                return "Transaction failed: Reverted immediately (no gas used)".to_string();
+            }
+            
+            // Generic failure with transaction details
+            return format!("Transaction failed at block {} (gas used: {}, status: {})",
+                tx.block_number, tx.fees.gas_used, tx.status);
+        }
+        
+        "Transaction failed with unknown reason".to_string()
     }
 }
 

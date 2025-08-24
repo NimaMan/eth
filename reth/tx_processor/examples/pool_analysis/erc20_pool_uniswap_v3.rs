@@ -20,10 +20,12 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    // Create components
-    let chain_query = Arc::new(ChainQuery::new(&reth_datadir)?);
-    let simulator = chain_query.get_simulator();
+    // Create tx processor (contains shared chain_query)
     let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
+    
+    // Use shared chain_query from tx_processor (no separate DB connection)
+    let chain_query = tx_processor.chain_query.clone();
+    let simulator = chain_query.get_simulator();
     
     // Example: USDC/WETH 0.05% pool on Uniswap V3
     let usdc_address: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?;

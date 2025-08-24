@@ -93,6 +93,31 @@ pub struct ProcessedTransaction {
 }
 
 impl ProcessedTransaction {
+    /// Create a failed/empty transaction placeholder for skipped transactions
+    pub fn empty_failed(
+        from: Address,
+        to: Option<Address>,
+        nonce: u64,
+        reason: &str,
+    ) -> Self {
+        let hash = B256::from_slice(&[nonce as u8; 32]);
+        let mut tx = Self::new(
+            hash,
+            0,  // block_number
+            0,  // block_timestamp
+            nonce,  // txn_index  
+            from,
+            to,
+            U256::ZERO,  // value
+            "0".to_string(),  // status (failed)
+            nonce,
+            vec![],  // input
+        );
+        tx.txn_type = "skipped".to_string();
+        tx.actions = vec![reason.to_string()];
+        tx
+    }
+    
     pub fn new(
         hash: B256,
         block_number: u64,

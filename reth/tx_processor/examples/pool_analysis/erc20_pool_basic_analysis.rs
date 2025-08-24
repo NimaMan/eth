@@ -21,12 +21,12 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    // Create chain query and get simulator
-    let chain_query = Arc::new(ChainQuery::new(&reth_datadir)?);
-    let simulator = chain_query.get_simulator();
-    
-    // Create tx processor
+    // Create tx processor (contains shared chain_query)
     let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
+    
+    // Use shared chain_query from tx_processor (no separate DB connection)
+    let chain_query = tx_processor.chain_query.clone();
+    let simulator = chain_query.get_simulator();
     
     // Example: PEPE token and its Uniswap V2 pool
     let token_address: Address = "0x6982508145454Ce325dDbE47a25d4ec3d2311933".parse()?;

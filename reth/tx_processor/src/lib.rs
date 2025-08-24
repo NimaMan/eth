@@ -30,7 +30,8 @@ pub mod transaction_loader;
 pub mod config;
 pub mod utils;
 pub mod retry_utils;
-pub mod chain_query;
+// Chain query moved to external crate reth_chain_query
+// pub mod chain_query;
 
 // Export ERC20 token trading viability module
 pub mod erc20_token_trading_viability;
@@ -56,7 +57,7 @@ pub mod tx_processor {
     use crate::data_models::transaction::ETHTransfer;
     use crate::data_models::events::InternalTransaction;
     use crate::transaction_loader::TransactionLoader;
-    use crate::chain_query::ChainQuery;
+    use reth_chain_query::ChainQuery;
     use eyre::Result;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -121,6 +122,11 @@ pub mod tx_processor {
                 provider_factory,
                 chain_query,
             })
+        }
+        
+        /// Get the shared provider factory (for use by other components that need DB access)
+        pub fn provider_factory(&self) -> Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>> {
+            Arc::new(self.provider_factory.clone())
         }
         
         /// Get the latest block number from the database

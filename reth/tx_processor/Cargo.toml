@@ -73,6 +73,7 @@ path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
+reth_chain_query = { path = "../reth_chain_query" }
 
 
 # Basic dependencies

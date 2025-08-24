@@ -20,10 +20,12 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    // Create components
-    let chain_query = Arc::new(ChainQuery::new(&reth_datadir)?);
-    let simulator = chain_query.get_simulator();
+    // Create tx processor (contains shared chain_query)
     let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
+    
+    // Use shared chain_query from tx_processor (no separate DB connection)
+    let chain_query = tx_processor.chain_query.clone();
+    let simulator = chain_query.get_simulator();
     
     // USDC address
     let usdc_address: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?;
@@ -37,13 +39,13 @@ async fn main() -> Result<()> {
         v2_pool_address,
         PoolType::UniswapV2,
     )
-    .with_test_amount(U256::from(100_000_000_000_000_000u64)); // 0.1 ETH
+    .with_test_amount(U256::from(10_000_000_000_000_000u64)); // 0.01 ETH
     
     println!("Configuration:");
     println!("  Token: USDC (0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48)");
     println!("  Pool: Uniswap V2 USDC/WETH (0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc)");
     println!("  Type: UniswapV2");
-    println!("  Test Amount: 0.1 ETH");
+    println!("  Test Amount: 0.01 ETH");
     println!();
     
     println!("Analyzing V2 pool...");
