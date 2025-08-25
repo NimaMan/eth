@@ -22,6 +22,10 @@ Python examples demonstrating pyreth module usage.
 ### `/ipy/` - IPython/Jupyter Examples
 - Interactive notebook examples
 
+### TradingSimulator Examples
+- **`test_trading_simulator.py`** - Basic TradingSimulator functionality tests
+- **`eth_token_trading_analysis.py`** - Token trading analysis with tax calculation
+
 ## Installation
 
 ```bash
@@ -63,4 +67,16 @@ tx = processor.process_transaction("0x...")
 # Simulate transactions
 simulator = pyreth.Simulator()
 result = simulator.simulate_transaction({...})
+
+# Trading simulation (NEW)
+pyreth_client = pyreth.PyReth()
+trading_sim = pyreth_client.trading_simulator()
+result = trading_sim.simulate_tx_with_buy_sell_seq(
+    prior_tx=None,  # Optional: any tx that might affect trading
+    token_address="0x6982508145454Ce325dDbE47a25d4ec3d2311933",
+    pool_address="0xa43fe16908251ee70ef74718545e4fe6c5ccec9f",
+    block_number=None  # Optional: defaults to latest block
+)
+print(f"Trading enabled: {result.trading_enabled}")
+print(f"Buy tax: {result.buy_tax}%, Sell tax: {result.sell_tax}%")
 ```

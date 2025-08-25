@@ -27,9 +27,10 @@ def main():
     print("ChainQuery Demo - Direct Database Access")
     print("="*60)
     
-    # Initialize ChainQuery
+    # Initialize ChainQuery via PyReth
     print("\nInitializing ChainQuery...")
-    query = pyreth.ChainQuery()
+    reth = pyreth.PyReth()
+    query = reth.chain_query()
     print(f"Connected to: {query}")
     
     # Get latest block
@@ -99,10 +100,10 @@ def main():
         
         # Total supply
         start = time.time()
-        supply = query.get_total_supply(token_addr)
+        supply = query.get_token_total_supply(token_addr)
         query_time = (time.time() - start) * 1000
         
-        decimals = query.get_decimals(token_addr)
+        decimals = query.get_token_decimals(token_addr)
         formatted_supply = format_wei(supply, decimals)
         
         print(f"  Total Supply: {formatted_supply}")

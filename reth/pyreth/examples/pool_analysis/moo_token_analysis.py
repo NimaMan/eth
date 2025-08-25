@@ -9,12 +9,7 @@ This example simulates buy/approve/sell at the same block where we know
 the token was tradeable to verify our simulation matches reality.
 """
 
-import os
-import sys
-sys.path.append('/home/nima/code/crypto/rust/pyreth')
-
 import pyreth
-from pyreth import ChainQuery, TradingSimulator, PoolType
 
 
 def main():
@@ -25,9 +20,9 @@ def main():
     print("Original swap: 0.1 ETH -> 575,446,178 moo tokens")
     print()
     
-    # Create components using Python bindings
-    chain_query = ChainQuery()
-    simulator = chain_query.get_simulator()
+    # Create PyReth instance and get trading simulator
+    py_reth = pyreth.PyReth()
+    trading_sim = py_reth.trading_simulator()
     
     # moo token details from the transaction
     moo_token_address = "0xDF6010eF80142D379eA0324ac100Dd3Cf50901b2"
@@ -45,74 +40,74 @@ def main():
     print(f"Analyzing moo token at block {target_block}...")
     
     try:
-        # Create trading simulator
-        trading_sim = TradingSimulator(simulator)
+        # Use config with 0.1 ETH (not default 0.01 ETH)
+        config = trading_sim.default_config()
+        config = config.with_buy_amount(0.1)  # 0.1 ETH
         
-        # Configure for moo token V2 trading at specific block
-        config = {
-            'token_address': moo_token_address,
-            'pool_address': moo_pool_address,
-            'pool_type': PoolType.UniswapV2,
-            'test_amount': int(0.1 * 1e18),  # 0.1 ETH in wei
-            'buyer_address': "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689",  # Default buyer
-            'block_number': target_block
-        }
-        
-        # Run the buy/approve/sell analysis
-        result = trading_sim.analyze_token_trading_viability(config)
+        # Run the buy/approve/sell simulation
+        result = trading_sim.simulate_with_config(
+            prior_tx=None,  # No prior transaction
+            token_address=moo_token_address,
+            pool_address=moo_pool_address,
+            config=config,
+            block_number=target_block
+        )
         
         print("\nAnalysis Results:")
         print("=================")
-        print(f"Block Number: {result['block_number']}")
-        print(f"Is Tradeable: {result['is_tradeable']}")
+        print(f"Block Number: {result.block_number}")
+        print(f"Trading Enabled: {result.trading_enabled}")
         
-        if result['is_tradeable']:
+        if result.trading_enabled:
             print("\n✅ Pool is tradeable!")
-            print(f"  Buy Tax: {result['buy_tax_percent']:.2f}%")
-            print(f"  Sell Tax: {result['sell_tax_percent']:.2f}%")
-            print(f"  Tokens Received: {result['tokens_received']}")
-            print(f"  ETH Spent: {result['eth_spent']} wei")
-            print(f"  ETH Received: {result['eth_received']} wei")
+            print(f"  Buy Tax: {result.buy_tax:.2f}%")
+            print(f"  Sell Tax: {result.sell_tax:.2f}%")
+            
+            # Extract tokens received from buy transaction
+            buy_tx = result.buy_tx
+            tokens_received = 0
+            for transfer in buy_tx.erc20_transfers:
+                # Look for transfer to buyer
+                if transfer['token_address'] == moo_token_address:
+                    if transfer['to_address'] == buy_tx.from_address:
+                        tokens_received = int(transfer['amount'])
+                        break
+            
+            print(f"  Tokens Received: {tokens_received}")
             
             # Compare with original transaction
             original_tokens = 575_446_178_536_175_301
-            simulated_tokens = result['tokens_received']
             
-            if original_tokens > 0:
-                difference_pct = abs(original_tokens - simulated_tokens) / original_tokens * 100
+            if original_tokens > 0 and tokens_received > 0:
+                difference_pct = abs(original_tokens - tokens_received) / original_tokens * 100
                 
                 print("\n📊 Comparison with original transaction:")
-                print(f"  Original tokens received: {original_tokens}")
-                print(f"  Simulated tokens received: {simulated_tokens}")
+                print(f"  Original tokens received: {original_tokens:,}")
+                print(f"  Simulated tokens received: {tokens_received:,}")
                 print(f"  Difference: {difference_pct:.2f}%")
                 
-                if difference_pct < 1.0:
+                if difference_pct < 5.0:
                     print("  ✅ Simulation closely matches actual transaction!")
                 else:
-                    print("  ⚠️ Some difference detected (could be due to MEV, slippage, or fees)")
+                    print("  ⚠️ Some difference detected (could be due to MEV, slippage, or block timing)")
         else:
             print("\n❌ Pool is not tradeable")
-            if 'failure_reason' in result:
-                print(f"  Reason: {result['failure_reason']}")
         
         # Transaction details
         print("\nTransaction Status:")
-        if 'transactions' in result:
-            txs = result['transactions']
-            print(f"  Buy: {'Success' if txs['buy']['success'] else 'Failed'} (gas: {txs['buy'].get('gas_used', 'N/A')})")
-            print(f"  Approve: {'Success' if txs['approve']['success'] else 'Failed'} (gas: {txs['approve'].get('gas_used', 'N/A')})")
-            print(f"  Sell: {'Success' if txs['sell']['success'] else 'Failed'} (gas: {txs['sell'].get('gas_used', 'N/A')})")
+        print(f"  Buy: {'Success' if result.buy_tx.status == '1' else 'Failed'} (gas: {result.buy_tx.fees['gas_used']})")
+        print(f"  Approve: {'Success' if result.approve_tx.status == '1' else 'Failed'} (gas: {result.approve_tx.fees['gas_used']})")
+        print(f"  Sell: {'Success' if result.sell_tx.status == '1' else 'Failed'} (gas: {result.sell_tx.fees['gas_used']})")
         
         # Expected results from Rust
         print("\n📊 Expected Results (from Rust):")
         print("  Tokens: ~497,409,164 moo tokens")
-        print("  ETH Return: ~0.0994 ETH")
-        print("  Taxes: 0% buy, 0% sell")
-        print("  Status: All transactions should succeed")
-        print("  Difference from real tx: ~13.56%")
+        print("  Buy Tax: 0.00%")
+        print("  Sell Tax: 0.00%")
+        print("  Note: Difference from original is due to different routing/execution")
         
     except Exception as e:
-        print(f"Analysis failed: {e}")
+        print(f"\n❌ Analysis failed: {e}")
         import traceback
         traceback.print_exc()
 

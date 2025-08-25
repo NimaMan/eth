@@ -41,13 +41,12 @@ def main():
     pool_address = "0xf068C6d0390797e622b668531789adb31fF2A3c0"   # Uniswap V2: ♾️INHB Pool
     
     print(f"\nProcessing transactions...")
-    print(f"Token: InfinityHub (♾️INHB)")
     print(f"Token Address: {token_address}")
     print(f"Pool Address: {pool_address}")
     
     # Process the liquidity addition transaction
     print(f"\n1. Processing liquidity addition tx...")
-    print(f"   Hash: {liquidity_add_hash[:10]}...")
+    print(f"   Hash: {liquidity_add_hash}")
     try:
         tx1_processed = processor.process_transaction(liquidity_add_hash)
         print(f"   ✓ Block: {tx1_processed.block_number}")
@@ -60,7 +59,7 @@ def main():
     
     # Process the liquidity removal transaction
     print(f"\n2. Processing liquidity removal tx...")
-    print(f"   Hash: {liquidity_remove_hash[:10]}...")
+    print(f"   Hash: {liquidity_remove_hash}")
     try:
         tx2_processed = processor.process_transaction(liquidity_remove_hash)
         print(f"   ✓ Block: {tx2_processed.block_number}")
@@ -72,7 +71,7 @@ def main():
         if tx2_processed.erc20_transfers:
             print(f"   ✓ ERC20 Transfers: {len(tx2_processed.erc20_transfers)}")
             for transfer in tx2_processed.erc20_transfers[:2]:  # Show first 2
-                print(f"     - {transfer.amount} tokens from {transfer.from_address[:10]}...")
+                print(f"     - {transfer['amount']} tokens from {transfer['from_address'][:10]}...")
                 
     except Exception as e:
         print(f"   ✗ Error processing tx2: {e}")
@@ -97,11 +96,11 @@ def main():
             # Access full ProcessedTransaction objects
             print(f"\n   Transaction Results:")
             if result_after_add.prior_tx:
-                print(f"   - Prior TX: {result_after_add.prior_tx.hash[:10]}... (liquidity add)")
-            print(f"   - Buy TX: {result_after_add.buy_tx.hash[:10]}... (Status: {result_after_add.buy_tx.status})")
-            print(f"   - Approve TX: {result_after_add.approve_tx.hash[:10]}... (Status: {result_after_add.approve_tx.status})")
-            print(f"   - Sell TX: {result_after_add.sell_tx.hash[:10]}... (Status: {result_after_add.sell_tx.status})")
-            
+                print(f"   - Prior TX: {result_after_add.prior_tx.hash} (liquidity add)")
+            print(f"   - Buy TX: {result_after_add.buy_tx.hash} (Status: {result_after_add.buy_tx.status})")
+            print(f"   - Approve TX: {result_after_add.approve_tx.hash} (Status: {result_after_add.approve_tx.status})")
+            print(f"   - Sell TX: {result_after_add.sell_tx.hash} (Status: {result_after_add.sell_tx.status})")
+
         except Exception as e:
             print(f"   ✗ Error in simulation: {e}")
     
@@ -151,14 +150,14 @@ def main():
         buy_tx = result_current.buy_tx
         print(f"\n   Buy Transaction Details:")
         print(f"   - Hash: {buy_tx.hash[:10]}...")
-        print(f"   - Gas Used: {buy_tx.fees.gas_used}")
+        print(f"   - Gas Used: {buy_tx.fees['gas_used']}")
         print(f"   - Status: {'Success' if buy_tx.status == '1' else 'Failed'}")
         
         # Access sell transaction details  
         sell_tx = result_current.sell_tx
         print(f"\n   Sell Transaction Details:")
         print(f"   - Hash: {sell_tx.hash[:10]}...")
-        print(f"   - Gas Used: {sell_tx.fees.gas_used}")
+        print(f"   - Gas Used: {sell_tx.fees['gas_used']}")
         print(f"   - Status: {'Success' if sell_tx.status == '1' else 'Failed'}")
         
     except Exception as e:

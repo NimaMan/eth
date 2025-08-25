@@ -14,7 +14,7 @@ use alloy_primitives::{Address, U256, Bytes, B256};
 use std::str::FromStr;
 
 use reth_tx_simulator::CallRequest;
-use ethtx::TxProcessor;
+use tx_processor::TxProcessor;
 use super::processed_transaction::PyProcessedTransaction;
 use reth_tx_simulator::SequentialSimulationOptions;
 

@@ -8,22 +8,16 @@ This helps detect when trading was enabled/disabled or tax changes occurred.
 Analyzes the moo token across blocks around the liquidity addition to understand
 the trading restriction period.
 """
-
-import os
-import sys
-sys.path.append('/home/nima/code/crypto/rust/pyreth')
-
 import pyreth
-from pyreth import ChainQuery, TradingSimulator, PoolType
 
 
 def analyze_block_range():
     print("Block Range Token Trading Analysis (Python)")
     print("===========================================")
     
-    # Create components using Python bindings
-    chain_query = ChainQuery()
-    simulator = chain_query.get_simulator()
+    # Create PyReth instance and get components
+    py_reth = pyreth.PyReth()
+    trading_sim = py_reth.trading_simulator()
     
     # Configure token to analyze - using moo token
     token_address = "0xDF6010eF80142D379eA0324ac100Dd3Cf50901b2"  # moo token
@@ -56,74 +50,129 @@ def analyze_block_range():
     last_buy_tax = None
     last_sell_tax = None
     
-    try:
-        # Create trading simulator
-        trading_sim = TradingSimulator(simulator)
-        
-        for block_number in range(start_block, end_block + 1, block_step):
-            # Configure for this specific block
-            config = {
-                'token_address': token_address,
-                'pool_address': pool_address,
-                'pool_type': PoolType.UniswapV2,
-                'test_amount': int(0.1 * 1e18),  # 0.1 ETH in wei
-                'buyer_address': "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689",
-                'block_number': block_number
-            }
-            
-            try:
-                result = trading_sim.analyze_token_trading_viability(config)
-                
-                status = "✅ Yes" if result['is_tradeable'] else "❌ No"
-                buy_tax = f"{result['buy_tax_percent']:.2f}%" if result['is_tradeable'] else "-"
-                sell_tax = f"{result['sell_tax_percent']:.2f}%" if result['is_tradeable'] else "-"
-                tokens = str(result['tokens_received']) if result['is_tradeable'] else "-"
-                eth_received = f"{result['eth_received'] / 1e18:.6f} ETH" if result['is_tradeable'] else "-"
-                
-                print(f"{block_number:<10} {status:<12} {buy_tax:<10} {sell_tax:<10} {tokens:<20} {eth_received:<20}")
-                
-                # Log failure details for non-tradeable tokens
-                if not result['is_tradeable']:
-                    if 'failure_reason' in result:
-                        print(f"           🔍 Failure reason: {result['failure_reason']}")
-                    
-                    # Log individual transaction statuses for debugging
-                    if 'transactions' in result:
-                        txs = result['transactions']
-                        buy_status = "✅" if txs['buy']['success'] else "❌"
-                        approve_status = "✅" if txs['approve']['success'] else "❌"
-                        sell_status = "✅" if txs['sell']['success'] else "❌"
-                        
-                        print(f"           📊 Transaction status: Buy {buy_status} | Approve {approve_status} | Sell {sell_status}")
-                
-                # Track state changes
-                if result['is_tradeable']:
-                    if trading_enabled_block is None:
-                        trading_enabled_block = block_number
-                    
-                    # Check for tax changes
-                    if last_buy_tax is not None:
-                        if abs(result['buy_tax_percent'] - last_buy_tax) > 0.01:
-                            tax_changes.append((block_number, "buy", last_buy_tax, result['buy_tax_percent']))
-                    if last_sell_tax is not None:
-                        if abs(result['sell_tax_percent'] - last_sell_tax) > 0.01:
-                            tax_changes.append((block_number, "sell", last_sell_tax, result['sell_tax_percent']))
-                    
-                    last_buy_tax = result['buy_tax_percent']
-                    last_sell_tax = result['sell_tax_percent']
-                elif trading_enabled_block is not None and trading_disabled_block is None:
-                    trading_disabled_block = block_number
-                
-                results.append((block_number, result))
-                
-            except Exception as e:
-                print(f"{block_number:<10} ❌ Error: {str(e)}")
+    config = trading_sim.default_config()
+    config = config.with_buy_amount(0.01)
     
-    except Exception as e:
-        print(f"Analysis setup failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return
+    for block_number in range(start_block, end_block + 1, block_step):
+        try:
+            # Run simulation at specific block
+            result = trading_sim.simulate_with_config(
+                prior_tx=None,
+                token_address=token_address,
+                pool_address=pool_address,
+                config=config,
+                block_number=block_number
+            )
+            
+            # Determine if trading is enabled
+            is_tradeable = result.trading_enabled
+            
+            if is_tradeable:
+                status = "✅ Yes"
+                buy_tax = f"{result.buy_tax:.2f}%"
+                sell_tax = f"{result.sell_tax:.2f}%"
+                
+                # Extract tokens received from buy transaction
+                tokens_received = 0
+                for transfer in result.buy_tx.erc20_transfers:
+                    if transfer['token_address'] == token_address:
+                        if transfer['to_address'] == result.buy_tx.from_address:
+                            tokens_received = int(transfer['amount'])
+                            break
+                
+                # Extract ETH received from sell transaction (as WETH)
+                eth_received = 0
+                weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+                for transfer in result.sell_tx.erc20_transfers:
+                    if transfer['token_address'] == weth_address:
+                        eth_received = int(transfer['amount'])
+                        break
+                
+                tokens_str = str(tokens_received) if tokens_received > 0 else "-"
+                eth_str = f"{eth_received / 1e18:.6f} ETH" if eth_received > 0 else "-"
+            else:
+                status = "❌ No"
+                buy_tax = "-"
+                sell_tax = "-"
+                tokens_str = "-"
+                eth_str = "-"
+            
+            print(f"{block_number:<10} {status:<12} {buy_tax:<10} {sell_tax:<10} {tokens_str:<20} {eth_str:<20}")
+            
+            # Log failure details for non-tradeable tokens
+            if not is_tradeable:
+                # Check which transaction failed
+                buy_success = result.buy_tx.status == '1'
+                approve_success = result.approve_tx.status == '1'
+                sell_success = result.sell_tx.status == '1'
+                
+                buy_status = "✅" if buy_success else "❌"
+                approve_status = "✅" if approve_success else "❌"
+                sell_status = "✅" if sell_success else "❌"
+                print(f"           📊 Transaction status: Buy {buy_status} | Approve {approve_status} | Sell {sell_status}")
+                
+                # The TradingSequenceResult doesn't have failure_reason - that's in other result types
+                # We'll extract failure details from the individual transactions
+                
+                # Also show transaction-specific details
+                if not buy_success:
+                    # Show buy transaction failure details
+                    if result.buy_tx.txn_type:
+                        print(f"           ⚠️  Buy transaction type: {result.buy_tx.txn_type}")
+                    if result.buy_tx.actions:
+                        # Actions contain the failure reason
+                        for action in result.buy_tx.actions:
+                            if action:
+                                print(f"           ⚠️  Buy details: {action}")
+                
+                if not sell_success:
+                    # Show sell transaction failure details
+                    if result.sell_tx.txn_type:
+                        print(f"           ⚠️  Sell transaction type: {result.sell_tx.txn_type}")
+                    if result.sell_tx.actions:
+                        # Actions contain the failure reason
+                        for action in result.sell_tx.actions:
+                            if action:
+                                print(f"           ⚠️  Sell details: {action}")
+            
+            # Track state changes
+            if is_tradeable:
+                if trading_enabled_block is None:
+                    trading_enabled_block = block_number
+                
+                # Check for tax changes
+                if last_buy_tax is not None:
+                    if abs(result.buy_tax - last_buy_tax) > 0.01:
+                        tax_changes.append((block_number, "buy", last_buy_tax, result.buy_tax))
+                if last_sell_tax is not None:
+                    if abs(result.sell_tax - last_sell_tax) > 0.01:
+                        tax_changes.append((block_number, "sell", last_sell_tax, result.sell_tax))
+                
+                last_buy_tax = result.buy_tax
+                last_sell_tax = result.sell_tax
+            elif trading_enabled_block is not None and trading_disabled_block is None:
+                trading_disabled_block = block_number
+            
+            results.append((block_number, {
+                'is_tradeable': is_tradeable,
+                'buy_tax': result.buy_tax if is_tradeable else 0,
+                'sell_tax': result.sell_tax if is_tradeable else 0,
+                'tokens_received': tokens_received if is_tradeable else 0
+            }))
+            
+        except Exception as e:
+            # Show the actual error from the simulation
+            error_msg = str(e)
+            # Truncate very long error messages
+            if len(error_msg) > 100:
+                error_msg = error_msg[:100] + "..."
+            print(f"{block_number:<10} ❌ Error: {error_msg}")
+            results.append((block_number, {
+                'is_tradeable': False,
+                'buy_tax': 0,
+                'sell_tax': 0,
+                'tokens_received': 0
+            }))
     
     # Summary
     print("\n📊 Analysis Summary:")
@@ -152,16 +201,16 @@ def analyze_block_range():
         tradeable_results = [(block, result) for block, result in results if result['is_tradeable']]
         if tradeable_results:
             best_block, best_result = min(tradeable_results, 
-                key=lambda x: x[1]['buy_tax_percent'] + x[1]['sell_tax_percent'])
+                key=lambda x: x[1]['buy_tax'] + x[1]['sell_tax'])
             
             print(f"\n🏆 Best Trading Block: {best_block}")
-            print(f"  Combined tax: {best_result['buy_tax_percent'] + best_result['sell_tax_percent']:.2f}%")
-            print(f"  Buy tax: {best_result['buy_tax_percent']:.2f}%, Sell tax: {best_result['sell_tax_percent']:.2f}%")
+            print(f"  Combined tax: {best_result['buy_tax'] + best_result['sell_tax']:.2f}%")
+            print(f"  Buy tax: {best_result['buy_tax']:.2f}%, Sell tax: {best_result['sell_tax']:.2f}%")
     
     # Compare with Rust results
     print("\n📊 Expected Results (from Rust):")
     print("  Trading pattern: Fails until block 23196239, then succeeds")
-    print("  Failure reason: 'Sell transaction failed - token may prevent selling or have cooldown period'")
+    print("  Failure reason: Shows actual EVM revert reasons")
     print("  Key insight: 40-block sell restriction after liquidity addition")
     print("  Tax pattern: 0% throughout when tradeable")
 

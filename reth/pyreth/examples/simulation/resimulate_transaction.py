@@ -13,7 +13,7 @@ from typing import Optional
 
 def resimulate_transaction(
     processed_tx,
-    simulator: pyreth.Simulator,
+    simulator,
     block_number: Optional[int] = None,
     gas_multiplier: float = 2.0
 ):
@@ -22,7 +22,7 @@ def resimulate_transaction(
     
     Args:
         processed_tx: The original ProcessedTransaction object
-        simulator: pyreth.Simulator instance
+        simulator: PySimulator instance from PyReth
         block_number: Block to simulate at (default: original block)
         gas_multiplier: Multiplier for gas limit (default: 2.0 for safety)
     
@@ -153,7 +153,9 @@ def test_resimulation():
         # Try to simulate at current state (will likely fail due to lack of funds)
         print("Attempting to simulate at latest block...")
         try:
-            latest_block = simulator.get_latest_block()
+            # Get latest block using chain_query
+            chain_query = reth.chain_query()
+            latest_block = chain_query.get_latest_block()
             current_sim = resimulate_transaction(problem_tx, simulator, latest_block)
             print(f"  Unexpected success at block {latest_block}")
         except Exception as e:

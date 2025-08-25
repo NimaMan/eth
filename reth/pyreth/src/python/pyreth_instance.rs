@@ -8,11 +8,13 @@ use pyo3::prelude::*;
 use std::sync::Arc;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use ethtx::TxProcessor;
+use tx_processor::TxProcessor;
 
 use super::tx_processor::PyTxProcessor;
 use super::simulator::PySimulator;
 use super::chain_query::PyChainQuery;
+use super::trading_simulator::PyTradingSimulator;
+use super::price_reader::PyEthPriceClient;
 
 /// Global singleton database connection
 static DB_INSTANCE: Lazy<Arc<Mutex<Option<Arc<TxProcessor>>>>> = 
@@ -77,6 +79,16 @@ impl PyRethInstance {
         PyChainQuery::from_shared(self.processor.clone())
     }
     
+    /// Get a trading simulator that uses the shared database
+    pub fn trading_simulator(&self) -> PyResult<PyTradingSimulator> {
+        PyTradingSimulator::from_shared(self.processor.clone())
+    }
+    
+    /// Get a price client that uses the shared database
+    pub fn price_client(&self) -> PyEthPriceClient {
+        PyEthPriceClient::from_shared(self.processor.clone())
+    }
+    
     /// Check if database is open
     pub fn is_connected(&self) -> bool {
         true // If we have self.processor, we're connected
@@ -87,6 +99,7 @@ impl PyRethInstance {
         Ok(format!(
             "Connected to Reth database at /home/nima/.local/share/reth/mainnet\n\
              Shared instance: Yes\n\
+             Available components: tx_processor(), simulator(), chain_query(), trading_simulator(), price_client()\n\
              Components can be created without additional file watchers"
         ))
     }
@@ -107,4 +120,20 @@ pub fn clear_singleton() -> PyResult<()> {
 #[pyfunction]
 pub fn is_singleton_initialized() -> bool {
     DB_INSTANCE.lock().is_some()
+}
+
+/// Get or create singleton instance (internal use)
+pub fn get_or_create_singleton(reth_datadir: &str) -> PyResult<Arc<TxProcessor>> {
+    let mut instance = DB_INSTANCE.lock();
+    
+    if instance.is_none() {
+        let processor = Arc::new(
+            TxProcessor::new(reth_datadir)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Failed to initialize TxProcessor: {}", e)))?
+        );
+        *instance = Some(processor.clone());
+        Ok(processor)
+    } else {
+        Ok(instance.as_ref().unwrap().clone())
+    }
 }

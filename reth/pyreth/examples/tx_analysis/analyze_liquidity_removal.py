@@ -9,7 +9,9 @@ import json
 def analyze_liquidity_removal():
     """Analyze the undetected scam transaction"""
     
-    processor = pyreth.TxProcessor()
+    # Use PyReth singleton
+    reth = pyreth.PyReth()
+    processor = reth.tx_processor()
     
     # The undetected scam transaction
     tx_hash = "0xb20e91c60b35647725b1878b60e2ccf6543fc17983983227656cf98bebb22966"
@@ -41,7 +43,7 @@ def analyze_liquidity_removal():
         print(f"  Amount: {transfer['amount']}")
         
         # Check if it's from the pool
-        if transfer['from_address'].lower() == pool_address.lower():
+        if transfer['from_address'] == pool_address:
             print("  ⚠️ TRANSFER FROM POOL")
     
     # Analyze Uniswap events
@@ -73,7 +75,7 @@ def analyze_liquidity_removal():
         print(f"  Depth: {itx['depth']}")
         
         # Check if it's from the pool
-        if itx['from_address'].lower() == pool_address.lower():
+        if itx['from_address'] == pool_address:
             print(f"  ⚠️ ETH REMOVED FROM POOL: {float(itx['value']) / 10**18:.6f} ETH")
     
     # Look for specific function calls
@@ -108,7 +110,7 @@ def analyze_liquidity_removal():
     
     # Calculate total ETH removed
     total_eth_removed = sum(float(itx['value']) / 10**18 for itx in eth_transfers 
-                           if itx['from_address'].lower() == pool_address.lower())
+                           if itx['from_address'] == pool_address)
     
     if total_eth_removed > 0:
         print(f"⚠️ LIQUIDITY REMOVAL DETECTED!")
@@ -118,7 +120,7 @@ def analyze_liquidity_removal():
         print("Checking ERC20 transfers from pool...")
         
         pool_transfers = [t for t in tx.erc20_transfers 
-                         if t['from_address'].lower() == pool_address.lower()]
+                         if t['from_address'] == pool_address]
         if pool_transfers:
             print(f"  Found {len(pool_transfers)} token transfers from pool")
 

@@ -4,8 +4,8 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PySet};
-use ethtx::data_models::transaction::ProcessedTransaction;
-use ethtx::utils::to_checksum_address;
+use tx_processor::data_models::transaction::ProcessedTransaction;
+use tx_processor::utils::to_checksum_address;
 use alloy_primitives::U256;
 use serde_json::Value as JsonValue;
 
@@ -94,12 +94,14 @@ pub struct PyProcessedTransaction {
 impl PyProcessedTransaction {
     /// Create from Rust ProcessedTransaction
     pub fn from_processed_transaction(ptx: ProcessedTransaction) -> Self {
+        let checksum_from = to_checksum_address(&ptx.from_address);
+        
         Self {
             hash: format!("0x{}", hex::encode(ptx.hash)),
             block_number: ptx.block_number,
             block_timestamp: ptx.block_timestamp,
             txn_index: ptx.txn_index,
-            from_address: to_checksum_address(&ptx.from_address),
+            from_address: checksum_from,
             to_address: ptx.to_address.map(|a| to_checksum_address(&a)),
             contract_address: ptx.contract_address.map(|a| to_checksum_address(&a)),
             value: ptx.value.to_string(),
@@ -111,6 +113,11 @@ impl PyProcessedTransaction {
             bribe_amount: ptx.bribe_amount,
             inner: ptx,
         }
+    }
+    
+    /// Get the inner ProcessedTransaction (for internal use)
+    pub(crate) fn to_processed_transaction(&self) -> ProcessedTransaction {
+        self.inner.clone()
     }
 }
 
@@ -143,9 +150,13 @@ impl PyProcessedTransaction {
         
         for transfer in &self.inner.erc20_transfers {
             let dict = PyDict::new(py);
-            dict.set_item("from_address", to_checksum_address(&transfer.from_address))?;
-            dict.set_item("to_address", to_checksum_address(&transfer.to_address))?;
-            dict.set_item("token_address", to_checksum_address(&transfer.token_address))?;
+            let token_checksum = to_checksum_address(&transfer.token_address);
+            let from_checksum = to_checksum_address(&transfer.from_address);
+            let to_checksum = to_checksum_address(&transfer.to_address);
+            
+            dict.set_item("from_address", from_checksum)?;
+            dict.set_item("to_address", to_checksum)?;
+            dict.set_item("token_address", token_checksum)?;
             dict.set_item("amount", transfer.amount.to_string())?;
             dict.set_item("log_index", transfer.log_index)?;
             list.append(dict)?;
@@ -606,12 +617,12 @@ impl PyProcessedTransaction {
         Ok(dict.into())
     }
     
-    /// Get state changes as Python dict
+    /// Get address balance changes as Python dict
     #[getter]
-    fn state_changes(&self, py: Python) -> PyResult<Py<PyDict>> {
+    fn address_balance_changes(&self, py: Python) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new(py);
         
-        for (addr, value) in &self.inner.state_changes {
+        for (addr, value) in &self.inner.address_balance_changes {
             let addr_str = to_checksum_address(&addr);
             // Convert serde_json::Value to nested Python dict
             let py_value = json_to_python(py, &value)?;
@@ -699,7 +710,7 @@ impl PyProcessedTransaction {
         dict.set_item("other_events", self.other_events(py)?)?;
         
         // State and fees
-        dict.set_item("state_changes", self.state_changes(py)?)?;
+        dict.set_item("address_balance_changes", self.address_balance_changes(py)?)?;
         dict.set_item("latest_states", self.latest_states(py)?)?;
         dict.set_item("fees", self.fees(py)?)?;
         
@@ -765,17 +776,17 @@ impl PyProcessedTransaction {
             self.inner.fees.max_priority_fee.map_or("None".to_string(), |v| v.to_string())
         );
         
-        // Format state changes - show all
-        let state_changes: Vec<String> = self.inner.state_changes.iter()
+        // Format address balance changes - show all
+        let address_balance_changes: Vec<String> = self.inner.address_balance_changes.iter()
             .map(|(addr, val)| format!("'0x{}': {}", 
                 hex::encode(addr).to_uppercase(),
                 serde_json::to_string(&val).unwrap_or_else(|_| "{}".to_string())
             ))
             .collect();
-        let state_changes_repr = format!("{{{}}}", state_changes.join(", "));
+        let address_balance_changes_repr = format!("{{{}}}", address_balance_changes.join(", "));
         
         format!(
-            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, txn_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, txn_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, approvals={}, mints={}, burns={}, deposits={}, withdraws={}, pair_events={}, owner_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, state_changes={}, latest_states={}, input='{}')",
+            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, txn_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, txn_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, approvals={}, mints={}, burns={}, deposits={}, withdraws={}, pair_events={}, owner_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, address_balance_changes={}, latest_states={}, input='{}')",
             self.hash,
             self.block_number,
             self.block_timestamp,
@@ -822,7 +833,7 @@ impl PyProcessedTransaction {
             format_list("uniswap_v4_swaps", self.inner.uniswap_v4_swaps.len()),
             format_list("permit2_events", self.inner.permit2_events.len()),
             format_list("other_events", self.inner.other_events.len()),
-            state_changes_repr,
+            address_balance_changes_repr,
             format_list("latest_states", self.inner.latest_states.len()),
             self.input
         )

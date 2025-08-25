@@ -12,11 +12,14 @@ def main():
     print("PyReth Basic Usage Examples")
     print("=" * 60)
     
+    # Create the PyReth instance
+    py_reth = pyreth.PyReth()
+    
     # 1. ChainQuery - Direct database access
     print("\n1. ChainQuery - Direct Database Access")
     print("-" * 40)
     
-    query = pyreth.ChainQuery()
+    query = py_reth.chain_query()
     
     # Get ETH balance
     vitalik = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
@@ -35,7 +38,7 @@ def main():
     print("\n2. TxProcessor - Transaction Processing")
     print("-" * 40)
     
-    processor = pyreth.TxProcessor()
+    processor = py_reth.tx_processor()
     
     # Process a known Uniswap swap transaction
     tx_hash = "0x5c89f223fe19593cf85319dcdd3f6de618e770d958f72ea123d36db2fdf5d46e"
@@ -62,7 +65,7 @@ def main():
     print("\n3. Simulator - Transaction Simulation")
     print("-" * 40)
     
-    simulator = pyreth.Simulator()
+    simulator = py_reth.simulator()
     
     # Simulate a simple ETH transfer
     tx_request = {

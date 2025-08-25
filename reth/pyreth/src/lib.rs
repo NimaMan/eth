@@ -9,11 +9,14 @@
 /// All functionality is accessible through a single Python module: `import pyreth`
 
 // Core modules
-pub mod chain_query;
+pub mod trading_simulator;
 
 // Re-export external functionality
-pub use ethtx::{TxProcessor, ProcessedTransaction};
+pub use tx_processor::{TxProcessor, ProcessedTransaction};
 pub use reth_tx_simulator::{RethTxSimulator, CallRequest, SimulationResult};
+
+// Re-export erc20_token_trading_viability from tx_processor
+pub use tx_processor::erc20_token_trading_viability;
 
 #[cfg(feature = "python")]
 pub use tx_builder::TxBuilder;
@@ -24,5 +27,5 @@ pub mod python;
 
 // Utility modules
 pub mod utils {
-    pub use ethtx::utils::*;
+    pub use tx_processor::utils::*;
 }

@@ -76,7 +76,7 @@ def analyze_token_trading(token_address, pool_address=None, enable_tx_hash=None)
         print("Step 1: Querying token information...")
         
         # Get latest block for simulation
-        latest_block = chain_query.get_latest_block_number()
+        latest_block = chain_query.get_latest_block()
         print(f"✓ Latest block: {latest_block}")
         
         # Step 2: Process enable trading transaction if provided
@@ -104,12 +104,24 @@ def analyze_token_trading(token_address, pool_address=None, enable_tx_hash=None)
         print("Step 4: Simulating trading sequence...")
         
         try:
-            result = trading_sim.simulate_trading_sequence(
-                enable_tx=enable_tx,
-                token_address=token_address,
-                pool_address=pool_address,
-                block_number=latest_block
-            )
+            # Use simulate_tx_with_buy_sell_seq or simulate_with_config
+            if enable_tx:
+                result = trading_sim.simulate_tx_with_buy_sell_seq(
+                    prior_tx=enable_tx,
+                    token_address=token_address,
+                    pool_address=pool_address,
+                    block_number=latest_block
+                )
+            else:
+                # Use simulate_with_config for no prior tx case
+                config = trading_sim.default_config()
+                result = trading_sim.simulate_with_config(
+                    prior_tx=None,
+                    token_address=token_address,
+                    pool_address=pool_address,
+                    config=config,
+                    block_number=latest_block
+                )
             
             # Update analysis with results
             analysis.update({

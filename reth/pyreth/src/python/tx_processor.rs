@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use rayon::prelude::*;
 
-use ethtx::TxProcessor;
+use tx_processor::TxProcessor;
 use super::processed_transaction::PyProcessedTransaction;
 
 /// Python wrapper for TxProcessor
