@@ -1,0 +1,123 @@
+[package]
+name = "reth_chain_query"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nima"]
+description = "Direct blockchain state queries using Reth database"
+license = "MIT"
+
+[dependencies]
+# Core dependencies
+alloy-primitives = "1.0.0"
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+hex-literal = "0.4"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+
+# Reth simulator for database access
+reth_tx_simulator = { path = "../reth_tx_simulator" }
+
+# PostgreSQL support
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "bigdecimal"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+# For decoding ABI responses
+alloy-sol-types = "0.8"
+alloy-rlp = "0.3"
+once_cell = "1.21.3"
+
+# Examples
+[[example]]
+name = "query_token"
+path = "examples/query_token.rs"
+
+# Token examples
+[[example]]
+name = "stablecoin_supplies"
+path = "examples/token/stablecoin_supplies.rs"
+
+[[example]]
+name = "etf_token_holdings"
+path = "examples/token/etf_token_holdings.rs"
+
+# Account examples  
+[[example]]
+name = "eth_whales"
+path = "examples/account/eth_whales.rs"
+
+# Block examples
+[[example]]
+name = "latest_block_info"
+path = "examples/block/latest_block_info.rs"
+
+# Performance examples
+[[example]]
+name = "query_latency_benchmark"
+path = "examples/performance/query_latency_benchmark.rs"
+
+# Storage examples
+[[example]]
+name = "uniswap_pool_state"
+path = "examples/storage/uniswap_pool_state.rs"
+
+[[example]]
+name = "erc20_storage_layout"
+path = "examples/storage/erc20_storage_layout.rs"
+
+[[example]]
+name = "proxy_implementation_detector"  
+path = "examples/storage/proxy_implementation_detector.rs"
+
+# Integration examples
+[[example]]
+name = "stablecoin_market_share"
+path = "examples/integration/stablecoin_market_share.rs"
+
+[[example]]
+name = "etf_flow_analysis"
+path = "examples/integration/etf_flow_analysis.rs"
+
+# Debug examples
+[[example]]
+name = "block_sync_analysis"
+path = "examples/debug/block_sync_analysis.rs"
+
+[[example]]
+name = "block_methods_comparison"
+path = "examples/debug/block_methods_comparison.rs"
+
+# PostgreSQL examples
+[[example]]
+name = "address_profitability"
+path = "examples/postgres_db/address_profitability.rs"
+
+[[example]]
+name = "trade_pnl_calculation"
+path = "examples/postgres_db/trade_pnl_calculation.rs"
+
+[[example]]
+name = "token_scam_analysis"
+path = "examples/postgres_db/token_scam_analysis.rs"
+
+[[example]]
+name = "pool_discovery"
+path = "examples/postgres_db/pool_discovery.rs"
+
+[[example]]
+name = "populate_address_metrics"
+path = "examples/postgres_db/populate_address_metrics.rs"
+
+[[example]]
+name = "calculate_pnl_metrics"
+path = "examples/postgres_db/calculate_pnl_metrics.rs"
+
+[[example]]
+name = "transaction_graph"
+path = "examples/postgres_db/transaction_graph.rs"
+
+[dev-dependencies]
+tokio-test = "0.4"
+hex = "0.4"
