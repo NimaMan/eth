@@ -176,30 +176,38 @@ def test_aggregation_periods():
     print("\n📈 Testing Aggregation Periods")
     print("=" * 50)
     
+    from datetime import datetime, timedelta, timezone
+    
     reth = pyreth.PyReth()
     query = reth.chain_query()
     
-    # Get blocks for different periods
+    # Get blocks for exact time ranges
     # Note: Actual block counts may vary from theoretical values due to
     # Ethereum block time variations (12-14 seconds instead of exactly 12)
+    now = datetime.now(timezone.utc)
     periods = [
-        ('hour', 'Hourly'),     # Theoretical: 300, Actual: 250-350
-        ('4hour', '4-Hourly'),   # Theoretical: 1200, Actual: 1000-1400
-        ('day', 'Daily'),        # Theoretical: 7200, Actual: 6000-7500
-        ('week', 'Weekly'),      # Theoretical: 50400, Actual: 45000-52000
-        ('month', 'Monthly'),    # Theoretical: 216000, Actual: 200000-225000
+        (timedelta(hours=1), 'Hourly'),        # Theoretical: 300, Actual: 250-350
+        (timedelta(hours=4), '4-Hourly'),      # Theoretical: 1200, Actual: 1000-1400
+        (timedelta(days=1), 'Daily'),          # Theoretical: 7200, Actual: 6000-7500
+        (timedelta(weeks=1), 'Weekly'),        # Theoretical: 50400, Actual: 45000-52000
+        (timedelta(days=30), 'Monthly'),       # Theoretical: 216000, Actual: 200000-225000
     ]
     
     print("Period sizes (in blocks):")
     print("-" * 40)
     
-    for period_key, period_name in periods:
-        # Get last period boundaries
-        boundaries = query.get_blocks_for_last_n_periods(1, period_key)
-        if boundaries:
-            boundary = boundaries[0]
-            block_count = boundary['end_block'] - boundary['start_block']
-            print(f"{period_name:10} = {block_count:6} blocks (~{block_count * 12:7} seconds)")
+    for delta, period_name in periods:
+        # Get blocks for exact time range
+        start_time = (now - delta).isoformat().replace('+00:00', 'Z')
+        end_time = now.isoformat().replace('+00:00', 'Z')
+        
+        try:
+            start_block, end_block = query.get_blocks_for_time_range(start_time, end_time)
+            block_count = end_block - start_block
+            avg_block_time = int(delta.total_seconds() / block_count) if block_count > 0 else 0
+            print(f"{period_name:10} = {block_count:6} blocks (~{avg_block_time:3}s per block)")
+        except Exception as e:
+            print(f"{period_name:10} = Error: {e}")
 
 
 def main():
