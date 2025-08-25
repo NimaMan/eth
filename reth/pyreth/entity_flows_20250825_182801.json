@@ -1,0 +1,170 @@
+[
+  {
+    "period": "Last Hour",
+    "start_time": "2025-08-25T15:28:01.207326Z",
+    "end_time": "2025-08-25T16:28:01.207326Z",
+    "start_block": 23219018,
+    "end_block": 23219135,
+    "block_count": 117,
+    "etf": {
+      "total_inflow": 0,
+      "total_outflow": 0,
+      "net_flow": 0,
+      "top_inflows": [],
+      "top_outflows": []
+    },
+    "cex": {
+      "total_deposits": 0,
+      "total_withdrawals": 0,
+      "net_flow": 0,
+      "top_deposits": [],
+      "top_withdrawals": []
+    },
+    "stablecoin": {
+      "total_minted": 672190.5641393661,
+      "total_burned": 23381025.76535797,
+      "net_change": -22708835.201218605,
+      "significant_changes": [
+        [
+          "USDC",
+          -23381025.76535797,
+          -0.05299305963262619
+        ],
+        [
+          "DAI",
+          672190.5641393661,
+          0.015242068120922131
+        ]
+      ]
+    },
+    "correlation": {
+      "institutional_net": 0,
+      "stablecoin_net": -22708835.201218605,
+      "correlation": "Neutral (low activity)",
+      "sentiment": "\u26aa Neutral",
+      "description": "Mixed signals"
+    }
+  },
+  {
+    "period": "Last 24 Hours",
+    "start_time": "2025-08-24T16:28:01.207326Z",
+    "end_time": "2025-08-25T16:28:01.207326Z",
+    "start_block": 23212142,
+    "end_block": 23219135,
+    "block_count": 6993,
+    "etf": {
+      "total_inflow": 0,
+      "total_outflow": 0,
+      "net_flow": 0,
+      "top_inflows": [],
+      "top_outflows": []
+    },
+    "cex": {
+      "total_deposits": 0,
+      "total_withdrawals": 0,
+      "net_flow": 0,
+      "top_deposits": [],
+      "top_withdrawals": []
+    },
+    "stablecoin": {
+      "total_minted": 183654128.84547555,
+      "total_burned": 16856266.93649873,
+      "net_change": 166797861.90897682,
+      "significant_changes": [
+        [
+          "DAI",
+          102859324.03412819,
+          2.387683055479273
+        ],
+        [
+          "USDC",
+          43494484.379470825,
+          0.09872983125219785
+        ],
+        [
+          "USDE",
+          35290793.50723648,
+          0.2926445759999653
+        ],
+        [
+          "DOLA",
+          -6999087.32470569,
+          -3.352564846985712
+        ],
+        [
+          "PYUSD",
+          -6260345.141793013,
+          -0.6532634373834353
+        ]
+      ]
+    },
+    "correlation": {
+      "institutional_net": 0,
+      "stablecoin_net": 166797861.90897682,
+      "correlation": "Neutral (low activity)",
+      "sentiment": "\u26aa Neutral",
+      "description": "Mixed signals"
+    }
+  },
+  {
+    "period": "Last 7 Days",
+    "start_time": "2025-08-18T16:28:01.207326Z",
+    "end_time": "2025-08-25T16:28:01.207326Z",
+    "start_block": 23169136,
+    "end_block": 23219135,
+    "block_count": 49999,
+    "etf": {
+      "total_inflow": 0,
+      "total_outflow": 0,
+      "net_flow": 0,
+      "top_inflows": [],
+      "top_outflows": []
+    },
+    "cex": {
+      "total_deposits": 0,
+      "total_withdrawals": 0,
+      "net_flow": 0,
+      "top_deposits": [],
+      "top_withdrawals": []
+    },
+    "stablecoin": {
+      "total_minted": 2007700972.3909907,
+      "total_burned": 1013223907.5581025,
+      "net_change": 994477064.8328882,
+      "significant_changes": [
+        [
+          "USDT",
+          999072844.5582733,
+          1.2366895211214577
+        ],
+        [
+          "USDC",
+          -974299880.4379044,
+          -2.1616599015516536
+        ],
+        [
+          "USDE",
+          728788433.3422928,
+          6.412134106458371
+        ],
+        [
+          "DAI",
+          269031364.01683235,
+          6.495609576324343
+        ],
+        [
+          "FDUSD",
+          -31197228.590000033,
+          -4.0901547423714995
+        ]
+      ]
+    },
+    "correlation": {
+      "institutional_net": 0,
+      "stablecoin_net": 994477064.8328882,
+      "correlation": "Neutral (low activity)",
+      "sentiment": "\u26aa Neutral",
+      "description": "Mixed signals"
+    }
+  }
+]
