@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use crate::Result;
 use super::cache::TimestampCache;
 use super::{estimate_timestamp, estimate_block_number};
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 
 /// Block timestamp data
 #[derive(Debug, Clone, Copy)]
@@ -20,13 +20,13 @@ pub struct BlockTimestamp {
 
 /// Block-time converter with caching
 pub struct BlockTimeConverter {
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
     cache: TimestampCache,
 }
 
 impl BlockTimeConverter {
     /// Create new converter
-    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<TxSimulator>) -> Self {
         Self {
             simulator,
             cache: TimestampCache::new(10000), // Cache up to 10k entries
@@ -126,7 +126,7 @@ impl BlockTimeConverter {
     async fn fetch_block_timestamp(&self, block_number: u64) -> Result<DateTime<Utc>> {
         // Try to get from Reth DB via simulator's block header info method
         // Returns (timestamp, gas_limit, gas_used, base_fee)
-        match self.simulator.get_block_header_info(block_number) {
+        match self.simulator.get_block_metadata(block_number) {
             Ok((timestamp, _gas_limit, _gas_used, _base_fee)) => {
                 Ok(DateTime::from_timestamp(timestamp as i64, 0)
                     .unwrap_or_else(|| estimate_timestamp(block_number)))

@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Address, U256, B256};
 use eyre::Result;
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 use std::sync::Arc;
 
 use super::{
@@ -21,7 +21,7 @@ use super::{
 /// It uses Reth's database directly for maximum performance.
 pub struct ChainQuery {
     /// The underlying simulator that provides database access
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
     
     /// Account query module
     pub account: AccountQuery,
@@ -45,7 +45,7 @@ impl ChainQuery {
     /// # Arguments
     /// * `reth_datadir` - Path to Reth data directory (e.g., "/home/user/.local/share/reth/mainnet")
     pub fn new(reth_datadir: &str) -> Result<Self> {
-        let simulator = Arc::new(RethTxSimulator::new(reth_datadir)?);
+        let simulator = Arc::new(TxSimulator::new(reth_datadir)?);
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
         
         Ok(Self {
@@ -59,7 +59,7 @@ impl ChainQuery {
     }
     
     /// Create ChainQuery from existing simulator
-    pub fn from_simulator(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn from_simulator(simulator: Arc<TxSimulator>) -> Self {
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
         
         Self {
@@ -81,12 +81,12 @@ impl ChainQuery {
     }
     
     /// Get provider factory for advanced queries
-    pub(crate) fn provider_factory(&self) -> &reth_tx_simulator::RethTxSimulator {
+    pub(crate) fn provider_factory(&self) -> &tx_simulator::TxSimulator {
         &self.simulator
     }
     
     /// Get shared simulator for trading simulation
-    pub fn get_simulator(&self) -> Arc<RethTxSimulator> {
+    pub fn get_simulator(&self) -> Arc<TxSimulator> {
         self.simulator.clone()
     }
     

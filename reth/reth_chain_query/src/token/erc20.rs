@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Address, U256, B256};
 use eyre::Result;
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 use std::sync::Arc;
 use tiny_keccak::{Hasher, Keccak};
 // use hex_literal::hex; // Commented out unused import
@@ -31,12 +31,12 @@ pub struct ERC20Info {
 
 /// Token query module
 pub struct TokenQuery {
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
 }
 
 impl TokenQuery {
     /// Create new TokenQuery instance
-    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<TxSimulator>) -> Self {
         Self { simulator }
     }
     
@@ -50,8 +50,7 @@ impl TokenQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Calculate storage slot for balance mapping
@@ -70,7 +69,7 @@ impl TokenQuery {
     pub async fn get_erc20_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
         // Build totalSupply() call - function selector is 0x18160ddd
         let total_supply_selector = hex_literal::hex!("18160ddd");
-        let data = RethTxSimulator::encode_view_function_call(total_supply_selector);
+        let data = TxSimulator::encode_view_function_call(total_supply_selector);
         
         // Simulate the view function call
         let result = self.simulator.simulate_view_function(
@@ -85,14 +84,14 @@ impl TokenQuery {
         }
         
         // Parse the result as U256
-        Ok(RethTxSimulator::decode_uint256_result(&result.output))
+        Ok(result.decode_uint256())
     }
     
     /// Get ERC20 decimals by calling decimals() function
     pub async fn get_erc20_decimals(&self, token: Address, block_number: Option<u64>) -> Result<u8> {
         // Build decimals() call - function selector is 0x313ce567
         let decimals_selector = hex_literal::hex!("313ce567");
-        let data = RethTxSimulator::encode_view_function_call(decimals_selector);
+        let data = TxSimulator::encode_view_function_call(decimals_selector);
         
         // Simulate the view function call
         let result = self.simulator.simulate_view_function(
@@ -108,7 +107,7 @@ impl TokenQuery {
         }
         
         // Parse the result as uint8
-        let decimals = RethTxSimulator::decode_uint8_result(&result.output);
+        let decimals = result.decode_uint8();
         
         // Validate decimals is in reasonable range
         if decimals > 0 && decimals <= 36 {
@@ -123,7 +122,7 @@ impl TokenQuery {
     pub async fn get_erc20_symbol(&self, token: Address, block_number: Option<u64>) -> Result<String> {
         // Build symbol() call - function selector is 0x95d89b41
         let symbol_selector = hex_literal::hex!("95d89b41");
-        let data = RethTxSimulator::encode_view_function_call(symbol_selector);
+        let data = TxSimulator::encode_view_function_call(symbol_selector);
         
         // Simulate the view function call
         let result = self.simulator.simulate_view_function(
@@ -138,14 +137,14 @@ impl TokenQuery {
         }
         
         // Parse the result as string
-        Ok(RethTxSimulator::decode_string_result(&result.output))
+        Ok(result.decode_string())
     }
     
     /// Get ERC20 token name by calling name() function
     pub async fn get_erc20_name(&self, token: Address, block_number: Option<u64>) -> Result<String> {
         // Build name() call - function selector is 0x06fdde03
         let name_selector = hex_literal::hex!("06fdde03");
-        let data = RethTxSimulator::encode_view_function_call(name_selector);
+        let data = TxSimulator::encode_view_function_call(name_selector);
         
         // Simulate the view function call
         let result = self.simulator.simulate_view_function(
@@ -160,7 +159,7 @@ impl TokenQuery {
         }
         
         // Parse the result as string
-        Ok(RethTxSimulator::decode_string_result(&result.output))
+        Ok(result.decode_string())
     }
     
     /// Calculate storage slot for mapping[address] => value
@@ -209,8 +208,7 @@ impl TokenQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Allowance mapping is typically at slot 1

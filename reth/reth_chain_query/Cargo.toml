@@ -15,8 +15,8 @@ tracing = "0.1"
 hex-literal = "0.4"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 
-# Reth simulator for database access
-reth_tx_simulator = { path = "../reth_tx_simulator" }
+# Transaction simulator for database access
+tx_simulator = { path = "../tx_simulator" }
 
 # PostgreSQL support
 sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "bigdecimal"] }

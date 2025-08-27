@@ -21,6 +21,7 @@ pub mod query_engine;
 pub mod postgres_db;
 pub mod entities;
 pub mod time_utils;
+pub mod common_addresses;
 
 // Re-export main types
 pub use query_engine::ChainQuery;
@@ -42,6 +43,9 @@ pub use time_utils::{
     TimePeriod, PeriodType, PeriodBoundary,
     TimestampCache,
 };
+
+// Re-export common addresses
+pub use common_addresses::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME};
 
 // Re-export commonly used types from dependencies
 pub use alloy_primitives::{Address, U256, B256};

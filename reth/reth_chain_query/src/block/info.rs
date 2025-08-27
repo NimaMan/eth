@@ -4,7 +4,7 @@
 
 // use alloy_primitives::{U256, B256}; // Commented out unused imports
 use eyre::Result;
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 use std::sync::Arc;
 
 /// Block information structure
@@ -19,12 +19,12 @@ pub struct BlockInfo {
 
 /// Block query module
 pub struct BlockQuery {
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
 }
 
 impl BlockQuery {
     /// Create new BlockQuery instance
-    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<TxSimulator>) -> Self {
         Self { simulator }
     }
     
@@ -55,7 +55,7 @@ impl BlockQuery {
         
         // Get complete header information from the database
         let (timestamp, gas_limit, gas_used, base_fee_per_gas) = 
-            self.simulator.get_block_header_info(block_number)?;
+            self.simulator.get_block_metadata(block_number)?;
         
         Ok(BlockInfo {
             number: block_number,
@@ -96,8 +96,7 @@ impl BlockQuery {
     /// Check if a block exists
     pub async fn block_exists(&self, block_number: u64) -> Result<bool> {
         // Try to get provider at block - if it succeeds, block exists
-        match self.simulator.provider_factory()
-            .history_by_block_number(block_number.into()) {
+        match self.simulator.get_chain_state_at_block(block_number) {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }

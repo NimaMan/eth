@@ -4,7 +4,7 @@
 
 use alloy_primitives::{Address, U256};
 use eyre::Result;
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 use std::sync::Arc;
 
 /// Account information structure
@@ -18,12 +18,12 @@ pub struct AccountInfo {
 
 /// Account query module
 pub struct AccountQuery {
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
 }
 
 impl AccountQuery {
     /// Create new AccountQuery instance
-    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<TxSimulator>) -> Self {
         Self { simulator }
     }
     
@@ -37,8 +37,7 @@ impl AccountQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Get account info
@@ -58,8 +57,7 @@ impl AccountQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Get account info
@@ -79,8 +77,7 @@ impl AccountQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Check if account has code
@@ -102,8 +99,7 @@ impl AccountQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Get account info

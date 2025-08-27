@@ -19,6 +19,8 @@ from eth_data.chain_utils.common_addresses import (
     STABLECOINS_ADDRESS_BY_NAME,
     STABLECOIN_UNIT_BY_NAME,
     ERC20_TOKEN_DECIMALS,
+    DENOM_ADDRESSES,
+    addresses_by_name,
 )
 from eth_data.chain_utils.common_addresses.all_cex_addresses import CEX_ADDRESSES_BY_NAME
 from eth_data.chain_utils.common_addresses.all_etf_addresses import ETF_ADDRESSES_BY_NAME
@@ -348,32 +350,151 @@ pub fn provider_stats() -> Vec<(&'static str, usize)> {{
     return rust_code
 
 
+def generate_denom_tokens_rust():
+    """Generate Rust code for DENOM_ADDRESSES (major tokens and currencies)."""
+    rust_code = '''//! DENOM token addresses (major tokens and currencies)
+//! 
+//! This file is auto-generated from Python address files.
+//! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
+
+use alloy_primitives::{address, Address};
+use std::collections::HashMap;
+use once_cell::sync::Lazy;
+
+/// DENOM_ADDRESSES - Major tokens and currencies tracked by the system
+/// Maps token contract addresses to their symbols
+pub static DENOM_ADDRESSES: Lazy<HashMap<Address, &'static str>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+'''
+    
+    # Add all DENOM_ADDRESSES entries
+    for addr, symbol in DENOM_ADDRESSES.items():
+        if addr.startswith('0x'):  # Only process addresses, not the merged stablecoins
+            rust_code += f'    m.insert(address!("{format_address(addr)}"), "{symbol}");\n'
+    
+    rust_code += '''    m
+});
+
+/// ERC20_TOKEN_DECIMALS - Decimal places for known tokens
+pub static ERC20_TOKEN_DECIMALS: Lazy<HashMap<&'static str, u8>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+'''
+    
+    # Add all decimal entries
+    for symbol, decimals in ERC20_TOKEN_DECIMALS.items():
+        rust_code += f'    m.insert("{symbol}", {decimals});\n'
+    
+    rust_code += '''    m
+});
+
+/// Common addresses by name (routers, factories, etc.)
+pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+'''
+    
+    # Add common named addresses (routers, factories, etc.)
+    for name, addr in addresses_by_name.items():
+        if addr.startswith('0x'):
+            # Escape single quotes in names
+            safe_name = name.replace("'", "\\'")
+            rust_code += f'    m.insert("{safe_name}", address!("{format_address(addr)}"));\n'
+    
+    rust_code += '''    m
+});
+
+/// Get token symbol by address
+pub fn get_token_symbol(address: Address) -> Option<&'static str> {
+    DENOM_ADDRESSES.get(&address).copied()
+}
+
+/// Get decimals for a token symbol
+pub fn get_token_decimals(symbol: &str) -> Option<u8> {
+    ERC20_TOKEN_DECIMALS.get(symbol).copied()
+}
+
+/// Check if an address is a known DENOM token
+pub fn is_denom_token(address: Address) -> bool {
+    DENOM_ADDRESSES.contains_key(&address)
+}
+
+/// Get address by name (for routers, factories, etc.)
+pub fn get_address_by_name(name: &str) -> Option<Address> {
+    ADDRESSES_BY_NAME.get(name).copied()
+}
+'''
+    
+    return rust_code
+
+
 def main():
     """Generate all Rust files."""
-    output_dir = Path("/home/nima/code/crypto/rust/reth_chain_query/src/entities")
+    # Create common_addresses directory
+    common_dir = Path("/home/nima/code/crypto/rust/reth_chain_query/src/common_addresses")
+    common_dir.mkdir(exist_ok=True)
     
-    # Generate stablecoins
+    # Keep entities directory for backward compatibility
+    entities_dir = Path("/home/nima/code/crypto/rust/reth_chain_query/src/entities")
+    
+    # Generate DENOM tokens (to common_addresses)
+    denom_code = generate_denom_tokens_rust()
+    denom_file = common_dir / "denom_tokens.rs"
+    denom_file.write_text(denom_code)
+    print(f"Generated {denom_file}")
+    print(f"  - {len(DENOM_ADDRESSES)} DENOM tokens")
+    print(f"  - {len(ERC20_TOKEN_DECIMALS)} tokens with decimals")
+    print(f"  - {len(addresses_by_name)} named addresses")
+    
+    # Generate stablecoins (both locations for now)
     stablecoins_code = generate_stablecoins_rust()
-    stablecoins_file = output_dir / "stablecoins" / "addresses.rs"
+    stablecoins_file = common_dir / "stablecoins.rs"
     stablecoins_file.write_text(stablecoins_code)
+    entities_stablecoins_file = entities_dir / "stablecoins" / "addresses.rs"
+    entities_stablecoins_file.write_text(stablecoins_code)
     print(f"Generated {stablecoins_file}")
     print(f"  - {len(STABLECOINS_ADDRESS_BY_NAME)} stablecoins with decimals")
     
-    # Generate CEX addresses
+    # Generate CEX addresses (both locations for now)
     cex_code = generate_cex_rust()
-    cex_file = output_dir / "cex" / "addresses.rs"
+    cex_file = common_dir / "cex.rs"
     cex_file.write_text(cex_code)
+    entities_cex_file = entities_dir / "cex" / "addresses.rs"
+    entities_cex_file.write_text(cex_code)
     print(f"Generated {cex_file}")
     print(f"  - {len(CEX_ADDRESSES_BY_NAME)} CEX addresses")
     
-    # Generate ETF addresses
+    # Generate ETF addresses (both locations for now)
     etf_code = generate_etf_rust()
-    etf_file = output_dir / "etfs" / "addresses.rs"
+    etf_file = common_dir / "etf.rs"
     etf_file.write_text(etf_code)
+    entities_etf_file = entities_dir / "etfs" / "addresses.rs"
+    entities_etf_file.write_text(etf_code)
     print(f"Generated {etf_file}")
     print(f"  - {len(ETF_ADDRESSES_BY_NAME)} ETF addresses")
     
-    total = len(STABLECOINS_ADDRESS_BY_NAME) + len(CEX_ADDRESSES_BY_NAME) + len(ETF_ADDRESSES_BY_NAME)
+    # Create mod.rs for common_addresses
+    mod_code = '''//! Common addresses module
+//! 
+//! This module contains all common Ethereum addresses used throughout the system.
+//! All files are auto-generated from Python address files.
+
+pub mod denom_tokens;
+pub mod stablecoins;
+pub mod cex;
+pub mod etf;
+
+// Re-export commonly used items
+pub use denom_tokens::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME};
+pub use denom_tokens::{get_token_symbol, get_token_decimals, is_denom_token, get_address_by_name};
+pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
+pub use cex::{CEX_ADDRESSES, CEX_ADDRESSES_SET, ADDRESSES_BY_EXCHANGE};
+pub use etf::{ETF_ADDRESSES, ETF_ADDRESSES_SET, ADDRESSES_BY_PROVIDER};
+'''
+    
+    mod_file = common_dir / "mod.rs"
+    mod_file.write_text(mod_code)
+    print(f"Generated {mod_file}")
+    
+    total = len(DENOM_ADDRESSES) + len(STABLECOINS_ADDRESS_BY_NAME) + len(CEX_ADDRESSES_BY_NAME) + len(ETF_ADDRESSES_BY_NAME)
     print(f"\nTotal addresses generated: {total}")
 
 

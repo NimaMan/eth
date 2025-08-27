@@ -4,18 +4,18 @@
 
 use alloy_primitives::{Address, U256, B256};
 use eyre::Result;
-use reth_tx_simulator::RethTxSimulator;
+use tx_simulator::TxSimulator;
 use std::sync::Arc;
 use tiny_keccak::{Hasher, Keccak};
 
 /// Storage query module
 pub struct StorageQuery {
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
 }
 
 impl StorageQuery {
     /// Create new StorageQuery instance
-    pub fn new(simulator: Arc<RethTxSimulator>) -> Self {
+    pub fn new(simulator: Arc<TxSimulator>) -> Self {
         Self { simulator }
     }
     
@@ -29,8 +29,7 @@ impl StorageQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Read storage
@@ -121,8 +120,7 @@ impl StorageQuery {
         };
         
         // Get provider at block
-        let provider = self.simulator.provider_factory()
-            .history_by_block_number(block_number.into())
+        let provider = self.simulator.get_chain_state_at_block(block_number)
             .map_err(|e| eyre::eyre!("Failed to get provider at block {}: {}", block_number, e))?;
         
         // Read all slots
