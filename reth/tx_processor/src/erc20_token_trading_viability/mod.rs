@@ -16,6 +16,7 @@ pub mod pool_adapters;
 pub mod tx_builders;
 pub mod tax_calculator;
 pub mod optional_setup_buy_approve_sell_token_simulator;
+pub mod trading_sequence_simulator;
 
 pub use config::PoolViabilityConfig;
 pub use types::{PoolViabilityResult, PoolType};
@@ -23,4 +24,8 @@ pub use analyzer::analyze_pool_viability;
 pub use optional_setup_buy_approve_sell_token_simulator::{
     OptionalSetupBuyApproveSellTokenSimulator, 
     OptionalSetupBuyApproveSellResult,
+};
+pub use trading_sequence_simulator::{
+    TradingSequenceSimulator,
+    TradingSequenceResult,
 };

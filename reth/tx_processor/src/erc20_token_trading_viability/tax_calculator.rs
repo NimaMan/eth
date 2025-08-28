@@ -2,7 +2,6 @@
 
 use alloy_primitives::{Address, I256, U256};
 use std::collections::HashMap;
-use reth_tx_simulator::AddressBalanceChange;
 use crate::data_models::ProcessedTransaction;
 
 pub enum TaxCalculationResult {
@@ -35,7 +34,9 @@ pub fn calculate_buy_tax(
     };
     
     // ETH spent by buyer (should be negative)
-    let eth_spent = buyer_state.eth_net;
+    let eth_spent = buyer_state.currency_net.get("ETH")
+        .cloned()
+        .unwrap_or(I256::ZERO);
     if eth_spent >= I256::ZERO {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Buyer didn't spend ETH".to_string()
@@ -43,7 +44,9 @@ pub fn calculate_buy_tax(
     }
     
     // ETH received by pool (should be positive)
-    let eth_to_pool = pool_state.eth_net;
+    let eth_to_pool = pool_state.currency_net.get("ETH")
+        .cloned()
+        .unwrap_or(I256::ZERO);
     if eth_to_pool <= I256::ZERO {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Pool didn't receive ETH".to_string()
@@ -97,7 +100,9 @@ pub fn calculate_sell_tax(
     };
     
     // ETH received by buyer (should be positive)
-    let eth_received = buyer_state.eth_net;
+    let eth_received = buyer_state.currency_net.get("ETH")
+        .cloned()
+        .unwrap_or(I256::ZERO);
     if eth_received <= I256::ZERO {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Buyer didn't receive ETH".to_string()
@@ -105,7 +110,9 @@ pub fn calculate_sell_tax(
     }
     
     // ETH sent from pool (should be negative)
-    let eth_from_pool = pool_state.eth_net;
+    let eth_from_pool = pool_state.currency_net.get("ETH")
+        .cloned()
+        .unwrap_or(I256::ZERO);
     if eth_from_pool >= I256::ZERO {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Pool didn't send ETH".to_string()
@@ -142,11 +149,14 @@ pub fn extract_eth_received(
 ) -> U256 {
     address_balance_changes.get(buyer_address)
         .and_then(|state| {
-            if state.eth_net > I256::ZERO {
-                Some(U256::try_from(state.eth_net.unsigned_abs()).unwrap_or(U256::ZERO))
-            } else {
-                None
-            }
+            state.currency_net.get("ETH")
+                .and_then(|eth_net| {
+                    if *eth_net > I256::ZERO {
+                        Some(U256::try_from(eth_net.unsigned_abs()).unwrap_or(U256::ZERO))
+                    } else {
+                        None
+                    }
+                })
         })
         .unwrap_or(U256::ZERO)
 }

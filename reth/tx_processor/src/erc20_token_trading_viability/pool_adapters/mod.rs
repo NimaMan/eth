@@ -5,7 +5,7 @@ pub mod uniswap_v3;
 
 use alloy_primitives::{Address, U256};
 use eyre::Result;
-use reth_tx_simulator::CallRequest;
+use tx_simulator::CallRequest;
 
 pub use uniswap_v2::UniswapV2Adapter;
 pub use uniswap_v3::UniswapV3Adapter;

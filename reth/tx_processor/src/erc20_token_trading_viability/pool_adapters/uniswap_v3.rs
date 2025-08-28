@@ -3,7 +3,7 @@
 use super::PoolAdapter;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_tx_simulator::CallRequest;
+use tx_simulator::CallRequest;
 
 pub struct UniswapV3Adapter {
     pool_address: Address,

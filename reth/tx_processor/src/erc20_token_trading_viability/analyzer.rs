@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 use eyre::Result;
-use reth_tx_simulator::{RethTxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, CallRequest};
 use crate::TxProcessor;
 use crate::data_models::ProcessedTransaction;
-use crate::chain_state_persisting_sequential_tx_simulator::ChainStatePersistingSequentialTxSimulator;
 
 use crate::erc20_token_trading_viability::{
     config::PoolViabilityConfig,
@@ -29,16 +28,13 @@ use crate::erc20_token_trading_viability::{
 /// 
 /// Returns comprehensive analysis including tax percentages and trading viability
 pub async fn analyze_pool_viability(
-    simulator: Arc<RethTxSimulator>,
+    simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolViabilityConfig,
 ) -> Result<PoolViabilityResult> {
-    // Create the chain state persisting sequential simulator
-    let sequential_simulator = ChainStatePersistingSequentialTxSimulator::new(simulator);
-    
-    // Create the specialized trading simulator
-    let mut trading_simulator = OptionalSetupBuyApproveSellTokenSimulator::new(
-        sequential_simulator,
+    // Create the specialized trading simulator using the new architecture
+    let trading_simulator = OptionalSetupBuyApproveSellTokenSimulator::new(
+        simulator.clone(),
         tx_processor.clone(),
     );
     

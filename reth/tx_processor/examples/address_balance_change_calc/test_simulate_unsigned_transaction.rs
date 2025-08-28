@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
                 test_tx.address_balance_changes.insert(
                     addr,
                     serde_json::json!({
-                        "eth_net": changes.eth_net,
+                        "currency_net": changes.currency_net,
                         "token_net": changes.token_net,
                     })
                 );

@@ -22,12 +22,20 @@ name = "compare_with_python"
 path = "examples/compare_with_python.rs"
 
 [[example]]
+name = "processed_tx_from_call_data"
+path = "examples/tx_processor /processed_tx_from_call_data.rs"
+
+[[example]]
 name = "simulate_unsigned_transaction"
 path = "examples/simulation/test_simulate_unsigned_transaction.rs"
 
 [[example]]
 name = "process_transaction_by_hash"
-path = "examples/process_transaction_by_hash.rs"
+path = "examples/tx_processor /process_transaction_by_hash.rs"
+
+[[example]]
+name = "test_new_migration"
+path = "examples/test_new_migration.rs"
 
 [[example]]
 name = "single_pass_token_trading_simulation"
@@ -70,10 +78,50 @@ path = "examples/pool_analysis/erc20_pool_moo_token.rs"
 name = "erc20_pool_block_range_analysis"
 path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
 
+# Balance change analysis examples
+[[example]]
+name = "extract_address_balance_changes"
+path = "examples/balance_change_analysis/extract_address_balance_changes.rs"
+
+[[example]]
+name = "simulate_using_calldata"
+path = "examples/balance_change_analysis/simulate_using_calldata.rs"
+
+[[example]]
+name = "mempool_workflow_usdt_transfer_example"
+path = "examples/balance_change_analysis/mempool_workflow_usdt_transfer_example.rs"
+
+[[example]]
+name = "real_performance_benchmark"
+path = "examples/balance_change_analysis/real_performance_benchmark.rs"
+
+[[example]]
+name = "sequential_approval_mechanics_demo"
+path = "examples/balance_change_analysis/sequential/approval_mechanics_demo.rs"
+
+[[example]]
+name = "sequential_basic_demo"
+path = "examples/balance_change_analysis/sequential/basic_demo.rs"
+
+[[example]]
+name = "sequential_usdc_buy_sell"
+path = "examples/balance_change_analysis/sequential/usdc_buy_sell.rs"
+
+[[example]]
+name = "usdc_usdt_comparison_with_balance_changes"
+path = "examples/balance_change_analysis/sequential/usdc_usdt_comparison_with_balance_changes.rs"
+
+[[example]]
+name = "buy_approve_sell_with_processed_tx"
+path = "examples/simulation/buy_approve_sell_with_processed_tx.rs"
+
 [dependencies]
 # Use the new Direct Reth Transaction Simulator
 reth_tx_simulator = { path = "../reth_tx_simulator" }
 reth_chain_query = { path = "../reth_chain_query" }
+
+# New modular tx_simulator for migration
+tx_simulator = { path = "../tx_simulator" }
 
 
 # Basic dependencies
@@ -89,6 +137,7 @@ serde_json = "1.0"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 reqwest = { version = "0.11", features = ["json"] } # For benchmark comparison with Python
 futures = "0.3"
+lazy_static = "1.5"
 
 # Reth dependencies for direct database access
 reth-provider = { path = "../reth/crates/storage/provider" }

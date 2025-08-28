@@ -9,7 +9,6 @@ The tx_processor module is a high-performance Rust implementation that processes
 1. **Accept**: Transaction hash or list of transaction hashes
 2. **Process**: Decode events, classify transaction, extract internal transfers (when needed)
 3. **Return**: ProcessedTransaction struct with all extracted data
-4. **Performance**: 10-40x faster than Python implementation
 
 ## Key Design Principles
 
