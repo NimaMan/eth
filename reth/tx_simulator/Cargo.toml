@@ -1,0 +1,93 @@
+[package]
+name = "tx_simulator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Core
+tokio = { version = "1", features = ["full"] }
+eyre = "0.6"
+tracing = "0.1"
+futures = "0.3"
+
+# Ethereum types
+alloy-primitives = { version = "1.0", features = ["rlp"] }
+alloy-rlp = "0.3"
+alloy-rpc-types-trace = "0.14.0"
+alloy-consensus = "0.14.0"
+hex = "0.4"
+
+# Reth dependencies - using local paths
+reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
+reth-db = { path = "/home/nima/code/crypto/rust/reth/crates/storage/db" }
+reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
+reth-revm = { path = "/home/nima/code/crypto/rust/reth/crates/revm" }
+reth-evm = { path = "/home/nima/code/crypto/rust/reth/crates/evm" }
+reth-node-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/node" }
+reth-node-types = { path = "/home/nima/code/crypto/rust/reth/crates/node/types" }
+reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives" }
+
+# REVM - exact version Reth uses
+revm = { version = "22.0.1", default-features = false, features = ["std"] }
+revm-inspectors = "0.19.1"
+
+# For serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# For RPC benchmarking
+jsonrpsee = { version = "0.24", features = ["http-client"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = "0.4"
+
+# Examples
+
+# Basic examples
+[[example]]
+name = "verify_database_setup"
+path = "examples/basic/verify_database_setup.rs"
+
+[[example]]
+name = "unsigned_transaction_example"
+path = "examples/basic/unsigned_transaction_example.rs"
+
+[[example]]
+name = "view_function_example"
+path = "examples/basic/view_function_example.rs"
+
+[[example]]
+name = "weth_totalsupply_view_call"
+path = "examples/basic/weth_totalsupply_view_call.rs"
+
+[[example]]
+name = "trace_extraction_example"
+path = "examples/basic/trace_extraction_example.rs"
+
+# Sequential examples
+[[example]]
+name = "buy_approve_then_sell"
+path = "examples/sequential/buy_approve_then_sell.rs"
+
+[[example]]
+name = "batch_sequence_example"
+path = "examples/sequential/batch_sequence_example.rs"
+
+[[example]]
+name = "auto_nonce_management_example"
+path = "examples/sequential/auto_nonce_management_example.rs"
+
+[[example]]
+name = "mev_sandwich_bundle_example"
+path = "examples/sequential/mev_sandwich_bundle_example.rs"
+
+# Performance examples
+[[example]]
+name = "rpc_vs_direct_simulation_benchmark"
+path = "examples/performance/rpc_vs_direct_simulation_benchmark.rs"
+
+# Advanced examples
+[[example]]
+name = "timeout_handling_example"
+path = "examples/advanced/timeout_handling_example.rs"
