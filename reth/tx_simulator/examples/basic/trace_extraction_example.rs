@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(45));
     
     let eth_transfer = CallRequest {
-        from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
-        value: Some(U256::from(1000000000000000000u64)), // 1 ETH
+        value: Some(U256::from(1000000000000000u64)), // 0.001 ETH
         gas: Some(21000),
         gas_price: Some(20_000_000_000), // 20 gwei
         ..Default::default()

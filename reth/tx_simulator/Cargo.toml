@@ -67,12 +67,12 @@ path = "examples/basic/trace_extraction_example.rs"
 
 # Sequential examples
 [[example]]
-name = "buy_approve_then_sell"
-path = "examples/sequential/buy_approve_then_sell.rs"
+name = "buy_approve_then_sell_usdc"
+path = "examples/sequential/buy_approve_then_sell_usdc.rs"
 
 [[example]]
-name = "batch_sequence_example"
-path = "examples/sequential/batch_sequence_example.rs"
+name = "sequential_eth_transfers_with_state_persistence"
+path = "examples/sequential/sequential_eth_transfers_with_state_persistence.rs"
 
 [[example]]
 name = "auto_nonce_management_example"

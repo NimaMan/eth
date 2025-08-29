@@ -16,6 +16,7 @@ use crate::{
     simulator::TxSimulator,
     types::{SequentialTransactionResult, SequentialSimulationResult, SequentialSimulationOptions},
     call_simulator::CallRequest,
+    simulation_revert_decoder::decode_revert_data,
 };
 use std::collections::HashMap;
 use eyre::Result;
@@ -180,10 +181,12 @@ impl TxSimulator {
         
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_reason = if success {
-            None
+        let revert_reason = if !success {
+            res.result.output()
+                .map(|bytes| decode_revert_data(&bytes))
+                .or_else(|| Some("Transaction reverted without data".to_string()))
         } else {
-            Some("Transaction reverted".to_string())
+            None
         };
         
         // Extract call trace
@@ -236,10 +239,12 @@ impl TxSimulator {
         
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_reason = if success {
-            None
+        let revert_reason = if !success {
+            res.result.output()
+                .map(|bytes| decode_revert_data(&bytes))
+                .or_else(|| Some("Transaction reverted without data".to_string()))
         } else {
-            Some("Transaction reverted".to_string())
+            None
         };
         
         // Extract call trace

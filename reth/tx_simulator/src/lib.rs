@@ -18,6 +18,7 @@ pub mod batch_sequence_simulation;
 pub mod view_function_simulator;
 pub mod parallel_tx_simulation;
 pub mod simulation_chain;
+pub mod simulation_revert_decoder;
 
 // Re-export main types
 pub use simulator::{TxSimulator, RethTxSimulator};

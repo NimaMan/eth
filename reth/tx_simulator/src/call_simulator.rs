@@ -7,6 +7,7 @@
 use crate::{
     simulator::TxSimulator,
     types::{SimulationResult, FullSimulationResult},
+    simulation_revert_decoder::decode_revert_data,
 };
 use eyre::Result;
 use tokio::task;
@@ -76,8 +77,11 @@ impl TxSimulator {
                 gas_used: res.result.gas_used(),
                 revert_reason: if res.result.is_success() { 
                     None 
-                } else { 
-                    Some("Transaction reverted".to_string()) 
+                } else {
+                    // Extract and decode the actual revert data
+                    res.result.output()
+                        .map(|bytes| decode_revert_data(&bytes))
+                        .or_else(|| Some("Transaction reverted without data".to_string()))
                 },
             })
         })
@@ -129,7 +133,10 @@ impl TxSimulator {
             let revert_reason = if success {
                 None
             } else {
-                Some("Transaction reverted".to_string())
+                // Extract and decode the actual revert data
+                res.result.output()
+                    .map(|bytes| decode_revert_data(&bytes))
+                    .or_else(|| Some("Transaction reverted without data".to_string()))
             };
             
             // Extract call trace

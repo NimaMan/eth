@@ -48,11 +48,11 @@ async fn main() -> Result<()> {
     // Initialize simulator
     let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     
-    // MEV bot address
-    let mev_bot = address!("1337133713371337133713371337133713371337");
+    // MEV bot address (using address with funds)
+    let mev_bot = address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689");
     
-    // Victim address
-    let victim = address!("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+    // Victim address (another address with funds - you'd need to check this has funds)
+    let victim = address!("742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e");
     
     // Create swap calldata for Uniswap V2
     // swapExactETHForTokens(uint amountOutMin, address[] path, address to, uint deadline)
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         CallRequest {
             from: Some(mev_bot),
             to: Some(UNISWAP_V2_ROUTER),
-            value: Some(U256::from(1_000_000_000_000_000_000u128)), // 1 ETH
+            value: Some(U256::from(1_000_000_000_000_000u128)), // 0.001 ETH
             gas: Some(200_000),
             data: Some(Bytes::from(swap_method_id.to_vec())), // Simplified calldata
             gas_price: None,
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         CallRequest {
             from: Some(victim),
             to: Some(UNISWAP_V2_ROUTER),
-            value: Some(U256::from(5_000_000_000_000_000_000u128)), // 5 ETH
+            value: Some(U256::from(5_000_000_000_000_000u128)), // 0.005 ETH
             gas: Some(200_000),
             data: Some(Bytes::from(swap_method_id.to_vec())),
             gas_price: None,
