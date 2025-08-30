@@ -1,14 +1,4 @@
-/// Buy → Approve → Sell Workflow Example
-/// 
-/// This example demonstrates a complete token trading workflow using SimulationChain,
-/// where each step depends on the results of the previous one:
-/// 
-/// 1. Buy tokens with ETH
-/// 2. Approve router
-/// 3. Sell tokens back to ETH
-/// 
-/// This workflow REQUIRES state preservation between steps.
-/// We show the actual simulation results - number of transfers and internal transactions.
+/// Buy → Approve → Sell FLOKI Token Workflow Example
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
@@ -17,82 +7,66 @@ use std::str::FromStr;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 
-// Well-known contract addresses
-const USDC_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";      // USDC token
-const USDT_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";      // USDT token
-const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";      // Wrapped ETH
+// Contract addresses
+const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E";     // FLOKI token (9 decimals)
+const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";     // Wrapped ETH
 const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"; // Uniswap V2 Router
 
 // Test address with ETH balance
-const TEST_BUYER: &str = "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5";
+const TEST_BUYER: &str = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("💱 Buy → Approve → Sell Workflow Demo");
-    println!("=====================================");
-    println!("Showing actual simulation results only.\n");
+    println!("🐕 FLOKI Token Buy → Approve → Sell Workflow Demo");
+    println!("=================================================");
+    println!("Using FLOKI token with 9 decimals\n");
     
     // Initialize simulator
     let simulator = TxSimulator::new(RETH_DB_PATH)?;
     println!("✅ Simulator initialized");
     
-    // Get latest block
-    let latest_block = simulator.get_latest_block()?;
-    println!("📊 Block: {}", latest_block);
-    println!("💰 Investment: 0.1 ETH per token\n");
+    // Use specific block for FLOKI testing
+    let block = 23247278;
+    println!("📊 Block: {}", block);
+    println!("💰 Investment: 0.1 ETH");
+    println!("🏦 Buyer: {}\n", TEST_BUYER);
     
     let buyer_address = Address::from_str(TEST_BUYER)?;
     let router_address = Address::from_str(UNISWAP_V2_ROUTER)?;
     
-    // Test USDC workflow
+    // Execute FLOKI workflow
     println!("{}", "=".repeat(60));
-    println!("USDC WORKFLOW");
+    println!("FLOKI WORKFLOW");
     println!("{}", "=".repeat(60));
-    execute_trading_workflow(
+    
+    execute_floki_trading_workflow(
         &simulator,
         buyer_address,
-        USDC_ADDRESS,
-        "USDC",
         router_address,
-        latest_block,
+        block,
     ).await?;
     
-    println!("\n{}", "=".repeat(60));
-    println!("USDT WORKFLOW");
-    println!("{}", "=".repeat(60));
-    execute_trading_workflow(
-        &simulator,
-        buyer_address,
-        USDT_ADDRESS,
-        "USDT",
-        router_address,
-        latest_block,
-    ).await?;
-    
-    println!("\n✅ Workflow demonstration complete!");
+    println!("\n✅ FLOKI workflow demonstration complete!");
     Ok(())
 }
 
-/// Execute trading workflow and show real results
-async fn execute_trading_workflow(
+/// Execute FLOKI trading workflow and show real results
+async fn execute_floki_trading_workflow(
     simulator: &TxSimulator,
     buyer: Address,
-    token_address: &str,
-    token_symbol: &str,
     router: Address,
     block: u64,
 ) -> Result<()> {
-    println!("\n🚀 Starting {} workflow at block {}", token_symbol, block);
+    println!("\n🚀 Starting FLOKI workflow at block {}", block);
     
     // Start a simulation chain with trace capability
     let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     println!("📍 Chain initialized");
     
-    // Step 1: Buy tokens with 0.1 ETH
-    println!("\n[Step 1] Buying {} with 0.1 ETH...", token_symbol);
-    let buy_tx = create_buy_token_transaction(
+    // Step 1: Buy FLOKI tokens with 0.1 ETH
+    println!("\n[Step 1] Buying FLOKI with 0.1 ETH...");
+    let buy_tx = create_buy_floki_transaction(
         buyer, 
-        token_address, 
         U256::from(100_000_000_000_000_000u128) // 0.1 ETH
     );
     
@@ -107,10 +81,10 @@ async fn execute_trading_workflow(
         return Ok(());
     }
     
-    // Step 2: Approve router
-    println!("\n[Step 2] Approving router...");
-    let token_addr = Address::from_str(token_address)?;
-    let approve_tx = create_approve_transaction(buyer, token_addr, router, U256::MAX);
+    // Step 2: Approve router for FLOKI
+    println!("\n[Step 2] Approving router for FLOKI...");
+    let floki_addr = Address::from_str(FLOKI_ADDRESS)?;
+    let approve_tx = create_approve_transaction(buyer, floki_addr, router, U256::MAX);
     
     let approve_result = chain.step_with_trace(approve_tx).await?;
     
@@ -123,17 +97,14 @@ async fn execute_trading_workflow(
         return Ok(());
     }
     
-    // Step 3: Sell a small amount of tokens
-    println!("\n[Step 3] Selling tokens back to ETH...");
+    // Step 3: Sell FLOKI tokens back to ETH
+    println!("\n[Step 3] Selling FLOKI tokens back to ETH...");
     
-    // We don't know exact balance, so try selling a small amount that should work
-    let sell_amount = if token_symbol == "USDC" {
-        U256::from(100_000_000u128) // 100 USDC (6 decimals)
-    } else {
-        U256::from(100_000_000u128) // 100 USDT (6 decimals)
-    };
+    // FLOKI has 9 decimals, so we'll sell 1,000,000 FLOKI
+    // 1,000,000 FLOKI = 1000000 * 10^9
+    let sell_amount = U256::from(1_000_000u128) * U256::from(10u128).pow(U256::from(9));
     
-    let sell_tx = create_sell_token_transaction(buyer, token_address, sell_amount);
+    let sell_tx = create_sell_floki_transaction(buyer, sell_amount);
     let sell_result = chain.step_with_trace(sell_tx).await?;
     
     println!("  Status: {}", if sell_result.success { "✅ Success" } else { "❌ Failed" });
@@ -150,11 +121,18 @@ async fn execute_trading_workflow(
     println!("  • Transactions executed: {}", state.transaction_count);
     println!("  • Total gas used: {}", state.total_gas_used);
     
+    // Summary
+    println!("\n📈 FLOKI Trading Summary:");
+    println!("  • Bought FLOKI with 0.1 ETH");
+    println!("  • Approved router for unlimited FLOKI");
+    println!("  • Attempted to sell 1,000,000 FLOKI");
+    println!("  • Note: FLOKI has 9 decimals");
+    
     Ok(())
 }
 
-/// Create a transaction to buy a token with ETH using Uniswap V2
-fn create_buy_token_transaction(buyer: Address, token_address: &str, eth_amount: U256) -> CallRequest {
+/// Create a transaction to buy FLOKI with ETH using Uniswap V2
+fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest {
     // swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // Function selector
     
@@ -178,9 +156,9 @@ fn create_buy_token_transaction(buyer: Address, token_address: &str, eth_amount:
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
     
-    // Target token address
+    // FLOKI address
     data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&token_address[2..]).unwrap());
+    data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
     
     CallRequest {
         from: Some(buyer),
@@ -220,15 +198,15 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
     }
 }
 
-/// Create a transaction to sell tokens for ETH using Uniswap V2
-fn create_sell_token_transaction(seller: Address, token_address: &str, token_amount: U256) -> CallRequest {
+/// Create a transaction to sell FLOKI for ETH using Uniswap V2
+fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> CallRequest {
     // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
     
-    // amountIn
-    data.extend_from_slice(&token_amount.to_be_bytes::<32>());
+    // amountIn (amount of FLOKI to sell)
+    data.extend_from_slice(&floki_amount.to_be_bytes::<32>());
     
-    // amountOutMin (1 = accept any amount)
+    // amountOutMin (1 = accept any amount of ETH)
     data.extend_from_slice(&U256::from(1).to_be_bytes::<32>());
     
     // path offset
@@ -244,11 +222,11 @@ fn create_sell_token_transaction(seller: Address, token_address: &str, token_amo
     // path array
     data.extend_from_slice(&U256::from(2).to_be_bytes::<32>()); // length = 2
     
-    // Source token
+    // FLOKI address
     data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&token_address[2..]).unwrap());
+    data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
     
-    // WETH
+    // WETH address
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
     

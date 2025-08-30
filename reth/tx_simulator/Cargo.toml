@@ -68,7 +68,15 @@ path = "examples/basic/trace_extraction_example.rs"
 # Sequential examples
 [[example]]
 name = "buy_approve_then_sell_usdc"
-path = "examples/sequential/buy_approve_then_sell_usdc.rs"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_usdc.rs"
+
+[[example]]
+name = "buy_approve_then_sell_pepe"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_pepe.rs"
+
+[[example]]
+name = "buy_approve_then_sell_floki"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_floki.rs"
 
 [[example]]
 name = "sequential_eth_transfers_with_state_persistence"
