@@ -86,17 +86,17 @@ pub struct ViewFunctionResult {
 impl ViewFunctionResult {
     /// Decode the output as a U256 value
     pub fn decode_uint256(&self) -> U256 {
-        crate::view_function_simulator::decode_uint256_result(&self.output)
+        crate::contract_method_simulator::decode_uint256_result(&self.output)
     }
     
     /// Decode the output as a uint8 value
     pub fn decode_uint8(&self) -> u8 {
-        crate::view_function_simulator::decode_uint8_result(&self.output)
+        crate::contract_method_simulator::decode_uint8_result(&self.output)
     }
     
     /// Decode the output as a string
     pub fn decode_string(&self) -> String {
-        crate::view_function_simulator::decode_string_result(&self.output)
+        crate::contract_method_simulator::decode_string_result(&self.output)
     }
 }
 

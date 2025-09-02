@@ -323,4 +323,42 @@ impl TxSimulator {
             authorization_list: Default::default(),
         })
     }
+    
+    // ========== Backward Compatibility Aliases ==========
+    
+    /// Legacy alias for simulate_unsigned_transaction_at_block with latest block
+    /// 
+    /// This method exists for backward compatibility with code that used
+    /// the old naming convention. New code should use simulate_unsigned_transaction_at_block.
+    pub async fn simulate_call(&self, unsigned_tx: UnsignedTransaction) -> Result<SimulationResult> {
+        let block = self.get_latest_block()?;
+        self.simulate_unsigned_transaction_at_block(unsigned_tx, block).await
+    }
+    
+    /// Legacy alias for simulate_unsigned_transaction_at_block
+    /// 
+    /// This method exists for backward compatibility with code that used
+    /// the old naming convention. New code should use simulate_unsigned_transaction_at_block.
+    pub async fn simulate_call_at_block(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: u64,
+    ) -> Result<SimulationResult> {
+        self.simulate_unsigned_transaction_at_block(unsigned_tx, block_number).await
+    }
+    
+    /// Alias for simulate_unsigned_transaction_at_block with latest block (shorter name)
+    pub async fn simulate_unsigned_tx(&self, unsigned_tx: UnsignedTransaction) -> Result<SimulationResult> {
+        let block = self.get_latest_block()?;
+        self.simulate_unsigned_transaction_at_block(unsigned_tx, block).await
+    }
+    
+    /// Alias for simulate_unsigned_transaction_at_block (shorter name)
+    pub async fn simulate_unsigned_tx_at_block(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: u64,
+    ) -> Result<SimulationResult> {
+        self.simulate_unsigned_transaction_at_block(unsigned_tx, block_number).await
+    }
 }

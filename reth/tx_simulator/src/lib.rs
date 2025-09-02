@@ -11,13 +11,12 @@
 
 pub mod types;
 pub mod simulator;
-pub mod signed_simulation;
-pub mod unsigned_simulation;
-pub mod call_simulator;
-pub mod unsigned_tx_bundle_simulation;
-pub mod view_function_simulator;
-pub mod parallel_tx_simulation;
-pub mod unsigned_tx_chain_simulation;
+pub mod signed_tx_simulator;
+pub mod unsigned_tx_simulator;
+pub mod unsigned_tx_bundle_simulator;
+pub mod contract_method_simulator;
+pub mod parallel_tx_simulator;
+pub mod unsigned_tx_chain_simulator;
 pub mod simulation_revert_decoder;
 // Block simulation module for tracing entire blocks
 pub mod block_simulation;
@@ -34,7 +33,7 @@ pub use types::{
     SequentialSimulationOptions,
     CallFrame,
 };
-pub use call_simulator::UnsignedTransaction;
-pub use signed_simulation::SignedTransaction;
-pub use unsigned_tx_chain_simulation::{UnsignedTxChainSimulation, ChainStateInfo};
-pub use parallel_tx_simulation::ParallelTxSimulationOptions;
+pub use unsigned_tx_simulator::UnsignedTransaction;
+pub use signed_tx_simulator::SignedTransaction;
+pub use unsigned_tx_chain_simulator::{UnsignedTxChainSimulation, ChainStateInfo};
+pub use parallel_tx_simulator::ParallelTxSimulationOptions;

@@ -108,7 +108,7 @@ async fn check_token_info(
     if let Some(address) = check_balance_for {
         // balanceOf(address) - 0x70a08231 + address
         let selector = hex::decode("70a08231")?;
-        let balance_data = tx_simulator::view_function_simulator::encode_view_function_with_address(
+        let balance_data = tx_simulator::contract_method_simulator::encode_view_function_with_address(
             selector.try_into().unwrap(),
             address,
         );

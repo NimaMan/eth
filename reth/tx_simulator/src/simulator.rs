@@ -131,7 +131,7 @@ impl TxSimulator {
     
     /// Encode a view function call (static wrapper for compatibility)
     pub fn encode_view_function_call(selector: [u8; 4]) -> Bytes {
-        crate::view_function_simulator::encode_view_function_call(selector)
+        crate::contract_method_simulator::encode_view_function_call(selector)
     }
     
     /// Extract expected nonce from error message
