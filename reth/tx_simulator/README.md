@@ -27,7 +27,7 @@ eyre = "0.6"
 ### Basic Usage
 
 ```rust
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{Address, U256, Bytes};
 use eyre::Result;
 
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     let simulator = TxSimulator::new("/home/user/.local/share/reth/mainnet")?;
     
     // Create a call request (unsigned transaction)
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(Address::ZERO),
         to: Some("0xA0b86a33E6C2C76F8c4f8e60b55C2E6F4Fd9a3dB".parse()?),
         value: Some(U256::from(1000000000000000000u64)), // 1 ETH
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 Simulate contract calls without signatures:
 
 ```rust
-use tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 
 // Basic simulation
 let result = simulator.simulate_call(call_request).await?;
@@ -105,7 +105,7 @@ let result = simulator
 Simulate a complete sequence where all transactions are known upfront:
 
 ```rust
-use tx_simulator::{CallRequest, SequentialSimulationOptions};
+use tx_simulator::{UnsignedTransaction, SequentialSimulationOptions};
 
 let transactions = vec![
     enable_trading_call,
@@ -185,32 +185,32 @@ println!("Token balance: {}", balance);
 Process many transactions concurrently:
 
 ```rust
-use tx_simulator::BatchSimulationOptions;
+use tx_simulator::ParallelTxSimulationOptions;
 use std::time::Duration;
 
-let transactions: Vec<CallRequest> = // ... your transactions
+let transactions: Vec<UnsignedTransaction> = // ... your transactions
 
-let options = BatchSimulationOptions {
+let options = ParallelTxSimulationOptions {
     max_concurrent: 20,
     timeout_per_tx: Some(Duration::from_millis(100)),
     block_number: Some(18_500_000),
 };
 
-let results = simulator.simulate_batch(transactions, options).await?;
+let results = simulator.simulate_signed_tx_list_parallel(transactions, options).await?;
 
 println!("Total: {}, Successful: {}, Failed: {}", 
-    results.total_transactions,
-    results.successful_transactions, 
-    results.failed_transactions
+    results.total,
+    results.successful, 
+    results.failed
 );
 ```
 
 ## Data Structures
 
-### CallRequest
+### UnsignedTransaction
 
 ```rust
-pub struct CallRequest {
+pub struct UnsignedTransaction {
     pub from: Option<Address>,           // Sender address
     pub to: Option<Address>,             // Recipient address  
     pub gas: Option<u64>,                // Gas limit
@@ -311,7 +311,7 @@ The library is organized into focused modules:
 - `types.rs` - All result types and data structures
 - `signed_simulation.rs` - Signed transaction processing
 - `unsigned_simulation.rs` - Unsigned call simulation  
-- `call_simulator.rs` - CallRequest handling and simulation
+- `call_simulator.rs` - UnsignedTransaction handling and simulation
 - `batch_sequence_simulation.rs` - Sequential transaction processing
 - `parallel_tx_simulation.rs` - Concurrent batch processing
 - `view_function_simulator.rs` - View/pure function execution

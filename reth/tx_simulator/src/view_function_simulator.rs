@@ -7,7 +7,7 @@
 use crate::{
     simulator::TxSimulator,
     types::ViewFunctionResult,
-    call_simulator::CallRequest,
+    call_simulator::UnsignedTransaction,
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
@@ -29,7 +29,7 @@ impl TxSimulator {
         block_number: Option<u64>,
     ) -> Result<ViewFunctionResult> {
         // Build a call request for the view function
-        let call_request = CallRequest {
+        let unsigned_tx = UnsignedTransaction {
             from: Some(Address::ZERO), // View functions can be called from any address
             to: Some(contract),
             value: Some(U256::ZERO), // View functions shouldn't accept value
@@ -49,7 +49,7 @@ impl TxSimulator {
         };
         
         // We need to use the trace version to get the actual output data
-        let result = self.simulate_unsigned_transaction_with_trace(call_request, Some(block)).await?;
+        let result = self.simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block)).await?;
         
         // Extract the output from the call trace
         let output = if result.success {

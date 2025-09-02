@@ -1,7 +1,7 @@
 /// Call simulation (unsigned transactions)
 /// 
 /// This module handles simulation of unsigned transactions (like debug_traceCall).
-/// These are contract calls that haven't been signed, used for read operations
+/// These are contract unsigned_txs that haven't been signed, used for read operations
 /// and testing transaction effects without broadcasting.
 
 use crate::{
@@ -23,9 +23,9 @@ use alloy_rpc_types_trace::geth::CallConfig;
 use alloy_primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
-/// Call request for unsigned transaction simulation
+/// Unsigned transaction for simulation (no signature required)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CallRequest {
+pub struct UnsignedTransaction {
     pub from: Option<Address>,
     pub to: Option<Address>,
     pub gas: Option<u64>,
@@ -41,7 +41,7 @@ impl TxSimulator {
     /// Simulate an unsigned transaction at specific block
     pub async fn simulate_unsigned_transaction_at_block(
         &self,
-        call: CallRequest,
+        unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<SimulationResult> {
         let simulator = self.clone();
@@ -50,7 +50,7 @@ impl TxSimulator {
             
             let provider = simulator.provider_factory.provider()?;
             let header = provider.header_by_number(block_number)?
-                .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+                .ok_or_else(|| eyre::eyre!("Provider did not return header for block {}", block_number))?;
             
             let state = simulator.provider_factory.history_by_block_number(block_number)?;
             
@@ -64,7 +64,7 @@ impl TxSimulator {
             let base_fee = header.base_fee_per_gas.map(|v| v as u128);
             
             // Create transaction environment
-            let tx_env = simulator.create_tx_env(&call, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
+            let tx_env = simulator.create_tx_env(&unsigned_tx, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
             
             let mut evm = simulator.evm_config.evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
             
@@ -89,10 +89,10 @@ impl TxSimulator {
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
     }
     
-    /// Simulate an unsigned transaction with detailed call trace
+    /// Simulate an unsigned transaction with detailed unsigned_tx trace
     pub async fn simulate_unsigned_transaction_with_trace(
         &self,
-        call: CallRequest,
+        unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
     ) -> Result<FullSimulationResult> {
         let block = block_number.unwrap_or(self.get_latest_block()?);
@@ -108,10 +108,10 @@ impl TxSimulator {
             
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             
-            // Create tracer with call config
-            let call_config = TracingInspectorConfig::default_geth()
+            // Create tracer with unsigned_tx config
+            let unsigned_tx_config = TracingInspectorConfig::default_geth()
                 .set_record_logs(true);
-            let mut inspector = TracingInspector::new(call_config);
+            let mut inspector = TracingInspector::new(unsigned_tx_config);
             
             let evm_env = simulator.evm_config.evm_env(&header);
             
@@ -119,7 +119,7 @@ impl TxSimulator {
             let base_fee = header.base_fee_per_gas.map(|v| v as u128);
             
             // Create transaction environment
-            let tx_env = simulator.create_tx_env(&call, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
+            let tx_env = simulator.create_tx_env(&unsigned_tx, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
             let gas_limit = tx_env.gas_limit;
             
             let mut evm = simulator.evm_config.evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
@@ -139,8 +139,8 @@ impl TxSimulator {
                     .or_else(|| Some("Transaction reverted without data".to_string()))
             };
             
-            // Extract call trace
-            let call_frame = inspector
+            // Extract unsigned_tx trace
+            let unsigned_tx_frame = inspector
                 .with_transaction_gas_limit(gas_limit)
                 .into_geth_builder()
                 .geth_call_traces(CallConfig::default().with_log(), gas_used);
@@ -149,7 +149,7 @@ impl TxSimulator {
                 success,
                 gas_used,
                 revert_reason,
-                call_trace: call_frame,
+                call_trace: unsigned_tx_frame,
             })
         })
         .await
@@ -159,11 +159,11 @@ impl TxSimulator {
     /// Simulate unsigned transaction with full trace at specific block
     /// 
     /// This method provides maximum detail including internal transactions,
-    /// logs, and complete call traces. Use this for comprehensive analysis
+    /// logs, and complete unsigned_tx traces. Use this for comprehensive analysis
     /// of transaction effects.
     pub async fn simulate_unsigned_transaction_with_full_trace_at_block(
         &self,
-        call: CallRequest,
+        unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<FullSimulationResult> {
         let simulator = self.clone();
@@ -173,7 +173,7 @@ impl TxSimulator {
             // Get provider and state at specific block
             let provider = simulator.provider_factory.provider()?;
             let header = provider.header_by_number(block_number)?
-                .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+                .ok_or_else(|| eyre::eyre!("Provider did not return header for block {}", block_number))?;
             
             // Get state at the block
             let state = simulator.provider_factory.history_by_block_number(block_number)?;
@@ -182,17 +182,17 @@ impl TxSimulator {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             
             // Create TracingInspector with full config (logs enabled)
-            let call_config = TracingInspectorConfig::default_geth()
+            let unsigned_tx_config = TracingInspectorConfig::default_geth()
                 .set_record_logs(true)
                 .set_steps(true);
-            let mut inspector = TracingInspector::new(call_config);
+            let mut inspector = TracingInspector::new(unsigned_tx_config);
             
             // Get EVM environment
             let evm_env = simulator.evm_config.evm_env(&header);
             
-            // Create transaction environment from CallRequest
+            // Create transaction environment from UnsignedTransaction
             let base_fee = header.base_fee_per_gas.map(|v| v as u128);
-            let tx_env = simulator.create_tx_env(&call, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
+            let tx_env = simulator.create_tx_env(&unsigned_tx, evm_env.block_env.gas_limit as u128, base_fee, &mut db)?;
             let gas_limit = tx_env.gas_limit;
             
             // Create EVM with inspector
@@ -220,29 +220,29 @@ impl TxSimulator {
                 None
             };
             
-            // Use geth builder to get call traces with full details
-            let call_config = CallConfig::default()
+            // Use geth builder to get unsigned_tx traces with full details
+            let unsigned_tx_config = CallConfig::default()
                 .with_log();
-            let call_frame = inspector
+            let unsigned_tx_frame = inspector
                 .with_transaction_gas_limit(gas_limit)
                 .into_geth_builder()
-                .geth_call_traces(call_config, gas_used);
+                .geth_call_traces(unsigned_tx_config, gas_used);
             
             Ok(FullSimulationResult {
                 success,
                 gas_used,
                 revert_reason,
-                call_trace: call_frame,
+                call_trace: unsigned_tx_frame,
             })
         })
         .await
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
     }
     
-    /// Helper to create transaction environment from CallRequest
+    /// Helper to create transaction environment from UnsignedTransaction
     fn create_tx_env<DB: revm::Database>(
         &self,
-        request: &CallRequest,
+        request: &UnsignedTransaction,
         block_gas_limit: u128,
         base_fee: Option<u128>,
         db: &mut DB,
@@ -274,8 +274,8 @@ impl TxSimulator {
         // Calculate fees with base fee awareness
         let (gas_price, gas_priority_fee) = if tx_type == 2 {
             // EIP-1559
-            let priority_fee = request.max_priority_fee_per_gas.unwrap_or(1_000_000_000); // 1 gwei default
-            
+            let priority_fee = request.max_priority_fee_per_gas.unwrap_or(100_000_000_000); // 100 gwei default
+
             // If max_fee_per_gas is provided, use it; otherwise calculate from base fee
             let max_fee = if let Some(max_fee) = request.max_fee_per_gas {
                 max_fee

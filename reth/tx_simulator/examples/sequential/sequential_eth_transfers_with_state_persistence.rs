@@ -29,7 +29,7 @@
 use eyre::Result;
 use tx_simulator::{
     TxSimulator, 
-    CallRequest,
+    UnsignedTransaction,
     SequentialSimulationOptions,
 };
 use alloy_primitives::{Address, U256, address};
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     // 3. Perform a swap
     let transactions = vec![
         // Transaction 1: Simple ETH transfer
-        CallRequest {
+        UnsignedTransaction {
             from: Some(address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689")),
             to: Some(address!("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")),
             value: Some(U256::from(1_000_000_000_000_000u128)), // 0.001 ETH
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
             nonce: None, // Will be auto-detected
         },
         // Transaction 2: Another transfer (builds on tx1's state)
-        CallRequest {
+        UnsignedTransaction {
             from: Some(address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689")),
             to: Some(address!("beefdeadbeefdeadbeefdeadbeefdeadbeefdead")),
             value: Some(U256::from(2_000_000_000_000_000u128)), // 0.002 ETH
@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
             nonce: None, // Will auto-increment from tx1
         },
         // Transaction 3: Final transfer
-        CallRequest {
+        UnsignedTransaction {
             from: Some(address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689")),
             to: Some(address!("cafebabecafebabecafebabecafebabecafebabe")),
             value: Some(U256::from(3_000_000_000_000_000u128)), // 0.003 ETH
@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
     
     // Add a transaction that will fail
     let mut failing_sequence = transactions.clone();
-    failing_sequence[1] = CallRequest {
+    failing_sequence[1] = UnsignedTransaction {
         from: Some(address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689")),
         to: Some(address!("beefdeadbeefdeadbeefdeadbeefdeadbeefdead")),
         value: Some(U256::from(10_000_000_000_000_000_000u128)), // 10 ETH (will fail - too much)

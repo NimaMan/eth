@@ -7,7 +7,7 @@
 /// Both methods simulate unsigned calls with automatic nonce resolution,
 /// providing a true apples-to-apples performance comparison.
 
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use eyre::Result;
 use tracing::{info, warn};
 use std::time::{Duration, Instant};
@@ -17,7 +17,8 @@ use std::env;
 use jsonrpsee::http_client::HttpClientBuilder;
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::rpc_params;
-use reth_primitives::{TransactionSigned, transaction::SignedTransaction};
+use reth_primitives::TransactionSigned;
+use alloy_consensus::transaction::SignerRecoverable;
 use alloy_consensus::transaction::Transaction;
 use alloy_rlp::Decodable;
 use serde_json::{Value, json};
@@ -117,7 +118,7 @@ async fn main() -> Result<()> {
         let start = Instant::now();
         
         // Create call request from transaction data, handling different tx types
-        let mut call_request = json!({
+        let mut unsigned_tx = json!({
             "from": tx_data["from"],
             "to": tx_data["to"],
             "gas": tx_data["gas"],
@@ -129,18 +130,18 @@ async fn main() -> Result<()> {
         // Handle gas pricing based on transaction type
         if tx_data["type"].as_str() == Some("0x2") {
             // EIP-1559 transaction
-            call_request["maxFeePerGas"] = tx_data["maxFeePerGas"].clone();
-            call_request["maxPriorityFeePerGas"] = tx_data["maxPriorityFeePerGas"].clone();
+            unsigned_tx["maxFeePerGas"] = tx_data["maxFeePerGas"].clone();
+            unsigned_tx["maxPriorityFeePerGas"] = tx_data["maxPriorityFeePerGas"].clone();
         } else {
             // Legacy transaction
-            call_request["gasPrice"] = tx_data["gasPrice"].clone();
+            unsigned_tx["gasPrice"] = tx_data["gasPrice"].clone();
         }
         
         // RPC call with call tracer (same as our Direct method)
         let rpc_result: Result<Value, _> = rpc_client.request(
             "debug_traceCall",
             rpc_params![
-                call_request,
+                unsigned_tx,
                 format!("0x{:x}", sim_block),
                 json!({"tracer": "callTracer"})
             ]
@@ -180,11 +181,11 @@ async fn main() -> Result<()> {
     for (i, (_hash, signed_tx, tx_data, sim_block)) in transactions.iter().enumerate() {
         let start = Instant::now();
         
-        // Convert signed transaction to CallRequest for unsigned simulation (like RPC does)
-        let call_request = match signed_tx.recover_signer() {
+        // Convert signed transaction to UnsignedTransaction for unsigned simulation (like RPC does)
+        let unsigned_tx = match signed_tx.recover_signer() {
             Ok(sender) => {
-                // Create CallRequest without nonce - let it be determined automatically
-                let mut request = CallRequest {
+                // Create UnsignedTransaction without nonce - let it be determined automatically
+                let mut request = UnsignedTransaction {
                     from: Some(sender),
                     to: signed_tx.to(),
                     data: Some(signed_tx.input().clone()),
@@ -221,9 +222,9 @@ async fn main() -> Result<()> {
         };
         
         // Direct simulation with unsigned call (matching RPC behavior)
-        let direct_result = if let Some(call_request) = call_request {
+        let direct_result = if let Some(unsigned_tx) = unsigned_tx {
             simulator
-                .simulate_unsigned_transaction_with_trace(call_request, Some(*sim_block))
+                .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(*sim_block))
                 .await
         } else {
             continue;

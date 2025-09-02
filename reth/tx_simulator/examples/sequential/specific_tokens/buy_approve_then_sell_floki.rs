@@ -2,7 +2,7 @@
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use std::str::FromStr;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
@@ -25,8 +25,8 @@ async fn main() -> Result<()> {
     let simulator = TxSimulator::new(RETH_DB_PATH)?;
     println!("✅ Simulator initialized");
     
-    // Use specific block for FLOKI testing
-    let block = 23247278;
+    // Use latest block to avoid pruned state issues
+    let block = simulator.get_latest_block()?;
     println!("📊 Block: {}", block);
     println!("💰 Investment: 0.1 ETH");
     println!("🏦 Buyer: {}\n", TEST_BUYER);
@@ -59,8 +59,8 @@ async fn execute_floki_trading_workflow(
 ) -> Result<()> {
     println!("\n🚀 Starting FLOKI workflow at block {}", block);
     
-    // Start a simulation chain with trace capability
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    // Start a simulation chain with trace capability (use latest block)
+    let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
     
     // Step 1: Buy FLOKI tokens with 0.1 ETH
@@ -132,7 +132,7 @@ async fn execute_floki_trading_workflow(
 }
 
 /// Create a transaction to buy FLOKI with ETH using Uniswap V2
-fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest {
+fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTransaction {
     // swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // Function selector
     
@@ -160,21 +160,21 @@ fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(buyer),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(eth_amount),
         data: Some(Bytes::from(data)),
         gas: Some(300_000),
         gas_price: Some(20_000_000_000), // 20 gwei
-        nonce: None, // Let SimulationChain handle nonce
+        nonce: None, // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
     }
 }
 
 /// Create an approve transaction for ERC20 tokens
-fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> CallRequest {
+fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> UnsignedTransaction {
     // approve(address spender, uint256 amount)
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3]; // approve selector
     
@@ -185,7 +185,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
     // amount
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(from),
         to: Some(token),
         value: Some(U256::ZERO),
@@ -199,7 +199,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
 }
 
 /// Create a transaction to sell FLOKI for ETH using Uniswap V2
-fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> CallRequest {
+fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> UnsignedTransaction {
     // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
     
@@ -230,7 +230,7 @@ fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> CallReq
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(seller),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::ZERO),

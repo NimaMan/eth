@@ -1,6 +1,6 @@
 [package]
 name = "tx_simulator"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -11,25 +11,27 @@ tracing = "0.1"
 futures = "0.3"
 
 # Ethereum types
-alloy-primitives = { version = "1.0", features = ["rlp"] }
+alloy-primitives = { version = "1.3.1", features = ["rlp"] }
 alloy-rlp = "0.3"
-alloy-rpc-types-trace = "0.14.0"
-alloy-consensus = "0.14.0"
+alloy-rpc-types-trace = "1.0.27"
+alloy-rpc-types-eth = "1.0.27"
+alloy-consensus = "1.0.27"
 hex = "0.4"
 
-# Reth dependencies - using local paths
-reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
-reth-db = { path = "/home/nima/code/crypto/rust/reth/crates/storage/db" }
-reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
-reth-revm = { path = "/home/nima/code/crypto/rust/reth/crates/revm" }
-reth-evm = { path = "/home/nima/code/crypto/rust/reth/crates/evm" }
-reth-node-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/node" }
-reth-node-types = { path = "/home/nima/code/crypto/rust/reth/crates/node/types" }
-reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives" }
+# Reth dependencies - using GitHub references
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 
 # REVM - exact version Reth uses
-revm = { version = "22.0.1", default-features = false, features = ["std"] }
-revm-inspectors = "0.19.1"
+revm = { version = "27.1.0", default-features = false, features = ["std"] }
+revm-inspectors = "0.27.2"
 
 # For serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -95,7 +97,24 @@ path = "examples/sequential/mev_sandwich_bundle_example.rs"
 name = "rpc_vs_direct_simulation_benchmark"
 path = "examples/performance/rpc_vs_direct_simulation_benchmark.rs"
 
+[[example]]
+name = "inspector_fusing_test"
+path = "examples/performance/inspector_fusing_test.rs"
+
 # Advanced examples
 [[example]]
 name = "timeout_handling_example"
 path = "examples/advanced/timeout_handling_example.rs"
+
+[[example]]
+name = "revert_reason_decoder_example"
+path = "examples/advanced/revert_reason_decoder_example.rs"
+
+# Block simulation examples
+[[example]]
+name = "trace_block_transactions"
+path = "examples/block/trace_block_transactions.rs"
+
+[[example]]
+name = "verify_block_trace_rpc_equivalence"
+path = "examples/block/verify_block_trace_rpc_equivalence.rs"

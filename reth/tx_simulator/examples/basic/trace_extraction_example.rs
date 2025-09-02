@@ -4,7 +4,7 @@
 /// which provides comprehensive analysis including internal transactions, event logs,
 /// and complete call traces. This is the most detailed simulation method available.
 
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{Address, U256, Bytes};
 use eyre::Result;
 
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 1: ETH Transfer with Full Trace");
     println!("{}", "-".repeat(45));
     
-    let eth_transfer = CallRequest {
+    let eth_transfer = UnsignedTransaction {
         from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(1000000000000000u64)), // 0.001 ETH
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
     call_data.extend_from_slice(recipient.as_slice());
     call_data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    let erc20_transfer = CallRequest {
+    let erc20_transfer = UnsignedTransaction {
         from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?), // USDC contract
         data: Some(Bytes::from(call_data)),
@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
     swap_data.extend_from_slice(&swap_selector);
     swap_data.extend_from_slice(&min_amount_out.to_be_bytes::<32>());
     
-    let uniswap_swap = CallRequest {
+    let uniswap_swap = UnsignedTransaction {
         from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
         to: Some("0x7a250d5630b4cf539739df2c5dacb4c659f2488d".parse()?), // Uniswap V2 Router
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH

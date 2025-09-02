@@ -15,7 +15,7 @@
 use crate::{
     simulator::TxSimulator,
     types::{SequentialTransactionResult, SequentialSimulationResult, SequentialSimulationOptions},
-    call_simulator::CallRequest,
+    call_simulator::UnsignedTransaction,
     simulation_revert_decoder::decode_revert_data,
 };
 use std::collections::HashMap;
@@ -47,9 +47,11 @@ impl TxSimulator {
     /// - Protocol testing (e.g., enable trading -> swap)
     /// - Complex DeFi interactions
     /// - Transaction dependency analysis
+    /// 
+    /// Uses inspector fusing for optimal performance across the bundle.
     pub async fn simulate_transaction_sequence(
         &self,
-        transactions: Vec<CallRequest>,
+        transactions: Vec<UnsignedTransaction>,
         options: SequentialSimulationOptions,
     ) -> Result<SequentialSimulationResult> {
         if transactions.is_empty() {
@@ -76,6 +78,9 @@ impl TxSimulator {
             let mut successful_transactions = 0usize;
             let mut failed_transactions = 0usize;
             
+            // Create fused inspector that persists across transactions
+            let mut inspector: Option<TracingInspector> = None;
+            
             for (index, mut transaction) in transactions.into_iter().enumerate() {
                 // Auto-detect nonce if not provided
                 if transaction.nonce.is_none() {
@@ -95,8 +100,8 @@ impl TxSimulator {
                     transaction.gas = Some(gas_limit);
                 }
                 
-                // Simulate the transaction on the forked state
-                let result = simulator.simulate_on_fork(&mut forked_state, transaction)?;
+                // Simulate the transaction on the forked state with fused inspector
+                let result = simulator.simulate_on_fork_with_inspector(&mut forked_state, transaction, &mut inspector)?;
                 
                 cumulative_gas_used += result.gas_used;
                 
@@ -149,7 +154,7 @@ impl TxSimulator {
     pub(crate) fn simulate_on_fork_with_trace(
         &self,
         forked_state: &mut ForkedState,
-        transaction: CallRequest,
+        transaction: UnsignedTransaction,
         block_number: u64,
     ) -> Result<crate::types::FullSimulationResult> {
         
@@ -158,9 +163,9 @@ impl TxSimulator {
             .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
         
         // Create tracer with full config
-        let call_config = TracingInspectorConfig::default_geth()
+        let unsigned_tx_config = TracingInspectorConfig::default_geth()
             .set_record_logs(true);
-        let mut inspector = TracingInspector::new(call_config);
+        let mut inspector = TracingInspector::new(unsigned_tx_config);
         
         // Setup EVM environment
         let evm_env = self.evm_config.evm_env(&header);
@@ -169,7 +174,7 @@ impl TxSimulator {
         let base_fee = header.base_fee_per_gas.map(|v| v as u128);
         
         // Create transaction environment
-        let tx_env = self.create_tx_env_from_call(&transaction, evm_env.block_env.gas_limit as u128, base_fee, &mut forked_state.db)?;
+        let tx_env = self.create_tx_env_from_unsigned_tx(&transaction, evm_env.block_env.gas_limit as u128, base_fee, &mut forked_state.db)?;
         let gas_limit = tx_env.gas_limit;
         
         // Execute transaction
@@ -189,13 +194,13 @@ impl TxSimulator {
             None
         };
         
-        // Extract call trace
+        // Extract unsigned_tx trace
         let call_frame = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder()
             .geth_call_traces(CallConfig::default().with_log(), gas_used);
         
-        // Note: Nonce updating is handled by the caller (SimulationChain)
+        // Note: Nonce updating is handled by the unsigned_txer (SimulationChain)
         
         Ok(crate::types::FullSimulationResult {
             success,
@@ -205,20 +210,23 @@ impl TxSimulator {
         })
     }
     
-    /// Simulate a transaction on a forked state
-    pub(crate) fn simulate_on_fork(
+    /// Simulate a transaction on a forked state with fused inspector
+    pub(crate) fn simulate_on_fork_with_inspector(
         &self,
         forked_state: &mut ForkedState,
-        transaction: CallRequest,
+        transaction: UnsignedTransaction,
+        inspector: &mut Option<TracingInspector>,
     ) -> Result<SequentialTransactionResult> {
         let provider = self.provider_factory.provider()?;
         let header = provider.header_by_number(forked_state.block_number)?
             .ok_or_else(|| eyre::eyre!("No header for block {}", forked_state.block_number))?;
         
-        // Create tracer
-        let call_config = TracingInspectorConfig::default_geth()
-            .set_record_logs(true);
-        let mut inspector = TracingInspector::new(call_config);
+        // Get or create inspector with fusing
+        let insp = inspector.get_or_insert_with(|| {
+            let config = TracingInspectorConfig::default_geth()
+                .set_record_logs(true);
+            TracingInspector::new(config)
+        });
         
         // Setup EVM environment
         let evm_env = self.evm_config.evm_env(&header);
@@ -227,7 +235,64 @@ impl TxSimulator {
         let base_fee = header.base_fee_per_gas.map(|v| v as u128);
         
         // Create transaction environment
-        let tx_env = self.create_tx_env_from_call(&transaction, evm_env.block_env.gas_limit as u128, base_fee, &mut forked_state.db)?;
+        let tx_env = self.create_tx_env_from_unsigned_tx(&transaction, evm_env.block_env.gas_limit as u128, base_fee, &mut forked_state.db)?;
+        
+        // Execute transaction with inspector
+        let mut evm = self.evm_config.evm_with_env_and_inspector(&mut forked_state.db, evm_env, insp);
+        let res = evm.transact(tx_env)?;
+        
+        // Commit state changes to forked state
+        forked_state.db.commit(res.state);
+        
+        // Inspector is reused for next transaction - no need to recreate
+        // This provides performance benefits by avoiding allocations
+        
+        let success = res.result.is_success();
+        let gas_used = res.result.gas_used();
+        let revert_reason = if !success {
+            res.result.output()
+                .map(|bytes| decode_revert_data(&bytes))
+                .or_else(|| Some("Transaction reverted without data".to_string()))
+        } else {
+            None
+        };
+        
+        // Update nonces
+        let updated_nonces = forked_state.nonces.clone();
+        
+        Ok(SequentialTransactionResult {
+            transaction_index: 0, // Will be set by caller
+            success,
+            gas_used,
+            revert_reason,
+            cumulative_gas_used: gas_used,
+            updated_nonces,
+        })
+    }
+    
+    /// Simulate a transaction on a forked state (legacy method without inspector fusing)
+    pub(crate) fn simulate_on_fork(
+        &self,
+        forked_state: &mut ForkedState,
+        transaction: UnsignedTransaction,
+    ) -> Result<SequentialTransactionResult> {
+        let provider = self.provider_factory.provider()?;
+        let header = provider.header_by_number(forked_state.block_number)?
+            .ok_or_else(|| eyre::eyre!("No header for block {}", forked_state.block_number))?;
+        
+        // Create tracer
+        let unsigned_tx_config = TracingInspectorConfig::default_geth()
+            .set_record_logs(true);
+        let mut inspector = TracingInspector::new(unsigned_tx_config);
+        
+        // Setup EVM environment
+        let evm_env = self.evm_config.evm_env(&header);
+        
+        // Get base fee for gas price adjustment
+        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        
+        // Create transaction environment
+        let tx_env = self.create_tx_env_from_unsigned_tx(&transaction, evm_env.block_env.gas_limit as u128, base_fee, &mut forked_state.db)?;
         let gas_limit = tx_env.gas_limit;
         
         // Execute transaction
@@ -247,18 +312,18 @@ impl TxSimulator {
             None
         };
         
-        // Extract call trace
+        // Extract unsigned_tx trace
         let call_frame = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder()
             .geth_call_traces(CallConfig::default().with_log(), gas_used);
         
         Ok(SequentialTransactionResult {
-            transaction_index: 0, // Will be set by caller
+            transaction_index: 0, // Will be set by unsigned_txer
             success,
             gas_used,
             revert_reason,
-            cumulative_gas_used: 0, // Will be set by caller
+            cumulative_gas_used: 0, // Will be set by unsigned_txer
             updated_nonces: forked_state.nonces.clone(),
         })
     }
@@ -275,11 +340,11 @@ impl TxSimulator {
         Ok(account_info.map(|info| info.nonce).unwrap_or(0))
     }
     
-    /// Helper to create transaction environment from CallRequest
+    /// Helper to create transaction environment from UnsignedTransaction
     /// This should ideally be in call_simulator but we'll add it here for now
-    fn create_tx_env_from_call<DB: revm::Database>(
+    pub(crate) fn create_tx_env_from_unsigned_tx<DB: revm::Database>(
         &self,
-        request: &CallRequest,
+        request: &UnsignedTransaction,
         block_gas_limit: u128,
         base_fee: Option<u128>,
         db: &mut DB,

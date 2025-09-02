@@ -15,13 +15,6 @@ pub struct SimulationResult {
     pub revert_reason: Option<String>,
 }
 
-/// Extended simulation result
-#[derive(Debug, Clone)]
-pub struct DetailedSimulationResult {
-    pub success: bool,
-    pub gas_used: u64,
-    pub revert_reason: Option<String>,
-}
 
 
 /// Full simulation result with call trace
@@ -107,9 +100,9 @@ impl ViewFunctionResult {
     }
 }
 
-/// Batch simulation results
+/// Parallel transaction simulation results
 #[derive(Debug)]
-pub struct BatchSimulationResult {
+pub struct ParallelTxSimulationResult {
     /// Total number of transactions in the batch
     pub total: usize,
     /// Number of successfully simulated transactions

@@ -4,7 +4,7 @@
 /// by simulating transactions that should revert with specific errors.
 
 use eyre::Result;
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{Address, U256, Bytes};
 
 #[tokio::main]
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     // Test 1: Call a function that doesn't exist
     println!("Test 1: Calling non-existent function");
     println!("--------------------------------------");
-    let invalid_call = CallRequest {
+    let invalid_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000001".parse()?),
         to: Some("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?), // WETH
         data: Some(Bytes::from(vec![0x12, 0x34, 0x56, 0x78])), // Invalid selector
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     // amount: max uint256
     transfer_data.extend_from_slice(&[0xff; 32]);
     
-    let transfer_call = CallRequest {
+    let transfer_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000001".parse()?),
         to: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?), // USDC
         data: Some(Bytes::from(transfer_data)),
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
     // Add some invalid data (not properly encoded struct)
     swap_data.extend_from_slice(&[0x00; 256]); // Invalid struct data
     
-    let swap_call = CallRequest {
+    let swap_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000001".parse()?),
         to: Some("0xE592427A0AEce92De3Edee1F18E0157C05861564".parse()?), // V3 Router
         data: Some(Bytes::from(swap_data)),

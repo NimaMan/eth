@@ -1,6 +1,6 @@
 /// Buy → Approve → Sell Workflow Example
 /// 
-/// This example demonstrates a complete token trading workflow using SimulationChain,
+/// This example demonstrates a complete token trading workflow using UnsignedTxChainSimulation,
 /// where each step depends on the results of the previous one:
 /// 
 /// 1. Buy tokens with ETH
@@ -12,7 +12,7 @@
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use std::str::FromStr;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
@@ -84,8 +84,8 @@ async fn execute_trading_workflow(
 ) -> Result<()> {
     println!("\n🚀 Starting {} workflow at block {}", token_symbol, block);
     
-    // Start a simulation chain with trace capability
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    // Start a simulation chain with trace capability (use latest block)
+    let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
     
     // Step 1: Buy tokens with 0.1 ETH
@@ -154,7 +154,7 @@ async fn execute_trading_workflow(
 }
 
 /// Create a transaction to buy a token with ETH using Uniswap V2
-fn create_buy_token_transaction(buyer: Address, token_address: &str, eth_amount: U256) -> CallRequest {
+fn create_buy_token_transaction(buyer: Address, token_address: &str, eth_amount: U256) -> UnsignedTransaction {
     // swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // Function selector
     
@@ -182,21 +182,21 @@ fn create_buy_token_transaction(buyer: Address, token_address: &str, eth_amount:
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&token_address[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(buyer),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(eth_amount),
         data: Some(Bytes::from(data)),
         gas: Some(300_000),
         gas_price: Some(20_000_000_000), // 20 gwei
-        nonce: None, // Let SimulationChain handle nonce
+        nonce: None, // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
     }
 }
 
 /// Create an approve transaction for ERC20 tokens
-fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> CallRequest {
+fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> UnsignedTransaction {
     // approve(address spender, uint256 amount)
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3]; // approve selector
     
@@ -207,7 +207,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
     // amount
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(from),
         to: Some(token),
         value: Some(U256::ZERO),
@@ -221,7 +221,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
 }
 
 /// Create a transaction to sell tokens for ETH using Uniswap V2
-fn create_sell_token_transaction(seller: Address, token_address: &str, token_amount: U256) -> CallRequest {
+fn create_sell_token_transaction(seller: Address, token_address: &str, token_amount: U256) -> UnsignedTransaction {
     // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
     
@@ -252,7 +252,7 @@ fn create_sell_token_transaction(seller: Address, token_address: &str, token_amo
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(seller),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::ZERO),

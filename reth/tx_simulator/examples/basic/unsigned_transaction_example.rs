@@ -4,7 +4,7 @@
 /// which is equivalent to Ethereum's `debug_traceCall` RPC method but with
 /// direct database access for better performance.
 
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{Address, U256, Bytes};
 use eyre::Result;
 use std::str::FromStr;
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 1: ETH Transfer Simulation");
     println!("{}", "-".repeat(40));
     
-    let eth_call = CallRequest {
+    let eth_call = UnsignedTransaction {
         from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(1000000000000000u64)), // 0.001 ETH
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
     call_data.extend_from_slice(&[0u8; 12]); // Pad to 32 bytes
     call_data.extend_from_slice(account_to_check.as_slice());
     
-    let balance_call = CallRequest {
+    let balance_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000000".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?), // USDC contract
         data: Some(Bytes::from(call_data)),
@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 3: EIP-1559 Transaction");
     println!("{}", "-".repeat(35));
     
-    let eip1559_call = CallRequest {
+    let eip1559_call = UnsignedTransaction {
         from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(1000000000000000u64)), // 0.001 ETH
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(42));
     
     // Try to send more ETH than available
-    let failed_call = CallRequest {
+    let failed_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000001".parse()?), // Likely empty account
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from_str("1000000000000000000000").unwrap()), // 1000 ETH
@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 5: Gas Limit Optimization");
     println!("{}", "-".repeat(40));
     
-    let base_call = CallRequest {
+    let base_call = UnsignedTransaction {
         from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH
@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 6: Nonce Management");
     println!("{}", "-".repeat(32));
     
-    let nonce_call = CallRequest {
+    let nonce_call = UnsignedTransaction {
         from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH

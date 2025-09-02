@@ -20,7 +20,7 @@
 /// OUTPUT:
 /// Shows the error, extracted nonce, and successful retry with correct nonce.
 
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{U256, Address};
 use eyre::Result;
 
@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     println!("\n1️⃣  Testing with deliberately wrong nonce...");
     
     // Create transaction with nonce 0 (likely wrong for this active address)
-    let mut request = CallRequest {
+    let mut request = UnsignedTransaction {
         from: Some(from_address),
         to: Some("0x388C818CA8B9251b393131C08a736A67ccB19297".parse()?),
         value: Some(U256::from(1_000_000_000_000_000u64)), // 0.001 ETH

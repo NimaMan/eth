@@ -1,6 +1,6 @@
 /// Basic simulation example - test the pure simulation functionality
 
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use alloy_primitives::{Address, U256, Bytes};
 use eyre::Result;
 
@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     println!("Latest block: {}", latest_block);
     
     // Create a simple call request (check ETH balance)
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(Address::ZERO),
         to: Some("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?), // WETH
         value: Some(U256::ZERO),

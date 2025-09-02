@@ -5,8 +5,8 @@
 
 use crate::{
     simulator::TxSimulator,
-    types::{SimulationResult, BatchSimulationResult},
-    call_simulator::CallRequest,
+    types::{SimulationResult, ParallelTxSimulationResult},
+    call_simulator::UnsignedTransaction,
 };
 use alloy_primitives::Address;
 use std::collections::HashMap;
@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use futures::future::join_all;
 
-/// Options for batch simulation
+/// Options for parallel transaction simulation
 #[derive(Debug, Clone)]
-pub struct BatchSimulationOptions {
+pub struct ParallelTxSimulationOptions {
     /// Maximum number of concurrent simulations (default: 10)
     pub max_concurrent: usize,
     /// Timeout per transaction (default: 100ms)
@@ -28,7 +28,7 @@ pub struct BatchSimulationOptions {
     pub block_number: Option<u64>,
 }
 
-impl Default for BatchSimulationOptions {
+impl Default for ParallelTxSimulationOptions {
     fn default() -> Self {
         Self {
             max_concurrent: 10,
@@ -56,11 +56,11 @@ impl TxSimulator {
     /// - Processes transactions in parallel up to max_concurrent limit
     /// - Each transaction runs in its own blocking thread with timeout support
     /// - Results are collected and returned with statistics
-    pub async fn simulate_batch(
+    pub async fn simulate_signed_tx_list_parallel(
         &self,
         transactions: Vec<(String, TransactionSigned)>,
-        options: BatchSimulationOptions,
-    ) -> Result<BatchSimulationResult> {
+        options: ParallelTxSimulationOptions,
+    ) -> Result<ParallelTxSimulationResult> {
         let start = Instant::now();
         let total = transactions.len();
         
@@ -121,7 +121,7 @@ impl TxSimulator {
         let duration = start.elapsed();
         let avg_time_per_tx = duration / total as u32;
         
-        Ok(BatchSimulationResult {
+        Ok(ParallelTxSimulationResult {
             total,
             successful,
             failed,
@@ -141,10 +141,10 @@ impl TxSimulator {
     /// - Proper from/to addresses and amounts
     /// 
     /// Returns structured state changes, not raw JSON.
-    pub async fn simulate_batch_with_call_trace(
+    pub async fn simulate_signed_tx_list_parallel_with_trace(
         &self,
         transactions: Vec<(String, TransactionSigned)>,
-        options: BatchSimulationOptions,
+        options: ParallelTxSimulationOptions,
     ) -> Result<Vec<(String, Result<HashMap<Address, ()>>)>> {
         // REMOVED - AddressStateChange functionality moved to tx_processor
         Ok(Vec::new())
@@ -192,16 +192,16 @@ impl TxSimulator {
     /// This is ideal for simulating mempool transactions where nonces might be outdated.
     /// 
     /// # Arguments
-    /// * `requests` - Vector of (identifier, CallRequest) pairs
+    /// * `requests` - Vector of (identifier, UnsignedTransaction) pairs
     /// * `options` - Batch simulation options (concurrency, timeout, block)
     /// 
     /// # Returns
     /// Results with nonce adaptation applied where needed
-    pub async fn simulate_unsigned_batch(
+    pub async fn simulate_unsigned_tx_list_parallel(
         &self,
-        requests: Vec<(String, CallRequest)>,
-        options: BatchSimulationOptions,
-    ) -> Result<BatchSimulationResult> {
+        requests: Vec<(String, UnsignedTransaction)>,
+        options: ParallelTxSimulationOptions,
+    ) -> Result<ParallelTxSimulationResult> {
         let start = Instant::now();
         let total = requests.len();
         
@@ -262,7 +262,7 @@ impl TxSimulator {
         let duration = start.elapsed();
         let avg_time_per_tx = duration / total as u32;
         
-        Ok(BatchSimulationResult {
+        Ok(ParallelTxSimulationResult {
             total,
             successful,
             failed,
@@ -279,10 +279,10 @@ impl TxSimulator {
     /// - Simulates transactions with call tracer enabled 
     /// - Automatically adapts nonce if needed
     /// - Returns raw CallFrame traces (result processing done by tx_processor)
-    pub async fn simulate_unsigned_batch_with_call_trace(
+    pub async fn simulate_unsigned_tx_list_parallel_with_trace(
         &self,
-        requests: Vec<(String, CallRequest)>,
-        options: BatchSimulationOptions,
+        requests: Vec<(String, UnsignedTransaction)>,
+        options: ParallelTxSimulationOptions,
     ) -> Result<Vec<(String, Result<HashMap<Address, ()>>)>> {
         // REMOVED - AddressStateChange functionality moved to tx_processor
         Ok(Vec::new())

@@ -6,12 +6,16 @@
 use crate::{
     simulator::TxSimulator,
     types::{SimulationResult, FullSimulationResult},
+    simulation_revert_decoder::decode_revert_data,
 };
 use eyre::Result;
 use tokio::task;
 
+// Type alias for consistent naming style with UnsignedTransaction
+pub type SignedTransaction = reth_primitives::TransactionSigned;
+
 // Reth imports
-use reth_primitives::{TransactionSigned, Recovered, transaction::SignedTransaction};
+use reth_primitives::{TransactionSigned, Recovered, transaction::SignedTransaction as _};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_provider::HeaderProvider;
@@ -19,6 +23,7 @@ use reth_evm::{ConfigureEvm, Evm};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use alloy_rpc_types_trace::geth::{CallFrame, CallConfig};
+use alloy_consensus::transaction::SignerRecoverable;
 
 impl TxSimulator {
     /// Simulate a SIGNED transaction and return basic result
@@ -71,6 +76,69 @@ impl TxSimulator {
                 } else { 
                     Some("Transaction reverted".to_string()) 
                 },
+            })
+        })
+        .await
+        .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
+    }
+    
+    /// Simulate signed transaction with detailed call trace at specific block
+    pub async fn simulate_signed_transaction_with_trace_at_block(
+        &self,
+        tx: &TransactionSigned,
+        block_number: u64,
+    ) -> Result<FullSimulationResult> {
+        let tx = tx.clone();
+        let simulator = self.clone();
+        
+        task::spawn_blocking(move || {
+            let provider = simulator.provider_factory.provider()?;
+            let header = provider.header_by_number(block_number)?
+                .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+            
+            let state = simulator.provider_factory.history_by_block_number(block_number)?;
+            
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+            
+            // Create tracer with call config
+            let call_config = TracingInspectorConfig::default_geth()
+                .set_record_logs(true);
+            let mut inspector = TracingInspector::new(call_config);
+            
+            let evm_env = simulator.evm_config.evm_env(&header);
+            
+            let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
+            
+            let tx_env = simulator.evm_config.tx_env(&recovered_tx);
+            let gas_limit = tx_env.gas_limit;
+            
+            let mut evm = simulator.evm_config.evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
+            
+            let res = evm.transact(tx_env)?;
+            
+            db.commit(res.state);
+            
+            let success = res.result.is_success();
+            let gas_used = res.result.gas_used();
+            let revert_reason = if success {
+                None
+            } else {
+                res.result.output()
+                    .map(|bytes| decode_revert_data(&bytes))
+                    .or_else(|| Some("Transaction reverted without data".to_string()))
+            };
+            
+            // Extract call trace
+            let call_frame = inspector
+                .with_transaction_gas_limit(gas_limit)
+                .into_geth_builder()
+                .geth_call_traces(CallConfig::default().with_log(), gas_used);
+            
+            Ok(FullSimulationResult {
+                success,
+                gas_used,
+                revert_reason,
+                call_trace: call_frame,
             })
         })
         .await

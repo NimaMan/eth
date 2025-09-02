@@ -27,7 +27,7 @@ tx_simulator/
 │   ├── types.rs                        # All result types and data structures
 │   ├── signed_simulation.rs            # Signed transaction processing
 │   ├── unsigned_simulation.rs          # Unsigned call aliases
-│   ├── call_simulator.rs               # CallRequest handling and simulation
+│   ├── call_simulator.rs               # UnsignedTransaction handling and simulation
 │   ├── batch_sequence_simulation.rs    # Sequential transaction processing (state preservation)
 │   ├── parallel_tx_simulation.rs       # Independent parallel processing
 │   ├── simulation_chain.rs             # Stateful step-by-step simulation
@@ -35,7 +35,7 @@ tx_simulator/
 └── examples/
     ├── basic/                           # Basic simulation examples
     │   ├── verify_database_setup.rs     # Database connection verification
-    │   ├── unsigned_transaction_example.rs # Basic CallRequest simulation
+    │   ├── unsigned_transaction_example.rs # Basic UnsignedTransaction simulation
     │   ├── view_function_example.rs     # ERC20 view function calls
     │   ├── weth_totalsupply_view_call.rs # WETH totalSupply example
     │   └── trace_extraction_example.rs  # CallFrame structure demonstration
@@ -141,7 +141,7 @@ Core module for `debug_traceCall` equivalent functionality:
 - `simulate_unsigned_transaction_with_full_trace_at_block()` - Full simulation with CallFrame
 
 **Examples:**
-- `examples/basic/unsigned_transaction_example.rs` - Basic CallRequest usage
+- `examples/basic/unsigned_transaction_example.rs` - Basic UnsignedTransaction usage
 - `examples/basic/trace_extraction_example.rs` - CallFrame structure demonstration
 
 #### Sequential Processing (`batch_sequence_simulation.rs`)
@@ -166,9 +166,9 @@ pub struct SimulationChain {
 }
 
 // Key methods:
-pub async fn step(&mut self, call: CallRequest) -> Result<SimulationResult>
-pub async fn step_with_trace(&mut self, call: CallRequest) -> Result<FullSimulationResult>
-pub async fn step_through(&mut self, calls: Vec<CallRequest>) -> Result<Vec<SimulationResult>>
+pub async fn step(&mut self, call: UnsignedTransaction) -> Result<SimulationResult>
+pub async fn step_with_trace(&mut self, call: UnsignedTransaction) -> Result<FullSimulationResult>
+pub async fn step_through(&mut self, calls: Vec<UnsignedTransaction>) -> Result<Vec<SimulationResult>>
 pub fn current_state(&self) -> ChainStateInfo
 pub async fn reset(&mut self) -> Result<()>
 ```
@@ -185,8 +185,8 @@ pub async fn reset(&mut self) -> Result<()>
 
 Independent parallel processing of multiple transactions (no state sharing):
 
-- `simulate_batch()` - Process signed transactions concurrently
-- `simulate_unsigned_batch()` - Process CallRequests concurrently
+- `simulate_signed_tx_list_parallel()` - Process signed transactions concurrently
+- `simulate_unsigned_tx_list_parallel()` - Process UnsignedTransactions concurrently
 - Configurable parallelism (semaphore-based concurrency control)
 - Per-transaction timeouts
 - Aggregated statistics and error handling
@@ -198,7 +198,7 @@ Independent parallel processing of multiple transactions (no state sharing):
 For calling view/pure functions that don't modify state:
 
 - `simulate_view_function()` - Execute view functions
-- `simulate_view_function_from_call()` - From CallRequest
+- `simulate_view_function_from_call()` - From UnsignedTransaction
 - Helper functions for encoding/decoding common types
 - Optimized for read-only operations
 
@@ -228,10 +228,10 @@ Robust timeout mechanisms:
 
 ```rust
 // Unsigned transaction (like debug_traceCall)
-let result = simulator.simulate_call(call_request).await?;
+let result = simulator.simulate_call(unsigned_tx).await?;
 
 // At specific block
-let result = simulator.simulate_call_at_block(call_request, block_number).await?;
+let result = simulator.simulate_call_at_block(unsigned_tx, block_number).await?;
 ```
 
 ### Advanced Simulation
@@ -239,7 +239,7 @@ let result = simulator.simulate_call_at_block(call_request, block_number).await?
 ```rust
 // Full simulation with CallFrame trace
 let full_result = simulator
-    .simulate_unsigned_transaction_with_full_trace_at_block(call_request, block_number)
+    .simulate_unsigned_transaction_with_full_trace_at_block(unsigned_tx, block_number)
     .await?;
 
 // Access simulation results and raw CallFrame (processing done by tx_processor)
@@ -283,13 +283,13 @@ println!("Total gas used: {}", state.total_gas_used);
 ### Parallel Processing
 
 ```rust
-let options = BatchSimulationOptions {
+let options = ParallelTxSimulationOptions {
     max_concurrent: 20,
     timeout_per_tx: Some(Duration::from_millis(100)),
     block_number: Some(block_number),
 };
 
-let results = simulator.simulate_unsigned_batch(requests, options).await?;
+let results = simulator.simulate_unsigned_tx_list_parallel(requests, options).await?;
 ```
 
 ## Example Reference
@@ -302,7 +302,7 @@ let results = simulator.simulate_unsigned_batch(requests, options).await?;
    - Validates database permissions
 
 2. **Unsigned Transactions** (`unsigned_transaction_example.rs`)
-   - Basic CallRequest simulation
+   - Basic UnsignedTransaction simulation
    - ETH transfers and contract calls
    - Success/failure scenarios
 
@@ -446,7 +446,7 @@ let result = simulator.simulate_unsigned_transaction_with_full_trace_at_block(ca
 
 **Type Compatibility:**
 - `RethTxSimulator` → `TxSimulator`
-- `CallRequest` → Same structure, same fields
+- `UnsignedTransaction` → Same structure, same fields
 - `SimulationResult` → Same structure
 - `FullSimulationResult` → Same structure (minus state changes)
 
@@ -456,7 +456,7 @@ let result = simulator.simulate_unsigned_transaction_with_full_trace_at_block(ca
 
 ```rust
 let simulator = TxSimulator::new("/path/to/reth/db")?;
-let result = simulator.simulate_call(call_request).await?;
+let result = simulator.simulate_call(unsigned_tx).await?;
 
 if result.success {
     println!("Transaction would succeed, gas: {}", result.gas_used);
@@ -508,7 +508,7 @@ println!("Total transactions: {}, Total gas: {}", state.transaction_count, state
 
 ```rust
 // Check token balance
-let balance_call = CallRequest {
+let balance_call = UnsignedTransaction {
     to: Some(token_address),
     data: Some(encode_balance_of(user_address)),
     ..Default::default()
@@ -521,15 +521,15 @@ let balance = result.decode_uint256();
 ### 5. Concurrent Transaction Testing
 
 ```rust
-let test_transactions: Vec<CallRequest> = generate_test_calls();
+let test_transactions: Vec<UnsignedTransaction> = generate_test_calls();
 
-let options = BatchSimulationOptions {
+let options = ParallelTxSimulationOptions {
     max_concurrent: 50,
     timeout_per_tx: Some(Duration::from_secs(1)),
     block_number: Some(latest_block),
 };
 
-let results = simulator.simulate_unsigned_batch(test_transactions, options).await?;
+let results = simulator.simulate_unsigned_tx_list_parallel(test_transactions, options).await?;
 println!("Success rate: {}/{}", results.successful, results.total);
 ```
 
@@ -545,7 +545,7 @@ println!("Success rate: {}/{}", results.successful, results.total);
 ### Error Recovery Patterns
 
 ```rust
-match simulator.simulate_call(call_request).await {
+match simulator.simulate_call(unsigned_tx).await {
     Ok(result) => {
         if result.success {
             process_success(&result);
@@ -569,7 +569,7 @@ match simulator.simulate_call(call_request).await {
 
 Each module includes focused unit tests:
 - `signed_simulation` tests with valid signatures
-- `call_simulator` tests with various CallRequest configurations
+- `call_simulator` tests with various UnsignedTransaction configurations
 - `batch_sequence_simulation` tests with complex sequences
 - `simulation_chain` tests with stateful workflows
 - CallFrame structure tests with known transaction patterns
@@ -595,7 +595,7 @@ The `examples/` directory serves as comprehensive integration tests:
 - **Isolated Execution**: Each simulation runs in its own forked state
 - **No Network Access**: All data comes from local database
 - **Safe Concurrent Use**: Multiple simulators can access database simultaneously
-- **Input Validation**: CallRequest parameters are validated before execution
+- **Input Validation**: UnsignedTransaction parameters are validated before execution
 
 ## Future Enhancements
 

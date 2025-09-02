@@ -32,7 +32,7 @@
 use eyre::Result;
 use tx_simulator::{
     TxSimulator,
-    CallRequest,
+    UnsignedTransaction,
     SequentialSimulationOptions,
 };
 use alloy_primitives::{Address, U256, Bytes, address, hex};
@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
     // Build the MEV bundle
     let bundle = vec![
         // 1. FRONTRUN: MEV bot buys token before victim
-        CallRequest {
+        UnsignedTransaction {
             from: Some(mev_bot),
             to: Some(UNISWAP_V2_ROUTER),
             value: Some(U256::from(1_000_000_000_000_000u128)), // 0.001 ETH
@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
         },
         
         // 2. VICTIM TRANSACTION: User's swap
-        CallRequest {
+        UnsignedTransaction {
             from: Some(victim),
             to: Some(UNISWAP_V2_ROUTER),
             value: Some(U256::from(5_000_000_000_000_000u128)), // 0.005 ETH
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
         },
         
         // 3. BACKRUN: MEV bot sells token after victim
-        CallRequest {
+        UnsignedTransaction {
             from: Some(mev_bot),
             to: Some(UNISWAP_V2_ROUTER),
             value: Some(U256::ZERO), // Selling tokens, not ETH
