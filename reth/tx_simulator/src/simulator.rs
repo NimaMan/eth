@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::path::Path;
 use eyre::Result;
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::Bytes;
 
 // Core Reth imports
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
@@ -131,21 +131,7 @@ impl TxSimulator {
     
     /// Encode a view function call (static wrapper for compatibility)
     pub fn encode_view_function_call(selector: [u8; 4]) -> Bytes {
-        crate::contract_method_simulator::encode_view_function_call(selector)
-    }
-    
-    /// Extract expected nonce from error message
-    pub(crate) fn extract_expected_nonce(error_msg: &str) -> Option<u64> {
-        // Parse "nonce X too low, expected Y" format
-        if let Some(expected_pos) = error_msg.find("expected ") {
-            let remaining = &error_msg[expected_pos + 9..];
-            let nonce_str: String = remaining.chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
-            nonce_str.parse::<u64>().ok()
-        } else {
-            None
-        }
+        crate::contract_method_simulator::encode_contract_read_call_no_args(selector)
     }
 }
 

@@ -15,14 +15,14 @@ use tokio::task;
 pub type SignedTransaction = reth_primitives::TransactionSigned;
 
 // Reth imports
-use reth_primitives::{TransactionSigned, Recovered, transaction::SignedTransaction as _};
+use reth_primitives::{TransactionSigned, Recovered};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_provider::HeaderProvider;
 use reth_evm::{ConfigureEvm, Evm};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use alloy_rpc_types_trace::geth::{CallFrame, CallConfig};
+use alloy_rpc_types_trace::geth::CallConfig;
 use alloy_consensus::transaction::SignerRecoverable;
 
 impl TxSimulator {

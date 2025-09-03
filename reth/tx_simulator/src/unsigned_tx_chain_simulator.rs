@@ -10,7 +10,7 @@
 
 use crate::{
     simulator::TxSimulator,
-    types::{SimulationResult, SequentialTransactionResult, FullSimulationResult},
+    types::{SimulationResult, FullSimulationResult},
     unsigned_tx_simulator::UnsignedTransaction,
     unsigned_tx_bundle_simulator::ForkedState,
 };

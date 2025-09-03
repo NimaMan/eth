@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
     failing_sequence[1] = UnsignedTransaction {
         from: Some(address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689")),
         to: Some(address!("beefdeadbeefdeadbeefdeadbeefdeadbeefdead")),
-        value: Some(U256::from(10_000_000_000_000_000_000u128)), // 10 ETH (will fail - too much)
+        value: Some(U256::from(4_000_000_000_000_000_000u128)), // 4 ETH (will fail - too much)
         gas: Some(21_000),
         data: None,
         gas_price: None,

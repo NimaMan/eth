@@ -81,7 +81,7 @@ impl TxSimulator {
             // Create fused inspector that persists across transactions
             let mut inspector: Option<TracingInspector> = None;
             
-            for (index, mut transaction) in transactions.into_iter().enumerate() {
+            for (_index, mut transaction) in transactions.into_iter().enumerate() {
                 // Auto-detect nonce if not provided
                 if transaction.nonce.is_none() {
                     if let Some(from) = transaction.from {
@@ -139,7 +139,7 @@ impl TxSimulator {
     
     /// Create a forked state at a specific block for sequential simulation
     pub(crate) fn create_forked_state(&self, block_number: u64) -> Result<ForkedState> {
-        let provider = self.provider_factory.provider()?;
+        let _provider = self.provider_factory.provider()?;
         let state = self.provider_factory.history_by_block_number(block_number)?;
         let db = CacheDB::new(StateProviderDatabase::new(state));
         
@@ -271,6 +271,7 @@ impl TxSimulator {
     }
     
     /// Simulate a transaction on a forked state (legacy method without inspector fusing)
+    #[allow(dead_code)]
     pub(crate) fn simulate_on_fork(
         &self,
         forked_state: &mut ForkedState,
@@ -312,8 +313,8 @@ impl TxSimulator {
             None
         };
         
-        // Extract unsigned_tx trace
-        let call_frame = inspector
+        // Extract unsigned_tx trace (not used in this method)
+        let _call_frame = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder()
             .geth_call_traces(CallConfig::default().with_log(), gas_used);

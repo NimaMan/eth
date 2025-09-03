@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
     call_data.extend_from_slice(&amount.to_be_bytes::<32>());
     
     let erc20_transfer = UnsignedTransaction {
-        from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?), // USDC contract
         data: Some(Bytes::from(call_data)),
         gas: Some(65000),
@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
     let swap_selector = [0x7f, 0xf3, 0x6a, 0xb5]; // swapExactETHForTokens(uint256,address[],address,uint256)
     let min_amount_out = U256::from(1u64);
     let deadline = U256::from(9999999999u64);
-    let recipient: Address = "0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?;
+    let recipient: Address = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?;
     
     // Simplified call data for demo (would need proper path encoding for real swap)
     let mut swap_data = Vec::new();
@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
     swap_data.extend_from_slice(&min_amount_out.to_be_bytes::<32>());
     
     let uniswap_swap = UnsignedTransaction {
-        from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0x7a250d5630b4cf539739df2c5dacb4c659f2488d".parse()?), // Uniswap V2 Router
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH
         data: Some(Bytes::from(swap_data)),

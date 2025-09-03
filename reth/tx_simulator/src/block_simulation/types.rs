@@ -1,8 +1,7 @@
 /// Types for block-level simulation
-use alloy_primitives::{Address, B256, Bytes, U256, Log, Bloom};
-use alloy_rpc_types_trace::geth::{GethTrace, TraceResult, GethDebugTracingOptions};
+use alloy_primitives::{B256, U256};
+use alloy_rpc_types_trace::geth::TraceResult;
 use serde::{Deserialize, Serialize};
-use crate::types::CallFrame;
 
 /// Result of tracing an entire block - matches debug_traceBlockByNumber output
 #[derive(Debug, Clone)]

@@ -5,7 +5,7 @@
 
 use crate::{
     simulator::TxSimulator,
-    types::{SimulationResult, ParallelTxSimulationResult},
+    types::ParallelTxSimulationResult,
     unsigned_tx_simulator::UnsignedTransaction,
 };
 use alloy_primitives::Address;
@@ -143,8 +143,8 @@ impl TxSimulator {
     /// Returns structured state changes, not raw JSON.
     pub async fn simulate_signed_tx_list_parallel_with_trace(
         &self,
-        transactions: Vec<(String, TransactionSigned)>,
-        options: ParallelTxSimulationOptions,
+        _transactions: Vec<(String, TransactionSigned)>,
+        _options: ParallelTxSimulationOptions,
     ) -> Result<Vec<(String, Result<HashMap<Address, ()>>)>> {
         // REMOVED - AddressStateChange functionality moved to tx_processor
         Ok(Vec::new())
@@ -205,8 +205,8 @@ impl TxSimulator {
         let start = Instant::now();
         let total = requests.len();
         
-        // Get block number for simulation
-        let block_number = match options.block_number {
+        // Get block number for simulation (not used in current implementation)
+        let _block_number = match options.block_number {
             Some(n) => n,
             None => self.get_latest_block()?,
         };
@@ -281,8 +281,8 @@ impl TxSimulator {
     /// - Returns raw CallFrame traces (result processing done by tx_processor)
     pub async fn simulate_unsigned_tx_list_parallel_with_trace(
         &self,
-        requests: Vec<(String, UnsignedTransaction)>,
-        options: ParallelTxSimulationOptions,
+        _requests: Vec<(String, UnsignedTransaction)>,
+        _options: ParallelTxSimulationOptions,
     ) -> Result<Vec<(String, Result<HashMap<Address, ()>>)>> {
         // REMOVED - AddressStateChange functionality moved to tx_processor
         Ok(Vec::new())

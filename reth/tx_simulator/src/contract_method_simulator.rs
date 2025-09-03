@@ -1,8 +1,8 @@
-/// View Function Simulator - for calling view/pure functions on smart contracts
+/// Contract Method Simulator - for calling read-only contract methods
 /// 
-/// This module provides functionality to call view functions (read-only) on smart contracts
-/// without needing to create a transaction. These are commonly used for querying token
-/// balances, total supply, and other contract state.
+/// This module provides functionality to call read-only methods (view/pure functions) on smart contracts
+/// without creating a transaction. These are commonly used for querying token balances, 
+/// total supply, decimals, and other contract state.
 
 use crate::{
     simulator::TxSimulator,
@@ -13,7 +13,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 
 impl TxSimulator {
-    /// Simulate a view function call (read-only contract call)
+    /// Simulate a read-only contract method call (view/pure function)
     /// 
     /// This simulates calling a view/pure function on a smart contract.
     /// No state changes are made, just returns the output data.
@@ -22,7 +22,7 @@ impl TxSimulator {
     /// * `contract` - The contract address to call
     /// * `data` - The encoded function call data (selector + args)
     /// * `block_number` - Optional block number to query at (defaults to latest)
-    pub async fn simulate_view_function(
+    pub async fn simulate_contract_read_only_call(
         &self,
         contract: Address,
         data: Bytes,
@@ -66,17 +66,26 @@ impl TxSimulator {
         })
     }
     
+    /// Backward compatibility alias for simulate_contract_read_only_call
+    pub async fn simulate_view_function(
+        &self,
+        contract: Address,
+        data: Bytes,
+        block_number: Option<u64>,
+    ) -> Result<ViewFunctionResult> {
+        self.simulate_contract_read_only_call(contract, data, block_number).await
+    }
 }
 
-// Public utility functions for view function encoding/decoding
+// Public utility functions for contract method encoding/decoding
 
-/// Helper to encode a simple view function call (just selector, no args)
-pub fn encode_view_function_call(selector: [u8; 4]) -> Bytes {
+/// Encode a contract read-only call with no arguments (just 4-byte selector)
+pub fn encode_contract_read_call_no_args(selector: [u8; 4]) -> Bytes {
     Bytes::from(selector.to_vec())
 }
 
-/// Helper to encode a view function call with a single address argument
-pub fn encode_view_function_with_address(selector: [u8; 4], address: Address) -> Bytes {
+/// Encode a contract read-only call with a single address argument (e.g., balanceOf)
+pub fn encode_contract_read_call_with_address_arg(selector: [u8; 4], address: Address) -> Bytes {
     let mut data = selector.to_vec();
     // Pad address to 32 bytes (addresses are left-padded with zeros)
     let mut padded = [0u8; 32];
@@ -85,8 +94,8 @@ pub fn encode_view_function_with_address(selector: [u8; 4], address: Address) ->
     Bytes::from(data)
 }
 
-/// Helper to decode a uint256 result from view function output
-pub fn decode_uint256_result(output: &Bytes) -> U256 {
+/// Decode a uint256 value from contract method output bytes
+pub fn decode_uint256_from_contract_output(output: &Bytes) -> U256 {
     if output.len() >= 32 {
         U256::from_be_slice(&output[..32])
     } else {
@@ -94,8 +103,8 @@ pub fn decode_uint256_result(output: &Bytes) -> U256 {
     }
 }
 
-/// Helper to decode a uint8 result from view function output
-pub fn decode_uint8_result(output: &Bytes) -> u8 {
+/// Decode a uint8 value from contract method output bytes (e.g., decimals)
+pub fn decode_uint8_from_contract_output(output: &Bytes) -> u8 {
     if output.len() >= 32 {
         output[31]
     } else {
@@ -103,8 +112,8 @@ pub fn decode_uint8_result(output: &Bytes) -> u8 {
     }
 }
 
-/// Helper to decode a string result from view function output
-pub fn decode_string_result(output: &Bytes) -> String {
+/// Decode a string value from contract method output bytes (e.g., name, symbol)
+pub fn decode_string_from_contract_output(output: &Bytes) -> String {
     if output.len() < 64 {
         return String::new();
     }
@@ -123,3 +132,10 @@ pub fn decode_string_result(output: &Bytes) -> String {
 }
 
 // ViewFunctionResult is already exported from lib.rs
+
+// Backward compatibility aliases
+pub use self::encode_contract_read_call_no_args as encode_view_function_call;
+pub use self::encode_contract_read_call_with_address_arg as encode_view_function_with_address;
+pub use self::decode_uint256_from_contract_output as decode_uint256_result;
+pub use self::decode_uint8_from_contract_output as decode_uint8_result;
+pub use self::decode_string_from_contract_output as decode_string_result;

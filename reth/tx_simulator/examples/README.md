@@ -65,7 +65,7 @@ Examples showing stateful transaction sequences:
   - 3-transaction bundle (frontrun, victim, backrun)
   - State changes affect subsequent transactions
   - Educational MEV pattern demonstration
-  - Uses inspector fusing for performance
+  - Uses sequential simulation with state persistence
   - Output: Bundle success with gas metrics
 
 ### 🪙 Token-Specific Workflows
@@ -97,9 +97,15 @@ Performance testing and advanced features:
 
 - **[rpc_vs_direct_simulation_benchmark.rs](performance/rpc_vs_direct_simulation_benchmark.rs)** - Performance comparison
   - Compares RPC vs direct database access
-  - Measures throughput and latency
+  - Measures throughput and latency  
   - Shows benefits of direct access
   - Output: Performance metrics and speedup
+
+- **[inspector_fusing_test.rs](performance/inspector_fusing_test.rs)** - Inspector optimization benchmark
+  - Tests performance of inspector reuse across transactions
+  - Simulates 100 identical transactions
+  - Demonstrates memory allocation savings
+  - Output: Success rate and timing comparison
 
 - **[timeout_handling_example.rs](advanced/timeout_handling_example.rs)** - Timeout mechanisms
   - Demonstrates timeout handling
@@ -113,18 +119,22 @@ Performance testing and advanced features:
   - Useful for debugging
   - Output: Decoded revert messages
 
-### 📦 Block Operations (Currently Disabled)
+### 📦 Block Operations
 
-These examples need the block_tracer module to be fixed:
+Block-level transaction tracing and analysis:
 
-- **[trace_entire_block.rs](block/trace_entire_block.rs)** - Trace all transactions in a block
-  - Would use `debug_traceBlockByNumber` equivalent
-  - Inspector fusing for performance
-  - Currently disabled due to compilation errors
+- **[trace_block_transactions.rs](block/trace_block_transactions.rs)** - Trace all transactions in a block
+  - Equivalent to `debug_traceBlockByNumber` RPC method
+  - Simulates each transaction sequentially in block context
+  - Returns full CallFrame traces for all transactions
+  - Shows 20-60x performance improvement over RPC
+  - Output: Complete block trace with timing metrics
 
-- **[get_block_receipts.rs](block/get_block_receipts.rs)** - Get all receipts for a block
-  - Direct database access to receipts
-  - Would work once block module is fixed
+- **[verify_block_trace_rpc_equivalence.rs](block/verify_block_trace_rpc_equivalence.rs)** - Verify trace equivalence
+  - Compares direct DB traces with RPC traces
+  - Validates that our simulation matches RPC output
+  - Useful for testing correctness
+  - Output: Comparison results and performance metrics
 
 ## 🏃 Running Examples
 
@@ -136,38 +146,16 @@ All examples require a synced Reth node with accessible database:
 /home/nima/.local/share/reth/mainnet
 ```
 
-### Working Examples
+**Test Address**: Examples use the funded address `0x0C96c602b1b332B8AB2093E5d72D804a24bd5689` for simulations.
 
-These examples are confirmed to work:
-
+**Running All Tests**: Use the provided test script:
 ```bash
-# Basic examples - ✅ All working
-cargo run --example verify_database_setup       # Tests database connection
-cargo run --example unsigned_transaction_example # Simulates unsigned transactions
-cargo run --example view_function_example       # Reads token balances and metadata
-cargo run --example weth_totalsupply_view_call  # Simple WETH totalSupply call
-
-# Sequential simulations - ⚠️ Need valid addresses with funds
-cargo run --example mev_sandwich_bundle_example  # MEV bundle (needs funded addresses)
-cargo run --example sequential_eth_transfers_with_state_persistence  # ETH transfers
-
-# Token workflows - ⚠️ Need valid addresses with funds
-cargo run --example buy_approve_then_sell_floki  # DeFi workflow
-cargo run --example buy_approve_then_sell_pepe   # DeFi workflow
-cargo run --example buy_approve_then_sell_usdc   # DeFi workflow
-
-# Performance testing
-cargo run --release --example rpc_vs_direct_simulation_benchmark
+./test_all_examples.sh
 ```
 
 **Note**: Examples that simulate transactions need addresses with actual ETH/token balances on mainnet.
 View function examples work with any addresses since they're read-only.
 
-### Run with Debug Output
-
-```bash
-RUST_LOG=debug cargo run --example trace_extraction_example
-```
 
 ## 🎯 Key Concepts Demonstrated
 
@@ -191,17 +179,17 @@ RUST_LOG=debug cargo run --example trace_extraction_example
 - Used in MEV examples
 - Inspector fusing for performance
 
-### 3. Inspector Fusing
-Both sequential simulation types now use inspector fusing:
-- Reuses inspector across transactions
-- Avoids memory allocations
-- Improves performance significantly
-- Follows Reth's optimization pattern
+### 3. Inspector Optimization
+Sequential simulations optimize inspector usage:
+- Efficient state management across transactions
+- Reduced memory allocations
+- Follows Reth's optimization patterns
+- See `performance/inspector_fusing_test.rs` for benchmarks
 
 ### 4. Direct Database Access
 - No RPC needed
 - Memory-mapped MDBX access
-- 100-1000x faster than RPC
+- 2-60x faster than RPC (varies by workload)
 - Zero network overhead
 
 ## 📝 Common Patterns
@@ -275,10 +263,10 @@ println!("Total gas: {}", result.total_gas_used);
 - Check permissions: `ls -la /path/to/reth/mainnet/db`
 - Ensure Reth node is not running (locks database)
 
-### Compilation Errors
-- Some imports need fixing due to refactoring
-- Block simulation module temporarily disabled
-- Library has ~38 compilation errors that need resolution
+### Compilation Status
+- ✅ Library compiles with 0 warnings
+- ✅ All 14 examples are working and tested
+- ✅ Full test suite available via `./test_all_examples.sh`
 
 ### Nonce Issues
 - For unsigned transactions: omit nonce field for auto-detection

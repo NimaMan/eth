@@ -17,7 +17,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_provider::HeaderProvider;
 use reth_evm::{ConfigureEvm, Evm};
-use revm::{Database, DatabaseCommit};
+use revm::DatabaseCommit;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use alloy_rpc_types_trace::geth::CallConfig;
 use alloy_primitives::{Address, Bytes, U256};

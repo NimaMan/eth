@@ -102,15 +102,24 @@ async fn main() -> Result<()> {
     
     // Try to send more ETH than available
     let failed_call = UnsignedTransaction {
-        from: Some("0x0000000000000000000000000000000000000001".parse()?), // Likely empty account
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?), // Funded account
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
-        value: Some(U256::from_str("1000000000000000000000").unwrap()), // 1000 ETH
+        value: Some(U256::from_str("5000000000000000000").unwrap()), // 5 ETH
         gas: Some(21000),
         gas_price: Some(20_000_000_000),
         ..Default::default()
     };
     
-    let result = simulator.simulate_call(failed_call).await?;
+    let result = simulator.simulate_call(failed_call).await
+        .unwrap_or_else(|e| {
+            println!("❌ Transaction validation failed: {}", e);
+            // Return a failed result
+            tx_simulator::SimulationResult {
+                success: false,
+                gas_used: 0,
+                revert_reason: Some(e.to_string()),
+            }
+        });
     println!("❌ Failed transaction analysis:");
     println!("   Success: {}", result.success);
     println!("   Gas used: {}", result.gas_used);
@@ -123,7 +132,7 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(40));
     
     let base_call = UnsignedTransaction {
-        from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH
         gas_price: Some(20_000_000_000),
@@ -147,7 +156,7 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(32));
     
     let nonce_call = UnsignedTransaction {
-        from: Some("0x742d35cc6548c5b8a9f63c4c81d0e90e3e1d3d9e".parse()?),
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
         value: Some(U256::from(100000000000000000u64)), // 0.1 ETH
         gas: Some(21000),
@@ -156,7 +165,15 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
     
-    let result = simulator.simulate_call(nonce_call).await?;
+    let result = simulator.simulate_call(nonce_call).await
+        .unwrap_or_else(|e| {
+            println!("   Expected error with wrong nonce: {}", e);
+            tx_simulator::SimulationResult {
+                success: false,
+                gas_used: 0,
+                revert_reason: Some(e.to_string()),
+            }
+        });
     println!("   High nonce test:");
     println!("   Success: {}", result.success);
     println!("   Gas used: {}", result.gas_used);
