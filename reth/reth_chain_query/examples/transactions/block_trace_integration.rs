@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     
     // === Section 1: Basic Block Information ===
     println!("\n1. Basic Block Information");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     let test_block = latest_block - 10; // Use a recent block
     let block = provider.block_by_number(test_block)?
@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
     
     // === Section 2: Block Tracing with tx_simulator ===
     println!("\n2. Block Tracing with tx_simulator");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     // Initialize tx_simulator
     let tx_sim = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
     
     // === Section 3: Analyze Trace Results ===
     println!("\n3. Trace Analysis");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     let mut successful = 0;
     let mut failed = 0;
@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
     
     // === Section 4: Complex Transactions ===
     println!("\n4. Complex Transactions (>5 internal calls)");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     if complex_txs.is_empty() {
         println!("No complex transactions found in this block");
@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
     
     // === Section 5: Specific Transaction Types ===
     println!("\n5. Transaction Type Analysis");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     let uniswap_v2 = Address::from_str("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D")?;
     let uniswap_v3 = Address::from_str("0xE592427A0AEce92De3Edee1F18E0157C05861564")?;
@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
     
     // === Section 6: Performance Comparison ===
     println!("\n6. Performance Metrics");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     let txs_per_sec = traces.len() as f64 / trace_time.as_secs_f64();
     println!("Tracing Performance:");

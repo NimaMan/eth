@@ -18,7 +18,7 @@ mod contract_methods;
 mod batch_ops;
 mod caching;
 mod types;
-// mod transactions; // TEMPORARILY DISABLED - fixing compilation errors
+mod transactions;
 // mod block_transactions; // TEMPORARILY DISABLED - has compilation errors
 mod address_state;
 
@@ -26,7 +26,7 @@ pub use contract_methods::*;
 pub use batch_ops::*;
 pub use caching::*;
 pub use types::*;
-// pub use transactions::*; // TEMPORARILY DISABLED
+pub use transactions::*;
 // pub use block_transactions::*; // TEMPORARILY DISABLED
 pub use address_state::*;
 

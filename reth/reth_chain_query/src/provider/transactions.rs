@@ -92,7 +92,7 @@ impl RethQueryProvider {
         // We need to find which block this transaction is in
         // This is less efficient than by hash, but still works
         // In practice, you'd want to maintain an index for this
-        let (tx, meta) = self.get_raw_tx_with_metadata(tx_hash)?;
+        let (tx, meta) = self.get_raw_tx_with_metadata(*tx_hash)?;
         
         let block_number = meta.block_number;
         let tx_index = meta.index as u64;
@@ -106,7 +106,7 @@ impl RethQueryProvider {
             .map_err(|_| eyre::eyre!("Failed to recover signer"))?;
         
         Ok(TransactionData {
-            hash: tx_hash,
+            hash: *tx_hash,
             block_number,
             block_timestamp: header.timestamp,
             tx_index,
@@ -183,7 +183,7 @@ impl RethQueryProvider {
                 Some(tx_data.input.clone()) 
             },
             gas: Some(tx_data.gas_limit),
-            gas_price: Some(tx_data.gas_price),
+            gas_price: Some(tx_data.gas_price.try_into().unwrap_or(u128::MAX)),
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None
@@ -271,17 +271,15 @@ impl RethQueryProvider {
         // which has different field names than our internal CallFrame
         CallFrame {
             from: frame.from,
-            to: frame.to.unwrap_or(Address::ZERO),
+            to: frame.to,
             value: frame.value.unwrap_or(U256::ZERO),
             input: frame.input.clone(),
             output: frame.output.clone().unwrap_or_default(),
-            gas_used: frame.gas_used,
-            gas_limit: frame.gas,
+            gas_used: frame.gas_used.try_into().unwrap_or(u64::MAX),
+            gas_limit: frame.gas.try_into().unwrap_or(u64::MAX),
             depth: 0, // CallFrame from alloy doesn't have depth, we track it separately
             call_type: CallType::Call, // Default to Call, can be enhanced later
-            subcalls: frame.calls.as_ref().map(|calls| {
-                calls.iter().map(|c| self.convert_call_frame(c)).collect()
-            }).unwrap_or_default(),
+            subcalls: frame.calls.iter().map(|c| self.convert_call_frame(c)).collect(),
         }
     }
     

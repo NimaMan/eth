@@ -1,12 +1,14 @@
-/// Transaction lookup and receipt queries
+/// Fetch transaction data, receipts, and execution traces
 /// 
-/// This example shows how to:
-/// 1. Find transactions by hash
-/// 2. Get transaction receipts
-/// 3. Parse logs and events
-/// 4. Check transaction status
+/// This example demonstrates comprehensive transaction data retrieval:
+/// 1. Load transaction metadata by hash
+/// 2. Fetch transaction receipts with gas usage and status
+/// 3. Parse event logs (e.g., ERC20 Transfer events)
+/// 4. Build UnsignedTransaction for re-simulation
+/// 5. Get execution traces showing internal calls
+/// 6. Batch check transaction existence
 /// 
-/// Run with: cargo run --example lookup_and_receipts
+/// Run with: cargo run --example fetch_transaction_data_receipts_and_traces
 
 use reth_chain_query::{RethQueryProvider, Result};
 use alloy_primitives::{B256, Address, U256, utils::format_ether};
@@ -20,7 +22,7 @@ async fn main() -> Result<()> {
     
     // === Find Transaction by Hash ===
     println!("1. Transaction Lookup");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     // Example: A recent USDC transfer transaction
     // You'll need to replace this with a real transaction hash
@@ -47,7 +49,7 @@ async fn main() -> Result<()> {
         println!("  Value: {} ETH", format_ether(tx_data.value));
         println!("  Gas: {} @ {} gwei", 
             tx_data.gas_limit, 
-            tx_data.gas_price / 1_000_000_000u64
+            tx_data.gas_price / U256::from(1_000_000_000u64)
         );
         
         // Get receipt
@@ -105,23 +107,23 @@ async fn main() -> Result<()> {
     
     println!();
     
-    // === Build CallRequest from Transaction ===
+    // === Build UnsignedTransaction from Transaction ===
     println!("2. Rebuild Transaction for Simulation");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     if provider.transaction_exists(tx_hash).await? {
-        let call_request = provider.build_call_request(tx_hash).await?;
+        let unsigned_tx = provider.build_unsigned_tx_from_tx_hash(tx_hash).await?;
         
-        println!("CallRequest built from transaction:");
-        println!("  From: {:?}", call_request.from);
-        println!("  To: {:?}", call_request.to);
-        println!("  Value: {:?}", call_request.value);
+        println!("UnsignedTransaction built from transaction:");
+        println!("  From: {:?}", unsigned_tx.from);
+        println!("  To: {:?}", unsigned_tx.to);
+        println!("  Value: {:?}", unsigned_tx.value);
         println!("  Data length: {} bytes", 
-            call_request.data.as_ref().map(|d| d.len()).unwrap_or(0)
+            unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0)
         );
-        println!("  Gas: {:?}", call_request.gas);
+        println!("  Gas: {:?}", unsigned_tx.gas);
         
-        println!("\nThis CallRequest can be used to:");
+        println!("\nThis UnsignedTransaction can be used to:");
         println!("  - Re-simulate the transaction");
         println!("  - Test with different parameters");
         println!("  - Debug transaction behavior");
@@ -131,14 +133,14 @@ async fn main() -> Result<()> {
     
     // === Transaction with Traces ===
     println!("3. Transaction with Traces (if RPC configured)");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     // This requires RPC endpoint to be configured
     match provider.get_transaction_with_trace(tx_hash).await {
         Ok(tx_with_trace) => {
             println!("Transaction with trace data:");
             println!("  Main call type: {:?}", 
-                tx_with_trace.trace.as_ref().map(|t| &t.call_type)
+                tx_with_trace.trace.as_ref().map(|t| &t.call_frame.call_type)
             );
             
             if let Some(trace) = tx_with_trace.trace {
@@ -148,12 +150,11 @@ async fn main() -> Result<()> {
                 if subcall_count > 0 {
                     println!("\n  Internal calls:");
                     for (i, subcall) in trace.call_frame.subcalls.iter().enumerate() {
-                        println!("    Call #{}: {} -> {}", 
+                        println!("    Call #{}: 0x{} -> {}", 
                             i + 1,
-                            subcall.from.map(|a| format!("0x{}", a))
-                                .unwrap_or("N/A".to_string()),
+                            subcall.from,
                             subcall.to.map(|a| format!("0x{}", a))
-                                .unwrap_or("N/A".to_string())
+                                .unwrap_or("Contract Creation".to_string())
                         );
                     }
                 }
@@ -170,7 +171,7 @@ async fn main() -> Result<()> {
     
     // === Batch Transaction Queries ===
     println!("4. Batch Transaction Queries");
-    println!("-" .repeat(60));
+    println!("{}", "-".repeat(60));
     
     // Query multiple transactions at once
     let tx_hashes = vec![

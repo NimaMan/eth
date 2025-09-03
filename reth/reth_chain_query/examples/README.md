@@ -16,7 +16,7 @@ If you're new to reth_chain_query, start here:
 - **[accounts/portfolio.rs](accounts/portfolio.rs)** - Build complete portfolio views with multiple tokens
 
 ### 📝 Transactions
-- **[transactions/lookup_and_receipts.rs](transactions/lookup_and_receipts.rs)** - Find transactions, get receipts, parse logs
+- **[transactions/lookup_and_receipts.rs](transactions/lookup_and_receipts.rs)** - Find transactions, get receipts and logs
 - **[transactions/block_transactions.rs](transactions/block_transactions.rs)** - Get all transactions, receipts, events, traces, and gas metrics from blocks
 
 ### 🪙 Tokens
@@ -47,19 +47,6 @@ If you're new to reth_chain_query, start here:
    eyre = "0.6"
    ```
 
-## 🏃 Running Examples
-
-Run any example with:
-```bash
-# Run a specific example
-cargo run --example setup
-cargo run --example balances
-cargo run --example portfolio
-
-# Run with release mode for better performance
-cargo run --release --example benchmark
-```
-
 ## 🎯 Key Concepts
 
 ### Provider Initialization
@@ -84,46 +71,15 @@ tokio::spawn(async move {
 });
 ```
 
-### Error Handling
-```rust
-// Handle missing data gracefully
-let account = provider.get_account(address, None).await
-    .unwrap_or_else(|_| Account {
-        nonce: 0,
-        balance: U256::ZERO,
-        code_hash: None,
-    });
-```
 
 ## 🚀 Performance Tips
 
 1. **Use batch operations** - Query multiple items in parallel
 2. **Share the provider** - Use `Arc` to share across tasks
-3. **Cache frequently used data** - Store token metadata, etc.
-4. **Use specific block numbers** - Avoid repeated `latest` queries
-
-## 📊 Performance Comparison
-
-Reth Chain Query vs RPC:
-- **Balance query**: 0.1ms vs 50ms (500x faster)
-- **Token balance**: 0.5ms vs 100ms (200x faster)
-- **Block query**: 0.05ms vs 30ms (600x faster)
-- **Storage read**: 0.1ms vs 40ms (400x faster)
+3. **Use specific block numbers** - Avoid repeated `latest` queries
 
 ## 📖 Learn More
 
 - See the [main README](../README.md) for architecture details
 - Check [CLAUDE.md](../CLAUDE.md) for development notes
 - Review the [src/provider](../src/provider) module for implementation
-
-## 🤝 Contributing
-
-Found a bug or want to add an example? Contributions are welcome!
-
-1. Test your example thoroughly
-2. Add clear comments explaining the concepts
-3. Update this README with your new example
-
-## 📝 License
-
-MIT
