@@ -82,6 +82,13 @@ pub struct CallFrame {
     pub subcalls: Vec<CallFrame>,
 }
 
+/// Block with transactions (for get_block_with_txs compatibility)
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub transactions: Vec<reth_primitives::TransactionSignedEcRecovered>,
+}
+
 /// Type of call in trace
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallType {

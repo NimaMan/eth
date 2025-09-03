@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
     println!("Latest synced block: #{}", latest_block);
     
     // 2. Get block header information
-    let header = provider.get_block_header(latest_block).await?;
+    let header = provider.fetch_block_header_only(latest_block).await?;
     println!("Block timestamp: {}", header.timestamp);
     println!("Gas used: {} / {} ({:.1}%)", 
         header.gas_used, 

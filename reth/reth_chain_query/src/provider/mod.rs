@@ -19,7 +19,7 @@ mod batch_ops;
 mod caching;
 mod types;
 mod transactions;
-// mod block_transactions; // TEMPORARILY DISABLED - has compilation errors
+mod block_transactions;
 mod address_state;
 
 pub use contract_methods::*;
@@ -27,7 +27,7 @@ pub use batch_ops::*;
 pub use caching::*;
 pub use types::*;
 pub use transactions::*;
-// pub use block_transactions::*; // TEMPORARILY DISABLED
+pub use block_transactions::*;
 pub use address_state::*;
 
 /// Storage slot cache for tracking known slot positions

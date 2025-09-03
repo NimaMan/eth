@@ -19,13 +19,6 @@ use super::{RethQueryProvider, TransactionData, TransactionReceipt, TransactionW
 impl RethQueryProvider {
     // === Private Helper Methods ===
     
-    /// Get transaction indices for a block (first_tx_num and count)
-    fn get_block_tx_indices(&self, block_number: u64) -> Result<reth_db_models::StoredBlockBodyIndices> {
-        let provider = self.provider_factory.provider()?;
-        provider.block_body_indices(block_number)?
-            .ok_or_else(|| eyre::eyre!("No transaction indices for block {}", block_number))
-    }
-    
     /// Private helper to get raw transaction by number
     fn get_raw_tx_by_number(&self, tx_number: u64) -> Result<reth_primitives::TransactionSigned> {
         let provider = self.provider_factory.provider()?;
@@ -266,7 +259,7 @@ impl RethQueryProvider {
     }
     
     /// Convert tx_simulator CallFrame to our CallFrame type
-    fn convert_call_frame(&self, frame: &tx_simulator::types::CallFrame) -> CallFrame {
+    pub(super) fn convert_call_frame(&self, frame: &tx_simulator::types::CallFrame) -> CallFrame {
         // tx_simulator uses alloy_rpc_types_trace::geth::CallFrame
         // which has different field names than our internal CallFrame
         CallFrame {

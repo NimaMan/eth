@@ -9,6 +9,7 @@
 use alloy_primitives::{Address, B256, U256, Bytes};
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_consensus::Transaction;
+use reth_primitives::{TransactionSignedEcRecovered, Recovered};
 use eyre::Result;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use reth_provider::{BlockNumReader, HeaderProvider, BlockReader, ReceiptProvider, TransactionsProvider, BlockBodyIndicesProvider};
@@ -20,7 +21,7 @@ use super::{
     BlockTransactionOptions, Log,
     StateChanges, CallFrame, CallType
 };
-use super::types::{TransactionMetadata, BlockHeader};
+use super::types::{TransactionMetadata, BlockHeader, Block};
 
 impl RethQueryProvider {
     /// Get transaction indices for a block (first_tx_num and count)
@@ -31,7 +32,7 @@ impl RethQueryProvider {
     }
     
     /// Get block header from Headers table
-    pub async fn get_block_header(&self, block_number: u64) -> Result<BlockHeader> {
+    pub async fn fetch_block_header_only(&self, block_number: u64) -> Result<BlockHeader> {
         let provider = self.provider_factory.provider()?;
         
         let header = provider.header_by_number(block_number)?
@@ -50,7 +51,7 @@ impl RethQueryProvider {
     
     /// Get all transactions in a block with complete data
     /// This is the main entry point for block-level processing
-    pub async fn get_block_transactions(
+    pub async fn fetch_block_with_all_tx_data(
         &self,
         block_number: u64,
         options: BlockTransactionOptions,
@@ -58,13 +59,13 @@ impl RethQueryProvider {
         let start_time = Instant::now();
         
         // 1. Get block header from DB
-        let header = self.get_block_header(block_number).await?;
+        let header = self.fetch_block_header_only(block_number).await?;
         
         // 2. Get all transactions in block from DB
-        let transactions = self.get_block_transactions_from_db(block_number)?;
+        let transactions = self.fetch_block_tx_metadata_only_internal(block_number)?;
         
         // 3. Get all receipts from DB (includes logs)
-        let receipts = self.get_block_receipts_from_db(block_number)?;
+        let receipts = self.fetch_block_receipts_only_internal(block_number)?;
         
         // 4. Optional: Get traces via RPC if requested
         let traces = if options.include_traces {
@@ -80,8 +81,12 @@ impl RethQueryProvider {
             let tx_trace = traces.as_ref().and_then(|t| t.get(idx).cloned());
             
             // Calculate state changes if requested
-            let state_changes = if options.include_state_changes && tx_trace.is_some() {
-                Some(self.calculate_state_changes(&tx_trace.unwrap())?)
+            let state_changes = if options.include_state_changes {
+                if let Some(ref trace) = tx_trace {
+                    Some(self.calculate_state_changes(trace)?)
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -108,8 +113,40 @@ impl RethQueryProvider {
     /// Get only transaction metadata without receipts, logs, or traces
     /// Returns just the transaction parameters (from, to, value, input, gas, nonce)
     /// Use this when you don't need execution results, events, or traces
-    pub async fn get_block_tx_metadata(&self, block_number: u64) -> Result<Vec<TransactionMetadata>> {
-        self.get_block_transactions_from_db(block_number)
+    pub async fn fetch_block_tx_metadata_only(&self, block_number: u64) -> Result<Vec<TransactionMetadata>> {
+        self.fetch_block_tx_metadata_only_internal(block_number)
+    }
+    
+    /// Get only transaction hashes for a block using efficient index lookup
+    /// This is the fastest way to get all transaction hashes in a block
+    pub async fn fetch_block_tx_hashes_using_indices(&self, block_number: u64) -> Result<Vec<B256>> {
+        let provider = self.provider_factory.provider()?;
+        
+        // Get block indices to find transaction range
+        let indices = self.get_block_tx_indices(block_number)?;
+        
+        // Batch fetch all transactions in range just for hashes
+        let tx_range = indices.first_tx_num..indices.first_tx_num + indices.tx_count;
+        let txs = provider.transactions_by_tx_range(tx_range)?;
+        
+        // Extract just the hashes
+        Ok(txs.iter().map(|tx| *tx.hash()).collect())
+    }
+    
+    /// Get only receipts for all transactions in a block
+    /// Public wrapper for the internal method
+    pub async fn fetch_block_receipts_only(&self, block_number: u64) -> Result<Vec<TransactionReceipt>> {
+        self.fetch_block_receipts_only_internal(block_number)
+    }
+    
+    /// Get both transaction metadata and receipts (common use case)
+    /// Returns paired metadata and receipts for each transaction
+    pub async fn fetch_block_tx_metadata_and_receipts(&self, block_number: u64) -> Result<Vec<(TransactionMetadata, TransactionReceipt)>> {
+        let metadata = self.fetch_block_tx_metadata_only_internal(block_number)?;
+        let receipts = self.fetch_block_receipts_only_internal(block_number)?;
+        
+        // Zip them together
+        Ok(metadata.into_iter().zip(receipts).collect())
     }
     
     /// Stream block transactions for large blocks
@@ -143,7 +180,7 @@ impl RethQueryProvider {
             include_state_changes: true,
         };
         
-        let block_txs = self.get_block_transactions(block_number, options).await?;
+        let block_txs = self.fetch_block_with_all_tx_data(block_number, options).await?;
         
         Ok(block_txs.transactions
             .into_iter()
@@ -152,13 +189,12 @@ impl RethQueryProvider {
             .collect())
     }
     
-    /// FROM DATABASE - Get all transactions in a block
-    fn get_block_transactions_from_db(&self, block_number: u64) -> Result<Vec<TransactionMetadata>> {
+    /// FROM DATABASE - Get all transactions in a block (internal method)
+    fn fetch_block_tx_metadata_only_internal(&self, block_number: u64) -> Result<Vec<TransactionMetadata>> {
         let provider = self.provider_factory.provider()?;
         
         // Get block body indices to find transaction range
-        let indices = self.get_block_tx_indices(block_number)?
-            .ok_or_else(|| eyre::eyre!("No body indices for block {}", block_number))?;
+        let indices = self.get_block_tx_indices(block_number)?;
         
         // Get block header for timestamp
         let header = provider.header_by_number(block_number)?
@@ -177,7 +213,7 @@ impl RethQueryProvider {
             let tx_num = indices.first_tx_num + idx as u64;
             
             transactions.push(TransactionMetadata {
-                hash: tx.hash(),
+                hash: *tx.hash(),
                 block_number,
                 block_timestamp: header.timestamp,
                 tx_index: idx as u64,
@@ -196,8 +232,8 @@ impl RethQueryProvider {
         Ok(transactions)
     }
     
-    /// FROM DATABASE - Get all receipts for block
-    fn get_block_receipts_from_db(&self, block_number: u64) -> Result<Vec<TransactionReceipt>> {
+    /// FROM DATABASE - Get all receipts for block (internal method)
+    fn fetch_block_receipts_only_internal(&self, block_number: u64) -> Result<Vec<TransactionReceipt>> {
         let provider = self.provider_factory.provider()?;
         
         // Get receipts by block
@@ -205,8 +241,7 @@ impl RethQueryProvider {
             .ok_or_else(|| eyre::eyre!("No receipts for block {}", block_number))?;
         
         // Get block header and indices for transaction info
-        let indices = self.get_block_tx_indices(block_number)?
-            .ok_or_else(|| eyre::eyre!("No body indices for block"))?;
+        let indices = self.get_block_tx_indices(block_number)?;
         
         let header = provider.header_by_number(block_number)?
             .ok_or_else(|| eyre::eyre!("No header for block"))?;
@@ -231,7 +266,7 @@ impl RethQueryProvider {
             }).collect();
             
             tx_receipts.push(TransactionReceipt {
-                tx_hash: tx.hash(),
+                tx_hash: *tx.hash(),
                 status: receipt.success,
                 gas_used: receipt.cumulative_gas_used,
                 logs,
@@ -272,7 +307,7 @@ impl RethQueryProvider {
     
     /// LOCAL SIMULATION - Simulate all transactions in block
     async fn get_block_traces_local(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
-        let transactions = self.get_block_transactions_from_db(block_number)?;
+        let transactions = self.fetch_block_tx_metadata_only_internal(block_number)?;
         let mut traces = Vec::new();
         
         for tx in transactions {
@@ -281,7 +316,7 @@ impl RethQueryProvider {
                 from: Some(tx.from),
                 to: tx.to,
                 value: Some(tx.value),
-                data: if tx.input.is_empty() { None } else { Some(tx.input.into()) },
+                data: if tx.input.is_empty() { None } else { Some(tx.input.clone()) },
                 gas: Some(tx.gas_limit),
                 ..Default::default()
             };
@@ -350,7 +385,7 @@ impl RethQueryProvider {
         let blocks = (start_block..=end_block).collect::<Vec<_>>();
         
         let results = stream::iter(blocks)
-            .map(|block| self.get_block_transactions(block, options.clone()))
+            .map(|block| self.fetch_block_with_all_tx_data(block, options.clone()))
             .buffer_unordered(4) // Process 4 blocks in parallel
             .try_collect()
             .await?;
@@ -361,16 +396,64 @@ impl RethQueryProvider {
     /// Get block transaction count without loading all data
     pub async fn get_block_transaction_count(&self, block_number: u64) -> Result<usize> {
         let provider = self.provider_factory.provider()?;
-        let indices = self.get_block_tx_indices(block_number)?
-            .ok_or_else(|| eyre::eyre!("No body indices for block {}", block_number))?;
+        let indices = self.get_block_tx_indices(block_number)?;
         Ok(indices.tx_count as usize)
     }
     
     /// Check if block needs trace data (has contract interactions)
     pub async fn block_needs_traces(&self, block_number: u64) -> Result<bool> {
-        let transactions = self.get_block_tx_metadata(block_number).await?;
+        let transactions = self.fetch_block_tx_metadata_only(block_number).await?;
         
         // Check if any transaction has input data (contract interaction)
         Ok(transactions.iter().any(|tx| !tx.input.is_empty() && tx.to.is_some()))
+    }
+    
+    // === CONVENIENCE METHODS FOR EXAMPLE COMPATIBILITY ===
+    
+    /// Get block with transactions (compatibility method for examples)
+    /// Returns block header and raw transaction list
+    pub async fn get_block_with_txs(&self, block_number: u64) -> Result<Block> {
+        let provider = self.provider_factory.provider()?;
+        
+        // Get header
+        let header = self.fetch_block_header_only(block_number).await?;
+        
+        // Get block indices to find transaction range
+        let indices = self.get_block_tx_indices(block_number)?;
+        
+        // Batch fetch all transactions
+        let tx_range = indices.first_tx_num..indices.first_tx_num + indices.tx_count;
+        let txs = provider.transactions_by_tx_range(tx_range)?;
+        
+        // Convert to TransactionSignedEcRecovered (with recovered senders)
+        let transactions: Result<Vec<_>> = txs.into_iter().map(|tx| {
+            let sender = tx.recover_signer()
+                .map_err(|_| eyre::eyre!("Failed to recover signer"))?;
+            Ok(Recovered::new_unchecked(tx, sender))
+        }).collect();
+        
+        Ok(Block {
+            header,
+            transactions: transactions?,
+        })
+    }
+    
+    /// Get all block transactions with default options (compatibility wrapper)
+    pub async fn get_block_transactions(&self, block_number: u64) -> Result<BlockTransactions> {
+        self.fetch_block_with_all_tx_data(block_number, BlockTransactionOptions::default()).await
+    }
+    
+    /// Get block receipts (compatibility alias)
+    pub async fn get_block_receipts(&self, block_number: u64) -> Result<Vec<TransactionReceipt>> {
+        self.fetch_block_receipts_only(block_number).await
+    }
+    
+    /// Get block transactions with options (compatibility alias)
+    pub async fn get_block_transactions_with_options(
+        &self,
+        block_number: u64,
+        options: BlockTransactionOptions,
+    ) -> Result<BlockTransactions> {
+        self.fetch_block_with_all_tx_data(block_number, options).await
     }
 }

@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     
     // === ETH Balances ===
     println!("1. ETH Balances");
-    println!("-" .repeat(40));
+    println!("{}", "-".repeat(40));
     
     // Some interesting addresses
     let addresses = vec![
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     
     // === Token Balances ===
     println!("2. Token Balances");
-    println!("-" .repeat(40));
+    println!("{}", "-".repeat(40));
     
     // Check Vitalik's token balances
     let vitalik = Address::from_str("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045")?;
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
     
     // === Historical Balances ===
     println!("3. Historical Balance Query");
-    println!("-" .repeat(40));
+    println!("{}", "-".repeat(40));
     
     let address = Address::from_str("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045")?;
     
@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
     
     // === Check Contract vs EOA ===
     println!("4. Account Types");
-    println!("-" .repeat(40));
+    println!("{}", "-".repeat(40));
     
     let test_addresses = vec![
         ("Vitalik (EOA)", "d8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
@@ -137,7 +137,7 @@ async fn main() -> Result<()> {
     
     // === Batch Balance Check ===
     println!("5. Batch Balance Query");
-    println!("-" .repeat(40));
+    println!("{}", "-".repeat(40));
     
     // Get top exchange addresses
     let exchanges = vec![

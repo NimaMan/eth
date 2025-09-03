@@ -51,18 +51,11 @@ alloy-rpc-types-trace = "1.0"
 name = "setup"
 path = "examples/quickstart/setup.rs"
 
-[[example]]
-name = "common_patterns"
-path = "examples/quickstart/common_patterns.rs"
 
 # Address State examples
 [[example]]
 name = "balances"
 path = "examples/address_state/balances.rs"
-
-[[example]]
-name = "portfolio"
-path = "examples/address_state/portfolio.rs"
 
 [[example]]
 name = "batch_operations"
@@ -78,40 +71,37 @@ path = "examples/address_state/historical_analysis.rs"
 
 # Transaction examples
 [[example]]
-name = "lookup_and_receipts"
-path = "examples/transactions/lookup_and_receipts.rs"
+name = "fetch_block_tx_and_receipts_simple"
+path = "examples/transactions/fetch_block_tx_and_receipts_simple.rs"
 
 [[example]]
-name = "block_transactions"
-path = "examples/transactions/block_transactions.rs"
+name = "test_block_fetching"
+path = "examples/transactions/test_block_fetching.rs"
+
+[[example]]
+name = "fetch_transaction_data_receipts_and_traces"
+path = "examples/transactions/fetch_transaction_data_receipts_and_traces.rs"
 
 [[example]]
 name = "verify_receipts_rpc_equivalence"
 path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
 
-[[example]]
-name = "block_trace_integration"
-path = "examples/transactions/block_trace_integration.rs"
-
 # Token examples
 [[example]]
-name = "token_info"
-path = "examples/tokens/token_info.rs"
+name = "token_metadata_basic"
+path = "examples/tokens/token_metadata_basic.rs"
 
-# Storage examples
 [[example]]
-name = "read_storage"
-path = "examples/storage/read_storage.rs"
+name = "stablecoin_total_supply"
+path = "examples/entities/stablecoin_total_supply.rs"
 
-# DeFi examples
 [[example]]
-name = "dex_pools"
-path = "examples/defi/dex_pools.rs"
+name = "token_supply_historical"
+path = "examples/tokens/token_supply_historical.rs"
 
-# Entity monitoring examples
 [[example]]
-name = "cex_monitoring"
-path = "examples/entities/cex_monitoring.rs"
+name = "token_comprehensive_info"
+path = "examples/tokens/token_comprehensive_info.rs"
 
 [dev-dependencies]
 tokio-test = "0.4"
