@@ -13,29 +13,36 @@
 /// 
 /// All queries bypass RPC and read directly from Reth's MDBX database.
 
-pub mod account;
-pub mod token;
-pub mod storage;
-pub mod block;
-pub mod query_engine;
-pub mod postgres_db;
+// Core modules
+pub mod provider;
+pub mod reth_index;
 pub mod entities;
+
+// Legacy modules (to be refactored)
+pub mod query_engine;
+
+// Utility modules
+pub mod postgres_db;
 pub mod time_utils;
 pub mod common_addresses;
 
-// Re-export main types
-pub use query_engine::ChainQuery;
-pub use account::{AccountInfo, AccountQuery};
-pub use token::{TokenQuery, ERC20Info};
-pub use storage::StorageQuery;
-pub use block::{BlockInfo, BlockQuery};
-
-// Re-export entity analysis
-pub use entities::{
-    stablecoins::{StablecoinInfo, STABLECOINS, StablecoinMarketAnalyzer, StablecoinSupplyTracker},
-    cex::{CexAddress, CEX_ADDRESSES, CexBalanceTracker, CexFlowAnalyzer},
-    etfs::{EtfAddress, ETF_ADDRESSES, EtfHoldingsTracker, EtfFlowAnalyzer},
+// Re-export new provider architecture
+pub use provider::{
+    RethQueryProvider, Account, Portfolio, TokenMetadata, CompleteBalances, BalanceChanges,
+    BlockHeader, TransactionData, TransactionReceipt, // FullTransactionData, BlockTransactions, // TEMPORARILY DISABLED
+    // Types from address_state are exported via provider::*
 };
+
+// Re-export entity analysis types
+pub use entities::{
+    EntityType,
+    StablecoinMarketData, StablecoinMarketAnalysis, MarketByUnitAnalysis, UnitMarketData,
+    ExchangeBalance, CexBalanceSummary,
+    ProviderHoldings, EtfHoldingsSummary,
+};
+
+// Re-export legacy types (to be deprecated)
+pub use query_engine::ChainQuery;
 
 // Re-export time utilities
 pub use time_utils::{
@@ -45,7 +52,13 @@ pub use time_utils::{
 };
 
 // Re-export common addresses
-pub use common_addresses::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME};
+pub use common_addresses::{
+    DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME, FEE_RECIPIENTS,
+    // Address types
+    stablecoins::{StablecoinInfo, STABLECOINS},
+    cex::{CexAddress, CEX_ADDRESSES},
+    etf::{EtfAddress, ETF_ADDRESSES},
+};
 
 // Re-export commonly used types from dependencies
 pub use alloy_primitives::{Address, U256, B256};

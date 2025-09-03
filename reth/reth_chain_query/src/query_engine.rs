@@ -8,11 +8,8 @@ use tx_simulator::TxSimulator;
 use std::sync::Arc;
 
 use super::{
-    account::AccountQuery,
-    token::TokenQuery,
-    storage::StorageQuery,
-    block::BlockQuery,
     time_utils::BlockTimeConverter,
+    provider::RethQueryProvider,
 };
 
 /// ChainQuery provides direct database access for blockchain queries
@@ -23,17 +20,8 @@ pub struct ChainQuery {
     /// The underlying simulator that provides database access
     simulator: Arc<TxSimulator>,
     
-    /// Account query module
-    pub account: AccountQuery,
-    
-    /// Token query module
-    pub token: TokenQuery,
-    
-    /// Storage query module
-    pub storage: StorageQuery,
-    
-    /// Block query module
-    pub block: BlockQuery,
+    /// Provider for direct access
+    provider: Arc<RethQueryProvider>,
     
     /// Block-time converter for timestamp operations
     pub time_converter: Arc<BlockTimeConverter>,
@@ -47,29 +35,25 @@ impl ChainQuery {
     pub fn new(reth_datadir: &str) -> Result<Self> {
         let simulator = Arc::new(TxSimulator::new(reth_datadir)?);
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
+        let provider = Arc::new(RethQueryProvider::with_simulator(simulator.clone())?);
         
         Ok(Self {
-            account: AccountQuery::new(simulator.clone()),
-            token: TokenQuery::new(simulator.clone()),
-            storage: StorageQuery::new(simulator.clone()),
-            block: BlockQuery::new(simulator.clone()),
+            provider,
             time_converter,
             simulator,
         })
     }
     
     /// Create ChainQuery from existing simulator
-    pub fn from_simulator(simulator: Arc<TxSimulator>) -> Self {
+    pub fn from_simulator(simulator: Arc<TxSimulator>) -> Result<Self> {
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
+        let provider = Arc::new(RethQueryProvider::with_simulator(simulator.clone())?);
         
-        Self {
-            account: AccountQuery::new(simulator.clone()),
-            token: TokenQuery::new(simulator.clone()),
-            storage: StorageQuery::new(simulator.clone()),
-            block: BlockQuery::new(simulator.clone()),
+        Ok(Self {
+            provider,
             time_converter,
             simulator,
-        }
+        })
     }
     
     /// Get the latest block number (uses best_block_number from database)
@@ -94,31 +78,31 @@ impl ChainQuery {
     
     /// Get ETH balance for an address
     pub async fn get_balance(&self, address: Address, block_number: Option<u64>) -> Result<U256> {
-        self.account.get_balance(address, block_number).await
+        self.provider.get_eth_balance(address, block_number).await
     }
     
     /// Get nonce for an address
     pub async fn get_nonce(&self, address: Address, block_number: Option<u64>) -> Result<u64> {
-        self.account.get_nonce(address, block_number).await
+        self.provider.get_transaction_count_at_block(address, block_number).await
     }
     
     /// Check if address has code (is a contract)
     pub async fn has_code(&self, address: Address, block_number: Option<u64>) -> Result<bool> {
-        self.account.has_code(address, block_number).await
+        self.provider.has_code(address, block_number).await
     }
     
     /// Get ERC20 token balance
     pub async fn get_token_balance(&self, token: Address, holder: Address, block_number: Option<u64>) -> Result<U256> {
-        self.token.get_erc20_balance(token, holder, block_number).await
+        self.provider.get_token_balance(token, holder, block_number).await
     }
     
     /// Get ERC20 total supply
     pub async fn get_token_total_supply(&self, token: Address, block_number: Option<u64>) -> Result<U256> {
-        self.token.get_erc20_total_supply(token, block_number).await
+        self.provider.get_token_total_supply(token, block_number).await
     }
     
     /// Get storage value at specific slot
     pub async fn get_storage_at(&self, address: Address, slot: B256, block_number: Option<u64>) -> Result<U256> {
-        self.storage.get_storage_at(address, slot, block_number).await
+        self.provider.get_storage(address, slot, block_number).await
     }
 }

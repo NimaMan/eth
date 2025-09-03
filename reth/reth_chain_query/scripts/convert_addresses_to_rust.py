@@ -24,6 +24,7 @@ from eth_data.chain_utils.common_addresses import (
 )
 from eth_data.chain_utils.common_addresses.all_cex_addresses import CEX_ADDRESSES_BY_NAME
 from eth_data.chain_utils.common_addresses.all_etf_addresses import ETF_ADDRESSES_BY_NAME
+from eth_data.chain_utils.common_addresses.validators import fee_recipients
 
 
 def format_address(addr: str) -> str:
@@ -350,6 +351,117 @@ pub fn provider_stats() -> Vec<(&'static str, usize)> {{
     return rust_code
 
 
+def generate_validators_rust():
+    """Generate Rust code for validator/builder fee recipient addresses."""
+    rust_code = '''//! Validator and MEV builder fee recipient addresses
+//! 
+//! This file is auto-generated from Python address files.
+//! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
+
+use alloy_primitives::{address, Address};
+use std::collections::{HashMap, HashSet};
+use once_cell::sync::Lazy;
+
+/// Validator/Builder fee recipient entry
+#[derive(Debug, Clone)]
+pub struct FeeRecipient {
+    pub address: Address,
+    pub name: &'static str,
+}
+
+/// All fee recipient addresses (validators and MEV builders)
+pub const FEE_RECIPIENT_LIST: &[FeeRecipient] = &[
+'''
+    
+    # Generate fee recipient entries
+    entries = []
+    for addr, name in sorted(fee_recipients.items()):
+        # Escape single quotes in names
+        safe_name = name.replace("'", "\\'")
+        entry = f'''    FeeRecipient {{
+        address: address!("{format_address(addr)}"),
+        name: "{safe_name}",
+    }}'''
+        entries.append(entry)
+    
+    rust_code += ',\n'.join(entries)
+    rust_code += f'''
+];
+
+/// Total number of fee recipients
+pub const FEE_RECIPIENT_COUNT: usize = {len(fee_recipients)};
+
+/// Lazy static HashSet for quick lookups
+pub static FEE_RECIPIENTS: Lazy<HashSet<Address>> = Lazy::new(|| {{
+    FEE_RECIPIENT_LIST.iter().map(|entry| entry.address).collect()
+}});
+
+/// Lazy static HashMap for address to name mapping
+pub static FEE_RECIPIENT_BY_ADDRESS: Lazy<HashMap<Address, &'static str>> = Lazy::new(|| {{
+    FEE_RECIPIENT_LIST
+        .iter()
+        .map(|entry| (entry.address, entry.name))
+        .collect()
+}});
+
+/// Check if an address is a known fee recipient (validator/builder)
+pub fn is_fee_recipient(address: Address) -> bool {{
+    FEE_RECIPIENTS.contains(&address)
+}}
+
+/// Get fee recipient name by address
+pub fn get_fee_recipient_name(address: Address) -> Option<&'static str> {{
+    FEE_RECIPIENT_BY_ADDRESS.get(&address).copied()
+}}
+
+/// Check if this is a bribe payment (ETH transfer to fee recipient)
+pub fn is_bribe(to_address: Address) -> bool {{
+    is_fee_recipient(to_address)
+}}
+
+/// Get builder/validator statistics
+pub fn fee_recipient_stats() -> Vec<(&'static str, usize)> {{
+    let mut builders = 0usize;
+    let mut validators = 0usize;
+    let mut flashbots = 0usize;
+    let mut titan = 0usize;
+    let mut rsync = 0usize;
+    let mut bloxroute = 0usize;
+    
+    for entry in FEE_RECIPIENT_LIST {{
+        let name_lower = entry.name.to_lowercase();
+        if name_lower.contains("flashbots") {{
+            flashbots += 1;
+        }} else if name_lower.contains("titan") {{
+            titan += 1;
+        }} else if name_lower.contains("rsync") {{
+            rsync += 1;
+        }} else if name_lower.contains("bloxroute") {{
+            bloxroute += 1;
+        }}
+        
+        if name_lower.contains("builder") {{
+            builders += 1;
+        }} else {{
+            validators += 1;
+        }}
+    }}
+    
+    vec![
+        ("Total Fee Recipients", FEE_RECIPIENT_COUNT),
+        ("Builders", builders),
+        ("Validators", validators),
+        ("Flashbots", flashbots),
+        ("Titan", titan),
+        ("bloXroute", bloxroute),
+        ("rsync", rsync),
+    ]
+}}
+'''
+    
+    return rust_code
+
+
 def generate_denom_tokens_rust():
     """Generate Rust code for DENOM_ADDRESSES (major tokens and currencies)."""
     rust_code = '''//! DENOM token addresses (major tokens and currencies)
@@ -471,6 +583,13 @@ def main():
     print(f"Generated {etf_file}")
     print(f"  - {len(ETF_ADDRESSES_BY_NAME)} ETF addresses")
     
+    # Generate validators/fee recipients
+    validators_code = generate_validators_rust()
+    validators_file = common_dir / "validators.rs"
+    validators_file.write_text(validators_code)
+    print(f"Generated {validators_file}")
+    print(f"  - {len(fee_recipients)} fee recipients (validators and MEV builders)")
+    
     # Create mod.rs for common_addresses
     mod_code = '''//! Common addresses module
 //! 
@@ -481,13 +600,15 @@ pub mod denom_tokens;
 pub mod stablecoins;
 pub mod cex;
 pub mod etf;
+pub mod validators;
 
 // Re-export commonly used items
 pub use denom_tokens::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME};
 pub use denom_tokens::{get_token_symbol, get_token_decimals, is_denom_token, get_address_by_name};
 pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
-pub use cex::{CEX_ADDRESSES, CEX_ADDRESSES_SET, ADDRESSES_BY_EXCHANGE};
-pub use etf::{ETF_ADDRESSES, ETF_ADDRESSES_SET, ADDRESSES_BY_PROVIDER};
+pub use cex::{CEX_ADDRESSES, CEX_ADDRESS_SET, ADDRESSES_BY_EXCHANGE};
+pub use etf::{ETF_ADDRESSES, ETF_ADDRESS_SET, ADDRESSES_BY_PROVIDER};
+pub use validators::{FEE_RECIPIENTS, FEE_RECIPIENT_LIST, is_fee_recipient, is_bribe};
 '''
     
     mod_file = common_dir / "mod.rs"

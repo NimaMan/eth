@@ -1,30 +1,49 @@
-/// Entity analysis modules for major blockchain actors
+/// Entity tracking and analysis module
 /// 
-/// This module provides comprehensive analysis for major entities on the blockchain:
-/// - Stablecoins: Market share, supply tracking, whale analysis
-/// - CEX: Balance tracking, flow analysis for centralized exchanges
-/// - ETFs: Holdings tracking, inflow/outflow for ETF providers
-/// 
-/// All address data is imported from the Python eth_data module to maintain
-/// consistency across the ecosystem.
+/// Provides comprehensive analysis for major blockchain entities:
+/// - Stablecoins: Market share, supply tracking, concentration metrics
+/// - CEX (Centralized Exchanges): Balance tracking, flow analysis
+/// - ETF (Exchange-Traded Funds): Holdings tracking, provider analysis
 
-pub mod common;
+pub mod types;
 pub mod stablecoins;
 pub mod cex;
-pub mod etfs;
+pub mod etf;
 
-// Re-export main types for convenience
+// Re-export common types
+pub use types::{EntityType, format_token_amount};
+
+// Re-export stablecoin types
 pub use stablecoins::{
-    StablecoinInfo, STABLECOINS, 
-    is_stablecoin, get_stablecoin_by_address, get_stablecoin_by_symbol
+    StablecoinMarketData, StablecoinMarketAnalysis, 
+    MarketByUnitAnalysis, UnitMarketData,
 };
 
-pub use cex::{
-    CexAddress, CEX_ADDRESSES, CEX_ADDRESS_COUNT,
-    is_cex_address, get_cex_by_address, get_exchange_addresses
+// Re-export CEX types
+pub use cex::{ExchangeBalance, CexBalanceSummary};
+
+// Re-export ETF types
+pub use etf::{ProviderHoldings, EtfHoldingsSummary};
+
+use alloy_primitives::Address;
+use crate::provider::RethQueryProvider;
+use crate::common_addresses::{
+    stablecoins::get_stablecoin_by_address,
+    cex::get_cex_by_address,
+    etf::get_etf_by_address,
 };
 
-pub use etfs::{
-    EtfAddress, ETF_ADDRESSES, ETF_ADDRESS_COUNT,
-    is_etf_address, get_etf_by_address, get_provider_addresses
-};
+impl RethQueryProvider {
+    /// Identify entity type for an address
+    pub fn identify_entity_type(&self, address: Address) -> EntityType {
+        if get_stablecoin_by_address(address).is_some() {
+            EntityType::Stablecoin
+        } else if get_cex_by_address(address).is_some() {
+            EntityType::CEX
+        } else if get_etf_by_address(address).is_some() {
+            EntityType::ETF
+        } else {
+            EntityType::Unknown
+        }
+    }
+}

@@ -1,197 +1,180 @@
-/// CEX Monitoring Example
+/// Monitor centralized exchange holdings
 /// 
-/// Demonstrates how to use the entities module for centralized exchange monitoring.
-/// This example showcases:
-/// - ETH balance tracking across all exchanges
-/// - Top exchanges by holdings
-/// - Flow analysis for transfers
-/// - Large deposit/withdrawal detection
+/// This example shows how to:
+/// 1. Track CEX wallet balances
+/// 2. Monitor exchange holdings
+/// 3. Analyze CEX dominance
+/// 4. Track fund movements
+/// 
+/// Run with: cargo run --example cex_monitoring
 
-use reth_chain_query::{ChainQuery, Result, Address};
-use reth_chain_query::entities::cex::{
-    CexBalanceTracker, CexFlowAnalyzer,
-    CEX_ADDRESSES, CEX_ADDRESS_COUNT, exchange_stats,
-    is_cex_address, get_cex_by_address,
-};
-use reth_chain_query::entities::common::format_token_amount;
-use alloy_primitives::U256;
-use std::sync::Arc;
+use reth_chain_query::{RethQueryProvider, Result};
+use alloy_primitives::{Address, U256, utils::format_ether};
 use std::str::FromStr;
+
+// Known CEX addresses (simplified list)
+const CEX_WALLETS: &[(&str, &str)] = &[
+    ("Binance Hot", "F977814e90dA44bFA03b6295A0616a897441aceC"),
+    ("Binance Cold", "28C6c06298d514Db089934071355E5743bf21d60"),
+    ("Coinbase", "A9D1e08C7793af67e9d92fe308d5697FB81d3E43"),
+    ("Kraken", "53d284357ec70cE289D6D64134DfAc8E511c8a3D"),
+    ("Bitfinex", "C61b9BB3A7a0767E0C829db25bAda34Fc69D22dc"),
+    ("OKX", "06959153B974D5BdD3506d77303d7305462b5f96"),
+    ("Crypto.com", "6262998Ced004146417bEF0F61C905FECBF223fa"),
+    ("KuCoin", "D6216fC19DB775Df9774a6E33526131dA7D19a2c"),
+];
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("🏦 CEX Monitoring using Entities Module");
-    println!("{}", "=".repeat(70));
+    println!("=== CEX Holdings Monitor ===\n");
     
-    // Initialize ChainQuery
-    let reth_datadir = "/home/nima/.local/share/reth/mainnet";
-    let chain_query = Arc::new(ChainQuery::new(reth_datadir)?);
+    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
     
-    // Create analyzers
-    let balance_tracker = CexBalanceTracker::new(chain_query.clone());
-    let flow_analyzer = CexFlowAnalyzer::new(chain_query.clone());
+    // === Current CEX Holdings ===
+    println!("1. Current Exchange Holdings");
+    println!("-" .repeat(60));
     
-    // 1. Overall CEX Statistics
-    println!("\n📊 CEX STATISTICS");
-    println!("{}", "-".repeat(70));
-    println!("Total CEX Addresses Tracked: {}", CEX_ADDRESS_COUNT);
-    println!("\nExchanges by Address Count:");
+    let mut total_cex_eth = U256::ZERO;
+    let mut exchange_balances = Vec::new();
     
-    for (exchange, count) in exchange_stats().iter().take(10) {
-        println!("  {}: {} addresses", exchange, count);
-    }
-    
-    // 2. ETH Balance Analysis
-    println!("\n💰 CEX ETH BALANCES");
-    println!("{}", "-".repeat(70));
-    
-    let balance_summary = balance_tracker.get_all_cex_eth_balances(None).await?;
-    
-    println!("Block: {}", balance_summary.block_number);
-    println!("Total ETH in CEXs: {:.2} ETH", balance_summary.total_cex_eth_formatted);
-    println!("Total Value: ${:.2}M (assuming $2000/ETH)", 
-        balance_summary.total_cex_eth_formatted * 2000.0 / 1_000_000.0);
-    
-    println!("\nTop 10 Exchanges by ETH Holdings:");
-    for (i, (exchange, eth_amount)) in balance_summary.exchange_rankings.iter().take(10).enumerate() {
-        println!("{}. {} - {:.2} ETH (${:.2}M)", 
-            i + 1,
-            exchange,
-            eth_amount,
-            eth_amount * 2000.0 / 1_000_000.0
+    for (name, addr_str) in CEX_WALLETS {
+        let address = Address::from_str(addr_str)?;
+        let account = provider.get_account(address, None).await?;
+        
+        total_cex_eth = total_cex_eth + account.balance;
+        exchange_balances.push((name, account.balance));
+        
+        println!("{:20} {} ETH", 
+            format!("{}:", name),
+            format_ether(account.balance)
         );
     }
     
-    // 3. Specific Exchange Deep Dive
-    println!("\n🔍 BINANCE DEEP DIVE");
-    println!("{}", "-".repeat(70));
+    println!("{:20} {} ETH", 
+        "TOTAL:",
+        format_ether(total_cex_eth)
+    );
     
-    if let Some(binance_data) = balance_summary.exchanges.iter()
-        .find(|e| e.name == "Binance") 
-    {
-        println!("Binance Statistics:");
-        println!("  Address Count: {}", binance_data.address_count);
-        println!("  Total ETH: {:.2}", binance_data.total_eth_formatted);
-        println!("  Average per Address: {:.2} ETH", 
-            binance_data.total_eth_formatted / binance_data.address_count as f64);
-        
-        // Check USDC balance for Binance
-        let usdc_address = Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")?;
-        let usdc_balance = balance_tracker
-            .get_exchange_token_balances("Binance", usdc_address, None)
-            .await?;
-        let usdc_formatted = format_token_amount(usdc_balance, 6);
-        println!("  USDC Balance: ${:.2}M", usdc_formatted / 1_000_000.0);
+    // Calculate percentage of ETH supply
+    // ETH total supply is approximately 120M ETH
+    let eth_supply = U256::from(120_000_000u64) * U256::from(10u64.pow(18));
+    let cex_percentage = (total_cex_eth * U256::from(10000) / eth_supply).to::<u64>() as f64 / 100.0;
+    
+    println!("\nCEX Control: {:.2}% of ETH supply", cex_percentage);
+    
+    println!();
+    
+    // === Exchange Rankings ===
+    println!("2. Exchange Rankings by ETH Holdings");
+    println!("-" .repeat(60));
+    
+    // Sort by balance
+    exchange_balances.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    for (i, (name, balance)) in exchange_balances.iter().enumerate() {
+        let percentage = (*balance * U256::from(10000) / total_cex_eth).to::<u64>() as f64 / 100.0;
+        println!("#{:2}. {:20} {} ETH ({:.1}%)", 
+            i + 1,
+            name,
+            format_ether(*balance),
+            percentage
+        );
     }
     
-    // 4. Flow Analysis Examples
-    println!("\n🔄 FLOW ANALYSIS EXAMPLES");
-    println!("{}", "-".repeat(70));
+    println!();
     
-    // Example transfers to analyze
-    let test_transfers = vec![
-        // Binance to unknown
-        ("0x28C6c06298d514Db089934071355E5743bf21d60", "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"),
-        // Unknown to Coinbase
-        ("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb", "0x71660c4005BA85c37ccec55d0C4493E66Fe775d3"),
-        // Binance to Binance (internal)
-        ("0x28C6c06298d514Db089934071355E5743bf21d60", "0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549"),
+    // === Historical Comparison ===
+    println!("3. Historical CEX Holdings");
+    println!("-" .repeat(60));
+    
+    // Compare holdings at different points
+    let checkpoints = vec![
+        (15_537_393, "The Merge"),
+        (17_000_000, "Post-Shanghai"),
+        (None, "Current"),
     ];
     
-    for (from_str, to_str) in test_transfers {
-        let from = Address::from_str(from_str)?;
-        let to = Address::from_str(to_str)?;
+    for (block, label) in checkpoints {
+        let mut checkpoint_total = U256::ZERO;
         
-        if let Some((exchange, direction)) = flow_analyzer.analyze_transfer_flow(from, to) {
-            let direction_str = match direction {
-                reth_chain_query::entities::common::FlowDirection::Inflow => "⬇️ DEPOSIT",
-                reth_chain_query::entities::common::FlowDirection::Outflow => "⬆️ WITHDRAWAL",
-                reth_chain_query::entities::common::FlowDirection::Internal => "🔄 INTERNAL",
-            };
-            println!("{} - {} transfer", direction_str, exchange);
-        } else if flow_analyzer.involves_cex(from, to) {
-            println!("🔀 Transfer involves CEX but couldn't determine direction");
-        } else {
-            println!("❌ No CEX involvement detected");
+        for (_, addr_str) in CEX_WALLETS.iter().take(3) { // Just top 3 for speed
+            let address = Address::from_str(addr_str)?;
+            match provider.get_account(address, block).await {
+                Ok(account) => checkpoint_total = checkpoint_total + account.balance,
+                Err(_) => continue,
+            }
+        }
+        
+        println!("{:20} {} ETH (top 3 exchanges)", 
+            format!("{}:", label),
+            format_ether(checkpoint_total)
+        );
+    }
+    
+    println!();
+    
+    // === Stablecoin Holdings ===
+    println!("4. CEX Stablecoin Holdings");
+    println!("-" .repeat(60));
+    
+    let usdc = Address::from_str("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")?;
+    let usdt = Address::from_str("dAC17F958D2ee523a2206206994597C13D831ec7")?;
+    
+    let mut total_usdc = U256::ZERO;
+    let mut total_usdt = U256::ZERO;
+    
+    println!("Top 3 Exchange Stablecoin Holdings:");
+    for (name, addr_str) in CEX_WALLETS.iter().take(3) {
+        let address = Address::from_str(addr_str)?;
+        
+        let usdc_balance = provider.get_token_balance(usdc, address, None).await?;
+        let usdt_balance = provider.get_token_balance(usdt, address, None).await?;
+        
+        total_usdc = total_usdc + usdc_balance;
+        total_usdt = total_usdt + usdt_balance;
+        
+        if usdc_balance > U256::ZERO || usdt_balance > U256::ZERO {
+            println!("  {}:", name);
+            if usdc_balance > U256::ZERO {
+                println!("    USDC: ${}", usdc_balance / U256::from(10u64.pow(6)));
+            }
+            if usdt_balance > U256::ZERO {
+                println!("    USDT: ${}", usdt_balance / U256::from(10u64.pow(6)));
+            }
         }
     }
     
-    // 5. Large Transfer Detection
-    println!("\n🐋 LARGE TRANSFER DETECTION");
-    println!("{}", "-".repeat(70));
+    println!("\nTotal Stablecoins on Top 3 CEXs:");
+    println!("  USDC: ${}", total_usdc / U256::from(10u64.pow(6)));
+    println!("  USDT: ${}", total_usdt / U256::from(10u64.pow(6)));
     
-    let test_amounts = vec![
-        ("Small", U256::from(1) * U256::from(10).pow(U256::from(18))), // 1 ETH
-        ("Medium", U256::from(50) * U256::from(10).pow(U256::from(18))), // 50 ETH
-        ("Large", U256::from(500) * U256::from(10).pow(U256::from(18))), // 500 ETH
-    ];
+    println!();
     
-    let binance_address = Address::from_str("0x28C6c06298d514Db089934071355E5743bf21d60")?;
-    let random_address = Address::from_str("0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb")?;
+    // === Risk Metrics ===
+    println!("5. Centralization Risk Metrics");
+    println!("-" .repeat(60));
     
-    for (size, amount) in test_amounts {
-        println!("\n{} Transfer ({} ETH):", size, format_token_amount(amount, 18));
-        
-        // Test deposit
-        if flow_analyzer.is_large_cex_deposit(binance_address, amount) {
-            println!("  🚨 Large deposit to CEX detected!");
-        }
-        
-        // Test withdrawal
-        if flow_analyzer.is_large_cex_withdrawal(binance_address, amount) {
-            println!("  🚨 Large withdrawal from CEX detected!");
-        }
-        
-        if !flow_analyzer.is_large_cex_deposit(binance_address, amount) && 
-           !flow_analyzer.is_large_cex_withdrawal(binance_address, amount) {
-            println!("  ✅ Normal size transfer");
-        }
-    }
+    // Calculate concentration metrics
+    let top_exchange = exchange_balances[0].1;
+    let top_3_total = exchange_balances.iter().take(3).map(|(_, b)| *b).sum::<U256>();
     
-    // 6. Net Flow Example
-    println!("\n📈 NET FLOW ANALYSIS (Last 100 blocks)");
-    println!("{}", "-".repeat(70));
+    let top_1_dominance = (top_exchange * U256::from(10000) / total_cex_eth).to::<u64>() as f64 / 100.0;
+    let top_3_dominance = (top_3_total * U256::from(10000) / total_cex_eth).to::<u64>() as f64 / 100.0;
     
-    let latest_block = chain_query.get_latest_block()?;
-    let from_block = latest_block - 100;
+    println!("Concentration Metrics:");
+    println!("  Largest exchange holds: {:.1}% of CEX ETH", top_1_dominance);
+    println!("  Top 3 exchanges hold: {:.1}% of CEX ETH", top_3_dominance);
+    println!("  Total CEX ETH: {} ETH", format_ether(total_cex_eth));
+    println!("  Number of tracked exchanges: {}", CEX_WALLETS.len());
     
-    for exchange in ["Binance", "Coinbase", "Kraken"] {
-        let net_flow = flow_analyzer
-            .get_exchange_net_flow(exchange, from_block, latest_block)
-            .await?;
-        
-        let flow_eth = net_flow as f64 / 10_f64.powi(18);
-        let flow_direction = if net_flow > 0 {
-            "⬆️ Net Inflow"
-        } else if net_flow < 0 {
-            "⬇️ Net Outflow"
-        } else {
-            "➡️ No Change"
-        };
-        
-        println!("{}: {} of {:.2} ETH", exchange, flow_direction, flow_eth.abs());
-    }
-    
-    // 7. Address Identification
-    println!("\n🔍 ADDRESS IDENTIFICATION");
-    println!("{}", "-".repeat(70));
-    
-    let test_addresses = vec![
-        "0x28C6c06298d514Db089934071355E5743bf21d60", // Binance
-        "0x71660c4005BA85c37ccec55d0C4493E66Fe775d3", // Coinbase
-        "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb", // Random
-    ];
-    
-    for addr_str in test_addresses {
-        let addr = Address::from_str(addr_str)?;
-        if let Some(cex_info) = get_cex_by_address(addr) {
-            println!("✅ {} is {}", 
-                &addr_str[..10], 
-                cex_info.name
-            );
-        } else {
-            println!("❌ {} is not a known CEX", &addr_str[..10]);
-        }
+    // Risk assessment
+    println!("\nRisk Assessment:");
+    if top_1_dominance > 50.0 {
+        println!("  ⚠️  HIGH RISK: Single exchange controls majority");
+    } else if top_3_dominance > 80.0 {
+        println!("  ⚠️  MEDIUM RISK: High concentration in top 3");
+    } else {
+        println!("  ✅ LOW RISK: Reasonable distribution");
     }
     
     println!("\n✅ CEX monitoring complete!");
