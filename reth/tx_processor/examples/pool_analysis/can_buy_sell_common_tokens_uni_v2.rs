@@ -391,6 +391,32 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::MayHaveTaxes, // Might fail due to sanctions
             decimals: 18,
         },
+        
+        // ===================== TAX/REFLECTION TOKENS =====================
+        TokenConfig {
+            symbol: "BABYDOGE",
+            token_address: "0xAC57De9C1A09FeC648E93EB98875B212DB0d460B",
+            pool_address: "0x21e12C0C45f9E4C5CdD2bC6Ff4DA7B33B4FA654a", // BABYDOGE/WETH V2
+            pool_type: PoolType::UniswapV2,
+            expected_behavior: ExpectedBehavior::MayHaveTaxes, // Known reflection token
+            decimals: 9,
+        },
+        TokenConfig {
+            symbol: "KISHU",
+            token_address: "0xA2b4C0Af19cC16a6CfAcCe81F192B024d625817D",
+            pool_address: "0xF82d8Ec196Fb0D56c6B82a8B1870F09502A49F88", // KISHU/WETH V2
+            pool_type: PoolType::UniswapV2,
+            expected_behavior: ExpectedBehavior::MayHaveTaxes, // 2% redistribution fee
+            decimals: 9,
+        },
+        TokenConfig {
+            symbol: "SAFEMOON",
+            token_address: "0x42981d0bfbAf196529376EE702F2a9Eb9092fcB5", // SafeMoon V2
+            pool_address: "0x4658EA7e9960D6158a261104aAA160cC953bb6ba", // SFM/WETH V2
+            pool_type: PoolType::UniswapV2,
+            expected_behavior: ExpectedBehavior::MayHaveTaxes, // Known 10% tax structure
+            decimals: 9,
+        },
     ]
 }
 
@@ -416,9 +442,11 @@ async fn main() -> Result<()> {
     
     // Get token configurations
     let token_configs = get_token_configs();
+    let total_tokens = token_configs.len();
     let mut all_results = Vec::new();
     
-    println!("📋 Testing {} tokens across different categories:", token_configs.len());
+    println!("📋 Testing {} tokens across different categories:", total_tokens);
+    
     for config in &token_configs {
         println!("  {} {} - Expected: {:?}", 
                 match config.expected_behavior {
@@ -433,10 +461,12 @@ async fn main() -> Result<()> {
     println!();
     
     // Test each token
-    for config in token_configs {
+    for (idx, config) in token_configs.into_iter().enumerate() {
         println!("{}", "=".repeat(80));
-        println!("🔍 TESTING: {} ({})", config.symbol, config.token_address);
+        println!("🔍 TESTING [{}/{}]: {} ({})", idx + 1, total_tokens, config.symbol, config.token_address);
         println!("{}", "=".repeat(80));
+        
+        // Token info already printed to console
         
         let test_result = test_single_token(
             &config,
@@ -444,6 +474,8 @@ async fn main() -> Result<()> {
             &tx_processor,
             latest_block
         ).await;
+        
+        // Results will be output to CSV at the end
         
         all_results.push(test_result);
         
@@ -453,6 +485,9 @@ async fn main() -> Result<()> {
     
     // Generate comprehensive summary
     print_comprehensive_summary(&all_results);
+    
+    // Generate CSV output only
+    generate_csv_output(&all_results)?;
     
     Ok(())
 }
@@ -690,6 +725,65 @@ fn print_token_result(config: &TokenConfig, result: &PoolViabilityResult, durati
         println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
         println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
     }
+}
+
+/// Generate CSV output
+fn generate_csv_output(results: &[TokenTestResult]) -> Result<()> {
+    use std::io::Write;
+    
+    let csv_path = "/home/nima/code/crypto/rust/tx_processor/examples/pool_analysis/token_analysis_results.csv";
+    let mut csv_file = std::fs::File::create(csv_path)?;
+    
+    // CSV Header
+    writeln!(csv_file, "Symbol,Address,Pool,ExpectedBehavior,Tradeable,CanBuy,CanApprove,CanSell,BuyTaxPercent,SellTaxPercent,TokensReceived,EthSpent,EthReceived,NetLoss,TestDurationMs,FailureReason")?;
+    
+    // CSV Data
+    for result in results {
+        let symbol = result.config.symbol;
+        let address = result.config.token_address;
+        let pool = result.config.pool_address;
+        let expected = format!("{:?}", result.config.expected_behavior);
+        let test_duration_ms = result.test_duration.as_secs_f64() * 1000.0;
+        
+        if let Some(analysis) = &result.result {
+            let buy_tax = if analysis.can_buy && analysis.buy_tax_percent >= 0.0 { format!("{:.2}", analysis.buy_tax_percent) } else { "".to_string() };
+            let sell_tax = if analysis.can_sell && analysis.sell_tax_percent >= 0.0 { format!("{:.2}", analysis.sell_tax_percent) } else { "".to_string() };
+            let failure_reason = analysis.failure_reason.as_deref().unwrap_or("").replace(",", ";");
+            let net_loss = analysis.eth_spent.saturating_sub(analysis.eth_received);
+            
+            writeln!(csv_file, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.1},\"{}\"",
+                symbol,
+                address,
+                pool,
+                expected,
+                analysis.is_tradeable,
+                analysis.can_buy,
+                analysis.can_approve,
+                analysis.can_sell,
+                buy_tax,
+                sell_tax,
+                analysis.tokens_received,
+                analysis.eth_spent,
+                analysis.eth_received,
+                net_loss,
+                test_duration_ms,
+                failure_reason
+            )?;
+        } else {
+            let error_msg = result.error.as_deref().unwrap_or("Unknown error").replace(",", ";");
+            writeln!(csv_file, "{},{},{},{},false,false,false,false,,,0,0,0,0,{:.1},\"{}\"",
+                symbol,
+                address,
+                pool,
+                expected,
+                test_duration_ms,
+                error_msg
+            )?;
+        }
+    }
+    
+    println!("\n✅ CSV results saved to: {}", csv_path);
+    Ok(())
 }
 
 /// Print comprehensive summary of all test results
