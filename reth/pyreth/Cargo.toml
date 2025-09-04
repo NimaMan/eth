@@ -13,20 +13,15 @@ name = "pyreth"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["python"]
-python = ["pyo3", "pyo3-asyncio", "tx_builder"]
+default = []
 
 [dependencies]
-# Core Reth-based dependencies
-tx_processor = { path = "../tx_processor" }
-reth_tx_simulator = { path = "../reth_tx_simulator" }
-reth_chain_query = { path = "../reth_chain_query" }
-tx_builder = { path = "../tx_builder", default-features = false, features = ["python"], optional = true }
-eth_price_leverage = { path = "../eth_prices" }
+# Core simulation dependency (minimal start)
+tx_simulator = { path = "../tx_simulator" }
 
 # Python bindings
-pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"], optional = true }
-pyo3-asyncio = { version = "0.20", features = ["tokio-runtime"], optional = true }
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"] }
+pyo3-asyncio = { version = "0.20", features = ["tokio-runtime"] }
 
 # Async runtime
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
@@ -49,6 +44,10 @@ num_cpus = "1.16"
 # Singleton pattern
 once_cell = "1.19"
 parking_lot = "0.12"
+
+[[example]]
+name = "test_simulation"
+path = "examples/test_simulation.rs"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

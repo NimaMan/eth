@@ -32,5 +32,4 @@ Repository = "https://github.com/yourusername/pyreth.git"
 Issues = "https://github.com/yourusername/pyreth/issues"
 
 [tool.maturin]
-features = ["python"]
 module-name = "pyreth"

@@ -10,7 +10,14 @@ Python examples demonstrating pyreth module usage.
 - `query_examples.py` - Comprehensive ChainQuery examples
 
 ### `/simulation/` - Transaction Simulation
-- **`resimulate_transaction.py`** - Function to re-simulate ProcessedTransaction objects
+- **`basic_simulation.py`** - Essential ETH transfer simulation with error handling and type flexibility
+- **`contract_simulation.py`** - Smart contract interactions (ERC20 transfers, approvals, contract creation)
+- **`gas_estimation.py`** - Accurate gas estimation using simulation for various transaction types
+- **`error_handling.py`** - Comprehensive error scenario testing and debugging guidance
+- **`batch_simulation.py`** - Multi-transaction simulation with sequential analysis and optimization
+- **`state_forking.py`** - Historical blockchain state simulation for "what if" analysis
+- **`swap_simulation.py`** - DEX swap simulation including Uniswap V2 swaps and slippage analysis
+- **`resimulate_transaction.py`** - Re-simulate ProcessedTransaction objects at different blocks
 
 ### `/tx_analysis/` - Transaction Analysis
 - `investigate_liquidity_txs.py` - Investigate specific liquidity removal transactions
@@ -33,21 +40,52 @@ cd /home/nima/code/crypto/rust/pyreth
 maturin develop --release
 ```
 
-## Key Function: `resimulate_transaction()`
+## Simulation Capabilities
 
-Located in `/simulation/resimulate_transaction.py`, this function allows re-simulating any ProcessedTransaction:
+PyReth provides comprehensive transaction simulation with the refactored singleton pattern:
 
+### Basic Simulation
 ```python
-from simulation.resimulate_transaction import resimulate_transaction
 import pyreth
 
-# Get original transaction
-processor = pyreth.TxProcessor()
-tx = processor.process_transaction("0x...")
+# Initialize singleton instance
+reth = pyreth.PyReth()
+simulator = reth.simulator()
 
-# Re-simulate at different block
-simulator = pyreth.Simulator()
-new_tx = resimulate_transaction(tx, simulator, block_number=12345678)
+# Basic ETH transfer simulation
+tx = {
+    'from': '0x...',
+    'to': '0x...',
+    'value': 1000000000000000000,  # 1 ETH
+    'gas': 21000,
+    'gas_price': 20000000000,  # 20 gwei
+    'nonce': 0
+}
+
+result = simulator.simulate_transaction(tx, None)
+print(f"Success: {result.success}")
+print(f"Gas used: {result.gas_used}")
+```
+
+### Advanced Simulation Features
+- **Contract Interactions**: ERC20 transfers, approvals, DEX swaps
+- **Gas Estimation**: Accurate gas usage prediction
+- **Batch Operations**: Multi-transaction sequential simulation
+- **Historical Analysis**: State forking at different block heights
+- **Error Handling**: Comprehensive error categorization and guidance
+- **Type Flexibility**: Accepts both string and integer parameters
+
+### Re-simulation Function
+```python
+from simulation.resimulate_transaction import resimulate_transaction
+
+# Get original transaction using singleton
+reth = pyreth.PyReth()
+processor = reth.tx_processor()
+simulator = reth.simulator()
+
+tx = processor.process_transaction("0x...")
+new_result = resimulate_transaction(tx, simulator, block_number=12345678)
 ```
 
 ## Basic Usage
@@ -55,28 +93,31 @@ new_tx = resimulate_transaction(tx, simulator, block_number=12345678)
 ```python
 import pyreth
 
+# Initialize singleton instance for shared database connection
+reth = pyreth.PyReth()
+
+# Get components from singleton
+query = reth.chain_query()
+processor = reth.tx_processor()
+simulator = reth.simulator()
+
 # Direct database queries
-query = pyreth.ChainQuery()
 balance = query.get_balance("0x...")
 supply = query.get_token_total_supply("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 
 # Process transactions
-processor = pyreth.TxProcessor()
 tx = processor.process_transaction("0x...")
 
 # Simulate transactions
-simulator = pyreth.Simulator()
-result = simulator.simulate_transaction({...})
+result = simulator.simulate_transaction({
+    'from': '0x...',
+    'to': '0x...',
+    'value': 1000000000000000000,
+    'gas': 21000,
+    'gas_price': 20000000000,
+    'nonce': 0
+})
 
-# Trading simulation (NEW)
-pyreth_client = pyreth.PyReth()
-trading_sim = pyreth_client.trading_simulator()
-result = trading_sim.simulate_tx_with_buy_sell_seq(
-    prior_tx=None,  # Optional: any tx that might affect trading
-    token_address="0x6982508145454Ce325dDbE47a25d4ec3d2311933",
-    pool_address="0xa43fe16908251ee70ef74718545e4fe6c5ccec9f",
-    block_number=None  # Optional: defaults to latest block
-)
-print(f"Trading enabled: {result.trading_enabled}")
-print(f"Buy tax: {result.buy_tax}%, Sell tax: {result.sell_tax}%")
+# Access all components through singleton pattern
+# This ensures efficient database usage and prevents file watcher exhaustion
 ```

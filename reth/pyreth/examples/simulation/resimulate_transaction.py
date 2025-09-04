@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """
-Function to re-simulate a ProcessedTransaction at different blocks
+Transaction Re-simulation Using PyReth
+
+Function to re-simulate a ProcessedTransaction at different blocks using
+the refactored PyReth singleton pattern for efficient database access.
+
+Algorithm:
+1. Initialize PyReth singleton for shared database connection
+2. Process original transaction to get transaction details
+3. Convert ProcessedTransaction to simulation parameters
+4. Re-simulate at original or different block numbers
+5. Compare results and analyze differences
 
 This allows us to:
 1. Test if simulation matches actual execution
-2. Debug transactions at different states
-3. Perform "what if" analysis
+2. Debug transactions at different states  
+3. Perform "what if" analysis across time
+4. Validate transaction logic against historical states
 """
 
 import pyreth
@@ -71,7 +82,7 @@ def test_resimulation():
     print("TRANSACTION RE-SIMULATION TEST")
     print("=" * 80)
     
-    # Initialize components using shared instance
+    # Initialize components using singleton pattern
     reth = pyreth.PyReth()
     processor = reth.tx_processor()
     simulator = reth.simulator()
