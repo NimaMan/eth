@@ -314,14 +314,15 @@ impl AddressBalanceChangeCalculator {
                 for (currency_symbol, movements) in currency_movs {
                     let currency_in: U256 = movements.incoming.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
                     let currency_out: U256 = movements.outgoing.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
-                    // Calculate net change (store as positive value with direction tracked separately if needed)
-                    let (net_change, is_positive) = if currency_in >= currency_out {
-                        (currency_in - currency_out, true)
+                    // Calculate net change with proper sign (positive for net gain, negative for net loss)
+                    let net_change = if currency_in >= currency_out {
+                        currency_in - currency_out  // Positive: net gain
                     } else {
-                        (currency_out - currency_in, false)
+                        // Negative: net loss - use two's complement representation
+                        U256::MAX - (currency_out - currency_in) + U256::from(1)
                     };
                     
-                    // Apply threshold based on currency type
+                    // Apply threshold based on currency type (check absolute value)
                     let threshold = if currency_symbol == "ETH" {
                         // 0.0005 ETH = 500000000000000 wei
                         U256::from(500_000_000_000_000u64)
@@ -329,11 +330,18 @@ impl AddressBalanceChangeCalculator {
                         U256::from(self.token_state_change_threshold as u64)
                     };
                     
-                    if net_change > threshold {
-                        // Store the actual value in smallest unit (wei for ETH, etc)
-                        // Sign is tracked by is_positive if needed later
+                    // Check if absolute change exceeds threshold
+                    let abs_change = if net_change > U256::MAX / U256::from(2) {
+                        // Negative value - get absolute value
+                        U256::MAX - net_change + U256::from(1)
+                    } else {
+                        net_change
+                    };
+                    
+                    if abs_change > threshold {
+                        // Store the signed net change
                         currency_net.insert(currency_symbol.clone(), net_change);
-                        total_currency_movement = total_currency_movement + net_change;
+                        total_currency_movement = total_currency_movement + abs_change;
                     }
                 }
             }
@@ -348,20 +356,29 @@ impl AddressBalanceChangeCalculator {
                     if !DENOM_ADDRESSES.contains_key(token_addr) {
                         let token_in: U256 = movements.incoming.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
                         let token_out: U256 = movements.outgoing.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
-                        // Calculate net change
-                        let (net_change, is_positive) = if token_in >= token_out {
-                            (token_in - token_out, true)
+                        // Calculate net change with proper sign (positive for net gain, negative for net loss)
+                        let net_change = if token_in >= token_out {
+                            token_in - token_out  // Positive: net gain
                         } else {
-                            (token_out - token_in, false)
+                            // Negative: net loss - use two's complement representation
+                            U256::MAX - (token_out - token_in) + U256::from(1)
                         };
                         
                         let threshold = U256::from(self.token_state_change_threshold as u64);
                         
-                        if net_change > threshold {
-                            // Always use checksum address as key, raw amount as value
+                        // Check if absolute change exceeds threshold
+                        let abs_change = if net_change > U256::MAX / U256::from(2) {
+                            // Negative value - get absolute value
+                            U256::MAX - net_change + U256::from(1)
+                        } else {
+                            net_change
+                        };
+                        
+                        if abs_change > threshold {
+                            // Always use checksum address as key, signed amount as value
                             let token_key = to_checksum_address(token_addr);
                             token_net.insert(token_key, net_change);
-                            total_token_movement = total_token_movement + net_change;
+                            total_token_movement = total_token_movement + abs_change;
                         }
                     }
                 }
