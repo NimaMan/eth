@@ -20,6 +20,8 @@
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_processor::tx_processor::TxProcessor;
+use tx_processor::ProcessedTransaction;
 use std::str::FromStr;
 use hex;
 
@@ -42,9 +44,10 @@ async fn main() -> Result<()> {
     println!("Full U256 precision - no accuracy loss!");
     println!("⚠️  Note: FLOKI may have sell restrictions!\n");
     
-    // Initialize simulator
+    // Initialize simulator and processor
     let simulator = TxSimulator::new(RETH_DB_PATH)?;
-    println!("✅ Simulator initialized");
+    let tx_processor = TxProcessor::new();
+    println!("✅ Simulator and TxProcessor initialized");
     
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
@@ -62,6 +65,7 @@ async fn main() -> Result<()> {
     
     let floki_metrics = execute_floki_trading_workflow(
         &simulator,
+        &tx_processor,
         buyer_address,
         router_address,
         latest_block,
@@ -155,6 +159,7 @@ struct FlokiTradingMetrics {
 /// Execute FLOKI trading workflow with ProcessedTransaction generation
 async fn execute_floki_trading_workflow(
     simulator: &TxSimulator,
+    tx_processor: &TxProcessor,
     buyer: Address,
     router: Address,
     block: u64,
