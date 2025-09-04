@@ -10,7 +10,8 @@
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
-use tx_processor::{RethTxSimulator, CallRequest, SequentialSimulationOptions, TxProcessor};
+use tx_simulator::{TxSimulator, UnsignedTransaction, SequentialSimulationOptions, SequentialSimulationResult};
+use std::str::FromStr;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 
@@ -30,7 +31,7 @@ async fn main() -> Result<()> {
     println!();
     
     // Initialize simulator
-    let simulator = RethTxSimulator::new(RETH_DB_PATH)?;
+    let simulator = TxSimulator::new(RETH_DB_PATH)?;
     println!("✅ Simulator initialized");
     
     let latest_block = simulator.get_latest_block()?;
@@ -128,7 +129,7 @@ async fn main() -> Result<()> {
 
 /// Create USDC approval transaction
 /// Approves Uniswap V2 Router to spend USDC
-fn create_approve_usdc_transaction() -> CallRequest {
+fn create_approve_usdc_transaction() -> UnsignedTransaction {
     // Function: approve(address,uint256)
     let function_signature = "0x095ea7b3"; // approve selector
     let spender = format!("{:0>64}", &UNISWAP_V2_ROUTER[2..]); // Uniswap V2 Router
@@ -136,9 +137,9 @@ fn create_approve_usdc_transaction() -> CallRequest {
     
     let data = format!("{}{}{}", function_signature, spender, amount);
     
-    CallRequest {
-        from: Some(WHALE_ADDRESS.parse().unwrap()),
-        to: Some(USDC_ADDRESS.parse().unwrap()),
+    UnsignedTransaction {
+        from: Some(Address::from_str(WHALE_ADDRESS).unwrap()),
+        to: Some(Address::from_str(USDC_ADDRESS).unwrap()),
         value: Some(U256::ZERO),
         data: Some(Bytes::from(hex::decode(&data[2..]).unwrap())),
         gas: Some(100000),
@@ -151,7 +152,7 @@ fn create_approve_usdc_transaction() -> CallRequest {
 
 /// Create swap USDC for ETH transaction
 /// Swaps USDC tokens for ETH via Uniswap V2
-fn create_swap_usdc_for_eth_transaction() -> CallRequest {
+fn create_swap_usdc_for_eth_transaction() -> UnsignedTransaction {
     // Function: swapExactTokensForETH(uint256,uint256,address[],address,uint256)
     let function_signature = "0x18cbafe5"; // swapExactTokensForETH selector
     let amount_in = format!("{:0>64x}", 100_000000u128); // 100 USDC (6 decimals)
@@ -170,9 +171,9 @@ fn create_swap_usdc_for_eth_transaction() -> CallRequest {
         path_length, usdc_address, weth_address
     );
     
-    CallRequest {
-        from: Some(WHALE_ADDRESS.parse().unwrap()),
-        to: Some(UNISWAP_V2_ROUTER.parse().unwrap()),
+    UnsignedTransaction {
+        from: Some(Address::from_str(WHALE_ADDRESS).unwrap()),
+        to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::ZERO),
         data: Some(Bytes::from(hex::decode(&data[2..]).unwrap())),
         gas: Some(200000),
@@ -185,7 +186,7 @@ fn create_swap_usdc_for_eth_transaction() -> CallRequest {
 
 /// Create swap ETH for USDC transaction
 /// Swaps ETH for USDC tokens via Uniswap V2
-fn create_swap_eth_for_usdc_transaction() -> CallRequest {
+fn create_swap_eth_for_usdc_transaction() -> UnsignedTransaction {
     // Function: swapExactETHForTokens(uint256,address[],address,uint256)
     let function_signature = "0x7ff36ab5"; // swapExactETHForTokens selector
     let amount_out_min = format!("{:0>64x}", 0); // Accept any amount of USDC
@@ -203,9 +204,9 @@ fn create_swap_eth_for_usdc_transaction() -> CallRequest {
         path_length, weth_address, usdc_address
     );
     
-    CallRequest {
-        from: Some(TEST_BUYER.parse().unwrap()),
-        to: Some(UNISWAP_V2_ROUTER.parse().unwrap()),
+    UnsignedTransaction {
+        from: Some(Address::from_str(TEST_BUYER).unwrap()),
+        to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::from(10_000_000_000_000_000u128)), // 0.01 ETH
         data: Some(Bytes::from(hex::decode(&data[2..]).unwrap())),
         gas: Some(200000),
@@ -217,7 +218,7 @@ fn create_swap_eth_for_usdc_transaction() -> CallRequest {
 }
 
 /// Print detailed results of a transaction sequence
-fn print_sequence_results(scenario_name: &str, result: &reth_tx_simulator::SequentialSimulationResult) {
+fn print_sequence_results(scenario_name: &str, result: &SequentialSimulationResult) {
     println!("🔄 Simulating {} sequence...", scenario_name);
     println!();
     
@@ -243,21 +244,6 @@ fn print_sequence_results(scenario_name: &str, result: &reth_tx_simulator::Seque
         
         if let Some(ref reason) = tx_result.revert_reason {
             println!("    Revert reason: {}", reason);
-        }
-        
-        println!("    Cumulative gas: {}", tx_result.cumulative_gas_used);
-        println!("    Address balance changes: {} addresses affected", tx_result.address_balance_changes.len());
-        
-        // Show key address balance changes
-        for (address, changes) in &tx_result.address_balance_changes {
-            if changes.eth_net != 0.0 {
-                println!("      {}: ETH {:+.6}", format_address(*address), changes.eth_net);
-            }
-            for (token, amount) in &changes.token_net {
-                if *amount != 0.0 {
-                    println!("      {}: {} {:+.6}", format_address(*address), token, amount);
-                }
-            }
         }
         println!();
     }

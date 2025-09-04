@@ -1,6 +1,7 @@
 /// EIP-55 checksum address encoding
 use alloy_primitives::Address;
 use tiny_keccak::{Hasher, Keccak};
+use serde::{Deserialize, Serialize, Serializer, Deserializer};
 
 /// Convert an alloy Address to EIP-55 checksum format string
 pub fn alloy_address_to_checksum(address: Address) -> String {
@@ -42,6 +43,25 @@ pub fn to_checksum_address(address: &Address) -> String {
     }
     
     checksum
+}
+
+/// Serialize an Address as a checksummed string
+pub fn serialize_address_checksum<S>(address: &Address, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let checksum = to_checksum_address(address);
+    serializer.serialize_str(&checksum)
+}
+
+/// Deserialize a checksummed address string to Address
+pub fn deserialize_address_checksum<'de, D>(deserializer: D) -> Result<Address, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    s.parse::<Address>()
+        .map_err(serde::de::Error::custom)
 }
 
 #[cfg(test)]

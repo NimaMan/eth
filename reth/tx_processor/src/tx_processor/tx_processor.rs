@@ -57,7 +57,7 @@ impl TxProcessor {
         nonce: u64,
         logs: Vec<alloy_primitives::Log>,
         gas_limit: u64,
-        address_balance_changes: Option<HashMap<Address, serde_json::Value>>,
+        address_balance_changes: Option<HashMap<Address, super::data_models::AddressBalanceChange>>,
     ) -> Result<ProcessedTransaction> {
         
         // STEP 1: Decode ALL event logs using LogDecoder (just like Python's log_processor.process_logs)
@@ -215,7 +215,7 @@ impl TxProcessor {
     /// This is what processed_tx_provider uses to convert simulation to ProcessedTransaction.
     pub async fn process_transaction_from_simulation_result(
         &self,
-        call_request: &tx_simulator::CallRequest,
+        unsigned_tx: &tx_simulator::UnsignedTransaction,
         simulation_result: &tx_simulator::FullSimulationResult,
         block_number: u64,
         tx_index: u64,
@@ -224,16 +224,16 @@ impl TxProcessor {
         // Generate synthetic transaction hash for simulation
         let tx_hash = B256::random();
         
-        // Extract transaction parameters from CallRequest
-        let from = call_request.from.unwrap_or(Address::ZERO);
-        let to = call_request.to;
-        let value = call_request.value.unwrap_or(U256::ZERO);
-        let input = call_request.data.as_ref().map(|d| d.to_vec()).unwrap_or_default();
-        let gas_price = U256::from(call_request.gas_price.unwrap_or(20_000_000_000));
+        // Extract transaction parameters from UnsignedTransaction
+        let from = unsigned_tx.from.unwrap_or(Address::ZERO);
+        let to = unsigned_tx.to;
+        let value = unsigned_tx.value.unwrap_or(U256::ZERO);
+        let input = unsigned_tx.data.as_ref().map(|d| d.to_vec()).unwrap_or_default();
+        let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
         let gas_used = simulation_result.gas_used;
         let status = if simulation_result.success { "1".to_string() } else { "0".to_string() };
-        let nonce = call_request.nonce.unwrap_or(0);
-        let gas_limit = call_request.gas.unwrap_or(300_000);
+        let nonce = unsigned_tx.nonce.unwrap_or(0);
+        let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
         
         // Use current timestamp for simulation
         let block_timestamp = std::time::SystemTime::now()

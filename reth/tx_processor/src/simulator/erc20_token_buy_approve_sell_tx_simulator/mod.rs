@@ -1,6 +1,8 @@
 /// Trading Viability Analysis Module
 /// 
-/// Analyzes if a token pool is tradeable and calculates associated taxes/fees.
+/// Checks if a token can be bought and sold on a DEX pool by simulating the complete
+/// trading sequence and calculating taxes/fees.
+/// 
 /// Supports multiple DEX protocols (UniswapV2, UniswapV3, Curve, etc.)
 /// 
 /// Core functionality:
@@ -11,21 +13,13 @@
 
 pub mod config;
 pub mod types;
-pub mod analyzer;
+pub mod pool_buy_sell_simulator;
 pub mod pool_adapters;
 pub mod tx_builders;
 pub mod tax_calculator;
-pub mod optional_setup_buy_approve_sell_token_simulator;
-pub mod trading_sequence_simulator;
+pub mod simulation_result;
 
 pub use config::PoolViabilityConfig;
 pub use types::{PoolViabilityResult, PoolType};
-pub use analyzer::analyze_pool_viability;
-pub use optional_setup_buy_approve_sell_token_simulator::{
-    OptionalSetupBuyApproveSellTokenSimulator, 
-    OptionalSetupBuyApproveSellResult,
-};
-pub use trading_sequence_simulator::{
-    TradingSequenceSimulator,
-    TradingSequenceResult,
-};
+pub use pool_buy_sell_simulator::check_can_buy_sell_pool;
+pub use simulation_result::{TradingSequenceResult, OptionalSetupBuyApproveSellResult};

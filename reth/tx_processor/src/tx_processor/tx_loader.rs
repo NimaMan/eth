@@ -5,8 +5,9 @@
 use reth_provider::{ProviderFactory, TransactionsProvider, ReceiptProvider, BlockReader, providers::StaticFileProvider};
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::transaction::SignedTransaction;
+use reth_primitives::TransactionSignedEcRecovered;
 use alloy_primitives::{B256, U256, Log as AlloyLog, TxKind};
+use alloy_consensus::{Transaction, transaction::{TransactionMeta, SignerRecoverable}};
 use eyre::Result;
 use std::sync::Arc;
 use std::path::Path;
@@ -99,57 +100,16 @@ impl TransactionLoader {
             .header;
         
         // Extract transaction details
-        let from = tx.recover_signer_unchecked()?;
+        let from = tx.recover_signer()
+            .map_err(|_| eyre::eyre!("Failed to recover signer for {:?}", tx_hash))?;
         
-        // Get transaction data based on type
-        let (to_kind, value, input, nonce, gas_limit, gas_price) = match tx.transaction() {
-            reth_primitives::Transaction::Legacy(tx) => (
-                tx.to,
-                tx.value,
-                tx.input.clone(),
-                tx.nonce,
-                tx.gas_limit,
-                U256::from(tx.gas_price),
-            ),
-            reth_primitives::Transaction::Eip2930(tx) => (
-                tx.to,
-                tx.value,
-                tx.input.clone(),
-                tx.nonce,
-                tx.gas_limit,
-                U256::from(tx.gas_price),
-            ),
-            reth_primitives::Transaction::Eip1559(tx) => (
-                tx.to,
-                tx.value,
-                tx.input.clone(),
-                tx.nonce,
-                tx.gas_limit,
-                U256::from(tx.max_fee_per_gas),
-            ),
-            reth_primitives::Transaction::Eip4844(tx) => (
-                TxKind::Call(tx.to),
-                tx.value,
-                tx.input.clone(),
-                tx.nonce,
-                tx.gas_limit,
-                U256::from(tx.max_fee_per_gas),
-            ),
-            reth_primitives::Transaction::Eip7702(tx) => (
-                TxKind::Call(tx.to),
-                tx.value,
-                tx.input.clone(),
-                tx.nonce,
-                tx.gas_limit,
-                U256::from(tx.max_fee_per_gas),
-            ),
-        };
-        
-        let input = input.to_vec();
-        let to = match to_kind {
-            TxKind::Call(addr) => Some(addr),
-            TxKind::Create => None,
-        };
+        // Get transaction data directly from transaction methods (new API)
+        let to = tx.to();
+        let value = tx.value();
+        let input = tx.input().to_vec();
+        let nonce = tx.nonce();
+        let gas_limit = tx.gas_limit();
+        let gas_price = U256::from(tx.max_fee_per_gas());
         // Calculate actual gas used for this transaction
         let actual_gas_used = if meta.index == 0 {
             receipt.cumulative_gas_used

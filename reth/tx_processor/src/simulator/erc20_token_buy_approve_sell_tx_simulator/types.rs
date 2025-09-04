@@ -1,7 +1,7 @@
 /// Type definitions for trading viability analysis
 
 use alloy_primitives::{Address, U256};
-use crate::data_models::ProcessedTransaction;
+use crate::tx_processor::data_models::ProcessedTransaction;
 use serde::{Serialize, Deserialize};
 
 /// Supported DEX pool types
@@ -66,7 +66,16 @@ pub struct PoolViabilityResult {
     /// Token contract address
     pub token_address: Address,
     
-    /// Whether trading is possible (buy and sell both succeed)
+    /// Whether the buy transaction succeeded
+    pub can_buy: bool,
+    
+    /// Whether the approve transaction succeeded  
+    pub can_approve: bool,
+    
+    /// Whether the sell transaction succeeded
+    pub can_sell: bool,
+    
+    /// Whether trading is possible (buy, approve and sell all succeed)
     pub is_tradeable: bool,
     
     /// Buy tax percentage (negative means failed)

@@ -4,7 +4,7 @@
 /// with the NEW tx_simulator for basic simulation and balance change calculation.
 
 use tx_processor::processed_tx_provider::ProcessedTxProvider;
-use tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 use eyre::Result;
 use alloy_primitives::{Address, U256};
 use std::str::FromStr;
@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     println!("Creating simple ETH transfer simulation...\n");
     
     // Create a simple ETH transfer simulation
-    let call_request = CallRequest {
+    let unsigned_tx = UnsignedTransaction {
         from: Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5")?), // Known funded address
         to: Some(Address::from_str("0x8ba1f109551bD432803012645ac136c29F36cd42")?),    // Random recipient
         value: Some(U256::from(1_000_000_000_000_000u128)), // 0.001 ETH in wei
@@ -40,7 +40,8 @@ async fn main() -> Result<()> {
         gas: Some(21000), // Standard ETH transfer gas
         gas_price: Some(20_000_000_000u128), // 20 gwei
         nonce: None, // Let simulator determine
-        ..Default::default()
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
     };
     
     // Use NEW simulation approach that leverages proper flow:
@@ -48,7 +49,7 @@ async fn main() -> Result<()> {
     // 2. Extract internal transactions from CallFrame (tx_processor) 
     // 3. Decode event logs (tx_processor)
     // 4. Calculate balance changes from logs + internal txs (tx_processor)
-    match provider.process_transaction_from_call_data(call_request, Some(latest_block)).await {
+    match provider.process_transaction_from_unsigned_tx(unsigned_tx, Some(latest_block)).await {
         Ok(processed_tx) => {
             println!("✅ Simulation and processing completed successfully!\n");
             

@@ -6,121 +6,81 @@ edition = "2021"
 [features]
 default = []
 
-# Clean TX Processor - Rust alternative to Python eth_data
-# Uses reth_tx_simulator for all transaction simulation
+# TX Processor Examples - Uses modular tx_simulator for simulation
+# Note: Library functionality broken after refactoring, examples work
 
-[lib]
-name = "tx_processor"
-path = "src/lib.rs"
-crate-type = ["rlib"]  # Library only, no Python bindings
+# TX Processor Examples - Only examples that actually exist
 
-# Clean tx_processor examples
-# Examples that actually exist
-
-[[example]]
-name = "compare_with_python"
-path = "examples/compare_with_python.rs"
-
-[[example]]
-name = "processed_tx_from_call_data"
-path = "examples/tx_processor /processed_tx_from_call_data.rs"
-
-[[example]]
-name = "simulate_unsigned_transaction"
-path = "examples/simulation/test_simulate_unsigned_transaction.rs"
-
+# Transaction Processing examples  
 [[example]]
 name = "process_transaction_by_hash"
-path = "examples/tx_processor /process_transaction_by_hash.rs"
+path = "examples/tx_processor/process_transaction_by_hash.rs"
 
 [[example]]
-name = "test_new_migration"
-path = "examples/test_new_migration.rs"
+name = "processed_tx_from_unsigned_tx"
+path = "examples/tx_processor/processed_tx_from_unsigned_tx.rs"
 
 [[example]]
-name = "single_pass_token_trading_simulation"
-path = "examples/single_pass_token_trading_simulation.rs"
+name = "test_bribe_detection"
+path = "examples/tx_processor/test_bribe_detection.rs"
+
+# Simulation examples
+[[example]]
+name = "buy_approve_sell_with_processed_tx"
+path = "examples/simulation/buy_approve_sell_with_processed_tx.rs"
+
+[[example]]
+name = "approval_mechanics_demo"
+path = "examples/simulation/approval_mechanics_demo.rs"
+
+[[example]]
+name = "buy_approve_sell_pepe_with_processed_tx"
+path = "examples/simulation/buy_approve_sell_pepe_with_processed_tx.rs"
+
+[[example]]
+name = "parallel_vs_sequential_simulation_benchmark"
+path = "examples/simulation/batch/parallel_vs_sequential_simulation_benchmark.rs"
+
+# Token-specific investigations
+[[example]]
+name = "buy_approve_sell_floki_with_processed_tx"
+path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_with_processed_tx.rs"
+
+[[example]]
+name = "buy_approve_sell_floki_alternative_methods"
+path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_alternative_methods.rs"
+
+[[example]]
+name = "process_floki_swap_transaction"
+path = "examples/simulation/specific_token_investigation/process_floki_swap_transaction.rs"
 
 # Pool analysis examples
 [[example]]
-name = "erc20_pool_basic_analysis"
-path = "examples/pool_analysis/erc20_pool_basic_analysis.rs"
-
-[[example]]
-name = "erc20_pool_liquidity_removal_simple"
-path = "examples/pool_analysis/erc20_pool_liquidity_removal_simple.rs"
-
-[[example]]
 name = "erc20_pool_tax_demo"
 path = "examples/pool_analysis/erc20_pool_tax_demo.rs"
-
-[[example]]
-name = "erc20_pool_uniswap_v3"
-path = "examples/pool_analysis/erc20_pool_uniswap_v3.rs"
-
-[[example]]
-name = "erc20_pool_usdc_v2"
-path = "examples/pool_analysis/erc20_pool_usdc_v2.rs"
 
 [[example]]
 name = "erc20_pool_with_enable_tx"
 path = "examples/pool_analysis/erc20_pool_with_enable_tx.rs"
 
 [[example]]
-name = "token_trading_viability_simulation"
-path = "examples/pool_analysis/token_trading_viability_simulation.rs"
-
-[[example]]
-name = "erc20_pool_moo_token"
-path = "examples/pool_analysis/erc20_pool_moo_token.rs"
+name = "erc20_pool_liquidity_removal_simple"
+path = "examples/pool_analysis/erc20_pool_liquidity_removal_simple.rs"
 
 [[example]]
 name = "erc20_pool_block_range_analysis"
 path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
 
-# Balance change analysis examples
 [[example]]
-name = "extract_address_balance_changes"
-path = "examples/balance_change_analysis/extract_address_balance_changes.rs"
+name = "can_buy_sell_common_tokens_uni_v2"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v2.rs"
 
 [[example]]
-name = "simulate_using_calldata"
-path = "examples/balance_change_analysis/simulate_using_calldata.rs"
-
-[[example]]
-name = "mempool_workflow_usdt_transfer_example"
-path = "examples/balance_change_analysis/mempool_workflow_usdt_transfer_example.rs"
-
-[[example]]
-name = "real_performance_benchmark"
-path = "examples/balance_change_analysis/real_performance_benchmark.rs"
-
-[[example]]
-name = "sequential_approval_mechanics_demo"
-path = "examples/balance_change_analysis/sequential/approval_mechanics_demo.rs"
-
-[[example]]
-name = "sequential_basic_demo"
-path = "examples/balance_change_analysis/sequential/basic_demo.rs"
-
-[[example]]
-name = "sequential_usdc_buy_sell"
-path = "examples/balance_change_analysis/sequential/usdc_buy_sell.rs"
-
-[[example]]
-name = "usdc_usdt_comparison_with_balance_changes"
-path = "examples/balance_change_analysis/sequential/usdc_usdt_comparison_with_balance_changes.rs"
-
-[[example]]
-name = "buy_approve_sell_with_processed_tx"
-path = "examples/simulation/buy_approve_sell_with_processed_tx.rs"
+name = "can_buy_sell_common_tokens_uni_v3"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v3.rs"
 
 [dependencies]
-# Use the new Direct Reth Transaction Simulator
-reth_tx_simulator = { path = "../reth_tx_simulator" }
-reth_chain_query = { path = "../reth_chain_query" }
-
-# New modular tx_simulator for migration
+# Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
 
 
@@ -139,12 +99,17 @@ reqwest = { version = "0.11", features = ["json"] } # For benchmark comparison w
 futures = "0.3"
 lazy_static = "1.5"
 
-# Reth dependencies for direct database access
-reth-provider = { path = "../reth/crates/storage/provider" }
-reth-node-types = { path = "../reth/crates/node/types" }
-reth-node-ethereum = { path = "../reth/crates/ethereum/node" }
-reth-primitives = { path = "../reth/crates/primitives" }
-reth-db = { path = "../reth/crates/storage/db" }
-reth-chainspec = { path = "../reth/crates/chainspec" }
-alloy-consensus = "1.0.20"
+# Basic Alloy dependencies for examples
+alloy-consensus = "1.0.0"
+
+# Add reth_chain_query for direct database access
+reth_chain_query = { path = "../reth_chain_query" }
+
+# Reth dependencies for database access (matching reth_chain_query's v1.6.0)
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 

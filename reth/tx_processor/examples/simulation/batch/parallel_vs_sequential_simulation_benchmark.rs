@@ -1,47 +1,27 @@
-/// Batch Simulation Demonstration
+/// Parallel vs Sequential Simulation Benchmark
 /// 
-/// This example demonstrates high-performance batch transaction simulation using the Direct Reth simulator.
-/// It shows how to process multiple transactions concurrently with controlled parallelism and timeout support.
+/// This example demonstrates the performance difference between sequential and parallel
+/// transaction simulation using the tx_simulator.
 ///
 /// WHAT IT DOES:
-/// 1. Creates multiple test transactions (unsigned call requests)
-/// 2. Simulates them in parallel with configurable concurrency limits
-/// 3. Demonstrates timeout handling for slow simulations
-/// 4. Shows performance metrics and statistics
+/// 1. Creates 5 independent test transactions (simple ETH transfers)
+/// 2. Simulates them sequentially (one after another), measures total time
+/// 3. Simulates them in parallel (all at once using futures::join_all), measures total time  
+/// 4. Compares performance and shows speedup ratio (e.g., "2.26x faster")
 ///
 /// USE CASE:
-/// - High-throughput transaction analysis (e.g., mempool monitoring)
-/// - Bulk transaction validation before submission
-/// - Performance testing of transaction simulation
+/// - Performance benchmarking of transaction simulation approaches
+/// - Understanding concurrency benefits for independent transaction processing
+/// - Optimizing bulk transaction analysis workflows
 ///
 /// OUTPUT:
-/// - Number of concurrent simulations
-/// - Success/failure/timeout statistics
-/// - Total processing time and throughput metrics
-/// - Individual transaction results
+/// - Sequential processing time and success count
+/// - Parallel processing time and success count  
+/// - Speedup ratio comparison
 ///
-/// PERFORMANCE:
-/// - Processes transactions in parallel (default: 10 concurrent)
-/// - Configurable timeout per transaction (default: 100ms)
-/// - Typical throughput: 100-1000 tx/sec depending on complexity
-///
-/// INPUT:
-/// Creates 5 test CallRequests with increasing values:
+/// EXAMPLE OUTPUT:
 /// ```
-/// CallRequest {
-///     from: Some(Address::default()),
-///     to: Some(Address::default()),
-///     value: Some(U256::from(i * 1000)), // 0, 1000, 2000, 3000, 4000 wei
-///     gas: Some(21000),
-///     max_fee_per_gas: Some(30_000_000_000),
-///     max_priority_fee_per_gas: Some(1_000_000_000),
-///     // ... other fields None
-/// }
-/// ```
-///
-/// OUTPUT:
-/// ```
-/// === Batch Simulation Demonstration ===
+/// === Parallel vs Sequential Simulation Benchmark ===
 ///
 /// ✓ Simulator initialized
 ///
@@ -57,7 +37,7 @@
 ///    Total: 5 successful in 262.382µs
 ///    Speedup: 2.26x
 ///
-/// ✓ Batch processing works correctly!
+/// ✓ Benchmark complete!
 /// ```
 use eyre::Result;
 use tx_simulator::{TxSimulator, CallRequest};
@@ -67,7 +47,7 @@ use alloy_primitives::{Address, U256};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("\n=== Batch Simulation Demonstration ===\n");
+    println!("\n=== Parallel vs Sequential Simulation Benchmark ===\n");
     
     let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     println!("✓ Simulator initialized");
@@ -125,7 +105,7 @@ async fn main() -> Result<()> {
     println!("   Total: {} successful in {:?}", parallel_success, parallel_time);
     println!("   Speedup: {:.2}x", sequential_time.as_secs_f64() / parallel_time.as_secs_f64());
     
-    println!("\n✓ Batch processing works correctly!");
+    println!("\n✓ Benchmark complete!");
     
     Ok(())
 }

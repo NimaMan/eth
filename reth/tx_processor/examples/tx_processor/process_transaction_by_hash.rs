@@ -127,32 +127,18 @@ async fn main() -> Result<()> {
                 for (address, changes) in tx.address_balance_changes.iter() {
                     println!("\n  Address: {}", address);
                     
-                    // Parse the JSON to display nicely
-                    if let Some(currency_net) = changes.get("currency_net") {
-                        if let Some(obj) = currency_net.as_object() {
-                            if !obj.is_empty() {
-                                println!("    Currency Net Changes:");
-                                for (symbol, amount) in obj {
-                                    if let Some(val) = amount.as_f64() {
-                                        let sign = if val >= 0.0 { "+" } else { "" };
-                                        println!("      {} {}{}", symbol, sign, val);
-                                    }
-                                }
-                            }
+                    // Display currency net changes
+                    if !changes.currency_net.is_empty() {
+                        println!("    Currency Net Changes:");
+                        for (symbol, amount) in &changes.currency_net {
+                            println!("      {}: {} wei", symbol, amount);
                         }
                     }
                     
-                    if let Some(token_net) = changes.get("token_net") {
-                        if let Some(obj) = token_net.as_object() {
-                            if !obj.is_empty() {
-                                println!("    Token Net Changes:");
-                                for (token_addr, amount) in obj {
-                                    if let Some(val) = amount.as_f64() {
-                                        let sign = if val >= 0.0 { "+" } else { "" };
-                                        println!("      {} {}{}", token_addr, sign, val);
-                                    }
-                                }
-                            }
+                    if !changes.token_net.is_empty() {
+                        println!("    Token Net Changes:");
+                        for (token_addr, amount) in &changes.token_net {
+                            println!("      {}: {}", token_addr, amount);
                         }
                     }
                 }

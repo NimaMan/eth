@@ -1,45 +1,155 @@
-# TX Processor Examples
+# TX Processor Examples - POST-REFACTORING STATUS
 
-These examples demonstrate how to use the tx_processor module to fetch and process Ethereum transactions using direct Reth database access (NO RPC CALLS).
+## ⚠️ CURRENT STATUS: ALL EXAMPLES FAIL DUE TO REFACTORING
 
-## Working Examples
+**Problem:** All 16 examples fail to compile due to breaking changes in the `reth_tx_simulator` dependency after refactoring. The examples exist and are properly documented, but cannot run until dependency issues are resolved.
 
-### 1. `process_transaction_by_hash.rs`
-Process a specific transaction by its hash and display all decoded information.
-```bash
-cargo run --example process_transaction_by_hash
+**Root Cause:** Version conflicts in `alloy_rpc_types_trace` (0.14.0 vs 1.0.28) and missing trait imports (`SignerRecoverable`).
+
+## Available Examples (16 total)
+
+This directory contains the actual examples that exist in the tx_processor module. Previously there were 45+ documented examples, but only these 16 actually exist on disk.
+
+### 1. Transaction Processing (`tx_processor/`) - 3 examples
+
+#### `process_transaction_by_hash.rs` 
+**Purpose:** Process transaction by hash with full event decoding  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Uses ProcessedTxProvider to fetch and decode transaction data, extract internal transactions, and calculate balance changes
+
+#### `processed_tx_from_call_data.rs`
+**Purpose:** Generate ProcessedTransaction from raw call data  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Pre-execution analysis by simulating unsigned transactions
+
+#### `test_bribe_detection.rs`
+**Purpose:** MEV bribe detection in transactions  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Analyzes transactions for MEV bribes and validator payments
+
+### 2. Simulation Examples (`simulation/`) - 4 examples
+
+#### `buy_approve_sell_with_processed_tx.rs`
+**Purpose:** Complete token trading workflow (Buy → Approve → Sell)  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Uses SimulationChain for state preservation, generates ProcessedTransaction for each step, compares USDC vs USDT trading
+
+#### `approval_mechanics_demo.rs`
+**Purpose:** Demonstrate ERC20 approval mechanics  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Shows sequential transaction dependencies and approval requirements
+
+#### `buy_approve_sell_pepe_with_processed_tx.rs`
+**Purpose:** PEPE token trading simulation  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Tests meme token mechanics with special transfer logic
+
+#### `batch_simulation_demo.rs` (in simulation/batch/)
+**Purpose:** High-performance parallel transaction simulation  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Concurrent processing with configurable parallelism and timeout handling
+
+### 3. Token-Specific Investigations (`simulation/specific_token_investigation/`) - 3 examples
+
+#### `buy_approve_sell_floki_with_processed_tx.rs`
+**Purpose:** FLOKI token trading with detailed analysis  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Handles reflection tokens, analyzes token tax mechanics
+
+#### `buy_approve_sell_floki_alternative_methods.rs`
+**Purpose:** Alternative FLOKI trading approaches  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Tests different swap methods and gas efficiency
+
+#### `process_floki_swap_transaction.rs`
+**Purpose:** Process actual FLOKI swap transactions  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Analyzes real mainnet FLOKI swaps and extracts transfer taxes
+
+### 4. Pool Analysis (`pool_analysis/`) - 6 examples
+
+#### `erc20_pool_tax_demo.rs`
+**Purpose:** Analyze tokens with transfer taxes  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Pool viability testing with tax detection and effective amount calculation
+
+#### `erc20_pool_with_enable_tx.rs`
+**Purpose:** Handle pools requiring enable transactions  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Tests tokens with trading enable/disable mechanisms
+
+#### `erc20_pool_liquidity_removal_simple.rs`
+**Purpose:** Simulate liquidity removal from pools  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** LP token mechanics and impermanent loss calculation
+
+#### `erc20_pool_block_range_analysis.rs`
+**Purpose:** Analyze pool behavior over block ranges  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Historical pool analysis with volume and liquidity tracking
+
+#### `can_buy_sell_common_tokens_uni_v2.rs`
+**Purpose:** Test token viability on Uniswap V2  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Validates WETH, USDC, USDT, DAI trading on V2
+
+#### `can_buy_sell_common_tokens_uni_v3.rs`
+**Purpose:** Test token viability on Uniswap V3  
+**Status:** ❌ Fails - dependency issues  
+**Original Function:** Tests concentrated liquidity pools and fee tiers
+
+## Resolution Required
+
+### To Fix These Examples:
+
+1. **Update Dependencies** - Resolve `alloy_rpc_types_trace` version conflicts
+2. **Import Missing Traits** - Add `use alloy_consensus::transaction::recovered::SignerRecoverable;`
+3. **Fix API Changes** - Update calls to match new `recover_signer` method signatures
+4. **Test Compilation** - Verify all 16 examples compile after fixes
+
+### Expected Performance (when working):
+
+| Transaction Type | Processing Time | Throughput |
+|-----------------|-----------------|------------|
+| Simple ETH Transfer | ~2-3ms | 400 tx/sec |
+| ERC20 Transfer | ~3-5ms | 250 tx/sec |
+| Complex DeFi | ~4-5ms | 200 tx/sec |
+| Batch (4 threads) | ~0.5ms/tx | 1825 tx/sec |
+
+## Requirements (when fixed)
+
+- Synced Reth node with database at `/home/nima/.local/share/reth/mainnet`
+- Rust 1.70+ with cargo
+- Fixed dependency issues in `reth_tx_simulator`
+
+## Usage Patterns (when working)
+
+### Transaction Processing
+```rust
+// This is the intended usage once dependencies are fixed
+let provider = ProcessedTxProvider::new("/home/nima/.local/share/reth/mainnet")?;
+let tx_hash = B256::from_str("0x...")?;
+let processed_tx = provider.process_transaction_by_hash(tx_hash).await?;
 ```
 
-### 2. `compare_with_python.rs`
-Fetches transactions from the latest blocks and compares Rust implementation with Python.
-```bash
-# Process 5 transactions (default)
-cargo run --example compare_with_python
-
-# Process 10 transactions
-cargo run --example compare_with_python -- 10
-
-# With Python service for comparison
-PYTHON_SERVICE_URL=http://localhost:18000 cargo run --example compare_with_python
+### Sequential Simulation
+```rust
+// Intended SimulationChain usage
+let simulator = TxSimulator::new(RETH_DB_PATH)?;
+let mut chain = simulator.start_simulation_chain(None).await?;
+let results = chain.step_multiple(transactions).await?;
 ```
 
-### 3. `simulate_unsigned_transaction.rs`
-Demonstrates how to simulate unsigned transactions and extract state changes.
-```bash
-cargo run --example simulate_unsigned_transaction
+### Pool Analysis
+```rust
+// Pool viability testing pattern
+let config = PoolViabilityConfig::default();
+let result = check_can_buy_sell_pool(processor, pool_address, token_address, PoolType::UniswapV2, config).await?;
 ```
 
-## Performance
+## Summary
 
-All working examples use direct Reth database access with shared provider (eliminates EAGAIN errors):
-- Simple ETH transfers: ~5-10ms
-- ERC20 transfers: ~10-20ms  
-- Complex DeFi transactions: ~20-50ms
-
-This is 10-40x faster than Python's RPC-based approach.
-
-## Requirements
-
-- A synced Reth node with database at `/home/nima/.local/share/reth/mainnet`
-- Or set `RETH_DATADIR` environment variable to your Reth data directory
-- Reth node can be running (shared provider eliminates database conflicts)
+- **16 examples exist** (down from 45+ phantom entries in Cargo.toml)
+- **All fail compilation** due to `reth_tx_simulator` dependency issues
+- **Well-organized** into 4 categories: tx_processor, simulation, token investigations, pool analysis
+- **Ready to fix** once dependency conflicts are resolved

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, U256, B256};
 use tx_processor::{TxProcessor, chain_query::ChainQuery};
 use tx_processor::erc20_token_trading_viability::{
-    analyze_pool_viability,
+    check_can_buy_sell_pool,
     PoolViabilityConfig,
     PoolType,
 };
@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
     
     println!("Analyzing token that may require enable trading...");
     
-    match analyze_pool_viability(simulator, tx_processor, config).await {
+    match check_can_buy_sell_pool(simulator, tx_processor, config).await {
         Ok(result) => {
             println!("\nResults:");
             println!("  Tradeable: {}", result.is_tradeable);

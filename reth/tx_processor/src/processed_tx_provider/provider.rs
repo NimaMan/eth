@@ -13,9 +13,9 @@
 use crate::tx_processor::{LogDecoder, TransactionClassifier, TxProcessor};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tx_loader::TransactionLoader;
-use crate::sequential_tx_simulator::CallDataBuilder;
+use crate::simulator::UnsignedTxBuilder;
 use reth_chain_query::ChainQuery;
-use tx_simulator::{TxSimulator, CallRequest};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use eyre::Result;
 use std::sync::Arc;
 use alloy_primitives::{Address, B256, U256};
@@ -29,7 +29,7 @@ pub struct ProcessedTxProvider {
     pub transaction_loader: Option<TransactionLoader>,
     pub provider_factory: reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, std::sync::Arc<reth_db::DatabaseEnv>>>,
     pub chain_query: Arc<ChainQuery>,
-    call_data_builder: Option<CallDataBuilder>,
+    unsigned_tx_builder: Option<UnsignedTxBuilder>,
     tx_processor: TxProcessor,
 }
 
@@ -45,9 +45,9 @@ impl ProcessedTxProvider {
         let classifier = TransactionClassifier::new();
         let transaction_loader = TransactionLoader::with_provider_factory(provider_factory.clone()).ok();
         
-        // Create call data builder if we have a transaction loader
-        let call_data_builder = if let Some(loader) = transaction_loader.clone() {
-            Some(CallDataBuilder::new(loader))
+        // Create unsigned tx builder if we have a transaction loader
+        let unsigned_tx_builder = if let Some(loader) = transaction_loader.clone() {
+            Some(UnsignedTxBuilder::new(loader))
         } else {
             None
         };
@@ -55,7 +55,8 @@ impl ProcessedTxProvider {
         // Initialize tx processor
         let tx_processor = TxProcessor::new();
         
-        let chain_query = Arc::new(ChainQuery::new(reth_datadir)?);
+        // Share the simulator to avoid duplicate DB connections
+        let chain_query = Arc::new(ChainQuery::from_simulator(Arc::new(simulator.clone()))?);
         
         Ok(Self { 
             simulator,
@@ -64,18 +65,18 @@ impl ProcessedTxProvider {
             transaction_loader,
             provider_factory,
             chain_query,
-            call_data_builder,
+            unsigned_tx_builder,
             tx_processor,
         })
     }
     
-    /// MAIN ENTRY POINT 1: Process transaction from CallData
+    /// MAIN ENTRY POINT 1: Process transaction from UnsignedTransaction
     /// 
-    /// Flow: CallData → Simulate → Decode logs → ProcessedTransaction
-    /// Use this when you already have the CallRequest ready for simulation
-    pub async fn process_transaction_from_call_data(
+    /// Flow: UnsignedTransaction → Simulate → Decode logs → ProcessedTransaction
+    /// Use this when you already have the UnsignedTransaction ready for simulation
+    pub async fn process_transaction_from_unsigned_tx(
         &self,
-        call_request: CallRequest,
+        unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
     ) -> Result<ProcessedTransaction> {
         
@@ -87,13 +88,13 @@ impl ProcessedTxProvider {
         
         // Simulate the transaction with full trace to get logs and internal txs
         let simulation_result = self.simulator.simulate_unsigned_transaction_with_full_trace_at_block(
-            call_request.clone(), 
+            unsigned_tx.clone(), 
             block_number
         ).await?;
         
         // Convert simulation result to ProcessedTransaction (like Python does)
         let processed_tx = self.build_processed_transaction_from_simulation(
-            &call_request,
+            &unsigned_tx,
             &simulation_result,
             block_number,
             0, // tx_index (0 for simulated transactions)
@@ -104,16 +105,16 @@ impl ProcessedTxProvider {
     
     /// MAIN ENTRY POINT 2: Process transaction by hash  
     /// 
-    /// Flow: TX Hash → Load from DB → Build CallData → Simulate → tx_processing → ProcessedTransaction
+    /// Flow: TX Hash → Load from DB → Build UnsignedTransaction → Simulate → tx_processing → ProcessedTransaction
     /// Use this when you have a transaction hash and want to process the actual transaction
     pub async fn process_transaction_by_hash(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
         
-        // Ensure we have a call data builder
-        let call_data_builder = self.call_data_builder.as_ref()
+        // Ensure we have an unsigned tx builder
+        let unsigned_tx_builder = self.unsigned_tx_builder.as_ref()
             .ok_or_else(|| eyre::eyre!("TransactionLoader not available for loading transaction by hash"))?;
         
-        // Build CallRequest from transaction hash (loads from DB)
-        let call_request = call_data_builder.build_call_request_from_tx_hash(tx_hash).await?;
+        // Build UnsignedTransaction from transaction hash (loads from DB)
+        let unsigned_tx = unsigned_tx_builder.build_unsigned_transaction_from_tx_hash(tx_hash).await?;
         
         // Load block number from transaction data
         let transaction_loader = self.transaction_loader.as_ref().unwrap();
@@ -140,13 +141,13 @@ impl ProcessedTxProvider {
         
         // Simulate the transaction with full trace
         let simulation_result = self.simulator.simulate_unsigned_transaction_with_full_trace_at_block(
-            call_request.clone(),
+            unsigned_tx.clone(),
             simulation_block
         ).await?;
         
         // Convert simulation result to ProcessedTransaction
         let processed_tx = self.build_processed_transaction_from_simulation(
-            &call_request,
+            &unsigned_tx,
             &simulation_result,
             block_number,
             tx_index,
@@ -182,7 +183,7 @@ impl ProcessedTxProvider {
     /// and builds a complete ProcessedTransaction, just like Python does.
     async fn build_processed_transaction_from_simulation(
         &self,
-        call_request: &CallRequest,
+        unsigned_tx: &UnsignedTransaction,
         simulation_result: &tx_simulator::FullSimulationResult,
         block_number: u64,
         tx_index: u64,
@@ -191,16 +192,16 @@ impl ProcessedTxProvider {
         // Generate synthetic transaction hash for simulation
         let tx_hash = B256::random();
         
-        // Extract transaction parameters from CallRequest
-        let from = call_request.from.unwrap_or(Address::ZERO);
-        let to = call_request.to;
-        let value = call_request.value.unwrap_or(U256::ZERO);
-        let input = call_request.data.as_ref().map(|d| d.to_vec()).unwrap_or_default();
-        let gas_price = U256::from(call_request.gas_price.unwrap_or(20_000_000_000));
+        // Extract transaction parameters from UnsignedTransaction
+        let from = unsigned_tx.from.unwrap_or(Address::ZERO);
+        let to = unsigned_tx.to;
+        let value = unsigned_tx.value.unwrap_or(U256::ZERO);
+        let input = unsigned_tx.data.as_ref().map(|d| d.to_vec()).unwrap_or_default();
+        let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
         let gas_used = simulation_result.gas_used;
         let status = if simulation_result.success { "1".to_string() } else { "0".to_string() };
-        let nonce = call_request.nonce.unwrap_or(0);
-        let gas_limit = call_request.gas.unwrap_or(300_000);
+        let nonce = unsigned_tx.nonce.unwrap_or(0);
+        let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
         
         // Use current timestamp for simulation
         let block_timestamp = std::time::SystemTime::now()
@@ -210,7 +211,7 @@ impl ProcessedTxProvider {
         
         // Use tx_processor to create complete ProcessedTransaction with balance changes
         let processed_tx = self.tx_processor.process_transaction_from_simulation_result(
-            &call_request,
+            &unsigned_tx,
             &simulation_result,
             block_number,
             tx_index,

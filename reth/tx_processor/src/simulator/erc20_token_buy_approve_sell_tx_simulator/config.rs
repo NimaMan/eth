@@ -1,8 +1,8 @@
 /// Configuration for pool viability analysis
 
 use alloy_primitives::{Address, U256};
-use crate::data_models::ProcessedTransaction;
-use crate::erc20_token_trading_viability::types::PoolType;
+use crate::tx_processor::data_models::ProcessedTransaction;
+use super::types::PoolType;
 
 /// Configuration for analyzing pool viability
 #[derive(Debug, Clone)]
@@ -39,6 +39,12 @@ pub struct PoolViabilityConfig {
     
     /// WETH address
     pub weth_address: Address,
+    
+    /// Block delay between buy/approve and sell (default: 0 = same block)
+    pub block_delay: u64,
+    
+    /// Token decimals (e.g., 18 for ETH, 6 for USDC, 9 for FLOKI)
+    pub token_decimals: u8,
 }
 
 impl Default for PoolViabilityConfig {
@@ -71,6 +77,12 @@ impl Default for PoolViabilityConfig {
                 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08, 
                 0x3C, 0x75, 0x6C, 0xc2
             ]),
+            
+            // Default: same block execution
+            block_delay: 0,
+            
+            // Default: 18 decimals (ETH standard)
+            token_decimals: 18,
         }
     }
 }
@@ -111,6 +123,18 @@ impl PoolViabilityConfig {
     /// Set block number
     pub fn with_block(mut self, block: u64) -> Self {
         self.block_number = Some(block);
+        self
+    }
+    
+    /// Set block delay between buy/approve and sell
+    pub fn with_block_delay(mut self, delay: u64) -> Self {
+        self.block_delay = delay;
+        self
+    }
+    
+    /// Set token decimals
+    pub fn with_token_decimals(mut self, decimals: u8) -> Self {
+        self.token_decimals = decimals;
         self
     }
 }

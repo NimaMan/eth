@@ -3,6 +3,8 @@ use alloy_primitives::{Address, B256, U256};
 use serde::{Serialize, Deserialize};
 use super::events::*;
 use super::fees::TransactionFees;
+use super::balance_changes::AddressBalanceChange;
+use crate::utils::checksum::to_checksum_address;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ETHTransfer {
@@ -87,7 +89,7 @@ pub struct ProcessedTransaction {
     
     // Generic events and state
     pub other_events: Vec<HashMap<String, serde_json::Value>>,
-    pub address_balance_changes: HashMap<Address, serde_json::Value>,
+    pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
     pub latest_states: HashMap<Address, serde_json::Value>,
     pub input: Vec<u8>,
 }
@@ -184,5 +186,24 @@ impl ProcessedTransaction {
             latest_states: HashMap::new(),
             input,
         }
+    }
+    
+    /// Get currency balance change for an address by currency symbol (ETH, USDC, USDT, etc.)
+    /// Returns the U256 amount from currency_net
+    pub fn get_address_currency_balance_change(&self, address: &Address, symbol: &str) -> Option<U256> {
+        self.address_balance_changes
+            .get(address)
+            .and_then(|changes| changes.currency_net.get(symbol))
+            .copied()
+    }
+    
+    /// Get token balance change for an address by token contract address
+    /// Returns the U256 amount from token_net
+    pub fn get_address_token_balance_change(&self, address: &Address, token_address: &Address) -> Option<U256> {
+        let token_checksum = to_checksum_address(token_address);
+        self.address_balance_changes
+            .get(address)
+            .and_then(|changes| changes.token_net.get(&token_checksum))
+            .copied()
     }
 }

@@ -3,7 +3,7 @@
 use super::PoolAdapter;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 
 pub struct UniswapV2Adapter {
     pool_address: Address,
@@ -21,9 +21,18 @@ impl UniswapV2Adapter {
                 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6, 
                 0x59, 0xF2, 0x48, 0x8D
             ]),
-            gas_limit: 300_000,
+            gas_limit: 500_000, // Increased for complex token logic
             gas_price: 100_000_000_000,
         }
+    }
+    
+    /// Get WETH address (mainnet)
+    fn weth_address(&self) -> Address {
+        Address::from([
+            0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D,
+            0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08,
+            0x3C, 0x75, 0x6C, 0xc2
+        ])
     }
     
     /// Encode swapExactETHForTokens
@@ -139,7 +148,7 @@ impl PoolAdapter for UniswapV2Adapter {
         eth_amount: U256,
         buyer_address: Address,
         _slippage: f64, // Unused for now - simplified implementation
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         // Calculate minimum output with slippage
         // For simplicity, we accept any amount (0) since we're testing
         let amount_out_min = U256::ZERO;
@@ -151,7 +160,7 @@ impl PoolAdapter for UniswapV2Adapter {
             U256::from(u64::MAX), // Far future deadline
         );
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(self.router_address),
             value: Some(eth_amount),
@@ -169,10 +178,10 @@ impl PoolAdapter for UniswapV2Adapter {
         token_address: Address,
         amount: U256,
         buyer_address: Address,
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         let calldata = self.encode_approve(self.router_address, amount);
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(token_address),
             value: Some(U256::ZERO),
@@ -191,7 +200,7 @@ impl PoolAdapter for UniswapV2Adapter {
         token_amount: U256,
         buyer_address: Address,
         _slippage: f64, // Unused for now - simplified implementation
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         // Calculate minimum output with slippage
         // For simplicity, we accept any amount (0) since we're testing
         let amount_out_min = U256::ZERO;
@@ -204,7 +213,7 @@ impl PoolAdapter for UniswapV2Adapter {
             U256::from(u64::MAX), // Far future deadline
         );
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(self.router_address),
             value: Some(U256::ZERO),

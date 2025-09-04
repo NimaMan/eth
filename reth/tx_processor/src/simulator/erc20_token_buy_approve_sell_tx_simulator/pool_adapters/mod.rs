@@ -5,7 +5,7 @@ pub mod uniswap_v3;
 
 use alloy_primitives::{Address, U256};
 use eyre::Result;
-use tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 
 pub use uniswap_v2::UniswapV2Adapter;
 pub use uniswap_v3::UniswapV3Adapter;
@@ -19,7 +19,7 @@ pub trait PoolAdapter: Send + Sync {
         eth_amount: U256,
         buyer_address: Address,
         slippage: f64,
-    ) -> Result<CallRequest>;
+    ) -> Result<UnsignedTransaction>;
     
     /// Build an approve transaction for the router
     fn build_approve_transaction(
@@ -27,7 +27,7 @@ pub trait PoolAdapter: Send + Sync {
         token_address: Address,
         amount: U256,
         buyer_address: Address,
-    ) -> Result<CallRequest>;
+    ) -> Result<UnsignedTransaction>;
     
     /// Build a sell transaction (Token -> ETH)
     fn build_sell_transaction(
@@ -36,7 +36,7 @@ pub trait PoolAdapter: Send + Sync {
         token_amount: U256,
         buyer_address: Address,
         slippage: f64,
-    ) -> Result<CallRequest>;
+    ) -> Result<UnsignedTransaction>;
     
     /// Get the router address for this pool type
     fn router_address(&self) -> Address;

@@ -3,7 +3,7 @@
 use super::PoolAdapter;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 
 pub struct UniswapV3Adapter {
     pool_address: Address,
@@ -109,7 +109,7 @@ impl PoolAdapter for UniswapV3Adapter {
         eth_amount: U256,
         buyer_address: Address,
         _slippage: f64, // Unused for now - simplified implementation
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         let calldata = self.encode_exact_input_single(
             self.weth_address(),  // tokenIn (WETH)
             token_address,         // tokenOut
@@ -121,7 +121,7 @@ impl PoolAdapter for UniswapV3Adapter {
             U256::ZERO,           // sqrtPriceLimitX96 (no limit)
         );
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(self.router_address),
             value: Some(eth_amount), // V3 router handles WETH wrapping
@@ -139,10 +139,10 @@ impl PoolAdapter for UniswapV3Adapter {
         token_address: Address,
         amount: U256,
         buyer_address: Address,
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         let calldata = self.encode_approve(self.router_address, amount);
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(token_address),
             value: Some(U256::ZERO),
@@ -161,7 +161,7 @@ impl PoolAdapter for UniswapV3Adapter {
         token_amount: U256,
         buyer_address: Address,
         _slippage: f64, // Unused for now - simplified implementation
-    ) -> Result<CallRequest> {
+    ) -> Result<UnsignedTransaction> {
         let calldata = self.encode_exact_input_single(
             token_address,         // tokenIn
             self.weth_address(),   // tokenOut (WETH)
@@ -173,7 +173,7 @@ impl PoolAdapter for UniswapV3Adapter {
             U256::ZERO,           // sqrtPriceLimitX96 (no limit)
         );
         
-        Ok(CallRequest {
+        Ok(UnsignedTransaction {
             from: Some(buyer_address),
             to: Some(self.router_address),
             value: Some(U256::ZERO),

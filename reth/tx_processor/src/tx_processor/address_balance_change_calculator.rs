@@ -20,12 +20,13 @@
 /// - No overlap between token_net and currency_net
 
 use super::data_models::events::InternalTransaction;
+use super::data_models::balance_changes::{AddressBalanceChange, TokenMovements, TokenMovement};
 use crate::utils::to_checksum_address;
 use alloy_primitives::{Address, U256};
 use eyre::Result;
 use lazy_static::lazy_static;
-use serde_json::json;
 use std::collections::HashMap;
+use std::str::FromStr;
 use reth_chain_query::FEE_RECIPIENTS;
 
 /// Known token addresses mapped to their symbols
@@ -43,6 +44,11 @@ lazy_static! {
         // Add more known tokens here
         m
     };
+}
+
+/// Get the token symbol for a known token address
+pub fn get_token_symbol(token_address: &Address) -> Option<&'static str> {
+    DENOM_ADDRESSES.get(token_address).copied()
 }
 
 /// Token decimals for known currencies
@@ -87,7 +93,7 @@ impl TransferId {
 /// Movement entry for tracking transfers
 #[derive(Debug, Clone)]
 struct MovementEntry {
-    amount: f64,
+    amount: U256,
 }
 
 /// Movements for an address (incoming and outgoing)
@@ -129,7 +135,7 @@ impl AddressBalanceChangeCalculator {
         internal_transactions: &[InternalTransaction],
         block_number: u64,
         tx_index: u64,
-    ) -> Result<HashMap<Address, serde_json::Value>> {
+    ) -> Result<HashMap<Address, AddressBalanceChange>> {
         // Clear previous state
         self.currency_movements.clear();
         self.token_movements.clear();
@@ -143,8 +149,8 @@ impl AddressBalanceChangeCalculator {
                     format!("internal_{}", i),
                 );
                 
-                // EXACT Python match: Keep internal ETH transfers in wei (Python expects wei)
-                let amount_wei = internal_tx.value.to_string().parse::<f64>().unwrap_or(0.0);
+                // Keep internal ETH transfers in wei
+                let amount_wei = internal_tx.value;
                 self.track_movement(
                     MovementType::Currency,
                     internal_tx.from_address,
@@ -174,18 +180,9 @@ impl AddressBalanceChangeCalculator {
                     currency_symbol = "ETH";
                 }
                 
-                // CRITICAL FIX: Keep ETH (from WETH transfers) in wei to match internal transactions
-                // Only convert non-ETH currencies (USDC, USDT, DAI) using decimals
-                let amount = if currency_symbol == "ETH" {
-                    // Keep WETH transfers in wei (matching internal transactions)
-                    transfer.amount.to_string().parse::<f64>().unwrap_or(0.0)
-                } else if let Some(decimals) = ERC20_TOKEN_DECIMALS.get(currency_symbol) {
-                    // Apply decimal conversion for other currencies (USDC, USDT, DAI)
-                    let divisor = 10f64.powi(*decimals as i32);
-                    transfer.amount.to_string().parse::<f64>().unwrap_or(0.0) / divisor
-                } else {
-                    transfer.amount.to_string().parse::<f64>().unwrap_or(0.0)
-                };
+                // Keep amounts as U256 - no decimal conversion needed here
+                // The amounts are already in the token's smallest unit
+                let amount = transfer.amount;
                 
                 self.track_movement(
                     MovementType::Currency,
@@ -198,7 +195,7 @@ impl AddressBalanceChangeCalculator {
                 );
             } else {
                 // Unknown token - track with raw amount
-                let amount = transfer.amount.to_string().parse::<f64>().unwrap_or(0.0);
+                let amount = transfer.amount;
                 
                 self.track_movement(
                     MovementType::Token,
@@ -230,7 +227,7 @@ impl AddressBalanceChangeCalculator {
         movement_type: MovementType,
         from_addr: Address,
         to_addr: Address,
-        amount: f64,
+        amount: U256,
         transfer_id: TransferId,
         token_address: Option<Address>,
         currency: Option<String>,
@@ -300,7 +297,7 @@ impl AddressBalanceChangeCalculator {
     }
 
     /// Aggregate net changes for every address touched in this tx
-    fn get_net_balance_changes(&self, from_address: Address) -> Result<HashMap<Address, serde_json::Value>> {
+    fn get_net_balance_changes(&self, from_address: Address) -> Result<HashMap<Address, AddressBalanceChange>> {
         let mut net = HashMap::new();
         
         // Get all addresses that had any movements
@@ -311,74 +308,81 @@ impl AddressBalanceChangeCalculator {
         for addr in all_addrs {
             // Calculate currency net changes per currency
             let mut currency_net = HashMap::new();
-            let mut total_currency_movement = 0.0;
+            let mut total_currency_movement = U256::ZERO;
             
             if let Some(currency_movs) = self.currency_movements.get(addr) {
                 for (currency_symbol, movements) in currency_movs {
-                    let currency_in: f64 = movements.incoming.values().map(|e| e.amount).sum();
-                    let currency_out: f64 = movements.outgoing.values().map(|e| e.amount).sum();
-                    let net_change = currency_in - currency_out;
-                    
-                    // Apply threshold based on currency type (EXACT Python logic)
-                    let threshold = if currency_symbol == "ETH" {
-                        // Python: ETH is now in wei, convert threshold to wei for comparison  
-                        // 0.0005 ETH = 500000000000000 wei (15 decimals for 0.0005, not 500000000000000000 for 0.5!)
-                        500_000_000_000_000.0  // 0.0005 * 1e18 = 5e14 wei
+                    let currency_in: U256 = movements.incoming.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
+                    let currency_out: U256 = movements.outgoing.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
+                    // Calculate net change (store as positive value with direction tracked separately if needed)
+                    let (net_change, is_positive) = if currency_in >= currency_out {
+                        (currency_in - currency_out, true)
                     } else {
-                        self.token_state_change_threshold
+                        (currency_out - currency_in, false)
                     };
                     
-                    if net_change.abs() > threshold {
-                        // For display: convert ETH from wei to ether, keep others as is (EXACT Python logic)
-                        if currency_symbol == "ETH" {
-                            // Convert wei to ETH for display (but keep original for movements)
-                            currency_net.insert(currency_symbol.clone(), net_change / 1e18);
-                        } else {
-                            currency_net.insert(currency_symbol.clone(), net_change);
-                        }
-                        total_currency_movement += net_change.abs();
+                    // Apply threshold based on currency type
+                    let threshold = if currency_symbol == "ETH" {
+                        // 0.0005 ETH = 500000000000000 wei
+                        U256::from(500_000_000_000_000u64)
+                    } else {
+                        U256::from(self.token_state_change_threshold as u64)
+                    };
+                    
+                    if net_change > threshold {
+                        // Store the actual value in smallest unit (wei for ETH, etc)
+                        // Sign is tracked by is_positive if needed later
+                        currency_net.insert(currency_symbol.clone(), net_change);
+                        total_currency_movement = total_currency_movement + net_change;
                     }
                 }
             }
             
             // Calculate token net changes per token (only for tokens NOT in DENOM_ADDRESSES)
             let mut token_net = HashMap::new();
-            let mut total_token_movement = 0.0;
+            let mut total_token_movement = U256::ZERO;
             
             if let Some(token_movs) = self.token_movements.get(addr) {
                 for (token_addr, movements) in token_movs {
                     // Skip tokens that are in DENOM_ADDRESSES - they go to currency_net
                     if !DENOM_ADDRESSES.contains_key(token_addr) {
-                        let token_in: f64 = movements.incoming.values().map(|e| e.amount).sum();
-                        let token_out: f64 = movements.outgoing.values().map(|e| e.amount).sum();
-                        let net_change = token_in - token_out;
+                        let token_in: U256 = movements.incoming.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
+                        let token_out: U256 = movements.outgoing.values().map(|e| e.amount).fold(U256::ZERO, |acc, x| acc + x);
+                        // Calculate net change
+                        let (net_change, is_positive) = if token_in >= token_out {
+                            (token_in - token_out, true)
+                        } else {
+                            (token_out - token_in, false)
+                        };
                         
-                        if net_change.abs() > self.token_state_change_threshold {
+                        let threshold = U256::from(self.token_state_change_threshold as u64);
+                        
+                        if net_change > threshold {
                             // Always use checksum address as key, raw amount as value
                             let token_key = to_checksum_address(token_addr);
                             token_net.insert(token_key, net_change);
-                            total_token_movement += net_change.abs();
+                            total_token_movement = total_token_movement + net_change;
                         }
                     }
                 }
             }
             
             // Include address if it meets thresholds or is the sender
-            if total_token_movement > 0.0
-                || total_currency_movement > 0.0
+            if total_token_movement > U256::ZERO
+                || total_currency_movement > U256::ZERO
                 || *addr == from_address
             {
-                // Convert movements to JSON format
-                let movements_json = json!({
-                    "tokens": self.format_token_movements(addr),
-                    "currencies": self.format_currency_movements(addr),
-                });
+                // Create proper struct instead of JSON
+                let movements = TokenMovements {
+                    tokens: self.format_token_movements_struct(addr),
+                    currencies: self.format_currency_movements_struct(addr),
+                };
                 
-                let balance_change = json!({
-                    "token_net": token_net,
-                    "currency_net": currency_net,
-                    "movements": movements_json,
-                });
+                let balance_change = AddressBalanceChange {
+                    token_net,
+                    currency_net,
+                    movements,
+                };
                 
                 net.insert(*addr, balance_change);
             }
@@ -387,62 +391,62 @@ impl AddressBalanceChangeCalculator {
         Ok(net)
     }
     
-    /// Format token movements for JSON output
-    fn format_token_movements(&self, addr: &Address) -> serde_json::Value {
-        let mut result = serde_json::Map::new();
+    /// Format token movements for struct output
+    fn format_token_movements_struct(&self, addr: &Address) -> HashMap<String, TokenMovement> {
+        let mut result = HashMap::new();
         
         if let Some(token_movs) = self.token_movements.get(addr) {
             for (token_addr, movements) in token_movs {
                 let token_key = to_checksum_address(token_addr);
                 
-                let mut in_map = serde_json::Map::new();
+                let mut incoming = HashMap::new();
                 for (tid, entry) in &movements.incoming {
                     let key = format!("{}_{}_{}",tid.block_number, tid.tx_index, tid.log_index);
-                    in_map.insert(key, json!(entry.amount));
+                    incoming.insert(key, entry.amount);
                 }
                 
-                let mut out_map = serde_json::Map::new();
+                let mut outgoing = HashMap::new();
                 for (tid, entry) in &movements.outgoing {
                     let key = format!("{}_{}_{}", tid.block_number, tid.tx_index, tid.log_index);
-                    out_map.insert(key, json!(entry.amount));
+                    outgoing.insert(key, entry.amount);
                 }
                 
-                result.insert(token_key, json!({
-                    "in": in_map,
-                    "out": out_map,
-                }));
+                result.insert(token_key, TokenMovement {
+                    incoming,
+                    outgoing,
+                });
             }
         }
         
-        json!(result)
+        result
     }
     
-    /// Format currency movements for JSON output
-    fn format_currency_movements(&self, addr: &Address) -> serde_json::Value {
-        let mut result = serde_json::Map::new();
+    /// Format currency movements for struct output
+    fn format_currency_movements_struct(&self, addr: &Address) -> HashMap<String, TokenMovement> {
+        let mut result = HashMap::new();
         
         if let Some(currency_movs) = self.currency_movements.get(addr) {
             for (currency_symbol, movements) in currency_movs {
-                let mut in_map = serde_json::Map::new();
+                let mut incoming = HashMap::new();
                 for (tid, entry) in &movements.incoming {
                     let key = format!("{}_{}_{}",tid.block_number, tid.tx_index, tid.log_index);
-                    in_map.insert(key, json!(entry.amount));
+                    incoming.insert(key, entry.amount);
                 }
                 
-                let mut out_map = serde_json::Map::new();
+                let mut outgoing = HashMap::new();
                 for (tid, entry) in &movements.outgoing {
                     let key = format!("{}_{}_{}", tid.block_number, tid.tx_index, tid.log_index);
-                    out_map.insert(key, json!(entry.amount));
+                    outgoing.insert(key, entry.amount);
                 }
                 
-                result.insert(currency_symbol.clone(), json!({
-                    "in": in_map,
-                    "out": out_map,
-                }));
+                result.insert(currency_symbol.clone(), TokenMovement {
+                    incoming,
+                    outgoing,
+                });
             }
         }
         
-        json!(result)
+        result
     }
 }
 

@@ -2,6 +2,7 @@ use alloy_primitives::{Address, B256, U256, Log as AlloyLog};
 use super::data_models::events::*;
 use eyre::Result;
 use tx_simulator::CallFrame;
+use crate::utils::to_checksum_address;
 
 /// Event signatures for common token standards and DEX protocols
 pub struct EventSignatures {

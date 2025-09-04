@@ -1,3 +1,8 @@
 pub mod checksum;
 
-pub use checksum::{to_checksum_address, alloy_address_to_checksum};
+pub use checksum::{
+    to_checksum_address, 
+    alloy_address_to_checksum,
+    serialize_address_checksum,
+    deserialize_address_checksum,
+};

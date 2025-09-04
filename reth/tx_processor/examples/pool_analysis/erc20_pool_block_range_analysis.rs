@@ -14,7 +14,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, U256};
 use tx_processor::{TxProcessor, chain_query::ChainQuery};
 use tx_processor::erc20_token_trading_viability::{
-    analyze_pool_viability,
+    check_can_buy_sell_pool,
     PoolViabilityConfig,
     PoolType,
 };
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
         .with_test_amount(U256::from(100_000_000_000_000_000u64)) // 0.1 ETH
         .with_block(block_number);
         
-        match analyze_pool_viability(simulator.clone(), tx_processor.clone(), config).await {
+        match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), config).await {
             Ok(result) => {
                 let status = if result.is_tradeable { "✅ Yes" } else { "❌ No" };
                 let buy_tax = if result.is_tradeable { 

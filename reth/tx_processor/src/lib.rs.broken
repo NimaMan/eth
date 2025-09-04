@@ -9,20 +9,24 @@
 /// - No complex RPC handling
 /// - Consistent performance
 
-// Re-export the NEW TX Simulator types (NO CallRequest - uses UnsignedTransaction)
+// Re-export the NEW TX Simulator (migrated from reth_tx_simulator)
 pub use tx_simulator::{
     TxSimulator,
-    UnsignedTransaction,
+    CallRequest, 
     SimulationResult,
     FullSimulationResult,
-    SequentialSimulationResult,
-    SequentialTransactionResult,
+    BatchSimulationResult,
     SequentialSimulationOptions,
-    UnsignedTxChainSimulation,
-    ChainStateInfo,
+    SequentialSimulationResult,
 };
 
-// Export transaction processing modules
+// Keep old re-exports for backward compatibility during migration
+pub use reth_tx_simulator::{
+    RethTxSimulator,
+    DetailedSimulationResult,
+};
+
+// Export transaction processing modules (renamed from processing to tx_processor)
 pub mod tx_processor;
 pub mod processed_tx_provider;
 pub mod simulator;
@@ -32,6 +36,8 @@ pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 pub mod config;
 pub mod utils;
 pub mod retry_utils;
+// Chain query moved to external crate reth_chain_query
+// pub mod chain_query;
 
 // Export ERC20 token buy-approve-sell simulator through simulator module
 pub use simulator::erc20_token_buy_approve_sell_tx_simulator;
@@ -42,3 +48,11 @@ pub use simulator::{
     PoolType,
     OptionalSetupBuyApproveSellResult,
 };
+
+
+// Export new modular structure
+// pub mod sequential_tx_simulator;
+
+// Python bindings module (only included when building for Python)
+
+// OLD TX Processor functionality removed - use core::TxProcessor instead

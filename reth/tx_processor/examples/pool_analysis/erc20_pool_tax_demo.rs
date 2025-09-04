@@ -8,7 +8,7 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use tx_processor::{TxProcessor, chain_query::ChainQuery};
 use tx_processor::erc20_token_trading_viability::{
-    analyze_pool_viability,
+    check_can_buy_sell_pool,
     PoolViabilityConfig,
     PoolType,
 };
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     
     // Run the analysis
     println!("Running pool viability analysis...");
-    let result = analyze_pool_viability(
+    let result = check_can_buy_sell_pool(
         simulator,
         tx_processor,
         config,
