@@ -17,6 +17,10 @@ name = "process_transaction_by_hash"
 path = "examples/tx_processor/process_transaction_by_hash.rs"
 
 [[example]]
+name = "buy_approve_sell_floki_with_processed_tx"
+path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_with_processed_tx.rs"
+
+[[example]]
 name = "processed_tx_from_unsigned_tx"
 path = "examples/tx_processor/processed_tx_from_unsigned_tx.rs"
 
@@ -26,8 +30,8 @@ path = "examples/tx_processor/test_bribe_detection.rs"
 
 # Simulation examples
 [[example]]
-name = "buy_approve_sell_with_processed_tx"
-path = "examples/simulation/buy_approve_sell_with_processed_tx.rs"
+name = "buy_approve_sell_usdc_usdt_workflow"
+path = "examples/simulation/buy_approve_sell_usdc_usdt_workflow.rs"
 
 [[example]]
 name = "approval_mechanics_demo"
@@ -42,9 +46,7 @@ name = "parallel_vs_sequential_simulation_benchmark"
 path = "examples/simulation/batch/parallel_vs_sequential_simulation_benchmark.rs"
 
 # Token-specific investigations
-[[example]]
-name = "buy_approve_sell_floki_with_processed_tx"
-path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_with_processed_tx.rs"
+# (buy_approve_sell_floki_with_processed_tx already defined above)
 
 [[example]]
 name = "buy_approve_sell_floki_alternative_methods"
@@ -53,6 +55,19 @@ path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_
 [[example]]
 name = "process_floki_swap_transaction"
 path = "examples/simulation/specific_token_investigation/process_floki_swap_transaction.rs"
+
+[[example]]
+name = "audit_balance_verification"
+path = "examples/simulation/specific_token_investigation/audit_balance_verification.rs"
+
+[[example]]
+name = "investigate_rfi_token_taxes"
+path = "examples/simulation/specific_token_investigation/investigate_rfi_token_taxes.rs"
+
+[[example]]
+name = "investigate_floki_token_taxes"
+path = "examples/simulation/specific_token_investigation/investigate_floki_token_taxes.rs"
+
 
 # Pool analysis examples
 [[example]]
@@ -101,6 +116,12 @@ lazy_static = "1.5"
 
 # Basic Alloy dependencies for examples
 alloy-consensus = "1.0.0"
+
+# Add jsonrpsee for RPC calls
+jsonrpsee = { version = "0.24", features = ["client", "ws-client", "http-client"] }
+
+# Add alloy-rpc-types-trace for CallLogFrame
+alloy-rpc-types-trace = "1.0"
 
 # Add reth_chain_query for direct database access
 reth_chain_query = { path = "../reth_chain_query" }

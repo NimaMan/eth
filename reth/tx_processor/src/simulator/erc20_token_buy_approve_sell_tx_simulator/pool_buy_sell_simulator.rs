@@ -15,7 +15,8 @@ use super::{
     pool_adapters::{PoolAdapter, UniswapV2Adapter, UniswapV3Adapter},
     tax_calculator::{
         calculate_buy_tax_from_processed_transaction,
-        calculate_sell_tax_from_processed_transaction,
+        TaxCalculationResult,
+        // calculate_sell_tax_from_processed_transaction, // TODO: Implement
     },
 };
 
@@ -248,11 +249,10 @@ pub async fn check_can_buy_sell_pool(
         config.token_address,
     );
     
-    let sell_tax = calculate_sell_tax_from_processed_transaction(
-        &sell_processed,
-        config.pool_address,
-        config.buyer_address,
-    );
+    // TODO: Implement sell tax calculation
+    let sell_tax = TaxCalculationResult::InvalidSimulation { 
+        reason: "Sell tax calculation not yet implemented".to_string() 
+    };
     
     let eth_received = extract_eth_received_from_processed_transaction(
         &sell_processed,
@@ -278,8 +278,8 @@ pub async fn check_can_buy_sell_pool(
         can_approve,
         can_sell,
         is_tradeable: can_buy && can_approve && can_sell,
-        buy_tax_percent: buy_tax.tax_percentage_or(0.0),
-        sell_tax_percent: sell_tax.tax_percentage_or(0.0),
+        buy_tax_percent: if can_buy { buy_tax.as_percentage().unwrap_or(0.0) } else { -1.0 },
+        sell_tax_percent: if can_sell { sell_tax.as_percentage().unwrap_or(0.0) } else { -1.0 },
         tokens_received,
         eth_spent: config.test_amount,
         eth_received: eth_received_u256,

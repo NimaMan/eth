@@ -22,6 +22,9 @@ use alloy_primitives::{Address, U256, Bytes};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::ProcessedTransaction;
+use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::tax_calculator::{
+    calculate_buy_tax_from_processed_transaction, TaxCalculationResult
+};
 use std::str::FromStr;
 use hex;
 
@@ -31,6 +34,7 @@ const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E";     // FLOKI token (9 decimals!)
 const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";      // Wrapped ETH
 const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"; // Uniswap V2 Router
+const FLOKI_WETH_POOL: &str = "0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0";     // FLOKI-WETH Uniswap V2 Pool
 const FLOKI_DECIMALS: u8 = 9;  // FLOKI has 9 decimals, not 18!
 
 // Test address with ETH balance (~5.38 ETH)
@@ -210,12 +214,185 @@ async fn execute_floki_trading_workflow(
     let buy_transfers = buy_processed.erc20_transfers.len();
     println!("  ERC20 Transfer events: {}", buy_transfers);
     
-    // Debug: Check ERC20 transfers for comparison
-    println!("\n  🔍 Debug - ERC20 Transfer amounts:");
-    for transfer in &buy_processed.erc20_transfers {
-        if transfer.to_address == buyer {
-            println!("    Transfer to buyer: {} (raw)", transfer.amount);
-            println!("    Transfer to buyer: {} (formatted)", format_floki_amount(transfer.amount));
+    // Debug: Check ALL ERC20 transfers to understand the flow
+    println!("\n  🔍 Debug - ALL ERC20 Transfers:");
+    println!("    Total ERC20 transfers: {}", buy_processed.erc20_transfers.len());
+    
+    // Define key addresses for analysis
+    let floki_address = Address::from_str(FLOKI_ADDRESS)?;
+    let pool_address = Address::from_str(FLOKI_WETH_POOL)?;
+    
+    for (i, transfer) in buy_processed.erc20_transfers.iter().enumerate() {
+        println!("\n    Transfer #{}: ", i + 1);
+        println!("      Token: {}", transfer.token_address);
+        println!("      From:  {}", transfer.from_address);
+        println!("      To:    {}", transfer.to_address);
+        println!("      Amount: {} (raw: {})", 
+                 if transfer.token_address.to_string().to_lowercase() == FLOKI_ADDRESS.to_lowercase() {
+                     format_floki_amount(transfer.amount)
+                 } else {
+                     format!("{} tokens", transfer.amount)
+                 },
+                 transfer.amount);
+        
+        // Identify key addresses
+        if transfer.from_address == pool_address {
+            println!("      ⭐ FROM: FLOKI-WETH Pool");
+        } else if transfer.from_address == buyer {
+            println!("      ⭐ FROM: Buyer");
+        } else if transfer.from_address == Address::from_str(UNISWAP_V2_ROUTER)? {
+            println!("      ⭐ FROM: Uniswap V2 Router");
+        }
+        
+        if transfer.to_address == pool_address {
+            println!("      ⭐ TO: FLOKI-WETH Pool");
+        } else if transfer.to_address == buyer {
+            println!("      ⭐ TO: Buyer");
+        } else if transfer.to_address == Address::from_str(UNISWAP_V2_ROUTER)? {
+            println!("      ⭐ TO: Uniswap V2 Router");
+        }
+        
+        // Special analysis for FLOKI transfers
+        if transfer.token_address.to_string().to_lowercase() == FLOKI_ADDRESS.to_lowercase() {
+            println!("      🟡 This is a FLOKI transfer");
+            
+            if transfer.from_address == pool_address && transfer.to_address == buyer {
+                println!("      💰 Direct pool → buyer transfer");
+            } else if transfer.from_address == pool_address {
+                println!("      📤 Pool sending FLOKI somewhere");
+            } else if transfer.to_address == pool_address {
+                println!("      📥 Pool receiving FLOKI from somewhere");
+            }
+        }
+    }
+    
+    // Debug: Log ALL address balance changes to understand token flow
+    println!("\n  🔍 Debug - ALL Address Balance Changes:");
+    
+    println!("    Key addresses:");
+    println!("      Buyer: {}", buyer);
+    println!("      Pool:  {}", pool_address);
+    println!("      FLOKI: {}", floki_address);
+    
+    // Log every address that had balance changes
+    for (address, changes) in &buy_processed.address_balance_changes {
+        println!("\n    Address: {}", address);
+        
+        // ETH changes
+        if !changes.currency_net.is_empty() {
+            println!("      Currency changes:");
+            for (currency, amount) in &changes.currency_net {
+                let formatted_amount = if currency == "ETH" {
+                    format_eth_amount(*amount)
+                } else {
+                    format!("{} {}", amount, currency)
+                };
+                println!("        {}: {} (raw: {})", currency, formatted_amount, amount);
+                
+                // Special check for negative values that might be displayed as positive
+                println!("        🔍 Raw U256 analysis:");
+                println!("          Hex: {:#x}", amount);
+                println!("          Is > U256::MAX/2: {}", *amount > (U256::MAX / U256::from(2)));
+                if *amount > (U256::MAX / U256::from(2)) {
+                    let negative_amount = U256::MAX - *amount + U256::from(1);
+                    println!("          Interpreted as negative: -{} ({})", 
+                             if currency == "ETH" { format_eth_amount(negative_amount) } else { negative_amount.to_string() },
+                             negative_amount);
+                }
+            }
+        }
+        
+        // Token changes
+        if !changes.token_net.is_empty() {
+            println!("      Token changes:");
+            for (token_key, amount) in &changes.token_net {
+                let formatted_amount = if token_key.contains(&floki_address.to_string()[2..]) {
+                    format_floki_amount(*amount)
+                } else {
+                    format!("{} tokens", amount)
+                };
+                println!("        {}: {} (raw: {})", token_key, formatted_amount, amount);
+                
+                // Special check for negative values that might be displayed as positive
+                println!("        🔍 Raw U256 analysis:");
+                println!("          Hex: {:#x}", amount);
+                println!("          Is > U256::MAX/2: {}", *amount > (U256::MAX / U256::from(2)));
+                if *amount > (U256::MAX / U256::from(2)) {
+                    let negative_amount = U256::MAX - *amount + U256::from(1);
+                    println!("          Interpreted as negative: -{} ({})", 
+                             if token_key.contains(&floki_address.to_string()[2..]) {
+                                 format_floki_amount(negative_amount)
+                             } else {
+                                 format!("{} tokens", negative_amount)
+                             },
+                             negative_amount);
+                }
+            }
+        }
+        
+        // Special analysis for key addresses
+        if *address == buyer {
+            println!("      ⭐ This is the BUYER");
+        } else if *address == pool_address {
+            println!("      ⭐ This is the FLOKI-WETH POOL");
+            
+            // Deep analysis of pool balance changes
+            if let Some(floki_change) = changes.token_net.get(&floki_address.to_string()) {
+                println!("      🔍 POOL FLOKI ANALYSIS:");
+                println!("        Raw value: {}", floki_change);
+                println!("        Formatted: {}", format_floki_amount(*floki_change));
+                println!("        Hex: {:#x}", floki_change);
+                
+                // Check if it's actually a negative value stored as positive
+                if *floki_change > (U256::MAX / U256::from(2)) {
+                    let actual_negative = U256::MAX - *floki_change + U256::from(1);
+                    println!("        ✅ ACTUALLY NEGATIVE: -{} FLOKI", format_floki_amount(actual_negative));
+                } else {
+                    println!("        ❌ POSITIVE VALUE: Pool gained FLOKI (this is wrong!)");
+                }
+            }
+        } else if *address == Address::from_str(UNISWAP_V2_ROUTER)? {
+            println!("      ⭐ This is the Uniswap V2 Router");
+        }
+    }
+    
+    // Calculate buy tax using the tax calculator
+    println!("\n  🔍 Debug - Buy Tax Analysis:");
+    
+    let buy_tax_result = calculate_buy_tax_from_processed_transaction(
+        &buy_processed,
+        pool_address,
+        buyer,
+        floki_address,
+    );
+    
+    match buy_tax_result {
+        TaxCalculationResult::Calculated { tax_basis_points } => {
+            if let Some(tax_percentage) = buy_tax_result.as_percentage() {
+                println!("    ✅ Buy tax calculated: {:.2}% ({} basis points)", tax_percentage, tax_basis_points);
+                if tax_basis_points > 0 {
+                    println!("    ⚠️  FLOKI has a {:.2}% buy tax!", tax_percentage);
+                    println!("       This means you receive {:.2}% fewer tokens than expected", tax_percentage);
+                } else {
+                    println!("    ✅ No buy tax detected");
+                }
+            }
+        }
+        TaxCalculationResult::InvalidSimulation { reason } => {
+            println!("    ❌ Could not calculate buy tax: {}", reason);
+            
+            // Manual analysis based on what we found
+            let buyer_floki = buy_processed.get_address_token_balance_change(&buyer, &floki_address).unwrap_or(U256::ZERO);
+            let pool_floki = buy_processed.get_address_token_balance_change(&pool_address, &floki_address).unwrap_or(U256::ZERO);
+            
+            println!("    📊 Manual analysis:");
+            println!("      Buyer FLOKI change: {} ({})", buyer_floki, format_floki_amount(buyer_floki));
+            println!("      Pool FLOKI change: {} ({})", pool_floki, format_floki_amount(pool_floki));
+            
+            if pool_floki > U256::ZERO {
+                println!("      ⚠️  Pool GAINED FLOKI - this indicates a tax/reflection mechanism");
+                println!("      💡 FLOKI likely redistributes tokens to holders during transactions");
+            }
         }
     }
     
@@ -229,23 +406,9 @@ async fn execute_floki_trading_workflow(
     // For FLOKI, we might need to try different sell amounts due to restrictions
     // Let's try different amounts to see what works
     
-    // Test different scales based on decimals
+    // Test selling the full amount received from buy
     let test_amounts = vec![
         ("Full amount", metrics.tokens_received_wei),
-        ("99% of amount", metrics.tokens_received_wei * U256::from(99) / U256::from(100)),
-        ("90% of amount", metrics.tokens_received_wei * U256::from(90) / U256::from(100)),
-        ("50% of amount", metrics.tokens_received_wei / U256::from(2)),
-        ("10% of amount", metrics.tokens_received_wei / U256::from(10)),
-        ("1% of amount", metrics.tokens_received_wei / U256::from(100)),
-        ("1M FLOKI", U256::from(1_000_000u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("100K FLOKI", U256::from(100_000u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("10K FLOKI", U256::from(10_000u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("1K FLOKI", U256::from(1_000u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("100 FLOKI", U256::from(100u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("10 FLOKI", U256::from(10u64) * U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("1 FLOKI", U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))),
-        ("0.1 FLOKI", U256::from(10u64).pow(U256::from(FLOKI_DECIMALS - 1))),
-        ("0.01 FLOKI", U256::from(10u64).pow(U256::from(FLOKI_DECIMALS - 2))),
     ];
     
     println!("\n  🔍 Debug - Testing different sell amounts:");
@@ -437,13 +600,13 @@ async fn execute_floki_trading_workflow(
         println!("       This indicates transfer restrictions");
     }
     
-    // Step 3: Attempt to sell 10% of FLOKI we received (to reduce price impact)
-    println!("\n[Step 3] Selling 10% of FLOKI received from buy...");
+    // Step 3: Attempt to sell 100% of FLOKI we received
+    println!("\n[Step 3] Selling 100% of FLOKI received from buy...");
     
-    // Sell 10% of the amount we received from the buy
-    let floki_amount_to_sell = metrics.tokens_received_wei / U256::from(10);
+    // Sell all of the amount we received from the buy
+    let floki_amount_to_sell = metrics.tokens_received_wei;
     
-    println!("  🔄 Attempting to sell 10% of received amount");
+    println!("  🔄 Attempting to sell 100% of received amount");
     println!("    Total received: {} raw ({} formatted)", 
              metrics.tokens_received_wei, format_floki_amount(metrics.tokens_received_wei));
     println!("    Amount to sell: {} raw ({} formatted)", 

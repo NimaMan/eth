@@ -1,28 +1,46 @@
-/// Tax calculation for buy and sell transactions
+/// Tax Calculator for ERC20 Tokens using ProcessedTransaction
 /// 
 /// Uses the modern currency_net approach from ProcessedTransaction
-/// to accurately calculate taxes from ETH balance changes.
+/// to accurately calculate taxes from address balance changes.
 
 use alloy_primitives::{Address, U256};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
 use crate::utils::to_checksum_address;
 
+/// Check if U256 value represents a negative number (two's complement)
+fn is_negative_u256(value: U256) -> bool {
+    value > U256::MAX / U256::from(2)
+}
+
+/// Get absolute value of potentially negative U256 (two's complement)
+fn abs_u256(value: U256) -> U256 {
+    if is_negative_u256(value) {
+        // Negative value - convert to positive
+        U256::MAX - value + U256::from(1)
+    } else {
+        // Already positive
+        value
+    }
+}
+
 /// Result of tax calculation
 #[derive(Debug, Clone)]
 pub enum TaxCalculationResult {
-    /// Tax calculated successfully
-    Calculated { tax_percentage: f64 },
+    /// Tax calculated successfully in basis points (e.g., 30 = 0.30%)
+    Calculated { tax_basis_points: u32 },
     /// Unable to calculate due to invalid simulation data
     InvalidSimulation { reason: String },
 }
 
 impl TaxCalculationResult {
-    /// Extract tax percentage, or return default value if calculation failed
-    pub fn tax_percentage_or(&self, default: f64) -> f64 {
+    /// Get tax percentage as f64 for display (e.g., 30 basis points = 0.30%)
+    pub fn as_percentage(&self) -> Option<f64> {
         match self {
-            TaxCalculationResult::Calculated { tax_percentage } => *tax_percentage,
-            TaxCalculationResult::InvalidSimulation { .. } => default,
+            TaxCalculationResult::Calculated { tax_basis_points } => {
+                Some(*tax_basis_points as f64 / 100.0)
+            }
+            TaxCalculationResult::InvalidSimulation { .. } => None,
         }
     }
     
@@ -32,46 +50,33 @@ impl TaxCalculationResult {
     }
 }
 
-/// Extract ETH change for an address from address_balance_changes
-fn extract_eth_change(processed_tx: &ProcessedTransaction, address: Address) -> f64 {
-    if let Some(balance_changes) = processed_tx.address_balance_changes.get(&address) {
-        if let Some(&eth_amount) = balance_changes.currency_net.get("ETH") {
-            // Convert from wei to ETH
-            return eth_amount.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
-        }
-    }
-    0.0
-}
-
 /// Extract token change for an address from address_balance_changes
-fn extract_token_change(processed_tx: &ProcessedTransaction, address: Address, token_address: Address) -> f64 {
+/// Returns the raw U256 value (potentially negative in two's complement)
+fn extract_token_change(processed_tx: &ProcessedTransaction, address: Address, token_address: Address) -> Option<U256> {
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&address) {
         // Check if it's a known token (in currency_net)
         if let Some(symbol) = get_token_symbol(&token_address) {
             if let Some(&amount) = balance_changes.currency_net.get(symbol) {
-                // For known tokens, amount is already with decimals applied
-                return amount.to_string().parse::<f64>().unwrap_or(0.0);
+                return Some(amount);
             }
         } else {
             // Unknown token - check token_net
             let token_key = to_checksum_address(&token_address);
             if let Some(&amount) = balance_changes.token_net.get(&token_key) {
-                // Raw amount with decimals
-                return amount.to_string().parse::<f64>().unwrap_or(0.0);
+                return Some(amount);
             }
         }
     }
-    0.0
+    None
 }
 
-/// Calculate buy tax from ProcessedTransaction
+/// Calculate buy tax from ProcessedTransaction using address balance changes
 /// 
-/// Buy Tax Formula: (1 - tokens_received_by_buyer / tokens_sent_by_pool) × 100
-/// 
-/// We look at ERC20 transfers to determine:
-/// 1. Total tokens sent from the pool
-/// 2. Tokens received by the buyer
-/// 3. The difference is the tax
+/// Buy Tax Logic:
+/// 1. Pool should have negative token change (loses tokens)
+/// 2. Buyer should have positive token change (gains tokens)  
+/// 3. Tax = tokens_sent_by_pool - tokens_received_by_buyer
+/// 4. Tax percentage = (tax_amount * 10000) / tokens_sent_by_pool (basis points)
 pub fn calculate_buy_tax_from_processed_transaction(
     processed_tx: &ProcessedTransaction,
     pool_address: Address,
@@ -82,93 +87,63 @@ pub fn calculate_buy_tax_from_processed_transaction(
     let pool_token_change = extract_token_change(processed_tx, pool_address, token_address);
     let buyer_token_change = extract_token_change(processed_tx, buyer_address, token_address);
     
-    // Pool should have negative change (sending tokens), buyer should have positive (receiving)
-    if pool_token_change >= 0.0 {
+    let pool_change = match pool_token_change {
+        Some(change) => change,
+        None => return TaxCalculationResult::InvalidSimulation {
+            reason: "Pool has no token balance change".to_string()
+        }
+    };
+    
+    let buyer_change = match buyer_token_change {
+        Some(change) => change,
+        None => return TaxCalculationResult::InvalidSimulation {
+            reason: "Buyer has no token balance change".to_string()
+        }
+    };
+    
+    // Pool should have negative change (sending tokens)
+    if !is_negative_u256(pool_change) {
         return TaxCalculationResult::InvalidSimulation {
-            reason: format!("Pool token change is non-negative ({}) - pool should lose tokens in a buy", pool_token_change)
+            reason: format!("Pool token change is non-negative ({}) - pool should lose tokens in a buy", pool_change)
         };
     }
     
-    if buyer_token_change <= 0.0 {
-        // Buyer received no tokens - 100% tax (honeypot)
-        if pool_token_change < 0.0 {
-            return TaxCalculationResult::Calculated { 
-                tax_percentage: 100.0
-            };
-        } else {
-            return TaxCalculationResult::InvalidSimulation {
-                reason: format!("Buyer token change is non-positive ({}) - invalid buy simulation", buyer_token_change)
-            };
-        }
+    // Buyer should have positive change (receiving tokens)
+    if is_negative_u256(buyer_change) {
+        return TaxCalculationResult::InvalidSimulation {
+            reason: "Buyer has negative token change - should gain tokens in buy".to_string()
+        };
     }
     
-    // Calculate tax percentage
-    // Pool loses tokens (negative), so we need absolute value
-    let tokens_from_pool = pool_token_change.abs();
-    let tokens_to_buyer = buyer_token_change;
+    // Convert pool change to positive (tokens sent out)
+    let pool_tokens_sent = abs_u256(pool_change);
+    let buyer_tokens_received = buyer_change;
     
-    if tokens_from_pool > 0.0 {
-        let tax_percent = (1.0 - (tokens_to_buyer / tokens_from_pool)) * 100.0;
-        TaxCalculationResult::Calculated {
-            tax_percentage: tax_percent.max(0.0)
-        }
+    // Calculate tax: tokens sent by pool - tokens received by buyer
+    if pool_tokens_sent < buyer_tokens_received {
+        // This shouldn't happen - buyer can't receive more than pool sent
+        return TaxCalculationResult::InvalidSimulation {
+            reason: "Buyer received more tokens than pool sent".to_string()
+        };
+    }
+    
+    let tax_amount = pool_tokens_sent - buyer_tokens_received;
+    
+    // Calculate tax percentage in basis points (e.g., 30 = 0.30%)
+    if pool_tokens_sent == U256::ZERO {
+        return TaxCalculationResult::Calculated { tax_basis_points: 0 };
+    }
+    
+    // tax_basis_points = (tax_amount * 10000) / pool_tokens_sent
+    let tax_basis_points = if tax_amount == U256::ZERO {
+        0
     } else {
-        TaxCalculationResult::InvalidSimulation {
-            reason: "Pool sent zero tokens - invalid calculation".to_string()
-        }
-    }
+        let basis_points_calc = (tax_amount * U256::from(10000)) / pool_tokens_sent;
+        // Convert to u32, capping at u32::MAX if somehow larger
+        basis_points_calc.try_into().unwrap_or(u32::MAX)
+    };
+    
+    TaxCalculationResult::Calculated { tax_basis_points }
 }
 
-/// Calculate sell tax from ProcessedTransaction
-/// 
-/// Sell Tax Formula: (1 - eth_received_by_seller / eth_sent_by_pool) × 100
-/// 
-/// We look at internal transactions to determine:
-/// 1. Total ETH sent from the pool
-/// 2. ETH received by the seller
-/// 3. The difference is the tax
-pub fn calculate_sell_tax_from_processed_transaction(
-    processed_tx: &ProcessedTransaction,
-    pool_address: Address,
-    seller_address: Address,
-) -> TaxCalculationResult {
-    // Get ETH changes from address_balance_changes
-    let pool_eth_change = extract_eth_change(processed_tx, pool_address);
-    let seller_eth_change = extract_eth_change(processed_tx, seller_address);
-    
-    // Pool should have negative change (sending ETH), seller should have positive (receiving)
-    if pool_eth_change >= 0.0 {
-        return TaxCalculationResult::InvalidSimulation {
-            reason: format!("Pool ETH change is non-negative ({}) - pool should lose ETH in a sell", pool_eth_change)
-        };
-    }
-    
-    if seller_eth_change <= 0.0 {
-        // Seller received no ETH - 100% tax (honeypot)
-        if pool_eth_change < 0.0 {
-            return TaxCalculationResult::Calculated {
-                tax_percentage: 100.0
-            };
-        } else {
-            return TaxCalculationResult::InvalidSimulation {
-                reason: format!("Seller ETH change is non-positive ({}) - invalid sell simulation", seller_eth_change)
-            };
-        }
-    }
-    
-    // Calculate tax percentage
-    // Pool loses ETH (negative), so we need absolute value
-    let eth_from_pool = pool_eth_change.abs();
-    let eth_to_seller = seller_eth_change;
-    
-    if eth_from_pool > 0.0 {
-        let tax_percent = (1.0 - (eth_to_seller / eth_from_pool)) * 100.0;
-        TaxCalculationResult::Calculated {
-            tax_percentage: tax_percent.max(0.0)
-        }
-    } else {
-        TaxCalculationResult::InvalidSimulation {
-            reason: "Pool sent zero ETH - invalid calculation".to_string()
-        }
-    }
-}
+// TODO: Implement sell tax calculation with U256 arithmetic if needed
