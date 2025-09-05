@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     info!("🚀 Starting Transaction Router with Token Cache Example");
 
     // Create log directory and file
-    let log_dir = "/home/nima/code/crypto/logs/mempool/tx_router";
+    let log_dir = "/home/nima/code/crypto/rust/mempool_processor/logs/tx_router";
     fs::create_dir_all(log_dir)?;
     
     let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
@@ -68,16 +68,16 @@ async fn main() -> Result<()> {
     info!("⏳ Waiting for initial token cache population...");
     tokio::time::sleep(Duration::from_secs(2)).await;
     
-    let initial_pools = token_cache.pools.get_pool_count().await;
-    let initial_creators = token_cache.creators.get_creator_count().await;
+    let initial_pools = token_cache.get_pool_count().await;
+    let initial_creators = token_cache.get_creator_count().await;
     
     // Get some sample entries to verify cache is populated
-    let sample_pools = token_cache.pools.get_all_pools().await;
-    let sample_creators = token_cache.creators.get_all_creators().await;
+    let sample_pools = token_cache.get_pools_for_token_compat("").await; // Get sample pools
+    let sample_creators = token_cache.creator_addresses().await;
     
     // Count unique tokens from pools
-    let initial_tokens: usize = sample_pools.values()
-        .map(|pool| &pool.token_address)
+    let initial_tokens: usize = sample_pools.iter()
+        .map(|(_, pool)| &pool.token_address)
         .collect::<std::collections::HashSet<_>>()
         .len();
     
@@ -107,11 +107,8 @@ async fn main() -> Result<()> {
     // Log first 5 creators as examples
     if !sample_creators.is_empty() {
         writeln!(log_file, "\n  Sample Creators (first 5):")?;
-        for (i, (token_addr, creator_state)) in sample_creators.iter().take(5).enumerate() {
-            writeln!(log_file, "    {}. Token: {}", i + 1, token_addr)?;
-            writeln!(log_file, "       Creator: {}", creator_state.creator.creator_address)?;
-            writeln!(log_file, "       Private Mempool: {}", creator_state.creator.uses_private_mempool)?;
-            writeln!(log_file, "       Total Observed TXs: {}", creator_state.observed_transactions.len())?;
+        for (i, creator_addr) in sample_creators.iter().take(5).enumerate() {
+            writeln!(log_file, "    {}. Creator: {}", i + 1, creator_addr)?;
         }
     }
     writeln!(log_file, "===================")?;
@@ -193,29 +190,14 @@ async fn main() -> Result<()> {
                     writeln!(log_file, "    Function: {:?}", function_type)?;
                     
                     // Check if this was a cache hit
-                    if token_cache.creators.is_creator(creator).await {
+                    if token_cache.is_creator(creator).await {
                         creator_cache_hits += 1;
                         writeln!(log_file, "    Cache: HIT (creator known)")?;
                     } else {
                         writeln!(log_file, "    Cache: MISS (creator unknown)")?;
                     }
                 }
-                TransactionCategory::DexInteraction { dex_type, action, token_address, pool_address } => {
-                    dex_interactions += 1;
-                    writeln!(log_file, "  Category: DEX_INTERACTION")?;
-                    writeln!(log_file, "    DEX: {:?}", dex_type)?;
-                    writeln!(log_file, "    Action: {:?}", action)?;
-                    
-                    // Check pool cache
-                    if let Some(pool) = pool_address {
-                        if token_cache.pools.get_pool(pool).await.is_some() {
-                            pool_cache_hits += 1;
-                            writeln!(log_file, "    Cache: HIT (pool known)")?;
-                        } else {
-                            writeln!(log_file, "    Cache: MISS (pool unknown)")?;
-                        }
-                    }
-                }
+                // DexInteraction category no longer exists - handle as regular transaction
                 TransactionCategory::Regular { is_transfer, is_approval } => {
                     regular_txs += 1;
                     if processed < 10 || *is_transfer || *is_approval { // Log first 10 or interesting ones
@@ -244,8 +226,8 @@ async fn main() -> Result<()> {
                 info!("Progress: {}/{} transactions ({:.0} tx/sec)", processed, target_count, rate);
                 
                 // Check cache growth
-                let current_pools = token_cache.pools.get_pool_count().await;
-                let current_creators = token_cache.creators.get_creator_count().await;
+                let current_pools = token_cache.get_pool_count().await;
+                let current_creators = token_cache.get_creator_count().await;
                 if current_pools > initial_pools || current_creators > initial_creators {
                     info!("  Cache updated: {} pools (+{}), {} creators (+{})", 
                           current_pools, current_pools - initial_pools,
@@ -262,13 +244,13 @@ async fn main() -> Result<()> {
     let total_elapsed = start_time.elapsed();
     
     // Final cache state
-    let final_pools = token_cache.pools.get_pool_count().await;
-    let final_creators = token_cache.creators.get_creator_count().await;
+    let final_pools = token_cache.get_pool_count().await;
+    let final_creators = token_cache.get_creator_count().await;
     
     // Count unique tokens from pools for final state
-    let final_sample_pools = token_cache.pools.get_all_pools().await;
-    let final_tokens: usize = final_sample_pools.values()
-        .map(|pool| &pool.token_address)
+    let final_sample_pools = token_cache.get_pools_for_token_compat("").await;
+    let final_tokens: usize = final_sample_pools.iter()
+        .map(|(_, pool)| &pool.token_address)
         .collect::<std::collections::HashSet<_>>()
         .len();
 

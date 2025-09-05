@@ -59,8 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Create log file
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+    // Create log directory if it doesn't exist
+    std::fs::create_dir_all("/home/nima/code/crypto/rust/mempool_processor/logs")?;
     let log_path = format!(
-        "/home/nima/code/crypto/logs/mempool/instant_fetch_{}tx_{}.csv",
+        "/home/nima/code/crypto/rust/mempool_processor/logs/instant_fetch_{}tx_{}.csv",
         args.tx_count,
         timestamp
     );
@@ -69,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Also create a separate file with just transaction hashes for easy Etherscan verification
     let hash_log_path = format!(
-        "/home/nima/code/crypto/logs/mempool/tx_hashes_{}tx_{}.txt",
+        "/home/nima/code/crypto/rust/mempool_processor/logs/tx_hashes_{}tx_{}.txt",
         args.tx_count,
         timestamp
     );

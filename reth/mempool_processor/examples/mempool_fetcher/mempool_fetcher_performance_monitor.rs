@@ -12,7 +12,7 @@
 /// 
 /// Run with: cargo run --example mempool_fetcher_performance_monitor --release
 /// 
-/// Logs to: /home/nima/code/crypto/logs/mempool/performance_YYYYMMDD_HHMMSS.csv
+/// Logs to: /home/nima/code/crypto/rust/mempool_processor/logs/performance_YYYYMMDD_HHMMSS.csv
 
 use std::time::{Instant, Duration, SystemTime, UNIX_EPOCH};
 use std::fs::File;
@@ -136,7 +136,7 @@ fn check_transaction_completeness(tx: &mempool_processor::mempool_fetcher::Mempo
 
 async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
-    let log_dir = "/home/nima/code/crypto/logs/mempool";
+    let log_dir = "/home/nima/code/crypto/rust/mempool_processor/logs";
     std::fs::create_dir_all(log_dir)?;
     
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");

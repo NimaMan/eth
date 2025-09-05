@@ -1,16 +1,29 @@
 # Mempool Processor Examples
 
-This directory contains essential examples demonstrating the mempool processor functionality.
+## Mempool Fetcher Examples
+- **test_fetcher_simple.rs** - Quick connectivity test for IPC client, fetches 10 transactions and shows detection latency
+- **mempool_fetcher_performance_monitor.rs** - Continuous performance monitoring with real-time stats (TPS, latency percentiles, queue depth)
+- **measure_instant_fetch_performance.rs** - Compares instant vs standard fetch methods with timing analysis
+- **verify_new_transactions_only.rs** - Validates no duplicate transactions are received, shows duplicate detection statistics
+- **function_detector_example.rs** - Demonstrates function signature detection from transaction calldata
 
-## Directory Structure
+## TX Router Examples  
+- **tx_router_example.rs** - Complete pipeline demo: connects to Python publisher, builds token cache, processes 1000 transactions through function detector and router, logs detailed classification results
 
-### mempool_fetcher/
-Examples for testing and benchmarking the mempool fetching components:
-- `analyze_log_timing.rs` - Analyzes timing patterns from logs
-- `analyze_transaction_arrival_pattern.rs` - Studies transaction arrival patterns
-- `measure_instant_fetch_performance.rs` - Measures instant fetch performance
-- `mempool_fetcher_performance_monitor.rs` - Production monitoring tool
-- `verify_new_transactions_only.rs` - Validates new transaction handling
+## Simulator Examples
+- **test_mempool_simulator.rs** - Tests database lock prevention with pool buy/sell simulation on multiple pools
+- **basic_mempool_simulation.rs** - Live mempool transaction simulation using NonBlockingIpcClient and TxSimulator
+- **test_buy_sell_simulator.rs** - Buy/sell tax simulation for specific tokens with state change analysis
+- **test_specific_tx_simulation.rs** - Simulates individual transactions with detailed state change extraction
+
+## Signal Detector Examples
+- **simulation_pipeline.rs** - Full signal detection pipeline: fetches transactions, simulates, detects signals (tax, trading, liquidity)
+- **simulation_only.rs** - Simulation-focused pipeline without signal publishing
+
+## Token Parameter Extraction Examples
+- **simulate_buy_sell_taxes.rs** - Calculates buy/sell taxes using transaction simulation
+- **analyze_token_with_detectors.rs** - Comprehensive token analysis using multiple detection methods
+- **get_token_info_via_rpc.rs** - Fetches token metadata via RPC calls
 
 ### reth_simulation/
 Examples for Direct Reth simulation (20-40x faster than RPC):
