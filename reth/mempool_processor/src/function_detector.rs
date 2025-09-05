@@ -83,18 +83,6 @@ lazy_static! {
     
     
     
-    /// Main signal detector log file
-    static ref SIGNAL_DETECTOR_LOG: Mutex<std::fs::File> = {
-        let log_path = LOG_DIR.join("function_detector.log");
-        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)
-            .expect("Failed to open function detector log file");
-        
-        Mutex::new(file)
-    };
     
     
     /// Global statistics
@@ -171,17 +159,14 @@ impl FunctionDetector {
         info!("🔍 Function detector initialized");
         info!("📁 Log directory: {}", LOG_DIR.display());
         
-        // Log startup information to signal detector log
-        if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
-            let _ = writeln!(log_file, "\n{} ==========================================", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 🚀 Starting Mempool Signal Detection Service", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} ⚡ Using non-blocking IPC for sub-millisecond latency", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 🔍 Function detector initialized", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} 📁 Log directory: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"), LOG_DIR.display());
-            let _ = writeln!(log_file, "{} 🎯 Starting main processing loop...", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = writeln!(log_file, "{} ==========================================\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
-            let _ = log_file.flush();
-        }
+        // Startup information now only goes to stdout/main log via tracing
+        info!("==========================================");
+        info!("🚀 Starting Mempool Signal Detection Service");
+        info!("⚡ Using non-blocking IPC for sub-millisecond latency");
+        info!("🔍 Function detector initialized");
+        info!("📁 Log directory: {}", LOG_DIR.display());
+        info!("🎯 Starting main processing loop...");
+        info!("==========================================");
         
         Self {
             liquidity_removal: LiquidityRemovalDetector::new(),
@@ -391,23 +376,15 @@ impl FunctionDetector {
         
         // Check if the approve is being called on an LP token contract
         if let Some(to_bytes) = &tx.to {
-            let to_addr = hex::encode(to_bytes);
+            let to_addr = checksum_address(&hex::encode(to_bytes));
             
+            // Check if the 'to' address is a pool (LP token)
             if let Some(ref cache) = self.token_cache {
-                let from_addr = checksum_address(&hex::encode(&tx.from));
+                let is_pool = futures::executor::block_on(cache.is_pool(&to_addr));
                 
-                // Get the token created by this address
-                if let Some(token_info) = futures::executor::block_on(cache.get_token_for_creator(&from_addr)) {
-                    // Get all pools for this token
-                    let pools = futures::executor::block_on(cache.get_pools_for_token(&token_info.address));
-                    
-                    // Check if the 'to' address is one of the pool addresses
-                    for pool in pools {
-                        if to_addr.eq_ignore_ascii_case(&pool.address) {
-                            // Creator is approving router to spend LP tokens = rug pull setup
-                            return CreatorFunctionType::LiquidityPoolApproval;
-                        }
-                    }
+                if is_pool {
+                    // Anyone approving router to spend LP tokens = liquidity removal preparation
+                    return CreatorFunctionType::LiquidityPoolApproval;
                 }
             }
         }
@@ -532,54 +509,72 @@ impl FunctionDetector {
             return;
         }
         
-        // Check for approve function first - needs special handling
+        // Check for approve function - log if it's an LP token approval
+        // Note: Classification already done in detect_and_categorize, this is just for logging
         if selector_bytes == &hex_to_bytes("095ea7b3") {
-            // This is an approve function - check if it's an LP token approval
-            let is_lp_approval = if let Some(ref cache) = self.token_cache {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        cache.is_pool(&to.to_string()).await
-                    })
-                })
-            } else {
-                false
-            };
-            
-            if is_lp_approval {
-                // This is an LP token approval - critical signal!
-                stats.liquidity_removals += 1; // Count as liquidity removal preparation
-                info!("🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}", tx_hash);
+            // Check if this was classified as an LP approval
+            // We need to check the same way as classify_approve does
+            if input_data.len() >= 68 {
+                // Extract spender address from input data
+                let spender_bytes = &input_data[16..36];
+                let spender_hex = hex::encode(spender_bytes);
                 
-                // Create critical signal alert - only encode to hex when needed for external publishing
-                let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
-                    selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]);
-                let signal = SignalAlert {
-                    alert_type: "lp_token_approval".to_string(),
-                    function_name: "approve (LP Token)".to_string(),
-                    tx_hash: tx_hash.to_string(),
-                    from_address: from.to_string(),
-                    to_address: to.to_string(),
-                    value: value.to_string(),
-                    gas_price: gas_price.to_string(),
-                    selector: selector_hex.clone(),
-                    timestamp: timestamp.to_string(),
-                    detection_latency_us: 0,
+                // Check if spender is a known router
+                const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
+                const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+                
+                let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER) ||
+                                         spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+                
+                if is_router_approval {
+                    // Check if the 'to' address is a pool
+                    let is_lp_approval = if let Some(ref cache) = self.token_cache {
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                cache.is_pool(&to.to_string()).await
+                            })
+                        })
+                    } else {
+                        false
                     };
-                
-                // Publish via ZMQ
-                self.publish_signal(&signal);
-                
-                // Log to liquidity removal file as preparation
-                if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
-                    let _ = writeln!(log_file, 
-                        "[{}] LP APPROVAL TX: {} | From: {} | LP Pair: {} | Value: {} | GasPrice: {} | Function: approve (LP Token) | Selector: {}", 
-                        timestamp, tx_hash, from, to, value, gas_price, selector_hex
-                    );
-                    let _ = log_file.flush();
+                    
+                    if is_lp_approval {
+                        // This is an LP token approval - critical signal!
+                        stats.liquidity_removals += 1; // Count as liquidity removal preparation
+                        info!("🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}", tx_hash);
+                        
+                        // Create critical signal alert
+                        let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
+                            selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]);
+                        let signal = SignalAlert {
+                            alert_type: "lp_token_approval".to_string(),
+                            function_name: "approve (LP Token)".to_string(),
+                            tx_hash: tx_hash.to_string(),
+                            from_address: from.to_string(),
+                            to_address: to.to_string(),
+                            value: value.to_string(),
+                            gas_price: gas_price.to_string(),
+                            selector: selector_hex.clone(),
+                            timestamp: timestamp.to_string(),
+                            detection_latency_us: 0,
+                        };
+                        
+                        // Publish via ZMQ
+                        self.publish_signal(&signal);
+                        
+                        // Log to liquidity removal file as preparation
+                        if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
+                            let _ = writeln!(log_file, 
+                                "[{}] LP APPROVAL TX: {} | From: {} | LP Pair: {} | Value: {} | GasPrice: {} | Function: approve (LP Token) | Selector: {}", 
+                                timestamp, tx_hash, from, to, value, gas_price, selector_hex
+                            );
+                            let _ = log_file.flush();
+                        }
+                        return;
+                    }
                 }
-                return;
             }
-            // Regular token approval - just log as other function
+            // Regular token approval - just count
             stats.other_functions += 1;
             return;
         }
@@ -641,22 +636,6 @@ impl FunctionDetector {
         info!("   Trading enabled: {}", stats.trading_enabled);
         info!("   Swaps: {}", stats.swaps);
         info!("   Other functions: {}", stats.other_functions);
-    }
-    
-    /// Log performance metrics to the performance log
-    pub fn log_performance_metrics(&self, total_processed: u64, 
-                                  avg_detection_ms: f64, max_detection_ms: f64,
-                                  avg_function_ms: f64, max_function_ms: f64) {
-        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        
-        if let Ok(mut log_file) = SIGNAL_DETECTOR_LOG.lock() {
-            let _ = writeln!(log_file, "\n[{}] === SIGNAL DETECTOR PERFORMANCE ({} processed) ===", timestamp, total_processed);
-            let _ = writeln!(log_file, "  IPC Detection Latency: Average: {:.3}ms, Maximum: {:.3}ms", 
-                           avg_detection_ms, max_detection_ms);
-            let _ = writeln!(log_file, "  Function Detection Time: Average: {:.3}ms, Maximum: {:.3}ms", 
-                           avg_function_ms, max_function_ms);
-            let _ = log_file.flush();
-        }
     }
 }
 

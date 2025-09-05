@@ -11,14 +11,10 @@
 - **tx_router_example.rs** - Complete pipeline demo: connects to Python publisher, builds token cache, processes 1000 transactions through function detector and router, logs detailed classification results
 
 ## Simulator Examples
-- **test_mempool_simulator.rs** - Tests database lock prevention with pool buy/sell simulation on multiple pools
-- **basic_mempool_simulation.rs** - Live mempool transaction simulation using NonBlockingIpcClient and TxSimulator
-- **test_buy_sell_simulator.rs** - Buy/sell tax simulation for specific tokens with state change analysis
-- **test_specific_tx_simulation.rs** - Simulates individual transactions with detailed state change extraction
-
-## Signal Detector Examples
+- **database_lock_prevention_demo.rs** - Demonstrates MempoolSimulator prevents database locks during pool buy/sell simulations
+- **live_mempool_transaction_simulation.rs** - Live mempool transaction simulation using MempoolFetcherIPCClient and MempoolSimulator with automatic nonce retry
+- **token_tax_calculation_with_external_processor.rs** - Tax calculation using external tx_processor with known tokens (AITAI, 0xT, FLOKI)
 - **simulation_pipeline.rs** - Full signal detection pipeline: fetches transactions, simulates, detects signals (tax, trading, liquidity)
-- **simulation_only.rs** - Simulation-focused pipeline without signal publishing
 
 ## Token Parameter Extraction Examples
 - **simulate_buy_sell_taxes.rs** - Calculates buy/sell taxes using transaction simulation
@@ -34,7 +30,7 @@ Examples for Direct Reth simulation (20-40x faster than RPC):
 
 ### tx_simulation/
 Examples for the new unified TxSimulator API:
-- `test_state_changes_nonblocking.rs` - NonBlockingIpcClient + TxSimulator demo
+- `test_state_changes_nonblocking.rs` - MempoolFetcherIPCClient + TxSimulator demo
 
 ## Examples with Input/Output
 
@@ -45,13 +41,13 @@ Examples for the new unified TxSimulator API:
 
 **Output**:
 ```
-🚀 TxSimulator API Demo with NonBlockingIpcClient
+🚀 TxSimulator API Demo with MempoolFetcherIPCClient
 =================================================
 
 ✅ DirectTxSimulator initialized in 19.597037ms
    🎯 Direct Reth database access for ultra-fast simulation
-📡 Connecting to mempool via NonBlockingIpcClient...
-✅ NonBlockingIpcClient started - Sub-10μs detection!
+📡 Connecting to mempool via MempoolFetcherIPCClient...
+✅ MempoolFetcherIPCClient started - Sub-10μs detection!
 
 📊 Processing transaction #1
    Hash: 0x07f0ef9defbd97
@@ -84,7 +80,7 @@ Examples for the new unified TxSimulator API:
 
 ✅ Demo completed successfully!
 💡 This example demonstrates:
-   - NonBlockingIpcClient for microsecond detection
+   - MempoolFetcherIPCClient for microsecond detection
    - TxSimulator with automatic latest block handling
    - Nonce retry logic built-in
    - Clean, unified API

@@ -25,63 +25,25 @@ use mempool_processor::{
     mempool_fetcher::{NonBlockingIpcClient, MempoolTransaction},
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter as TxRouter, TransactionCategory, SimulationPriority},
-    simulator::{UnifiedSimulator, BuySellSimulatorConfig},
+    simulator::MempoolSimulator,
     token_tracking::{TokenTrackingCache, TokenTrackingSubscriber},
 };
 use std::collections::{HashMap, VecDeque};
-use alloy_primitives::Address;
-use reth_tx_simulator::AddressStateChange;
-use mempool_processor::simulator::SequenceSimulationResult;
+use alloy_primitives::{Address, U256};
+// Import pool simulation types from tx_processor
+use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::{
+    config::PoolViabilityConfig,
+    types::{PoolType, PoolViabilityResult},
+};
+use std::str::FromStr;
+// Import the correct types from simulation_manager
+use mempool_processor::simulator::simulation_manager::{SimulationResult, BuySellResult, SimulationRequest, SimulationType};
 
 // ========== Simplified Simulation Manager (No Signal Detection) ==========
 
-/// Types of simulation to perform
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SimulationType {
-    /// Only simulate the transaction itself
-    TransactionOnly,
-    /// Simulate transaction then buy/sell sequence
-    TransactionWithBuySell,
-    /// Only simulate buy/sell (for existing tokens)
-    BuySellOnly,
-}
+// SimulationRequest, SimulationType are imported from simulation_manager
 
-/// Request for simulation
-#[derive(Debug, Clone)]
-pub struct SimulationRequest {
-    pub tx: MempoolTransaction,
-    pub category: TransactionCategory,
-    pub priority: SimulationPriority,
-    pub simulation_type: SimulationType,
-    pub tx_hash: H256,
-}
-
-/// Result of simulation
-#[derive(Debug, Clone)]
-pub struct SimulationResult {
-    pub request: SimulationRequest,
-    pub tx_state_changes: Option<HashMap<Address, AddressStateChange>>,
-    pub buy_sell_result: Option<BuySellResult>,
-    pub error: Option<String>,
-    pub simulation_time_ms: f64,
-    // Addresses needed for tax calculation
-    pub token_address: Option<Address>,
-    pub pool_address: Option<Address>,
-    // Full sequence simulation details for debugging
-    pub sequence_result: Option<SequenceSimulationResult>,
-    // Debug info for error analysis
-    pub debug_info: Option<String>,
-}
-
-/// Buy/sell simulation result
-#[derive(Debug, Clone)]
-pub struct BuySellResult {
-    pub can_buy: bool,
-    pub can_sell: bool,
-    // Raw state changes for tax calculation
-    pub buy_state_changes: Option<HashMap<Address, AddressStateChange>>,
-    pub sell_state_changes: Option<HashMap<Address, AddressStateChange>>,
-}
+// SimulationResult and BuySellResult are imported from simulation_manager
 
 /// Simple queue for simulation requests
 struct SimulationQueue {
@@ -120,7 +82,7 @@ impl SimulationQueue {
 
 /// Simplified manager for transaction simulations (no signal detection)
 struct SimplifiedSimulationManager {
-    simulator: Arc<UnifiedSimulator>,
+    simulator: Arc<MempoolSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
     token_cache: Arc<TokenTrackingCache>,
     max_concurrent_simulations: usize,
@@ -140,7 +102,7 @@ struct ManagerStats {
 impl SimplifiedSimulationManager {
     /// Create new simplified simulation manager
     pub fn new(
-        simulator: Arc<UnifiedSimulator>,
+        simulator: Arc<MempoolSimulator>,
         token_cache: Arc<TokenTrackingCache>,
         max_concurrent: usize,
     ) -> Self {
@@ -201,7 +163,7 @@ impl SimplifiedSimulationManager {
                 } else {
                     stats.failed_simulations += 1;
                 }
-                if result.buy_sell_result.is_some() {
+                if result.pool_viability_result.is_some() {
                     stats.buy_sell_tests += 1;
                 }
                 stats.max_simulation_time_ms = stats.max_simulation_time_ms.max(elapsed);
@@ -227,19 +189,19 @@ impl SimplifiedSimulationManager {
     /// Simulate a single request
     async fn simulate_request(
         request: SimulationRequest,
-        simulator: Arc<UnifiedSimulator>,
+        simulator: Arc<MempoolSimulator>,
         token_cache: Arc<TokenTrackingCache>,
     ) -> SimulationResult {
         let mut result = SimulationResult {
             request: request.clone(),
-            tx_state_changes: None,
-            buy_sell_result: None,
+            pool_viability_result: None,
             error: None,
             simulation_time_ms: 0.0,
             token_address: None,
             pool_address: None,
-            sequence_result: None,
+            pool_type: None,
             debug_info: None,
+            liquidity_removal_result: None,
         };
         
         let start = Instant::now();
@@ -251,12 +213,12 @@ impl SimplifiedSimulationManager {
                 let token_addr = contract_address.trim_start_matches("0x")
                     .parse::<Address>()
                     .ok();
-                // Get pool address from TokenInfo pools directly
-                let pool_addr = if let Some(token_info) = token_cache.get_token(contract_address).await {
-                    // Get the pool with highest ETH reserve from the token's pools
-                    token_info.pools.values()
-                        .max_by(|a, b| a.denom_reserve.partial_cmp(&b.denom_reserve).unwrap())
-                        .and_then(|pool| pool.pool_address.trim_start_matches("0x").parse::<Address>().ok())
+                // Get pool address from token's pools
+                let pool_addr = if let Some(addr) = token_addr {
+                    let pools = token_cache.get_pools_for_token(&addr).await;
+                    pools.iter()
+                        .max_by(|a, b| a.eth_reserve.partial_cmp(&b.eth_reserve).unwrap())
+                        .and_then(|pool| pool.address.parse::<Address>().ok())
                 } else {
                     None
                 };
@@ -269,17 +231,12 @@ impl SimplifiedSimulationManager {
                 } else {
                     None
                 };
-                // Get pool address from TokenInfo pools directly
-                let pool_addr = if let Some(token_str) = target_token {
-                    // Get the full token info which includes all pools
-                    if let Some(token_info) = token_cache.get_token(token_str).await {
-                        // Get the pool with highest ETH reserve from the token's pools
-                        token_info.pools.values()
-                            .max_by(|a, b| a.denom_reserve.partial_cmp(&b.denom_reserve).unwrap())
-                            .and_then(|pool| pool.pool_address.trim_start_matches("0x").parse::<Address>().ok())
-                    } else {
-                        None
-                    }
+                // Get pool address from token's pools
+                let pool_addr = if let Some(addr) = token_addr {
+                    let pools = token_cache.get_pools_for_token(&addr).await;
+                    pools.iter()
+                        .max_by(|a, b| a.eth_reserve.partial_cmp(&b.eth_reserve).unwrap())
+                        .and_then(|pool| pool.address.parse::<Address>().ok())
                 } else {
                     None
                 };
@@ -303,9 +260,9 @@ impl SimplifiedSimulationManager {
         match request.simulation_type {
             SimulationType::TransactionOnly => {
                 // Only simulate the transaction
-                match simulator.simulate_single_tx(&full_tx).await {
+                match simulator.simulate_mempool_tx(&full_tx).await {
                     Ok(sim_result) => {
-                        result.tx_state_changes = None; // State changes would need separate call
+                        // State changes are in pool_viability_result if we had one
                         if let Some(reason) = sim_result.revert_reason {
                             result.error = Some(format!("Transaction reverted: {}", reason));
                         }
@@ -331,24 +288,32 @@ impl SimplifiedSimulationManager {
                         None
                     };
                     
-                    // Run sequence simulation
-                    match simulator.simulate_sequence_with_tx(
-                        tx_call_request,
-                        token_addr,
-                        pool_addr,
-                        None, // Use latest block
-                    ).await {
-                        Ok(seq_result) => {
-                            // Convert to BuySellResult
-                            result.buy_sell_result = Some(BuySellResult {
-                                can_buy: seq_result.buy_result.success,
-                                can_sell: seq_result.sell_result.success,
-                                buy_state_changes: Some(seq_result.buy_result.state_changes.clone()),
-                                sell_state_changes: Some(seq_result.sell_result.state_changes.clone()),
-                            });
-                            
-                            // Store the full sequence result for debugging
-                            result.sequence_result = Some(seq_result);
+                    // Run pool buy/sell simulation
+                    let config = tx_processor::config::PoolViabilityConfig {
+                        token_address: token_addr,
+                        pool_address: pool_addr.to_string(),
+                        pool_type: PoolType::UniswapV2,
+                        test_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
+                        buyer_address: Address::from_str("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689").unwrap(),
+                        block_number: None,
+                        gas_limit: 500_000,
+                        gas_price: 30_000_000_000,
+                        prior_tx: tx_call_request,
+                        block_delay: 0,
+                        slippage_tolerance: 0.5,
+                        token_decimals: 18,
+                        weth_address: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                    };
+                    
+                    match simulator.simulate_pool_buy_sell(config).await {
+                        Ok(sim_result) => {
+                            result.pool_viability_result = Some(sim_result);
+                            /*
+                                    can_buy: pool_result.can_buy,
+                                    can_sell: pool_result.can_sell,
+                                    buy_tax: Some(pool_result.buy_tax_percent),
+                                    sell_tax: Some(pool_result.sell_tax_percent),
+                            */
                         }
                         Err(e) => {
                             result.error = Some(format!("Buy/sell simulation failed: {}", e));
@@ -445,7 +410,7 @@ async fn main() -> Result<()> {
     info!("⏳ Waiting for token cache population...");
     tokio::time::sleep(Duration::from_secs(2)).await;
     
-    let initial_pools = token_cache.pools.get_pool_count().await;
+    let initial_pools = token_cache.get_pool_count().await;
     let initial_creators = token_cache.get_creator_count().await;
     info!("📊 Token Cache Statistics:");
     info!("   Total Pools: {}", initial_pools);
@@ -453,7 +418,9 @@ async fn main() -> Result<()> {
     
     // Log some sample pools
     info!("\n📋 Sample pools in cache:");
-    let all_pools = token_cache.pools.get_all_pools().await;
+    // Note: get_all_pools is not exposed publicly
+    // Commenting out sample pool logging for now
+    /*
     for (i, (pool_addr, pool_state)) in all_pools.iter().take(5).enumerate() {
         info!("   {}: {} - {:.4} ETH, token: {}", 
             i+1, 
@@ -462,6 +429,7 @@ async fn main() -> Result<()> {
             pool_state.token_address
         );
     }
+    */
     
     // Log cache details
     info!("\n📡 Cache configuration:");
@@ -485,9 +453,8 @@ async fn main() -> Result<()> {
     info!("✅ Transaction router initialized");
     
     // Initialize unified simulator with custom config
-    let buy_sell_config = BuySellSimulatorConfig::default();
-    let simulator = Arc::new(UnifiedSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
-    info!("✅ UnifiedSimulator initialized (no database lock issues!)");
+    let simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
+    info!("✅ MempoolSimulator initialized (no database lock issues!)");
     
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
@@ -575,8 +542,9 @@ async fn main() -> Result<()> {
                     if let Some(token) = target_token {
                         // Check if we have token info in cache
                         if let Some(token_info) = token_cache.get_token(token).await {
-                            let pool_count = token_info.pools.len();
-                            let has_pools = !token_info.pools.is_empty();
+                            let pools = token_cache.get_pools_for_token(&token_info.address).await;
+                            let pool_count = pools.len();
+                            let has_pools = !pools.is_empty();
                             format!("Creator[{} p:{} has_pools:{}]", token, pool_count, has_pools)
                         } else {
                             format!("Creator[{} NOT_IN_CACHE]", token)
@@ -627,19 +595,19 @@ async fn main() -> Result<()> {
                 token_info)?;
             
             // Check buy/sell results
-            if let Some(buy_sell) = &result.buy_sell_result {
+            if let Some(pool_result) = &result.pool_viability_result {
                 write!(log_file, " Buy:{} Sell:{}", 
-                    if buy_sell.can_buy { "✓" } else { "✗" },
-                    if buy_sell.can_sell { "✓" } else { "✗" }
+                    if pool_result.can_buy { "✓" } else { "✗" },
+                    if pool_result.can_sell { "✓" } else { "✗" }
                 )?;
                 
-                if buy_sell.can_buy {
+                if pool_result.can_buy {
                     can_buy_count += 1;
                 }
-                if buy_sell.can_sell {
+                if pool_result.can_sell {
                     can_sell_count += 1;
                 }
-                if buy_sell.can_buy && buy_sell.can_sell {
+                if pool_result.can_buy && pool_result.can_sell {
                     both_tradeable += 1;
                 }
             }

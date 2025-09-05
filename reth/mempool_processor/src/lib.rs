@@ -19,7 +19,9 @@ pub mod tx_router;
 // Re-export commonly used types
 pub use mempool_fetcher::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
 
-// Temporary stub module for tx_simulator until signal_engine is fixed
+// Migration note: tx_simulator functionality has been migrated to tx_processor
+// The old reth_tx_simulator is no longer used
+/* 
 pub mod tx_simulator {
     // Re-export reth_tx_simulator types directly for now
     pub use reth_tx_simulator::{
@@ -33,4 +35,5 @@ pub mod tx_simulator {
     // Re-export tx_processor if available
     // pub use tx_processor::{TxProcessor, ProcessedTransaction};
 }
+*/
 

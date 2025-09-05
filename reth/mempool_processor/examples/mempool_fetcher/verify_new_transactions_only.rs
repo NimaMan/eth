@@ -6,7 +6,7 @@
 /// 3. Track first 100 transactions
 /// 4. Check if we see any existing transactions or only new ones
 
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use ethers::providers::{Provider, Http, Middleware};
 use std::collections::HashSet;
 use std::time::{Instant, Duration};
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Now start our subscription
     info!("Starting subscription to newPendingTransactions...");
-    let ipc_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     ipc_client.start().await?;
     
     // Track what we receive

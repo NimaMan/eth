@@ -5,7 +5,6 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use chrono::{DateTime, Utc};
 use tracing::{info, error, debug};
 use eyre::Result;
-use rust_decimal::Decimal;
 
 use crate::signal_detector::TradingStatusSignal;
 
@@ -19,12 +18,12 @@ pub struct TradingSignalRecord {
     pub denom_currency: Option<String>,
     pub detection_timestamp: DateTime<Utc>,
     pub detection_tx_hash: String,
-    pub price_ratio: Option<Decimal>,
-    pub denom_reserve_at_signal: Option<Decimal>,
-    pub token_reserve_at_signal: Option<Decimal>,
-    pub buy_tax_at_signal: Option<Decimal>,
-    pub sell_tax_at_signal: Option<Decimal>,
-    pub total_supply: Option<Decimal>,
+    pub price_ratio: Option<f64>,
+    pub denom_reserve_at_signal: Option<f64>,
+    pub token_reserve_at_signal: Option<f64>,
+    pub buy_tax_at_signal: Option<f64>,
+    pub sell_tax_at_signal: Option<f64>,
+    pub total_supply: Option<f64>,
     pub owner_address: Option<String>,
     pub creator_address: String,
     pub signal_source: String,
@@ -44,8 +43,8 @@ impl TradingSignalRecord {
             price_ratio: None, // Could be calculated from reserves if available
             denom_reserve_at_signal: None, // Would need to be passed from pool state
             token_reserve_at_signal: None, // Would need to be passed from pool state
-            buy_tax_at_signal: signal.buy_tax.map(|t| Decimal::from_f64_retain(t).unwrap_or_default()),
-            sell_tax_at_signal: signal.sell_tax.map(|t| Decimal::from_f64_retain(t).unwrap_or_default()),
+            buy_tax_at_signal: signal.buy_tax,
+            sell_tax_at_signal: signal.sell_tax,
             total_supply: None, // Would need to be passed from token info
             owner_address: None, // Would need to be passed from token info
             creator_address: signal.executor.clone(),
@@ -63,15 +62,15 @@ impl TradingSignalRecord {
     ) -> Self {
         let mut record = Self::from_signal(signal);
         
-        record.denom_reserve_at_signal = denom_reserve.map(|r| Decimal::from_f64_retain(r).unwrap_or_default());
-        record.token_reserve_at_signal = token_reserve.map(|r| Decimal::from_f64_retain(r).unwrap_or_default());
-        record.total_supply = total_supply.and_then(|s| s.parse::<Decimal>().ok());
+        record.denom_reserve_at_signal = denom_reserve;
+        record.token_reserve_at_signal = token_reserve;
+        record.total_supply = total_supply.and_then(|s| s.parse::<f64>().ok());
         record.owner_address = owner_address;
         
         // Calculate price ratio if we have reserves
         if let (Some(denom_res), Some(token_res)) = (denom_reserve, token_reserve) {
             if token_res > 0.0 {
-                record.price_ratio = Some(Decimal::from_f64_retain(denom_res / token_res).unwrap_or_default());
+                record.price_ratio = Some(denom_res / token_res);
             }
         }
         

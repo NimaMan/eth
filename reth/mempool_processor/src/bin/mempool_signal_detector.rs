@@ -33,7 +33,7 @@ use mempool_processor::{
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter, TransactionCategory},
     function_detector::CreatorFunctionType,
-    simulator::{SimulationManager, SimulationRequest, SimulationType, UnifiedSimulator, BuySellSimulatorConfig},
+    simulator::{SimulationManager, SimulationRequest, SimulationType, MempoolSimulator},
     signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
@@ -324,11 +324,10 @@ async fn main() -> Result<()> {
     let tx_router = TransactionRouter::new(Some(token_cache.clone()));
     info!("✅ Transaction router ready");
     
-    // 5. Unified Simulator (single database connection)
-    info!("🧪 Initializing unified simulator...");
-    let buy_sell_config = BuySellSimulatorConfig::default();
-    let unified_simulator = Arc::new(UnifiedSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
-    info!("✅ Unified simulator initialized");
+    // 5. Mempool Simulator (single database connection)
+    info!("🧪 Initializing mempool simulator...");
+    let unified_simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
+    info!("✅ Mempool simulator initialized");
     
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");

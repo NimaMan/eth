@@ -1,12 +1,10 @@
-/// Basic Mempool Transaction Simulation
+/// Live Mempool Transaction Simulation
 /// 
-/// Demonstrates how to fetch transactions from mempool and simulate them
-/// using Direct Reth for ultra-fast performance (20-40x faster than RPC).
+/// Fetches live transactions from mempool using NonBlockingIpcClient
+/// and simulates them with TxSimulator for ultra-fast performance.
 
-use mempool_processor::mempool_fetcher::{
-    full_transaction_ipc_client::FullTransactionIpcClient,
-};
-use reth_tx_simulator::RethTxSimulator;
+use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use tx_simulator::TxSimulator;
 use reth_primitives::TransactionSigned;
 use alloy_rlp::Decodable;
 use eyre::Result;
@@ -29,18 +27,18 @@ async fn main() -> Result<()> {
 
     // Initialize Direct Reth simulator
     let start = Instant::now();
-    let simulator = RethTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     info!("✅ Direct Reth simulator initialized in {:?}", start.elapsed());
 
     // Connect to mempool
     info!("📡 Connecting to mempool via IPC...");
-    let mempool_client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
-    mempool_client.start_monitoring().await?;
+    let mempool_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    mempool_client.start().await?;
     info!("✅ Mempool monitoring started\n");
 
     // Create log file
-    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool/dev")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool/dev/basic_sim_1k_{}.log", 
+    std::fs::create_dir_all("/home/nima/code/crypto/rust/mempool_processor/logs/simulation")?;
+    let log_path = format!("/home/nima/code/crypto/rust/mempool_processor/logs/simulation/live_simulation_{}.log", 
         Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)
@@ -62,7 +60,7 @@ async fn main() -> Result<()> {
     info!("📊 Processing {} transactions...\n", target_txs);
 
     while processed < target_txs {
-        let transactions = mempool_client.get_full_transactions(5).await?;
+        let transactions = mempool_client.get_transactions_instant(5).await;
         
         if transactions.is_empty() {
             tokio::time::sleep(Duration::from_millis(100)).await;

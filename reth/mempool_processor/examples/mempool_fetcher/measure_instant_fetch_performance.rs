@@ -24,7 +24,7 @@
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::Write;
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use tracing::{info, warn};
 use tracing_subscriber;
 use chrono::Local;
@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(hash_file, "")?;
     
     // Initialize client
-    let client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     client.start().await?;
     
     info!("Client started, beginning measurement...");

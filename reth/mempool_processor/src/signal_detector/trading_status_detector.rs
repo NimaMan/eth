@@ -86,7 +86,7 @@ impl TradingStatusDetector {
     /// Tax values are extracted from sim_result.buy_sell_result (calculated in simulation_manager)
     pub async fn detect(&self, sim_result: &SimulationResult, _buy_tax: Option<f64>, _sell_tax: Option<f64>) -> Option<TradingStatusSignal> {
         // Get buy/sell results from simulation
-        let buy_sell = sim_result.buy_sell_result.as_ref()?;
+        let buy_sell = sim_result.buy_sell_result()?;
         
         // Extract transaction details
         let tx_hash = &sim_result.request.tx.hash;
@@ -130,7 +130,7 @@ impl TradingStatusDetector {
         let sell_tax = buy_sell.sell_tax;
         
         // Always log simulation results for debugging (now includes tax values)
-        self.log_simulation_result(&token_address, &pool_address, buy_sell, tx_hash, buy_tax, sell_tax);
+        self.log_simulation_result(&token_address, &pool_address, &buy_sell, tx_hash, buy_tax, sell_tax);
         
         // Check if trading works (both buy and sell)
         if !buy_sell.can_buy || !buy_sell.can_sell {

@@ -6,8 +6,9 @@
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 use lazy_static::lazy_static;
-use alloy_primitives::{Address, I256};
-use reth_tx_simulator::AddressStateChange;
+use alloy_primitives::Address;
+// AddressStateChange is now part of tx_processor
+use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
 use crate::common::address::{alloy_address_to_checksum, checksum_address};
 
 lazy_static! {
@@ -108,15 +109,9 @@ impl StablecoinDetector {
                         let decimals = self.get_stablecoin_decimals(token_addr);
                         let divisor = 10f64.powi(decimals);
                         
-                        // Convert I256 to f64 for analysis
-                        let amount_f64 = if *amount >= I256::ZERO {
-                            // Positive change (mint or receive)
-                            amount.to_string().parse::<f64>().unwrap_or(0.0) / divisor
-                        } else {
-                            // Negative change (burn or send)
-                            let abs_amount = (-*amount).to_string().parse::<f64>().unwrap_or(0.0) / divisor;
-                            -abs_amount
-                        };
+                        // Convert U256 to f64 for analysis
+                        // Note: U256 is always non-negative, represents absolute amounts
+                        let amount_f64 = amount.to_string().parse::<f64>().unwrap_or(0.0) / divisor;
                         
                         // Determine activity type based on amount and context
                         let activity_type = if amount_f64 > 1.0 {

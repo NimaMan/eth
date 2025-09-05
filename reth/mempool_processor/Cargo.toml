@@ -168,36 +168,20 @@ path = "examples/tx_router/tx_router_example.rs"
 
 # Reth Simulation Examples
 [[example]]
-name = "basic_mempool_simulation"
-path = "examples/simulator/basic_mempool_simulation.rs"
+name = "database_lock_prevention_demo"
+path = "examples/simulator/database_lock_prevention_demo.rs"
 
 [[example]]
-name = "state_change_extraction"
-path = "examples/simulator/state_change_extraction.rs"
+name = "live_mempool_transaction_simulation"
+path = "examples/simulator/live_mempool_transaction_simulation.rs"
 
 [[example]]
-name = "benchmark_direct_reth_simulation"
-path = "examples/simulator/benchmark_direct_reth_simulation.rs"
+name = "token_tax_calculation_with_external_processor"
+path = "examples/simulator/token_tax_calculation_with_external_processor.rs"
 
 [[example]]
-name = "test_mempool_simulator"
-path = "examples/simulator/test_mempool_simulator.rs"
-
-[[example]]
-name = "test_buy_sell_simulator"
-path = "examples/simulator/test_buy_sell_simulator.rs"
-
-[[example]]
-name = "test_buy_sell_simulator_new"
-path = "examples/simulator/test_buy_sell_simulator_new.rs"
-
-[[example]]
-name = "test_new_pool_simulator"
-path = "examples/simulator/test_new_pool_simulator.rs"
-
-[[example]]
-name = "test_specific_tx_simulation"
-path = "examples/simulator/test_specific_tx_simulation.rs"
+name = "simulation_pipeline"
+path = "examples/simulator/simulation_pipeline.rs"
 
 [[example]]
 name = "test_imag_token_simulation"
@@ -304,9 +288,6 @@ path = "examples/signal_detector/full_pipeline_signal_detection.rs"
 name = "simulation_only"
 path = "examples/signal_detector/simulation_only.rs"
 
-[[example]]
-name = "simulation_pipeline"
-path = "examples/signal_detector/simulation_pipeline.rs"
 
 [[example]]
 name = "read_token_data_from_storage"

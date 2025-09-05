@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use ethers::providers::{Provider, Http};
 use tracing::{info, warn};
 use chrono::Local;
@@ -155,7 +155,7 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     info!("");
     
     // Initialize IPC client
-    let ipc_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     ipc_client.start().await?;
     
     // Stats tracking

@@ -5,7 +5,7 @@
 ///
 /// Usage: cargo run --example test_fetcher_simple
 
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use std::time::Duration;
 use tracing::{info, error};
 
@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // 1. Create IPC client
     println!("📡 Connecting to IPC at /tmp/reth.ipc...");
-    let ipc_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     
     // 2. Start monitoring
     println!("🚀 Starting mempool monitoring...");
