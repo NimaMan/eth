@@ -63,3 +63,4 @@ pub use common_addresses::{
 // Re-export commonly used types from dependencies
 pub use alloy_primitives::{Address, U256, B256};
 pub use eyre::Result;
+pub use tx_simulator::TxSimulator;

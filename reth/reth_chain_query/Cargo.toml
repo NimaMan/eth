@@ -34,8 +34,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 
-# For decoding ABI responses
-alloy-sol-types = "0.8"
+# For ABI encoding/decoding
 alloy-rlp = "0.3"
 alloy-provider = "1.0"
 alloy-transport = "1.0"
@@ -106,3 +105,9 @@ path = "examples/tokens/token_comprehensive_info.rs"
 [dev-dependencies]
 tokio-test = "0.4"
 hex = "0.4"
+
+
+# DeFi examples
+[[example]]
+name = "verify_dex_pool_computation"
+path = "examples/defi/verify_dex_pool_computation.rs"
