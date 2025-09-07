@@ -4,7 +4,6 @@
 /// It includes connection management, query execution, and specialized logging functionality.
 
 pub mod mempool_timestamp_tracker;
-pub mod mempool_arrival_recorder;
 pub mod trading_signal_writer;
 pub mod liquidity_removal_signal_writer;
 pub mod lp_approval_signal_writer;
@@ -13,7 +12,6 @@ pub mod scam_signal_writer;
 pub mod unified_signal_writer;
 
 pub use mempool_timestamp_tracker::{MempoolTimestampTracker, TrackerConfig};
-pub use mempool_arrival_recorder::{MempoolArrivalRecorder, ArrivalRecorderConfig};
 pub use trading_signal_writer::{TradingSignalWriter, TradingSignalRecord, WriterConfig as SignalWriterConfig};
 pub use liquidity_removal_signal_writer::{LiquidityRemovalSignalWriter, LiquidityRemovalSignalRecord};
 pub use lp_approval_signal_writer::{LpApprovalSignalWriter, LpApprovalSignalRecord};

@@ -4,7 +4,6 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use chrono::Utc;
 use alloy_primitives::B256;
-use eyre::Result;
 
 use reth_chain_query::reth_index::database::RethIndexDB;
 use reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter;
@@ -28,7 +27,6 @@ pub struct MempoolArrivalRecorder {
     _db: Arc<RethIndexDB>,
     writer: Arc<MempoolArrivalWriter>,
     _flush_task: tokio::task::JoinHandle<()>,
-    cfg: ArrivalRecorderConfig,
 }
 
 impl MempoolArrivalRecorder {
@@ -37,9 +35,8 @@ impl MempoolArrivalRecorder {
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let pending_clone = pending.clone();
         let writer_clone = writer.clone();
-        let cfg_clone = cfg.clone();
         let handle = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(cfg_clone.flush_interval);
+            let mut ticker = tokio::time::interval(cfg.flush_interval);
             loop {
                 ticker.tick().await;
                 let mut batch: Vec<(B256, u64)> = {
@@ -47,7 +44,7 @@ impl MempoolArrivalRecorder {
                     map.iter().map(|(h, ts)| (*h, *ts)).collect()
                 };
                 if batch.is_empty() { continue; }
-                if batch.len() > cfg_clone.batch_size { batch.truncate(cfg_clone.batch_size); }
+                if batch.len() > cfg.batch_size { batch.truncate(cfg.batch_size); }
                 match writer_clone.write_arrivals_by_hashes_ms_return_resolved(&batch) {
                     Ok(resolved) => {
                         if !resolved.is_empty() {
@@ -61,7 +58,7 @@ impl MempoolArrivalRecorder {
                 }
             }
         });
-        Self { pending, _db: db, writer, _flush_task: handle, cfg }
+        Self { pending, _db: db, writer, _flush_task: handle }
     }
 
     /// Record first seen in ms for a tx hash string (with or without 0x)

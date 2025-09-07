@@ -38,8 +38,8 @@ use mempool_processor::{
     signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
+    arrival_recorder::{MempoolArrivalRecorder, ArrivalRecorderConfig},
     config::MempoolProcessorConfig,
-    db_writers::{MempoolArrivalRecorder, ArrivalRecorderConfig},
 };
 use ethers::types::H256;
 use hex;
@@ -74,10 +74,10 @@ struct Args {
     #[arg(long, default_value = "60")]
     report_interval: u64,
 
-    /// Optional arrival index directory (MDBX or file). If set, the service records
-    /// first-seen mempool timestamps and writes them when txs are mined.
+    /// Deprecated: arrival index dir now defaults to `<RETH_DB_PATH>/reth_index`.
+    /// Kept for compatibility but ignored.
     #[arg(long, env = "ARRIVAL_INDEX_DIR")]
-    arrival_index_dir: Option<String>,
+    _arrival_index_dir: Option<String>,
 }
 
 /// Performance metrics tracker
@@ -299,7 +299,7 @@ async fn main() -> Result<()> {
     let initial_creators = token_cache.get_creator_count().await;
     info!("✅ Token cache initialized: {} pools, {} creators", initial_pools, initial_creators);
 
-    // Arrival time recorder (optional, writes to reth_chain_query arrival index)
+    // Arrival time recorder (always on): writes to `<RETH_DB_PATH>/reth_index`
     let mut arrival_recorder: Option<MempoolArrivalRecorder> = None;
 
     // 2. IPC client
@@ -338,19 +338,17 @@ async fn main() -> Result<()> {
     info!("✅ Mempool simulator initialized");
 
     // Initialize arrival recorder only after simulator (to reuse provider)
-    if let Some(ref dir) = args.arrival_index_dir {
-        let path = Path::new(dir);
-        std::fs::create_dir_all(path)?;
-        let db = std::sync::Arc::new(reth_chain_query::reth_index::database::RethIndexDB::open(path)?);
-        let provider_factory = mempool_simulator.get_tx_simulator().provider_factory().clone();
-        let writer = std::sync::Arc::new(reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
-            db.clone(),
-            std::sync::Arc::new(provider_factory),
-        ));
-        let cfg = ArrivalRecorderConfig { flush_interval: Duration::from_secs(5), batch_size: 1000 };
-        arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
-        info!("✅ Arrival recorder initialized at {} (ms precision)", path.display());
-    }
+    let index_dir = Path::new(&args.reth_db_path).join("reth_index");
+    std::fs::create_dir_all(&index_dir)?;
+    let db = std::sync::Arc::new(reth_chain_query::reth_index::database::RethIndexDB::open(&index_dir)?);
+    let provider_factory = mempool_simulator.get_tx_simulator().provider_factory().clone();
+    let writer = std::sync::Arc::new(reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
+        db.clone(),
+        std::sync::Arc::new(provider_factory),
+    ));
+    let cfg = ArrivalRecorderConfig { flush_interval: Duration::from_secs(5), batch_size: 1000 };
+    arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
+    info!("✅ Arrival recorder initialized at {} (ms precision)", index_dir.display());
     
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");
