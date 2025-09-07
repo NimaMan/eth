@@ -86,6 +86,18 @@ impl RethIndexDB {
         tx.commit()?;
         Ok(entries.len())
     }
+
+    /// Delete arrival timestamp for a transaction number. Returns true if deleted.
+    pub fn delete_tx_arrival(&self, tx_number: u64) -> Result<bool> {
+        let mut tx = self.env.begin_rw_txn()?;
+        let key = MempoolTxArrivalTable::encode_key(tx_number);
+        if let Err(e) = tx.del(self.tx_arrival_dbi.dbi(), &key, Option::<&[u8]>::None) {
+            if let reth_libmdbx::Error::NotFound = e { return Ok(false); }
+            return Err(e.into());
+        }
+        tx.commit()?;
+        Ok(true)
+    }
 }
 
 /// Database statistics

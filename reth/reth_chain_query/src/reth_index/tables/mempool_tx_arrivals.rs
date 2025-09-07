@@ -1,6 +1,6 @@
 /// Mempool Tx Arrival Times Table
 ///
-/// Minimal mapping: TxNumber (u64 big-endian) -> first_seen_ns (u64 big-endian)
+/// Minimal mapping: TxNumber (u64 big-endian) -> first_seen_ms (u64 big-endian)
 /// Implemented in RethIndexDB via reth-libmdbx environment.
 
 use eyre::Result;
@@ -23,7 +23,7 @@ impl MempoolTxArrivalTable {
     }
 
     #[inline]
-    pub fn encode_value(first_seen_ns: u64) -> [u8; 8] { first_seen_ns.to_be_bytes() }
+    pub fn encode_value(first_seen_ms: u64) -> [u8; 8] { first_seen_ms.to_be_bytes() }
 
     #[inline]
     pub fn decode_value(val: &[u8]) -> Result<u64> {

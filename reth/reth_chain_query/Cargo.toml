@@ -125,3 +125,7 @@ path = "examples/defi/verify_dex_pool_computation.rs"
 [[example]]
 name = "tx_arrival_index_smoke"
 path = "examples/reth_index/tx_arrival_index_smoke.rs"
+
+[[example]]
+name = "delete_tx_arrival"
+path = "examples/reth_index/delete_tx_arrival.rs"
