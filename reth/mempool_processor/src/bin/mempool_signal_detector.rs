@@ -39,6 +39,7 @@ use mempool_processor::{
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     config::MempoolProcessorConfig,
+    db_writers::{MempoolArrivalRecorder, ArrivalRecorderConfig},
 };
 use ethers::types::H256;
 use hex;
@@ -298,22 +299,8 @@ async fn main() -> Result<()> {
     let initial_creators = token_cache.get_creator_count().await;
     info!("✅ Token cache initialized: {} pools, {} creators", initial_pools, initial_creators);
 
-    // Arrival index tracker (optional)
-    #[allow(unused_mut)]
-    let mut arrival_tracker: Option<mempool_processor::arrival_index::tracker::ArrivalTracker<mempool_processor::arrival_index::FileArrivalIndex>> = None;
-    if let Some(ref dir) = args.arrival_index_dir {
-        let path = Path::new(dir);
-        // choose file-backed by default; enable MDBX through feature flag later
-        match mempool_processor::arrival_index::tracker::ArrivalTracker::file_backed(&path.join("tx_arrivals.csv"), &args.reth_db_path) {
-            Ok(tr) => {
-                info!("✅ Arrival index tracker initialized at {}", path.display());
-                arrival_tracker = Some(tr);
-            }
-            Err(e) => {
-                warn!("Failed to initialize arrival tracker at {}: {}", path.display(), e);
-            }
-        }
-    }
+    // Arrival time recorder (optional, writes to reth_chain_query arrival index)
+    let mut arrival_recorder: Option<MempoolArrivalRecorder> = None;
 
     // 2. IPC client
     info!("\n🔌 Connecting to Reth IPC...");
@@ -349,6 +336,21 @@ async fn main() -> Result<()> {
     info!("🧪 Initializing mempool simulator...");
     let mempool_simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
     info!("✅ Mempool simulator initialized");
+
+    // Initialize arrival recorder only after simulator (to reuse provider)
+    if let Some(ref dir) = args.arrival_index_dir {
+        let path = Path::new(dir);
+        std::fs::create_dir_all(path)?;
+        let db = std::sync::Arc::new(reth_chain_query::reth_index::database::RethIndexDB::open(path)?);
+        let provider_factory = mempool_simulator.get_tx_simulator().provider_factory().clone();
+        let writer = std::sync::Arc::new(reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
+            db.clone(),
+            std::sync::Arc::new(provider_factory),
+        ));
+        let cfg = ArrivalRecorderConfig { flush_interval: Duration::from_secs(5), batch_size: 1000 };
+        arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
+        info!("✅ Arrival recorder initialized at {} (ms precision)", path.display());
+    }
     
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");
@@ -451,21 +453,21 @@ async fn main() -> Result<()> {
         
         consecutive_empty = 0;
         
-        // Record mempool timestamps for all transactions (disabled)
-        // if let Some(ref tracker) = mempool_tracker {
-        //     for tx in &new_txs {
-        //         tracker.record_transaction(tx.hash.clone()).await;
-        //     }
-        // }
+        // Record mempool arrival timestamps in ms when first seen
+        if let Some(ref recorder) = arrival_recorder {
+            for tx in &new_txs {
+                recorder.record_hash_hex_ms(&tx.hash);
+            }
+        }
         
         // Step 1: Function detection
         let transactions_with_functions = function_detector.detect_batch(new_txs);
 
         // Step 2: Process each transaction
         for tx in transactions_with_functions {
-            // Record arrival time for this hash (if tracker is enabled)
-            if let Some(ref tracker) = arrival_tracker {
-                tracker.record_hash_stripped(&tx.hash);
+            // Record earliest arrival if not already recorded
+            if let Some(ref recorder) = arrival_recorder {
+                recorder.record_hash_hex_ms(&tx.hash);
             }
             metrics.total_processed.fetch_add(1, Ordering::Relaxed);
             

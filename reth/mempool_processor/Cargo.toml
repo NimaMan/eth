@@ -91,6 +91,7 @@ tokio-tungstenite = "0.20"
 # Transaction processing with proven tax calculation
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
+reth_chain_query = { path = "../reth_chain_query" }
 # Reth dependencies - using GitHub references to match tx_simulator
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }

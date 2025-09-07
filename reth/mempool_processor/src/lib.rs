@@ -16,7 +16,6 @@ pub mod signal_detector;
 pub mod signal_publisher;
 pub mod simulator;
 pub mod tx_router;
-pub mod arrival_index;
 
 // Re-export commonly used types  
 // Note: Legacy FullTransactionIpcClient removed, use MempoolFetcherIPCClient instead
