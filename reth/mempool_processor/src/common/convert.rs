@@ -3,7 +3,7 @@
 use eyre::{Result, eyre};
 use ethers::types::{Transaction as EthersTransaction, U256, Bytes};
 use crate::mempool_fetcher::MempoolTransaction;
-use reth_tx_simulator::CallRequest;
+use tx_simulator::UnsignedTransaction;
 use alloy_primitives::{Address, U256 as AlloyU256, Bytes as AlloyBytes};
 use serde_json::Value;
 
@@ -62,9 +62,9 @@ pub fn convert_nonblocking_to_transaction_view(tx: &MempoolTransaction) -> Resul
     Ok(ethers_tx)
 }
 
-/// Convert IPC transaction data to CallRequest with proper EIP-1559 gas parameter handling
+/// Convert IPC transaction data to UnsignedTransaction with proper EIP-1559 gas parameter handling
 /// This function ensures that priority fees never exceed max fees, preventing simulation errors
-pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<CallRequest> {
+pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<UnsignedTransaction> {
     // Parse gas price fields - handle both legacy and EIP-1559 transactions
     let gas_price = ipc_tx["gasPrice"].as_str()
         .and_then(|s| s.strip_prefix("0x"))
@@ -106,7 +106,7 @@ pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<CallRequest> {
             }
         };
     
-    Ok(CallRequest {
+    Ok(UnsignedTransaction {
         from: ipc_tx["from"].as_str()
             .and_then(|s| s.parse::<Address>().ok()),
         to: ipc_tx["to"].as_str()
@@ -127,4 +127,9 @@ pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<CallRequest> {
             .and_then(|s| s.strip_prefix("0x"))
             .and_then(|s| u64::from_str_radix(s, 16).ok()),
     })
+}
+
+/// Alias for ipc_to_call_request - kept for backwards compatibility
+pub fn ipc_to_unsigned_tx(ipc_tx: &Value) -> Result<UnsignedTransaction> {
+    ipc_to_call_request(ipc_tx)
 }

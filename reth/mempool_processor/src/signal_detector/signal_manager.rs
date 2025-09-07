@@ -12,6 +12,7 @@ use crate::signal_publisher::SignalPublisher;
 use crate::config::TaxDetectionConfig;
 use crate::tx_router::{TransactionCategory, CreatorFunctionType};
 use hex;
+use alloy_primitives::U256;
 
 use super::{
     LiquidityDetector,
@@ -212,7 +213,7 @@ impl SignalManager {
     ) -> Vec<Signal> {
         info!("📨 Signal Manager: Received simulation result for TX {}", result.request.tx.hash);
         info!("  Simulation had error: {}", result.error.is_some());
-        if let Some(ref bs) = result.buy_sell_result {
+        if let Some(ref bs) = result.buy_sell_result() {
             info!("  Buy/Sell result: can_buy={}, can_sell={}", bs.can_buy, bs.can_sell);
         }
         
@@ -236,7 +237,7 @@ impl SignalManager {
             self.log_activity("", "");  // Empty line
             self.log_activity("", &format!("════════════════════════════════════════════════════════════════════════════════"));
             self.log_activity("", &format!("TX: {}", result.request.tx.hash));
-            let buysell_status = if let Some(ref bs) = result.buy_sell_result {
+            let buysell_status = if let Some(ref bs) = result.buy_sell_result() {
                 format!("SimulationRan(can_buy:{}, can_sell:{})", bs.can_buy, bs.can_sell)
             } else {
                 "NoSimulation".to_string()
@@ -306,7 +307,7 @@ impl SignalManager {
         let mut signals = Vec::new();
         
         // First, extract key values from simulation result
-        let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &result.buy_sell_result {
+        let (_buy_tax, _sell_tax, _can_buy, _can_sell) = if let Some(buy_sell) = &result.buy_sell_result() {
             self.log_activity("BUY_SELL_RESULT", &format!(
                 "can_buy: {} | can_sell: {}",
                 buy_sell.can_buy,
@@ -335,14 +336,14 @@ impl SignalManager {
         let tax_signals = self.tax_signal_detector.detect(result);
         
         // Extract tax values from simulation result (calculated in simulation_manager)
-        let (calculated_buy_tax, calculated_sell_tax) = if let Some(ref buy_sell) = result.buy_sell_result {
+        let (calculated_buy_tax, calculated_sell_tax) = if let Some(ref buy_sell) = result.buy_sell_result() {
             (buy_sell.buy_tax, buy_sell.sell_tax)
         } else {
             (None, None)
         };
         
         // Always log tax detection results, even if no signals
-        if let Some(ref buy_sell) = result.buy_sell_result {
+        if let Some(ref buy_sell) = result.buy_sell_result() {
             // Log more detailed information about the detection
             // If can't buy/sell, show tax as None instead of 0%
             let buy_tax_str = if !buy_sell.can_buy {
@@ -419,7 +420,7 @@ impl SignalManager {
                             true
                         } else {
                             // Trading is disabled - only log if we can buy/sell (potential TRADING_ENABLED signal)
-                            if let Some(ref bs) = result.buy_sell_result {
+                            if let Some(ref bs) = result.buy_sell_result() {
                                 bs.can_buy || bs.can_sell
                             } else {
                                 // Can't determine buy/sell capability - skip
@@ -522,7 +523,7 @@ impl SignalManager {
             // No trading signal detected - log what we found
             // Skip trading status logging for contract creation transactions to reduce noise
             if !matches!(result.request.category, crate::tx_router::TransactionCategory::ContractCreation { .. }) {
-                if let Some(ref buy_sell) = result.buy_sell_result {
+                if let Some(ref buy_sell) = result.buy_sell_result() {
                     self.log_activity("TRADING_STATUS", &format!(
                         "No change | Can Buy: {} | Can Sell: {}",
                         buy_sell.can_buy,
@@ -539,17 +540,28 @@ impl SignalManager {
         
         // Critical debug logging for liquidity removal
         if matches!(result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
+            // Get state changes from pool_viability_result if available
+            let has_state_changes = result.pool_viability_result.as_ref()
+                .map(|pvr| !pvr.buy_transaction.address_balance_changes.is_empty())
+                .unwrap_or(false);
+            let state_change_count = result.pool_viability_result.as_ref()
+                .map(|pvr| pvr.buy_transaction.address_balance_changes.len())
+                .unwrap_or(0);
+            
             self.log_activity("TX_STATE_DEBUG", &format!(
-                "TX {} | tx_state_changes present: {} | count: {}",
+                "TX {} | state_changes present: {} | count: {}",
                 result.request.tx.hash,
-                result.tx_state_changes.is_some(),
-                result.tx_state_changes.as_ref().map_or(0, |sc| sc.len())
+                has_state_changes,
+                state_change_count
             ));
         }
         
-        if let Some(ref state_changes) = result.tx_state_changes {
-            // Log state changes for liquidity removal transactions
-            if matches!(result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
+        // Get state changes from pool_viability_result
+        if let Some(ref pool_result) = result.pool_viability_result {
+            {  
+                let state_changes = &pool_result.buy_transaction.address_balance_changes;
+                // Log state changes for liquidity removal transactions
+                if matches!(result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
                 self.log_activity("STATE_CHANGES", &format!("TX {} has {} address changes", 
                     result.request.tx.hash, state_changes.len()));
                 
@@ -565,7 +577,7 @@ impl SignalManager {
                     if is_pool {
                         self.log_activity("POOL_STATE_CHANGE", &format!(
                             "Pool {} | ETH net: {:?} | Token changes: {}",
-                            address, changes.eth_net, changes.token_net.len()
+                            address, changes.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO), changes.token_net.len()
                         ));
                         
                         // Log token changes if any
@@ -578,6 +590,7 @@ impl SignalManager {
                     }
                 }
             }
+        }
             
             // tx.from is already bytes (Vec<u8>), no need to decode
             let from_address_result = alloy_primitives::Address::try_from(result.request.tx.from.as_slice()).ok();
@@ -660,11 +673,16 @@ impl SignalManager {
                 }
             } else {
                 // Use the standard detection method (for non-liquidity-removal transactions)
-                self.liquidity_detector.detect(
-                    &result.request.tx.hash,
-                    from_address,
-                    state_changes,
-                ).await
+                // Get state changes from pool_viability_result if available
+                if let Some(ref pool_result) = result.pool_viability_result {
+                    self.liquidity_detector.detect(
+                        &result.request.tx.hash,
+                        from_address,
+                        &pool_result.buy_transaction.address_balance_changes,
+                    ).await
+                } else {
+                    vec![]
+                }
             };
             
             // Convert liquidity signals to the Signal enum
@@ -771,7 +789,9 @@ impl SignalManager {
         }
         
         // STEP 4: Log pool state changes for debugging (detection is done by LiquidityDetector)
-        if let Some(ref state_changes) = result.tx_state_changes {
+        if let Some(ref pool_result) = result.pool_viability_result {
+            {  
+                let state_changes = &pool_result.buy_transaction.address_balance_changes;
             if let Some(ref token_cache) = self.token_cache {
                 let mut pool_changes = Vec::new();
                 
@@ -782,8 +802,8 @@ impl SignalManager {
                     
                     // Check if this address is a tracked pool
                     if let Some(pool_state) = token_cache.get_pool_by_address(&address_str).await {
-                        // Get ETH balance change from eth_net field
-                        let eth_change_wei = state_change.eth_net;
+                        // Get ETH balance change from currency_net map
+                        let eth_change_wei = state_change.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
                         let eth_change = eth_change_wei.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
                         
                         pool_changes.push(format!(
@@ -809,6 +829,7 @@ impl SignalManager {
                         self.log_activity("POOL_CHANGE_DETAIL", pool_change);
                     }
                 }
+            }
             }
         }
         

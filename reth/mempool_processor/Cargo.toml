@@ -88,22 +88,19 @@ warp            = "0.3"
 # WebSocket client for measurements
 tokio-tungstenite = "0.20"
 
-# Reth direct integration for ultra-fast simulation
-reth_tx_simulator = { path = "../reth_tx_simulator" }
-# tx_processor = { path = "../tx_processor" }
-reth-provider = { path = "/home/nima/code/crypto/rust/reth/crates/storage/provider" }
-reth-chainspec = { path = "/home/nima/code/crypto/rust/reth/crates/chainspec" }
-reth-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/reth" }
-reth-ethereum-forks = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum-forks" }
-reth-revm = { path = "/home/nima/code/crypto/rust/reth/crates/revm" }
-reth-evm = { path = "/home/nima/code/crypto/rust/reth/crates/evm" }
-reth-db = { path = "/home/nima/code/crypto/rust/reth/crates/storage/db" }
-reth-node-types = { path = "/home/nima/code/crypto/rust/reth/crates/node/types" }
-reth-node-ethereum = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/node" }
-reth-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/primitives" }
-reth-ethereum-primitives = { path = "/home/nima/code/crypto/rust/reth/crates/ethereum/primitives" }
-reth-primitives-traits = { path = "/home/nima/code/crypto/rust/reth/crates/primitives-traits" }
-reth-storage-api = { path = "/home/nima/code/crypto/rust/reth/crates/storage/storage-api" }
+# Transaction processing with proven tax calculation
+tx_processor = { path = "../tx_processor" }
+tx_simulator = { path = "../tx_simulator" }
+# Reth dependencies - using GitHub references to match tx_simulator
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 
 # Alloy dependencies for transaction decoding
 alloy-primitives = { version = "1.0", features = ["rlp"] }
@@ -124,8 +121,9 @@ revm-inspectors = "0.19.1"
 jsonrpsee = { version = "0.24", features = ["http-client"] }
 
 # Database support
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "rust_decimal"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
 rust_decimal = { version = "1.0", features = ["serde-float"] }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", optional = true }
 
 [lib]
 name = "mempool_processor"
@@ -133,9 +131,12 @@ path = "src/lib.rs"
 
 # Enable tx_processor module tests
 [features]
-default = []
+# Enable database-related writers by default; can be disabled for example-only runs
+default = ["db"]
+db = []
 tx_processor_tests = []
 reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
+arrival_mdbx = ["reth-libmdbx"]
 
 [[bin]]
 name = "mempool_signal_detector"
@@ -156,17 +157,14 @@ path = "examples/mempool_fetcher/verify_new_transactions_only.rs"
 name = "measure_instant_fetch_performance"
 path = "examples/mempool_fetcher/measure_instant_fetch_performance.rs"
 
-[[example]]
-name = "analyze_transaction_arrival_pattern"
-path = "examples/mempool_fetcher/analyze_transaction_arrival_pattern.rs"
-
-[[example]]
-name = "analyze_log_timing"
-path = "examples/mempool_fetcher/analyze_log_timing.rs"
 
 [[example]]
 name = "function_detector_example"
 path = "examples/mempool_fetcher/function_detector_example.rs"
+
+[[example]]
+name = "test_fetcher_simple"
+path = "examples/mempool_fetcher/test_fetcher_simple.rs"
 
 [[example]]
 name = "tx_router_example"
@@ -174,36 +172,12 @@ path = "examples/tx_router/tx_router_example.rs"
 
 # Reth Simulation Examples
 [[example]]
-name = "basic_mempool_simulation"
-path = "examples/simulator/basic_mempool_simulation.rs"
+name = "live_mempool_transaction_simulation"
+path = "examples/simulator/live_mempool_transaction_simulation.rs"
 
 [[example]]
-name = "state_change_extraction"
-path = "examples/simulator/state_change_extraction.rs"
-
-[[example]]
-name = "benchmark_direct_reth_simulation"
-path = "examples/simulator/benchmark_direct_reth_simulation.rs"
-
-[[example]]
-name = "test_buy_sell_simulator"
-path = "examples/simulator/test_buy_sell_simulator.rs"
-
-[[example]]
-name = "test_specific_tx_simulation"
-path = "examples/simulator/test_specific_tx_simulation.rs"
-
-[[example]]
-name = "test_imag_token_simulation"
-path = "examples/simulator/specific_tokens/test_imag_token_simulation.rs"
-
-[[example]]
-name = "test_imag_sell_transaction"
-path = "examples/simulator/specific_tokens/test_imag_sell_transaction.rs"
-
-[[example]]
-name = "test_groge_token_simulation"
-path = "examples/simulator/specific_tokens/test_groge_token_simulation.rs"
+name = "isolated_simulator_test"
+path = "examples/simulator/isolated_simulator_test.rs"
 
 [[example]]
 name = "test_liquidity_removal_simulation"
@@ -292,15 +266,16 @@ path = "examples/token_parameter_extraction/verify_exclusion_storage.rs"
 # Signal Detector Examples
 [[example]]
 name = "full_pipeline_signal_detection"
-path = "examples/signal_detector/full_pipeline_signal_detection.rs"
+path = "examples/signal_detector/full_signal_detection_pipeline.rs"
 
 [[example]]
 name = "simulation_only"
 path = "examples/signal_detector/simulation_only.rs"
 
 [[example]]
-name = "simulation_pipeline"
-path = "examples/signal_detector/simulation_pipeline.rs"
+name = "test_liquidity_removal_detection"
+path = "examples/signal_detector/test_liquidity_removal_detection.rs"
+
 
 [[example]]
 name = "read_token_data_from_storage"
@@ -339,9 +314,6 @@ path = "examples/token_tracking/token_pool_csv_logger.rs"
 
 # Using crates.io versions - no patches needed
 
-[[example]]
-name = "test_unified_simulator"
-path = "examples/simulator/test_unified_simulator.rs"
 
 [[example]]
 name = "debug_scout_token_simulation"

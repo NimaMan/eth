@@ -5,7 +5,6 @@ use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use chrono::{DateTime, Utc};
 use tracing::{info, error};
 use eyre::Result;
-use rust_decimal::Decimal;
 
 use crate::signal_detector::TaxSignal;
 
@@ -21,9 +20,9 @@ pub struct TaxSignalRecord {
     pub detection_tx_hash: String,
     pub signal_type: String,
     pub signal_details: String,
-    pub confidence: Option<Decimal>,
-    pub buy_tax_at_signal: Option<Decimal>,
-    pub sell_tax_at_signal: Option<Decimal>,
+    pub confidence: Option<f64>,
+    pub buy_tax_at_signal: Option<f64>,
+    pub sell_tax_at_signal: Option<f64>,
     pub buy_tax_exceeds_threshold: bool,
     pub sell_tax_exceeds_threshold: bool,
     pub cant_sell: bool,
@@ -44,9 +43,9 @@ impl TaxSignalRecord {
             detection_tx_hash: tx_hash.to_string(),
             signal_type: format!("{:?}", signal.signal_type).split("::").last().unwrap_or("Unknown").to_string(),
             signal_details: signal.details.clone(),
-            confidence: Some(Decimal::from_f64_retain(signal.confidence).unwrap_or_default()),
-            buy_tax_at_signal: signal.buy_tax.map(|tax| Decimal::from_f64_retain(tax).unwrap_or_default()),
-            sell_tax_at_signal: signal.sell_tax.map(|tax| Decimal::from_f64_retain(tax).unwrap_or_default()),
+            confidence: Some(signal.confidence),
+            buy_tax_at_signal: signal.buy_tax,
+            sell_tax_at_signal: signal.sell_tax,
             buy_tax_exceeds_threshold: match &signal.signal_type {
                 crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { buy_tax_exceeds_threshold, .. } => *buy_tax_exceeds_threshold,
                 _ => false,

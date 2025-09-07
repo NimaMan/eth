@@ -26,18 +26,18 @@ use tokio::time;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tracing_subscriber::Layer;
+use std::path::Path;
 
 // Mempool processor imports
 use mempool_processor::{
-    mempool_fetcher::NonBlockingIpcClient,
+    mempool_fetcher::MempoolFetcherIPCClient,
     function_detector::FunctionDetector,
     tx_router::{TransactionRouter, TransactionCategory},
     function_detector::CreatorFunctionType,
-    simulator::{SimulationManager, SimulationRequest, SimulationType, UnifiedSimulator, BuySellSimulatorConfig},
+    simulator::{SimulationManager, SimulationRequest, SimulationType, MempoolSimulator},
     signal_detector::SignalManagerConfig,
     token_tracking::TokenTrackingSubscriber,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
-    db_writers::{MempoolTimestampTracker, TrackerConfig},
     config::MempoolProcessorConfig,
 };
 use ethers::types::H256;
@@ -72,6 +72,11 @@ struct Args {
     /// Performance report interval in seconds
     #[arg(long, default_value = "60")]
     report_interval: u64,
+
+    /// Optional arrival index directory (MDBX or file). If set, the service records
+    /// first-seen mempool timestamps and writes them when txs are mined.
+    #[arg(long, env = "ARRIVAL_INDEX_DIR")]
+    arrival_index_dir: Option<String>,
 }
 
 /// Performance metrics tracker
@@ -292,20 +297,36 @@ async fn main() -> Result<()> {
     let initial_pools = token_cache.get_pool_count().await;
     let initial_creators = token_cache.get_creator_count().await;
     info!("✅ Token cache initialized: {} pools, {} creators", initial_pools, initial_creators);
-    
+
+    // Arrival index tracker (optional)
+    #[allow(unused_mut)]
+    let mut arrival_tracker: Option<mempool_processor::arrival_index::tracker::ArrivalTracker<mempool_processor::arrival_index::FileArrivalIndex>> = None;
+    if let Some(ref dir) = args.arrival_index_dir {
+        let path = Path::new(dir);
+        // choose file-backed by default; enable MDBX through feature flag later
+        match mempool_processor::arrival_index::tracker::ArrivalTracker::file_backed(&path.join("tx_arrivals.csv"), &args.reth_db_path) {
+            Ok(tr) => {
+                info!("✅ Arrival index tracker initialized at {}", path.display());
+                arrival_tracker = Some(tr);
+            }
+            Err(e) => {
+                warn!("Failed to initialize arrival tracker at {}: {}", path.display(), e);
+            }
+        }
+    }
+
     // 2. IPC client
     info!("\n🔌 Connecting to Reth IPC...");
-    let ipc_client = NonBlockingIpcClient::new(Some(&args.ipc_path))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&args.ipc_path))?;
     ipc_client.start().await?;
     info!("✅ IPC client connected");
     
-    // 3. Database services (each with their own hardcoded connections)
-    info!("📝 Initializing database services...");
-    
-    // Create mempool timestamp tracker with its hardcoded connection
-    let tracker_config = TrackerConfig::default();
-    let mempool_tracker = Some(MempoolTimestampTracker::new_with_defaults(tracker_config).await?);
-    info!("✅ Mempool timestamp tracker ready (using eth_db)");
+    // 3. Database services (disabled: arrival time tracker)
+    info!("📝 Skipping mempool timestamp tracker initialization (disabled)");
+    // NOTE: Transaction arrival-time tracking is temporarily disabled.
+    // let tracker_config = TrackerConfig::default();
+    // let mempool_tracker = Some(MempoolTimestampTracker::new_with_defaults(tracker_config).await?);
+    // info!("✅ Mempool timestamp tracker ready (using eth_db)");
     
     // Trading signal writer is now integrated into SignalPublisher
     // Database writing happens automatically when signals are published
@@ -324,11 +345,10 @@ async fn main() -> Result<()> {
     let tx_router = TransactionRouter::new(Some(token_cache.clone()));
     info!("✅ Transaction router ready");
     
-    // 5. Unified Simulator (single database connection)
-    info!("🧪 Initializing unified simulator...");
-    let buy_sell_config = BuySellSimulatorConfig::default();
-    let unified_simulator = Arc::new(UnifiedSimulator::with_config(&args.reth_db_path, buy_sell_config)?);
-    info!("✅ Unified simulator initialized");
+    // 5. Mempool Simulator (single database connection)
+    info!("🧪 Initializing mempool simulator...");
+    let mempool_simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
+    info!("✅ Mempool simulator initialized");
     
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");
@@ -351,7 +371,7 @@ async fn main() -> Result<()> {
         tax_detection: config.tax_detection,
     };
     let simulation_manager = SimulationManager::new(
-        unified_simulator,
+        mempool_simulator,
         token_cache.clone(),
         signal_config.clone(),
         signal_publisher.clone(),
@@ -431,18 +451,22 @@ async fn main() -> Result<()> {
         
         consecutive_empty = 0;
         
-        // Record mempool timestamps for all transactions (non-blocking)
-        if let Some(ref tracker) = mempool_tracker {
-            for tx in &new_txs {
-                tracker.record_transaction(tx.hash.clone()).await;
-            }
-        }
+        // Record mempool timestamps for all transactions (disabled)
+        // if let Some(ref tracker) = mempool_tracker {
+        //     for tx in &new_txs {
+        //         tracker.record_transaction(tx.hash.clone()).await;
+        //     }
+        // }
         
         // Step 1: Function detection
         let transactions_with_functions = function_detector.detect_batch(new_txs);
-        
+
         // Step 2: Process each transaction
         for tx in transactions_with_functions {
+            // Record arrival time for this hash (if tracker is enabled)
+            if let Some(ref tracker) = arrival_tracker {
+                tracker.record_hash_stripped(&tx.hash);
+            }
             metrics.total_processed.fetch_add(1, Ordering::Relaxed);
             
             // Record detection latency
@@ -536,10 +560,12 @@ async fn main() -> Result<()> {
                     ).ok();
                 } else {
                     // Log successful simulation with key results
-                    let buy_sell_info = if let Some(ref bs) = result.buy_sell_result {
-                        format!("CanBuy: {}, CanSell: {}", 
-                            bs.can_buy,
-                            bs.can_sell
+                    let buy_sell_info = if let Some(ref pool_result) = result.pool_viability_result {
+                        format!("CanBuy: {}, CanSell: {}, BuyTax: {:.2}%, SellTax: {:.2}%", 
+                            pool_result.can_buy,
+                            pool_result.can_sell,
+                            pool_result.buy_tax_percent,
+                            pool_result.sell_tax_percent
                         )
                     } else {
                         "No buy/sell data".to_string()

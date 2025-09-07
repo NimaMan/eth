@@ -5,7 +5,7 @@
 /// 2. Process mempool transactions to detect function calls
 /// 3. Access the detected functions from the transaction
 
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use mempool_processor::function_detector::FunctionDetector;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     info!("🚀 Starting function detector example");
 
     // Initialize IPC client to receive mempool transactions
-    let ipc_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 

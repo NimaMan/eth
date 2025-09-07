@@ -13,8 +13,11 @@ use hex;
 #[derive(Debug, Clone)]
 pub struct MempoolTransaction {
     pub hash: String,
-    pub data: Value,
+    pub data: Value,  // JSON transaction data (equivalent to FullTransaction.tx_data)
     pub detection_ns: u64,
+    // Add missing fields for compatibility with FullTransaction
+    pub detection_time: Instant,  // When we detected it
+    pub latency_ns: u64,  // Detection latency in nanoseconds (alias for detection_ns)
     // Pre-parsed fields for fast access
     pub from: Vec<u8>,
     pub to: Option<Vec<u8>>,
@@ -25,7 +28,7 @@ pub struct MempoolTransaction {
     pub function_category: Option<crate::function_detector::CreatorFunctionType>, // Function category from detector
 }
 
-pub struct NonBlockingIpcClient {
+pub struct MempoolFetcherIPCClient {
     socket_path: String,
     tx_sender: mpsc::Sender<MempoolTransaction>,
     tx_receiver: Arc<Mutex<mpsc::Receiver<MempoolTransaction>>>,
@@ -42,7 +45,7 @@ pub struct Stats {
     pub queue_size: usize,
 }
 
-impl NonBlockingIpcClient {
+impl MempoolFetcherIPCClient {
     pub fn new(socket_path: Option<&str>) -> Result<Self> {
         let socket_path = socket_path.unwrap_or("/tmp/reth.ipc").to_string();
         let (tx_sender, tx_receiver) = mpsc::channel(50000);
@@ -200,10 +203,13 @@ impl NonBlockingIpcClient {
                                                 .and_then(|v| v.as_str())
                                                 .and_then(|s| ethers::types::U256::from_str_radix(s.trim_start_matches("0x"), 16).ok());
                                             
+                                            let detection_time = Instant::now();
                                             let tx = MempoolTransaction {
                                                 hash,
                                                 data: result.clone(),
                                                 detection_ns,
+                                                detection_time,
+                                                latency_ns: detection_ns, // Same value as detection_ns for compatibility
                                                 from,
                                                 to,
                                                 input,
@@ -312,9 +318,9 @@ impl NonBlockingIpcClient {
 
 use std::io::Read;
 
-impl std::fmt::Debug for NonBlockingIpcClient {
+impl std::fmt::Debug for MempoolFetcherIPCClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NonBlockingIpcClient")
+        f.debug_struct("MempoolFetcherIPCClient")
             .field("socket_path", &self.socket_path)
             .finish()
     }

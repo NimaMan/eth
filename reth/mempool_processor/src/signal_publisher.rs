@@ -118,10 +118,8 @@ impl SignalPublisher {
         let db_sender = if config.enable_database {
             info!("Setting up database writer...");
             let (sender, receiver) = mpsc::channel(config.db_channel_buffer_size);
-            // Use hardcoded database URL from database module
-            let db_url = Some(crate::db_writers::get_default_database_url());
             info!("Spawning database writer task...");
-            Self::spawn_db_writer(db_url, receiver, stats.clone()).await?;
+            Self::spawn_db_writer(receiver, stats.clone()).await?;
             info!("Database writer spawned");
             Some(sender)
         } else {
@@ -179,44 +177,60 @@ impl SignalPublisher {
     }
     
     /// Spawn non-blocking database writer task
+    #[cfg(feature = "db")]
     async fn spawn_db_writer(
-        database_url: Option<String>, 
         mut receiver: mpsc::Receiver<Signal>,
         stats: Arc<PublisherStats>
     ) -> Result<()> {
-        if let Some(db_url) = database_url {
-            // Spawn database writer task without blocking on connection
-            let stats_clone = stats.clone();
-            tokio::spawn(async move {
-                info!("🗄️ Starting database writer task...");
-                
-                // Create unified signal writer
-                let unified_writer = match crate::db_writers::UnifiedSignalWriter::new(&db_url).await {
-                    Ok(w) => {
-                        info!("✅ Unified signal writer initialized");
-                        info!("  {}", w.get_status());
-                        w
-                    }
-                    Err(e) => {
-                        error!("❌ Failed to initialize unified signal writer: {}", e);
-                        return;
-                    }
-                };
-                
-                info!("✅ Database writer task started successfully");
-                
-                while let Some(signal) = receiver.recv().await {
-                    // Use unified writer to handle all signal types
-                    if let Err(e) = unified_writer.write_signal(signal).await {
-                        error!("Failed to write signal to database: {}", e);
-                        stats_clone.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else {
-                        stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
+        // Spawn database writer task without blocking on connection
+        let stats_clone = stats.clone();
+        tokio::spawn(async move {
+            info!("🗄️ Starting database writer task...");
+            // Use hardcoded database URL from database module
+            let db_url = crate::db_writers::get_default_database_url();
+
+            // Create unified signal writer
+            let unified_writer = match crate::db_writers::UnifiedSignalWriter::new(&db_url).await {
+                Ok(w) => {
+                    info!("✅ Unified signal writer initialized");
+                    info!("  {}", w.get_status());
+                    w
                 }
-                warn!("Database writer task terminated");
-            });
-        }
+                Err(e) => {
+                    error!("❌ Failed to initialize unified signal writer: {}", e);
+                    return;
+                }
+            };
+
+            info!("✅ Database writer task started successfully");
+
+            while let Some(signal) = receiver.recv().await {
+                // Use unified writer to handle all signal types
+                if let Err(e) = unified_writer.write_signal(signal).await {
+                    error!("Failed to write signal to database: {}", e);
+                    stats_clone.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                } else {
+                    stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            warn!("Database writer task terminated");
+        });
+        Ok(())
+    }
+
+    #[cfg(not(feature = "db"))]
+    async fn spawn_db_writer(
+        mut receiver: mpsc::Receiver<Signal>,
+        _stats: Arc<PublisherStats>
+    ) -> Result<()> {
+        // If DB feature is disabled, drop the receiver and log a message
+        info!("Database feature disabled; not spawning DB writer task");
+        // Drain and drop to avoid unused mut warning
+        tokio::spawn(async move {
+            while let Some(_signal) = receiver.recv().await {
+                // no-op
+            }
+        });
         Ok(())
     }
     

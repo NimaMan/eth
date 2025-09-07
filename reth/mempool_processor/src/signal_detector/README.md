@@ -1,377 +1,113 @@
-# Signal Detector Module - Critical Architecture Documentation
-
-## 🎯 Core Purpose
-This module processes token-pool pairs to detect trading signals from mempool transactions. It is the **critical decision-making component** that determines which transactions represent actionable trading opportunities.
-
-## 📊 Current Implementation Status
-
-### Active Signal Detectors (3/7) ✅
-
-**1. Trading Status Detector** (`trading_status_detector.rs`)
-- **Purpose**: Detects when trading becomes enabled on pools
-- **Database**: `live_trading.trading_enabled_signals` table
-- **Fields**: token_address, pool_address, buy_tax_at_signal, sell_tax_at_signal, etc.
-- **Status**: ACTIVE - Tax calculation bug fixed with checksummed addresses
-
-**2. Liquidity Detector** (`liquidity_detector.rs`)  
-- **Purpose**: Detects significant liquidity changes and pool drains
-- **Database**: `live_trading.liquidity_removal_signals` table
-- **Fields**: liquidity_removed_eth, removal_percentage, pool_drain_risk_level, etc.
-- **Status**: ACTIVE - Database writer implemented and tested
-
-**3. LP Approval Detector** (`lp_approval_detector.rs`)
-- **Purpose**: Detects LP token approvals (potential rug pull setup)
-- **Database**: `live_trading.lp_approval_signals` table
-- **Fields**: approved_spender, approval_amount, is_unlimited_approval, etc.
-- **Status**: ACTIVE - Database writer implemented and tested
-
-### Removed Detectors (1/7) ❌
-
-**4. Honeypot Detector** (`honeypot_detector.rs`)
-- **Status**: REMOVED per user request
-- **Reason**: "remove noly honeypot for now"
-
-### Inactive Detectors (3/7) ⏸️
-
-**5. Tax Change Detector** (`tax_change_detector.rs`)
-- **Status**: INACTIVE - Not integrated with database
-- **Purpose**: Detects dynamic tax changes during transactions
-
-**6. Stablecoin Detector** (`stablecoin_detector.rs`)
-- **Status**: INACTIVE - Not integrated with database  
-- **Purpose**: Detects stablecoin minting/burning activities
-
-**7. Tax Detector** (`tax_detector.rs`)
-- **Status**: INACTIVE - Not integrated with database
-- **Purpose**: General tax rate detection and warnings
-
-## Database Schema
-
-All active detectors now write to their respective tables in the `live_trading` schema:
-
-```sql
--- Trading enabled signals
-live_trading.trading_enabled_signals
-- Primary key: signal_id
-- Unique constraint: (pool_address, detection_tx_hash)
-- Indexes: token_address, pool_address, timestamp, tx_hash
-
--- Liquidity removal signals  
-live_trading.liquidity_removal_signals
-- Primary key: signal_id
-- Unique constraint: (pool_address, detection_tx_hash)
-- Indexes: token_address, pool_address, timestamp, tx_hash
-
--- LP approval signals
-live_trading.lp_approval_signals
-- Primary key: signal_id  
-- Unique constraint: (pool_address, detection_tx_hash, approved_spender)
-- Indexes: token_address, pool_address, spender, timestamp, tx_hash
-```
-
-## Key Architecture Decisions
-
-1. **Per-Pool Signal Generation**: Each pool generates independent signals
-2. **Checksummed Addresses**: All addresses use EIP-55 format for consistency
-3. **Non-blocking Database Writes**: Background tasks with batched inserts
-4. **Hardcoded Database Connections**: Each writer has its own connection string
-5. **ZMQ + Database**: Signals published via ZMQ and stored in database
-
-## Critical Bug Fixes
-
-### Tax Calculation Bug (RESOLVED)
-- **Problem**: All tax calculations returned 0% or None
-- **Root Cause**: Address format mismatch in HashMap lookups
-- **Solution**: Implemented checksummed addresses throughout
-- **Result**: IMAG token now shows 4.00% buy tax instead of 0%
-
-### Verification Results
-```
-IMAG Token (0x7EAa8d0DdeC2B0427cca190C8c360ff49c88d257):
-✅ Buy Tax: 4.00% (was 0%)
-✅ Token Balance Change: 959926981716644 (was None) 
-✅ Database Integration: All 3 signal types working
-```
-
-## Database Status
-
-Current signal counts:
-- `trading_enabled_signals`: 2 signals
-- `liquidity_removal_signals`: 1 signal  
-- `lp_approval_signals`: 1 signal
-
-All tables tested and functioning with proper:
-- Tax rate storage (Decimal fields)
-- Timestamp handling (TIMESTAMP WITHOUT TIME ZONE)
-- Unique constraints preventing duplicates
-- Proper indexing for query performance
-
-## ⚠️ CRITICAL: Per-Pool Signal Generation
-**All signals are generated PER-POOL, not per-token.**
-
-```
-Signal = f(token_address, pool_address)
-```
-
-Key Concepts:
-- A token can have multiple pools (WETH/TOKEN, USDC/TOKEN, etc.)
-- Each pool is monitored and signaled INDEPENDENTLY
-- Each signal contains pool-specific data (taxes, liquidity, trading status)
-- Currently supports V2 pools only (V3/V4 in development)
-
-## 🏗️ Architecture Overview
-
-### Signal Flow
-```
-1. SimulationManager processes EACH pool separately
-2. Each pool gets its own SimulationResult  
-3. SignalManager receives pool-specific results
-4. Generates unique signal for (token, pool) pair
-5. SignalPublisher distributes signals via ZMQ
-6. Database writer persists signals to PostgreSQL
-```
-
-### Integration with SimulationManager
-```rust
-SimulationManager {
-    signal_manager: Arc<Mutex<SignalManager>>,
-    token_cache: Arc<TokenTrackingCache>,
-    // ... simulation components
-}
-```
-
-## 📦 Module Structure
-
-### Active Detectors (Used in Production)
-
-#### 1. **TaxDetector** (`tax_detector.rs`) ✅ ACTIVE
-- **Purpose**: Calculates buy/sell taxes from state changes
-- **Status**: Active but returning 0% (bug being investigated)
-- **Critical Issue**: Tax calculation from state changes not working
-
-#### 2. **TradingStatusDetector** (`trading_status_detector.rs`) ✅ ACTIVE  
-- **Purpose**: Detects when trading is enabled on a pool
-- **Status**: Fully functional
-- **Triggers**: enableTrading(), openTrading(), first successful buy/sell
-
-#### 3. **LiquidityDetector** (`liquidity_detector.rs`) ✅ ACTIVE
-- **Purpose**: Detects liquidity removals and pool drains
-- **Status**: Fully functional
-- **Thresholds**: Scam >60% drain OR <0.3 ETH remaining
-
-#### 4. **LpApprovalDetector** (`lp_approval_detector.rs`) ✅ ACTIVE
-- **Purpose**: Detects LP token approvals (rug pull setup)
-- **Status**: Fully functional
-
-### Inactive/Unused Detectors
-
-#### 5. **HoneypotDetector** ❌ UNUSED
-#### 6. **StablecoinDetector** ❌ UNUSED
-#### 7. **TaxChangeDetector** ❌ UNUSED
-
-## 🚦 Signal Types (Emitted in Production)
-
-### 1. Trading Enabled Signal
-
-**Purpose**: Detect when trading becomes enabled on a specific pool
-
-**Trigger Conditions**:
-- Trading enabled function detected (`enableTrading`, `openTrading`, etc.)
-- Both buy and sell transactions succeed in simulation
-- Tax values calculated (currently buggy - returning 0%)
-
-**Signal Data**:
-```rust
-pub struct TradingEnabledSignal {
-    pub tx_hash: String,
-    pub token_address: String,
-    pub pool_address: String,  // Pool-specific
-    pub pool_type: String,     // V2, V3, V4
-    pub creator_address: String,
-    pub buy_tax: u8,          // 0-100 or 255 for None
-    pub sell_tax: u8,         // 0-100 or 255 for None
-    pub timestamp: u64,
-    // block_number removed - timestamps sufficient
-}
-```
-
-**Configuration Parameters** (in `config.rs`):
-- `tax_detection.max_acceptable_buy_tax` (default: 30%)
-- `tax_detection.max_acceptable_sell_tax` (default: 30%)
-
-### 2. High Tax Warning Signal
-
-**Purpose**: Alert when a pool has excessive taxes that indicate potential honeypot
-
-**Trigger Conditions**:
-- Buy tax > `max_acceptable_buy_tax` OR
-- Sell tax > `max_acceptable_sell_tax`
-- Cannot buy or cannot sell in simulation
-
-**Signal Data**:
-```rust
-pub struct HighTaxWarningSignal {
-    pub tx_hash: String,
-    pub token_address: String,
-    pub pool_address: String,  // Pool-specific
-    pub pool_type: String,     // V2, V3, V4
-    pub creator_address: Option<String>,
-    pub buy_tax: u8,          // 255 means cannot buy
-    pub sell_tax: u8,         // 255 means cannot sell
-    pub warning_type: TaxWarningType,
-    pub timestamp: u64,
-}
-
-pub enum TaxWarningType {
-    HighBuyTax,
-    HighSellTax, 
-    PotentialHoneypot, // sell tax > 50% or cannot sell
-}
-```
-
-**Configuration Parameters** (in `config.rs`):
-- `tax_detection.max_acceptable_buy_tax` (default: 30%)
-- `tax_detection.max_acceptable_sell_tax` (default: 30%)
-- `tax_detection.honeypot_sell_threshold` (default: 50%)
-
-### 3. Scam Detection Signal (ACTIVE)
-
-**Purpose**: Detect when a transaction drains significant liquidity from a specific pool
-
-**Trigger Conditions**:
-- Pool ETH balance drops by more than 60% OR
-- Pool ETH balance falls below 0.3 ETH
-- LP token approval to router (rug pull setup)
-
-**Signal Data**:
-```rust
-pub struct ScamDetectionSignal {
-    pub tx_hash: String,
-    pub pool_address: String,
-    pub pool_type: String,     // V2, V3, V4
-    pub token_address: String,
-    pub scammer_address: String,
-    pub eth_drained: f64,
-    pub eth_remaining: f64,
-    pub drain_percentage: f64,
-    pub timestamp: u64,
-}
-```
-
-**Configuration Parameters**:
-- `scam_detection.drain_percentage_threshold` (default: 60%)
-- `scam_detection.min_eth_remaining` (default: 0.3 ETH)
-
-### 4. Liquidity Removal Signal (DEFINED BUT NOT EMITTED)
-
-**Status**: Detected internally but not converted to a public signal. The detector logs liquidity removals but doesn't emit them as signals.
-
-## 🐛 Critical Issues
-
-### 1. Tax Calculation Returns 0% ⚠️
-- **Problem**: All tax calculations return 0% or None
-- **Location**: `tax_detector.rs:detect()`
-- **Impact**: Trading signals have incorrect tax values
-- **Root Cause**: State change calculation logic not working correctly
-- **Status**: Under investigation - HIGH PRIORITY
-
-### 2. Unused Detectors
-- **Problem**: 3 detectors implemented but never used
-- **Files**: `honeypot_detector.rs`, `stablecoin_detector.rs`, `tax_change_detector.rs`
-- **Impact**: Code bloat, confusion, maintenance overhead
-- **Recommendation**: Remove these files
-
-### 3. LiquidityRemovalSignal Not Emitted
-- **Problem**: Liquidity removals are detected but not converted to signals
-- **Impact**: Missing important trading signals
-- **Fix**: Convert LiquiditySignal to public Signal enum
-
-## 🔄 Signal Detection Flow
-
-```
-1. Transaction arrives via IPC
-   ↓
-2. FunctionDetector identifies function signatures
-   ↓
-3. TransactionRouter categorizes transaction
-   ↓
-4. SimulationManager.submit(request) called
-   ↓
-5. Inside SimulationManager:
-   a. Run simulation (tx + buy/sell if needed)
-   b. Get pool info from cache for context
-   c. Call signal_manager.process_simulation_result()
-   d. Log and publish signals immediately
-   ↓
-6. Signals published to ZMQ and written to database
-```
-
-## 🔄 SignalManager (`signal_manager.rs`)
-
-The central coordinator that processes simulation results PER-POOL:
-
-```rust
-pub async fn process_simulation_result(
-    &mut self,
-    result: &SimulationResult,  // Contains pool-specific data
-) -> Vec<Signal>
-```
-
-### Processing Order
-1. **TaxDetector** - Calculates taxes from state changes (BROKEN)
-2. **TradingStatusDetector** - Detects trading enable/disable
-3. **LiquidityDetector** - Checks for pool drains
-4. **LpApprovalDetector** - Checks LP approvals (non-simulated txs)
-
-## 📊 Performance Characteristics
-
-- **Processing Time**: ~5-10ms per signal detection
-- **Memory Usage**: Minimal (no caching in detectors)
-- **Bottleneck**: Tax calculation from state changes
-- **Throughput**: Handles 1000+ transactions/second
-
-
-## 📤 Signal Output
-
-### ZMQ Publishing
-- **Endpoint**: `tcp://127.0.0.1:5556`
-- **Format**: JSON-serialized signal structs
-- **Topics**: "trading_enabled", "high_tax", "scam_detection"
-
-### Database Storage
-- **Database**: PostgreSQL `eth_db`
-- **Schema**: `live_trading`
-- **Tables**: `trading_enabled_signals`, `high_tax_signals`, `scam_detection_signals`
-- **Writer**: Integrated into SignalPublisher (non-blocking)
-
-### File Logging
-- `logs/signals/signal_manager.log` - All activity
-- `logs/signals/trading_enabled.log` - Trading signals
-- `logs/signals/tax_signals.log` - Tax detections
-
-## ⚠️ Critical Notes
-
-1. **Never process pools together** - Each pool must be independent
-2. **Tax values are pool-specific** - Different pools = different taxes
-3. **Signal timing is critical** - Delays mean missed opportunities
-4. **Database writes are async** - Don't block signal detection
-5. **ZMQ publishing must not fail** - Use buffering if needed
-
-## 🚀 Future Improvements
-
-1. **Fix tax calculation** - Critical priority
-2. **Remove unused detectors** - Clean up codebase
-3. **Add V3/V4 pool support** - Expand coverage
-4. **Emit LiquidityRemovalSignal** - Complete signal types
-5. **Optimize state change processing** - Performance
-6. **Add MEV detection** - New signal type
-
-## 📚 Dependencies
-
-- `reth_tx_simulator` - For simulation results
-- `alloy_primitives` - For address handling
-- `tokio` - For async operations
-- `tracing` - For logging
-- `chrono` - For timestamps
-- `zmq` - For signal publishing
-- `sqlx` - For database writing
+# Signal Detector Module
+
+## Purpose
+Converts pool‑scoped simulation results into actionable, per‑pool trading signals and publishes them via logs/ZMQ (and optionally to a database when the `db` feature is enabled).
+
+Key properties:
+- Per‑Pool: Every signal is specific to a (token_address, pool_address) pair.
+- Integrated: SimulationManager dispatches a SimulationResult per pool to SignalManager, which runs all detectors and publishes immediately.
+
+## Published Signals
+Signals are defined in `signal_detector/types.rs` and serialized to JSON for publishing.
+
+1) TradingEnabled (topic: `trading_enabled`)
+- Trigger: buy/sell both succeed for the pool AND taxes are within threshold (≤ 25% by default) AND the cache does not already mark the pool as trading.
+- Payload:
+  - tx_hash, token_address, pool_address, pool_type
+  - creator_address, buy_tax, sell_tax, timestamp
+
+2) TaxSignal (topic: `tax_signal`)
+- Trigger: consolidated tax issues per pool (high buy/sell tax beyond thresholds, honeypot pattern “can’t sell”), or suspicious patterns.
+- Payload (TaxSignalRecord):
+  - tx_hash, token_address, pool_address, pool_type, creator_address
+  - signal_type: "HighTaxOrHoneypot" | "TaxChange" | "SuspiciousPattern"
+  - signal_details, confidence
+  - buy_tax, sell_tax (optional), buy_tax_exceeds_threshold, sell_tax_exceeds_threshold, cant_sell
+  - timestamp
+
+3) LiquidityRemoval (topic: `liquidity_removal`)
+- Trigger: liquidity removal on a pool (minor, significant, or major) detected via dedicated liquidity removal simulator or state changes.
+- Payload:
+  - tx_hash, pool_address, pool_type, token_address (optional)
+  - remover_address, function_name, estimated_eth_removed (optional), timestamp
+
+4) ScamDetection (topic: `scam_detection`)
+- Trigger: pool drain above threshold (>60%) or remaining ETH below threshold (≤0.3 ETH).
+- Payload:
+  - tx_hash, pool_address, pool_type, token_address
+  - scammer_address, eth_drained, eth_remaining, drain_percentage, timestamp
+
+5) LpApproval (topic: `lp_approval`)
+- Trigger: non‑simulated LP token approval transactions by creators (potential rug setup).
+- Payload (LpApprovalSignal):
+  - tx_hash, creator, lp_token_address, router_address, amount
+
+## Detectors
+Detection happens inside `signal_manager.rs`, which coordinates the following:
+
+- TradingStatusDetector (`trading_status_detector.rs`)
+  - Uses can_buy/can_sell and taxes from the SimulationResult (calculated upstream)
+  - Ensures pool isn’t already trading (via TokenTrackingCache)
+  - Emits TradingEnabled signals
+
+- TaxDetector (`tax_signal_detector.rs`)
+  - Consolidates high tax, honeypot, and suspicious tax patterns
+  - Produces TaxSignalRecord for publishing as `tax_signal`
+
+- LiquidityDetector (`liquidity_detector.rs`)
+  - Detects drains/removals via state changes or LiquidityRemovalResult
+  - Emits ScamDetection or LiquidityRemoval signals
+
+- LpApprovalDetector (`lp_approval_detector.rs`)
+  - Checks non‑simulated transactions classified as LP approvals
+  - Emits LpApproval signals directly (or can be called by SignalManager)
+
+## Publishing
+
+- ZMQ
+  - Endpoint: `tcp://127.0.0.1:5556`
+  - Topics: `trading_enabled`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`
+  - Format: JSON serialized signal structs
+
+- Logs (files under the run’s `signals/` directory)
+  - `trading_enabled.log`
+  - `tax_signals.log`
+  - `liquidity_removals.log`
+  - `scam_detections.log`
+  - `lp_approval_signals.log`
+  - `signal_manager.log` (summary/activity)
+
+- Database (optional, feature `db`)
+  - When built with `db` and `SignalPublisherConfig.enable_database = true`, signals are persisted via the unified database writer used by SignalPublisher.
+  - When built without `db` (e.g. `--no-default-features`), publisher disables DB writes automatically.
+
+## Processing Flow (Per Pool)
+
+1) SimulationManager runs the transaction + per‑pool buy/sell sim.
+2) Builds a SimulationResult for the specific (token, pool) pair.
+3) Calls `signal_manager.process_simulation_result(&result)`.
+4) SignalManager runs detectors and immediately publishes any signals via SignalPublisher (ZMQ + logs + optional DB).
+
+Non‑simulated LP approvals are routed directly to LpApprovalDetector.
+
+## Configuration Knobs
+
+- TradingStatusDetector
+  - `tax_threshold` (default: 25%)
+  - `min_liquidity_threshold` (default: 0.5 ETH)
+
+- TaxDetector (via `TaxDetectionConfig`)
+  - `max_acceptable_buy_tax`, `max_acceptable_sell_tax`
+  - Honeypot determination uses can_sell=false
+
+- LiquidityDetector
+  - `scam_drain_threshold` (default: 60%)
+  - `min_eth_threshold` (default: 0.3 ETH)
+  - `major_removal_threshold` (50%), `significant_removal_threshold` (20%)
+
+## Notes & Edge Cases
+
+- Per‑pool semantics: signals are specific to a single pool — multiple pools per token produce multiple independent signals.
+- Historical vs latest state: when at‑block simulation is not possible (pruned state), detectors still use best available results; TradingEnabled requires valid tax values and can_buy/can_sell.
+- Publishing is best‑effort and non‑blocking; DB writes are optional and gated by build features.
+

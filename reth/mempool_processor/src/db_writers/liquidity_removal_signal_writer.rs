@@ -10,7 +10,8 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use chrono::{DateTime, Utc};
 use tracing::{info, error};
 use eyre::Result;
-use rust_decimal::Decimal;
+use sqlx::types::BigDecimal;
+use std::str::FromStr;
 
 use crate::signal_detector::{LiquiditySignal};
 
@@ -24,11 +25,8 @@ pub struct LiquidityRemovalSignalRecord {
     pub denom_currency: Option<String>,
     pub detection_timestamp: DateTime<Utc>,
     pub detection_tx_hash: String,
-    pub liquidity_removed_eth: Option<Decimal>,
-    pub liquidity_removed_token: Option<Decimal>,
-    pub remaining_liquidity_eth: Option<Decimal>,
-    pub remaining_liquidity_token: Option<Decimal>,
-    pub removal_percentage: Option<Decimal>,
+    pub liquidity_removed_denom: Option<f64>,
+    pub remaining_liquidity_denom: Option<f64>,
     pub pool_drain_risk_level: String,
     pub creator_address: String,
     pub signal_source: String,
@@ -45,11 +43,8 @@ impl LiquidityRemovalSignalRecord {
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
-            liquidity_removed_eth: signal.eth_removed.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
-            liquidity_removed_token: signal.token_removed.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
-            remaining_liquidity_eth: signal.remaining_eth.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
-            remaining_liquidity_token: signal.remaining_token.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
-            removal_percentage: signal.removal_percentage.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
+            liquidity_removed_denom: signal.eth_removed,
+            remaining_liquidity_denom: signal.remaining_eth,
             pool_drain_risk_level: match signal.removal_percentage.unwrap_or(0.0) {
                 p if p > 80.0 => "CRITICAL".to_string(),
                 p if p > 60.0 => "HIGH".to_string(),
@@ -161,10 +156,9 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
             r#"
             INSERT INTO live_trading.liquidity_removal_signals (
                 token_address, pool_address, pool_type, denom_address, denom_currency,
-                detection_timestamp, detection_tx_hash, liquidity_removed_eth, liquidity_removed_token,
-                remaining_liquidity_eth, remaining_liquidity_token, removal_percentage,
-                pool_drain_risk_level, creator_address, signal_source
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                detection_timestamp, detection_tx_hash, liquidity_removed_eth,
+                remaining_liquidity_eth, pool_drain_risk_level, creator_address, signal_source
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (pool_address, detection_tx_hash) DO NOTHING
             "#,
             record.token_address,
@@ -174,11 +168,8 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
             record.denom_currency,
             record.detection_timestamp.naive_utc(),
             record.detection_tx_hash,
-            record.liquidity_removed_eth,
-            record.liquidity_removed_token,
-            record.remaining_liquidity_eth,
-            record.remaining_liquidity_token,
-            record.removal_percentage,
+            record.liquidity_removed_denom.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
+            record.remaining_liquidity_denom.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
             record.pool_drain_risk_level,
             record.creator_address,
             record.signal_source

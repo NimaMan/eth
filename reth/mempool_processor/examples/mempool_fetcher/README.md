@@ -52,7 +52,7 @@ cargo run --example mempool_fetcher_performance_monitor --release
 
 ## Production Stats
 
-Our NonBlockingIpcClient achieves:
+Our MempoolFetcherIPCClient achieves:
 - **Average latency**: 5-7μs
 - **Target**: <10μs for 95%+ of transactions
 - **Data completeness**: 100% (all fields in first notification)

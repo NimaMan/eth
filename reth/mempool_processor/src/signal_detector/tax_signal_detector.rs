@@ -69,7 +69,7 @@ impl TaxDetector {
         let mut signals = Vec::new();
 
         // Skip if no buy/sell result
-        let buy_sell = match &sim_result.buy_sell_result {
+        let buy_sell = match sim_result.buy_sell_result() {
             Some(bs) => bs,
             None => return signals,
         };
@@ -98,7 +98,7 @@ impl TaxDetector {
         self.log_tax_detection(&token_address, sim_result, calculated_buy_tax, calculated_sell_tax);
 
         // Check for high taxes or honeypot patterns - consolidated detection
-        let cant_sell = sim_result.buy_sell_result.as_ref().map(|bs| !bs.can_sell).unwrap_or(false);
+        let cant_sell = sim_result.buy_sell_result().map(|bs| !bs.can_sell).unwrap_or(false);
         let buy_tax_exceeds_threshold = calculated_buy_tax.unwrap_or(0.0) >= self.config.max_acceptable_buy_tax as f64;
         let sell_tax_exceeds_threshold = calculated_sell_tax.unwrap_or(0.0) >= self.config.max_acceptable_sell_tax as f64;
         
@@ -200,7 +200,7 @@ impl TaxDetector {
                     .unwrap_or_else(|| "unknown".to_string());
                 
                 // Extract buy/sell capabilities and error messages
-                let (can_buy, can_sell, buy_tax_error, sell_tax_error) = if let Some(buy_sell) = &sim_result.buy_sell_result {
+                let (can_buy, can_sell, buy_tax_error, sell_tax_error) = if let Some(buy_sell) = sim_result.buy_sell_result() {
                     (buy_sell.can_buy, buy_sell.can_sell, buy_sell.buy_tax_error.clone(), buy_sell.sell_tax_error.clone())
                 } else {
                     (false, false, None, None)

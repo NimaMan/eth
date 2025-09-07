@@ -11,17 +11,12 @@
 // Core types used by all methods
 pub mod types;
 
-// Non-blocking IPC client - production implementation
-pub mod nonblocking_ipc_client;
-
-// Full transaction client with reconnection logic
-pub mod full_transaction_ipc_client;
-
+// Mempool fetcher IPC client - production implementation
+pub mod mempool_fetcher_ipc_client;
 
 // Re-export main types for convenience
 pub use types::*;
-pub use nonblocking_ipc_client::{NonBlockingIpcClient, MempoolTransaction};
-pub use full_transaction_ipc_client::{FullTransactionIpcClient, FullTransaction, IpcClientStats};
+pub use mempool_fetcher_ipc_client::{MempoolFetcherIPCClient, MempoolTransaction};
 
 // Re-export tx_simulator functionality 
 // pub use crate::tx_simulator::*; // Temporarily disabled for migration

@@ -1,16 +1,25 @@
 # Mempool Processor Examples
 
-This directory contains essential examples demonstrating the mempool processor functionality.
+## Mempool Fetcher Examples
+- **test_fetcher_simple.rs** - Quick connectivity test for IPC client, fetches 10 transactions and shows detection latency
+- **mempool_fetcher_performance_monitor.rs** - Continuous performance monitoring with real-time stats (TPS, latency percentiles, queue depth)
+- **measure_instant_fetch_performance.rs** - Compares instant vs standard fetch methods with timing analysis
+- **verify_new_transactions_only.rs** - Validates no duplicate transactions are received, shows duplicate detection statistics
+- **function_detector_example.rs** - Demonstrates function signature detection from transaction calldata
 
-## Directory Structure
+## TX Router Examples  
+- **tx_router_example.rs** - Complete pipeline demo: connects to Python publisher, builds token cache, processes 1000 transactions through function detector and router, logs detailed classification results
 
-### mempool_fetcher/
-Examples for testing and benchmarking the mempool fetching components:
-- `analyze_log_timing.rs` - Analyzes timing patterns from logs
-- `analyze_transaction_arrival_pattern.rs` - Studies transaction arrival patterns
-- `measure_instant_fetch_performance.rs` - Measures instant fetch performance
-- `mempool_fetcher_performance_monitor.rs` - Production monitoring tool
-- `verify_new_transactions_only.rs` - Validates new transaction handling
+## Simulator Examples
+- **database_lock_prevention_demo.rs** - Demonstrates MempoolSimulator prevents database locks during pool buy/sell simulations
+- **live_mempool_transaction_simulation.rs** - Live mempool transaction simulation using MempoolFetcherIPCClient and MempoolSimulator with automatic nonce retry
+- **token_tax_calculation_with_external_processor.rs** - Tax calculation using external tx_processor with known tokens (AITAI, 0xT, FLOKI)
+- **simulation_pipeline.rs** - Full signal detection pipeline: fetches transactions, simulates, detects signals (tax, trading, liquidity)
+
+## Token Parameter Extraction Examples
+- **simulate_buy_sell_taxes.rs** - Calculates buy/sell taxes using transaction simulation
+- **analyze_token_with_detectors.rs** - Comprehensive token analysis using multiple detection methods
+- **get_token_info_via_rpc.rs** - Fetches token metadata via RPC calls
 
 ### reth_simulation/
 Examples for Direct Reth simulation (20-40x faster than RPC):
@@ -21,7 +30,7 @@ Examples for Direct Reth simulation (20-40x faster than RPC):
 
 ### tx_simulation/
 Examples for the new unified TxSimulator API:
-- `test_state_changes_nonblocking.rs` - NonBlockingIpcClient + TxSimulator demo
+- `test_state_changes_nonblocking.rs` - MempoolFetcherIPCClient + TxSimulator demo
 
 ## Examples with Input/Output
 
@@ -32,13 +41,13 @@ Examples for the new unified TxSimulator API:
 
 **Output**:
 ```
-🚀 TxSimulator API Demo with NonBlockingIpcClient
+🚀 TxSimulator API Demo with MempoolFetcherIPCClient
 =================================================
 
 ✅ DirectTxSimulator initialized in 19.597037ms
    🎯 Direct Reth database access for ultra-fast simulation
-📡 Connecting to mempool via NonBlockingIpcClient...
-✅ NonBlockingIpcClient started - Sub-10μs detection!
+📡 Connecting to mempool via MempoolFetcherIPCClient...
+✅ MempoolFetcherIPCClient started - Sub-10μs detection!
 
 📊 Processing transaction #1
    Hash: 0x07f0ef9defbd97
@@ -71,7 +80,7 @@ Examples for the new unified TxSimulator API:
 
 ✅ Demo completed successfully!
 💡 This example demonstrates:
-   - NonBlockingIpcClient for microsecond detection
+   - MempoolFetcherIPCClient for microsecond detection
    - TxSimulator with automatic latest block handling
    - Nonce retry logic built-in
    - Clean, unified API

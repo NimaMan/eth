@@ -7,8 +7,9 @@
 
 use std::collections::HashMap;
 use tracing::{info, debug, warn};
-use alloy_primitives::{Address, I256};
-use reth_tx_simulator::AddressStateChange;
+use alloy_primitives::{Address, I256, U256};
+// AddressStateChange is now part of tx_processor
+use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
 use crate::common::address::alloy_address_to_checksum;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::LiquidityRemovalResult;
@@ -243,7 +244,10 @@ impl LiquidityDetector {
         }
         
         // Step 2: Check if there's negative ETH change (drain)
-        let eth_change = changes.eth_net;
+        // Get ETH change from currency_net map
+        let eth_change_u256 = changes.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
+        // Convert U256 to I256 for signed comparison
+        let eth_change = I256::try_from(eth_change_u256).unwrap_or(I256::ZERO);
         info!("  ETH change (raw): {:?} | Is negative: {}", eth_change, eth_change < I256::ZERO);
         
         if eth_change >= I256::ZERO {

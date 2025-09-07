@@ -1,21 +1,16 @@
-/// Basic Mempool Transaction Simulation
+/// Live Mempool Transaction Simulation
 /// 
-/// Demonstrates how to fetch transactions from mempool and simulate them
-/// using Direct Reth for ultra-fast performance (20-40x faster than RPC).
+/// Fetches live transactions from mempool using MempoolFetcherIPCClient
+/// and simulates them with MempoolSimulator for automatic nonce retry.
 
-use mempool_processor::mempool_fetcher::{
-    full_transaction_ipc_client::FullTransactionIpcClient,
-};
-use reth_tx_simulator::RethTxSimulator;
-use reth_primitives::TransactionSigned;
-use alloy_rlp::Decodable;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
+use mempool_processor::simulator::MempoolSimulator;
 use eyre::Result;
 use tracing::{info, warn};
 use std::time::{Duration, Instant};
 use std::fs::OpenOptions;
 use std::io::Write;
 use chrono::Local;
-use hex;
 use tokio::time::timeout;
 
 #[tokio::main]
@@ -24,23 +19,23 @@ async fn main() -> Result<()> {
         .with_env_filter("info")
         .init();
 
-    println!("\n🚀 Basic Mempool Transaction Simulation");
-    println!("======================================\n");
+    println!("\n🚀 Live Mempool Transaction Simulation with Auto-Nonce Retry");
+    println!("=============================================================\n");
 
-    // Initialize Direct Reth simulator
+    // Initialize MempoolSimulator with automatic nonce retry
     let start = Instant::now();
-    let simulator = RethTxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
-    info!("✅ Direct Reth simulator initialized in {:?}", start.elapsed());
+    let mempool_simulator = MempoolSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    info!("✅ MempoolSimulator initialized in {:?}", start.elapsed());
 
     // Connect to mempool
     info!("📡 Connecting to mempool via IPC...");
-    let mempool_client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
-    mempool_client.start_monitoring().await?;
+    let mempool_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    mempool_client.start().await?;
     info!("✅ Mempool monitoring started\n");
 
     // Create log file
-    std::fs::create_dir_all("/home/nima/code/crypto/logs/mempool/dev")?;
-    let log_path = format!("/home/nima/code/crypto/logs/mempool/dev/basic_sim_1k_{}.log", 
+    std::fs::create_dir_all("/home/nima/code/crypto/rust/mempool_processor/logs/simulation")?;
+    let log_path = format!("/home/nima/code/crypto/rust/mempool_processor/logs/simulation/live_simulation_{}.log", 
         Local::now().format("%Y%m%d_%H%M%S"));
     let mut log_file = OpenOptions::new()
         .create(true)
@@ -62,7 +57,7 @@ async fn main() -> Result<()> {
     info!("📊 Processing {} transactions...\n", target_txs);
 
     while processed < target_txs {
-        let transactions = mempool_client.get_full_transactions(5).await?;
+        let transactions = mempool_client.get_transactions_instant(5).await;
         
         if transactions.is_empty() {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -74,45 +69,11 @@ async fn main() -> Result<()> {
             
             println!("Transaction {}/{}: {}", processed, target_txs, tx.hash);
             
-            
-
-            // Get raw transaction first
-            let raw_tx = match get_raw_tx(&tx.hash).await {
-                Ok(raw) => raw,
-                Err(e) => {
-                    warn!("Failed to get raw transaction: {}", e);
-                    failed += 1;
-                    writeln!(log_file, "[{}] ERROR: Failed to get raw tx for {}", 
-                        Local::now().format("%H:%M:%S"), tx.hash)?;
-                    continue;
-                }
-            };
-            
-            // Decode the transaction
-            let hex_str = raw_tx.strip_prefix("0x").unwrap_or(&raw_tx);
-            let raw_bytes = match hex::decode(hex_str) {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    warn!("Failed to decode hex: {}", e);
-                    failed += 1;
-                    continue;
-                }
-            };
-            
-            let signed_tx = match TransactionSigned::decode(&mut raw_bytes.as_slice()) {
-                Ok(tx) => tx,
-                Err(e) => {
-                    warn!("Failed to decode transaction: {}", e);
-                    failed += 1;
-                    continue;
-                }
-            };
-            
-            // Simulate with timeout (50ms for fast timeout)
+            // Simulate with MempoolSimulator (includes automatic nonce retry)
             let sim_start = Instant::now();
             let result = timeout(
                 Duration::from_millis(50),
-                simulator.simulate_signed_transaction(&signed_tx)
+                mempool_simulator.simulate_mempool_tx(&tx)
             ).await;
             
             match result {
@@ -121,14 +82,14 @@ async fn main() -> Result<()> {
                     sim_times.push(sim_time);
                     successful += 1;
 
-                    println!("  ✅ Simulated in {:?}", sim_time);
+                    println!("  ✅ Simulated in {:?} (with auto-nonce retry)", sim_time);
                     println!("     Gas used: {}", sim_result.gas_used);
                     println!("     Success: {}", sim_result.success);
 
                     // Log details
                     writeln!(log_file, "[{}] SUCCESS", Local::now().format("%H:%M:%S"))?;
                     writeln!(log_file, "  Hash: {}", tx.hash)?;
-                    writeln!(log_file, "  Detection latency: {} µs", tx.latency_ns / 1000)?;
+                    writeln!(log_file, "  Detection latency: {} µs", tx.detection_ns / 1000)?;
                     writeln!(log_file, "  Simulation time: {:?}", sim_time)?;
                     writeln!(log_file, "  Gas used: {}", sim_result.gas_used)?;
                     writeln!(log_file, "  Success: {}", sim_result.success)?;
@@ -139,7 +100,7 @@ async fn main() -> Result<()> {
                 }
                 Ok(Err(e)) => {
                     failed += 1;
-                    warn!("Simulation error: {}", e);
+                    warn!("Simulation error (after nonce retry): {}", e);
                     writeln!(log_file, "[{}] FAILED: {}", Local::now().format("%H:%M:%S"), e)?;
                 }
                 Err(_) => {
@@ -184,19 +145,6 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// Helper function to get raw transaction via RPC
-async fn get_raw_tx(hash: &str) -> Result<String> {
-    use jsonrpsee::http_client::HttpClientBuilder;
-    use jsonrpsee::core::client::ClientT;
-    use jsonrpsee::rpc_params;
-    
-    let client = HttpClientBuilder::default()
-        .build("http://127.0.0.1:8545")?;
-    
-    let raw_tx: String = client
-        .request("eth_getRawTransactionByHash", rpc_params![hash])
-        .await?;
-    
-    Ok(raw_tx)
-}
+// Note: No longer need get_raw_tx function since MempoolSimulator 
+// handles transaction processing directly from MempoolTransaction
 

@@ -10,7 +10,8 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use chrono::{DateTime, Utc};
 use tracing::{info, error};
 use eyre::Result;
-use rust_decimal::Decimal;
+use sqlx::types::BigDecimal;
+use std::str::FromStr;
 
 use crate::signal_detector::{LpApprovalSignal};
 
@@ -25,10 +26,10 @@ pub struct LpApprovalSignalRecord {
     pub detection_timestamp: DateTime<Utc>,
     pub detection_tx_hash: String,
     pub approved_spender: String,
-    pub approval_amount: Option<Decimal>,
+    pub approval_amount: Option<f64>,
     pub is_unlimited_approval: bool,
     pub approval_type: String,
-    pub previous_allowance: Option<Decimal>,
+    pub previous_allowance: Option<f64>,
     pub creator_address: String,
     pub signal_source: String,
 }
@@ -47,10 +48,10 @@ impl LpApprovalSignalRecord {
             detection_timestamp: Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             approved_spender: signal.spender_address.clone(),
-            approval_amount: signal.amount_approved.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
+            approval_amount: signal.amount_approved,
             is_unlimited_approval: unlimited,
             approval_type: "TOKEN".to_string(),
-            previous_allowance: signal.previous_allowance.map(|v| Decimal::from_f64_retain(v).unwrap_or_default()),
+            previous_allowance: signal.previous_allowance,
             creator_address: signal.creator_address.clone(),
             signal_source: "mempool".to_string(),
         }
@@ -170,10 +171,10 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
             record.detection_timestamp.naive_utc(),
             record.detection_tx_hash,
             record.approved_spender,
-            record.approval_amount,
+            record.approval_amount.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
             record.is_unlimited_approval,
             record.approval_type,
-            record.previous_allowance,
+            record.previous_allowance.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
             record.creator_address,
             record.signal_source
         );

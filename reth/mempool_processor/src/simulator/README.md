@@ -9,55 +9,47 @@ The simulator module provides transaction simulation capabilities with integrate
 ### Core Components
 
 #### 1. SimulationManager
-The central coordinator that manages the simulation flow and passes results to signal detection.
+Central coordinator that manages per-pool simulation and passes results to signal detection.
 
 ```rust
 pub struct SimulationManager {
     // Simulators
-    tx_simulator: Arc<TxSimulator>,
-    buy_sell_simulator: Arc<SequentialBuySellSimulator>,
-    
+    mempool_simulator: Arc<MempoolSimulator>,
+    liquidity_removal_simulator: Arc<LiquidityRemovalSimulator>,
+
     // Queue management
     queue: Arc<Mutex<SimulationQueue>>,
-    
+
     // Signal detection
     signal_manager: Arc<Mutex<SignalManager>>,
     token_cache: Arc<TokenTrackingCache>,
-    
+
     // Configuration
     max_concurrent_simulations: usize,
-    enable_caching: bool,
-    
+
     // Statistics
     stats: Arc<Mutex<ManagerStats>>,
 }
 ```
 
 **Key Features:**
-- Manages transaction simulation queue with priority ordering
-- Runs transaction and buy/sell simulations
-- Passes results to SignalManager for detection
+- Manages a priority queue and runs simulations concurrently
+- For CreatorTransaction, simulates EACH pool independently and sends a result per pool to SignalManager
+- For other categories, sends a single SimulationResult to SignalManager
 - Tracks simulation statistics
 
-#### 2. TxSimulator
-Executes individual transactions against the current blockchain state.
+#### 2. MempoolSimulator
+Unified simulator that wraps a single shared `Arc<TxSimulator>` used across components to avoid DB write-locks. Provides:
+- `simulate_mempool_tx` with automatic nonce retry for "nonce too high, expected N"
+- `simulate_pool_buy_sell(_simple)` delegating to tx_processor via the PoolBuySellSimulator wrapper
 
-**Capabilities:**
-- Loads current state from Reth DB
-- Executes transaction in EVM
-- Tracks state changes (balance updates, storage changes)
-- Returns success/failure with gas usage
+#### 3. PoolBuySellSimulator (wrapper)
+Thin wrapper around tx_processor’s `check_can_buy_sell_pool` building a PoolViabilityConfig and returning PoolViabilityResult (can_buy, can_sell, buy/sell tax, etc.).
 
-#### 3. SequentialBuySellSimulator
-Tests token tradability by simulating buy and sell transactions.
+#### 4. LiquidityRemovalSimulator
+Specialized simulator for liquidity removals (MEV accounts with 0 balance). Supports simulating at the transaction’s block when available; falls back to latest if historical state is pruned.
 
-**Process:**
-1. Simulate 0.1 ETH buy transaction
-2. If successful, simulate selling received tokens
-3. Calculate buy/sell taxes from state changes
-4. Return results with taxes, can_buy/can_sell flags, and state changes
-
-#### 4. SimulationQueue
+#### 5. SimulationQueue
 Priority queue for managing simulation requests.
 
 **Priority Levels:**
@@ -67,6 +59,51 @@ Priority queue for managing simulation requests.
 - `Low`: Other transactions
 
 ## Data Flow and Calculations
+
+### Per‑Pool Simulation Flow (Creator Transactions)
+
+```
+Incoming tx (CreatorTransaction)
+        │
+        ▼
+Determine token address (router or cache lookup)
+        │
+        ▼
+Discover pools for token (TokenTrackingCache)
+        │
+        ▼
+For EACH pool (run independently / concurrently)
+  ┌───────────────────────────────────────────────────────────────┐
+  │ 1) Prepare optional tx call (if simulating tx itself)         │
+  │ 2) Build PoolViabilityConfig { token, pool, at_block?, … }    │
+  │ 3) mempool_simulator.simulate_pool_buy_sell(config)           │
+  │ 4) Build SimulationResult {                                   │
+  │       token_address, pool_address, pool_type,                 │
+  │       pool_viability_result (can_buy/can_sell/taxes),         │
+  │       liquidity_removal_result (if applicable)                 │
+  │     }                                                         │
+  │ 5) signal_manager.process_simulation_result(result)           │
+  └───────────────────────────────────────────────────────────────┘
+```
+
+Notes:
+- Each pool generates its own SimulationResult and downstream signals; one noisy pool does not block others.
+- If no pools are found for a creator, a single “no-pools” result is sent to SignalManager (for logging/consistency).
+
+### Other Categories
+
+```
+Incoming tx (Non‑creator category)
+        │
+        ▼
+Run appropriate simulation path (mempool_simulator …)
+        │
+        ▼
+Build single SimulationResult
+        │
+        ▼
+signal_manager.process_simulation_result(result)
+```
 
 ### 1. Transaction Submission
 ```rust
@@ -79,35 +116,18 @@ simulation_manager.submit(SimulationRequest {
 ```
 
 ### 2. Simulation Processing
-```rust
-async fn simulate_request(&self, request: SimulationRequest) -> SimulationResult {
-    // 1. For ContractCreation or CreatorTransaction:
-    let (tx_result, bs_result, token_addr, pool_addr) = 
-        self.simulate_tx_with_buy_sell(&request).await;
-    
-    // 2. Build result structure
-    SimulationResult {
-        request: request,
-        tx_simulation: Some(tx_result),
-        buy_sell_result: Some(BuySellResult {
-            can_buy: buy_result.success,
-            can_sell: sell_result.success,
-            buy_tax: None,    // Currently set to None, taxes calculated in SignalManager from state changes
-            sell_tax: None,   // Currently set to None, taxes calculated in SignalManager from state changes
-            tokens_received: None,
-            eth_received_on_sell: None,
-            buy_state_changes: Some(buy_result.state_changes),
-            sell_state_changes: Some(sell_result.state_changes),
-        }),
-        token_address: Some(token_addr),
-        pool_address: pool_addr,
-        simulation_time_ms: elapsed_ms,
-    }
-    
-    // 3. Pass to SignalManager
-    signal_manager.process_simulation_result(&result).await;
-}
-```
+High-level `simulate_request` flow:
+- CreatorTransaction:
+  - Liquidity removal → LiquidityRemovalSimulator; send result to SignalManager
+  - Otherwise → per-pool simulation; send EACH pool’s SimulationResult to SignalManager
+- Other categories:
+  - Single simulation; send one SimulationResult to SignalManager
+
+### Practical Considerations
+
+- Shared DB connection: MempoolSimulator wraps a single shared `Arc<TxSimulator>` so pool simulations and other paths reuse the same provider and avoid LMDB writer locks.
+- Nonce handling: `simulate_mempool_tx` retries on “nonce too high, expected N”. For historical transactions (or MEV sequences), prefer at‑block simulation to avoid nonce/basefee drift.
+- Historical state: When simulating at a transaction’s original block, a pruned node may report “state at block is pruned”. In that case, fall back to latest‑block behavior with best‑effort nonce handling.
 
 ### 3. SignalManager Processing
 
@@ -192,19 +212,14 @@ The SignalManager receives the SimulationResult and:
 
 ### SimulationManager Creation
 ```rust
+let mempool_simulator = Arc::new(MempoolSimulator::new(&reth_db_path)?);
+let publisher = Arc::new(tokio::sync::Mutex::new(SignalPublisher::new(cfg).await?));
 let simulation_manager = SimulationManager::new(
-    tx_simulator,
-    buy_sell_simulator,
+    mempool_simulator,
     token_cache,
     signal_config,
+    publisher,
     max_workers,
-);
-
-// Optional: Set metric counters
-simulation_manager.set_metric_counters(
-    trading_enabled_counter,
-    honeypot_counter,
-    high_tax_counter,
 );
 ```
 

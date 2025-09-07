@@ -16,7 +16,7 @@ This service operates with strict performance targets:
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │   Reth Node     │────▶│  IPC Client      │────▶│ Function        │
-│   (Mempool)     │     │  (NonBlocking)   │     │ Detector        │
+│   (Mempool)     │     │  (IPC Client)    │     │ Detector        │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                                            │
                                                            ▼
@@ -58,7 +58,7 @@ eliminating the need for separate signal processing steps.
 
 ### 1. IPC Transaction Data Format
 
-The IPC client (`NonBlockingIpcClient`) receives full transaction data as JSON from Reth:
+The IPC client (`MempoolFetcherIPCClient`) receives full transaction data as JSON from Reth:
 
 ```json
 {
@@ -84,14 +84,17 @@ This is wrapped in a `MempoolTransaction` struct:
 pub struct MempoolTransaction {
     pub hash: String,
     pub data: serde_json::Value,  // The JSON above
-    pub detection_ns: u64,         // Detection latency in nanoseconds
+    pub detection_ns: u64,        // Detection latency in nanoseconds
+    pub detection_time: Instant,  // When it was detected
+    pub latency_ns: u64,          // Alias for detection_ns
     // Pre-parsed fields for fast access
     pub from: Vec<u8>,
     pub to: Option<Vec<u8>>,
     pub input: Vec<u8>,
     pub value: U256,
     pub gas_price: Option<U256>,
-    pub functions: Vec<String>,    // Detected function names (populated by FunctionDetector)
+    pub functions: Vec<String>,
+    pub function_category: Option<CreatorFunctionType>,
 }
 ```
 
@@ -474,14 +477,17 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 **Publishing Channels**:
 
 #### 7.1 ZMQ Publishers  
-- **Port 5556**: All binary signals (trading_enabled, high_tax, liquidity_removal)
+- **Port 5556**: All binary signals (topics: `trading_enabled`, `tax_signal`, `liquidity_removal`, `scam_detection`, `lp_approval`)
 
 **Message Format**: `[topic, json_payload]` where topic is signal type
 
-#### 7.2 Log Files (in `/home/nima/code/crypto/logs/mempool/dev/`)
+#### 7.2 Log Files (under the run directory's `signals/` folder)
 - `trading_enabled.log`: Token becomes tradeable with reasonable taxes
-- `high_tax_warnings.log`: Tokens with excessive taxes  
+- `tax_signals.log`: High tax, honeypot, or suspicious tax patterns (consolidated)
 - `liquidity_removals.log`: LP removal operations
+- `scam_detections.log`: Pool drains above threshold or low remaining ETH
+- `lp_approval_signals.log`: Creator approving router to spend LP tokens
+- `signal_manager.log`: Per‑TX activity summary from detectors
 
 #### 7.3 Database (Optional)
 - Simple schema for binary signals only
@@ -515,6 +521,7 @@ RETH_DATADIR=~/.local/share/reth/mainnet
 
 # Optional
 LOG_LEVEL=info                  # Logging verbosity
+ARRIVAL_INDEX_DIR=/path/to/arrival_index   # Enable recording of arrival times
 ZMQ_ENDPOINT=tcp://127.0.0.1:5556
 ```
 
@@ -598,10 +605,11 @@ OPTIONS:
 - Auto-reconnection on failure
 - Maintains sub-millisecond latency
 
-### 3. Mempool Timestamp Tracker (Optional)
-- Records transaction arrival times when DATABASE_URL is provided
-- Tracks mempool timestamps for analysis
-- Uses PostgreSQL connection pool (max 5 connections)
+### 3. Mempool Arrival Index (Optional)
+- Records first-seen mempool timestamps and persists only when the tx is mined
+- Minimal mapping: `TxNumber → first_seen_ns`
+- Enable with `--arrival-index-dir <DIR>` or `ARRIVAL_INDEX_DIR` env var
+- Default backend: file-backed CSV (`tx_arrivals.csv`); MDBX backend available behind feature flag `arrival_mdbx`
 
 ### 4. Function Detector
 - Identifies function signatures in transaction calldata
@@ -672,8 +680,11 @@ The service creates a timestamped run directory with the following structure:
 │   └── ...
 └── signals/                     # Signal output directory
     ├── trading_enabled.log
-    ├── high_tax_warnings.log
-    └── liquidity_removals.log
+    ├── tax_signals.log
+    ├── liquidity_removals.log
+    ├── scam_detections.log
+    ├── lp_approval_signals.log
+    └── signal_manager.log
 ```
 
 ## Monitoring & Operations
