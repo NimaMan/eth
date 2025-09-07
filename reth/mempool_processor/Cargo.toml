@@ -123,6 +123,7 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 # Database support
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
 rust_decimal = { version = "1.0", features = ["serde-float"] }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", optional = true }
 
 [lib]
 name = "mempool_processor"
@@ -130,9 +131,12 @@ path = "src/lib.rs"
 
 # Enable tx_processor module tests
 [features]
-default = []
+# Enable database-related writers by default; can be disabled for example-only runs
+default = ["db"]
+db = []
 tx_processor_tests = []
 reth_integration = ["reth-exex", "reth-transaction-pool", "reth-node-core"]
+arrival_mdbx = ["reth-libmdbx"]
 
 [[bin]]
 name = "mempool_signal_detector"
@@ -168,32 +172,12 @@ path = "examples/tx_router/tx_router_example.rs"
 
 # Reth Simulation Examples
 [[example]]
-name = "database_lock_prevention_demo"
-path = "examples/simulator/database_lock_prevention_demo.rs"
-
-[[example]]
 name = "live_mempool_transaction_simulation"
 path = "examples/simulator/live_mempool_transaction_simulation.rs"
 
 [[example]]
-name = "token_tax_calculation_with_external_processor"
-path = "examples/simulator/token_tax_calculation_with_external_processor.rs"
-
-[[example]]
-name = "simulation_pipeline"
-path = "examples/simulator/simulation_pipeline.rs"
-
-[[example]]
-name = "test_imag_token_simulation"
-path = "examples/simulator/specific_tokens/test_imag_token_simulation.rs"
-
-[[example]]
-name = "test_imag_sell_transaction"
-path = "examples/simulator/specific_tokens/test_imag_sell_transaction.rs"
-
-[[example]]
-name = "test_groge_token_simulation"
-path = "examples/simulator/specific_tokens/test_groge_token_simulation.rs"
+name = "isolated_simulator_test"
+path = "examples/simulator/isolated_simulator_test.rs"
 
 [[example]]
 name = "test_liquidity_removal_simulation"
@@ -282,11 +266,15 @@ path = "examples/token_parameter_extraction/verify_exclusion_storage.rs"
 # Signal Detector Examples
 [[example]]
 name = "full_pipeline_signal_detection"
-path = "examples/signal_detector/full_pipeline_signal_detection.rs"
+path = "examples/signal_detector/full_signal_detection_pipeline.rs"
 
 [[example]]
 name = "simulation_only"
 path = "examples/signal_detector/simulation_only.rs"
+
+[[example]]
+name = "test_liquidity_removal_detection"
+path = "examples/signal_detector/test_liquidity_removal_detection.rs"
 
 
 [[example]]
@@ -326,9 +314,6 @@ path = "examples/token_tracking/token_pool_csv_logger.rs"
 
 # Using crates.io versions - no patches needed
 
-[[example]]
-name = "test_unified_simulator"
-path = "examples/simulator/test_unified_simulator.rs"
 
 [[example]]
 name = "debug_scout_token_simulation"

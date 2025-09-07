@@ -13,7 +13,7 @@ The mempool processor is a high-performance system designed to:
 ## Architecture Flow
 
 ```
-1. IPC Client (NonBlockingIpcClient)
+1. IPC Client (MempoolFetcherIPCClient)
    ↓ Raw bytes
 2. Transaction Parser
    ↓ Parsed transaction
@@ -34,17 +34,16 @@ src/
 ├── bin/
 │   └── mempool_signal_detector.rs      # Main service binary
 ├── mempool_fetcher/                    # Transaction ingestion
-│   ├── nonblocking_ipc_client.rs       # Reth IPC client
-│   └── full_transaction.rs             # Transaction parsing
+│   └── mempool_fetcher_ipc_client.rs   # Reth IPC client (non-blocking)
 ├── function_detector/                  # Function signature detection
 │   └── function_detector.rs            # 4-byte selector matching
 ├── tx_router/                         # Transaction categorization
 │   ├── tx_router.rs                   # Main routing logic
 │   └── creator_tx_router.rs           # Token creator detection
 ├── simulator/                         # Transaction simulation
-│   ├── simulation_manager.rs          # Batch simulation
-│   ├── sequential_tx_simulator.rs     # Buy/sell tax simulation
-│   └── unified_simulator.rs           # State change analysis
+│   ├── simulation_manager.rs          # Per-pool simulation + dispatch
+│   ├── pool_buy_sell_simulator.rs     # Buy/sell tax simulation wrapper
+│   └── mempool_simulator.rs           # Unified mempool + pool sim (shared TxSimulator)
 ├── signal_detector/                   # Signal generation (ACTIVE)
 │   ├── signal_manager.rs              # Central signal coordinator
 │   ├── tax_detector.rs                # Tax calculation & honeypot detection

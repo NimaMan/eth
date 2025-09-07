@@ -104,7 +104,7 @@ When a transaction appears in the Ethereum mempool, our system processes it thro
    • Sell test → Fails or returns minimal ETH
    • Calculated sell tax: 99%
    
-5. Signal: HIGH_TAX_WARNING / HONEYPOT
+5. Signal: TaxSignal (HighTaxOrHoneypot)
    • Token no longer sellable
    • Sell tax exceeds 50% threshold
 ```
@@ -190,30 +190,25 @@ END IF
 - Calculated tax rates from simulation
 - Token creation block for new token detection
 
-### **2. High Tax Warning Detector**
+### **2. Tax Signal Detector (Consolidated)**
 
-**Purpose**: Alert when tokens have excessive taxes that make trading unprofitable.
+**Purpose**: Emit a per‑pool tax signal when taxes are excessive or selling fails.
 
-**Algorithm**:
+**Logic (as implemented):**
 ```
-IF (buy_tax > 25% OR sell_tax > 25%) THEN
-    severity = "WARNING"
-    
-    IF (sell_tax > 50% OR NOT simulation.can_sell) THEN
-        severity = "CRITICAL"
-        type = "HONEYPOT"
-    END IF
-    
-    IF (token_cache.previous_tax < current_tax) THEN
-        EMIT HighTaxWarning(severity, type, tax_change)
-    END IF
-END IF
+let cant_sell = !simulation.can_sell
+let buy_exceeds = buy_tax >= max_acceptable_buy_tax
+let sell_exceeds = sell_tax >= max_acceptable_sell_tax
+
+if buy_exceeds || sell_exceeds || cant_sell:
+    emit TaxSignal(HighTaxOrHoneypot)
+else if (buy_tax <= 5%) and (sell_tax >= buy_tax + 20%):
+    emit TaxSignal(SuspiciousPattern)
 ```
 
-**Thresholds**:
-- Warning: >25% tax
-- Critical: >50% sell tax
-- Honeypot: Cannot sell OR sell tax >50%
+Notes:
+- Honeypot is determined primarily by “cannot sell”.
+- “Tax change” signaling exists in types but is not currently emitted.
 
 ### **3. Liquidity Removal Detector**
 
@@ -241,52 +236,13 @@ END IF
 - Creator/owner removals are more critical
 - Pool address must be known in cache
 
-### **4. Honeypot Detector**
+### **4. Honeypot (via Tax Signal)**
 
-**Purpose**: Identify tokens that can be bought but not sold.
-
-**Algorithm**:
-```
-IF (simulation.can_buy AND NOT simulation.can_sell) THEN
-    IF (token_cache.was_previously_sellable) THEN
-        // Token turned into honeypot
-        EMIT HoneypotSignal(severity="CRITICAL", type="CHANGED")
-    ELSE IF (is_new_token) THEN
-        // New honeypot token
-        EMIT HoneypotSignal(severity="HIGH", type="NEW")
-    END IF
-END IF
-
-// Alternative: Extreme sell tax
-IF (sell_tax > 90% AND buy_tax < 25%) THEN
-    EMIT HoneypotSignal(severity="HIGH", type="HIGH_TAX")
-END IF
-```
+Handled by the Tax Signal detector as `HighTaxOrHoneypot` when selling fails (cannot sell).
 
 ### **5. Tax Change Detector**
 
-**Purpose**: Alert on significant tax rate changes.
-
-**Algorithm**:
-```
-previous_buy_tax = token_cache.get_buy_tax()
-previous_sell_tax = token_cache.get_sell_tax()
-
-buy_tax_change = ABS(current_buy_tax - previous_buy_tax)
-sell_tax_change = ABS(current_sell_tax - previous_sell_tax)
-
-IF (buy_tax_change > 5% OR sell_tax_change > 5%) THEN
-    IF (current_tax > previous_tax) THEN
-        direction = "INCREASED"
-        severity = "HIGH"
-    ELSE
-        direction = "DECREASED"
-        severity = "MEDIUM"
-    END IF
-    
-    EMIT TaxChangeSignal(direction, severity, old_tax, new_tax)
-END IF
-```
+Reserved (types include `TaxChange`, but current implementation does not emit it).
 
 ### **Signal Emission Rules**
 
@@ -334,12 +290,92 @@ END IF
                └─────────────────────────────────────────────────────┘
 ```
 
+### End‑to‑End Pipeline Flow
+
+```
+Reth Node (IPC @ /tmp/reth.ipc)
+        │
+        ▼
+┌──────────────────────────────┐
+│ MempoolFetcherIPCClient      │  Non‑blocking try_read() + JSON parse
+│ - Produces MempoolTransaction│  (2–7µs socket read)
+└──────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────┐
+│ FunctionDetector              │  Populate tx.functions, function_category
+└──────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────┐
+│ TransactionRouter             │  Classify + priority
+│ - ContractCreation            │
+│ - CreatorTransaction          │  (e.g., enableTrading, liquidity removal)
+│ - Dex/Other                   │
+└──────────────────────────────┘
+        │
+        ├── (LP Approval, no simulation) ──────────────────────────────────────────────┐
+        │                                                                             │
+        │                                        ┌──────────────────────────────────┐  │
+        │                                        │  SignalManager (direct path)     │  │
+        │                                        │  • LpApprovalDetector            │  │
+        │                                        │  • Publish via SignalPublisher   │  │
+        │                                        └──────────────────────────────────┘  │
+        │                                                                             │
+        ▼                                                                             │
+┌────────────────────────────────────────────────────────────────────────────────────┘
+│ SimulationManager (integrated)
+│  submit(request)
+│  - Uses MempoolSimulator (shared Arc<TxSimulator>)
+│  - LiquidityRemovalSimulator for removal flows
+│  - Discovers pools via TokenTrackingCache for CreatorTransaction
+│  - Runs per‑pool simulations concurrently
+│  - Immediately dispatches EACH SimulationResult to SignalManager
+└────────────────────────────────────────────────────────────────────────────────────
+        │
+        ▼
+Per‑pool simulation (CreatorTransaction)
+  ┌──────────────────────────────────────────────────────────────────────────────┐
+  │ 1) Optional tx simulation (mempool) with nonce retry on “too high”         │
+  │ 2) Build PoolViabilityConfig { token, pool, at_block?, … }                 │
+  │ 3) Pool buy/sell via tx_processor (check_can_buy_sell_pool)                │
+  │ 4) Build SimulationResult { token, pool, pool_viability_result, … }        │
+  │ 5) Send to SignalManager                                                   │
+  └──────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ SignalManager                                                                     │
+│  • TaxDetector                → HighTax / Honeypot signals                        │
+│  • TradingStatusDetector      → TradingEnabled signals                            │
+│  • LiquidityDetector          → Pool drain / scam detections                      │
+│  • StablecoinDetector         → Stablecoin events                                 │
+│  • LpApprovalDetector         → LP approvals (direct path or from results)       │
+│  → Publishes every signal via SignalPublisher                                     │
+└──────────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ SignalPublisher (logs)       │    │ SignalPublisher (ZMQ)        │
+│  • signals/trading_enabled   │    │  tcp://127.0.0.1:5556        │
+│  • signals/tax_signals       │    └──────────────────────────────┘
+│  • signals/liquidity_removals│
+│  • signals/scam_detections   │    (Optional DB via feature `db`)
+│  • signals/lp_approval       │    • Enabled/disabled at build time
+└──────────────────────────────┘
+
+Support services
+  • TokenTrackingSubscriber → populates TokenTrackingCache from Python feeds (optional)
+  • MempoolSimulator shares a single TxSimulator to avoid DB writer locks
+  • At‑block simulation preferred when available to avoid nonce/basefee drift
+```
+
 ### **Component Architecture (New Integrated Design)**
 
 ```
 mempool_signal_detector (Single Binary)
 │
-├── 🔌 NonBlockingIpcClient              ──▶ /tmp/reth.ipc
+├── 🔌 MempoolFetcherIPCClient           ──▶ /tmp/reth.ipc
 │   ├── Non-blocking socket reads        ──▶ 2-7μs detection
 │   ├── JSON streaming parser            ──▶ Zero-copy parsing
 │   └── Auto-reconnect on failure        ──▶ Resilient connection
@@ -350,16 +386,16 @@ mempool_signal_detector (Single Binary)
 │   └── Category routing                 ──▶ Contract/Creator/DEX
 │
 ├── 🔧 SimulationManager (Integrated)    ──▶ All-in-one processing
-│   ├── TxSimulator                      ──▶ Reth DB direct access
-│   ├── BuySellSimulator                 ──▶ Trading validation
+│   ├── MempoolSimulator                 ──▶ Shared TxSimulator (no DB locks)
+│   ├── Buy/Sell Simulator               ──▶ Trading validation
 │   ├── SignalManager (built-in)         ──▶ Automatic detection
 │   └── TokenCache integration           ──▶ Context-aware signals
 │
 ├── 🎯 Signal Detection (Automatic)      ──▶ Inside SimulationManager
 │   ├── Trading Enabled (buy+sell OK)    ──▶ New tradeable tokens
-│   ├── Honeypot Detection               ──▶ Can't sell anymore
-│   ├── High Tax Warning (>25%)          ──▶ Excessive fees
-│   └── Liquidity/Scam Detection         ──▶ Pool drains
+│   ├── Tax Signal (high tax/honeypot)   ──▶ Excessive fees or cannot sell
+│   ├── Liquidity/Scam Detection         ──▶ Pool drains (incl. dedicated removal)
+│   └── LP Approval Detection            ──▶ Creator approving router to spend LP tokens
 │
 ├── 💾 TokenTrackingCache                ──▶ Comprehensive token data
 │   ├── Token information + simulation   ──▶ Full token state
@@ -399,7 +435,7 @@ simulation_manager.submit(request).await?;
 
 ### **Ultra-Fast Detection**
 - **IPC Integration**: Direct Unix socket connection to Reth node
-- **Non-blocking I/O**: Eliminates blocking read bottlenecks
+- **Non-blocking I/O**: Eliminates blocking read bottlenecks (via MempoolFetcherIPCClient)
 - **Zero RPC Fallback**: Full transaction data in first request
 - **Nanosecond Timing**: Precise performance measurement
 
@@ -410,17 +446,18 @@ simulation_manager.submit(request).await?;
 - **Distributed Integration**: External services via ZMQ
 
 ### **Transaction Simulator**
-- **Primary Method**: debug_traceCall RPC (~3.6ms average)
-- **Alternative**: REVM simulation (~40-50ms) - not used in production
+- **MempoolSimulator**: wraps a single shared `Arc<TxSimulator>` used across components
+- **DB Locks**: avoided by sharing one connection (no -30778 LMDB write lock)
+- **Nonce Handling**: mempool tx path retries on "nonce too high"; at-block simulation preferred
 - **State Tracking**: ETH transfers and ERC20 token movements
 - **Pool Analysis**: Reserve changes and percentage calculations
 
 ### **Signal Categories**
-1. **TradingEnabled**: Token becomes tradeable with taxes ≤25%
-2. **HighTaxWarning**: Buy or sell tax exceeds 25%
-3. **Honeypot**: Sell tax >50% or cannot sell
-4. **LiquidityRemoval**: Significant ETH removed from pools
-5. **ScamDetected**: Pool drain >60% or <0.3 ETH remaining
+1. **TradingEnabled**: Token becomes tradeable on a specific pool with acceptable taxes
+2. **TaxSignal**: HighTaxOrHoneypot (incl. cannot sell) or SuspiciousPattern
+3. **LiquidityRemoval**: ETH removed from pool (minor/significant/major)
+4. **ScamDetected**: Pool drain >60% or <0.3 ETH remaining
+5. **LpApproval**: Creator approves router to spend LP tokens
 
 ## 🚀 Performance Characteristics
 
@@ -451,8 +488,8 @@ simulation_manager.submit(request).await?;
 - **Rust**: 1.70+ with cargo
 - **Reth Node**: Running with IPC enabled (`/tmp/reth.ipc`)
 - **Reth Database**: Read access to `/home/nima/.local/share/reth/mainnet`
-- **Python Token Tracker**: Publishing tokens on `tcp://localhost:5557-5558`
-- **PostgreSQL**: Optional for audit logging
+- **Python Token Tracker**: Optional; when offline the cache is sparse but pipeline still runs
+- **PostgreSQL**: Optional for audit logging (disabled by default when building with `--no-default-features`)
 
 ### Installation
 ```bash
@@ -536,17 +573,23 @@ Signals are published to `tcp://127.0.0.1:5556` as topic-prefixed JSON:
 }
 ```
 
-**High Tax Warning Signal:**
+**TaxSignal (HighTaxOrHoneypot):**
 ```json
 {
   "tx_hash": "0x7ea69e87...",
   "token_address": "0x8390a1DA...",
+  "pool_address": "0xPool...",
+  "pool_type": "V2",
   "creator_address": "0x97dC7F34...",
-  "buy_tax": 30,
-  "sell_tax": 99,
-  "warning_type": "PotentialHoneypot",
-  "timestamp": 1705123456,
-  "block_number": 22832374
+  "signal_type": "HighTaxOrHoneypot",
+  "signal_details": "High sell tax: 99.0%",
+  "confidence": 0.90,
+  "buy_tax": 30.0,
+  "sell_tax": 99.0,
+  "buy_tax_exceeds_threshold": true,
+  "sell_tax_exceeds_threshold": true,
+  "cant_sell": false,
+  "timestamp": 1705123456
 }
 ```
 
@@ -567,11 +610,15 @@ while True:
     signal = json.loads(message)
     
     if topic == "trading_enabled":
-        print(f"✅ Trading Enabled: {signal['token_address']} (buy: {signal['buy_tax']}%, sell: {signal['sell_tax']}%)")
-    elif topic == "high_tax_warning":
-        print(f"⚠️ High Tax: {signal['token_address']} - {signal['warning_type']}")
+        print(f"✅ Trading Enabled: token={signal['token_address']} pool={signal['pool_address']} (buy: {signal['buy_tax']}%, sell: {signal['sell_tax']}%)")
+    elif topic == "tax_signal":
+        print(f"⚠️ TaxSignal: token={signal['token_address']} pool={signal['pool_address']} type={signal['signal_type']} details={signal['signal_details']}")
     elif topic == "liquidity_removal":
-        print(f"💧 Liquidity Removal: {signal['pool_address']} - {signal['eth_change']:.2f} ETH")
+        print(f"💧 Liquidity Removal: pool={signal['pool_address']}")
+    elif topic == "scam_detection":
+        print(f"🚨 Scam Detected: pool={signal['pool_address']} drained={signal['drain_percentage']}% remaining={signal['eth_remaining']} ETH")
+    elif topic == "lp_approval":
+        print(f"⚠️ LP Approval: creator={signal['creator']} lp_token={signal['lp_token_address']} router={signal['router_address']}")
 ```
 
 ## 📁 Project Structure
@@ -584,7 +631,7 @@ src/
 │
 ├── mempool_fetcher/                               # 🔌 Transaction detection
 │   ├── mod.rs                                     # Module exports
-│   ├── nonblocking_ipc_client.rs                 # ⚡ Ultra-fast IPC client
+│   ├── mempool_fetcher_ipc_client.rs              # ⚡ Ultra-fast IPC client
 │   └── types.rs                                   # Transaction types
 │
 ├── function_detector/                             # 🔍 Function signature detection
@@ -593,21 +640,22 @@ src/
 ├── tx_router/                                     # 🧭 Transaction routing
 │   └── mod.rs                                     # Classification & priority
 │
-├── simulator/                                     # 🔬 Transaction simulation
+├── simulator/                                     # 🔬 Transaction simulation (per‑pool)
 │   ├── mod.rs                                     # Module coordination
-│   ├── tx_simulator.rs                            # Reth DB simulator
-│   ├── buy_sell_sequence_simulator.rs            # Trading validation
-│   ├── simulation_manager.rs                      # Integrated processing
-│   └── simulation_queue.rs                        # Priority queue
+│   ├── mempool_simulator.rs                       # Reth DB simulator
+│   ├── pool_buy_sell_simulator.rs                 # Buy/Sell per‑pool testing
+│   ├── simulation_manager.rs                      # Integrated processing + signal dispatch
+│   ├── simulation_queue.rs                        # Priority queue
+│   └── liquidity_removal_simulator.rs             # Dedicated removal simulator
 │
-├── signal_detector/                               # 🎯 Signal detection
+├── signal_detector/                               # 🎯 Signal detection (per‑pool)
 │   ├── mod.rs                                     # Module exports
 │   ├── signal_manager.rs                          # Signal coordination
-│   ├── liquidity_detector.rs                      # Pool drain detection
+│   ├── liquidity_detector.rs                      # Drains/removals + scams
 │   ├── stablecoin_detector.rs                     # USDC/USDT activity
 │   ├── trading_status_detector.rs                 # Trading enabled signals
-│   ├── tax_change_detector.rs                     # Tax modification alerts
-│   ├── honeypot_detector.rs                       # Scam detection
+│   ├── tax_signal_detector.rs                     # Consolidated tax signals
+│   ├── lp_approval_detector.rs                    # LP approval detection
 │   └── types.rs                                   # Signal definitions
 │
 ├── token_tracking/                                # 💾 Token state management
@@ -615,8 +663,7 @@ src/
 │   ├── cache.rs                                   # TokenTrackingCache impl
 │   └── types.rs                                   # Token data structures
 │
-├── signal_publisher/                              # 📡 Signal distribution
-│   └── mod.rs                                     # ZMQ publisher
+├── signal_publisher.rs                            # 📡 Signal distribution (ZMQ/logs/DB)
 │
 ├── token_parameter_extraction/                    # 📊 Token analysis
 │   ├── mod.rs                                     # Module exports

@@ -8,7 +8,7 @@ This module provides direct IPC (Inter-Process Communication) connection to a lo
 
 ## Components
 
-### 1. **NonBlockingIpcClient** (`nonblocking_ipc_client.rs`) - PRODUCTION 🚀
+### 1. **MempoolFetcherIPCClient** (`mempool_fetcher_ipc_client.rs`) - PRODUCTION 🚀
 - **Latency**: 2-7 microseconds (μs)
 - **Method**: Non-blocking socket reads with streaming JSON parser
 - **Throughput**: 150-703 transactions/second sustained
@@ -21,56 +21,32 @@ Key features:
 - Tracks sub-10μs, sub-100μs, and sub-1ms transactions
 - Zero dependencies on RPC endpoints
 
-### 2. **FullTransactionIpcClient** (`full_transaction_ipc_client.rs`) - LEGACY
-- **Latency**: ~1ms average
-- **Method**: Traditional async/await with buffered reader
-- **Usage**: Backup implementation, used by standalone monitoring tools
-
-Key features:
-- More traditional async implementation
-- Includes reconnection logic
-- Detailed performance statistics
-- Used by `mempool_full_tx_client` binary
-
-### 3. **Types** (`types.rs`)
+### 2. Types (`types.rs`)
 Common types shared across the codebase:
 - `TransactionView`: Simplified transaction representation
 - `MempoolTransaction`: Transaction with metadata (status, first seen time)
 - `TransactionStatus`: Pending/Confirmed/Failed states
 
-## Performance Comparison
+## Performance
 
 | Client | Avg Latency | P99 Latency | Method |
-|--------|-------------|-------------|---------|
-| NonBlockingIpcClient | 5μs | 18μs | Non-blocking `try_read` |
-| FullTransactionIpcClient | 1ms | 5ms | Async buffered reader |
-| WebSocket (removed) | 28ms | 100ms | HTTP/WebSocket |
-| RPC polling (removed) | 100ms+ | 500ms+ | HTTP RPC |
+|--------|-------------|-------------|--------|
+| MempoolFetcherIPCClient | 5μs | 18μs | Non-blocking `try_read` |
 
 ## Usage
 
 ### Production Usage (Signal Detection)
 ```rust
-use mempool_processor::mempool_fetcher::{NonBlockingIpcClient, NonBlockingTransaction};
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 
-let client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+let client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
 client.start().await?;
 
-while let Some(tx) = client.get_transaction().await? {
+let txs = client.get_transactions_instant(100).await;
+for tx in txs {
     // Process transaction with 2-7μs latency
     println!("Detected: {} in {}ns", tx.hash, tx.detection_ns);
 }
-```
-
-### Monitoring/Testing Usage
-```rust
-use mempool_processor::FullTransactionIpcClient;
-
-let client = FullTransactionIpcClient::new(Some("/tmp/reth.ipc"))?;
-client.start_monitoring().await?;
-
-let stats = client.get_stats().await;
-println!("Processed {} transactions", stats.total_transactions);
 ```
 
 ## Technical Details
@@ -88,7 +64,7 @@ Both clients use Ethereum JSON-RPC subscription:
 
 The `true` parameter requests full transaction objects instead of just hashes.
 
-### Socket Optimization (NonBlockingIpcClient)
+### Socket Optimization (IPC Client)
 - Non-blocking mode: `socket.set_nonblocking(true)`
 - Large buffers: 64KB read, 1MB pending
 - Minimal allocations: Reuses buffers
@@ -97,17 +73,14 @@ The `true` parameter requests full transaction objects instead of just hashes.
 ### Data Flow
 1. Transaction enters Reth mempool
 2. Reth writes notification to IPC socket
-3. NonBlockingIpcClient reads with `try_read()` (2-7μs)
+3. MempoolFetcherIPCClient reads with `try_read()` (2-7μs)
 4. JSON parsed and transaction extracted
 5. Transaction sent via mpsc channel
 6. Signal detection processes transaction
 
-## Why Two Clients?
+## Recommendation
 
-1. **NonBlockingIpcClient**: Optimized for absolute minimum latency in production
-2. **FullTransactionIpcClient**: More features (reconnection, detailed stats) for monitoring
-
-In production, always use NonBlockingIpcClient for signal detection.
+In production, use MempoolFetcherIPCClient for signal detection.
 
 ## Removed Components
 
@@ -133,7 +106,7 @@ Here's the detailed timing breakdown of how a transaction flows through our syst
 - **Location**: Reth writes to Unix domain socket
 - **Action**: Full transaction JSON written to `/tmp/reth.ipc`
 
-#### Stage 3: Socket Read by NonBlockingIpcClient (T₀ + ~7-17μs)
+#### Stage 3: Socket Read by MempoolFetcherIPCClient (T₀ + ~7-17μs)
 - **Time**: 2-7μs to read from socket (measured as `detection_ns`)
 - **Location**: `monitor_nonblocking()` at line 112
 - **Action**: `try_read()` pulls data from socket into 64KB buffer

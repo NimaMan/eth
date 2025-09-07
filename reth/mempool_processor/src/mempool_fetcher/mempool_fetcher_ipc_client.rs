@@ -320,7 +320,7 @@ use std::io::Read;
 
 impl std::fmt::Debug for MempoolFetcherIPCClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NonBlockingIpcClient")
+        f.debug_struct("MempoolFetcherIPCClient")
             .field("socket_path", &self.socket_path)
             .finish()
     }

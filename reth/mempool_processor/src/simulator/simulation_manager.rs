@@ -124,7 +124,7 @@ impl From<&PoolViabilityResult> for BuySellResult {
 
 /// Manager for transaction simulations
 pub struct SimulationManager {
-    unified_simulator: Arc<MempoolSimulator>,
+    mempool_simulator: Arc<MempoolSimulator>,
     liquidity_removal_simulator: Arc<super::LiquidityRemovalSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
     
@@ -152,7 +152,7 @@ struct ManagerStats {
 impl SimulationManager {
     /// Create new simulation manager with unified simulator
     pub fn new(
-        unified_simulator: Arc<MempoolSimulator>,
+        mempool_simulator: Arc<MempoolSimulator>,
         token_cache: Arc<TokenTrackingCache>,
         signal_config: SignalManagerConfig,
         publisher: Arc<TokioMutex<crate::signal_publisher::SignalPublisher>>,
@@ -164,12 +164,12 @@ impl SimulationManager {
         
         // Create liquidity removal simulator with the same underlying simulator
         let mut liquidity_removal_simulator = super::LiquidityRemovalSimulator::new(
-            unified_simulator.get_tx_simulator()
+            mempool_simulator.get_tx_simulator()
         );
         liquidity_removal_simulator.set_token_cache(token_cache.clone());
         
         Self {
-            unified_simulator,
+            mempool_simulator,
             liquidity_removal_simulator: Arc::new(liquidity_removal_simulator),
             queue: Arc::new(Mutex::new(SimulationQueue::new())),
             signal_manager: Arc::new(Mutex::new(signal_manager)),
@@ -297,10 +297,9 @@ impl SimulationManager {
                     
                     // Still send to signal manager even with no pools
                     info!("📤 Sending no-pools result to signal manager for TX {}", result.request.tx.hash);
-                    // TEMPORARILY DISABLED FOR TESTING
-                    // let mut signal_manager = self.signal_manager.lock().await;
-                    // let signals = signal_manager.process_simulation_result(&result).await;
-                    // info!("  Signal manager returned {} signals", signals.len());
+                    let mut signal_manager = self.signal_manager.lock().await;
+                    let signals = signal_manager.process_simulation_result(&result).await;
+                    info!("  Signal manager returned {} signals", signals.len());
                 } else {
                     // CRITICAL: Process each pool's result INDEPENDENTLY
                     // Each pool gets its own SimulationResult and signal
@@ -323,10 +322,9 @@ impl SimulationManager {
                             pool_specific_result.error.is_some(), 
                             pool_specific_result.pool_viability_result.is_some()
                         );
-                        // TEMPORARILY DISABLED FOR TESTING
-                        // let mut signal_manager = self.signal_manager.lock().await;
-                        // let signals = signal_manager.process_simulation_result(&pool_specific_result).await;
-                        // info!("  Signal manager returned {} signals for pool {}", signals.len(), pool_idx);
+                        let mut signal_manager = self.signal_manager.lock().await;
+                        let signals = signal_manager.process_simulation_result(&pool_specific_result).await;
+                        info!("  Signal manager returned {} signals for pool {}", signals.len(), pool_idx);
                         
                         // Keep the last successful result as the overall result (for backward compatibility)
                         if pool_specific_result.error.is_none() {
@@ -356,10 +354,9 @@ impl SimulationManager {
                     result.error.is_some(), 
                     result.buy_sell_result().is_some()
                 );
-                // TEMPORARILY DISABLED FOR TESTING
-                // let mut signal_manager = self.signal_manager.lock().await;
-                // let signals = signal_manager.process_simulation_result(&result).await;
-                // info!("  Signal manager returned {} signals", signals.len());
+                let mut signal_manager = self.signal_manager.lock().await;
+                let signals = signal_manager.process_simulation_result(&result).await;
+                info!("  Signal manager returned {} signals", signals.len());
             }
         }
         
@@ -516,15 +513,8 @@ impl SimulationManager {
             let block_number = None; // Use latest block
             info!("  Using block number: {:?}", block_number);
             
-            // Create the transaction CallRequest
-            let full_tx = crate::mempool_fetcher::FullTransaction {
-                hash: request.tx.hash.clone(),
-                tx_data: request.tx.data.clone(),
-                detection_time: std::time::Instant::now(),
-                latency_ns: request.tx.detection_ns,
-            };
-            
-            let mut tx_call_request = match crate::common::convert::ipc_to_call_request(&full_tx.tx_data) {
+            // Use the MempoolTransaction directly (no need to convert to FullTransaction)
+            let mut tx_call_request = match crate::common::convert::ipc_to_call_request(&request.tx.data) {
                 Ok(req) => req,
                 Err(e) => {
                     results.push(SimulationResult {
@@ -566,7 +556,7 @@ impl SimulationManager {
             // Check if gas is missing - this should never happen for mined transactions
             if tx_call_request.gas.is_none() {
                 error!("WARNING: Gas limit is None for mined transaction!");
-                error!("Raw IPC data: {}", serde_json::to_string_pretty(&full_tx.tx_data).unwrap_or_default());
+                error!("Raw IPC data: {}", serde_json::to_string_pretty(&request.tx.data).unwrap_or_default());
                 results.push(SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
@@ -631,7 +621,7 @@ impl SimulationManager {
                 token_decimals: 18, // Default to 18 decimals
             };
             
-            let simulation_result = match self.unified_simulator.simulate_pool_buy_sell(config.clone()).await {
+            let simulation_result = match self.mempool_simulator.simulate_pool_buy_sell(config.clone()).await {
                 Ok(result) => Ok(result),
                 Err(e) => {
                     // Check if it's a base fee error
@@ -671,7 +661,7 @@ impl SimulationManager {
                             token_decimals: 18, // Default to 18 decimals
                         };
                         
-                        self.unified_simulator.simulate_pool_buy_sell(retry_config).await
+                        self.mempool_simulator.simulate_pool_buy_sell(retry_config).await
                     } else {
                         Err(e)
                     }

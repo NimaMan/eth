@@ -15,7 +15,7 @@
 /// - Track statistics: creator txs, dex interactions, contract creations
 /// - Log routing decisions with token cache hits/misses
 
-use mempool_processor::mempool_fetcher::NonBlockingIpcClient;
+use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use mempool_processor::function_detector::FunctionDetector;
 use mempool_processor::tx_router::{TransactionRouter, TransactionCategory, SimulationPriority};
 use mempool_processor::token_tracking::TokenTrackingSubscriber;
@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
 
     // Initialize IPC client
     info!("🔌 Connecting to Reth IPC...");
-    let ipc_client = NonBlockingIpcClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 

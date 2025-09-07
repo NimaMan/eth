@@ -15,7 +15,7 @@ use tracing::info;
 use alloy_primitives::{Address, U256};
 
 use tx_simulator::{TxSimulator, UnsignedTransaction, SimulationResult as TxSimResult};
-use crate::mempool_fetcher::FullTransaction;
+use crate::mempool_fetcher::MempoolTransaction;
 use crate::common::convert::ipc_to_unsigned_tx;
 use super::pool_buy_sell_simulator::{
     PoolBuySellSimulator, PoolSimulationResult
@@ -76,6 +76,20 @@ impl MempoolSimulator {
             pool_simulator,
         })
     }
+
+    /// Create a new mempool simulator from a shared TxSimulator instance
+    /// This allows external components (like tx_processor) to share the same
+    /// database connection and avoid writer lock conflicts.
+    pub fn from_shared_simulator(tx_simulator: Arc<TxSimulator>) -> Result<Self> {
+        info!("Initializing mempool simulator from shared TxSimulator...");
+
+        // Reuse the provided TxSimulator for both single and pool simulations
+        let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())?;
+
+        info!("✅ Mempool simulator initialized with shared TxSimulator");
+
+        Ok(Self { tx_simulator, pool_simulator })
+    }
     
     /// Create with custom buyer address
     pub fn with_custom_buyer(datadir: &str, buyer_address: Address) -> Result<Self> {
@@ -108,14 +122,14 @@ impl MempoolSimulator {
     // ========== Mempool Transaction Simulation Methods ==========
     
     /// Simulate a mempool transaction
-    pub async fn simulate_mempool_tx(&self, tx: &FullTransaction) -> Result<SimulationResult> {
-        let unsigned_tx = ipc_to_unsigned_tx(&tx.tx_data)?;
+    pub async fn simulate_mempool_tx(&self, tx: &MempoolTransaction) -> Result<SimulationResult> {
+        let unsigned_tx = ipc_to_unsigned_tx(&tx.data)?;
         let latest_block = self.tx_simulator.get_latest_block()?;
         self.simulate_with_nonce_retry(unsigned_tx, latest_block).await
     }
     
     /// Simulate mempool transaction and get state changes (placeholder)
-    pub async fn simulate_mempool_tx_with_state_changes(&self, tx: &FullTransaction) -> Result<StateChangeResult> {
+    pub async fn simulate_mempool_tx_with_state_changes(&self, tx: &MempoolTransaction) -> Result<StateChangeResult> {
         // For now, just do a basic simulation
         // TODO: Use tx_processor for actual state changes
         let sim_result = self.simulate_mempool_tx(tx).await?;
@@ -196,6 +210,6 @@ impl MempoolSimulator {
 }
 
 /// Convert mempool transaction to UnsignedTransaction (convenience function)
-pub fn mempool_tx_to_unsigned_tx(tx: &FullTransaction) -> Result<UnsignedTransaction> {
-    ipc_to_unsigned_tx(&tx.tx_data)
+pub fn mempool_tx_to_unsigned_tx(tx: &MempoolTransaction) -> Result<UnsignedTransaction> {
+    ipc_to_unsigned_tx(&tx.data)
 }
