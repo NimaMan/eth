@@ -17,6 +17,16 @@ pub struct RethQueryProvider {
 }
 ```
 
+### Gas Metadata (`gas.rs`)
+- `get_base_fee_at_block(b)` – Base fee in wei at block `b`
+- `get_latest_base_fee()` – Base fee of the tip block
+- `get_block_gas_metadata(b)` – `(gas_limit, gas_used, base_fee_opt)`
+
+### AMM Queries (`amm/*`)
+- `uni_v2_get_tokens(pair, block)` – Read `token0`/`token1` via local view calls
+- `uni_v2_get_reserves(pair, block)` – Read Uniswap V2 reserves at `block`
+- `uni_v2_calc_amount_out(amount_in, reserve_in, reserve_out)` – Pure math helper
+
 ### Transaction Operations (`transactions.rs`)
 - `get_transaction_by_hash()` - Load transaction metadata from Transactions table
 - `get_transaction_by_number()` - Load by sequential TxNumber (more efficient)
@@ -151,6 +161,13 @@ let options = BlockTransactionOptions {
     limit: Some(100),
 };
 let block = provider.get_block_transactions(block_num, options).await?;
+```
+
+### AMM Reads (Uniswap V2)
+```rust
+let (token0, token1) = provider.uni_v2_get_tokens(pair, Some(block)).await?;
+let (r0, r1, ts)   = provider.uni_v2_get_reserves(pair, Some(block)).await?;
+let amount_out     = provider.uni_v2_calc_amount_out(amount_in, r0, r1);
 ```
 
 ### Resource Sharing

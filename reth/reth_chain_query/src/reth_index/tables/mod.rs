@@ -8,6 +8,7 @@ pub mod trades;
 pub mod address_metrics;
 pub mod tokens;
 pub mod pools;
+pub mod mempool_tx_arrivals;
 
 // Re-export table interfaces
 pub use address_index::AddressIndex;
@@ -15,3 +16,4 @@ pub use trades::TradesTable;
 pub use address_metrics::AddressMetricsTable;
 pub use tokens::TokensTable;
 pub use pools::PoolsTable;
+pub use mempool_tx_arrivals::MempoolTxArrivalTable;

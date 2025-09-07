@@ -14,14 +14,14 @@
 pub mod database;
 pub mod models;
 pub mod reader;
-pub mod writer;
 pub mod tables;
+pub mod writers;
 
 // Re-export main types
 pub use database::RethIndexDB;
 pub use models::{TradeData, AddressMetrics, TokenMetadata, PoolData};
 pub use reader::RethIndexReader;
-pub use writer::RethIndexWriter;
+pub use writers::mempool_arrival_writer::MempoolArrivalWriter;
 
 // Re-export table interfaces
 pub use tables::{

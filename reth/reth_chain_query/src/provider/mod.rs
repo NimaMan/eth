@@ -21,6 +21,8 @@ mod types;
 mod transactions;
 mod block_transactions;
 mod address_state;
+mod gas;
+mod amm;
 
 pub use contract_methods::*;
 pub use batch_ops::*;
@@ -29,6 +31,8 @@ pub use types::*;
 pub use transactions::*;
 pub use block_transactions::*;
 pub use address_state::*;
+pub use gas::*;
+pub use amm::*;
 
 /// Storage slot cache for tracking known slot positions
 pub struct StorageSlotCache {
@@ -120,16 +124,7 @@ impl RethQueryProvider {
         })
     }
     
-    /// Add RPC endpoint for trace data (temporary until local tracing)
-    pub fn with_rpc_endpoint(mut self, rpc_url: &str) -> Result<Self> {
-        use alloy_provider::ProviderBuilder;
-        
-        let rpc_provider = ProviderBuilder::new()
-            .on_http(rpc_url.parse()?);
-        
-        self.rpc_provider = Some(Arc::new(rpc_provider));
-        Ok(self)
-    }
+    // RPC-based tracing intentionally omitted for direct DB-only usage.
     
     /// Enable RethIndex for fast entity-centric queries
     pub fn with_reth_index(mut self, reth_index_path: &str) -> Result<Self> {

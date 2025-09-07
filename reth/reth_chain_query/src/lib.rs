@@ -25,6 +25,7 @@ pub mod query_engine;
 pub mod postgres_db;
 pub mod time_utils;
 pub mod common_addresses;
+pub mod tx_builders;
 
 // Re-export new provider architecture
 pub use provider::{
@@ -59,6 +60,9 @@ pub use common_addresses::{
     cex::{CexAddress, CEX_ADDRESSES},
     etf::{EtfAddress, ETF_ADDRESSES},
 };
+
+// Re-export swap route for convenience
+pub use tx_builders::amm_swap_route::AmmSwapRoute;
 
 // Re-export commonly used types from dependencies
 pub use alloy_primitives::{Address, U256, B256};

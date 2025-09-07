@@ -8,6 +8,10 @@ use eyre::Result;
 use std::collections::HashMap;
 
 use super::RethQueryProvider;
+use reth_db::tables;
+use reth_db::transaction::DbTx;
+use reth_db_api::{models::ShardedKey, cursor::DbCursorRO};
+use reth_storage_api::DBProvider;
 
 /// Represents a balance difference
 #[derive(Debug, Clone)]
@@ -44,6 +48,56 @@ pub struct CompleteBalances {
 }
 
 impl RethQueryProvider {
+    /// Get blocks (archive, fast) where an address' account state changed
+    ///
+    /// Uses the archive `AccountsHistory` table to list block numbers where the
+    /// account was modified (balance/nonce/code/storage). This is the canonical
+    /// fast path for archive nodes.
+    ///
+    /// Caveat: This approximates "had any tx" by "state changed" and will not
+    /// include pure/reverted calls that don't change state.
+    pub async fn get_address_account_history_blocks(
+        &self,
+        address: Address,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<Vec<u64>> {
+        if end_block < start_block {
+            return Ok(Vec::new());
+        }
+
+        // Direct DB query: iterate AccountsHistory shards for this address and collect blocks.
+        let provider = self.provider_factory.provider()?;
+        let tx = provider.tx_ref();
+        let mut cursor = tx.cursor_read::<tables::AccountsHistory>()?;
+
+        let mut result = Vec::new();
+        // Seek to the first shard for this address (start from 0 to avoid skipping a preceding shard
+        // whose IntegerList may still contain entries >= start_block)
+        let mut item = cursor.seek(ShardedKey::new(address, 0))?;
+        while let Some((key, list)) = item {
+            if key.key != address {
+                break;
+            }
+            // Iterate block numbers in this shard and filter by range
+            for bn in list.iter() {
+                if bn < start_block {
+                    continue;
+                }
+                if bn > end_block {
+                    // Since IntegerList is sorted, we can break early for this shard
+                    break;
+                }
+                result.push(bn);
+            }
+            item = cursor.next()?;
+        }
+
+        result.sort_unstable();
+        result.dedup();
+        Ok(result)
+    }
+
     /// Get ETH balance for an address
     pub async fn get_eth_balance(&self, address: Address, block: Option<u64>) -> Result<U256> {
         let account = self.get_account(address, block).await?;

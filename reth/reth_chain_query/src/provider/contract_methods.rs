@@ -8,10 +8,8 @@ use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use super::RethQueryProvider;
 use tx_simulator::contract_method_simulator::{
-    encode_view_function_call,
     encode_view_function_with_address,
     decode_uint256_result,
-    decode_uint8_result,
     decode_string_result,
 };
 
@@ -39,7 +37,32 @@ impl RethQueryProvider {
             Ok(U256::ZERO) // Failed calls typically mean 0 balance
         }
     }
-    
+
+    /// Get ERC20 allowance via allowance(owner, spender) view function
+    pub async fn get_token_allowance(&self, token: Address, owner: Address, spender: Address, block: Option<u64>) -> Result<U256> {
+        // allowance(address,address) selector: 0xdd62ed3e
+        let mut data = Vec::with_capacity(4 + 32 + 32);
+        data.extend_from_slice(&[0xdd, 0x62, 0xed, 0x3e]);
+        // owner (left-padded to 32 bytes)
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(owner.as_slice());
+        // spender (left-padded to 32 bytes)
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(spender.as_slice());
+
+        let result = self.tx_simulator.simulate_view_function(
+            token,
+            Bytes::from(data),
+            block
+        ).await?;
+
+        if result.success {
+            Ok(decode_uint256_result(&result.output))
+        } else {
+            Ok(U256::ZERO)
+        }
+    }
+
     /// Get ERC20 total supply via totalSupply() view function
     pub async fn get_token_total_supply(&self, token: Address, block: Option<u64>) -> Result<U256> {
         // totalSupply() selector: 0x18160ddd

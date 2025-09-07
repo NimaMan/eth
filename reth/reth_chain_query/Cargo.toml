@@ -27,6 +27,11 @@ reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v
 reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-db-models = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-stages-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-prune-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 
 # PostgreSQL support
 sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "bigdecimal"] }
@@ -67,6 +72,12 @@ path = "examples/address_state/balance_changes.rs"
 [[example]]
 name = "historical_analysis"
 path = "examples/address_state/historical_analysis.rs"
+
+# Address tx blocks example
+[[example]]
+name = "address_tx_blocks"
+path = "examples/address_state/address_tx_blocks.rs"
+
 
 # Transaction examples
 [[example]]
@@ -111,3 +122,6 @@ hex = "0.4"
 [[example]]
 name = "verify_dex_pool_computation"
 path = "examples/defi/verify_dex_pool_computation.rs"
+[[example]]
+name = "tx_arrival_index_smoke"
+path = "examples/reth_index/tx_arrival_index_smoke.rs"
