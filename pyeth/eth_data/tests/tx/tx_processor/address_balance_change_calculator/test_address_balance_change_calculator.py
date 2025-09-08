@@ -1,7 +1,7 @@
 """
-Test suite for ProcessedTxStateDiffCalculator
+Test suite for AddressBalanceChangeCalculator
 
-Tests the ability to calculate state changes from processed transactions,
+Tests the ability to calculate address balance changes from processed transactions,
 particularly focusing on basic ETH transfers that were previously missed.
 """
 from web3 import Web3
@@ -9,8 +9,8 @@ from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 
 
-class TestProcessedTxStateDiffCalculator:
-    """Test cases for ProcessedTxStateDiffCalculator"""
+class TestAddressBalanceChangeCalculator:
+    """Test cases for AddressBalanceChangeCalculator"""
     def __init__(self):
         # Initialize Web3 connection first
         self.w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
@@ -62,14 +62,16 @@ class TestProcessedTxStateDiffCalculator:
         sender = processed_tx.from_address
         assert sender in state_changes, f"Sender {sender} not found in state changes"
         sender_change = state_changes[sender]
-        assert sender_change['eth_net'] == -0.00229, f"Expected sender eth_net=-0.00229, got {sender_change['eth_net']}"
+        assert 'ETH' in sender_change['currency_net'], f"Expected ETH in sender currency_net"
+        assert sender_change['currency_net']['ETH'] == -0.00229, f"Expected sender ETH=-0.00229, got {sender_change['currency_net']['ETH']}"
         assert sender_change['token_net'] == {}, f"Expected sender token_net={{}}, got {sender_change['token_net']}"
         
         # Verify receiver state change (positive)
         receiver = processed_tx.to_address
         assert receiver in state_changes, f"Receiver {receiver} not found in state changes"
         receiver_change = state_changes[receiver]
-        assert receiver_change['eth_net'] == 0.00229, f"Expected receiver eth_net=0.00229, got {receiver_change['eth_net']}"
+        assert 'ETH' in receiver_change['currency_net'], f"Expected ETH in receiver currency_net"
+        assert receiver_change['currency_net']['ETH'] == 0.00229, f"Expected receiver ETH=0.00229, got {receiver_change['currency_net']['ETH']}"
         assert receiver_change['token_net'] == {}, f"Expected receiver token_net={{}}, got {receiver_change['token_net']}"
         
         # Verify movements are properly tracked
@@ -77,16 +79,16 @@ class TestProcessedTxStateDiffCalculator:
         assert 'movements' in receiver_change
         
         # Verify sender has outgoing movement
-        sender_denom_out = sender_change['movements']['denom']['out']
-        assert len(sender_denom_out) == 1, f"Expected 1 outgoing denom movement for sender, got {len(sender_denom_out)}"
+        sender_eth_out = sender_change['movements']['currencies']['ETH']['out']
+        assert len(sender_eth_out) == 1, f"Expected 1 outgoing ETH movement for sender, got {len(sender_eth_out)}"
         
         # Verify receiver has incoming movement
-        receiver_denom_in = receiver_change['movements']['denom']['in']
-        assert len(receiver_denom_in) == 1, f"Expected 1 incoming denom movement for receiver, got {len(receiver_denom_in)}"
+        receiver_eth_in = receiver_change['movements']['currencies']['ETH']['in']
+        assert len(receiver_eth_in) == 1, f"Expected 1 incoming ETH movement for receiver, got {len(receiver_eth_in)}"
         
         print("✅ Basic ETH transfer state changes calculated correctly!")
-        print(f"   Sender ({sender}): {sender_change['eth_net']} ETH")
-        print(f"   Receiver ({receiver}): {receiver_change['eth_net']} ETH")
+        print(f"   Sender ({sender}): {sender_change['currency_net']['ETH']} ETH")
+        print(f"   Receiver ({receiver}): {receiver_change['currency_net']['ETH']} ETH")
 
     def test_complex_kermit_swap_real_transaction(self):
         """
@@ -127,8 +129,9 @@ class TestProcessedTxStateDiffCalculator:
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
+            eth_amount = change['currency_net'].get('ETH', 0)
             token_summary = f"{len(change['token_net'])} token types" if change['token_net'] else "no tokens"
-            print(f"   {address}: {change['eth_net']:.12f} ETH, {token_summary}")
+            print(f"   {address}: {eth_amount:.12f} ETH, {token_summary}")
         
         # Expected values from Etherscan analysis
         # NOTE: The intermediate address has net 0 change so it's correctly filtered out
@@ -153,17 +156,17 @@ class TestProcessedTxStateDiffCalculator:
         # Check each expected address
         for address, expected in expected_changes.items():
             if address in state_changes:
-                python_denom = state_changes[address]['eth_net']
-                expected_denom = expected['eth_net']
-                diff = python_denom - expected_denom
+                python_eth = state_changes[address]['currency_net'].get('ETH', 0)
+                expected_eth = expected['eth_net']
+                diff = python_eth - expected_eth
                 
                 print(f"   {address} ({expected['description']}):")
-                print(f"     Expected: {expected_denom:.12f} ETH")
-                print(f"     Python:   {python_denom:.12f} ETH")
+                print(f"     Expected: {expected_eth:.12f} ETH")
+                print(f"     Python:   {python_eth:.12f} ETH")
                 print(f"     Diff:     {diff:.12f} ETH")
                 
                 # Verify within reasonable tolerance (1e-10 for precision)
-                assert abs(diff) < 1e-10, f"Address {address}: Expected {expected_denom}, got {python_denom}, diff {diff}"
+                assert abs(diff) < 1e-10, f"Address {address}: Expected {expected_eth}, got {python_eth}, diff {diff}"
                 print(f"     ✅ Match!")
             else:
                 print(f"   ❌ Address {address} ({expected['description']}) NOT FOUND in Python results")
@@ -172,8 +175,9 @@ class TestProcessedTxStateDiffCalculator:
         # Verify we don't have unexpected significant changes
         for address, change in state_changes.items():
             if address not in expected_changes:
-                if abs(change['eth_net']) > 0.001:  # Only flag significant unexpected changes
-                    print(f"   ⚠️  Unexpected significant change: {address}: {change['eth_net']:.12f} ETH")
+                eth_change = change['currency_net'].get('ETH', 0)
+                if abs(eth_change) > 0.001:  # Only flag significant unexpected changes
+                    print(f"   ⚠️  Unexpected significant change: {address}: {eth_change:.12f} ETH")
         
         print(f"\n🎉 KERMIT swap state changes match expected Etherscan data!")
 
@@ -221,8 +225,9 @@ class TestProcessedTxStateDiffCalculator:
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
+            eth_amount = change['currency_net'].get('ETH', 0)
             token_summary = f"{len(change['token_net'])} token types" if change['token_net'] else "no tokens"
-            print(f"   {address}: {change['eth_net']:.12f} ETH, {token_summary}")
+            print(f"   {address}: {eth_amount:.12f} ETH, {token_summary}")
         
         # Expected values based on Etherscan analysis
         expected_changes = {
@@ -246,7 +251,7 @@ class TestProcessedTxStateDiffCalculator:
         for address, expected in expected_changes.items():
             assert address in state_changes, f"Expected address {address} not found in state changes"
             
-            python_eth = state_changes[address]['eth_net']
+            python_eth = state_changes[address]['currency_net'].get('ETH', 0)
             expected_eth = expected['eth_net']
             eth_diff = abs(python_eth - expected_eth)
             
@@ -262,21 +267,21 @@ class TestProcessedTxStateDiffCalculator:
             assert eth_diff < 1e-15, f"ETH mismatch for {address}: expected {expected_eth}, got {python_eth}"
             
             # Verify token amounts match exactly (compare dictionaries)
-            for token_symbol, expected_amount in expected_token_dict.items():
-                assert token_symbol in python_token_dict, f"Token {token_symbol} not found in Python results for {address}"
-                python_amount = python_token_dict[token_symbol]
+            for token_addr, expected_amount in expected_token_dict.items():
+                assert token_addr in python_token_dict, f"Token {token_addr} not found in Python results for {address}"
+                python_amount = python_token_dict[token_addr]
                 token_diff = abs(python_amount - expected_amount)
-                assert token_diff < 0.1, f"Token {token_symbol} mismatch for {address}: expected {expected_amount}, got {python_amount}"
+                assert token_diff < 0.1, f"Token {token_addr} mismatch for {address}: expected {expected_amount}, got {python_amount}"
             print(f"     ✅ Match!")
         
         # Verify intermediate address is correctly filtered out (net ~0 change)
         intermediate_addr = "0x6088d94C5a40CEcd3ae2D4e0710cA687b91c61d0"
         if intermediate_addr in state_changes:
             intermediate_change = state_changes[intermediate_addr]
-            intermediate_denom = abs(intermediate_change['eth_net'])
-            print(f"   ⚠️  Intermediate address present: {intermediate_addr}: {intermediate_change['eth_net']:.12f} ETH")
+            intermediate_eth = abs(intermediate_change['currency_net'].get('ETH', 0))
+            print(f"   ⚠️  Intermediate address present: {intermediate_addr}: {intermediate_change['currency_net'].get('ETH', 0):.12f} ETH")
             # Should be very close to 0 (within threshold) if present
-            assert intermediate_denom < 0.001, f"Intermediate should have ~0 net change, got {intermediate_denom}"
+            assert intermediate_eth < 0.001, f"Intermediate should have ~0 net change, got {intermediate_eth}"
         else:
             print(f"   ✅ Intermediate address correctly filtered out: {intermediate_addr}")
         
@@ -285,8 +290,9 @@ class TestProcessedTxStateDiffCalculator:
             if address not in expected_changes and address != intermediate_addr:
                 change = state_changes[address]
                 total_token_value = sum(abs(v) for v in change['token_net'].values()) if change['token_net'] else 0
-                if abs(change['eth_net']) > 0.001 or total_token_value > 1000:
-                    print(f"   ⚠️  Unexpected significant change: {address}: {change['eth_net']:.12f} ETH, tokens: {change['token_net']}")
+                eth_amount = change['currency_net'].get('ETH', 0)
+                if abs(eth_amount) > 0.001 or total_token_value > 1000:
+                    print(f"   ⚠️  Unexpected significant change: {address}: {eth_amount:.12f} ETH, tokens: {change['token_net']}")
         
         print(f"\n🎉 Double-counting bug fix verified! Transaction correctly processed without double-counting ETH transfers.")
 
@@ -342,7 +348,8 @@ class TestProcessedTxStateDiffCalculator:
         for address, change in state_changes.items():
             # Handle token dictionary display
             token_str = str(change['token_net']) if change['token_net'] else "no tokens"
-            print(f"   {address}: {change['eth_net']:.12f} ETH, {token_str}")
+            eth_amount = change['currency_net'].get('ETH', 0)
+            print(f"   {address}: {eth_amount:.12f} ETH, {token_str}")
         
         # Expected values based on Etherscan analysis and our fixes
         expected_changes = {
@@ -366,7 +373,7 @@ class TestProcessedTxStateDiffCalculator:
                 "eth_net": -0.27261806163315916,  # MYSTERY pool state change
                 "description": "Uniswap V2 MYSTERY pool"
             }
-        }
+    }
         
         print(f"\n🎯 Expected vs Python comparison:")
         
@@ -572,8 +579,9 @@ class TestProcessedTxStateDiffCalculator:
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
+            eth_amount = change['currency_net'].get('ETH', 0)
             token_summary = f"{len(change['token_net'])} token types" if change['token_net'] else "no tokens"
-            print(f"   {address}: {change['eth_net']:.12f} ETH, {token_summary}")
+            print(f"   {address}: {eth_amount:.12f} ETH, {token_summary}")
         
         # Expected values based on Etherscan state difference analysis
         # 
@@ -668,23 +676,24 @@ class TestProcessedTxStateDiffCalculator:
         
         print(f"\n🎯 Critical verification for problematic address:")
         print(f"   Address: {problematic_address}")
-        print(f"   Denom net: {problematic_change['eth_net']:.15f} ETH")
+        eth_net = problematic_change['currency_net'].get('ETH', 0)
+        print(f"   ETH net: {eth_net:.15f} ETH")
         
         # This address should have a small POSITIVE net change, not negative
-        assert problematic_change['eth_net'] > 0, f"Address should have positive net change, got {problematic_change['eth_net']}"
-        assert abs(problematic_change['eth_net'] - 0.010732407921078122) < 1e-15, f"Expected exact value 0.010732407921078122, got {problematic_change['eth_net']}"
+        assert eth_net > 0, f"Address should have positive net change, got {eth_net}"
+        assert abs(eth_net - 0.010732407921078122) < 1e-15, f"Expected exact value 0.010732407921078122, got {eth_net}"
         
         print(f"   ✅ Correct positive net change!")
         
         # Verify movements are properly tracked
-        movements = problematic_change['movements']['denom']
+        movements = problematic_change['movements']['currencies']['ETH']
         print(f"\n📋 Movement verification for {problematic_address}:")
         print(f"   Incoming movements: {len(movements['in'])}")
         print(f"   Outgoing movements: {len(movements['out'])}")
         
         # Should have both incoming (WETH conversion) and outgoing (internal transfer) movements
-        assert len(movements['in']) > 0, "Should have incoming denomination movements"
-        assert len(movements['out']) > 0, "Should have outgoing denomination movements"
+        assert len(movements['in']) > 0, "Should have incoming ETH movements"
+        assert len(movements['out']) > 0, "Should have outgoing ETH movements"
         
         total_in = sum(movements['in'].values())
         total_out = sum(movements['out'].values())
@@ -695,7 +704,7 @@ class TestProcessedTxStateDiffCalculator:
         
         # Verify the movement totals match our net calculation
         calculated_net = total_in - total_out
-        assert abs(calculated_net - problematic_change['eth_net']) < 1e-15, f"Movement net {calculated_net} doesn't match eth_net {problematic_change['eth_net']}"
+        assert abs(calculated_net - eth_net) < 1e-15, f"Movement net {calculated_net} doesn't match eth_net {eth_net}"
         
         print(f"   ✅ Movement tracking correct!")
         
@@ -767,7 +776,8 @@ class TestProcessedTxStateDiffCalculator:
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
             print(f"   {address}:")
-            print(f"     ETH Net: {change['eth_net']:.12f}")
+            eth_amount = change['currency_net'].get('ETH', 0)
+            print(f"     ETH Net: {eth_amount:.12f}")
             print(f"     Token Net: {change['token_net']}")
         
         # Expected values based on actual Python output
@@ -805,13 +815,14 @@ class TestProcessedTxStateDiffCalculator:
             
             print(f"   {address} ({expected['description']}):")
             print(f"     Expected ETH: {expected['eth_net']:.12f}")
-            print(f"     Python ETH:   {change['eth_net']:.12f}")
+            eth_amount = change['currency_net'].get('ETH', 0)
+            print(f"     Python ETH:   {eth_amount:.12f}")
             print(f"     Expected tokens: {expected['token_net']}")
             print(f"     Python tokens:   {change['token_net']}")
             
             # Verify ETH amounts
-            eth_diff = abs(change['eth_net'] - expected['eth_net'])
-            assert eth_diff < 1e-10, f"ETH mismatch for {address}: expected {expected['eth_net']}, got {change['eth_net']}"
+            eth_diff = abs(eth_amount - expected['eth_net'])
+            assert eth_diff < 1e-10, f"ETH mismatch for {address}: expected {expected['eth_net']}, got {eth_amount}"
             
             # Verify token amounts
             for token_symbol, expected_amount in expected['token_net'].items():
