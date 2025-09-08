@@ -17,6 +17,11 @@ class ETHTransfer:
     to_address: ChecksumAddress
     amount: Wei
 
+    def __post_init__(self):
+        # Store ETH amount in wei as string to avoid 64-bit overflows during JSON serialization
+        if not isinstance(self.amount, str):
+            self.amount = str(self.amount)
+
 @dataclass
 class ContractCreationEvent:
     contract_address: ChecksumAddress
@@ -58,6 +63,8 @@ class ProcessedTransaction:
     bribe_amount: float = 0
     unique_addresses: Set[ChecksumAddress] = field(default_factory=set)
     erc20_contracts: Set[ChecksumAddress] = field(default_factory=set)
+    erc721_contracts: Set[ChecksumAddress] = field(default_factory=set)
+    erc1155_contracts: Set[ChecksumAddress] = field(default_factory=set)
    
     eth_transfers: List[ETHTransfer] = field(default_factory=list)
     erc20_transfers: List[ERC20Transfer] = field(default_factory=list)
@@ -67,6 +74,7 @@ class ProcessedTransaction:
     uniswap_v2_syncs: List[UniswapV2Sync] = field(default_factory=list)
     uniswap_v2_swaps: List[UniswapV2Swap] = field(default_factory=list)
     approvals: List[ERC20Approval] = field(default_factory=list)
+    erc721_approvals: List['ERC721Approval'] = field(default_factory=list)
     mints: List[MintAction] = field(default_factory=list)
     burns: List[BurnAction] = field(default_factory=list)
     deposits: List[DepositAction] = field(default_factory=list)
@@ -98,6 +106,85 @@ class ProcessedTransaction:
     latest_states: Dict[str, Any] = field(default_factory=dict)
     input: str = ""
     
+    @classmethod
+    def from_dict(cls, tx_dict: Dict[str, Any]) -> 'ProcessedTransaction':
+        """
+        Create ProcessedTransaction from a dictionary.
+        
+        The dict is expected to be from an already processed transaction,
+        so it should have the basic fields populated.
+        """
+        # Extract fees or create default
+        fees_data = tx_dict.get('fees', {})
+        if isinstance(fees_data, TransactionFees):
+            fees = fees_data
+        elif isinstance(fees_data, dict):
+            fees = TransactionFees(
+                gas_price=fees_data.get('gas_price', 0),
+                gas_used=fees_data.get('gas_used', 0),
+                txn_fee=fees_data.get('txn_fee', 0),
+                protocol_type=fees_data.get('protocol_type', 'unknown'),
+                max_fee_per_gas=fees_data.get('max_fee_per_gas'),
+                max_priority_fee=fees_data.get('max_priority_fee')
+            )
+        else:
+            fees = TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
+        
+        return cls(
+            hash=tx_dict['hash'],
+            block_number=tx_dict['block_number'],
+            txn_index=tx_dict.get('txn_index', 0),
+            from_address=tx_dict['from_address'],
+            to_address=tx_dict.get('to_address'),
+            contract_address=tx_dict.get('contract_address'),
+            value=tx_dict.get('value', 0),
+            status=tx_dict.get('status', 'success'),
+            nonce=tx_dict.get('nonce', 0),
+            input=tx_dict.get('input', '0x'),
+            txn_type=tx_dict.get('txn_type', 'unknown'),
+            actions=tx_dict.get('actions'),
+            eth_transfers=tx_dict.get('eth_transfers'),
+            erc20_transfers=tx_dict.get('erc20_transfers'),
+            erc721_transfers=tx_dict.get('erc721_transfers'),
+            erc1155_transfers=tx_dict.get('erc1155_transfers'),
+            internal_transactions=tx_dict.get('internal_transactions'),
+            uniswap_v2_syncs=tx_dict.get('uniswap_v2_syncs'),
+            uniswap_v2_swaps=tx_dict.get('uniswap_v2_swaps'),
+            approvals=tx_dict.get('approvals'),
+            erc721_approvals=tx_dict.get('erc721_approvals'),
+            mints=tx_dict.get('mints'),
+            burns=tx_dict.get('burns'),
+            deposits=tx_dict.get('deposits'),
+            withdraws=tx_dict.get('withdraws'),
+            pair_events=tx_dict.get('pair_events'),
+            owner_events=tx_dict.get('owner_events'),
+            contract_creation_events=tx_dict.get('contract_creation_events'),
+            trading_enabled_events=tx_dict.get('trading_enabled_events'),
+            trading_disabled_events=tx_dict.get('trading_disabled_events'),
+            uniswap_v3_pools=tx_dict.get('uniswap_v3_pools'),
+            uniswap_v3_initializations=tx_dict.get('uniswap_v3_initializations'),
+            uniswap_v3_burns=tx_dict.get('uniswap_v3_burns'),
+            uniswap_v3_mints=tx_dict.get('uniswap_v3_mints'),
+            uniswap_v3_swaps=tx_dict.get('uniswap_v3_swaps'),
+            uniswap_v3_positions=tx_dict.get('uniswap_v3_positions'),
+            uniswap_v3_increases=tx_dict.get('uniswap_v3_increases'),
+            uniswap_v3_decreases=tx_dict.get('uniswap_v3_decreases'),
+            uniswap_v4_initializes=tx_dict.get('uniswap_v4_initializes'),
+            uniswap_v4_modifies=tx_dict.get('uniswap_v4_modifies'),
+            uniswap_v4_swaps=tx_dict.get('uniswap_v4_swaps'),
+            permit2_events=tx_dict.get('permit2_events'),
+            other_events=tx_dict.get('other_events'),
+            fees=fees,
+            unique_addresses=tx_dict.get('unique_addresses'),
+            erc20_contracts=tx_dict.get('erc20_contracts'),
+            erc721_contracts=tx_dict.get('erc721_contracts'),
+            erc1155_contracts=tx_dict.get('erc1155_contracts'),
+            state_changes=tx_dict.get('state_changes'),
+            latest_states=tx_dict.get('latest_states'),
+            bribe_amount=tx_dict.get('bribe_amount', 0),
+            block_timestamp=tx_dict.get('block_timestamp', tx_dict.get('timestamp', 0))
+        )
+    
     def __init__(self, 
                  hash: str,
                  block_number: int,
@@ -119,6 +206,7 @@ class ProcessedTransaction:
                  uniswap_v2_syncs: Optional[List[UniswapV2Sync]] = None,
                  uniswap_v2_swaps: Optional[List[UniswapV2Swap]] = None,
                  approvals: Optional[List[ERC20Approval]] = None,
+                 erc721_approvals: Optional[List['ERC721Approval']] = None,
                  mints: Optional[List[MintAction]] = None,
                  burns: Optional[List[BurnAction]] = None,
                  deposits: Optional[List[DepositAction]] = None,
@@ -144,6 +232,8 @@ class ProcessedTransaction:
                  fees: Optional[TransactionFees] = None,
                  unique_addresses: Optional[Set[ChecksumAddress]] = None,
                  erc20_contracts: Optional[Set[ChecksumAddress]] = None,
+                 erc721_contracts: Optional[Set[ChecksumAddress]] = None,
+                 erc1155_contracts: Optional[Set[ChecksumAddress]] = None,
                  state_changes: Optional[Dict[str, Any]] = None,
                  latest_states: Optional[Dict[str, Any]] = None,
                  bribe_amount: float = 0,
@@ -173,6 +263,7 @@ class ProcessedTransaction:
         self.uniswap_v2_syncs = uniswap_v2_syncs or []
         self.uniswap_v2_swaps = uniswap_v2_swaps or []
         self.approvals = approvals or []
+        self.erc721_approvals = erc721_approvals or []
         self.mints = mints or []
         self.burns = burns or []
         self.deposits = deposits or []
@@ -204,6 +295,8 @@ class ProcessedTransaction:
         self.fees = fees or TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
         self.unique_addresses = unique_addresses or set()
         self.erc20_contracts = erc20_contracts or set()
+        self.erc721_contracts = erc721_contracts or set()
+        self.erc1155_contracts = erc1155_contracts or set()
         self.state_changes = state_changes or {}
         self.latest_states = latest_states or {}
         self.bribe_amount = float(bribe_amount)
