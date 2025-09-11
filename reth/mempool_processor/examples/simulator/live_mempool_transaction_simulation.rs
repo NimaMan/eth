@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
 
     // Connect to mempool
     info!("📡 Connecting to mempool via IPC...");
-    let mempool_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    let mempool_client = MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
     mempool_client.start().await?;
     info!("✅ Mempool monitoring started\n");
 
@@ -147,4 +147,3 @@ async fn main() -> Result<()> {
 
 // Note: No longer need get_raw_tx function since MempoolSimulator 
 // handles transaction processing directly from MempoolTransaction
-

@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
 
     // Initialize IPC client
     info!("🔌 Connecting to Reth IPC...");
-    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 
