@@ -8,9 +8,8 @@
 use std::collections::HashMap;
 use tracing::{info, debug, warn};
 use alloy_primitives::{Address, I256, U256};
-// AddressStateChange is now part of tx_processor
 use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
-use crate::common::address::alloy_address_to_checksum;
+use reth_chain_query::{to_checksum_address, alloy_address_to_checksum};
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::LiquidityRemovalResult;
 use std::sync::Arc;
@@ -20,7 +19,7 @@ pub struct LiquiditySignal {
     pub signal_type: SignalType,
     pub pool_address: String,
     pub token_address: String,
-    pub pool_type: String,  // Added pool type (V2, V3, V4)
+    pub pool_type: String,
     pub change_type: LiquidityChangeType,
     pub eth_change: f64,
     pub percentage_change: f64,
@@ -139,7 +138,7 @@ impl LiquidityDetector {
         let pool_address = removal_result.pool_address?;
         
         info!("🔍 LIQUIDITY REMOVAL DETECTION: Pool {} | Drain: {:.1}% | TX: {}", 
-            alloy_address_to_checksum(pool_address), 
+            to_checksum_address(&pool_address), 
             removal_result.drain_percentage,
             tx_hash
         );
@@ -164,7 +163,7 @@ impl LiquidityDetector {
         };
         
         // Get pool type from token cache if available
-        let pool_address_str = alloy_address_to_checksum(pool_address);
+        let pool_address_str = to_checksum_address(&pool_address);
         let pool_type = if let Some(ref token_cache) = self.token_cache {
             if let Some(pool_state) = token_cache.get_pool(&pool_address_str).await {
                 format!("{:?}", pool_state.pool_type)
@@ -191,13 +190,13 @@ impl LiquidityDetector {
         Some(LiquiditySignal {
             signal_type,
             pool_address: pool_address_str,
-            token_address: alloy_address_to_checksum(token_address),
+            token_address: to_checksum_address(&token_address),
             pool_type,
             change_type,
             eth_change: -removal_result.eth_removed, // Negative for removal
             percentage_change: removal_result.drain_percentage,
             remaining_liquidity: removal_result.remaining_eth,
-            from_address: alloy_address_to_checksum(from_address),
+            from_address: to_checksum_address(&from_address),
             tx_hash: tx_hash.to_string(),
             details,
             // Additional fields for database
@@ -206,7 +205,7 @@ impl LiquidityDetector {
             remaining_eth: Some(removal_result.remaining_eth),
             remaining_token: None,
             removal_percentage: Some(removal_result.drain_percentage),
-            creator_address: alloy_address_to_checksum(from_address),
+            creator_address: to_checksum_address(&from_address),
         })
     }
 

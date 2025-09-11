@@ -14,10 +14,11 @@ use alloy_primitives::{Address, U256};
 use eyre::Result;
 
 // Import from tx_processor
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::{
-    pool_buy_sell_simulator::check_can_buy_sell_pool,
-    config::PoolViabilityConfig,
-    types::{PoolType, PoolViabilityResult},
+use tx_processor::{
+    check_can_buy_sell_pool,
+    PoolViabilityConfig,
+    PoolType,
+    PoolViabilityResult,
 };
 use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::TxSimulator;

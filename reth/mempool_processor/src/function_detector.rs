@@ -14,8 +14,10 @@ use chrono::Utc;
 use zmq::{Context, Socket};
 use serde::{Serialize, Deserialize};
 use crate::token_tracking::TokenTrackingCache;
-use crate::common::address::checksum_address;
+use alloy_primitives::Address as AlloyAddress;
+use reth_chain_query::to_checksum_address;
 use hex;
+// (duplicates removed)
 use futures;
 
 /// Types of functions called by creators
@@ -221,9 +223,9 @@ impl FunctionDetector {
         }
         
         let tx_hash = &ipc_tx.hash;
-        let from = checksum_address(&hex::encode(&ipc_tx.from));
+        let from = to_checksum_address(&AlloyAddress::from_slice(&ipc_tx.from));
         let to = ipc_tx.to.as_ref()
-            .map(|addr| checksum_address(&hex::encode(addr)))
+            .map(|addr| to_checksum_address(&AlloyAddress::from_slice(addr)))
             .unwrap_or_else(|| "contract_creation".to_string());
         let value = format!("0x{:x}", ipc_tx.value);
         let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
@@ -376,7 +378,7 @@ impl FunctionDetector {
         
         // Check if the approve is being called on an LP token contract
         if let Some(to_bytes) = &tx.to {
-            let to_addr = checksum_address(&hex::encode(to_bytes));
+            let to_addr = to_checksum_address(&AlloyAddress::from_slice(to_bytes));
             
             // Check if the 'to' address is a pool (LP token)
             if let Some(ref cache) = self.token_cache {

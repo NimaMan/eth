@@ -29,7 +29,7 @@ use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, MempoolSimulator, LiquidityRemovalSimulator, LiquidityRemovalResult};
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolViabilityResult;
+use tx_processor::{PoolViabilityResult, PoolType, PoolViabilityConfig};
 use std::collections::HashMap;
 use alloy_primitives::U256;
 
@@ -596,12 +596,12 @@ impl SimulationManager {
             // Try simulation with original gas price first
             // Create pool viability config
             let pool_type_enum = match pool_type.as_str() {
-                "V2" => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV2,
-                "V3" => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV3 { fee_tier: 3000 }, // Default to 0.3% fee
-                _ => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV2,
+                "V2" => PoolType::UniswapV2,
+                "V3" => PoolType::UniswapV3 { fee_tier: 3000 }, // Default to 0.3% fee
+                _ => PoolType::UniswapV2,
             };
             
-            let config = tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::config::PoolViabilityConfig {
+            let config: PoolViabilityConfig = PoolViabilityConfig {
                 token_address,
                 pool_address,
                 pool_type: pool_type_enum,
@@ -641,7 +641,7 @@ impl SimulationManager {
                             new_gas_price.map(|p| p / 1_000_000_000));
                         
                         // Retry with higher gas price
-                        let retry_config = tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::config::PoolViabilityConfig {
+                        let retry_config: PoolViabilityConfig = PoolViabilityConfig {
                             token_address,
                             pool_address,
                             pool_type: pool_type_enum,
@@ -685,7 +685,7 @@ impl SimulationManager {
                         if reason.contains("output:") {
                             if let Some(output_start) = reason.find("output: ") {
                                 let output = &reason[output_start + 8..];
-                                if let Some(end) = output.find(' ').or_else(|| output.find('}')) {
+                                if let Some(end) = output.find(' ').or(output.find('}')) {
                                     let hex_output = &output[..end];
                                     warn!("    Revert output hex: {}", hex_output);
                                     if hex_output == "0x" {
