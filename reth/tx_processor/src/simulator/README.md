@@ -52,10 +52,9 @@ Data extraction (ProcessedTransaction)
 Where to look
 - Single‑shot orchestration: `src/processed_tx_provider/provider.rs`
 - Core simulation chain: `src/unsigned_tx_chain_simulator.rs` (via `TxSimulator::start_simulation_chain()`)
-- Viability analyzer (buy→approve→sell): `src/simulator/erc20_token_buy_approve_sell_tx_simulator/*`
+- Viability analyzer (buy→approve→sell): `src/simulator/{buy_swap_simulator.rs, sell_swap_simulator.rs, pool_buy_sell_simulator.rs, cross_venue_buy_approve_sell.rs}`
 
 Design split (by crate)
 - reth_chain_query: tx builders (unsigned txs), provider (read‑only chain data)
 - tx_processor (this crate): simulators + `ProcessedTransaction`
 - eth_price_leverage: RL envs that map actions → unsigned tx(s), simulate, apply deltas, and compute rewards
-

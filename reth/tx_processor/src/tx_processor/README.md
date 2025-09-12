@@ -180,7 +180,7 @@ let approve = tx_builders::build_approve_for_route(&route, buyer, token_out, U25
 let sell = tx_builders::build_sell_swap(&route, buyer, token_out, tokens_in, slippage_bps, deadline);
 ```
 
-The simulation module `erc20_token_buy_approve_sell_tx_simulator` orchestrates multi‑step sequences and uses the core processor to convert each step to a `ProcessedTransaction`.
+Multi‑step sequences are orchestrated via the simulators in `src/simulator` (e.g., `buy_swap_simulator.rs`, `sell_swap_simulator.rs`, `pool_buy_sell_simulator.rs`, `cross_venue_buy_approve_sell.rs`) and use the core processor to convert each step to a `ProcessedTransaction`.
 
 ## Recommended Usage Patterns
 
