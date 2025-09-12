@@ -126,7 +126,7 @@ name = "verify_block_trace_rpc_equivalence"
 path = "examples/block/verify_block_trace_rpc_equivalence.rs"
 
 [[example]]
-name = "v2_buy_approve_sell_signed_chain"
-path = "examples/sequential/v2_buy_approve_sell_signed_chain.rs"
+name = "buy_approve_sell_signed_chain_uniswap_v2"
+path = "examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs"
 
 ## create_keystore example moved to eth_tx_executor
