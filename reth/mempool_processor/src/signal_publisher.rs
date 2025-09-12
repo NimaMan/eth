@@ -51,7 +51,7 @@ impl SignalPublisherConfig {
 
 impl Default for SignalPublisherConfig {
     fn default() -> Self {
-        Self::with_timestamped_logs("/home/nima/code/crypto/logs/mempool")
+        Self::with_timestamped_logs("/home/nima/code/crypto/rust/mempool_processor/logs")
     }
 }
 

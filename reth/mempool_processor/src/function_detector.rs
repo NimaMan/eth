@@ -50,7 +50,7 @@ lazy_static! {
         } else {
             // Fallback to default with timestamp
             let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
-            let dir = PathBuf::from("/home/nima/code/crypto/logs/mempool")
+            let dir = PathBuf::from("/home/nima/code/crypto/rust/mempool_processor/logs")
                 .join(format!("signal_detector_{}", timestamp));
             std::fs::create_dir_all(&dir).expect("Failed to create log directory");
             dir

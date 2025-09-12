@@ -599,9 +599,18 @@ impl SignalManager {
             if let Some(from_address) = from_address_result {
             
             // Check if we have a liquidity removal result (from dedicated simulator)
-            let liquidity_signals = if let Some(ref removal_result) = result.liquidity_removal_result {
+            let mut liquidity_signals = if let Some(ref removal_result) = result.liquidity_removal_result {
                 // Use the new dedicated detection method for liquidity removals
                 info!("💧 Using dedicated liquidity removal detection for TX {}", result.request.tx.hash);
+                info!(
+                    "  removal_result: success={} | pool_address={:?} | eth_removed={:.6} | drain%={:.2} | remaining_eth={:.6} | address_balance_changes_addrs={}",
+                    removal_result.success,
+                    removal_result.pool_address,
+                    removal_result.eth_removed,
+                    removal_result.drain_percentage,
+                    removal_result.remaining_eth,
+                    removal_result.address_balance_changes.len()
+                );
                 
                 // If simulation failed, log it
                 if !removal_result.success {
@@ -678,6 +687,23 @@ impl SignalManager {
                     vec![]
                 }
             };
+
+            // Fallback: if dedicated removal produced no signal (e.g., missing pool address),
+            // try standard state-change detection when pool_viability_result is available
+            if liquidity_signals.is_empty() {
+                if result.liquidity_removal_result.is_some() {
+                    if let Some(ref pool_result) = result.pool_viability_result {
+                        info!("💧 Fallback: using state changes from buy/sell result for TX {}", result.request.tx.hash);
+                        liquidity_signals = self.liquidity_detector.detect(
+                            &result.request.tx.hash,
+                            from_address,
+                            &pool_result.buy_transaction.address_balance_changes,
+                        ).await;
+                    } else {
+                        info!("💧 Fallback unavailable: no pool_viability_result state changes for TX {}", result.request.tx.hash);
+                    }
+                }
+            }
             
             // Convert liquidity signals to the Signal enum
             for liq_signal in liquidity_signals {

@@ -61,7 +61,6 @@ pub struct SimulationRequest {
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     pub request: SimulationRequest,
-    pub pool_viability_result: Option<PoolViabilityResult>,
     pub error: Option<String>,
     pub simulation_time_ms: f64,
     // Addresses needed for compatibility
@@ -70,6 +69,7 @@ pub struct SimulationResult {
     pub pool_type: Option<String>,  // Pool type (V2, V3, V4)
     // Debug info for error analysis
     pub debug_info: Option<String>,
+    pub pool_viability_result: Option<PoolViabilityResult>,
     // Liquidity removal result (only populated for liquidity removal transactions)
     pub liquidity_removal_result: Option<LiquidityRemovalResult>,
 }
@@ -307,7 +307,24 @@ impl SimulationManager {
                         // Debug logging for liquidity removal transactions
                         if matches!(pool_specific_result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
                             if let Some(ref removal_result) = pool_specific_result.liquidity_removal_result {
-                                info!("  [DEBUG] Liquidity removal TX {} pool {} has removal result",
+                                info!("  [DEBUG] LiquidityRemovalResult for TX {} (pool {}):",
+                                    pool_specific_result.request.tx.hash,
+                                    pool_idx
+                                );
+                                info!(
+                                    "    success={} | pool_address={:?} | eth_removed={:.6} | drain%={:.2} | remaining_eth={:.6}",
+                                    removal_result.success,
+                                    removal_result.pool_address,
+                                    removal_result.eth_removed,
+                                    removal_result.drain_percentage,
+                                    removal_result.remaining_eth
+                                );
+                                if let Some(ref reason) = removal_result.revert_reason {
+                                    info!("    revert_reason={}", reason);
+                                }
+                                info!("    address_balance_changes_addrs={}", removal_result.address_balance_changes.len());
+                            } else {
+                                info!("  [DEBUG] Liquidity removal TX {} pool {} has NO removal result",
                                     pool_specific_result.request.tx.hash,
                                     pool_idx
                                 );

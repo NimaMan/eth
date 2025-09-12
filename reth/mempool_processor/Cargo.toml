@@ -180,6 +180,10 @@ name = "isolated_simulator_test"
 path = "examples/simulator/isolated_simulator_test.rs"
 
 [[example]]
+name = "liquidity_removal_from_hash"
+path = "examples/simulator/liquidity_removal_from_hash.rs"
+
+[[example]]
 name = "test_liquidity_removal_simulation"
 path = "examples/test_liquidity_removal_simulation.rs"
 
