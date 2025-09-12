@@ -317,43 +317,45 @@ pub async fn get_balancer_pool_tokens(
 /// Basic ABI decoder for address arrays (simplified)
 /// This is a basic implementation - in production you'd want more robust ABI decoding
 fn decode_address_array_from_result(result: &[u8]) -> Option<Vec<Address>> {
-    if result.len() < 96 { // At least 3 * 32 bytes for basic structure
+    if result.len() < 96 { // Need head with 3 slots
         return None;
     }
-    
-    // Skip first 64 bytes (two offset pointers), read array length
-    let array_length_start = 64;
-    if result.len() < array_length_start + 32 {
-        return None;
+    // First slot: offset to tokens array
+    let tokens_off = be_word_to_usize(&result[0..32]);
+    if tokens_off == 0 || result.len() < tokens_off + 32 { return None; }
+    let len = be_word_to_usize(&result[tokens_off..tokens_off+32]);
+    let mut out = Vec::with_capacity(len);
+    let mut cur = tokens_off + 32;
+    for _ in 0..len {
+        if result.len() < cur + 32 { return None; }
+        out.push(Address::from_slice(&result[cur+12..cur+32]));
+        cur += 32;
     }
-    
-    let array_length = u32::from_be_bytes([
-        result[array_length_start + 28],
-        result[array_length_start + 29], 
-        result[array_length_start + 30],
-        result[array_length_start + 31]
-    ]) as usize;
-    
-    let mut addresses = Vec::with_capacity(array_length);
-    let data_start = array_length_start + 32;
-    
-    for i in 0..array_length {
-        let addr_start = data_start + (i * 32) + 12; // Skip 12 bytes padding
-        if result.len() >= addr_start + 20 {
-            let addr_bytes = &result[addr_start..addr_start + 20];
-            addresses.push(Address::from_slice(addr_bytes));
-        }
-    }
-    
-    Some(addresses)
+    Some(out)
 }
 
 /// Basic ABI decoder for uint256 arrays (simplified)
-fn decode_uint256_array_from_result(_result: &[u8], _offset: usize) -> Option<Vec<U256>> {
-    // This would need to be implemented based on the specific ABI layout
-    // For now, return None to avoid compilation errors
-    // TODO: Implement proper uint256 array decoding
-    None
+fn decode_uint256_array_from_result(result: &[u8], _offset: usize) -> Option<Vec<U256>> {
+    if result.len() < 64 { return None; }
+    // Second slot: offset to balances array
+    let balances_off = be_word_to_usize(&result[32..64]);
+    if balances_off == 0 || result.len() < balances_off + 32 { return None; }
+    let len = be_word_to_usize(&result[balances_off..balances_off+32]);
+    let mut out = Vec::with_capacity(len);
+    let mut cur = balances_off + 32;
+    for _ in 0..len {
+        if result.len() < cur + 32 { return None; }
+        out.push(U256::from_be_slice(&result[cur..cur+32]));
+        cur += 32;
+    }
+    Some(out)
+}
+
+fn be_word_to_usize(word: &[u8]) -> usize {
+    if word.len() < 32 { return 0; }
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&word[24..32]);
+    u64::from_be_bytes(bytes) as usize
 }
 
 /// Discovered Uniswap V4 pool info from Initialize events

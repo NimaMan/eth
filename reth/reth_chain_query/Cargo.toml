@@ -115,12 +115,17 @@ path = "examples/tokens/token_comprehensive_info.rs"
 [dev-dependencies]
 tokio-test = "0.4"
 hex = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 
 # DeFi examples
 [[example]]
 name = "verify_dex_pool_computation"
 path = "examples/defi/verify_dex_pool_computation.rs"
+
+[[example]]
+name = "liquidity_readers"
+path = "examples/defi/liquidity_readers.rs"
 [[example]]
 name = "tx_arrival_index_smoke"
 path = "examples/reth_index/tx_arrival_index_smoke.rs"
