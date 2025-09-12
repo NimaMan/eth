@@ -40,8 +40,7 @@
 /// ✓ Benchmark complete!
 /// ```
 use eyre::Result;
-use tx_simulator::{TxSimulator, CallRequest};
-use tx_simulator::batch_simulator::BatchSimulationOptions;
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 use tokio::time::Instant;
 use alloy_primitives::{Address, U256};
 
@@ -52,10 +51,13 @@ async fn main() -> Result<()> {
     let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     println!("✓ Simulator initialized");
     
-    // Create test call requests
+    // Determine a block to simulate at
+    let block = simulator.get_latest_block()?;
+
+    // Create test unsigned transactions
     let mut calls = Vec::new();
     for i in 0..5 {
-        let call = CallRequest {
+        let call = UnsignedTransaction {
             from: Some(Address::default()),
             to: Some(Address::default()),
             value: Some(U256::from(i * 1000)),
@@ -74,7 +76,7 @@ async fn main() -> Result<()> {
     let start = Instant::now();
     let mut sequential_success = 0;
     for (i, call) in calls.iter().enumerate() {
-        match simulator.simulate_call(call.clone()).await {
+        match simulator.simulate_unsigned_transaction_at_block(call.clone(), block).await {
             Ok(_) => {
                 sequential_success += 1;
                 println!("   Call {} ✓", i);
@@ -94,12 +96,15 @@ async fn main() -> Result<()> {
         let sim = simulator.clone();
         let call = call.clone();
         async move {
-            sim.simulate_call(call).await
+            sim.simulate_unsigned_transaction_at_block(call, block).await
         }
     });
     
     let results: Vec<_> = join_all(futures).await;
-    let parallel_success = results.iter().filter(|r| r.is_ok()).count();
+    let mut parallel_success = 0usize;
+    for r in &results {
+        if r.is_ok() { parallel_success += 1; }
+    }
     let parallel_time = start.elapsed();
     
     println!("   Total: {} successful in {:?}", parallel_success, parallel_time);

@@ -11,7 +11,7 @@ use eyre::Result;
 use std::str::FromStr;
 use tracing::{error, info};
 use tx_processor::tx_processor::TxProcessor;
-use tx_simulator::{CallRequest, TxSimulator};
+use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
 
 // Token addresses
 const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E";
@@ -40,14 +40,18 @@ async fn main() -> Result<()> {
     let tx_processor = TxProcessor::new();
     let simulator = TxSimulator::new(reth_datadir)?;
     
-    // Test configuration  
-    let block = 23247278;
+    // Test configuration - use latest block
+    let block = simulator.get_latest_block()?;
     let buyer = Address::from_str("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689")?; 
     let router = Address::from_str(UNISWAP_V2_ROUTER)?;
     
     // Start simulation chain
     let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     info!("📍 Chain initialized at block {}", block);
+    
+    // Get current nonce to avoid nonce errors
+    let chain_state = chain.current_state();
+    info!("📍 Current nonce for buyer: {}", chain_state.nonces.get(&buyer).unwrap_or(&0));
     
     // Step 1: Buy FLOKI with 1 ETH
     info!("\n[Step 1] Buying FLOKI with 1 ETH...");
@@ -61,7 +65,44 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     
+    // Process transaction to get exact amounts
+    let buy_processed = tx_processor.process_transaction_from_simulation_result(
+        &buy_tx,
+        &buy_result,
+        block,
+        0,
+    ).await?;
+    
+    // Extract FLOKI received from balance changes
+    let floki_address = Address::from_str(FLOKI_ADDRESS)?;
+    let floki_received = buy_processed.address_balance_changes
+        .get(&buyer)
+        .and_then(|changes| changes.token_net.get(&format!("{:?}", floki_address)))
+        .cloned()
+        .unwrap_or(U256::ZERO);
+    
+    let eth_spent = buy_processed.address_balance_changes
+        .get(&buyer)
+        .and_then(|changes| changes.currency_net.get("ETH"))
+        .cloned()
+        .unwrap_or(U256::ZERO);
+    
     info!("✅ Successfully bought FLOKI");
+    info!("  Gas used: {}", buy_result.gas_used);
+    info!("\n  📊 FLOKI RECEIVED FROM 1 ETH BUY:");
+    info!("  ═══════════════════════════════════");
+    info!("    Raw amount: {} wei", floki_received);
+    info!("    Formatted: {}", format_floki_amount(floki_received));
+    info!("    ETH spent: {}", format_eth_amount(eth_spent.abs_diff(U256::ZERO)));
+    
+    let exchange_rate = if eth_spent.abs_diff(U256::ZERO) > U256::ZERO {
+        let floki_per_eth = (floki_received * U256::from(10u64).pow(U256::from(18))) / eth_spent.abs_diff(U256::ZERO);
+        floki_per_eth / U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))
+    } else {
+        U256::ZERO
+    };
+    info!("    Exchange rate: {} FLOKI per ETH", exchange_rate);
+    info!("    Token decimals: {} (not standard 18!)", FLOKI_DECIMALS);
     
     // CRITICAL CHECK: Verify FLOKI balance using balanceOf
     info!("\n🔍 CRITICAL BALANCE VERIFICATION:");
@@ -91,6 +132,14 @@ async fn main() -> Result<()> {
     } else {
         info!("   ✅ Balance exists: {} FLOKI", format_floki_amount(balance));
     }
+    
+    // ========================================
+    // EARLY EXIT FOR BALANCE VERIFICATION
+    // ========================================
+    info!("\n🎯 BALANCE VERIFICATION COMPLETE!");
+    info!("   Stopping here to see balance comparison results.");
+    info!("   This avoids nonce errors from later transfer tests.");
+    return Ok(());
     
     // Step 2: Approve BOTH routers (standard and successful one)
     info!("\n[Step 2] Approving routers to spend FLOKI...");
@@ -216,7 +265,7 @@ async fn main() -> Result<()> {
 
 /// Test direct pool interaction - bypass all routers
 async fn test_direct_pool_interaction(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     seller: Address,
     floki_amount: U256,
 ) -> Result<bool> {
@@ -295,12 +344,12 @@ async fn test_direct_pool_interaction(
 
 /// Get reserves from Uniswap V2 pool
 async fn get_pool_reserves(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
 ) -> Result<(U256, U256)> {
     // getReserves() selector: 0x0902f1ac
     let data = vec![0x09, 0x02, 0xf1, 0xac];
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: None,
         to: Some(Address::from_str(FLOKI_WETH_PAIR)?),
         value: Some(U256::ZERO),
@@ -348,7 +397,7 @@ fn calculate_amount_out(amount_in: U256, reserve_in: U256, reserve_out: U256) ->
 
 /// Get FLOKI balance
 async fn get_floki_balance(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     owner: Address,
 ) -> Result<U256> {
     get_token_balance(chain, owner, Address::from_str(FLOKI_ADDRESS)?).await
@@ -356,7 +405,7 @@ async fn get_floki_balance(
 
 /// Check FLOKI balance with detailed logging
 async fn check_floki_balance_detailed(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     owner: Address,
 ) -> Result<U256> {
     info!("      Calling FLOKI.balanceOf({:?})", owner);
@@ -365,7 +414,7 @@ async fn check_floki_balance_detailed(
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(owner.as_slice());
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(owner),
         to: Some(Address::from_str(FLOKI_ADDRESS)?),
         value: Some(U256::ZERO),
@@ -402,7 +451,7 @@ async fn check_floki_balance_detailed(
 
 /// Get original balance at block start (before any transactions)
 async fn get_original_balance(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     owner: Address,
 ) -> Result<U256> {
     // This checks the balance without any of our transactions
@@ -412,7 +461,7 @@ async fn get_original_balance(
 
 /// Test direct transfer to any address
 async fn test_direct_transfer(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     from: Address,
     to: Address,
     amount: U256,
@@ -420,13 +469,23 @@ async fn test_direct_transfer(
     info!("   Attempting transfer: {} FLOKI from {:?} to {:?}", 
           format_floki_amount(amount), from, to);
     
+    // Identify the target address type
+    let target_type = if to == Address::from_str(FLOKI_WETH_PAIR).unwrap_or(Address::ZERO) {
+        "LIQUIDITY POOL"
+    } else if to == Address::from_str(UNISWAP_V2_ROUTER).unwrap_or(Address::ZERO) {
+        "ROUTER"
+    } else {
+        "REGULAR ADDRESS"
+    };
+    info!("   Target type: {}", target_type);
+    
     // Create transfer transaction
     let mut data = vec![0xa9, 0x05, 0x9c, 0xbb]; // transfer selector
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(to.as_slice());
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    let transfer_tx = CallRequest {
+    let transfer_tx = UnsignedTransaction {
         from: Some(from),
         to: Some(Address::from_str(FLOKI_ADDRESS)?),
         value: Some(U256::ZERO),
@@ -447,6 +506,15 @@ async fn test_direct_transfer(
         error!("   ❌ TRANSFER FAILED!");
         error!("   Gas used: {}", result.gas_used);
         error!("   Revert reason: {:?}", result.revert_reason);
+        
+        // Explain why it failed based on target type
+        if target_type == "LIQUIDITY POOL" {
+            error!("   📝 EXPLANATION: FLOKI contract BLOCKS transfers to its liquidity pool!");
+            error!("                   This is why you can't sell FLOKI through DEX routers.");
+            error!("                   Router needs to send FLOKI to pool, but that's BLOCKED!");
+        } else if target_type == "ROUTER" {
+            error!("   📝 EXPLANATION: Transfer to router might work, but router can't forward to pool");
+        }
         error!("   This address CANNOT receive FLOKI transfers!");
     }
     
@@ -455,7 +523,7 @@ async fn test_direct_transfer(
 
 /// Get any ERC20 token balance
 async fn get_token_balance(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     owner: Address,
     token: Address,
 ) -> Result<U256> {
@@ -463,7 +531,7 @@ async fn get_token_balance(
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(owner.as_slice());
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(owner),
         to: Some(token),
         value: Some(U256::ZERO),
@@ -490,7 +558,7 @@ async fn get_token_balance(
 
 // ===== Transaction Building Functions =====
 
-fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest {
+fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTransaction {
     let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // swapExactETHForTokens
     data.extend_from_slice(&U256::from(1).to_be_bytes::<32>());
     data.extend_from_slice(&U256::from(128).to_be_bytes::<32>());
@@ -503,7 +571,7 @@ fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(buyer),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(eth_amount),
@@ -516,13 +584,13 @@ fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> CallRequest
     }
 }
 
-fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> CallRequest {
+fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> UnsignedTransaction {
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3]; // approve
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(spender.as_slice());
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(from),
         to: Some(token),
         value: Some(U256::ZERO),
@@ -536,7 +604,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
 }
 
 /// Transfer FLOKI tokens directly to the pool
-fn create_transfer_to_pool_transaction(from: Address, amount: U256) -> CallRequest {
+fn create_transfer_to_pool_transaction(from: Address, amount: U256) -> UnsignedTransaction {
     // transfer(address,uint256) - ERC20 transfer
     let mut data = vec![0xa9, 0x05, 0x9c, 0xbb]; // transfer selector
     
@@ -547,7 +615,7 @@ fn create_transfer_to_pool_transaction(from: Address, amount: U256) -> CallReque
     // Amount to transfer
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(from),
         to: Some(Address::from_str(FLOKI_ADDRESS).unwrap()),
         value: Some(U256::ZERO),
@@ -566,7 +634,7 @@ fn create_pool_swap_transaction(
     amount0_out: U256,  // WETH out
     amount1_out: U256,  // FLOKI out (should be 0 for our case)
     to: Address,
-) -> CallRequest {
+) -> UnsignedTransaction {
     // swap(uint256,uint256,address,bytes) - Uniswap V2 pool swap
     let mut data = vec![0x02, 0x2c, 0x0d, 0x9f]; // swap selector
     
@@ -586,7 +654,7 @@ fn create_pool_swap_transaction(
     // data length (empty callback data)
     data.extend_from_slice(&U256::from(0).to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(sender),
         to: Some(Address::from_str(FLOKI_WETH_PAIR).unwrap()),
         value: Some(U256::ZERO),
@@ -603,12 +671,12 @@ fn create_pool_swap_transaction(
 
 /// Get tax handler address from FLOKI contract
 async fn get_tax_handler(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
 ) -> Result<Address> {
     // taxHandler() selector: 0xc57f6661
     let data = vec![0xc5, 0x7f, 0x66, 0x61];
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: None,
         to: Some(Address::from_str(FLOKI_ADDRESS)?),
         value: Some(U256::ZERO),
@@ -636,7 +704,7 @@ async fn get_tax_handler(
 
 /// Test tax handler to see if it's causing the issue
 async fn test_tax_handler(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     from: Address,
     tax_handler: Address,
     amount: U256,
@@ -659,7 +727,7 @@ async fn test_tax_handler(
     // amount
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(from),
         to: Some(tax_handler),
         value: Some(U256::ZERO),
@@ -694,12 +762,12 @@ async fn test_tax_handler(
 
 /// Get treasury handler address from FLOKI contract
 async fn get_treasury_handler(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
 ) -> Result<Address> {
     // treasuryHandler() selector: 0x3e72a434
     let data = vec![0x3e, 0x72, 0xa4, 0x34];
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: None,
         to: Some(Address::from_str(FLOKI_ADDRESS)?),
         value: Some(U256::ZERO),
@@ -727,7 +795,7 @@ async fn get_treasury_handler(
 
 /// Test treasury handler directly to find exact failure
 async fn test_treasury_handler(
-    chain: &mut tx_simulator::SimulationChain,
+    chain: &mut UnsignedTxChainSimulation,
     from: Address,
     treasury_handler: Address,
     amount: U256,
@@ -750,7 +818,7 @@ async fn test_treasury_handler(
     // amount
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    let call = CallRequest {
+    let call = UnsignedTransaction {
         from: Some(from),
         to: Some(treasury_handler),
         value: Some(U256::ZERO),

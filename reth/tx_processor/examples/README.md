@@ -2,9 +2,9 @@
 
 ## ⚠️ CURRENT STATUS: ALL EXAMPLES FAIL DUE TO REFACTORING
 
-**Problem:** All 16 examples fail to compile due to breaking changes in the `reth_tx_simulator` dependency after refactoring. The examples exist and are properly documented, but cannot run until dependency issues are resolved.
+**Problem:** These examples were written during the migration away from the legacy `reth_tx_simulator` crate. That crate has been replaced by the modular `tx_simulator` + `tx_processor` stack. Some examples still reference the old API and need import/usage updates before they compile.
 
-**Root Cause:** Version conflicts in `alloy_rpc_types_trace` (0.14.0 vs 1.0.28) and missing trait imports (`SignerRecoverable`).
+**Root Cause:** Out-of-date imports/usages referencing `reth_tx_simulator`, plus version drift (e.g., `alloy_rpc_types_trace`) and missing trait imports (`SignerRecoverable`). Update examples to use the `tx_simulator` crate APIs.
 
 ## Available Examples (16 total)
 
@@ -120,7 +120,7 @@ This directory contains the actual examples that exist in the tx_processor modul
 
 - Synced Reth node with database at `/home/nima/.local/share/reth/mainnet`
 - Rust 1.70+ with cargo
-- Fixed dependency issues in `reth_tx_simulator`
+- Update imports/usages to `tx_simulator` (replacement for `reth_tx_simulator`)
 
 ## Usage Patterns (when working)
 
@@ -150,6 +150,6 @@ let result = check_can_buy_sell_pool(processor, pool_address, token_address, Poo
 ## Summary
 
 - **16 examples exist** (down from 45+ phantom entries in Cargo.toml)
-- **All fail compilation** due to `reth_tx_simulator` dependency issues
-- **Well-organized** into 4 categories: tx_processor, simulation, token investigations, pool analysis
-- **Ready to fix** once dependency conflicts are resolved
+- Some still reference the removed `reth_tx_simulator` crate — switch to `tx_simulator`
+- Organized into 4 categories: tx_processor, simulation, token investigations, pool analysis
+- Ready to fix by updating imports and aligning versions (no design changes required)

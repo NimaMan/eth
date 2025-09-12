@@ -1,12 +1,38 @@
-# FLOKI Token Investigation - Observed Results Only
+# Specific Token Investigation Examples
 
-## What This Directory Contains
+This directory contains specialized examples for investigating tokens with unusual trading behaviors, particularly focusing on FLOKI token which has demonstrated sell restrictions.
 
-Three working examples that investigate FLOKI token behavior:
+## What Each Example Does
 
-1. `buy_approve_sell_floki_alternative_methods.rs` - Tests FLOKI transfers to different addresses
-2. `buy_approve_sell_floki_with_processed_tx.rs` - Full buy-approve-sell workflow  
-3. `process_floki_swap_transaction.rs` - Analyzes a successful FLOKI sell from mainnet
+### 1. `buy_approve_sell_floki_with_processed_tx.rs`
+**Purpose**: Complete trading workflow with ProcessedTransaction generation
+
+This example executes a full buy → approve → sell cycle for FLOKI token:
+- Buys FLOKI with 1 ETH through Uniswap V2
+- Generates ProcessedTransaction for each step with full event decoding
+- Extracts exact token amounts using balance changes (U256 precision)
+- Handles 9 decimal tokens (FLOKI has 9 decimals, not standard 18)
+- Shows how sell transactions fail with high gas consumption
+- Uses SimulationChain to preserve state between transactions
+
+### 2. `buy_approve_sell_floki_alternative_methods.rs`
+**Purpose**: Test alternative selling strategies to bypass trading restrictions
+
+This example tests multiple approaches when direct sells fail:
+- **Transfer Tests**: Tests transfers to different addresses (regular vs pool)
+- **WETH Intermediate Swap**: Attempts FLOKI → WETH → ETH (two-step process)
+- **Direct Pair Interaction**: Bypasses router, interacts directly with liquidity pair
+- **Smaller Chunk Swaps**: Breaks large sells into smaller amounts
+- **Alternative Router**: Tests different router contracts that may handle FLOKI differently
+
+### 3. `process_floki_swap_transaction.rs`
+**Purpose**: Analyze real on-chain FLOKI transactions
+
+This example processes an actual successful FLOKI swap transaction:
+- Transaction: `0xf15f081bbcd2701f109fe455b185359f7f749a57457fd2ae9ac71f5a252316c7`
+- Shows multi-step transaction with successful FLOKI sells
+- Uses alternative router: `0xBEE3211ab312a8D065c4FeF0247448e17A8da000`
+- Demonstrates that certain routers CAN successfully trade FLOKI
 
 ## Actual Test Results from Running Examples
 

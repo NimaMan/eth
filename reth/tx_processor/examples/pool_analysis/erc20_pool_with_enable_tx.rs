@@ -6,12 +6,9 @@
 use eyre::Result;
 use std::sync::Arc;
 use alloy_primitives::{Address, U256, B256};
-use tx_processor::{TxProcessor, chain_query::ChainQuery};
-use tx_processor::erc20_token_trading_viability::{
-    check_can_buy_sell_pool,
-    PoolViabilityConfig,
-    PoolType,
-};
+use tx_processor::tx_processor::TxProcessor;
+use tx_simulator::TxSimulator;
+use tx_processor::simulator::{check_can_buy_sell_pool, PoolViabilityConfig, PoolType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,12 +18,9 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    // Create tx processor (contains shared chain_query)
-    let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
-    
-    // Use shared chain_query from tx_processor (no separate DB connection)
-    let chain_query = tx_processor.chain_query.clone();
-    let simulator = chain_query.get_simulator();
+    // Create simulator and tx processor
+    let simulator = Arc::new(TxSimulator::new(&reth_datadir)?);
+    let tx_processor = Arc::new(TxProcessor::new());
     
     // Example: Get the enable trading transaction first
     // In a real scenario, you'd fetch this from the blockchain
@@ -39,13 +33,14 @@ async fn main() -> Result<()> {
     let token_address: Address = "0x6982508145454Ce325dDbE47a25d4ec3d2311933".parse()?;
     let pool_address: Address = "0xA43fe16908251ee70EF74718545e4FE6C5cCEc9f".parse()?;
     
-    // Configure with prior transaction
+    // Configure with prior transaction and block delay
     let mut config = PoolViabilityConfig::new(
         token_address,
         pool_address,
         PoolType::UniswapV2,
     )
-    .with_test_amount(U256::from(10_000_000_000_000_000u64));
+    .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 ETH
+    .with_block_delay(1); // Sell in next block
     
     // If you had the prior tx:
     // config = config.with_prior_tx(prior_tx);
@@ -59,6 +54,9 @@ async fn main() -> Result<()> {
             
             if !result.is_tradeable {
                 println!("  Failure: {:?}", result.failure_reason);
+                println!("  Can Buy: {}", result.can_buy);
+                println!("  Can Approve: {}", result.can_approve);
+                println!("  Can Sell: {}", result.can_sell);
                 println!("\nThis token likely requires an enable trading transaction first.");
                 println!("Steps to analyze:");
                 println!("1. Find the enable trading transaction hash");
@@ -68,6 +66,9 @@ async fn main() -> Result<()> {
             } else {
                 println!("  Buy Tax: {:.2}%", result.buy_tax_percent);
                 println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
+                println!("  Tokens Received: {}", result.tokens_received);
+                println!("  ETH Recovered: {} wei", result.eth_received);
+                println!("  Block Delay Used: 1 (sell in next block)");
             }
         }
         Err(e) => {

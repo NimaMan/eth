@@ -5,9 +5,9 @@
 use reth_provider::{ProviderFactory, TransactionsProvider, ReceiptProvider, BlockReader, providers::StaticFileProvider};
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::TransactionSignedEcRecovered;
+// use reth_primitives::TransactionSignedEcRecovered; // not used directly here
 use alloy_primitives::{B256, U256, Log as AlloyLog, TxKind};
-use alloy_consensus::{Transaction, transaction::{TransactionMeta, SignerRecoverable}};
+use alloy_consensus::{Transaction, EthereumTxEnvelope, TxEip4844, transaction::{TransactionMeta, SignerRecoverable}};
 use eyre::Result;
 use std::sync::Arc;
 use std::path::Path;
@@ -44,6 +44,15 @@ impl TransactionLoader {
         Ok(Self {
             provider_factory,
         })
+    }
+
+    /// Load the original signed transaction by hash
+    pub fn load_signed_transaction_envelope_by_hash(&self, tx_hash: B256) -> Result<EthereumTxEnvelope<TxEip4844>> {
+        let provider = self.provider_factory.provider()?;
+        let (tx, _meta) = provider
+            .transaction_by_hash_with_meta(tx_hash)?
+            .ok_or_else(|| eyre::eyre!("Transaction not found: {}", tx_hash))?;
+        Ok(tx)
     }
     
     /// Create a new transaction loader with an existing provider factory

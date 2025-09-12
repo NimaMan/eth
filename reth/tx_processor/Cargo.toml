@@ -1,6 +1,6 @@
 [package]
 name    = "tx_processor"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [features]
@@ -44,6 +44,18 @@ path = "examples/simulation/buy_approve_sell_pepe_with_processed_tx.rs"
 [[example]]
 name = "parallel_vs_sequential_simulation_benchmark"
 path = "examples/simulation/batch/parallel_vs_sequential_simulation_benchmark.rs"
+
+[[example]]
+name = "cross_venue_usd_arb"
+path = "examples/simulation/cross_venue_usd_arb.rs"
+
+[[example]]
+name = "cross_venue_usd_series"
+path = "examples/simulation/cross_venue_usd_series.rs"
+
+[[example]]
+name = "cross_block_minmax_v2"
+path = "examples/simulation/cross_block_minmax_v2.rs"
 
 # Token-specific investigations
 # (buy_approve_sell_floki_with_processed_tx already defined above)
@@ -94,6 +106,10 @@ path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v2.rs"
 name = "can_buy_sell_common_tokens_uni_v3"
 path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v3.rs"
 
+[[example]]
+name = "can_buy_sell_uniswap_v4"
+path = "examples/pool_analysis/can_buy_sell_uniswap_v4.rs"
+
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
@@ -133,4 +149,3 @@ reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-

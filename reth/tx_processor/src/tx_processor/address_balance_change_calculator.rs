@@ -21,7 +21,7 @@
 
 use super::data_models::events::InternalTransaction;
 use super::data_models::balance_changes::{AddressBalanceChange, TokenMovements, TokenMovement};
-use crate::utils::to_checksum_address;
+    use reth_chain_query::to_checksum_address;
 use alloy_primitives::{Address, U256};
 use eyre::Result;
 use lazy_static::lazy_static;
@@ -232,16 +232,12 @@ impl AddressBalanceChangeCalculator {
         token_address: Option<Address>,
         currency: Option<String>,
     ) {
-        // CORRECTED: Python implementation actually DOES track WETH movements!
-        // The filtering should only apply to pure WETH wrap/unwrap operations, 
-        // NOT to legitimate DEX trades involving WETH conversions.
-        // For now, remove the WETH filtering to match Python behavior.
-        // TODO: Implement more sophisticated filtering if needed
-        
-        // Original filtering (causing bug):
-        // if to_addr == self.weth_address || from_addr == self.weth_address {
-        //     return;
-        // }
+        //skip movements that directly touch the WETH contract
+        // (wrap/unwrap internal ETH legs). Legitimate ERC-20 WETH transfers are
+        // reclassified to currency "ETH" earlier and do not use WETH as from/to.
+        if to_addr == self.weth_address || from_addr == self.weth_address {
+            return;
+        }
         
         match movement_type {
             MovementType::Currency => {
@@ -376,7 +372,7 @@ impl AddressBalanceChangeCalculator {
                         
                         if abs_change > threshold {
                             // Always use checksum address as key, signed amount as value
-                            let token_key = to_checksum_address(token_addr);
+            let token_key = to_checksum_address(token_addr);
                             token_net.insert(token_key, net_change);
                             total_token_movement = total_token_movement + abs_change;
                         }

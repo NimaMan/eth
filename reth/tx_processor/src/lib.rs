@@ -29,16 +29,41 @@ pub mod simulator;
 
 // Re-export data models from tx_processor
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
+pub use processed_tx_provider::ProcessedTxProvider;
 pub mod config;
-pub mod utils;
-pub mod retry_utils;
 
 // Export ERC20 token buy-approve-sell simulator through simulator module
-pub use simulator::erc20_token_buy_approve_sell_tx_simulator;
 pub use simulator::{
     check_can_buy_sell_pool,
     PoolViabilityConfig,
     PoolViabilityResult,
     PoolType,
     OptionalSetupBuyApproveSellResult,
+    simulate_buy_swap,
+    BuySwapResult,
+    simulate_sell_swap,
+    SellSwapResult,
 };
+
+// Convenience facade: simulate and return ProcessedTransaction directly
+use alloy_primitives::B256;
+use eyre::Result;
+
+/// Simulate an unsigned transaction at a block (or latest) and return a fully processed transaction.
+pub async fn process_unsigned_tx(
+    simulator: &TxSimulator,
+    unsigned_tx: UnsignedTransaction,
+    block_number: Option<u64>,
+) -> Result<ProcessedTransaction> {
+    let provider = ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
+    provider.process_transaction_from_unsigned_tx(unsigned_tx, block_number).await
+}
+
+/// Load a transaction by hash, simulate it with correct pre-state, and return a processed transaction.
+pub async fn process_tx_by_hash(
+    simulator: &TxSimulator,
+    tx_hash: B256,
+) -> Result<ProcessedTransaction> {
+    let provider = ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
+    provider.process_transaction_by_hash(tx_hash).await
+}

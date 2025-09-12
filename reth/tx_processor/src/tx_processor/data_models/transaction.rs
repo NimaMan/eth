@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use super::events::*;
 use super::fees::TransactionFees;
 use super::balance_changes::AddressBalanceChange;
-use crate::utils::checksum::to_checksum_address;
+use reth_chain_query::to_checksum_address;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ETHTransfer {

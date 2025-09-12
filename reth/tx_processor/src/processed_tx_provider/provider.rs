@@ -69,6 +69,91 @@ impl ProcessedTxProvider {
             tx_processor,
         })
     }
+
+    /// Load and decode a transaction from DB only (no simulation)
+    ///
+    /// Flow: Load raw tx/receipt/logs from Reth DB → decode events → build ProcessedTransaction
+    /// Balance changes and internal traces are NOT computed in this path.
+    pub async fn load_transaction_from_hash_db_only(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
+        // Ensure we have a transaction loader
+        let transaction_loader = self.transaction_loader.as_ref()
+            .ok_or_else(|| eyre::eyre!("TransactionLoader not available for DB-only loading"))?;
+
+        // Load raw transaction data and logs from DB
+        let (
+            _loaded_hash,
+            block_number,
+            block_timestamp,
+            tx_index,
+            from,
+            to,
+            value,
+            input,
+            gas_price,
+            gas_used,
+            status,
+            nonce,
+            logs,
+            gas_limit,
+        ) = transaction_loader.load_transaction_data(tx_hash).await?;
+
+        // Build ProcessedTransaction from raw DB data without simulation
+        let processed_tx = self.tx_processor.process_transaction_from_raw_data(
+            tx_hash,
+            block_number,
+            block_timestamp,
+            tx_index,
+            from,
+            to,
+            value,
+            input,
+            gas_price,
+            gas_used,
+            status,
+            nonce,
+            logs,
+            gas_limit,
+            None, // No balance changes without simulation
+        ).await?;
+
+        Ok(processed_tx)
+    }
+
+    /// Create ProcessedTxProvider with an existing provider factory
+    /// This is useful when sharing a database connection across multiple components
+    pub fn with_provider_factory(
+        provider_factory: reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, std::sync::Arc<reth_db::DatabaseEnv>>>
+    ) -> Result<Self> {
+        // Initialize NEW tx_simulator WITH SHARED PROVIDER FACTORY
+        let simulator = TxSimulator::with_provider_factory(provider_factory.clone())?;
+        let decoder = LogDecoder::new();
+        let classifier = TransactionClassifier::new();
+        let transaction_loader = TransactionLoader::with_provider_factory(provider_factory.clone()).ok();
+        
+        // Create unsigned tx builder if we have a transaction loader
+        let unsigned_tx_builder = if let Some(loader) = transaction_loader.clone() {
+            Some(UnsignedTxBuilder::new(loader))
+        } else {
+            None
+        };
+        
+        // Initialize tx processor
+        let tx_processor = TxProcessor::new();
+        
+        // Share the simulator to avoid duplicate DB connections
+        let chain_query = Arc::new(ChainQuery::from_simulator(Arc::new(simulator.clone()))?);
+        
+        Ok(Self { 
+            simulator,
+            decoder, 
+            classifier, 
+            transaction_loader,
+            provider_factory,
+            chain_query,
+            unsigned_tx_builder,
+            tx_processor,
+        })
+    }
     
     /// MAIN ENTRY POINT 1: Process transaction from UnsignedTransaction
     /// 
@@ -114,7 +199,7 @@ impl ProcessedTxProvider {
             .ok_or_else(|| eyre::eyre!("TransactionLoader not available for loading transaction by hash"))?;
         
         // Build UnsignedTransaction from transaction hash (loads from DB)
-        let unsigned_tx = unsigned_tx_builder.build_unsigned_transaction_from_tx_hash(tx_hash).await?;
+        let mut unsigned_tx = unsigned_tx_builder.build_unsigned_transaction_from_tx_hash(tx_hash).await?;
         
         // Load block number from transaction data
         let transaction_loader = self.transaction_loader.as_ref().unwrap();
@@ -138,6 +223,14 @@ impl ProcessedTxProvider {
         // Simulate at block_number - 1 (the block BEFORE the transaction was included)
         // This ensures we have the correct state before the transaction executed
         let simulation_block = block_number.saturating_sub(1);
+        
+        // Get the account's actual nonce at the simulation block
+        // This prevents "nonce too high" errors when there are gaps in transaction processing
+        if let Some(from_address) = unsigned_tx.from {
+            let state_provider = self.simulator.get_chain_state_at_block(simulation_block)?;
+            let account_nonce = state_provider.account_nonce(&from_address)?.unwrap_or(0);
+            unsigned_tx.nonce = Some(account_nonce);
+        }
         
         // Simulate the transaction with full trace
         let simulation_result = self.simulator.simulate_unsigned_transaction_with_full_trace_at_block(

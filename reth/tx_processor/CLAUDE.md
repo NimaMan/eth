@@ -65,55 +65,6 @@ The module accepts transaction data (hash, block info, logs, etc.) and:
 6. **Python Interoperability** - Full PyO3 bindings for Python access
 7. **Checksum Addresses** - All addresses returned in EIP-55 checksum format
 
-## Architecture
-
-```
-TxProcessor
-├── TransactionLoader (fetches from DB, decides on simulation)
-├── DirectTxSimulator (simulates contract interactions)
-├── LogDecoder (decodes event logs)
-└── TransactionClassifier (classifies transaction type)
-```
-
-## Usage
-
-### Rust
-```rust
-// Initialize with Reth data directory
-let processor = TxProcessor::new("/home/nima/.local/share/reth/mainnet")?;
-
-// Process a transaction by hash
-let tx_hash = B256::from_str("0x...")?;
-let processed_tx = processor.process_transaction_by_hash(tx_hash).await?;
-
-// Access results
-println!("Transaction type: {}", processed_tx.txn_type);
-println!("ERC20 transfers: {}", processed_tx.erc20_transfers.len());
-println!("Internal transactions: {}", processed_tx.internal_transactions.len());
-```
-
-### Python
-```python
-import rs_tx_processor
-
-# Initialize (reth_datadir is hardcoded)
-processor = rs_tx_processor.TxProcessor()
-
-# Process single transaction
-tx = processor.process_transaction("0x...")
-print(f"ERC20 transfers: {len(tx.erc20_transfers)}")
-
-# Batch processing (parallel, optimized)
-txs = processor.process_transactions_batch([hash1, hash2, hash3])
-```
-
-## Performance Expectations
-
-- Simple ETH transfers: ~2-3ms (no simulation)
-- ERC20 transfers: ~3-5ms (with simulation)
-- Complex DeFi transactions: ~4-5ms (full simulation + decoding)
-- **Measured**: 712.56 tx/sec single thread, 1825.16 tx/sec batch (4 threads)
-- **Actual speedup**: 18.9x faster than Python in batch mode
 
 ## Important Notes
 
@@ -129,7 +80,6 @@ txs = processor.process_transactions_batch([hash1, hash2, hash3])
 | Feature | Python (eth_data) | Rust (tx_processor) |
 |---------|----------------------------|-------------------|
 | Data Source | RPC (debug_traceTransaction) | Direct DB + Simulation |
-| Performance | ~2.5 tx/sec (complex) | ~712.56 tx/sec single, ~1825 tx/sec batch |
 | Dependencies | web3.py, complex | Reth DB, simple |
 | Internal Txs | From traces | From simulation |
 | Accuracy | High | High |
@@ -147,60 +97,3 @@ The ProcessedTransaction structures from both implementations contain the same f
 - State changes (when applicable)
 
 This ensures that any analysis code written for Python ProcessedTransaction can work with Rust ProcessedTransaction and vice versa.
-
-## Module Structure
-
-```
-tx_processor/
-├── src/
-│   ├── lib.rs                    # Main library interface
-│   ├── tx_processor.rs           # Core TxProcessor implementation
-│   ├── transaction_loader.rs     # Database loading logic
-│   ├── processing/
-│   │   ├── mod.rs               # Processing orchestration
-│   │   ├── event_decoder.rs    # Event log decoding
-│   │   └── classifier.rs       # Transaction classification
-│   ├── data_models/
-│   │   ├── transaction.rs      # ProcessedTransaction struct
-│   │   └── events.rs           # Event structures
-│   ├── python_bindings/
-│   │   ├── mod.rs              # Python module setup
-│   │   ├── rs_tx_processor.rs  # Python interface
-│   │   └── processed_transaction.rs # Python data wrapper
-│   └── utils/
-│       └── checksum.rs         # EIP-55 checksum addresses
-├── examples/
-│   ├── python/                 # Python usage examples
-│   │   ├── benchmark_rust_vs_python.py
-│   │   ├── validate_rust_python_compatibility.py
-│   │   └── compare_state_changes_rust_vs_python.py
-│   └── *.rs                    # Rust examples
-└── Cargo.toml                  # Dependencies and build config
-```
-
-## Testing
-
-```bash
-# Run Rust tests
-cargo test
-
-# Build Python module
-maturin develop --release
-
-# Validate compatibility
-python examples/python/validate_rust_python_compatibility.py
-
-# Benchmark performance
-python examples/python/benchmark_rust_vs_python.py
-```
-
-## Common Issues
-
-1. **EAGAIN Error (Error 11)**: Database locked by running Reth node
-   - Solution: Stop Reth node before processing
-
-2. **Address format differences**: All addresses are checksum (EIP-55)
-   - No normalization needed, direct comparison works
-
-3. **Batch processing performance**: Use shared TxProcessor (no mutex)
-   - Achieves 18.9x speedup with 4 threads

@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, B256, U256};
 use serde::{Serialize, Deserialize};
-use crate::utils::{serialize_address_checksum, deserialize_address_checksum, to_checksum_address};
+use reth_chain_query::utils::checksum::{serialize_address_checksum, deserialize_address_checksum};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -18,9 +18,9 @@ pub struct ERC20Transfer {
 impl fmt::Debug for ERC20Transfer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ERC20Transfer")
-            .field("token_address", &to_checksum_address(&self.token_address))
-            .field("from_address", &to_checksum_address(&self.from_address))
-            .field("to_address", &to_checksum_address(&self.to_address))
+            .field("token_address", &reth_chain_query::to_checksum_address(&self.token_address))
+            .field("from_address", &reth_chain_query::to_checksum_address(&self.from_address))
+            .field("to_address", &reth_chain_query::to_checksum_address(&self.to_address))
             .field("amount", &self.amount)
             .field("log_index", &self.log_index)
             .finish()
@@ -31,8 +31,8 @@ impl fmt::Display for ERC20Transfer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Transfer {} tokens from {} to {}", 
             self.amount,
-            to_checksum_address(&self.from_address),
-            to_checksum_address(&self.to_address))
+            reth_chain_query::to_checksum_address(&self.from_address),
+            reth_chain_query::to_checksum_address(&self.to_address))
     }
 }
 

@@ -1,21 +1,22 @@
-/// Buy → Approve → Sell with Transaction Simulation
+/// USDC and USDT Buy → Approve → Sell Workflow with Balance Analysis
 /// 
-/// This example demonstrates a complete token trading workflow using UnsignedTxChainSimulation
-/// with proper state preservation between transactions.
+/// This example demonstrates a complete token trading workflow for USDC and USDT
+/// using UnsignedTxChainSimulation with proper state preservation between transactions.
 /// 
 /// Key features:
 /// 1. Uses simulation chain for proper state preservation between transactions
-/// 2. Shows simulation results with gas usage and logs for each step
+/// 2. Shows detailed balance changes for the buyer after buy and sell
 /// 3. Compares USDC vs USDT trading workflows
-/// 4. Demonstrates real transaction execution traces
+/// 4. Uses ProcessedTransaction to extract token amounts and fees
 /// 
-/// This shows the CORRECT way to simulate sequential transactions where each
-/// transaction depends on the results of previous ones.
+/// This shows how to analyze the actual token amounts received and ETH spent.
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_processor::tx_processor::TxProcessor;
 use std::str::FromStr;
+use std::sync::Arc;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 
@@ -34,14 +35,15 @@ async fn main() -> Result<()> {
     println!("=====================================");
     println!("Using simulation chain for proper state preservation.\n");
     
-    // Initialize simulator
-    let simulator = TxSimulator::new(RETH_DB_PATH)?;
-    println!("✅ Simulator initialized");
+    // Initialize simulator and processor
+    let simulator = Arc::new(TxSimulator::new(RETH_DB_PATH)?);
+    let tx_processor = Arc::new(TxProcessor::new());
+    println!("✅ Simulator and processor initialized");
     
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
     println!("📊 Block: {}", latest_block);
-    println!("💰 Investment: 0.1 ETH per token\n");
+    println!("💰 Investment: 1 ETH per token\n");
     
     let buyer_address = Address::from_str(TEST_BUYER)?;
     let router_address = Address::from_str(UNISWAP_V2_ROUTER)?;
@@ -51,7 +53,8 @@ async fn main() -> Result<()> {
     println!("USDC WORKFLOW");
     println!("{}", "=".repeat(60));
     execute_trading_workflow(
-        &simulator,
+        simulator.clone(),
+        tx_processor.clone(),
         buyer_address,
         USDC_ADDRESS,
         "USDC",
@@ -63,7 +66,8 @@ async fn main() -> Result<()> {
     println!("USDT WORKFLOW");
     println!("{}", "=".repeat(60));
     execute_trading_workflow(
-        &simulator,
+        simulator.clone(),
+        tx_processor.clone(),
         buyer_address,
         USDT_ADDRESS,
         "USDT",
@@ -77,7 +81,8 @@ async fn main() -> Result<()> {
 
 /// Execute trading workflow and show real results
 async fn execute_trading_workflow(
-    simulator: &TxSimulator,
+    simulator: Arc<TxSimulator>,
+    tx_processor: Arc<TxProcessor>,
     buyer: Address,
     token_address: &str,
     token_symbol: &str,
@@ -90,23 +95,52 @@ async fn execute_trading_workflow(
     let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
     
-    // Step 1: Buy tokens with 0.1 ETH
-    println!("\n[Step 1] Buying {} with 0.1 ETH...", token_symbol);
+    // Step 1: Buy tokens with 1 ETH
+    println!("\n[Step 1] Buying {} with 1 ETH...", token_symbol);
     let buy_tx = create_buy_token_transaction(
         buyer, 
         token_address, 
-        U256::from(100_000_000_000_000_000u128) // 0.1 ETH
+        U256::from(1_000_000_000_000_000_000u128) // 1 ETH
     );
     
-    let buy_result = chain.step_with_trace(buy_tx).await?;
+    let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
     
     println!("  Status: {}", if buy_result.success { "✅ Success" } else { "❌ Failed" });
     println!("  Gas used: {}", buy_result.gas_used);
-    println!("  Logs generated: {}", buy_result.call_trace.logs.len());
     
     if !buy_result.success {
         println!("  Revert reason: {:?}", buy_result.revert_reason);
         return Ok(());
+    }
+    
+    // Process the buy transaction to get balance changes
+    let buy_processed = tx_processor.process_transaction_from_simulation_result(
+        &buy_tx,
+        &buy_result,
+        block,
+        0,
+    ).await?;
+    
+    // Extract buyer's balance changes from buy
+    println!("\n  💰 Buyer Balance Changes After Buy:");
+    if let Some(buyer_changes) = buy_processed.address_balance_changes.get(&buyer) {
+        // ETH spent
+        if let Some(eth_change) = buyer_changes.currency_net.get("ETH") {
+            let eth_wei = eth_change.to_string();
+            println!("    ETH spent: {} wei", eth_wei);
+        }
+        // Tokens received  
+        for (token, amount) in &buyer_changes.token_net {
+            println!("    Token received: {} = {} (raw amount)", token, amount);
+        }
+    }
+    
+    // Count ERC20 transfers
+    println!("    ERC20 transfers detected: {}", buy_processed.erc20_transfers.len());
+    for transfer in &buy_processed.erc20_transfers {
+        if transfer.to_address == buyer {
+            println!("    Received {} tokens (wei): {}", token_symbol, transfer.amount);
+        }
     }
     
     // Step 2: Approve router
@@ -136,14 +170,42 @@ async fn execute_trading_workflow(
     };
     
     let sell_tx = create_sell_token_transaction(buyer, token_address, sell_amount);
-    let sell_result = chain.step_with_trace(sell_tx).await?;
+    let sell_result = chain.step_with_trace(sell_tx.clone()).await?;
     
     println!("  Status: {}", if sell_result.success { "✅ Success" } else { "❌ Failed" });
     println!("  Gas used: {}", sell_result.gas_used);
-    println!("  Logs generated: {}", sell_result.call_trace.logs.len());
     
     if !sell_result.success {
         println!("  Revert reason: {:?}", sell_result.revert_reason);
+    } else {
+        // Process the sell transaction to get balance changes
+        let sell_processed = tx_processor.process_transaction_from_simulation_result(
+            &sell_tx,
+            &sell_result,
+            block,
+            2, // tx index
+        ).await?;
+        
+        println!("\n  💰 Buyer Balance Changes After Sell:");
+        if let Some(buyer_changes) = sell_processed.address_balance_changes.get(&buyer) {
+            // ETH received
+            if let Some(eth_change) = buyer_changes.currency_net.get("ETH") {
+                let eth_wei = eth_change.to_string();
+                println!("    ETH received: {} wei", eth_wei);
+            }
+            // Tokens sold
+            for (token, amount) in &buyer_changes.token_net {
+                println!("    Token sent: {} = {} (raw amount)", token, amount);
+            }
+        }
+        
+        // Count ERC20 transfers
+        println!("    ERC20 transfers detected: {}", sell_processed.erc20_transfers.len());
+        for transfer in &sell_processed.erc20_transfers {
+            if transfer.from_address == buyer {
+                println!("    Sent {} tokens (wei): {}", token_symbol, transfer.amount);
+            }
+        }
     }
     
     // Final state

@@ -22,7 +22,7 @@ use alloy_primitives::{Address, U256, Bytes};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::ProcessedTransaction;
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::tax_calculator::{
+use tx_processor::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, TaxCalculationResult
 };
 use std::str::FromStr;
@@ -198,6 +198,31 @@ async fn execute_floki_trading_workflow(
     
     // Extract exact amounts from balance changes (U256 precision)
     let (floki_received, eth_spent) = extract_buy_amounts_from_balance_changes(&buy_processed, buyer);
+    
+    // Extra instrumentation: verify token_net keys and values for FLOKI
+    {
+        use reth_chain_query::to_checksum_address;
+        let floki_addr = Address::from_str(FLOKI_ADDRESS).unwrap();
+        let checksum_key = to_checksum_address(&floki_addr);
+        let debug_key = format!("{:?}", floki_addr);
+        println!("\n  🔎 Instrumentation - token_net lookup variants:");
+        if let Some(changes) = buy_processed.address_balance_changes.get(&buyer) {
+            let token_net_len = changes.token_net.len();
+            println!("    token_net entries: {}", token_net_len);
+            if token_net_len > 0 {
+                println!("    token_net keys sample (up to 5):");
+                for (i, (k, v)) in changes.token_net.iter().take(5).enumerate() {
+                    println!("      [{}] {} => {}", i, k, v);
+                }
+            }
+            let val_checksum = changes.token_net.get(&checksum_key).copied().unwrap_or(U256::ZERO);
+            let val_debug = changes.token_net.get(&debug_key).copied().unwrap_or(U256::ZERO);
+            println!("    lookup by checksum  ({}): {}", checksum_key, val_checksum);
+            println!("    lookup by {:?} (Debug): {}", floki_addr, val_debug);
+        } else {
+            println!("    No address_balance_changes found for buyer");
+        }
+    }
     metrics.tokens_received_wei = floki_received;
     metrics.eth_spent_wei = eth_spent.abs_diff(U256::ZERO); // Make positive for display
     
@@ -526,6 +551,89 @@ async fn execute_floki_trading_workflow(
             }
         }
     }
+
+    // Targeted check: simulate transferFrom(buyer -> pool) with controlled caller
+    println!("\n  🎯 Targeted Check - transferFrom(buyer → pool) in isolation:");
+    let pool_addr = Address::from_str(FLOKI_WETH_POOL)?;
+    // Use an EOA as caller to avoid simulator restriction on contract senders
+    let test_caller = Address::from_str("0x1000000000000000000000000000000000000001")?;
+    let transferfrom_selector = [0x23, 0xb8, 0x72, 0xdd]; // transferFrom(address,address,uint256)
+
+    let try_transfer_from_with_nonce = |amount: U256, nonce: Option<u64>| -> UnsignedTransaction {
+        let mut data = Vec::with_capacity(4 + 3 * 32);
+        data.extend_from_slice(&transferfrom_selector);
+        // from (buyer)
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(buyer.as_slice());
+        // to (pool)
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(pool_addr.as_slice());
+        // amount
+        data.extend_from_slice(&amount.to_be_bytes::<32>());
+
+        UnsignedTransaction {
+            from: Some(test_caller), // approved EOA caller simulating router role
+            to: Some(floki_addr),
+            value: Some(U256::ZERO),
+            data: Some(Bytes::from(data)),
+            gas: Some(200_000),
+            gas_price: Some(20_000_000_000),
+            nonce,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+        }
+    };
+
+    let tf_small = metrics.tokens_received_wei / U256::from(100); // 1%
+    let tf_full = metrics.tokens_received_wei; // 100%
+
+    // Approve the test caller to spend on behalf of buyer for transferFrom
+    println!("    Preparing approval for test caller (EOA) to perform transferFrom...");
+    let approve_tester_tx = create_approve_transaction(buyer, floki_addr, test_caller, U256::MAX);
+    let approve_tester_res = chain.step_with_trace(approve_tester_tx).await?;
+    println!("    Approve test caller: success={}, gas_used={}", approve_tester_res.success, approve_tester_res.gas_used);
+    if !approve_tester_res.success {
+        println!("    Cannot proceed with targeted transferFrom test (approval failed): {:?}", approve_tester_res.revert_reason);
+    }
+
+    // Ensure test_caller has ETH for gas (fund from buyer)
+    let fund_amount = U256::from(10_000_000_000_000_000u128); // 0.01 ETH
+    println!("    Funding test caller with {} wei for gas", fund_amount);
+    let fund_tx = UnsignedTransaction {
+        from: Some(buyer),
+        to: Some(test_caller),
+        value: Some(fund_amount),
+        data: Some(Bytes::from(vec![])),
+        gas: Some(21_000),
+        gas_price: Some(20_000_000_000),
+        nonce: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+    };
+    let fund_res = chain.step_with_trace(fund_tx).await?;
+    println!("    Fund tx: success={}, gas_used={}", fund_res.success, fund_res.gas_used);
+
+    println!(
+        "    Attempting transferFrom(buyer → pool) SMALL: {} raw ({} FLOKI)",
+        tf_small,
+        format_floki_amount(tf_small)
+    );
+    let tf_small_tx = try_transfer_from_with_nonce(tf_small, Some(0));
+    let tf_small_res = chain.step_with_trace(tf_small_tx).await?;
+    println!("    Result: success={}, gas_used={}", tf_small_res.success, tf_small_res.gas_used);
+    println!("    Revert reason: {:?}", tf_small_res.revert_reason);
+    println!("    Trace error: {:?}", tf_small_res.call_trace.error);
+
+    println!(
+        "    Attempting transferFrom(buyer → pool) FULL: {} raw ({} FLOKI)",
+        tf_full,
+        format_floki_amount(tf_full)
+    );
+    let tf_full_tx = try_transfer_from_with_nonce(tf_full, Some(1));
+    let tf_full_res = chain.step_with_trace(tf_full_tx).await?;
+    println!("    Result: success={}, gas_used={}", tf_full_res.success, tf_full_res.gas_used);
+    println!("    Revert reason: {:?}", tf_full_res.revert_reason);
+    println!("    Trace error: {:?}", tf_full_res.call_trace.error);
     
     // Debug: Test a direct transfer to see if there's a tax
     println!("\n  🔍 Debug - Testing direct FLOKI transfer to check for tax:");
@@ -614,6 +722,8 @@ async fn execute_floki_trading_workflow(
     
     metrics.tokens_attempted_to_sell = floki_amount_to_sell;
     
+    println!("    Will pass to create_sell_floki_transaction: {} raw ({} FLOKI)", 
+             floki_amount_to_sell, format_floki_amount(floki_amount_to_sell));
     let sell_tx = create_sell_floki_transaction(buyer, floki_amount_to_sell);
     
     // Debug: Print the sell transaction calldata

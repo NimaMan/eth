@@ -17,8 +17,9 @@
 
 use eyre::Result;
 use alloy_primitives::{Address, U256, Bytes};
-use tx_simulator::{TxSimulator, CallRequest};
-use tx_processor::tx_processor::{TxProcessor, data_models::ProcessedTransaction};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_processor::tx_processor::TxProcessor;
+use tx_processor::ProcessedTransaction;
 use std::str::FromStr;
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
@@ -46,7 +47,7 @@ async fn main() -> Result<()> {
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
     println!("📊 Block: {}", latest_block);
-    println!("💰 Investment: 0.1 ETH");
+    println!("💰 Investment: 1 ETH");
     println!("🏦 Buyer: {}\n", TEST_BUYER);
     
     let buyer_address = Address::from_str(TEST_BUYER)?;
@@ -136,9 +137,9 @@ async fn execute_pepe_trading_workflow_with_processed_tx(
     let mut chain = simulator.start_simulation_chain(Some(block)).await?;
     println!("📍 Chain initialized with state preservation");
     
-    // Step 1: Buy PEPE with 0.1 ETH
-    println!("\n[Step 1] Buying PEPE with 0.1 ETH...");
-    let buy_amount = U256::from(100_000_000_000_000_000u128); // 0.1 ETH
+    // Step 1: Buy PEPE with 1 ETH
+    println!("\n[Step 1] Buying PEPE with 1 ETH...");
+    let buy_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
     let buy_tx = create_buy_pepe_transaction(buyer, buy_amount);
     
     let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
@@ -428,7 +429,7 @@ fn wei_to_eth_approx(wei: U256) -> f64 {
 }
 
 /// Create a transaction to buy PEPE with ETH using Uniswap V2
-fn create_buy_pepe_transaction(buyer: Address, eth_amount: U256) -> CallRequest {
+fn create_buy_pepe_transaction(buyer: Address, eth_amount: U256) -> UnsignedTransaction {
     // swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // Function selector
     
@@ -456,7 +457,7 @@ fn create_buy_pepe_transaction(buyer: Address, eth_amount: U256) -> CallRequest 
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&PEPE_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(buyer),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(eth_amount),
@@ -470,7 +471,7 @@ fn create_buy_pepe_transaction(buyer: Address, eth_amount: U256) -> CallRequest 
 }
 
 /// Create an approve transaction for ERC20 tokens
-fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> CallRequest {
+fn create_approve_transaction(from: Address, token: Address, spender: Address, amount: U256) -> UnsignedTransaction {
     // approve(address spender, uint256 amount)
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3]; // approve selector
     
@@ -481,7 +482,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
     // amount
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(from),
         to: Some(token),
         value: Some(U256::ZERO),
@@ -495,7 +496,7 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
 }
 
 /// Create a transaction to sell PEPE for ETH using Uniswap V2
-fn create_sell_pepe_transaction(seller: Address, pepe_amount: U256) -> CallRequest {
+fn create_sell_pepe_transaction(seller: Address, pepe_amount: U256) -> UnsignedTransaction {
     // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
     let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
     
@@ -526,7 +527,7 @@ fn create_sell_pepe_transaction(seller: Address, pepe_amount: U256) -> CallReque
     data.extend_from_slice(&[0u8; 12]);
     data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
     
-    CallRequest {
+    UnsignedTransaction {
         from: Some(seller),
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::ZERO),

@@ -12,12 +12,9 @@
 use eyre::Result;
 use std::sync::Arc;
 use alloy_primitives::{Address, U256};
-use tx_processor::{TxProcessor, chain_query::ChainQuery};
-use tx_processor::erc20_token_trading_viability::{
-    check_can_buy_sell_pool,
-    PoolViabilityConfig,
-    PoolType,
-};
+use tx_processor::tx_processor::TxProcessor;
+use tx_simulator::TxSimulator;
+use tx_processor::simulator::{check_can_buy_sell_pool, PoolViabilityConfig, PoolType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,12 +24,9 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    // Create tx processor (contains shared chain_query)
-    let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
-    
-    // Use shared chain_query from tx_processor (no separate DB connection)
-    let chain_query = tx_processor.chain_query.clone();
-    let simulator = chain_query.get_simulator();
+    // Create simulator and tx processor
+    let simulator = Arc::new(TxSimulator::new(&reth_datadir)?);
+    let tx_processor = Arc::new(TxProcessor::new());
     
     // Configure token to analyze - using moo token as example
     let token_address: Address = "0xDF6010eF80142D379eA0324ac100Dd3Cf50901b2".parse()?; // moo token
@@ -69,14 +63,15 @@ async fn main() -> Result<()> {
     let mut last_sell_tax: Option<f64> = None;
     
     for block_number in (start_block..=end_block).step_by(block_step) {
-        // Configure for this specific block
+        // Configure for this specific block with block delay
         let config = PoolViabilityConfig::new(
             token_address,
             pool_address,
             PoolType::UniswapV2,
         )
         .with_test_amount(U256::from(100_000_000_000_000_000u64)) // 0.1 ETH
-        .with_block(block_number);
+        .with_block(block_number)
+        .with_block_delay(1); // Sell in next block for consistency
         
         match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), config).await {
             Ok(result) => {

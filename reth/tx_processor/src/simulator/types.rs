@@ -1,90 +1,88 @@
-/// Result types for trading simulation
-/// 
-/// Contains all result structures used by the trading viability system
+/// Type definitions for trading viability analysis
 
 use alloy_primitives::{Address, U256};
 use crate::tx_processor::data_models::ProcessedTransaction;
+use serde::{Serialize, Deserialize};
 
-/// Complete result of the trading sequence simulation
+/// Supported DEX pool types
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PoolType {
+    UniswapV2,
+    UniswapV3 { fee_tier: u32 }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
+    SushiSwap,
+    Curve,
+    Balancer,
+    /// Placeholder for Uniswap V4 (PoolManager + PoolId based)
+    /// Full swap support requires Router/Lock integration; not yet implemented
+    UniswapV4,
+}
+
+/// Result of pool viability analysis
+#[derive(Debug, Clone)]
+pub struct PoolViabilityResult {
+    pub pool_type: PoolType,
+    pub pool_address: Address,
+    pub token_address: Address,
+    pub can_buy: bool,
+    pub can_approve: bool,
+    pub can_sell: bool,
+    pub is_tradeable: bool,
+    pub buy_tax_percent: f64,
+    pub sell_tax_percent: f64,
+    pub tokens_received: U256,
+    pub eth_spent: U256,
+    pub eth_received: U256,
+    pub buy_transaction: ProcessedTransaction,
+    pub sell_transaction: ProcessedTransaction,
+    pub approve_transaction: ProcessedTransaction,
+    pub prior_transaction: Option<ProcessedTransaction>,
+    pub failure_reason: Option<String>,
+    pub block_number: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct TradingSequenceResult {
-    /// Result of the optional setup transaction (e.g., enable trading)
     pub setup_tx_result: Option<ProcessedTransaction>,
-    /// Result of buying tokens with ETH
     pub token_buy_result: ProcessedTransaction,
-    /// Result of approving token spending by router
     pub token_approve_result: ProcessedTransaction,
-    /// Result of selling all tokens back for ETH
     pub token_sell_result: ProcessedTransaction,
-    /// Exact amount of tokens bought (extracted from buy transaction)
     pub tokens_bought_amount: U256,
-    /// Amount of ETH originally spent on tokens
     pub eth_spent_on_tokens: U256,
-    /// Amount of ETH received from selling all tokens
     pub eth_received_from_selling_tokens: U256,
-    /// Buy tax percentage (ETH lost during token purchase)
     pub buy_tax_percentage: f64,
-    /// Sell tax percentage (ETH lost during token sale)
     pub sell_tax_percentage: f64,
-    /// Whether the buy transaction succeeded
     pub can_buy: bool,
-    /// Whether the approve transaction succeeded
     pub can_approve: bool,
-    /// Whether the sell transaction succeeded
     pub can_sell: bool,
-    /// Whether all transactions in the sequence succeeded
     pub all_transactions_succeeded: bool,
-    /// Whether the token can be traded (bought and sold successfully)
     pub token_is_tradeable: bool,
-    /// Total gas used across all transactions
     pub total_gas_used: u64,
-    /// Block number the sequence was simulated at
     pub simulation_block_number: u64,
-    /// Detailed failure reason if trading failed
     pub failure_reason: Option<String>,
 }
 
-/// Simplified result for the optional setup + buy + approve + sell simulator
 #[derive(Debug, Clone)]
 pub struct OptionalSetupBuyApproveSellResult {
-    /// Result of the optional setup transaction (e.g., enable trading)
     pub setup_tx_result: Option<ProcessedTransaction>,
-    /// Result of buying tokens with ETH
     pub token_buy_result: ProcessedTransaction,
-    /// Result of approving token spending by router  
     pub token_approve_result: ProcessedTransaction,
-    /// Result of selling all tokens back for ETH
     pub token_sell_result: ProcessedTransaction,
-    /// Exact amount of tokens bought (extracted from buy transaction)
     pub tokens_bought_amount: U256,
-    /// Amount of ETH originally spent on tokens (in ETH units, not wei)
     pub eth_spent_on_tokens: f64,
-    /// Amount of ETH received from selling all tokens (in ETH units, not wei)
     pub eth_received_from_selling_tokens: f64,
-    /// Buy tax percentage (ETH lost during token purchase)
     pub buy_tax_percentage: f64,
-    /// Sell tax percentage (ETH lost during token sale)
     pub sell_tax_percentage: f64,
-    /// Whether the buy transaction succeeded
     pub can_buy: bool,
-    /// Whether the approve transaction succeeded
     pub can_approve: bool,
-    /// Whether the sell transaction succeeded
     pub can_sell: bool,
-    /// Whether all transactions in the sequence succeeded
     pub all_transactions_succeeded: bool,
-    /// Whether the token can be traded (bought and sold successfully)
     pub token_is_tradeable: bool,
-    /// Total gas used across all transactions
     pub total_gas_used: u64,
-    /// Block number the sequence was simulated at
     pub simulation_block_number: u64,
-    /// Detailed failure reason if trading failed
     pub failure_reason: Option<String>,
 }
 
 impl TradingSequenceResult {
-    /// Convert to the simplified optional setup result format
     pub fn to_optional_setup_result(&self) -> OptionalSetupBuyApproveSellResult {
         OptionalSetupBuyApproveSellResult {
             setup_tx_result: self.setup_tx_result.clone(),

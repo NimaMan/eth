@@ -83,27 +83,21 @@ async fn main() -> Result<()> {
                     }
                     
                     // Check currency_net for ETH changes
-                    if let Some(currency_net) = changes.get("currency_net") {
-                        if let Some(eth_change) = currency_net.get("ETH") {
-                            if let Some(val) = eth_change.as_f64() {
-                                if val > 0.0 {
-                                    println!("  ✅ Received ETH bribe: {} ETH", val);
-                                    bribe_count += 1;
-                                } else if val < 0.0 {
-                                    println!("  Sent ETH: {} ETH", val);
-                                }
-                            }
+                    if let Some(eth_change) = changes.currency_net.get("ETH") {
+                        if *eth_change > U256::ZERO {
+                            // Convert from wei to ETH for display
+                            let eth_val = eth_change.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
+                            println!("  ✅ Received ETH bribe: {} ETH", eth_val);
+                            bribe_count += 1;
                         }
                     }
                 } else {
                     // Show addresses with significant ETH changes
-                    if let Some(currency_net) = changes.get("currency_net") {
-                        if let Some(eth_change) = currency_net.get("ETH") {
-                            if let Some(val) = eth_change.as_f64() {
-                                if val.abs() > 0.001 { // Only show significant changes
-                                    println!("Address {}: ETH change: {:+.6} ETH", address, val);
-                                }
-                            }
+                    if let Some(eth_change) = changes.currency_net.get("ETH") {
+                        // Convert from wei to ETH for display and filter by magnitude
+                        let eth_val = eth_change.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
+                        if eth_val.abs() > 0.001 {
+                            println!("Address {}: ETH change: {:+.6} ETH", address, eth_val);
                         }
                     }
                 }

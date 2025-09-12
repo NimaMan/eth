@@ -13,6 +13,7 @@ use crate::tx_processor::tx_loader::TransactionLoader;
 use tx_simulator::UnsignedTransaction;
 use eyre::Result;
 use alloy_primitives::{Address, U256, B256, Bytes};
+use crate::tx_processor::data_models::ProcessedTransaction;
 
 /// Builds UnsignedTransaction objects from transaction data
 pub struct UnsignedTxBuilder {
@@ -24,6 +25,43 @@ impl UnsignedTxBuilder {
     pub fn new(transaction_loader: TransactionLoader) -> Self {
         Self {
             transaction_loader,
+        }
+    }
+
+    /// Build an UnsignedTransaction from an existing ProcessedTransaction
+    ///
+    /// Useful when you want to re-simulate a transaction (or create a synthetic prior tx)
+    /// using the fields already present in a ProcessedTransaction.
+    ///
+    /// Notes:
+    /// - Gas limit is not stored in ProcessedTransaction, so we derive a conservative
+    ///   limit from gas_used (x2, min 21000). You may override as needed.
+    /// - EIP-1559 fees are respected if present (max_fee_per_gas / max_priority_fee).
+    pub fn build_unsigned_from_processed_tx(ptx: &ProcessedTransaction) -> UnsignedTransaction {
+        // Derive gas limit heuristically from gas_used
+        let used = ptx.fees.gas_used;
+        let gas_limit = used.saturating_mul(2).max(21_000);
+
+        // Prefer EIP-1559 fields when available
+        let (gas_price, max_fee, max_priority) = if let Some(mf) = ptx.fees.max_fee_per_gas {
+            let mp = ptx.fees.max_priority_fee;
+            (None, Some(mf.try_into().unwrap_or(0u128)), mp.map(|v| v.try_into().unwrap_or(0u128)))
+        } else {
+            // Legacy gas price from effective gas_price
+            let gp_u128 = ptx.fees.gas_price.as_limbs()[0] as u128;
+            (Some(gp_u128), None, None)
+        };
+
+        UnsignedTransaction {
+            from: Some(ptx.from_address),
+            to: ptx.to_address,
+            value: Some(ptx.value),
+            data: if ptx.input.is_empty() { None } else { Some(Bytes::from(ptx.input.clone())) },
+            gas: Some(gas_limit),
+            gas_price,
+            max_fee_per_gas: max_fee,
+            max_priority_fee_per_gas: max_priority,
+            nonce: Some(ptx.nonce),
         }
     }
     
@@ -97,30 +135,6 @@ impl UnsignedTxBuilder {
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: Some(nonce),
-        }
-    }
-    
-    /// Build UnsignedTransaction with default gas parameters for testing
-    pub fn build_unsigned_transaction_simple(
-        from: Address,
-        to: Option<Address>,
-        value: U256,
-        data: Vec<u8>,
-    ) -> UnsignedTransaction {
-        UnsignedTransaction {
-            from: Some(from),
-            to,
-            value: Some(value),
-            data: if data.is_empty() { 
-                None 
-            } else { 
-                Some(Bytes::from(data))
-            },
-            gas: Some(300_000), // Default gas limit
-            gas_price: Some(20_000_000_000), // Default 20 gwei
-            max_fee_per_gas: None,
-            max_priority_fee_per_gas: None,
-            nonce: Some(0), // Default nonce
         }
     }
 }

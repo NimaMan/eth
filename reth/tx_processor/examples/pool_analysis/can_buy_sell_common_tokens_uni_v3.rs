@@ -6,13 +6,11 @@
 use eyre::Result;
 use std::sync::Arc;
 use alloy_primitives::{Address, U256};
-use tx_processor::{
-    simulator::erc20_token_buy_approve_sell_tx_simulator::{
-        check_can_buy_sell_pool,
-        PoolViabilityConfig,
-        PoolType,
-        types::PoolViabilityResult,
-    }
+use tx_processor::simulator::{
+    check_can_buy_sell_pool,
+    PoolViabilityConfig,
+    PoolType,
+    PoolViabilityResult,
 };
 use tx_simulator::TxSimulator;
 use tx_processor::tx_processor::TxProcessor;

@@ -20,3 +20,10 @@ revm/
 ethers/
 
 # REVM  comparison_results.json
+
+# CSV files
+*.csv
+
+# Generated artifacts
+/artifacts/
+*.png

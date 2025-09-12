@@ -5,7 +5,7 @@
 use eyre::Result;
 use std::sync::Arc;
 use alloy_primitives::{Address, B256};
-use tx_processor::TxProcessor;
+use tx_processor::processed_tx_provider::ProcessedTxProvider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,16 +15,16 @@ async fn main() -> Result<()> {
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     
-    let tx_processor = Arc::new(TxProcessor::new(&reth_datadir)?);
+    let provider = Arc::new(ProcessedTxProvider::new(&reth_datadir)?);
     
-    // Example: Known liquidity removal transaction
+    // Example: Liquidity removal transaction hash (edit to test another TX)
     let removal_tx: B256 = "0xb20e91c60b35647725b1878b60e2ccf6543fc17983983227656cf98bebb22966".parse()?;
     
     println!("Analyzing transaction for liquidity removal...");
     println!("TX: {}\n", removal_tx);
     
     // Process the transaction
-    match tx_processor.process_transaction_by_hash(removal_tx).await {
+    match provider.process_transaction_by_hash(removal_tx).await {
         Ok(tx) => {
             println!("Transaction details:");
             println!("  Block: {}", tx.block_number);

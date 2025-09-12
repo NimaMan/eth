@@ -6,7 +6,7 @@
 use alloy_primitives::{Address, U256};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
-use crate::utils::to_checksum_address;
+use reth_chain_query::to_checksum_address;
 
 /// Check if U256 value represents a negative number (two's complement)
 fn is_negative_u256(value: U256) -> bool {
@@ -128,8 +128,7 @@ pub fn calculate_buy_tax_from_processed_transaction(
     }
     
     let tax_amount = pool_tokens_sent - buyer_tokens_received;
-    
-    // Calculate tax percentage in basis points (e.g., 30 = 0.30%)
+    // Avoid division by zero: if pool sent zero tokens, tax is zero
     if pool_tokens_sent == U256::ZERO {
         return TaxCalculationResult::Calculated { tax_basis_points: 0 };
     }
@@ -146,4 +145,114 @@ pub fn calculate_buy_tax_from_processed_transaction(
     TaxCalculationResult::Calculated { tax_basis_points }
 }
 
-// TODO: Implement sell tax calculation with U256 arithmetic if needed
+/// Calculate sell tax from ProcessedTransaction using address balance changes
+///
+/// Sell Tax Logic:
+/// 1. Seller should have negative token change (sends tokens)
+/// 2. Pool should have positive token change (receives tokens)
+/// 3. Identify the sold token by matching seller's negative change with pool's positive change
+/// 4. Tax = tokens_sent_by_seller - tokens_received_by_pool
+/// 5. Tax percentage = (tax_amount * 10000) / tokens_sent_by_seller (basis points)
+pub fn calculate_sell_tax_from_processed_transaction(
+    processed_tx: &ProcessedTransaction,
+    pool_address: Address,
+    seller_address: Address,
+) -> TaxCalculationResult {
+    // Fetch balance changes for seller and pool
+    let seller_changes = match processed_tx.address_balance_changes.get(&seller_address) {
+        Some(changes) => changes,
+        None => {
+            return TaxCalculationResult::InvalidSimulation {
+                reason: "Seller has no balance changes".to_string(),
+            }
+        }
+    };
+    let pool_changes = match processed_tx.address_balance_changes.get(&pool_address) {
+        Some(changes) => changes,
+        None => {
+            return TaxCalculationResult::InvalidSimulation {
+                reason: "Pool has no balance changes".to_string(),
+            }
+        }
+    };
+
+    // Try to find the sold token in token_net first (unknown tokens),
+    // then fallback to currency_net (known tokens like USDC/USDT/WETH but not ETH for gas).
+    let mut best_match: Option<(U256, U256)> = None; // (seller_negative, pool_positive)
+
+    // token_net path: keys are checksum addresses
+    for (token_key, &seller_amount) in &seller_changes.token_net {
+        if !is_negative_u256(seller_amount) {
+            continue; // seller must be sending tokens
+        }
+        if let Some(&pool_amount) = pool_changes.token_net.get(token_key) {
+            if pool_amount > U256::ZERO && !is_negative_u256(pool_amount) {
+                // Choose the largest absolute seller amount if multiple candidates
+                let pick = match best_match {
+                    None => true,
+                    Some((prev_seller_amt, _)) => abs_u256(seller_amount) > abs_u256(prev_seller_amt),
+                };
+                if pick {
+                    best_match = Some((seller_amount, pool_amount));
+                }
+            }
+        }
+    }
+
+    // currency_net path: keys are symbols (exclude ETH since gas can make it negative)
+    for (symbol, &seller_amount) in &seller_changes.currency_net {
+        if *symbol == "ETH" || !is_negative_u256(seller_amount) {
+            continue;
+        }
+        if let Some(&pool_amount) = pool_changes.currency_net.get(symbol) {
+            if pool_amount > U256::ZERO && !is_negative_u256(pool_amount) {
+                let pick = match best_match {
+                    None => true,
+                    Some((prev_seller_amt, _)) => abs_u256(seller_amount) > abs_u256(prev_seller_amt),
+                };
+                if pick {
+                    best_match = Some((seller_amount, pool_amount));
+                }
+            }
+        }
+    }
+
+    let (seller_change, pool_change) = match best_match {
+        Some(pair) => pair,
+        None => {
+            return TaxCalculationResult::InvalidSimulation {
+                reason: "Could not identify sold token from balance changes".to_string(),
+            }
+        }
+    };
+
+    // Sanity: seller must send (negative), pool must receive (positive)
+    if !is_negative_u256(seller_change) {
+        return TaxCalculationResult::InvalidSimulation {
+            reason: "Seller token change is non-negative - should send tokens in sell".to_string(),
+        };
+    }
+    if is_negative_u256(pool_change) || pool_change == U256::ZERO {
+        return TaxCalculationResult::InvalidSimulation {
+            reason: "Pool token change is non-positive - should receive tokens in sell".to_string(),
+        };
+    }
+
+    let seller_tokens_sent = abs_u256(seller_change);
+    let pool_tokens_received = pool_change;
+
+    if pool_tokens_received > seller_tokens_sent {
+        return TaxCalculationResult::InvalidSimulation {
+            reason: "Pool received more tokens than seller sent".to_string(),
+        };
+    }
+
+    let tax_amount = seller_tokens_sent - pool_tokens_received;
+    if seller_tokens_sent == U256::ZERO {
+        return TaxCalculationResult::Calculated { tax_basis_points: 0 };
+    }
+
+    let tax_bps_u256 = (tax_amount * U256::from(10000)) / seller_tokens_sent;
+    let tax_basis_points: u32 = tax_bps_u256.try_into().unwrap_or(u32::MAX);
+    TaxCalculationResult::Calculated { tax_basis_points }
+}
