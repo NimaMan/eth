@@ -14,7 +14,6 @@ eyre = "0.6"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 hex-literal = "0.4"
-tiny-keccak = { version = "2.0", features = ["keccak"] }
 futures = "0.3"
 
 # Transaction simulator for database access
@@ -129,3 +128,11 @@ path = "examples/reth_index/tx_arrival_index_smoke.rs"
 [[example]]
 name = "delete_tx_arrival"
 path = "examples/reth_index/delete_tx_arrival.rs"
+
+[[example]]
+name = "list_tx_arrivals"
+path = "examples/reth_index/list_tx_arrivals.rs"
+
+[[example]]
+name = "write_arrival_for_hash"
+path = "examples/reth_index/write_arrival_for_hash.rs"

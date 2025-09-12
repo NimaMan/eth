@@ -8,6 +8,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
 use tx_simulator::TxSimulator;
+use reth_provider::BlockReader;
 
 // Import our modules
 use crate::reth_index::RethIndexDB;
@@ -151,6 +152,15 @@ impl RethQueryProvider {
     pub fn get_latest_block(&self) -> Result<u64> {
         self.tx_simulator.get_latest_block()
     }
+
+    /// Get block timestamp for a specific block number
+    pub fn get_block_timestamp(&self, block_number: u64) -> Result<u64> {
+        let block = self
+            .provider_factory
+            .block_by_number(block_number)?
+            .ok_or_else(|| eyre::eyre!("Invalid block number {}", block_number))?;
+        Ok(block.timestamp)
+    }
     
     // === Internal Helper Methods ===
     
@@ -264,6 +274,18 @@ impl RethQueryProvider {
             Err(eyre::eyre!("RethIndex not available. Enable with with_reth_index()"))
         }
     }
+}
+
+/// Convenience: build and return a shared ProviderFactory (Arc) from a Reth datadir.
+///
+/// This uses RethQueryProvider::new under the hood to ensure we initialize the
+/// TxSimulator and internal caches in a consistent way, then returns a clone of
+/// the underlying ProviderFactory for components that only need the factory.
+pub fn provider_factory_from_datadir(
+    reth_datadir: &str
+) -> Result<Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>>> {
+    let rqp = RethQueryProvider::new(reth_datadir)?;
+    Ok(rqp.provider_factory().clone())
 }
 
 /// Account information from PlainAccountState

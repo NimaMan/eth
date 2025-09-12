@@ -22,4 +22,5 @@ pub use dex_pools::{
     V3_FEE_TIERS,
     compute_uniswap_v2_pool, compute_uniswap_v3_pool, compute_sushiswap_pool,
     get_all_v3_pools,
+    V4PoolInfo, find_uniswap_v4_pools_for_pair,
 };

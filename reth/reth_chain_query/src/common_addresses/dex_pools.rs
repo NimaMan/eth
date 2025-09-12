@@ -19,9 +19,11 @@
 //!    - Fast CREATE2 for standardized factories
 //!    - Chain queries for complex deployment patterns
 
-use alloy_primitives::{address, Address, keccak256, U256, Bytes};
+use alloy_primitives::{address, Address, keccak256, U256, Bytes, B256};
 use eyre::Result;
 use crate::TxSimulator;
+use std::collections::HashSet;
+use reth_provider::ReceiptProvider;
 
 /// Factory addresses for different DEX protocols
 pub const UNISWAP_V2_FACTORY: Address = address!("5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f");
@@ -347,11 +349,84 @@ fn decode_address_array_from_result(result: &[u8]) -> Option<Vec<Address>> {
 }
 
 /// Basic ABI decoder for uint256 arrays (simplified)
-fn decode_uint256_array_from_result(result: &[u8], offset: usize) -> Option<Vec<U256>> {
+fn decode_uint256_array_from_result(_result: &[u8], _offset: usize) -> Option<Vec<U256>> {
     // This would need to be implemented based on the specific ABI layout
     // For now, return None to avoid compilation errors
     // TODO: Implement proper uint256 array decoding
     None
+}
+
+/// Discovered Uniswap V4 pool info from Initialize events
+#[derive(Debug, Clone, Copy)]
+pub struct V4PoolInfo {
+    pub pool_id: B256,
+    pub currency0: Address,
+    pub currency1: Address,
+    pub fee: u32,
+    pub tick_spacing: i32,
+    pub hooks: Address,
+    pub block_number: u64,
+}
+
+/// Find recent Uniswap V4 pool ids for a token pair via PoolManager Initialize events.
+/// Scans receipts in the local Reth DB; returns up to `max_results` most recent matches.
+pub async fn find_uniswap_v4_pools_for_pair(
+    simulator: &TxSimulator,
+    pool_manager: Address,
+    token_a: Address,
+    token_b: Address,
+    blocks_back: u64,
+    max_results: usize,
+) -> Result<Vec<V4PoolInfo>> {
+    let init_sig = keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
+    let (want0, want1) = sort_tokens(token_a, token_b);
+
+    let latest = simulator.get_latest_block()?;
+    let start = latest.saturating_sub(blocks_back);
+    let provider = simulator.provider_factory().provider()?;
+
+    let mut results = Vec::new();
+    let mut seen: HashSet<B256> = HashSet::new();
+
+    for block in (start..=latest).rev() {
+        let receipts = match provider.receipts_by_block(block.into())? {
+            Some(r) => r,
+            None => continue,
+        };
+        for receipt in receipts {
+            for log in receipt.logs {
+                if log.address != pool_manager { continue; }
+                let topics = log.topics();
+                if topics.len() < 4 || topics[0] != init_sig { continue; }
+
+                // topics[1] = pool_id (bytes32)
+                let pool_id = topics[1];
+                if seen.contains(&pool_id) { continue; }
+
+                // topics[2], topics[3] are Currency (address) left-padded in topic
+                let c0b: &[u8] = topics[2].as_ref();
+                let c1b: &[u8] = topics[3].as_ref();
+                if c0b.len() < 32 || c1b.len() < 32 { continue; }
+                let currency0 = Address::from_slice(&c0b[12..32]);
+                let currency1 = Address::from_slice(&c1b[12..32]);
+
+                if !(currency0 == want0 && currency1 == want1) { continue; }
+
+                // Decode fee(uint24), tickSpacing(int24), hooks(address) from data
+                let data = &log.data.data;
+                if data.len() < 96 { continue; }
+                let fee = u32::from_be_bytes([ data[28], data[29], data[30], data[31] ]);
+                let tick_spacing = i32::from_be_bytes([ data[60], data[61], data[62], data[63] ]);
+                let hooks = Address::from_slice(&data[76..96]);
+
+                results.push(V4PoolInfo { pool_id, currency0, currency1, fee, tick_spacing, hooks, block_number: block });
+                seen.insert(pool_id);
+                if results.len() >= max_results { return Ok(results); }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[cfg(test)]

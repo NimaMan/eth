@@ -168,6 +168,48 @@ fn encode_swap_exact_tokens_for_eth(
     Bytes::from(data)
 }
 
+/// Encode swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
+fn encode_swap_exact_tokens_for_tokens(
+    amount_in: U256,
+    amount_out_min: U256,
+    path: &[Address; 2],
+    to: Address,
+    deadline: U256,
+) -> Bytes {
+    // Selector: 0x38ed1739
+    let mut data = vec![0x38, 0xed, 0x17, 0x39];
+
+    // amountIn
+    data.extend_from_slice(&amount_in.to_be_bytes::<32>());
+
+    // amountOutMin
+    data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+
+    // path offset -> 0xa0
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&[0, 0, 0, 0xa0]);
+
+    // to address
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(to.as_slice());
+
+    // deadline
+    data.extend_from_slice(&deadline.to_be_bytes::<32>());
+
+    // path array header
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&[0, 0, 0, 0x02]);
+
+    // path[0] = token_in
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(path[0].as_slice());
+    // path[1] = token_out
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(path[1].as_slice());
+
+    Bytes::from(data)
+}
+
 /// ERC20 approve(selector 0x095ea7b3)
 fn encode_approve(spender: Address, amount: U256) -> Bytes {
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3];
@@ -244,6 +286,68 @@ pub fn build_sell_swap_v2_with_min_out(
 
     UnsignedTransaction {
         from: Some(seller),
+        to: Some(router_address(router)),
+        gas: Some(500_000),
+        gas_price: Some(100_000_000_000),
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(calldata),
+        nonce: None,
+    }
+}
+
+/// Build a Uniswap/Sushiswap V2 token -> token swap via router.
+pub fn build_token_to_token_swap_v2(
+    router: Router,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    _slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_swap_exact_tokens_for_tokens(
+        amount_in,
+        U256::ZERO,
+        &[token_in, token_out],
+        trader,
+        U256::from(deadline),
+    );
+
+    UnsignedTransaction {
+        from: Some(trader),
+        to: Some(router_address(router)),
+        gas: Some(500_000),
+        gas_price: Some(100_000_000_000),
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(calldata),
+        nonce: None,
+    }
+}
+
+/// Build a Uniswap/Sushiswap V2 token -> token swap with explicit amountOutMin.
+pub fn build_token_to_token_swap_v2_with_min_out(
+    router: Router,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_swap_exact_tokens_for_tokens(
+        amount_in,
+        amount_out_min,
+        &[token_in, token_out],
+        trader,
+        U256::from(deadline),
+    );
+
+    UnsignedTransaction {
+        from: Some(trader),
         to: Some(router_address(router)),
         gas: Some(500_000),
         gas_price: Some(100_000_000_000),

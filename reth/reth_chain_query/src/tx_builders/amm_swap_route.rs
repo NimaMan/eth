@@ -12,6 +12,9 @@ pub enum AmmSwapRoute {
     SushiswapV2 { pool: Address },
     /// Uniswap V3 pool with fee tier (router-based exactInputSingle)
     UniswapV3 { pool: Address, fee_tier: u32 },
+    /// Uniswap V4 via PoolManager (not yet supported by builders)
+    /// Included for completeness so higher layers can select v4 and handle gracefully.
+    UniswapV4 { pool_manager: Address, pool_id: B256 },
     /// Balancer V2 SingleSwap (not implemented yet)
     BalancerV2 { pool_id: B256, token_in: Address, token_out: Address },
     /// Curve V1 pool (not implemented yet)
@@ -19,4 +22,3 @@ pub enum AmmSwapRoute {
     /// Fraxswap V2-style pool (router-based swap) (not implemented yet)
     FraxswapV2 { pool: Address },
 }
-

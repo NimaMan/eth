@@ -98,6 +98,18 @@ impl RethIndexDB {
         tx.commit()?;
         Ok(true)
     }
+
+    /// Count all tx arrival entries
+    pub fn count_tx_arrivals(&self) -> Result<u64> {
+        let ro = self.env.begin_ro_txn()?;
+        let cursor = ro.cursor(&self.tx_arrival_dbi)?;
+        let mut count: u64 = 0;
+        for res in cursor.into_iter::<[u8;8], [u8;8]>() {
+            let _ = res?;
+            count += 1;
+        }
+        Ok(count)
+    }
 }
 
 /// Database statistics

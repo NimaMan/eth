@@ -45,7 +45,16 @@ pub fn build_buy_swap(
             slippage_bps,
             deadline,
         ),
-        // TODO: Implement Balancer/Curve/Fraxswap builders
+        AmmSwapRoute::CurveV1 { pool, i, j, use_underlying } => amm::curve::build_buy_swap_curve_v1(
+            buyer,
+            pool,
+            i,
+            j,
+            amount_in_eth,
+            use_underlying,
+            U256::ZERO,
+        ),
+        // TODO: Implement Balancer/Fraxswap builders
         _ => amm::v2::build_buy_swap_v2(
             amm::v2::Router::UniswapV2,
             buyer,
@@ -202,6 +211,106 @@ pub fn build_sell_swap_with_min_out(
             seller,
             token_in,
             amount_in_tokens,
+            amount_out_min,
+            deadline,
+        ),
+    }
+}
+
+/// Build a token -> token swap UnsignedTransaction for the given route.
+pub fn build_token_to_token_swap(
+    route: &AmmSwapRoute,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    match *route {
+        AmmSwapRoute::UniswapV2 { .. } => amm::v2::build_token_to_token_swap_v2(
+            amm::v2::Router::UniswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            slippage_bps,
+            deadline,
+        ),
+        AmmSwapRoute::SushiswapV2 { .. } => amm::v2::build_token_to_token_swap_v2(
+            amm::v2::Router::SushiswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            slippage_bps,
+            deadline,
+        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::v3::build_token_to_token_swap_v3(
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            fee_tier,
+            slippage_bps,
+            deadline,
+        ),
+        _ => amm::v2::build_token_to_token_swap_v2(
+            amm::v2::Router::UniswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            slippage_bps,
+            deadline,
+        ),
+    }
+}
+
+/// Build a token -> token swap with explicit amountOutMin (slippage enforced by caller).
+pub fn build_token_to_token_swap_with_min_out(
+    route: &AmmSwapRoute,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    match *route {
+        AmmSwapRoute::UniswapV2 { .. } => amm::v2::build_token_to_token_swap_v2_with_min_out(
+            amm::v2::Router::UniswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out_min,
+            deadline,
+        ),
+        AmmSwapRoute::SushiswapV2 { .. } => amm::v2::build_token_to_token_swap_v2_with_min_out(
+            amm::v2::Router::SushiswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            amount_out_min,
+            deadline,
+        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::v3::build_token_to_token_swap_v3_with_min_out(
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            fee_tier,
+            amount_out_min,
+            deadline,
+        ),
+        _ => amm::v2::build_token_to_token_swap_v2_with_min_out(
+            amm::v2::Router::UniswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
             amount_out_min,
             deadline,
         ),

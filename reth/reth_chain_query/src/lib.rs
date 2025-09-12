@@ -26,6 +26,7 @@ pub mod postgres_db;
 pub mod time_utils;
 pub mod common_addresses;
 pub mod tx_builders;
+pub mod utils;
 
 // Re-export new provider architecture
 pub use provider::{
@@ -33,6 +34,7 @@ pub use provider::{
     BlockHeader, TransactionData, TransactionReceipt, // FullTransactionData, BlockTransactions, // TEMPORARILY DISABLED
     // Types from address_state are exported via provider::*
 };
+pub use provider::provider_factory_from_datadir;
 
 // Re-export entity analysis types
 pub use entities::{
@@ -68,3 +70,10 @@ pub use tx_builders::amm_swap_route::AmmSwapRoute;
 pub use alloy_primitives::{Address, U256, B256};
 pub use eyre::Result;
 pub use tx_simulator::TxSimulator;
+// Re-export checksum utilities for convenience
+pub use utils::checksum::{
+    to_checksum_address,
+    serialize_address_checksum,
+    deserialize_address_checksum,
+    alloy_address_to_checksum,
+};

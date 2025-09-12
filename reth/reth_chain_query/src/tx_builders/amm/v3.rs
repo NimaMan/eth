@@ -221,6 +221,74 @@ pub fn build_sell_swap_v3_with_min_out(
     }
 }
 
+/// Build a Uniswap V3 token -> token swap (exactInputSingle).
+pub fn build_token_to_token_swap_v3(
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    fee_tier: u32,
+    _slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_exact_input_single(
+        token_in,
+        token_out,
+        fee_tier,
+        trader,
+        U256::from(deadline),
+        amount_in,
+        U256::ZERO,
+        U256::ZERO,
+    );
+
+    UnsignedTransaction {
+        from: Some(trader),
+        to: Some(router_address_v3()),
+        gas: Some(350_000),
+        gas_price: Some(100_000_000_000),
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(calldata),
+        nonce: None,
+    }
+}
+
+/// Build a Uniswap V3 token -> token swap with explicit amountOutMinimum.
+pub fn build_token_to_token_swap_v3_with_min_out(
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    fee_tier: u32,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_exact_input_single(
+        token_in,
+        token_out,
+        fee_tier,
+        trader,
+        U256::from(deadline),
+        amount_in,
+        amount_out_min,
+        U256::ZERO,
+    );
+
+    UnsignedTransaction {
+        from: Some(trader),
+        to: Some(router_address_v3()),
+        gas: Some(350_000),
+        gas_price: Some(100_000_000_000),
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(calldata),
+        nonce: None,
+    }
+}
+
 /// Build a Uniswap V3 sell swap that attempts to include a selfPermit via multicall.
 /// NOTE: Placeholder implementation currently falls back to a standard sell swap.
 /// Proper selfPermit + multicall encoding will be added in a subsequent pass.
