@@ -66,8 +66,8 @@ name = "contract_method_simulation"
 path = "examples/basic/contract_method_simulation.rs"
 
 [[example]]
-name = "weth_totalsupply_view_call"
-path = "examples/basic/weth_totalsupply_view_call.rs"
+name = "contract_method_simulation_weth_total_supply"
+path = "examples/basic/contract_method_simulation_weth_total_supply.rs"
 
 [[example]]
 name = "trace_extraction_example"

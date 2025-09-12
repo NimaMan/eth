@@ -6,7 +6,7 @@ This directory showcases how to use `tx_simulator` across common scenarios. This
 - basic/verify_database_setup.rs: Verify Reth DB access and latest block
 - basic/unsigned_transaction_example.rs: First unsigned call simulation
 - basic/contract_method_simulation.rs: Read-only contract state queries
-- basic/weth_totalsupply_view_call.rs: Simple view call example
+- basic/contract_method_simulation_weth_total_supply.rs: Simple totalSupply() read example
 - basic/trace_extraction_example.rs: Extract geth-compatible call traces
 
 ## Sequential (Stateful)
