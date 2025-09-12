@@ -36,7 +36,7 @@ tx_simulator/
     ├── basic/                           # Basic simulation examples
     │   ├── verify_database_setup.rs     # Database connection verification
     │   ├── unsigned_transaction_example.rs # Basic UnsignedTransaction simulation
-    │   ├── view_function_example.rs     # ERC20 view function calls
+    │   ├── contract_method_simulation.rs     # ERC20 view function calls
     │   ├── weth_totalsupply_view_call.rs # WETH totalSupply example
     │   └── trace_extraction_example.rs  # CallFrame structure demonstration
     ├── sequential/                      # Sequential transaction examples
@@ -203,7 +203,7 @@ For calling view/pure functions that don't modify state:
 - Optimized for read-only operations
 
 **Examples:**
-- `examples/basic/view_function_example.rs` - ERC20 view function calls
+- `examples/basic/contract_method_simulation.rs` - ERC20 view function calls
 - `examples/basic/weth_totalsupply_view_call.rs` - Simple totalSupply call
 
 ### 4. Advanced Features
@@ -306,7 +306,7 @@ let results = simulator.simulate_unsigned_tx_list_parallel(requests, options).aw
    - ETH transfers and contract calls
    - Success/failure scenarios
 
-3. **View Functions** (`view_function_example.rs`, `weth_totalsupply_view_call.rs`)
+3. **View Functions** (`contract_method_simulation.rs`, `weth_totalsupply_view_call.rs`)
    - ERC20 function calls (balanceOf, totalSupply, decimals)
    - Read-only operations
    - Return value decoding

@@ -62,8 +62,8 @@ name = "unsigned_transaction_example"
 path = "examples/basic/unsigned_transaction_example.rs"
 
 [[example]]
-name = "view_function_example"
-path = "examples/basic/view_function_example.rs"
+name = "contract_method_simulation"
+path = "examples/basic/contract_method_simulation.rs"
 
 [[example]]
 name = "weth_totalsupply_view_call"
