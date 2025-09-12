@@ -50,6 +50,8 @@ impl SignedTxChainSimulation {
         let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(&mut self.forked_state.db, evm_env, inspector);
         let res = evm.transact(tx_env)?;
         self.forked_state.db.commit(res.state);
+        // Fuse inspector for subsequent steps
+        self.inspector = self.inspector.take().map(|insp| insp.fused());
 
         Ok(SimulationResult {
             success: res.result.is_success(),

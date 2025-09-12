@@ -207,10 +207,8 @@ impl UnsignedTxChainSimulation {
         // Commit state changes
         self.forked_state.db.commit(res.state);
         
-        // Fuse the inspector for next transaction (clear tx-specific data, keep block-level data)
-        // Note: This assumes TracingInspector has a fused() method like in Reth
-        // If not available, we'll keep the inspector as-is for now
-        // self.inspector = self.inspector.take().map(|insp| insp.fused());
+        // Fuse the inspector for next transaction (clear tx-specific data, keep internal buffers)
+        self.inspector = self.inspector.take().map(|insp| insp.fused());
         
         Ok(SimulationResult {
             success: res.result.is_success(),

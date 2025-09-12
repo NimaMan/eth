@@ -252,8 +252,10 @@ impl TxSimulator {
         // Commit state changes to forked state
         forked_state.db.commit(res.state);
         
-        // Inspector is reused for next transaction - no need to recreate
-        // This provides performance benefits by avoiding allocations
+        // Fuse inspector for next tx to clear tx-scoped buffers while reusing allocations
+        if let Some(current) = inspector.take() {
+            *inspector = Some(current.fused());
+        }
         
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();

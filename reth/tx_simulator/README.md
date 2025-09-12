@@ -76,6 +76,13 @@ Reth MDBX ──► Provider ──► Header(N)
 - Tracing uses `TracingInspector::default_geth()` and produces geth CallFrame shapes for consistency with RPC.
 - Nonce management in chain simulators reads from forked state and auto-increments after successful steps.
 
+### Equivalence With Reth
+
+- Execution environment: Built from canonical headers via Reth `HeaderProvider`, matching chain spec and block env used by Reth.
+- Inspector behavior: Chain simulators reuse and fuse the same `TracingInspector` between steps, mirroring Reth’s block/bundle tracing pattern (`inspector = inspector.map(|i| i.fused())`).
+- Trace format: Exported via geth builders; structure is intended to be identical to `debug_*` RPC traces.
+- Validation example: See `examples/block/verify_block_trace_rpc_equivalence.rs` which compares our traces to `debug_traceBlockByNumber` from an RPC endpoint.
+
 ## License
 
 MIT OR Apache-2.0
