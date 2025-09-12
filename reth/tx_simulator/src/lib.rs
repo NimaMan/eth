@@ -24,10 +24,8 @@ pub mod tx_chain {
 pub mod tx_parallel;
 pub mod contract_method_simulator;
 pub mod simulation_revert_decoder;
-// Block tracing (renamed from block_simulation)
-pub mod block_trace {
-    pub mod block_simulation; // keep inner name for now to minimize churn
-}
+// Block tracing
+pub mod block_trace;
 // Back-compat path so imports like tx_simulator::block_simulation::* still work
 pub use block_trace::block_simulation;
 

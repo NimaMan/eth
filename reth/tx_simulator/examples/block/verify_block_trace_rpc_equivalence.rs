@@ -7,7 +7,7 @@
 /// replacement for RPC tracing calls.
 
 use tx_simulator::TxSimulator;
-use tx_simulator::block_simulation::BlockTracer;
+use tx_simulator::block_trace::block_tracer::BlockTracer;
 use eyre::Result;
 use reth_provider::BlockReader;
 use std::time::Instant;
