@@ -15,6 +15,23 @@ const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"; //
 // Test address with ETH balance
 const TEST_BUYER: &str = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689";
 
+/// Encode balanceOf(owner) function call
+fn encode_balance_of(owner: Address) -> Bytes {
+    let mut data = vec![0x70, 0xa0, 0x82, 0x31]; // balanceOf selector
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(owner.as_slice());
+    Bytes::from(data)
+}
+
+/// Decode U256 from contract call output
+fn decode_uint256_from_output(output: &Bytes) -> U256 {
+    if output.len() >= 32 {
+        U256::from_be_slice(&output[..32])
+    } else {
+        U256::ZERO
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("🐕 FLOKI Token Buy → Approve → Sell Workflow Demo");
@@ -76,14 +93,63 @@ async fn execute_floki_trading_workflow(
     println!("  Gas used: {}", buy_result.gas_used);
     println!("  Logs generated: {}", buy_result.call_trace.logs.len());
     
+    // Debug: Check if we received tokens
+    if buy_result.success && buy_result.call_trace.logs.is_empty() {
+        println!("  ⚠️  WARNING: No logs emitted! FLOKI tokens might not have been transferred.");
+        println!("  This could mean the swap didn't actually execute a token transfer.");
+    }
+    
     if !buy_result.success {
         println!("  Revert reason: {:?}", buy_result.revert_reason);
         return Ok(());
     }
     
+    // ========================================
+    // BALANCE VERIFICATION AFTER BUY
+    // ========================================
+    println!("\n  🔍 BALANCE VERIFICATION:");
+    let floki_addr = Address::from_str(FLOKI_ADDRESS)?;
+    
+    // Direct balanceOf() simulation call
+    println!("    Making direct balanceOf() simulation call...");
+    let balance_call_data = encode_balance_of(buyer);
+    let balance_call = UnsignedTransaction {
+        from: Some(buyer),
+        to: Some(floki_addr),
+        value: Some(U256::ZERO),
+        data: Some(balance_call_data),
+        gas: Some(50_000),
+        gas_price: None,
+        nonce: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+    };
+    
+    let balance_result = chain.step_with_trace(balance_call).await?;
+    let floki_balance = if balance_result.success {
+        if let Some(output) = balance_result.call_trace.output {
+            decode_uint256_from_output(&output)
+        } else {
+            U256::ZERO
+        }
+    } else {
+        println!("    ❌ balanceOf() call failed: {:?}", balance_result.revert_reason);
+        U256::ZERO
+    };
+    
+    println!("    FLOKI balance after buy: {} raw tokens", floki_balance);
+    
+    if floki_balance == U256::ZERO {
+        println!("    ❌ CRITICAL: Balance is ZERO despite buy transaction success!");
+        println!("    This explains why sells fail - no actual FLOKI tokens received!");
+    } else {
+        println!("    ✅ SUCCESS: Actual FLOKI tokens received: {}", floki_balance);
+        let floki_formatted = floki_balance / U256::from(10_u64.pow(9)); // FLOKI has 9 decimals
+        println!("    Formatted: {} FLOKI", floki_formatted);
+    }
+    
     // Step 2: Approve router for FLOKI
     println!("\n[Step 2] Approving router for FLOKI...");
-    let floki_addr = Address::from_str(FLOKI_ADDRESS)?;
     let approve_tx = create_approve_transaction(buyer, floki_addr, router, U256::MAX);
     
     let approve_result = chain.step_with_trace(approve_tx).await?;
@@ -127,6 +193,106 @@ async fn execute_floki_trading_workflow(
     println!("  • Approved router for unlimited FLOKI");
     println!("  • Attempted to sell 1,000,000 FLOKI");
     println!("  • Note: FLOKI has 9 decimals");
+    
+    // Alternative test with mixed approach
+    println!("\n{}", "=".repeat(60));
+    println!("ALTERNATIVE TEST: Mixed step() and step_with_trace()");
+    println!("{}", "=".repeat(60));
+    println!("\nTesting with step() for buy/approve, step_with_trace() for sell...");
+    println!("This tests if state persistence is the issue.\n");
+    
+    // Start a fresh chain
+    let mut chain2 = simulator.start_simulation_chain(None).await?;
+    println!("📍 Fresh chain initialized");
+    
+    // Step 1: Buy with step() (ensures state persistence)
+    println!("\n[Step 1] Buying FLOKI with step()...");
+    let buy_tx2 = create_buy_floki_transaction(
+        buyer, 
+        U256::from(100_000_000_000_000_000u128) // 0.1 ETH
+    );
+    let buy_result2 = chain2.step(buy_tx2).await?;
+    println!("  Status: {}", if buy_result2.success { "✅ Success" } else { "❌ Failed" });
+    println!("  Gas used: {}", buy_result2.gas_used);
+    
+    if !buy_result2.success {
+        println!("  Revert reason: {:?}", buy_result2.revert_reason);
+        return Ok(());
+    }
+    
+    // Check FLOKI balance after buy
+    println!("\n[Balance Check] Checking FLOKI balance after buy...");
+    let balance_call = create_balance_check_transaction(buyer, floki_addr);
+    let balance_result = chain2.step(balance_call).await?;
+    println!("  Balance check executed: {}", if balance_result.success { "✅" } else { "❌" });
+    println!("  Note: Balance is stored in contract state, not returned directly");
+    
+    // Step 2: Approve with step() (ensures state persistence)
+    println!("\n[Step 2] Approving router with step()...");
+    let approve_tx2 = create_approve_transaction(buyer, floki_addr, router, U256::MAX);
+    let approve_result2 = chain2.step(approve_tx2).await?;
+    println!("  Status: {}", if approve_result2.success { "✅ Success" } else { "❌ Failed" });
+    println!("  Gas used: {}", approve_result2.gas_used);
+    
+    if !approve_result2.success {
+        println!("  Revert reason: {:?}", approve_result2.revert_reason);
+        return Ok(());
+    }
+    
+    // Step 3: Sell with step_with_trace() (to get trace data)
+    println!("\n[Step 3] Selling FLOKI with step_with_trace()...");
+    let sell_tx2 = create_sell_floki_transaction(buyer, sell_amount);
+    let sell_result2 = chain2.step_with_trace(sell_tx2).await?;
+    println!("  Status: {}", if sell_result2.success { "✅ Success" } else { "❌ Failed" });
+    println!("  Gas used: {}", sell_result2.gas_used);
+    println!("  Logs generated: {}", sell_result2.call_trace.logs.len());
+    
+    if !sell_result2.success {
+        println!("  Revert reason: {:?}", sell_result2.revert_reason);
+    }
+    
+    println!("\n📊 Alternative Test Summary:");
+    if sell_result2.success {
+        println!("  ✅ Mixed approach WORKS! State persistence confirmed as the issue.");
+        println!("  • step() properly persists FLOKI's complex state");
+        println!("  • step_with_trace() alone fails to persist state between transactions");
+    } else {
+        println!("  ❌ Mixed approach also failed. Issue might be deeper than state persistence.");
+    }
+    
+    // Test with reduced amount
+    println!("\n{}", "=".repeat(60));
+    println!("REDUCED AMOUNT TEST: Selling only 10,000 FLOKI");
+    println!("{}", "=".repeat(60));
+    
+    let mut chain3 = simulator.start_simulation_chain(None).await?;
+    println!("\n📍 Fresh chain initialized for reduced amount test");
+    
+    // Buy and approve with step()
+    println!("\n[Quick Setup] Buy and Approve with step()...");
+    let buy_tx3 = create_buy_floki_transaction(buyer, U256::from(100_000_000_000_000_000u128));
+    let buy_result3 = chain3.step(buy_tx3).await?;
+    let approve_tx3 = create_approve_transaction(buyer, floki_addr, router, U256::MAX);
+    let approve_result3 = chain3.step(approve_tx3).await?;
+    
+    if buy_result3.success && approve_result3.success {
+        println!("  ✅ Buy and Approve successful");
+        
+        // Try selling much smaller amount: 10,000 FLOKI
+        println!("\n[Reduced Test] Selling only 10,000 FLOKI...");
+        let small_sell_amount = U256::from(10_000u128) * U256::from(10u128).pow(U256::from(9));
+        let sell_tx3 = create_sell_floki_transaction(buyer, small_sell_amount);
+        let sell_result3 = chain3.step_with_trace(sell_tx3).await?;
+        
+        println!("  Status: {}", if sell_result3.success { "✅ Success" } else { "❌ Failed" });
+        println!("  Gas used: {}", sell_result3.gas_used);
+        
+        if !sell_result3.success {
+            println!("  Revert reason: {:?}", sell_result3.revert_reason);
+        } else {
+            println!("  ✅ Small amount works! Confirms we do receive FLOKI tokens.");
+        }
+    }
     
     Ok(())
 }
@@ -191,6 +357,28 @@ fn create_approve_transaction(from: Address, token: Address, spender: Address, a
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
         gas: Some(100_000),
+        gas_price: Some(20_000_000_000),
+        nonce: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+    }
+}
+
+/// Create a balance check transaction for ERC20 tokens
+fn create_balance_check_transaction(owner: Address, token: Address) -> UnsignedTransaction {
+    // balanceOf(address owner)
+    let mut data = vec![0x70, 0xa0, 0x82, 0x31]; // balanceOf selector
+    
+    // owner address
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(owner.as_slice());
+    
+    UnsignedTransaction {
+        from: Some(owner),
+        to: Some(token),
+        value: Some(U256::ZERO),
+        data: Some(Bytes::from(data)),
+        gas: Some(50_000),
         gas_price: Some(20_000_000_000),
         nonce: None,
         max_fee_per_gas: None,

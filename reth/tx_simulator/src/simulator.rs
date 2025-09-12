@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::path::Path;
 use eyre::Result;
-use alloy_primitives::Bytes;
 
 // Core Reth imports
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
@@ -94,7 +93,7 @@ impl TxSimulator {
     pub fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
         let provider = self.provider_factory.provider()?;
         let header = provider.header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+            .ok_or_else(|| eyre::eyre!("No header for block whilst getting base-fee {}", block_number))?;
         
         let base_fee = header.base_fee_per_gas
             .ok_or_else(|| eyre::eyre!("No base fee for block {} (pre-London?)", block_number))?;
@@ -119,7 +118,7 @@ impl TxSimulator {
     pub fn get_block_metadata(&self, block_number: u64) -> Result<(u64, u64, u64, Option<u128>)> {
         let provider = self.provider_factory.provider()?;
         let header = provider.header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+            .ok_or_else(|| eyre::eyre!("No header for block whilst getting block metadata {}", block_number))?;
         
         Ok((
             header.timestamp,
@@ -129,10 +128,6 @@ impl TxSimulator {
         ))
     }
     
-    /// Encode a view function call (static wrapper for compatibility)
-    pub fn encode_view_function_call(selector: [u8; 4]) -> Bytes {
-        crate::contract_method_simulator::encode_contract_read_call_no_args(selector)
-    }
 }
 
 // Alias for compatibility

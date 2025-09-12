@@ -17,6 +17,7 @@ pub mod unsigned_tx_bundle_simulator;
 pub mod contract_method_simulator;
 pub mod parallel_tx_simulator;
 pub mod unsigned_tx_chain_simulator;
+pub mod signed_tx_chain_simulator;
 pub mod simulation_revert_decoder;
 // Block simulation module for tracing entire blocks
 pub mod block_simulation;
@@ -36,4 +37,5 @@ pub use types::{
 pub use unsigned_tx_simulator::UnsignedTransaction;
 pub use signed_tx_simulator::SignedTransaction;
 pub use unsigned_tx_chain_simulator::{UnsignedTxChainSimulation, ChainStateInfo};
+pub use signed_tx_chain_simulator::SignedTxChainSimulation;
 pub use parallel_tx_simulator::ParallelTxSimulationOptions;

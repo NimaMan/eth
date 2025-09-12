@@ -41,6 +41,12 @@ serde_json = "1.0"
 jsonrpsee = { version = "0.24", features = ["http-client"] }
 
 [dev-dependencies]
+ethers = { version = "2.0.7", features = ["rustls"] }
+alloy-rlp = "0.3"
+reth_chain_query = { path = "../reth_chain_query" }
+reth-storage-api = { path = "../reth/crates/storage/storage-api" }
+secrecy = "0.8"
+tempfile = "3.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = "0.4"
 
@@ -118,3 +124,9 @@ path = "examples/block/trace_block_transactions.rs"
 [[example]]
 name = "verify_block_trace_rpc_equivalence"
 path = "examples/block/verify_block_trace_rpc_equivalence.rs"
+
+[[example]]
+name = "v2_buy_approve_sell_signed_chain"
+path = "examples/sequential/v2_buy_approve_sell_signed_chain.rs"
+
+## create_keystore example moved to eth_tx_executor

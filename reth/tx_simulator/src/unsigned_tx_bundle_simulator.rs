@@ -159,6 +159,12 @@ impl TxSimulator {
     ) -> Result<crate::types::FullSimulationResult> {
         
         let provider = self.provider_factory.provider()?;
+        // Important: This fetches the canonical header by block NUMBER.
+        // In live pipelines, a block can be mined and visible over RPC while the
+        // MDBX canonical mapping has not yet advanced. In that short window
+        // `header_by_number(block_number)` returns `None`, yielding
+        // "No header for block {block_number}". This reflects DB commit timing,
+        // not that the network lacks the block.
         let header = provider.header_by_number(block_number)?
             .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
         
@@ -218,6 +224,8 @@ impl TxSimulator {
         inspector: &mut Option<TracingInspector>,
     ) -> Result<SequentialTransactionResult> {
         let provider = self.provider_factory.provider()?;
+        // See note above: number-based canonical header lookup can momentarily be missing
+        // right after a new block is imported and before canonicalization commits.
         let header = provider.header_by_number(forked_state.block_number)?
             .ok_or_else(|| eyre::eyre!("No header for block {}", forked_state.block_number))?;
         
