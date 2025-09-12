@@ -26,8 +26,14 @@ pub mod contract_method_simulator;
 pub mod simulation_revert_decoder;
 // Block tracing
 pub mod block_trace;
-// Back-compat path so imports like tx_simulator::block_simulation::* still work
-pub use block_trace::block_simulation;
+// Back-compat module paths for external crates relying on previous layout
+pub mod unsigned_tx_simulator { pub use crate::single_tx::unsigned::*; }
+pub mod signed_tx_simulator { pub use crate::single_tx::signed::*; }
+pub mod unsigned_tx_chain_simulator { pub use crate::tx_chain::unsigned::*; }
+pub mod signed_tx_chain_simulator { pub use crate::tx_chain::signed::*; }
+pub mod unsigned_tx_bundle_simulator { pub use crate::tx_chain::bundle::*; }
+pub mod parallel_tx_simulator { pub use crate::tx_parallel::*; }
+pub mod block_simulation { pub use crate::block_trace::types::*; pub use crate::block_trace::block_tracer::*; }
 
 // Re-export main types
 pub use simulator::{TxSimulator, RethTxSimulator};
