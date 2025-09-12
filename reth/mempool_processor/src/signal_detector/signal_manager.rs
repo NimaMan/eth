@@ -7,7 +7,8 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::Mutex;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
-use crate::common::address::checksum_address;
+use reth_chain_query::to_checksum_address;
+use alloy_primitives::Address as AlloyAddress;
 use crate::signal_publisher::SignalPublisher;
 use crate::config::TaxDetectionConfig;
 use crate::tx_router::{TransactionCategory, CreatorFunctionType};
@@ -616,19 +617,12 @@ impl SignalManager {
                     {
                         let timestamp = chrono::Local::now();
                         let token_str = result.token_address
-                            .map(|a| {
-                                let bytes: &[u8] = a.as_ref();
-                                checksum_address(&hex::encode(bytes))
-                            })
+                            .map(|a| to_checksum_address(&a))
                             .unwrap_or_else(|| "Unknown".to_string());
                         let pool_str = result.pool_address
-                            .map(|a| {
-                                let bytes: &[u8] = a.as_ref();
-                                checksum_address(&hex::encode(bytes))
-                            })
+                            .map(|a| to_checksum_address(&a))
                             .unwrap_or_else(|| "Unknown".to_string());
-                        let from_bytes: &[u8] = from_address.as_ref();
-                        let remover_str = checksum_address(&hex::encode(from_bytes));
+                        let remover_str = to_checksum_address(&from_address);
                         
                         writeln!(file, "[{}] REMOVAL_FAILED | Pool: {} | Token: {} | Remover: {} | Reason: {} | TxHash: {}",
                             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -797,8 +791,7 @@ impl SignalManager {
                 
                 // Check each address in the state changes
                 for (address, state_change) in state_changes {
-                    let address_bytes: &[u8] = address.as_ref();
-                    let address_str = checksum_address(&hex::encode(address_bytes));
+                    let address_str = to_checksum_address(address);
                     
                     // Check if this address is a tracked pool
                     if let Some(pool_state) = token_cache.get_pool_by_address(&address_str).await {
@@ -821,7 +814,7 @@ impl SignalManager {
                 if !pool_changes.is_empty() {
                     self.log_activity("POOL_STATE_CHANGES", &format!(
                         "From: {} | Affected pools: {}",
-                        checksum_address(&hex::encode(&result.request.tx.from)),
+                        to_checksum_address(&AlloyAddress::from_slice(&result.request.tx.from)),
                         pool_changes.len()
                     ));
                     

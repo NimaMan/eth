@@ -123,7 +123,7 @@ Before using in production:
 
 These examples require:
 - `mempool_processor` crate with tax calculation module
-- `reth_tx_simulator` for transaction simulation
+- `tx_simulator` for transaction simulation (replacement for legacy reth_tx_simulator)
 - Running Reth node with synced database
 - Access to historical blockchain state
 
@@ -136,5 +136,5 @@ These examples require:
 ## Further Reading
 
 - [Token Parameter Extraction README](../../src/token_parameter_extraction/README.md)
-- [Reth Transaction Simulator](https://github.com/your-org/reth_tx_simulator)
+- tx_simulator crate (see `rust/tx_simulator/` in this repo)
 - [Uniswap V2 Documentation](https://docs.uniswap.org/contracts/v2/overview)

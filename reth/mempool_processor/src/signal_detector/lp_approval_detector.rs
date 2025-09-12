@@ -75,66 +75,61 @@ impl LpApprovalDetector {
     pub fn detect_from_transaction(
         &mut self,
         tx: &MempoolTransaction,
-        category: &TransactionCategory,
+        _category: &TransactionCategory,
     ) -> Option<LpApprovalSignal> {
-        // Only process creator transactions with LP approval
-        if let TransactionCategory::CreatorTransaction { 
-            creator, 
-            target_address, 
-            function_type: CreatorFunctionType::LiquidityPoolApproval,
-            .. 
-        } = category {
-            // Verify this is an approve function
-            if tx.input.len() >= 68 && &tx.input[0..4] == &[0x09, 0x5e, 0xa7, 0xb3] {
-                // Extract spender address (router) from bytes 16-36
-                let mut spender_bytes = [0u8; 20];
-                spender_bytes.copy_from_slice(&tx.input[16..36]);
-                let router_address = Address::from(spender_bytes);
-                
-                // Extract amount from bytes 36-68
-                let amount = U256::from_be_slice(&tx.input[36..68]);
-                
-                // Known routers
-                const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-                const SUSHISWAP_ROUTER: &str = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F";
-                
-                let router_hex = format!("0x{}", hex::encode(router_address));
-                let is_known_router = router_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER) ||
-                                     router_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
-                
-                if is_known_router {
-                    let signal = LpApprovalSignal {
-                        tx_hash: tx.hash.clone(),
-                        creator: creator.clone(),
-                        lp_token_address: target_address.clone(),
-                        router_address: router_hex.clone(),
-                        amount,
-                        timestamp: Utc::now().timestamp(),
-                        // Additional fields for database  
-                        token_address: target_address.clone(), // Will be resolved to actual token via LP token
-                        pool_address: target_address.clone(), // LP token address IS the pool address
-                        spender_address: router_hex.clone(),
-                        amount_approved: Some(amount.to_string().parse::<f64>().unwrap_or(0.0)),
-                        previous_allowance: None, // TODO: Get from state changes
-                        creator_address: creator.clone(),
-                    };
-                    
-                    // Log the warning
-                    self.log_approval_warning(&signal);
-                    
-                    warn!("🚨 RUG PULL SETUP DETECTED!");
-                    warn!("  Creator: {}", creator);
-                    warn!("  LP Token: {}", target_address);
-                    warn!("  Router: {}", router_hex);
-                    warn!("  Amount: {}", amount);
-                    warn!("  TX: {}", tx.hash);
-                    
-                    return Some(signal);
-                }
-            }
+        // Verify this is an approve() call
+        if tx.input.len() < 68 || &tx.input[0..4] != &[0x09, 0x5e, 0xa7, 0xb3] {
+            return None;
         }
-        
-        None
+
+        // Extract spender (router) from calldata
+        let mut spender_bytes = [0u8; 20];
+        spender_bytes.copy_from_slice(&tx.input[16..36]);
+        let router_address = Address::from(spender_bytes);
+
+        // Extract amount from calldata
+        let amount = U256::from_be_slice(&tx.input[36..68]);
+
+        // Known routers (extend as needed)
+        const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+        const SUSHISWAP_ROUTER: &str = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F";
+        let router_hex = format!("0x{}", hex::encode(router_address));
+        let is_known_router = router_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
+            || router_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+
+        if !is_known_router {
+            return None;
+        }
+
+        // Derive creator and LP token address directly from transaction fields
+        let creator = format!("0x{}", hex::encode(&tx.from));
+        let lp_token_address = tx
+            .to
+            .as_ref()
+            .map(|t| format!("0x{}", hex::encode(t)))
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let signal = LpApprovalSignal {
+            tx_hash: tx.hash.clone(),
+            creator: creator.clone(),
+            lp_token_address: lp_token_address.clone(),
+            router_address: router_hex.clone(),
+            amount,
+            timestamp: Utc::now().timestamp(),
+            // Additional fields for database
+            token_address: lp_token_address.clone(), // Will be resolved to actual token via LP token
+            pool_address: lp_token_address.clone(), // LP token address IS the pool address
+            spender_address: router_hex.clone(),
+            amount_approved: Some(amount.to_string().parse::<f64>().unwrap_or(0.0)),
+            previous_allowance: None,
+            creator_address: creator.clone(),
+        };
+
+        self.log_approval_warning(&signal);
+        warn!("🚨 RUG PULL SETUP DETECTED!\n  Creator: {}\n  LP Token: {}\n  Router: {}\n  Amount: {}\n  TX: {}",
+            creator, lp_token_address, router_hex, amount, tx.hash);
+
+        Some(signal)
     }
     
     fn log_approval_warning(&mut self, signal: &LpApprovalSignal) {

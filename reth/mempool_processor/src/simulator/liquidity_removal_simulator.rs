@@ -15,7 +15,7 @@ use alloy_primitives::{Address, U256, Bytes};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 use eyre::Result;
 use tracing::{info, warn, debug, error};
-use crate::common::address::alloy_address_to_checksum;
+use reth_chain_query::to_checksum_address;
 use crate::token_tracking::TokenTrackingCache;
 
 /// Placeholder for AddressStateChange - actual implementation in tx_processor
@@ -112,8 +112,8 @@ impl LiquidityRemovalSimulator {
         let to = unsigned_tx.to.unwrap_or_default();
         
         info!("🔍 LIQUIDITY REMOVAL SIMULATION STARTING");
-        info!("  From: {}", alloy_address_to_checksum(from));
-        info!("  To (Router): {}", alloy_address_to_checksum(to));
+        info!("  From: {}", to_checksum_address(&from));
+        info!("  To (Router): {}", to_checksum_address(&to));
         info!("  Block: {:?} (None = latest)", block_number);
         info!("  Call value: {:?}", unsigned_tx.value);
         info!("  Gas limit: {:?}", unsigned_tx.gas);
@@ -148,8 +148,8 @@ impl LiquidityRemovalSimulator {
                     Ok(res) => res,
                     Err(e) => {
                         error!("❌ LIQUIDITY REMOVAL SIMULATION FAILED:");
-                        error!("  From: {}", alloy_address_to_checksum(from));
-                        error!("  To: {}", alloy_address_to_checksum(to));
+                        error!("  From: {}", to_checksum_address(&from));
+                        error!("  To: {}", to_checksum_address(&to));
                         error!("  Block: {:?}", block_number);
                         error!("  Error: {}", e);
                         
@@ -201,7 +201,7 @@ impl LiquidityRemovalSimulator {
                                             data[0], data[1], data[2], data[3]);
                                         
                                         if let Some(lp_token) = Self::extract_lp_token_from_removal_calldata(data, &selector) {
-                                            info!("  LP Token: {}", alloy_address_to_checksum(lp_token));
+                                            info!("  LP Token: {}", to_checksum_address(&lp_token));
                                             info!("  Expected nonce: {}", expected_nonce);
                                             
                                             // First simulate approval with expected nonce
@@ -263,8 +263,8 @@ impl LiquidityRemovalSimulator {
                         
                         // Normal error handling
                         error!("❌ LIQUIDITY REMOVAL SIMULATION FAILED (latest block):");
-                        error!("  From: {}", alloy_address_to_checksum(from));
-                        error!("  To: {}", alloy_address_to_checksum(to));
+                        error!("  From: {}", to_checksum_address(&from));
+                        error!("  To: {}", to_checksum_address(&to));
                         error!("  Error: {}", e);
                         
                         // Parse the specific error type
@@ -334,7 +334,7 @@ impl LiquidityRemovalSimulator {
         
         if let Some(ref drain) = pool_drain {
             info!("  💧 Pool drain detected:");
-            info!("    Pool: {}", alloy_address_to_checksum(drain.pool_address));
+            info!("    Pool: {}", to_checksum_address(&drain.pool_address));
             info!("    Initial: {:.4} ETH", drain.initial_eth);
             info!("    Removed: {:.4} ETH", drain.eth_removed);
             info!("    Remaining: {:.4} ETH", drain.remaining_eth);
@@ -384,11 +384,11 @@ impl LiquidityRemovalSimulator {
             // Pool will have negative ETH change (drain)
             if eth_change < -0.01 { // More than 0.01 ETH removed
                 debug!("  Potential pool {} with ETH change: {:.6}", 
-                    alloy_address_to_checksum(*address), eth_change);
+                    to_checksum_address(address), eth_change);
                 
                 // Check if this is a known pool
                 if let Some(ref cache) = self.token_cache {
-                    let addr_str = alloy_address_to_checksum(*address);
+                    let addr_str = to_checksum_address(address);
                     if let Some(pool_state) = cache.get_pool(&addr_str).await {
                         info!("  ✅ Confirmed pool: {} (initial: {:.4} ETH)", 
                             addr_str, pool_state.eth_reserve);
@@ -416,7 +416,7 @@ impl LiquidityRemovalSimulator {
         // If we found a potential pool but it's not in cache, still report it
         if let Some((pool_addr, eth_change)) = pool_candidate {
             warn!("  ⚠️ Potential pool drain from unknown pool: {}", 
-                alloy_address_to_checksum(pool_addr));
+                to_checksum_address(&pool_addr));
             
             // Estimate based on typical pool sizes
             let estimated_initial = 10.0; // Assume 10 ETH pool
@@ -451,7 +451,7 @@ impl LiquidityRemovalSimulator {
         
         if let Some(ref drain) = pool_drain {
             info!("  💧 Pool drain detected:");
-            info!("    Pool: {}", alloy_address_to_checksum(drain.pool_address));
+            info!("    Pool: {}", to_checksum_address(&drain.pool_address));
             info!("    Initial: {:.4} ETH", drain.initial_eth);
             info!("    Removed: {:.4} ETH", drain.eth_removed);
             info!("    Remaining: {:.4} ETH", drain.remaining_eth);

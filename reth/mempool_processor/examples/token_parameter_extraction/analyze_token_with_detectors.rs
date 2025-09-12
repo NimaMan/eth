@@ -18,7 +18,7 @@ use mempool_processor::signal_detector::{
 };
 use mempool_processor::token_parameter_extraction::{calculate_buy_tax, calculate_sell_tax};
 use mempool_processor::config::MempoolProcessorConfig;
-use mempool_processor::common::address::alloy_address_to_checksum;
+use reth_chain_query::to_checksum_address;
 use alloy_primitives::{Address, U256, I256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_sol_types::{SolCall, SolValue};
@@ -168,7 +168,7 @@ async fn main() -> Result<()> {
     
     // Create log file with timestamp
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let token_short = format!("{:?}", token_address).chars().take(8).collect::<String>();
+    let token_short = to_checksum_address(&token_address).chars().skip(2).take(8).collect::<String>();
     let log_file_path = format!("{}/token_analysis_{}_{}.log", log_dir, token_short, timestamp);
     let mut log_file = OpenOptions::new()
         .create(true)

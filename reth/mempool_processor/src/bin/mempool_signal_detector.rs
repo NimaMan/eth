@@ -46,6 +46,9 @@ use hex;
 
 #[derive(Parser, Debug)]
 struct Args {
+    /// Optional config file path (TOML)
+    #[arg(long, env = "MEMPOOL_CONFIG_PATH")]
+    config: Option<String>,
     /// IPC socket path
     #[arg(long, env = "IPC_PATH", default_value = "/tmp/reth.ipc")]
     ipc_path: String,
@@ -213,10 +216,24 @@ async fn main() -> Result<()> {
     
     // Set up shutdown signal handler
     let shutdown = setup_shutdown_handler();
-    
+
+    // Load configuration (config file -> env/defaults)
+    let base_config = if let Some(ref path) = args.config {
+        mempool_processor::config::MempoolProcessorConfig::from_file(path)
+            .unwrap_or_else(|_| mempool_processor::config::MempoolProcessorConfig::from_env())
+    } else {
+        mempool_processor::config::MempoolProcessorConfig::from_env()
+    };
+
+    // Resolve key paths from config (CLI may still print separate values)
+    let cfg_ipc_path = base_config.ipc.socket_path.clone();
+    let cfg_reth_db_path = base_config.simulation.reth_datadir.clone();
+    let cfg_log_dir = base_config.logging.log_dir.clone();
+    let cfg_report_interval = base_config.logging.metrics_interval.as_secs();
+
     // Create timestamped run directory
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-    let run_dir = PathBuf::from(&args.log_dir).join(format!("signal_detector_{}", timestamp));
+    let run_dir = PathBuf::from(&cfg_log_dir).join(format!("signal_detector_{}", timestamp));
     std::fs::create_dir_all(&run_dir)?;
     
     // Initialize logging to run directory
@@ -264,12 +281,12 @@ async fn main() -> Result<()> {
     info!("🚀 Starting Mempool Signal Detection Service");
     info!("================================");
     info!("Configuration:");
-    info!("  IPC Path: {}", args.ipc_path);
-    info!("  Reth DB: {}", args.reth_db_path);
-    info!("  Log Directory: {}", args.log_dir);
+    info!("  IPC Path: {}", cfg_ipc_path);
+    info!("  Reth DB: {}", cfg_reth_db_path);
+    info!("  Log Directory: {}", cfg_log_dir);
     info!("  Batch Size: {}", args.batch_size);
     info!("  Simulation Workers: {}", args.sim_workers);
-    info!("  Report Interval: {}s", args.report_interval);
+    info!("  Report Interval: {}s", cfg_report_interval);
     info!("================================");
     
     // Initialize metrics
@@ -304,7 +321,7 @@ async fn main() -> Result<()> {
 
     // 2. IPC client
     info!("\n🔌 Connecting to Reth IPC...");
-    let ipc_client = MempoolFetcherIPCClient::new(Some(&args.ipc_path))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&cfg_ipc_path))?;
     ipc_client.start().await?;
     info!("✅ IPC client connected");
     
@@ -334,7 +351,7 @@ async fn main() -> Result<()> {
     
     // 5. Mempool Simulator (single database connection)
     info!("🧪 Initializing mempool simulator...");
-    let mempool_simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
+    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path)?);
     info!("✅ Mempool simulator initialized");
 
     // Initialize arrival recorder only after simulator (to reuse provider)
@@ -396,10 +413,10 @@ async fn main() -> Result<()> {
     writeln!(summary_file, "===================================")?;
     writeln!(summary_file, "Started: {}", chrono::Local::now())?;
     writeln!(summary_file, "Configuration:")?;
-    writeln!(summary_file, "  IPC Path: {}", args.ipc_path)?;
+    writeln!(summary_file, "  IPC Path: {}", cfg_ipc_path)?;
     writeln!(summary_file, "  Batch Size: {}", args.batch_size)?;
     writeln!(summary_file, "  Simulation Workers: {}", args.sim_workers)?;
-    writeln!(summary_file, "  Report Interval: {}s", args.report_interval)?;
+    writeln!(summary_file, "  Report Interval: {}s", cfg_report_interval)?;
     writeln!(summary_file, "\n===================================")?;
     writeln!(summary_file, "Real-time Metrics:\n")?;
     
@@ -594,7 +611,7 @@ async fn main() -> Result<()> {
         }
         
         // Periodic reporting
-        if last_report.elapsed() > Duration::from_secs(args.report_interval) {
+        if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
             let elapsed = start_time.elapsed();
             let report = metrics.report(elapsed).await;
             
