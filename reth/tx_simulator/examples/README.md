@@ -1,6 +1,6 @@
 # Transaction Simulator Examples (Index)
 
-This directory showcases how to use `tx_simulator` across common scenarios. This index is intentionally high-level; for API specifics see `../docs/DETAILED_DESIGN.md`.
+This directory showcases how to use `tx_simulator` across common scenarios. This index is intentionally high-level; for API specifics see the "Detailed Design and API Spec" section in `../README.md`.
 
 ## Basic
 - basic/verify_database_setup.rs: Verify Reth DB access and latest block
