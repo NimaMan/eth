@@ -7,7 +7,7 @@
 use crate::{
     simulator::TxSimulator,
     types::{SimulationResult, FullSimulationResult, ViewFunctionResult},
-    unsigned_tx_bundle_simulator::ForkedState,
+    tx_chain::bundle::ForkedState,
 };
 use eyre::Result;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use reth_evm::{ConfigureEvm, Evm};
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use alloy_primitives::{Address, Bytes, U256};
-use crate::unsigned_tx_simulator::UnsignedTransaction;
+use crate::single_tx::unsigned::UnsignedTransaction;
 
 /// Stateful signed-tx chain simulator
 pub struct SignedTxChainSimulation {

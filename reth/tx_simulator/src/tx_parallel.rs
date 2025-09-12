@@ -6,7 +6,7 @@
 use crate::{
     simulator::TxSimulator,
     types::ParallelTxSimulationResult,
-    unsigned_tx_simulator::UnsignedTransaction,
+    single_tx::unsigned::UnsignedTransaction,
 };
 use alloy_primitives::Address;
 use std::collections::HashMap;

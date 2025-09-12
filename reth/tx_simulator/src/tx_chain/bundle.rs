@@ -15,7 +15,7 @@
 use crate::{
     simulator::TxSimulator,
     types::{SequentialTransactionResult, SequentialSimulationResult, SequentialSimulationOptions},
-    unsigned_tx_simulator::UnsignedTransaction,
+    single_tx::unsigned::UnsignedTransaction,
     simulation_revert_decoder::decode_revert_data,
 };
 use std::collections::HashMap;

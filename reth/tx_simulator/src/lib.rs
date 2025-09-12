@@ -11,16 +11,25 @@
 
 pub mod types;
 pub mod simulator;
-pub mod signed_tx_simulator;
-pub mod unsigned_tx_simulator;
-pub mod unsigned_tx_bundle_simulator;
+// New structured modules
+pub mod single_tx {
+    pub mod unsigned;
+    pub mod signed;
+}
+pub mod tx_chain {
+    pub mod unsigned;
+    pub mod signed;
+    pub mod bundle;
+}
+pub mod tx_parallel;
 pub mod contract_method_simulator;
-pub mod parallel_tx_simulator;
-pub mod unsigned_tx_chain_simulator;
-pub mod signed_tx_chain_simulator;
 pub mod simulation_revert_decoder;
-// Block simulation module for tracing entire blocks
-pub mod block_simulation;
+// Block tracing (renamed from block_simulation)
+pub mod block_trace {
+    pub mod block_simulation; // keep inner name for now to minimize churn
+}
+// Back-compat path so imports like tx_simulator::block_simulation::* still work
+pub use block_trace::block_simulation;
 
 // Re-export main types
 pub use simulator::{TxSimulator, RethTxSimulator};
@@ -34,8 +43,8 @@ pub use types::{
     SequentialSimulationOptions,
     CallFrame,
 };
-pub use unsigned_tx_simulator::UnsignedTransaction;
-pub use signed_tx_simulator::SignedTransaction;
-pub use unsigned_tx_chain_simulator::{UnsignedTxChainSimulation, ChainStateInfo};
-pub use signed_tx_chain_simulator::SignedTxChainSimulation;
-pub use parallel_tx_simulator::ParallelTxSimulationOptions;
+pub use single_tx::unsigned::UnsignedTransaction;
+pub use single_tx::signed::SignedTransaction;
+pub use tx_chain::unsigned::{UnsignedTxChainSimulation, ChainStateInfo};
+pub use tx_chain::signed::SignedTxChainSimulation;
+pub use tx_parallel::ParallelTxSimulationOptions;

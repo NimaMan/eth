@@ -11,8 +11,8 @@
 use crate::{
     simulator::TxSimulator,
     types::{SimulationResult, FullSimulationResult},
-    unsigned_tx_simulator::UnsignedTransaction,
-    unsigned_tx_bundle_simulator::ForkedState,
+    single_tx::unsigned::UnsignedTransaction,
+    tx_chain::bundle::ForkedState,
 };
 use std::sync::Arc;
 use std::collections::HashMap;
