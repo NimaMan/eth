@@ -7,7 +7,7 @@
 use crate::{
     simulator::TxSimulator,
     types::ViewFunctionResult,
-    unsigned_tx_simulator::UnsignedTransaction,
+    single_tx::unsigned::UnsignedTransaction,
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
