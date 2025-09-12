@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Now start our subscription
     info!("Starting subscription to newPendingTransactions...");
-    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
     ipc_client.start().await?;
     
     // Track what we receive

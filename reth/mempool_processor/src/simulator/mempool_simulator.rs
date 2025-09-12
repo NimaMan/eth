@@ -20,10 +20,7 @@ use crate::common::convert::ipc_to_unsigned_tx;
 use super::pool_buy_sell_simulator::{
     PoolBuySellSimulator, PoolSimulationResult
 };
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::{
-    types::PoolType,
-    config::PoolViabilityConfig,
-};
+use tx_processor::{PoolType, PoolViabilityConfig};
 
 /// Mempool simulator that manages both mempool transaction and pool buy/sell simulations
 pub struct MempoolSimulator {

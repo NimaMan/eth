@@ -7,7 +7,8 @@ use tracing::{info, warn, error, debug};
 use tokio::sync::Mutex;
 use crate::token_tracking::TokenTrackingCache;
 use crate::simulator::SimulationResult;
-use crate::common::address::checksum_address;
+use reth_chain_query::to_checksum_address;
+use alloy_primitives::Address as AlloyAddress;
 use crate::signal_publisher::SignalPublisher;
 use crate::config::TaxDetectionConfig;
 use crate::tx_router::{TransactionCategory, CreatorFunctionType};
@@ -598,9 +599,18 @@ impl SignalManager {
             if let Some(from_address) = from_address_result {
             
             // Check if we have a liquidity removal result (from dedicated simulator)
-            let liquidity_signals = if let Some(ref removal_result) = result.liquidity_removal_result {
+            let mut liquidity_signals = if let Some(ref removal_result) = result.liquidity_removal_result {
                 // Use the new dedicated detection method for liquidity removals
                 info!("💧 Using dedicated liquidity removal detection for TX {}", result.request.tx.hash);
+                info!(
+                    "  removal_result: success={} | pool_address={:?} | eth_removed={:.6} | drain%={:.2} | remaining_eth={:.6} | address_balance_changes_addrs={}",
+                    removal_result.success,
+                    removal_result.pool_address,
+                    removal_result.eth_removed,
+                    removal_result.drain_percentage,
+                    removal_result.remaining_eth,
+                    removal_result.address_balance_changes.len()
+                );
                 
                 // If simulation failed, log it
                 if !removal_result.success {
@@ -616,19 +626,12 @@ impl SignalManager {
                     {
                         let timestamp = chrono::Local::now();
                         let token_str = result.token_address
-                            .map(|a| {
-                                let bytes: &[u8] = a.as_ref();
-                                checksum_address(&hex::encode(bytes))
-                            })
+                            .map(|a| to_checksum_address(&a))
                             .unwrap_or_else(|| "Unknown".to_string());
                         let pool_str = result.pool_address
-                            .map(|a| {
-                                let bytes: &[u8] = a.as_ref();
-                                checksum_address(&hex::encode(bytes))
-                            })
+                            .map(|a| to_checksum_address(&a))
                             .unwrap_or_else(|| "Unknown".to_string());
-                        let from_bytes: &[u8] = from_address.as_ref();
-                        let remover_str = checksum_address(&hex::encode(from_bytes));
+                        let remover_str = to_checksum_address(&from_address);
                         
                         writeln!(file, "[{}] REMOVAL_FAILED | Pool: {} | Token: {} | Remover: {} | Reason: {} | TxHash: {}",
                             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
@@ -684,6 +687,23 @@ impl SignalManager {
                     vec![]
                 }
             };
+
+            // Fallback: if dedicated removal produced no signal (e.g., missing pool address),
+            // try standard state-change detection when pool_viability_result is available
+            if liquidity_signals.is_empty() {
+                if result.liquidity_removal_result.is_some() {
+                    if let Some(ref pool_result) = result.pool_viability_result {
+                        info!("💧 Fallback: using state changes from buy/sell result for TX {}", result.request.tx.hash);
+                        liquidity_signals = self.liquidity_detector.detect(
+                            &result.request.tx.hash,
+                            from_address,
+                            &pool_result.buy_transaction.address_balance_changes,
+                        ).await;
+                    } else {
+                        info!("💧 Fallback unavailable: no pool_viability_result state changes for TX {}", result.request.tx.hash);
+                    }
+                }
+            }
             
             // Convert liquidity signals to the Signal enum
             for liq_signal in liquidity_signals {
@@ -797,8 +817,7 @@ impl SignalManager {
                 
                 // Check each address in the state changes
                 for (address, state_change) in state_changes {
-                    let address_bytes: &[u8] = address.as_ref();
-                    let address_str = checksum_address(&hex::encode(address_bytes));
+                    let address_str = to_checksum_address(address);
                     
                     // Check if this address is a tracked pool
                     if let Some(pool_state) = token_cache.get_pool_by_address(&address_str).await {
@@ -821,7 +840,7 @@ impl SignalManager {
                 if !pool_changes.is_empty() {
                     self.log_activity("POOL_STATE_CHANGES", &format!(
                         "From: {} | Affected pools: {}",
-                        checksum_address(&hex::encode(&result.request.tx.from)),
+                        to_checksum_address(&AlloyAddress::from_slice(&result.request.tx.from)),
                         pool_changes.len()
                     ));
                     

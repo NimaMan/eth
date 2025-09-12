@@ -20,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("================================\n");
     
     // 1. Create IPC client
-    println!("📡 Connecting to IPC at /tmp/reth.ipc...");
-    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    println!("📡 Connecting to IPC at /home/nima/.local/share/reth/mainnet/reth.ipc...");
+    let ipc_client = MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
     
     // 2. Start monitoring
     println!("🚀 Starting mempool monitoring...");

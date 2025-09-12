@@ -6,7 +6,8 @@
 use std::sync::Arc;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
-use crate::common::address::checksum_address;
+use alloy_primitives::Address as AlloyAddress;
+use reth_chain_query::to_checksum_address;
 
 use super::{
     ContractCreationRouter,
@@ -92,7 +93,7 @@ impl TransactionRouter {
 
         // Check if from a known creator
         if let Some(ref cache) = self.token_cache {
-            let from_addr = checksum_address(&hex::encode(&tx.from));
+            let from_addr = to_checksum_address(&AlloyAddress::from_slice(&tx.from));
             if cache.is_creator(&from_addr).await {
                 let result = self.classify_creator_transaction(tx).await;
                 return result;
@@ -109,7 +110,7 @@ impl TransactionRouter {
         
         ClassificationResult {
             category: TransactionCategory::ContractCreation {
-                deployer: checksum_address(&hex::encode(&tx.from)),
+                deployer: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
                 contract_address: "pending".to_string(), // Will be determined after execution
                 is_token,
                 has_liquidity_in_calldata: has_liquidity,
@@ -126,7 +127,7 @@ impl TransactionRouter {
         
         // Get the token created by this creator
         let target_token = if let Some(ref cache) = self.token_cache {
-            let from_addr = checksum_address(&hex::encode(&tx.from));
+            let from_addr = to_checksum_address(&AlloyAddress::from_slice(&tx.from));
             
             // Get token info for this creator
             if let Some(token_info) = cache.get_token_for_creator(&from_addr).await {
@@ -154,21 +155,23 @@ impl TransactionRouter {
             CreatorFunctionType::Other(_) => SimulationPriority::High, // Changed from Low to High
         };
 
-        // ALL creator transactions get buy/sell test except ETH transfers
-        let requires_buy_sell = !is_eth_transfer;
+        // LP approvals do NOT require simulation or buy/sell
+        let is_lp_approval = matches!(&function_type, CreatorFunctionType::LiquidityPoolApproval);
+        // ALL creator transactions get buy/sell test except ETH transfers and LP approvals
+        let requires_buy_sell = !is_eth_transfer && !is_lp_approval;
 
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
-                creator: checksum_address(&hex::encode(&tx.from)),
+                creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
                 target_address: tx.to.as_ref()
-                    .map(|t| checksum_address(&hex::encode(t)))
+                    .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
                     .unwrap_or_else(|| "none".to_string()),
                 target_token,
                 function_type,
             },
             priority,
-            // Simulate EVERYTHING from creators except ETH transfers
-            requires_simulation: !is_eth_transfer,
+            // Simulate everything except ETH transfers and LP approvals
+            requires_simulation: !is_eth_transfer && !is_lp_approval,
             requires_buy_sell_test: requires_buy_sell,
         }
     }

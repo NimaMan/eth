@@ -268,7 +268,7 @@ impl Default for MempoolProcessorConfig {
             },
             
             logging: LoggingConfig {
-                log_dir: "/home/nima/code/crypto/logs/mempool".to_string(),
+                log_dir: "/home/nima/code/crypto/rust/mempool_processor/logs".to_string(),
                 file_logging: true,
                 level: "info".to_string(),
                 metrics_interval: Duration::from_secs(60),

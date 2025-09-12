@@ -29,7 +29,7 @@ use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use tokio::sync::Mutex as TokioMutex;
 use super::{SimulationQueue, MempoolSimulator, LiquidityRemovalSimulator, LiquidityRemovalResult};
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolViabilityResult;
+use tx_processor::{PoolViabilityResult, PoolType, PoolViabilityConfig};
 use std::collections::HashMap;
 use alloy_primitives::U256;
 
@@ -61,7 +61,6 @@ pub struct SimulationRequest {
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
     pub request: SimulationRequest,
-    pub pool_viability_result: Option<PoolViabilityResult>,
     pub error: Option<String>,
     pub simulation_time_ms: f64,
     // Addresses needed for compatibility
@@ -70,6 +69,7 @@ pub struct SimulationResult {
     pub pool_type: Option<String>,  // Pool type (V2, V3, V4)
     // Debug info for error analysis
     pub debug_info: Option<String>,
+    pub pool_viability_result: Option<PoolViabilityResult>,
     // Liquidity removal result (only populated for liquidity removal transactions)
     pub liquidity_removal_result: Option<LiquidityRemovalResult>,
 }
@@ -307,7 +307,24 @@ impl SimulationManager {
                         // Debug logging for liquidity removal transactions
                         if matches!(pool_specific_result.request.category, TransactionCategory::CreatorTransaction { function_type: CreatorFunctionType::LiquidityRemoval, .. }) {
                             if let Some(ref removal_result) = pool_specific_result.liquidity_removal_result {
-                                info!("  [DEBUG] Liquidity removal TX {} pool {} has removal result",
+                                info!("  [DEBUG] LiquidityRemovalResult for TX {} (pool {}):",
+                                    pool_specific_result.request.tx.hash,
+                                    pool_idx
+                                );
+                                info!(
+                                    "    success={} | pool_address={:?} | eth_removed={:.6} | drain%={:.2} | remaining_eth={:.6}",
+                                    removal_result.success,
+                                    removal_result.pool_address,
+                                    removal_result.eth_removed,
+                                    removal_result.drain_percentage,
+                                    removal_result.remaining_eth
+                                );
+                                if let Some(ref reason) = removal_result.revert_reason {
+                                    info!("    revert_reason={}", reason);
+                                }
+                                info!("    address_balance_changes_addrs={}", removal_result.address_balance_changes.len());
+                            } else {
+                                info!("  [DEBUG] Liquidity removal TX {} pool {} has NO removal result",
                                     pool_specific_result.request.tx.hash,
                                     pool_idx
                                 );
@@ -596,12 +613,12 @@ impl SimulationManager {
             // Try simulation with original gas price first
             // Create pool viability config
             let pool_type_enum = match pool_type.as_str() {
-                "V2" => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV2,
-                "V3" => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV3 { fee_tier: 3000 }, // Default to 0.3% fee
-                _ => tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::types::PoolType::UniswapV2,
+                "V2" => PoolType::UniswapV2,
+                "V3" => PoolType::UniswapV3 { fee_tier: 3000 }, // Default to 0.3% fee
+                _ => PoolType::UniswapV2,
             };
             
-            let config = tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::config::PoolViabilityConfig {
+            let config: PoolViabilityConfig = PoolViabilityConfig {
                 token_address,
                 pool_address,
                 pool_type: pool_type_enum,
@@ -641,7 +658,7 @@ impl SimulationManager {
                             new_gas_price.map(|p| p / 1_000_000_000));
                         
                         // Retry with higher gas price
-                        let retry_config = tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::config::PoolViabilityConfig {
+                        let retry_config: PoolViabilityConfig = PoolViabilityConfig {
                             token_address,
                             pool_address,
                             pool_type: pool_type_enum,
@@ -685,7 +702,7 @@ impl SimulationManager {
                         if reason.contains("output:") {
                             if let Some(output_start) = reason.find("output: ") {
                                 let output = &reason[output_start + 8..];
-                                if let Some(end) = output.find(' ').or_else(|| output.find('}')) {
+                                if let Some(end) = output.find(' ').or(output.find('}')) {
                                     let hex_output = &output[..end];
                                     warn!("    Revert output hex: {}", hex_output);
                                     if hex_output == "0x" {

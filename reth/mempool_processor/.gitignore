@@ -14,6 +14,11 @@ Cargo.lock
 
 # Log files
 *.log
+# Project log directories
+logs/
+
+# Data exports
+*.csv
 
 # Editor directories and files
 .idea/

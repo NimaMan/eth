@@ -91,7 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(hash_file, "")?;
     
     // Initialize client
-    let client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    let client = MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
     client.start().await?;
     
     info!("Client started, beginning measurement...");

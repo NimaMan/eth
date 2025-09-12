@@ -71,7 +71,6 @@ serde_json      = "1.0"
 toml            = "0.8"
 hex             = "0.4"
 fastrand        = "2.0"
-tiny-keccak     = { version = "2.0", features = ["keccak"] }
 rlp             = "0.5"
 
 # PostgreSQL Client for database logging
@@ -91,6 +90,7 @@ tokio-tungstenite = "0.20"
 # Transaction processing with proven tax calculation
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
+reth_chain_query = { path = "../reth_chain_query" }
 # Reth dependencies - using GitHub references to match tx_simulator
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
 reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
@@ -178,6 +178,10 @@ path = "examples/simulator/live_mempool_transaction_simulation.rs"
 [[example]]
 name = "isolated_simulator_test"
 path = "examples/simulator/isolated_simulator_test.rs"
+
+[[example]]
+name = "liquidity_removal_from_hash"
+path = "examples/simulator/liquidity_removal_from_hash.rs"
 
 [[example]]
 name = "test_liquidity_removal_simulation"
