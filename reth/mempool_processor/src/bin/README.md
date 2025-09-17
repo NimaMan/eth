@@ -671,19 +671,16 @@ The service creates a timestamped run directory with the following structure:
 
 ```
 /home/nima/code/crypto/logs/mempool/signal_detector_YYYY-MM-DD_HH-MM-SS/
-├── signal_detector.log          # Main service logs
-├── simulation.log               # Simulation-specific logs
-├── summary.log                  # High-level metrics summary
-├── performance.log              # Detailed performance metrics
-├── simulation_results.log       # Individual simulation results
-├── function_detector/           # Function detection logs
-│   └── ...
-└── signals/                     # Signal output directory
-    ├── trading_enabled.log
-    ├── tax_signals.log
-    ├── liquidity_removals.log
-    ├── lp_approval_signals.log
-    └── signal_manager.log
+├── signal_detector.log          # Main service + lifecycle logs
+├── simulation_results.log       # One line per simulation outcome (success/error)
+├── function_detector/           # Function detector diagnostics
+│   └── liquidity_removals.log   # Fast path for removal function matches
+└── signals/                     # Per-signal outputs (one file per signal type)
+    ├── trading_enabled.log      # TradingEnabled signals
+    ├── tax_signals.log          # High tax / honeypot signals
+    ├── liquidity_removals.log   # LiquidityRemoval + ScamDetection signals
+    ├── lp_approval_signals.log  # LP approval (rug setup) signals
+    └── signal_manager.log       # Summary + publication diagnostics
 ```
 
 ## Monitoring & Operations
