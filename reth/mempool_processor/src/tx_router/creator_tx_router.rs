@@ -1,11 +1,10 @@
-/// Creator Transaction Classifier
-/// 
-/// Identifies and categorizes transactions from known token creators
-
-use std::sync::Arc;
+use super::CreatorFunctionType;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
-use super::CreatorFunctionType;
+/// Creator Transaction Classifier
+///
+/// Identifies and categorizes transactions from known token creators
+use std::sync::Arc;
 
 pub struct CreatorTransactionRouter {
     token_cache: Option<Arc<TokenTrackingCache>>,
@@ -27,8 +26,10 @@ impl CreatorTransactionRouter {
                 CreatorFunctionType::Other("eth_transfer".to_string())
             } else {
                 let selector = &tx.input[0..4];
-                let selector_hex = format!("{:02x}{:02x}{:02x}{:02x}", 
-                    selector[0], selector[1], selector[2], selector[3]);
+                let selector_hex = format!(
+                    "{:02x}{:02x}{:02x}{:02x}",
+                    selector[0], selector[1], selector[2], selector[3]
+                );
                 CreatorFunctionType::Other(selector_hex)
             }
         }

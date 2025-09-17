@@ -1,16 +1,15 @@
+use alloy_primitives::Address;
 /// Stablecoin Activity Detector
-/// 
+///
 /// Detects mints and burns of stablecoins from transaction state changes.
 /// Tracks 30+ stablecoins including USDC, USDT, DAI, and others.
-
 use std::collections::HashMap;
 use tracing::info;
-use alloy_primitives::Address;
 // AddressStateChange is now part of tx_processor
-use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
+use reth_chain_query::common_addresses::stablecoins::get_stablecoin_by_address;
 use reth_chain_query::to_checksum_address;
 use std::str::FromStr;
-use reth_chain_query::common_addresses::stablecoins::get_stablecoin_by_address;
+use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
 
 // No local stablecoin list: use reth_chain_query::common_addresses::stablecoins
 
@@ -53,7 +52,7 @@ impl StablecoinDetector {
         // Check for stablecoin mints and burns
         for (address, changes) in state_changes {
             let address_str = to_checksum_address(address);
-            
+
             // Check if this is a stablecoin address (via common_addresses)
             if get_stablecoin_by_address(*address).is_some() {
                 // Look for balance changes in the stablecoin contract itself
@@ -63,18 +62,19 @@ impl StablecoinDetector {
                         // Self-referencing balance change could be internal accounting
                         continue;
                     }
-                    
+
                     // Check if the token being moved is also a stablecoin
                     if let Ok(parsed_addr) = Address::from_str(token_addr) {
                         if let Some(info) = get_stablecoin_by_address(parsed_addr) {
                             let token_name = info.symbol.to_string();
                             let decimals = info.decimals as i32;
                             let divisor = 10f64.powi(decimals);
-                        
+
                             // Convert U256 to f64 for analysis
                             // Note: U256 is always non-negative, represents absolute amounts
-                            let amount_f64 = amount.to_string().parse::<f64>().unwrap_or(0.0) / divisor;
-                        
+                            let amount_f64 =
+                                amount.to_string().parse::<f64>().unwrap_or(0.0) / divisor;
+
                             // Determine activity type based on amount and context
                             let activity_type = if amount_f64 > 1.0 {
                                 StablecoinActivityType::Mint
@@ -83,24 +83,32 @@ impl StablecoinDetector {
                             } else {
                                 continue; // Ignore small changes
                             };
-                        
+
                             let details = match activity_type {
-                                StablecoinActivityType::Mint => 
-                                    format!("{} minted: {:.6} tokens", token_name, amount_f64.abs()),
-                                StablecoinActivityType::Burn => 
-                                    format!("{} burned: {:.6} tokens", token_name, amount_f64.abs()),
-                                StablecoinActivityType::LargeTransfer => 
-                                    format!("{} large transfer: {:.6} tokens", token_name, amount_f64.abs()),
+                                StablecoinActivityType::Mint => {
+                                    format!("{} minted: {:.6} tokens", token_name, amount_f64.abs())
+                                }
+                                StablecoinActivityType::Burn => {
+                                    format!("{} burned: {:.6} tokens", token_name, amount_f64.abs())
+                                }
+                                StablecoinActivityType::LargeTransfer => format!(
+                                    "{} large transfer: {:.6} tokens",
+                                    token_name,
+                                    amount_f64.abs()
+                                ),
                             };
-                        
-                            info!("💰 STABLECOIN {}: {} in tx {}", 
-                                  match activity_type {
-                                      StablecoinActivityType::Mint => "MINT",
-                                      StablecoinActivityType::Burn => "BURN",
-                                      StablecoinActivityType::LargeTransfer => "TRANSFER",
-                                  },
-                                  details, tx_hash);
-                        
+
+                            info!(
+                                "💰 STABLECOIN {}: {} in tx {}",
+                                match activity_type {
+                                    StablecoinActivityType::Mint => "MINT",
+                                    StablecoinActivityType::Burn => "BURN",
+                                    StablecoinActivityType::LargeTransfer => "TRANSFER",
+                                },
+                                details,
+                                tx_hash
+                            );
+
                             signals.push(StablecoinSignal {
                                 signal_type: activity_type,
                                 token_name,

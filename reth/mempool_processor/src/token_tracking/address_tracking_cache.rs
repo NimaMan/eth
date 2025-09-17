@@ -50,11 +50,11 @@ impl AddressActivity {
             is_high_risk: false,
         }
     }
-    
+
     pub fn add_function_call(&mut self, call: FunctionCall) {
         self.last_activity_timestamp = call.timestamp;
         self.total_functions_called += 1;
-        
+
         // Maintain history limit
         if self.function_history.len() >= 100 {
             self.function_history.pop_front();
@@ -97,16 +97,16 @@ pub struct AddressTrackingCache {
     /// Primary index: address -> activity tracking
     /// This is the main lookup for mempool transaction matching
     address_activity: Arc<RwLock<HashMap<String, AddressActivity>>>,
-    
+
     /// Token information: token_address -> full token data
     token_info: Arc<RwLock<HashMap<String, TokenTrackingInfo>>>,
-    
+
     /// Pool lookup: pool_address -> token_address (for quick pool identification)
     pool_to_token: Arc<RwLock<HashMap<String, String>>>,
-    
+
     /// High-risk addresses for priority monitoring
     high_risk_addresses: Arc<RwLock<HashMap<String, String>>>, // address -> reason
-    
+
     /// Configuration
     max_addresses: usize,
     max_tokens: usize,
@@ -123,7 +123,7 @@ impl AddressTrackingCache {
             max_tokens: 100_000,    // Track up to 100K tokens
         }
     }
-    
+
     /// Update cache with new token data from Python
     pub async fn update_token_data(
         &self,
@@ -136,7 +136,8 @@ impl AddressTrackingCache {
     ) {
         // Update token info
         let mut token_info_guard = self.token_info.write().await;
-        let token_info = token_info_guard.entry(token_address.to_string())
+        let token_info = token_info_guard
+            .entry(token_address.to_string())
             .or_insert_with(|| TokenTrackingInfo {
                 token_address: token_address.to_string(),
                 creator_address: creator.to_string(),
@@ -149,16 +150,18 @@ impl AddressTrackingCache {
                 is_scam,
                 scam_reason: None,
             });
-        
+
         // Update owner if changed
         if token_info.current_owner != owner {
-            token_info.previous_owners.push(token_info.current_owner.clone());
+            token_info
+                .previous_owners
+                .push(token_info.current_owner.clone());
             token_info.current_owner = owner.to_string();
         }
-        
+
         token_info.trading_enabled = trading_enabled;
         token_info.is_scam = is_scam;
-        
+
         // Update pools
         for (pool_addr, eth_reserve, token_reserve) in pools.iter() {
             let pool_info = PoolMonitoringInfo {
@@ -173,42 +176,54 @@ impl AddressTrackingCache {
             };
             token_info.pools.insert(pool_addr.clone(), pool_info);
         }
-        
+
         drop(token_info_guard);
-        
+
         // Update address activity for creator
         let mut address_activity_guard = self.address_activity.write().await;
-        let creator_activity = address_activity_guard.entry(creator.to_string())
+        let creator_activity = address_activity_guard
+            .entry(creator.to_string())
             .or_insert_with(|| AddressActivity::new(creator.to_string()));
-        creator_activity.tokens.insert(token_address.to_string(), AddressRole::Creator);
-        
+        creator_activity
+            .tokens
+            .insert(token_address.to_string(), AddressRole::Creator);
+
         // Update address activity for owner (might be same as creator)
         if creator != owner {
-            let owner_activity = address_activity_guard.entry(owner.to_string())
+            let owner_activity = address_activity_guard
+                .entry(owner.to_string())
                 .or_insert_with(|| AddressActivity::new(owner.to_string()));
-            owner_activity.tokens.insert(token_address.to_string(), AddressRole::Owner);
+            owner_activity
+                .tokens
+                .insert(token_address.to_string(), AddressRole::Owner);
         } else {
             // Same address is both creator and owner
-            creator_activity.tokens.insert(token_address.to_string(), AddressRole::Both);
+            creator_activity
+                .tokens
+                .insert(token_address.to_string(), AddressRole::Both);
         }
-        
+
         drop(address_activity_guard);
-        
+
         // Update pool lookup
         let mut pool_lookup_guard = self.pool_to_token.write().await;
         for (pool_addr, _, _) in pools.iter() {
             pool_lookup_guard.insert(pool_addr.clone(), token_address.to_string());
         }
-        
-        debug!("Updated token data for {} with {} pools", token_address, pool_lookup_guard.len());
+
+        debug!(
+            "Updated token data for {} with {} pools",
+            token_address,
+            pool_lookup_guard.len()
+        );
     }
-    
+
     /// Check if an address is a creator or owner (main entry point for mempool analysis)
     pub async fn get_address_info(&self, address: &str) -> Option<AddressActivity> {
         let guard = self.address_activity.read().await;
         guard.get(address).cloned()
     }
-    
+
     /// Record a function call from a tracked address
     pub async fn record_function_call(
         &self,
@@ -230,11 +245,14 @@ impl AddressTrackingCache {
                 success: None,
             };
             activity.add_function_call(call);
-            
-            info!("Recorded function call {} from tracked address {}", function_name, address);
+
+            info!(
+                "Recorded function call {} from tracked address {}",
+                function_name, address
+            );
         }
     }
-    
+
     /// Get pool info for post-simulation analysis
     pub async fn get_pool_info(&self, pool_address: &str) -> Option<(String, PoolMonitoringInfo)> {
         let pool_lookup = self.pool_to_token.read().await;
@@ -248,46 +266,48 @@ impl AddressTrackingCache {
         }
         None
     }
-    
+
     /// Check if address is high risk
     pub async fn is_high_risk_address(&self, address: &str) -> bool {
         let guard = self.high_risk_addresses.read().await;
         guard.contains_key(address)
     }
-    
+
     /// Mark an address as high risk
     pub async fn mark_address_high_risk(&self, address: &str, reason: &str) {
         let mut guard = self.high_risk_addresses.write().await;
         guard.insert(address.to_string(), reason.to_string());
-        
+
         // Also update in address activity
         let mut activity_guard = self.address_activity.write().await;
         if let Some(activity) = activity_guard.get_mut(address) {
             activity.is_high_risk = true;
         }
-        
+
         warn!("Marked address {} as high risk: {}", address, reason);
     }
-    
+
     /// Get all tokens created or owned by an address
     pub async fn get_address_tokens(&self, address: &str) -> Vec<(String, AddressRole)> {
         let guard = self.address_activity.read().await;
         if let Some(activity) = guard.get(address) {
-            activity.tokens.iter()
+            activity
+                .tokens
+                .iter()
                 .map(|(addr, role)| (addr.clone(), role.clone()))
                 .collect()
         } else {
             Vec::new()
         }
     }
-    
+
     /// Get statistics about the cache
     pub async fn get_stats(&self) -> CacheStats {
         let addresses = self.address_activity.read().await.len();
         let tokens = self.token_info.read().await.len();
         let pools = self.pool_to_token.read().await.len();
         let high_risk = self.high_risk_addresses.read().await.len();
-        
+
         CacheStats {
             tracked_addresses: addresses,
             tracked_tokens: tokens,
@@ -295,32 +315,32 @@ impl AddressTrackingCache {
             high_risk_addresses: high_risk,
         }
     }
-    
+
     /// Get token information by token address
     pub async fn get_token_info(&self, token_address: &str) -> Option<TokenTrackingInfo> {
         let token_info_guard = self.token_info.read().await;
         token_info_guard.get(token_address).cloned()
     }
-    
+
     /// Clean up stale entries (addresses with no activity for 24 hours)
     pub async fn cleanup_stale_entries(&self, max_age_seconds: u64) -> usize {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let mut guard = self.address_activity.write().await;
         let initial_count = guard.len();
-        
+
         guard.retain(|_, activity| {
             current_time - activity.last_activity_timestamp < max_age_seconds
         });
-        
+
         let removed = initial_count - guard.len();
         if removed > 0 {
             info!("Cleaned up {} stale address entries", removed);
         }
-        
+
         removed
     }
 }

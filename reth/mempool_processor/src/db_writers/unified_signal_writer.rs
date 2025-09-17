@@ -1,23 +1,20 @@
 /// Unified Signal Writer
-/// 
+///
 /// A single writer that orchestrates all signal types and routes them to the appropriate
 /// database writers. This keeps the signal publisher clean and makes it easy to add new
 /// signal types without modifying multiple places.
-
 use eyre::Result;
-use tracing::{info, error, debug};
 use std::time::Duration;
+use tracing::{debug, error, info};
 
-use crate::signal_detector::{Signal, TradingEnabledSignal, 
-    LiquidityRemovalSignal, LpApprovalSignal};
-use crate::signal_detector::types::TaxSignalRecord as TaxSignal;
 use super::{
-    TradingSignalWriter, TradingSignalRecord,
-    TaxSignalWriter, TaxSignalRecord,
-    LiquidityRemovalSignalWriter, LiquidityRemovalSignalRecord,
-    LpApprovalSignalWriter, LpApprovalSignalRecord,
-    ScamSignalWriter, ScamSignalRecord,
-    SignalWriterConfig,
+    LiquidityRemovalSignalRecord, LiquidityRemovalSignalWriter, LpApprovalSignalRecord,
+    LpApprovalSignalWriter, SignalWriterConfig, TaxSignalRecord, TaxSignalWriter,
+    TradingSignalRecord, TradingSignalWriter,
+};
+use crate::signal_detector::types::TaxSignalRecord as TaxSignal;
+use crate::signal_detector::{
+    LiquidityRemovalSignal, LpApprovalSignal, Signal, TradingEnabledSignal,
 };
 
 /// Unified writer that handles all signal types
@@ -26,28 +23,29 @@ pub struct UnifiedSignalWriter {
     tax_writer: Option<TaxSignalWriter>,
     liquidity_removal_writer: Option<LiquidityRemovalSignalWriter>,
     lp_approval_writer: Option<LpApprovalSignalWriter>,
-    scam_writer: Option<ScamSignalWriter>,
 }
 
 impl UnifiedSignalWriter {
     /// Create a new unified signal writer with all sub-writers
     pub async fn new(database_url: &str) -> Result<Self> {
         info!("Initializing unified signal writer...");
-        
+
         // Initialize trading signal writer
-        let trading_writer = match TradingSignalWriter::new_with_defaults(SignalWriterConfig::default()).await {
-            Ok(w) => {
-                info!("✅ Trading signal writer initialized");
-                Some(w)
-            }
-            Err(e) => {
-                error!("Failed to create trading signal writer: {}", e);
-                None
-            }
-        };
-        
+        let trading_writer =
+            match TradingSignalWriter::new_with_defaults(SignalWriterConfig::default()).await {
+                Ok(w) => {
+                    info!("✅ Trading signal writer initialized");
+                    Some(w)
+                }
+                Err(e) => {
+                    error!("Failed to create trading signal writer: {}", e);
+                    None
+                }
+            };
+
         // Initialize tax signal writer
-        let tax_writer = match TaxSignalWriter::new(database_url, 50, Duration::from_secs(5)).await {
+        let tax_writer = match TaxSignalWriter::new(database_url, 50, Duration::from_secs(5)).await
+        {
             Ok(w) => {
                 info!("✅ Tax signal writer initialized");
                 Some(w)
@@ -57,7 +55,7 @@ impl UnifiedSignalWriter {
                 None
             }
         };
-        
+
         // Initialize liquidity removal signal writer
         let liquidity_removal_writer = match LiquidityRemovalSignalWriter::new().await {
             Ok(w) => {
@@ -69,7 +67,7 @@ impl UnifiedSignalWriter {
                 None
             }
         };
-        
+
         // Initialize LP approval signal writer
         let lp_approval_writer = match LpApprovalSignalWriter::new().await {
             Ok(w) => {
@@ -81,36 +79,26 @@ impl UnifiedSignalWriter {
                 None
             }
         };
-        
-        // Initialize scam signal writer
-        let scam_writer = match ScamSignalWriter::new(database_url, 50, Duration::from_secs(5)).await {
-            Ok(w) => {
-                info!("✅ Scam signal writer initialized");
-                Some(w)
-            }
-            Err(e) => {
-                error!("Failed to create scam signal writer: {}", e);
-                None
-            }
-        };
-        
+
         // Check if at least one writer was initialized
-        if trading_writer.is_none() && tax_writer.is_none() && liquidity_removal_writer.is_none() 
-            && lp_approval_writer.is_none() && scam_writer.is_none() {
+        if trading_writer.is_none()
+            && tax_writer.is_none()
+            && liquidity_removal_writer.is_none()
+            && lp_approval_writer.is_none()
+        {
             return Err(eyre::eyre!("Failed to initialize any database writers"));
         }
-        
+
         info!("✅ Unified signal writer ready");
-        
+
         Ok(Self {
             trading_writer,
             tax_writer,
             liquidity_removal_writer,
             lp_approval_writer,
-            scam_writer,
         })
     }
-    
+
     /// Write any signal type to the appropriate database
     pub async fn write_signal(&self, signal: Signal) -> Result<()> {
         match signal {
@@ -123,7 +111,7 @@ impl UnifiedSignalWriter {
                     debug!("Trading signal writer not available");
                 }
             }
-            
+
             Signal::TaxSignal(s) => {
                 if let Some(ref writer) = self.tax_writer {
                     let record = TaxSignalRecord::from_tax_signal(&s);
@@ -133,7 +121,7 @@ impl UnifiedSignalWriter {
                     debug!("Tax signal writer not available");
                 }
             }
-            
+
             Signal::LiquidityRemoval(s) => {
                 if let Some(ref writer) = self.liquidity_removal_writer {
                     // Convert to LiquiditySignal for the writer
@@ -162,7 +150,7 @@ impl UnifiedSignalWriter {
                     debug!("Liquidity removal signal writer not available");
                 }
             }
-            
+
             Signal::LpApproval(s) => {
                 if let Some(ref writer) = self.lp_approval_writer {
                     // Write the signal directly since writer expects &LpApprovalSignal
@@ -172,46 +160,48 @@ impl UnifiedSignalWriter {
                     debug!("LP approval signal writer not available");
                 }
             }
-            
-            Signal::ScamDetection(s) => {
-                if let Some(ref writer) = self.scam_writer {
-                    // Convert ScamDetection to a liquidity_drain scam type
-                    let record = ScamSignalRecord::liquidity_drain(
-                        s.token_address,
-                        s.pool_address,
-                        s.scammer_address,
-                        s.tx_hash,
-                        s.eth_drained,
-                        s.drain_percentage,
-                        s.eth_remaining,
-                    );
-                    writer.write_signal(record)?;
-                    debug!("Written ScamDetection signal to database");
-                } else {
-                    debug!("Scam signal writer not available");
-                }
+
+            // ScamDetection signals are no longer written to DB
+            Signal::ScamDetection(_s) => {
+                debug!("Skipping ScamDetection signal (DB disabled)");
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Check if any writers are available
     pub fn has_writers(&self) -> bool {
-        self.trading_writer.is_some() || self.tax_writer.is_some() 
-            || self.liquidity_removal_writer.is_some() || self.lp_approval_writer.is_some()
-            || self.scam_writer.is_some()
+        self.trading_writer.is_some()
+            || self.tax_writer.is_some()
+            || self.liquidity_removal_writer.is_some()
+            || self.lp_approval_writer.is_some()
     }
-    
+
     /// Get status of individual writers
     pub fn get_status(&self) -> String {
         format!(
-            "Writers status - Trading: {}, Tax: {}, LiquidityRemoval: {}, LpApproval: {}, Scam: {}",
-            if self.trading_writer.is_some() { "✓" } else { "✗" },
-            if self.tax_writer.is_some() { "✓" } else { "✗" },
-            if self.liquidity_removal_writer.is_some() { "✓" } else { "✗" },
-            if self.lp_approval_writer.is_some() { "✓" } else { "✗" },
-            if self.scam_writer.is_some() { "✓" } else { "✗" },
+            "Writers status - Trading: {}, Tax: {}, LiquidityRemoval: {}, LpApproval: {}",
+            if self.trading_writer.is_some() {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tax_writer.is_some() {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.liquidity_removal_writer.is_some() {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.lp_approval_writer.is_some() {
+                "✓"
+            } else {
+                "✗"
+            },
         )
     }
 }
@@ -290,8 +280,13 @@ impl LiquidityRemovalSignalRecord {
 impl LpApprovalSignalRecord {
     /// Convert from LpApprovalSignal
     pub fn from_lp_approval_signal(signal: &LpApprovalSignal) -> Self {
-        let unlimited = signal.amount.to_string().parse::<f64>().map(|a| a >= 1e30).unwrap_or(false);
-        
+        let unlimited = signal
+            .amount
+            .to_string()
+            .parse::<f64>()
+            .map(|a| a >= 1e30)
+            .unwrap_or(false);
+
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),

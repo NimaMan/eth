@@ -1,11 +1,11 @@
+use chrono::{DateTime, Utc};
+use eyre::Result;
+use serde_json::json;
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
-use chrono::{DateTime, Utc};
-use tracing::{info, error};
-use eyre::Result;
-use serde_json::json;
+use tracing::{error, info};
 
 /// Scam signal types
 #[derive(Debug, Clone)]
@@ -150,7 +150,11 @@ pub struct ScamSignalWriter {
 
 impl ScamSignalWriter {
     /// Create a new scam signal writer with database connection
-    pub async fn new(database_url: &str, batch_size: usize, flush_interval: Duration) -> Result<Self> {
+    pub async fn new(
+        database_url: &str,
+        batch_size: usize,
+        flush_interval: Duration,
+    ) -> Result<Self> {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .acquire_timeout(Duration::from_secs(3))
@@ -159,7 +163,12 @@ impl ScamSignalWriter {
 
         let (sender, receiver) = mpsc::unbounded_channel::<ScamSignalRecord>();
 
-        let handle = tokio::spawn(Self::writer_task(pool, receiver, batch_size, flush_interval));
+        let handle = tokio::spawn(Self::writer_task(
+            pool,
+            receiver,
+            batch_size,
+            flush_interval,
+        ));
 
         Ok(Self {
             sender,
@@ -169,7 +178,8 @@ impl ScamSignalWriter {
 
     /// Submit a scam signal record for writing
     pub fn write_signal(&self, record: ScamSignalRecord) -> Result<()> {
-        self.sender.send(record)
+        self.sender
+            .send(record)
             .map_err(|_| eyre::eyre!("Scam signal writer channel closed"))?;
         Ok(())
     }
@@ -185,7 +195,10 @@ impl ScamSignalWriter {
         let mut flush_timer = interval(flush_interval);
         flush_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        info!("Scam signal writer started (batch_size: {}, flush_interval: {:?})", batch_size, flush_interval);
+        info!(
+            "Scam signal writer started (batch_size: {}, flush_interval: {:?})",
+            batch_size, flush_interval
+        );
 
         loop {
             tokio::select! {
@@ -194,7 +207,7 @@ impl ScamSignalWriter {
                     match record {
                         Some(record) => {
                             batch.push(record);
-                            
+
                             // Flush if batch is full
                             if batch.len() >= batch_size {
                                 let batch_to_write = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
@@ -211,7 +224,7 @@ impl ScamSignalWriter {
                         }
                     }
                 }
-                
+
                 // Periodic flush
                 _ = flush_timer.tick() => {
                     if !batch.is_empty() {
@@ -230,7 +243,7 @@ impl ScamSignalWriter {
         }
 
         let start = Instant::now();
-        
+
         // Write records one by one to avoid complex batch insert issues
         let mut success_count = 0;
         for record in &records {
@@ -242,7 +255,7 @@ impl ScamSignalWriter {
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8
                 ) ON CONFLICT (pool_address, detection_tx_hash, scam_type) DO NOTHING
-                "#
+                "#,
             )
             .bind(record.scam_type.as_str())
             .bind(&record.token_address)

@@ -1,11 +1,10 @@
 /// Priority-based Simulation Queue
-/// 
+///
 /// Manages simulation requests with priority ordering
-
 use super::SimulationRequest;
 use crate::tx_router::SimulationPriority;
-use std::collections::BinaryHeap;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use tracing::debug;
 
 /// Wrapper for priority ordering
@@ -33,7 +32,10 @@ impl Ord for PrioritizedRequest {
     fn cmp(&self, other: &Self) -> Ordering {
         // Lower priority value = higher priority (Critical=0, High=1, etc)
         // So we reverse the comparison
-        other.request.priority.cmp(&self.request.priority)
+        other
+            .request
+            .priority
+            .cmp(&self.request.priority)
             .then_with(|| self.enqueued_at.cmp(&other.enqueued_at))
     }
 }
@@ -42,7 +44,7 @@ impl Ord for PrioritizedRequest {
 pub struct SimulationQueue {
     queue: BinaryHeap<PrioritizedRequest>,
     max_size: usize,
-    
+
     // Statistics
     total_enqueued: u64,
     total_processed: u64,
@@ -78,18 +80,18 @@ impl SimulationQueue {
                 self.total_dropped += 1;
                 return Err("Queue full, dropping low priority request".to_string());
             }
-            
+
             // Make room for high priority request
             self.drop_lowest_priority();
         }
 
         debug!("Enqueuing {:?} priority request", request.priority);
-        
+
         self.queue.push(PrioritizedRequest {
             request,
             enqueued_at: std::time::Instant::now(),
         });
-        
+
         self.total_enqueued += 1;
         Ok(())
     }
@@ -97,7 +99,7 @@ impl SimulationQueue {
     /// Pop a batch of requests
     pub fn pop_batch(&mut self, max_batch: usize) -> Vec<SimulationRequest> {
         let mut batch = Vec::with_capacity(max_batch.min(self.queue.len()));
-        
+
         while batch.len() < max_batch && !self.queue.is_empty() {
             if let Some(prioritized) = self.queue.pop() {
                 batch.push(prioritized.request);
@@ -108,7 +110,7 @@ impl SimulationQueue {
         if !batch.is_empty() {
             debug!("Popped batch of {} requests", batch.len());
         }
-        
+
         batch
     }
 
@@ -117,19 +119,19 @@ impl SimulationQueue {
         // This is inefficient but simple - for production, use a different data structure
         let mut items: Vec<_> = self.queue.drain().collect();
         items.sort_by(|a, b| b.cmp(a)); // Reverse sort to get lowest priority last
-        
+
         if let Some(_dropped) = items.pop() {
             self.total_dropped += 1;
             debug!("Dropped lowest priority request to make room");
         }
-        
+
         self.queue = items.into_iter().collect();
     }
 
     /// Get queue statistics
     pub fn get_stats(&self) -> QueueStats {
         let mut by_priority = std::collections::HashMap::new();
-        
+
         for item in &self.queue {
             let priority_str = format!("{:?}", item.request.priority);
             *by_priority.entry(priority_str).or_insert(0) += 1;

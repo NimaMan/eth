@@ -10,7 +10,7 @@ ethers          = { version = "2.0", features = ["ws", "ipc"] }
 tokio           = { version = "1.37", features = ["full"] }
 tokio-stream    = "0.1"
 tracing         = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 tracing-appender = "0.2"
 clap            = { version = "4.5", features = ["derive","env"] }
 eyre            = "0.6"
@@ -42,17 +42,17 @@ ctrlc           = "3.4"
 # Async trait support
 async-trait     = "0.1"
 
-# Transaction simulation with REVM - Using crates.io versions to match revm_tx_simulator
-revm            = { version = "25.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
-revm-primitives = { version = "19.2.0", default-features = false, features = ["std", "serde"] }
-revm-context    = { version = "6.0.0", default-features = false, features = ["optional_no_base_fee"] }
-revm-database   = { version = "5.0.0", default-features = false }
+# Transaction simulation with REVM - align with Reth v1.7.0 toolchain
+revm            = { version = "29.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
+revm-primitives = { version = "20.2.1", default-features = false, features = ["std", "serde"] }
+revm-context    = { version = "9.0.2", default-features = false, features = ["optional_no_base_fee"] }
+revm-database   = { version = "7.0.5", default-features = false }
 
 # Alloy dependencies (for revm_tx_simulator_lib interaction)
-alloy-eips      = { git = "https://github.com/alloy-rs/alloy.git", branch = "main", default-features = false }
-alloy-provider  = { version = "1.0.6", default-features = false, features = ["reqwest", "ws"] }
-alloy-network   = { version = "1.0.6" }
-alloy-rpc-client = { version = "1.0.9" }
+alloy-eips      = { version = "1.0.32", default-features = false }
+alloy-provider  = { version = "1.0.32", default-features = false, features = ["reqwest", "ws"] }
+alloy-network   = { version = "1.0.32" }
+alloy-rpc-client = { version = "1.0.32" }
 
 
 # Reth dependencies for database access
@@ -92,27 +92,27 @@ tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
 reth_chain_query = { path = "../reth_chain_query" }
 # Reth dependencies - using GitHub references to match tx_simulator
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
 
 # Alloy dependencies for transaction decoding
-alloy-primitives = { version = "1.0", features = ["rlp"] }
+alloy-primitives = { version = "1.0.32", features = ["rlp"] }
 alloy-rlp = "0.3"
-# alloy-eips already defined above from git
-alloy-consensus = { version = "1.0" }
-alloy-sol-types = { version = "1.0" }
-alloy-rpc-types = { version = "1.0" }
+# alloy-eips already defined above from crates.io
+alloy-consensus = { version = "1.0.32" }
+alloy-sol-types = { version = "1.0.32" }
+alloy-rpc-types = { version = "1.0.32" }
 
 # REVM for Direct Reth simulation
-# Note: Using existing revm 25.0.0 from above
-revm-inspectors = "0.19.1"
+# Note: Using existing revm 29.0.0 from above
+revm-inspectors = "0.29.2"
 
 # Direct Reth simulator
 # Removed - replaced by reth_tx_simulator
@@ -123,7 +123,7 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 # Database support
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
 rust_decimal = { version = "1.0", features = ["serde-float"] }
-reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0", optional = true }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0", optional = true }
 
 [lib]
 name = "mempool_processor"
@@ -157,7 +157,6 @@ path = "examples/mempool_fetcher/verify_new_transactions_only.rs"
 name = "measure_instant_fetch_performance"
 path = "examples/mempool_fetcher/measure_instant_fetch_performance.rs"
 
-
 [[example]]
 name = "function_detector_example"
 path = "examples/mempool_fetcher/function_detector_example.rs"
@@ -170,7 +169,6 @@ path = "examples/mempool_fetcher/test_fetcher_simple.rs"
 name = "tx_router_example"
 path = "examples/tx_router/tx_router_example.rs"
 
-# Reth Simulation Examples
 [[example]]
 name = "live_mempool_transaction_simulation"
 path = "examples/simulator/live_mempool_transaction_simulation.rs"
@@ -184,161 +182,53 @@ name = "liquidity_removal_from_hash"
 path = "examples/simulator/liquidity_removal_from_hash.rs"
 
 [[example]]
-name = "test_liquidity_removal_simulation"
-path = "examples/test_liquidity_removal_simulation.rs"
-
-
-# TxSimulator Examples
-[[example]]
-name = "test_state_changes_nonblocking"
-path = "examples/tx_simulation/test_state_changes_nonblocking.rs"
-
-# Token Parameter Extraction Examples
-[[example]]
-name = "decode_tax_transactions"
-path = "examples/token_parameter_extraction/decode_tax_transactions.rs"
+name = "token_tax_calculation_with_external_processor"
+path = "examples/simulator/token_tax_calculation_with_external_processor.rs"
 
 [[example]]
-name = "extract_token_parameters"
-path = "examples/token_parameter_extraction/extract_token_parameters.rs"
+name = "test_unified_writer"
+path = "examples/test_unified_writer.rs"
 
 [[example]]
-name = "get_token_parameters"
-path = "examples/token_parameter_extraction/get_token_parameters.rs"
+name = "full_pipeline_signal_detection"
+path = "examples/signal_detector/full_signal_detection_pipeline.rs"
 
 [[example]]
-name = "analyze_token_timeline"
-path = "examples/token_parameter_extraction/analyze_token_timeline.rs"
+name = "test_liquidity_removal_detection"
+path = "examples/signal_detector/test_liquidity_removal_detection.rs"
 
 [[example]]
-name = "identify_storage_slots"
-path = "examples/token_parameter_extraction/identify_storage_slots.rs"
-
-[[example]]
-name = "calculate_dogeina_taxes"
-path = "examples/token_parameter_extraction/calculate_dogeina_taxes.rs"
-
-[[example]]
-name = "clean_tax_calculation"
-path = "examples/token_parameter_extraction/clean_tax_calculation.rs"
-
-[[example]]
-name = "simulate_buy_sell_taxes"
-path = "examples/token_parameter_extraction/simulate_buy_sell_taxes.rs"
-
-# Unified Publisher Examples
-[[example]]
-name = "publisher_demo"
-path = "examples/unified_publisher/publisher_demo.rs"
-
-[[example]]
-name = "multipart_subscriber"
-path = "examples/unified_publisher/multipart_subscriber.rs"
-
-[[example]]
-name = "unified_publisher_example"
-path = "examples/unified_publisher/unified_publisher_example.rs"
-
-[[example]]
-name = "get_0xt_data_at_block"
-path = "examples/token_parameter_extraction/get_0xt_data_at_block.rs"
-
-[[example]]
-name = "analyze_token_with_detectors"
-path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
+name = "diagnose_liquidity_event"
+path = "examples/diagnose_liquidity_event.rs"
 
 [[example]]
 name = "analyze_tax_for_block_range"
 path = "examples/token_parameter_extraction/analyze_tax_for_block_range.rs"
 
 [[example]]
-name = "validate_all_token_taxes"
-path = "examples/token_parameter_extraction/validate_all_token_taxes.rs"
-
-[[example]]
 name = "analyze_tax_multi_router"
 path = "examples/token_parameter_extraction/analyze_tax_multi_router.rs"
+
+[[example]]
+name = "analyze_token_with_detectors"
+path = "examples/token_parameter_extraction/analyze_token_with_detectors.rs"
 
 [[example]]
 name = "find_whitelisted_addresses"
 path = "examples/token_parameter_extraction/find_whitelisted_addresses.rs"
 
 [[example]]
+name = "validate_all_token_taxes"
+path = "examples/token_parameter_extraction/validate_all_token_taxes.rs"
+
+[[example]]
 name = "verify_exclusion_storage"
 path = "examples/token_parameter_extraction/verify_exclusion_storage.rs"
-
-# Signal Detector Examples
-[[example]]
-name = "full_pipeline_signal_detection"
-path = "examples/signal_detector/full_signal_detection_pipeline.rs"
-
-[[example]]
-name = "simulation_only"
-path = "examples/signal_detector/simulation_only.rs"
-
-[[example]]
-name = "test_liquidity_removal_detection"
-path = "examples/signal_detector/test_liquidity_removal_detection.rs"
-
-
-[[example]]
-name = "read_token_data_from_storage"
-path = "examples/token_parameter_extraction/read_token_data_from_storage.rs"
-
-[[example]]
-name = "get_token_info_via_rpc"
-path = "examples/token_parameter_extraction/get_token_info_via_rpc.rs"
-
-[[example]]
-name = "calculate_0xt_taxes"
-path = "examples/token_parameter_extraction/calculate_0xt_taxes.rs"
-
-[[example]]
-name = "calculate_0xt_taxes_formula"
-path = "examples/token_parameter_extraction/calculate_0xt_taxes_formula.rs"
-
-# Token Tracking Examples
-[[example]]
-name = "test_token_cache"
-path = "examples/token_tracking/test_token_cache.rs"
 
 [[example]]
 name = "export_all_tokens_from_cache_to_csv"
 path = "examples/token_tracking/export_all_tokens_from_cache_to_csv.rs"
-[[example]]
-name = "test_unified_cache"
-path = "examples/token_tracking/test_unified_cache.rs"
-
 
 [[example]]
-name = "token_pool_csv_logger"
-path = "examples/token_tracking/token_pool_csv_logger.rs"
-
-
-
-# Using crates.io versions - no patches needed
-
-
-[[example]]
-name = "debug_scout_token_simulation"
-path = "examples/simulation_debug/debug_scout_token_simulation.rs"
-
-[[example]]
-name = "investigate_scout_token"
-path = "examples/simulation_debug/investigate_scout_token.rs"
-
-[[example]]
-name = "test_multiple_addresses"
-path = "examples/simulation_debug/test_multiple_addresses.rs"
-
-[[example]]
-name = "test_buy_amounts"
-path = "examples/simulation_debug/test_buy_amounts.rs"
-
-[[example]]
-name = "test_simulation_with_known_tokens"
-path = "examples/test_simulation_with_known_tokens.rs"
-
-[[example]]
-name = "contract_creation_detection_simple"
-path = "examples/contract_creation_detection_simple.rs"
+name = "check_if_creator"
+path = "examples/token_tracking/check_if_creator.rs"

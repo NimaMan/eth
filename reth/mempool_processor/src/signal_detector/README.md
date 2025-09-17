@@ -72,8 +72,7 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
 - Logs (files under the run’s `signals/` directory)
   - `trading_enabled.log`
   - `tax_signals.log`
-  - `liquidity_removals.log`
-  - `scam_detections.log`
+  - `liquidity_removals.log` (also contains ScamDetection entries)
   - `lp_approval_signals.log`
   - `signal_manager.log` (summary/activity)
 
@@ -110,4 +109,3 @@ Non‑simulated LP approvals are routed directly to LpApprovalDetector.
 - Per‑pool semantics: signals are specific to a single pool — multiple pools per token produce multiple independent signals.
 - Historical vs latest state: when at‑block simulation is not possible (pruned state), detectors still use best available results; TradingEnabled requires valid tax values and can_buy/can_sell.
 - Publishing is best‑effort and non‑blocking; DB writes are optional and gated by build features.
-

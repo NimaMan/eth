@@ -1,10 +1,10 @@
+use chrono::{DateTime, Utc};
+use eyre::Result;
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
-use chrono::{DateTime, Utc};
-use tracing::{info, error};
-use eyre::Result;
+use tracing::{error, info};
 
 use crate::signal_detector::TaxSignal;
 
@@ -32,7 +32,13 @@ pub struct TaxSignalRecord {
 
 impl TaxSignalRecord {
     /// Create from TaxSignal with additional context
-    pub fn from_signal(signal: &TaxSignal, pool_address: &str, pool_type: &str, creator_address: &str, tx_hash: &str) -> Self {
+    pub fn from_signal(
+        signal: &TaxSignal,
+        pool_address: &str,
+        pool_type: &str,
+        creator_address: &str,
+        tx_hash: &str,
+    ) -> Self {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: pool_address.to_string(),
@@ -41,21 +47,33 @@ impl TaxSignalRecord {
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),
             detection_tx_hash: tx_hash.to_string(),
-            signal_type: format!("{:?}", signal.signal_type).split("::").last().unwrap_or("Unknown").to_string(),
+            signal_type: format!("{:?}", signal.signal_type)
+                .split("::")
+                .last()
+                .unwrap_or("Unknown")
+                .to_string(),
             signal_details: signal.details.clone(),
             confidence: Some(signal.confidence),
             buy_tax_at_signal: signal.buy_tax,
             sell_tax_at_signal: signal.sell_tax,
             buy_tax_exceeds_threshold: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { buy_tax_exceeds_threshold, .. } => *buy_tax_exceeds_threshold,
+                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot {
+                    buy_tax_exceeds_threshold,
+                    ..
+                } => *buy_tax_exceeds_threshold,
                 _ => false,
             },
             sell_tax_exceeds_threshold: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { sell_tax_exceeds_threshold, .. } => *sell_tax_exceeds_threshold,
+                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot {
+                    sell_tax_exceeds_threshold,
+                    ..
+                } => *sell_tax_exceeds_threshold,
                 _ => false,
             },
             cant_sell: match &signal.signal_type {
-                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { cant_sell, .. } => *cant_sell,
+                crate::signal_detector::TaxSignalType::HighTaxOrHoneypot { cant_sell, .. } => {
+                    *cant_sell
+                }
                 _ => false,
             },
             creator_address: creator_address.to_string(),
@@ -72,7 +90,11 @@ pub struct TaxSignalWriter {
 
 impl TaxSignalWriter {
     /// Create a new tax signal writer with database connection
-    pub async fn new(database_url: &str, batch_size: usize, flush_interval: Duration) -> Result<Self> {
+    pub async fn new(
+        database_url: &str,
+        batch_size: usize,
+        flush_interval: Duration,
+    ) -> Result<Self> {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .acquire_timeout(Duration::from_secs(3))
@@ -81,7 +103,12 @@ impl TaxSignalWriter {
 
         let (sender, receiver) = mpsc::unbounded_channel::<TaxSignalRecord>();
 
-        let handle = tokio::spawn(Self::writer_task(pool, receiver, batch_size, flush_interval));
+        let handle = tokio::spawn(Self::writer_task(
+            pool,
+            receiver,
+            batch_size,
+            flush_interval,
+        ));
 
         Ok(Self {
             sender,
@@ -91,7 +118,8 @@ impl TaxSignalWriter {
 
     /// Submit a tax signal record for writing
     pub fn write_signal(&self, record: TaxSignalRecord) -> Result<()> {
-        self.sender.send(record)
+        self.sender
+            .send(record)
             .map_err(|_| eyre::eyre!("Tax signal writer channel closed"))?;
         Ok(())
     }
@@ -107,7 +135,10 @@ impl TaxSignalWriter {
         let mut flush_timer = interval(flush_interval);
         flush_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        info!("Tax signal writer started (batch_size: {}, flush_interval: {:?})", batch_size, flush_interval);
+        info!(
+            "Tax signal writer started (batch_size: {}, flush_interval: {:?})",
+            batch_size, flush_interval
+        );
 
         loop {
             tokio::select! {
@@ -116,7 +147,7 @@ impl TaxSignalWriter {
                     match record {
                         Some(record) => {
                             batch.push(record);
-                            
+
                             // Flush if batch is full
                             if batch.len() >= batch_size {
                                 let batch_to_write = std::mem::replace(&mut batch, Vec::with_capacity(batch_size));
@@ -133,7 +164,7 @@ impl TaxSignalWriter {
                         }
                     }
                 }
-                
+
                 // Periodic flush
                 _ = flush_timer.tick() => {
                     if !batch.is_empty() {
@@ -152,7 +183,7 @@ impl TaxSignalWriter {
         }
 
         let start = Instant::now();
-        
+
         // Write records one by one to avoid complex batch insert issues
         let mut success_count = 0;
         for record in &records {
@@ -168,7 +199,7 @@ impl TaxSignalWriter {
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
                 ) ON CONFLICT (pool_address, detection_tx_hash) DO NOTHING
-                "#
+                "#,
             )
             .bind(&record.token_address)
             .bind(&record.pool_address)

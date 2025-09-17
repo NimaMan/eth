@@ -1,21 +1,18 @@
-/// Signal Publisher
-/// 
-/// Handles publishing of binary signals with fast ZMQ/logging and non-blocking database writes.
-/// ZMQ and log writes are synchronous (fast), database writes use background tasks.
-
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{info, warn, error, debug};
-use zmq::{Context, Socket};
+use chrono::Utc;
+use eyre::Result;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use chrono::Utc;
-use eyre::Result;
+/// Signal Publisher
+///
+/// Handles publishing of binary signals with fast ZMQ/logging and non-blocking database writes.
+/// ZMQ and log writes are synchronous (fast), database writes use background tasks.
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
+use zmq::{Context, Socket};
 
 use super::signal_detector::Signal;
-// Database imports disabled for now
-// use crate::db_writers::{TradingEventWriter, TradingEnabledEvent, CreatorActionEvent};
 
 /// Configuration for signal publishing
 #[derive(Debug, Clone)]
@@ -40,7 +37,7 @@ impl SignalPublisherConfig {
             db_channel_buffer_size: 1000,
         }
     }
-    
+
     /// Create config with timestamped log directory using provided base path
     pub fn with_timestamped_logs(base_dir: &str) -> Self {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
@@ -74,7 +71,6 @@ struct LogFiles {
     trading_enabled: std::fs::File,
     tax_signals: std::fs::File,
     liquidity_removal: std::fs::File,
-    scam_detection: std::fs::File,
     lp_approval: std::fs::File,
 }
 
@@ -93,7 +89,7 @@ impl SignalPublisher {
     pub async fn new(config: SignalPublisherConfig) -> Result<Self> {
         info!("SignalPublisher::new() starting...");
         let stats = Arc::new(PublisherStats::default());
-        
+
         // Setup ZMQ socket
         info!("Creating ZMQ context...");
         let context = Context::new();
@@ -103,17 +99,17 @@ impl SignalPublisher {
         info!("Binding ZMQ socket to {}...", config.zmq_endpoint);
         zmq_socket.bind(&config.zmq_endpoint)?;
         info!("📡 ZMQ publisher bound to {}", config.zmq_endpoint);
-        
+
         // Give ZMQ time to establish the socket (slow joiner problem)
         info!("Waiting 100ms for ZMQ socket...");
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        
+
         // Create log directory and files
         info!("Creating log directory: {}", config.log_dir);
         std::fs::create_dir_all(&config.log_dir)?;
         let log_files = Self::create_log_files(&config.log_dir)?;
         info!("📁 Signal log directory: {}", config.log_dir);
-        
+
         // Setup non-blocking database writer if enabled
         let db_sender = if config.enable_database {
             info!("Setting up database writer...");
@@ -126,9 +122,9 @@ impl SignalPublisher {
             info!("Database writing disabled");
             None
         };
-        
+
         info!("📡 Signal publisher initialized");
-        
+
         Ok(Self {
             config,
             zmq_socket,
@@ -137,50 +133,44 @@ impl SignalPublisher {
             stats,
         })
     }
-    
+
     /// Create log files
     fn create_log_files(log_dir: &str) -> Result<LogFiles> {
         let log_dir = PathBuf::from(log_dir);
-        
+
         let trading_enabled = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_dir.join("trading_enabled.log"))?;
-            
+
         let tax_signals = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_dir.join("tax_signals.log"))?;
-            
+
         let liquidity_removal = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_dir.join("liquidity_removals.log"))?;
-        
-        let scam_detection = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_dir.join("scam_detections.log"))?;
-        
+
         let lp_approval = OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_dir.join("lp_approval_signals.log"))?;
-        
+
         Ok(LogFiles {
             trading_enabled,
             tax_signals,
             liquidity_removal,
-            scam_detection,
             lp_approval,
         })
     }
-    
+
     /// Spawn non-blocking database writer task
     #[cfg(feature = "db")]
     async fn spawn_db_writer(
         mut receiver: mpsc::Receiver<Signal>,
-        stats: Arc<PublisherStats>
+        stats: Arc<PublisherStats>,
     ) -> Result<()> {
         // Spawn database writer task without blocking on connection
         let stats_clone = stats.clone();
@@ -208,9 +198,13 @@ impl SignalPublisher {
                 // Use unified writer to handle all signal types
                 if let Err(e) = unified_writer.write_signal(signal).await {
                     error!("Failed to write signal to database: {}", e);
-                    stats_clone.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    stats_clone
+                        .errors
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 } else {
-                    stats_clone.db_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    stats_clone
+                        .db_written
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             warn!("Database writer task terminated");
@@ -221,7 +215,7 @@ impl SignalPublisher {
     #[cfg(not(feature = "db"))]
     async fn spawn_db_writer(
         mut receiver: mpsc::Receiver<Signal>,
-        _stats: Arc<PublisherStats>
+        _stats: Arc<PublisherStats>,
     ) -> Result<()> {
         // If DB feature is disabled, drop the receiver and log a message
         info!("Database feature disabled; not spawning DB writer task");
@@ -233,76 +227,91 @@ impl SignalPublisher {
         });
         Ok(())
     }
-    
-    /*
-    /// Write a signal to the database (disabled for now)
-    async fn write_signal_to_database(db_writer: &mut TradingEventWriter, signal: &Signal) -> Result<()> {
-        // Database writing disabled - implement when needed
-        Ok(())
-    }
-    */
-    
+
     /// Publish a signal (fast ZMQ/logs, non-blocking DB)
     pub async fn publish(&mut self, signal: Signal) -> Result<()> {
-        self.stats.total_published.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        
+        self.stats
+            .total_published
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         // Fast ZMQ publishing
         self.publish_zmq(&signal)?;
-        
+
         // Fast log writing
         self.write_log(&signal)?;
-        
+
         // Non-blocking database write
         if let Some(ref db_sender) = self.db_sender {
             if let Err(e) = db_sender.try_send(signal) {
                 match e {
                     mpsc::error::TrySendError::Full(_) => {
                         warn!("Database writer channel full, dropping signal");
-                        self.stats.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.stats
+                            .errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                     mpsc::error::TrySendError::Closed(_) => {
                         error!("Database writer channel closed");
-                        self.stats.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        self.stats
+                            .errors
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Publish signal to ZMQ (fast)
     fn publish_zmq(&self, signal: &Signal) -> Result<()> {
-        let (topic, json_data) = match signal {
-            Signal::TradingEnabled(s) => ("trading_enabled", serde_json::to_string(s)?),
-            Signal::TaxSignal(s) => ("tax_signal", serde_json::to_string(s)?),
-            Signal::LiquidityRemoval(s) => ("liquidity_removal", serde_json::to_string(s)?),
-            Signal::ScamDetection(s) => ("scam_detection", serde_json::to_string(s)?),
-            Signal::LpApproval(s) => ("lp_approval", serde_json::to_string(s)?),
+        // Convert to topic/json; skip ScamDetection (deprecated)
+        let topic_and_data: Option<(&str, String)> = match signal {
+            Signal::TradingEnabled(s) => Some(("trading_enabled", serde_json::to_string(s)?)),
+            Signal::TaxSignal(s) => Some(("tax_signal", serde_json::to_string(s)?)),
+            Signal::LiquidityRemoval(s) => Some(("liquidity_removal", serde_json::to_string(s)?)),
+            Signal::LpApproval(s) => Some(("lp_approval", serde_json::to_string(s)?)),
+            Signal::ScamDetection(_) => None,
         };
-        
+
+        if topic_and_data.is_none() {
+            return Ok(());
+        }
+        let (topic, json_data) = topic_and_data.unwrap();
+
         // Log what we're about to send
-        debug!("Sending ZMQ message - Topic: '{}', Data length: {} bytes", topic, json_data.len());
-        
+        debug!(
+            "Sending ZMQ message - Topic: '{}', Data length: {} bytes",
+            topic,
+            json_data.len()
+        );
+
         // Try without DONTWAIT first to ensure message is sent
-        match self.zmq_socket.send_multipart(&[topic.as_bytes(), json_data.as_bytes()], 0) {
+        match self
+            .zmq_socket
+            .send_multipart(&[topic.as_bytes(), json_data.as_bytes()], 0)
+        {
             Ok(_) => {
-                self.stats.zmq_published.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.stats
+                    .zmq_published
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 debug!("Published {} signal to ZMQ", topic);
                 Ok(())
             }
             Err(e) => {
                 error!("ZMQ publish failed with error: {:?}", e);
-                self.stats.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.stats
+                    .errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Err(eyre::eyre!("Failed to publish to ZMQ: {}", e))
             }
         }
     }
-    
+
     /// Write signal to log files (fast)
     fn write_log(&mut self, signal: &Signal) -> Result<()> {
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        
+
         match signal {
             Signal::TradingEnabled(s) => {
                 writeln!(
@@ -324,27 +333,24 @@ impl SignalPublisher {
                 self.log_files.tax_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
-                let eth_info = s.estimated_eth_removed
+                let eth_info = s
+                    .estimated_eth_removed
                     .map(|eth| format!(" | EstETH: {:.3}", eth))
                     .unwrap_or_default();
                 writeln!(
                     self.log_files.liquidity_removal,
                     "[{}] LIQUIDITY_REMOVAL | Pool: {} | Function: {} | Remover: {} | TxHash: {}{}",
-                    timestamp, s.pool_address, s.function_name, s.remover_address, s.tx_hash, eth_info
+                    timestamp,
+                    s.pool_address,
+                    s.function_name,
+                    s.remover_address,
+                    s.tx_hash,
+                    eth_info
                 )?;
-                writeln!(self.log_files.liquidity_removal, "")?; // Add empty line for readability
                 self.log_files.liquidity_removal.flush()?;
             }
-            Signal::ScamDetection(s) => {
-                writeln!(
-                    self.log_files.scam_detection,
-                    "[{}] SCAM_DETECTED | Pool: {} | Token: {} | Scammer: {} | Drained: {:.2} ETH ({:.1}%) | Remaining: {:.2} ETH | TxHash: {}",
-                    timestamp, s.pool_address, s.token_address, s.scammer_address, 
-                    s.eth_drained, s.drain_percentage, s.eth_remaining, s.tx_hash
-                )?;
-                writeln!(self.log_files.scam_detection, "")?; // Add empty line for readability
-                self.log_files.scam_detection.flush()?;
-            }
+            // ScamDetection is deprecated: no log output
+            Signal::ScamDetection(_) => {}
             Signal::LpApproval(s) => {
                 writeln!(
                     self.log_files.lp_approval,
@@ -355,18 +361,32 @@ impl SignalPublisher {
                 self.log_files.lp_approval.flush()?;
             }
         }
-        
-        self.stats.logs_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        self.stats
+            .logs_written
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
-    
+
     /// Get publisher statistics
     pub fn get_stats(&self) -> PublisherStatsSnapshot {
         PublisherStatsSnapshot {
-            total_published: self.stats.total_published.load(std::sync::atomic::Ordering::Relaxed),
-            zmq_published: self.stats.zmq_published.load(std::sync::atomic::Ordering::Relaxed),
-            logs_written: self.stats.logs_written.load(std::sync::atomic::Ordering::Relaxed),
-            db_written: self.stats.db_written.load(std::sync::atomic::Ordering::Relaxed),
+            total_published: self
+                .stats
+                .total_published
+                .load(std::sync::atomic::Ordering::Relaxed),
+            zmq_published: self
+                .stats
+                .zmq_published
+                .load(std::sync::atomic::Ordering::Relaxed),
+            logs_written: self
+                .stats
+                .logs_written
+                .load(std::sync::atomic::Ordering::Relaxed),
+            db_written: self
+                .stats
+                .db_written
+                .load(std::sync::atomic::Ordering::Relaxed),
             errors: self.stats.errors.load(std::sync::atomic::Ordering::Relaxed),
         }
     }

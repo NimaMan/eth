@@ -1,18 +1,14 @@
-/// Main Transaction Router
-/// 
-/// Routes transactions to appropriate simulation strategies based on their
-/// characteristics and assigns processing priorities
-
-use std::sync::Arc;
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::Address as AlloyAddress;
 use reth_chain_query::to_checksum_address;
+/// Main Transaction Router
+///
+/// Routes transactions to appropriate simulation strategies based on their
+/// characteristics and assigns processing priorities
+use std::sync::Arc;
 
-use super::{
-    ContractCreationRouter,
-    CreatorTransactionRouter,
-};
+use super::{ContractCreationRouter, CreatorTransactionRouter};
 
 /// Categories of transactions for processing
 #[derive(Debug, Clone)]
@@ -41,7 +37,6 @@ pub enum TransactionCategory {
 // CreatorFunctionType moved to function_detector module
 pub use crate::function_detector::CreatorFunctionType;
 
-
 /// Classification result with priority
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
@@ -54,10 +49,10 @@ pub struct ClassificationResult {
 /// Simulation priority levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SimulationPriority {
-    Critical = 0,  // Must simulate immediately
-    High = 1,      // Should simulate soon
-    Normal = 2,    // Can batch
-    Low = 3,       // Optional simulation
+    Critical = 0, // Must simulate immediately
+    High = 1,     // Should simulate soon
+    Normal = 2,   // Can batch
+    Low = 3,      // Optional simulation
 }
 
 /// Main transaction router
@@ -80,12 +75,14 @@ impl TransactionRouter {
     /// Classify a transaction
     pub async fn classify(&self, tx: &MempoolTransaction) -> ClassificationResult {
         let start = std::time::Instant::now();
-        
+
         // First check if it's a contract creation
-        let to_str = tx.to.as_ref()
+        let to_str = tx
+            .to
+            .as_ref()
             .map(|t| hex::encode(t))
             .unwrap_or_else(|| "contract_creation".to_string());
-            
+
         if tx.to.is_none() || to_str == "0x0" || to_str.is_empty() {
             let result = self.classify_contract_creation(tx).await;
             return result;
@@ -107,7 +104,7 @@ impl TransactionRouter {
     /// Classify contract creation
     async fn classify_contract_creation(&self, tx: &MempoolTransaction) -> ClassificationResult {
         let (is_token, has_liquidity) = self.contract_router.analyze_creation(tx);
-        
+
         ClassificationResult {
             category: TransactionCategory::ContractCreation {
                 deployer: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
@@ -115,7 +112,11 @@ impl TransactionRouter {
                 is_token,
                 has_liquidity_in_calldata: has_liquidity,
             },
-            priority: if is_token { SimulationPriority::High } else { SimulationPriority::Low },
+            priority: if is_token {
+                SimulationPriority::High
+            } else {
+                SimulationPriority::Low
+            },
             requires_simulation: false, // Skip simulation for contract creations
             requires_buy_sell_test: false, // Can't test until deployed
         }
@@ -124,11 +125,11 @@ impl TransactionRouter {
     /// Classify creator transaction
     async fn classify_creator_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
         let function_type = self.creator_router.get_function_type(tx);
-        
+
         // Get the token created by this creator
         let target_token = if let Some(ref cache) = self.token_cache {
             let from_addr = to_checksum_address(&AlloyAddress::from_slice(&tx.from));
-            
+
             // Get token info for this creator
             if let Some(token_info) = cache.get_token_for_creator(&from_addr).await {
                 // Return the token address for context
@@ -141,15 +142,16 @@ impl TransactionRouter {
         };
 
         // Check if this is just an ETH transfer from a creator
-        let is_eth_transfer = matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
-        
+        let is_eth_transfer =
+            matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
+
         // ALL creator transactions get high priority except ETH transfers
         let priority = match &function_type {
             CreatorFunctionType::TaxModification => SimulationPriority::Critical,
             CreatorFunctionType::TradingControl => SimulationPriority::Critical,
             CreatorFunctionType::OwnershipChange => SimulationPriority::High,
-            CreatorFunctionType::LiquidityAddition => SimulationPriority::High,    // Less critical
-            CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical,  // Potential rug pull!
+            CreatorFunctionType::LiquidityAddition => SimulationPriority::High, // Less critical
+            CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical, // Potential rug pull!
             CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
             CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
             CreatorFunctionType::Other(_) => SimulationPriority::High, // Changed from Low to High
@@ -163,7 +165,9 @@ impl TransactionRouter {
         ClassificationResult {
             category: TransactionCategory::CreatorTransaction {
                 creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
-                target_address: tx.to.as_ref()
+                target_address: tx
+                    .to
+                    .as_ref()
                     .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
                     .unwrap_or_else(|| "none".to_string()),
                 target_token,
@@ -176,20 +180,17 @@ impl TransactionRouter {
         }
     }
 
-
     /// Classify regular transaction
     async fn classify_regular_transaction(&self, tx: &MempoolTransaction) -> ClassificationResult {
         let input_data = &tx.input;
-        
+
         // Check for transfer (0xa9059cbb) or transferFrom (0x23b872dd)
-        let is_transfer = input_data.len() >= 4 && (
-            &input_data[0..4] == &[0xa9, 0x05, 0x9c, 0xbb] ||
-            &input_data[0..4] == &[0x23, 0xb8, 0x72, 0xdd]
-        );
+        let is_transfer = input_data.len() >= 4
+            && (&input_data[0..4] == &[0xa9, 0x05, 0x9c, 0xbb]
+                || &input_data[0..4] == &[0x23, 0xb8, 0x72, 0xdd]);
 
         // Check for approve (0x095ea7b3)
-        let is_approval = input_data.len() >= 4 && 
-            &input_data[0..4] == &[0x09, 0x5e, 0xa7, 0xb3];
+        let is_approval = input_data.len() >= 4 && &input_data[0..4] == &[0x09, 0x5e, 0xa7, 0xb3];
 
         ClassificationResult {
             category: TransactionCategory::Regular {

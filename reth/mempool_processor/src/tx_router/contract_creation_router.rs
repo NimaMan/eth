@@ -1,7 +1,6 @@
 /// Contract Creation Classifier
-/// 
+///
 /// Analyzes contract creation transactions to identify token deployments
-
 use crate::mempool_fetcher::MempoolTransaction;
 use tracing::debug;
 
@@ -36,7 +35,7 @@ impl ContractCreationRouter {
     /// Analyze contract creation to determine if it's a token
     pub fn analyze_creation(&self, tx: &MempoolTransaction) -> (bool, bool) {
         let bytecode = &tx.input;
-        
+
         if bytecode.len() < 100 {
             return (false, false);
         }
@@ -62,7 +61,10 @@ impl ContractCreationRouter {
         let is_token = token_sig_count >= 4;
 
         if is_token {
-            debug!("Detected token creation with {} ERC20 signatures", token_sig_count);
+            debug!(
+                "Detected token creation with {} ERC20 signatures",
+                token_sig_count
+            );
         }
 
         (is_token, has_liquidity)
@@ -74,6 +76,8 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() || needle.len() > haystack.len() {
         return false;
     }
-    
-    haystack.windows(needle.len()).any(|window| window == needle)
+
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }

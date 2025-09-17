@@ -44,7 +44,7 @@ pub struct Token {
     pub decimals: u8,
     #[serde(deserialize_with = "deserialize_supply")]
     pub total_supply: Option<String>,
-    
+
     // Ownership
     pub creator_address: Address,
     pub current_owner: Address,
@@ -53,7 +53,7 @@ pub struct Token {
     pub ownership_renounced: bool,
     #[serde(default)]
     pub renouncement_block: Option<BlockNumber>,
-    
+
     // Tax state - from Python (0-100 range)
     #[serde(alias = "current_buy_tax")]
     pub buy_tax: Option<f64>,
@@ -63,13 +63,13 @@ pub struct Token {
     pub tax_risk_score: f64,
     #[serde(default)]
     pub last_tax_change_block: Option<BlockNumber>,
-    
+
     // Tax history
     #[serde(default)]
     pub tax_history: Vec<TaxChange>,
     #[serde(default)]
     pub pending_tax_changes: Vec<PendingTaxChange>,
-    
+
     // Metadata
     pub creation_block: BlockNumber,
     #[serde(alias = "creation_tx")]
@@ -77,11 +77,11 @@ pub struct Token {
     #[serde(default)]
     pub creation_timestamp: Option<f64>,
     pub latest_activity_block: BlockNumber,
-    
+
     // Scam detection
     pub is_scam: bool,
     pub scam_label: Option<String>,
-    
+
     // Cached computations (not from Python)
     #[serde(skip)]
     pub primary_pool: Option<Address>,
@@ -98,20 +98,20 @@ pub struct Pool {
     #[serde(default)] // Not provided when nested in token
     pub token_address: Address,
     pub pool_type: PoolType,
-    
+
     // Reserves
     pub token_reserve: f64,
     #[serde(alias = "denom_reserve")]
     pub eth_reserve: f64,
     pub denom_currency: String,
     pub denom_address: Address,
-    
+
     // Trading state (per-pool, not per-token)
     #[serde(default)]
     pub trading_enabled: bool,
     pub trading_enabled_block: Option<BlockNumber>,
     pub trading_enabled_txn: Option<TxHash>,
-    
+
     // Metadata
     pub fee_tier: Option<u32>,
     pub pool_id: Option<String>,
@@ -119,15 +119,15 @@ pub struct Pool {
     pub last_updated_block: BlockNumber,
     #[serde(alias = "last_update_time")]
     pub last_updated_time: f64,
-    
+
     // Scam detection
     pub is_scam: bool,
     pub scam_label: Option<String>,
-    
+
     // LP token approval tracking (V2 pools only)
     #[serde(default)]
     pub lp_tokens_approved_percentage: Option<f64>,
-    
+
     // System metadata (not from Python)
     #[serde(skip, default = "std::time::Instant::now")]
     pub received_at: std::time::Instant,
@@ -176,7 +176,7 @@ pub struct TokenWithPools {
     // All Token fields
     #[serde(flatten)]
     pub token: Token,
-    
+
     // Pools mapped by address
     pub pools: std::collections::HashMap<Address, Pool>,
 }
@@ -207,23 +207,23 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::de::{self, Visitor};
-    
+
     struct SupplyVisitor;
-    
+
     impl<'de> Visitor<'de> for SupplyVisitor {
         type Value = Option<String>;
-        
+
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a string, number, or null")
         }
-        
+
         fn visit_none<E>(self) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(None)
         }
-        
+
         fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
         where
             D: serde::Deserializer<'de>,
@@ -231,30 +231,30 @@ where
             deserializer.deserialize_any(InnerSupplyVisitor)
         }
     }
-    
+
     struct InnerSupplyVisitor;
-    
+
     impl<'de> Visitor<'de> for InnerSupplyVisitor {
         type Value = Option<String>;
-        
+
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a string or number")
         }
-        
+
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(Some(v.to_string()))
         }
-        
+
         fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
         where
             E: de::Error,
         {
             Ok(Some(v.to_string()))
         }
-        
+
         fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
         where
             E: de::Error,
@@ -262,7 +262,7 @@ where
             Ok(Some(v.to_string()))
         }
     }
-    
+
     deserializer.deserialize_option(SupplyVisitor)
 }
 
@@ -319,7 +319,7 @@ pub struct TokenCreatorsMessage {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TokenUpdatesMessage {
     #[serde(rename = "type")]
-    pub message_type: String,  // Python sends "type", we call it message_type
+    pub message_type: String, // Python sends "type", we call it message_type
     pub token_count: usize,
     pub block_number: BlockNumber,
     pub timestamp: f64,

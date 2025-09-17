@@ -1,4 +1,4 @@
-use mempool_processor::token_tracking::{TokenTrackingCache, CacheConfig};
+use mempool_processor::token_tracking::{CacheConfig, TokenTrackingCache};
 use std::sync::Arc;
 use tracing_subscriber;
 
@@ -20,13 +20,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The address we want to check (from the LP approval transaction)
     let address_to_check = "0xcb1534B135450ac5433BE4c5f5eC61a781b05c35".to_string();
-    
+
     println!("=== Checking Address: {} ===", address_to_check);
-    
+
     // Check if it's a creator
     let is_creator = cache.is_creator(&address_to_check).await;
     println!("Is creator in cache: {}", is_creator);
-    
+
     if is_creator {
         println!("✓ Address IS marked as a creator in cache");
         if let Some(token_info) = cache.get_token_for_creator(&address_to_check).await {
@@ -37,11 +37,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("✗ Address is NOT marked as a creator in cache");
     }
-    
+
     // Check the LP pair
     let lp_pair = "0x4547B34C4031393E1695E697675F6CEc17a2950E".to_string();
     println!("\n=== Checking LP Pair: {} ===", lp_pair);
-    
+
     if cache.is_pool(&lp_pair).await {
         println!("✓ LP pair IS in cache as a pool");
         if let Some(pool_info) = cache.get_pool(&lp_pair).await {
@@ -51,14 +51,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("✗ LP pair is NOT in cache");
     }
-    
+
     // Check cache stats
     println!("\n=== Cache Status ===");
     let stats = cache.stats().await;
     println!("Total tokens: {}", stats.total_tokens);
     println!("Total pools: {}", stats.total_pools);
     println!("Total creators: {}", stats.total_creators);
-    
+
     if stats.total_tokens == 0 {
         println!("\n⚠️ IMPORTANT: Cache is empty!");
         println!("The cache is only populated when:");

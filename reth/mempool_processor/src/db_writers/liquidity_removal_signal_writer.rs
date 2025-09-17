@@ -1,19 +1,18 @@
+use chrono::{DateTime, Utc};
+use eyre::Result;
+use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::types::BigDecimal;
+use std::str::FromStr;
 /// Liquidity Removal Signal Database Writer
-/// 
+///
 /// Non-blocking writer that records liquidity removal signals to the database.
 /// Uses a background task with batched inserts to avoid blocking the main processing pipeline.
-
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Instant};
-use sqlx::postgres::{PgPool, PgPoolOptions};
-use chrono::{DateTime, Utc};
-use tracing::{info, error};
-use eyre::Result;
-use sqlx::types::BigDecimal;
-use std::str::FromStr;
+use tracing::{error, info};
 
-use crate::signal_detector::{LiquiditySignal};
+use crate::signal_detector::LiquiditySignal;
 
 /// Liquidity removal signal record for database insertion
 #[derive(Debug, Clone)]
@@ -67,7 +66,7 @@ impl LiquidityRemovalSignalWriter {
     /// Create new writer with database connection
     pub async fn new() -> Result<Self> {
         let database_url = "postgresql://postgres:postgres@localhost:5432/eth_db";
-        
+
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(database_url)
@@ -81,11 +80,12 @@ impl LiquidityRemovalSignalWriter {
             _handle: handle,
         })
     }
-    
+
     /// Write a liquidity removal signal
     pub fn write_signal(&self, signal: &LiquiditySignal) -> Result<()> {
         let record = LiquidityRemovalSignalRecord::from_signal(signal);
-        self.sender.send(record)
+        self.sender
+            .send(record)
             .map_err(|e| eyre::eyre!("Failed to send liquidity removal signal: {}", e))?;
         Ok(())
     }
@@ -99,9 +99,9 @@ async fn writer_task(
     let mut batch = Vec::new();
     let mut interval = interval(Duration::from_secs(1)); // Batch every 1 second
     let batch_size = 50;
-    
+
     info!("🟢 Liquidity removal signal writer started");
-    
+
     loop {
         tokio::select! {
             // Receive new signals
@@ -122,7 +122,7 @@ async fn writer_task(
                     }
                 }
             }
-            
+
             // Periodic batch write
             _ = interval.tick() => {
                 if !batch.is_empty() {
@@ -133,11 +133,14 @@ async fn writer_task(
             }
         }
     }
-    
+
     // Write any remaining signals
     if !batch.is_empty() {
         if let Err(e) = write_batch(&pool, &mut batch).await {
-            error!("Failed to write final liquidity removal signal batch: {}", e);
+            error!(
+                "Failed to write final liquidity removal signal batch: {}",
+                e
+            );
         }
     }
 }
@@ -147,12 +150,21 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
     if batch.is_empty() {
         return Ok(());
     }
-    
+
     let start = Instant::now();
     let mut transaction = pool.begin().await?;
-    
+
     for record in batch.iter() {
-        let query = sqlx::query!(
+        let liquidity_removed = record
+            .liquidity_removed_denom
+            .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
+        let remaining_liquidity = record
+            .remaining_liquidity_denom
+            .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
+
+        let detection_timestamp = record.detection_timestamp.naive_utc();
+
+        let query = sqlx::query(
             r#"
             INSERT INTO live_trading.liquidity_removal_signals (
                 token_address, pool_address, pool_type, denom_address, denom_currency,
@@ -161,30 +173,34 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LiquidityRemovalSignalRecord
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (pool_address, detection_tx_hash) DO NOTHING
             "#,
-            record.token_address,
-            record.pool_address,
-            record.pool_type,
-            record.denom_address,
-            record.denom_currency,
-            record.detection_timestamp.naive_utc(),
-            record.detection_tx_hash,
-            record.liquidity_removed_denom.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
-            record.remaining_liquidity_denom.and_then(|v| BigDecimal::from_str(&v.to_string()).ok()),
-            record.pool_drain_risk_level,
-            record.creator_address,
-            record.signal_source
-        );
-        
+        )
+        .bind(&record.token_address)
+        .bind(&record.pool_address)
+        .bind(&record.pool_type)
+        .bind(&record.denom_address)
+        .bind(record.denom_currency.as_ref())
+        .bind(&detection_timestamp)
+        .bind(&record.detection_tx_hash)
+        .bind(liquidity_removed.as_ref())
+        .bind(remaining_liquidity.as_ref())
+        .bind(&record.pool_drain_risk_level)
+        .bind(&record.creator_address)
+        .bind(&record.signal_source);
+
         if let Err(e) = query.execute(&mut *transaction).await {
             error!("Failed to insert liquidity removal signal: {}", e);
         }
     }
-    
+
     transaction.commit().await?;
-    
+
     let duration = start.elapsed();
-    info!("📊 Wrote {} liquidity removal signals in {:.2}ms", batch.len(), duration.as_secs_f64() * 1000.0);
-    
+    info!(
+        "📊 Wrote {} liquidity removal signals in {:.2}ms",
+        batch.len(),
+        duration.as_secs_f64() * 1000.0
+    );
+
     batch.clear();
     Ok(())
 }

@@ -1,13 +1,12 @@
+use clap::Parser;
+use eyre::Result;
+use std::str::FromStr;
 /// Isolated Simulation Test (no Signal Manager)
 ///
 /// Runs a simple pool buy/sell simulation using a shared TxSimulator
 /// to verify the simulation step of the pipeline works without any
 /// signal manager or queue orchestration.
-
 use std::sync::Arc;
-use std::str::FromStr;
-use clap::Parser;
-use eyre::Result;
 use tracing::info;
 
 use alloy_primitives::Address;
@@ -18,7 +17,11 @@ use tx_simulator::TxSimulator;
 #[derive(Parser, Debug)]
 struct Args {
     /// Reth database path (datadir)
-    #[arg(long, env = "RETH_DB_PATH", default_value = "/home/nima/.local/share/reth/mainnet")]
+    #[arg(
+        long,
+        env = "RETH_DB_PATH",
+        default_value = "/home/nima/.local/share/reth/mainnet"
+    )]
     reth_db_path: String,
 
     /// Token address to test (default: USDC)
@@ -38,9 +41,7 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     info!("Starting isolated simulation (no signal manager)...");
 

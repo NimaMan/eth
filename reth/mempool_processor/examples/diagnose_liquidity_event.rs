@@ -12,22 +12,26 @@
 ///   LP approval: 0x102a4037b9e3e09c6215c3440c8f715dd6e73e23a1cdb887cfed84328c863921
 ///   Removal:     0xaeb040ae1f729900071e75007efee190186ade2fd7072ecc5cfc56678194c545
 ///   DB path:     /home/nima/.local/share/reth/mainnet
-
 use alloy_primitives::B256;
+use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
+use reth_chain_query::to_checksum_address;
 use std::env;
 use std::str::FromStr;
 use tx_processor::ProcessedTxProvider;
-use alloy_primitives::{Address, I256, U256};
-use reth_chain_query::to_checksum_address;
 
 fn parse_arg(idx: usize, default: &str) -> String {
     env::args().nth(idx).unwrap_or_else(|| default.to_string())
 }
 
 fn fourbyte_selector(input: &[u8]) -> Option<String> {
-    if input.len() < 4 { return None; }
-    Some(format!("{:02x}{:02x}{:02x}{:02x}", input[0], input[1], input[2], input[3]))
+    if input.len() < 4 {
+        return None;
+    }
+    Some(format!(
+        "{:02x}{:02x}{:02x}{:02x}",
+        input[0], input[1], input[2], input[3]
+    ))
 }
 
 fn print_eth_balance_changes(tx: &tx_processor::ProcessedTransaction) {
@@ -69,7 +73,8 @@ fn print_eth_balance_changes(tx: &tx_processor::ProcessedTransaction) {
 
 fn print_weth_token_deltas(tx: &tx_processor::ProcessedTransaction) {
     // Mainnet WETH address (checksum)
-    let weth_addr = Address::from_slice(&hex::decode("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap());
+    let weth_addr =
+        Address::from_slice(&hex::decode("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2").unwrap());
     let weth_checksum = to_checksum_address(&weth_addr);
     let mut entries: Vec<(Address, I256)> = Vec::new();
     for (addr, delta) in &tx.address_balance_changes {
@@ -100,7 +105,9 @@ fn print_all_token_net(tx: &tx_processor::ProcessedTransaction) {
     // Collect per-address token_net summaries
     let mut by_addr: BTreeMap<Address, Vec<(String, I256)>> = BTreeMap::new();
     for (addr, delta) in &tx.address_balance_changes {
-        if delta.token_net.is_empty() { continue; }
+        if delta.token_net.is_empty() {
+            continue;
+        }
         let mut entries: Vec<(String, I256)> = Vec::new();
         for (token_addr, amount_u256) in &delta.token_net {
             let signed = I256::try_from(*amount_u256).unwrap_or(I256::ZERO);
@@ -126,15 +133,24 @@ fn print_all_token_net(tx: &tx_processor::ProcessedTransaction) {
             let amt_str = amt.to_string();
             // Also show in scientific style roughly via f64 if fits
             let approx = amt_str.parse::<f64>().unwrap_or(0.0) / 1e18;
-            println!("      token {}: {} (~{:.6} in 18dp)", token, amt_str, approx);
+            println!(
+                "      token {}: {} (~{:.6} in 18dp)",
+                token, amt_str, approx
+            );
         }
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let lp_hash = parse_arg(1, "0x102a4037b9e3e09c6215c3440c8f715dd6e73e23a1cdb887cfed84328c863921");
-    let rem_hash = parse_arg(2, "0xaeb040ae1f729900071e75007efee190186ade2fd7072ecc5cfc56678194c545");
+    let lp_hash = parse_arg(
+        1,
+        "0x102a4037b9e3e09c6215c3440c8f715dd6e73e23a1cdb887cfed84328c863921",
+    );
+    let rem_hash = parse_arg(
+        2,
+        "0xaeb040ae1f729900071e75007efee190186ade2fd7072ecc5cfc56678194c545",
+    );
     let db_path = parse_arg(3, "/home/nima/.local/share/reth/mainnet");
 
     println!("🔎 Diagnose LP-Approval + Liquidity Removal");
@@ -147,14 +163,25 @@ async fn main() -> Result<()> {
     println!("== LP Approval ==\nHash: {}", lp_hash);
     match provider.process_transaction_by_hash(lp_b256).await {
         Ok(tx) => {
-            println!("  Block: {} | From: {} | To: {}", tx.block_number, tx.from_address, tx.to_address.unwrap_or_default());
+            println!(
+                "  Block: {} | From: {} | To: {}",
+                tx.block_number,
+                tx.from_address,
+                tx.to_address.unwrap_or_default()
+            );
             if let Some(sel) = fourbyte_selector(&tx.input) {
                 println!("  4-byte selector: {}", sel);
             }
             if !tx.approvals.is_empty() {
                 println!("  Approvals ({}):", tx.approvals.len());
                 for (i, a) in tx.approvals.iter().enumerate() {
-                    println!("    #{} owner={} spender={} amount={}", i + 1, a.owner, a.spender, a.amount);
+                    println!(
+                        "    #{} owner={} spender={} amount={}",
+                        i + 1,
+                        a.owner,
+                        a.spender,
+                        a.amount
+                    );
                 }
             } else {
                 println!("  No approvals decoded.");
@@ -175,7 +202,12 @@ async fn main() -> Result<()> {
     println!("\n== Liquidity Removal ==\nHash: {}", rem_hash);
     match provider.process_transaction_by_hash(rem_b256).await {
         Ok(tx) => {
-            println!("  Block: {} | From: {} | To: {}", tx.block_number, tx.from_address, tx.to_address.unwrap_or_default());
+            println!(
+                "  Block: {} | From: {} | To: {}",
+                tx.block_number,
+                tx.from_address,
+                tx.to_address.unwrap_or_default()
+            );
             if let Some(sel) = fourbyte_selector(&tx.input) {
                 println!("  4-byte selector: {}", sel);
             }

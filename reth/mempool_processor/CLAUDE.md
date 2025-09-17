@@ -108,7 +108,7 @@ src/
   - `trading_enabled.log` - TRADING_ENABLED entries only
   - `tax_signals.log` - TAX_SIGNAL entries (shows -1% for failed calculations)
   - `liquidity_removals.log` - Pool drain signals
-  - `scam_detections.log` - Scam alerts
+  - Scam alerts are included in `liquidity_removals.log`
 - ZMQ multipart publishing to tcp://127.0.0.1:5557
 - Database writing via db_writers/ (optional)
 - **NEW**: Empty lines between signals for readability

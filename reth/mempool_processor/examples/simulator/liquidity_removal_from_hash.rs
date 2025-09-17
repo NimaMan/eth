@@ -1,3 +1,4 @@
+use alloy_primitives::{Address, Bytes, B256, U256};
 /// Simulate liquidity removal for a given transaction hash using the dedicated
 /// LiquidityRemovalSimulator, and print the computed drain metrics.
 ///
@@ -7,15 +8,14 @@
 ///
 use clap::Parser;
 use eyre::Result;
+use reth_chain_query::to_checksum_address;
 use std::str::FromStr;
 use std::sync::Arc;
-use alloy_primitives::{Address, B256, Bytes, U256};
-use reth_chain_query::to_checksum_address;
 
 use mempool_processor::simulator::liquidity_removal_simulator::LiquidityRemovalSimulator;
 use mempool_processor::token_tracking::TokenTrackingSubscriber;
+use tx_processor::{simulator::UnsignedTxBuilder, ProcessedTxProvider};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
-use tx_processor::ProcessedTxProvider;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -24,7 +24,11 @@ struct Args {
     tx_hash: String,
 
     /// Reth DB path
-    #[arg(long, env = "RETH_DB_PATH", default_value = "/home/nima/.local/share/reth/mainnet")]
+    #[arg(
+        long,
+        env = "RETH_DB_PATH",
+        default_value = "/home/nima/.local/share/reth/mainnet"
+    )]
     reth_db_path: String,
 
     /// Verbose logging
@@ -58,21 +62,12 @@ async fn main() -> Result<()> {
     let simulator = Arc::new(TxSimulator::new(&args.reth_db_path)?);
 
     // Get processed tx to reconstruct the unsigned call and to cross-check deltas
-    let provider = ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
+    let provider =
+        ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
     let processed = provider.process_transaction_by_hash(tx_hash).await?;
 
-    // Reconstruct UnsignedTransaction from processed
-    let unsigned = UnsignedTransaction {
-        from: Some(processed.from_address),
-        to: processed.to_address,
-        gas: None, // let simulator pick a safe limit
-        gas_price: None, // base fee aware selection
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-        value: Some(processed.value),
-        data: Some(Bytes::from(processed.input.clone())),
-        nonce: Some(processed.nonce),
-    };
+    // Reconstruct UnsignedTransaction from processed with correct gas/fees
+    let unsigned = UnsignedTxBuilder::build_unsigned_from_processed_tx(&processed);
 
     // Use block-1 to get proper pre-state
     let sim_block = processed.block_number.saturating_sub(1);
@@ -95,17 +90,40 @@ async fn main() -> Result<()> {
     // NOTE: Token cache optional; not required to get a pool candidate, but helps confirm
     // if this address is a tracked pool with known reserves. We skip here for simplicity.
 
-    let result = lr.simulate_removal(unsigned, Some(sim_block)).await?;
+    // Try simulation at pre-state (block-1); if fee validation fails, try at block
+    let mut result = lr
+        .simulate_removal(unsigned.clone(), Some(sim_block))
+        .await?;
+    if !result.success {
+        // Retry at the actual block height (more permissive for analysis)
+        result = lr
+            .simulate_removal(unsigned, Some(processed.block_number))
+            .await?;
+    }
 
     println!("✅ LiquidityRemovalResult:");
     println!("  success: {}", result.success);
-    if let Some(r) = &result.revert_reason { println!("  revert_reason: {}", r); }
-    println!("  pool_address: {}", result.pool_address.map(|a| to_checksum_address(&a)).unwrap_or("None".into()));
+    if let Some(r) = &result.revert_reason {
+        println!("  revert_reason: {}", r);
+    }
+    println!(
+        "  pool_address: {}",
+        result
+            .pool_address
+            .map(|a| to_checksum_address(&a))
+            .unwrap_or("None".into())
+    );
     println!("  eth_removed: {:.6}", result.eth_removed);
     println!("  drain_percentage: {:.2}%", result.drain_percentage);
     println!("  remaining_eth: {:.6}", result.remaining_eth);
     println!("  is_scam: {}", result.is_scam);
-    println!("  address_balance_changes_addrs: {}\n", result.address_balance_changes.len());
+    println!(
+        "  address_balance_changes_addrs: {}\n",
+        result.address_balance_changes.len()
+    );
+    if let Some(info) = &result.debug_info {
+        println!("  debug_info: {}", info);
+    }
 
     // Quick cross-check: top ETH deltas from processed tx
     println!("Top ETH balance deltas from processed tx:");
@@ -114,8 +132,12 @@ async fn main() -> Result<()> {
         let av = a.1.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
         let bv = b.1.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
         // compare by absolute value of signed interpretation
-        let ai = alloy_primitives::I256::try_from(av).unwrap_or(alloy_primitives::I256::ZERO).unsigned_abs();
-        let bi = alloy_primitives::I256::try_from(bv).unwrap_or(alloy_primitives::I256::ZERO).unsigned_abs();
+        let ai = alloy_primitives::I256::try_from(av)
+            .unwrap_or(alloy_primitives::I256::ZERO)
+            .unsigned_abs();
+        let bi = alloy_primitives::I256::try_from(bv)
+            .unwrap_or(alloy_primitives::I256::ZERO)
+            .unsigned_abs();
         bi.cmp(&ai)
     });
     for (addr, ch) in entries.iter().take(10) {

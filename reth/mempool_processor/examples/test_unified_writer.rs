@@ -8,11 +8,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter("info,mempool_processor=debug")
         .init();
-    
+
     println!("Testing unified signal writer initialization...\n");
-    
+
     let database_url = "postgresql://postgres:postgres@localhost:5432/eth_db";
-    
+
     match UnifiedSignalWriter::new(database_url).await {
         Ok(writer) => {
             println!("✅ Unified signal writer initialized successfully!");
@@ -23,6 +23,6 @@ async fn main() -> Result<()> {
             println!("❌ Failed to initialize unified signal writer: {}", e);
         }
     }
-    
+
     Ok(())
 }

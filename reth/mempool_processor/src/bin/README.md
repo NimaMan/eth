@@ -484,8 +484,8 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 #### 7.2 Log Files (under the run directory's `signals/` folder)
 - `trading_enabled.log`: Token becomes tradeable with reasonable taxes
 - `tax_signals.log`: High tax, honeypot, or suspicious tax patterns (consolidated)
-- `liquidity_removals.log`: LP removal operations
-- `scam_detections.log`: Pool drains above threshold or low remaining ETH
+- `liquidity_removals.log`: LP removal operations (also includes ScamDetection entries)
+- (scam detections merged into `liquidity_removals.log`)
 - `lp_approval_signals.log`: Creator approving router to spend LP tokens
 - `signal_manager.log`: Per‑TX activity summary from detectors
 
@@ -682,7 +682,6 @@ The service creates a timestamped run directory with the following structure:
     ├── trading_enabled.log
     ├── tax_signals.log
     ├── liquidity_removals.log
-    ├── scam_detections.log
     ├── lp_approval_signals.log
     └── signal_manager.log
 ```
