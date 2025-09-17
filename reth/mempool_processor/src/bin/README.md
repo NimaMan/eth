@@ -674,7 +674,8 @@ The service creates a timestamped run directory with the following structure:
 ├── signal_detector.log          # Main service + lifecycle logs
 ├── simulation_results.log       # One line per simulation outcome (success/error)
 ├── function_detector/           # Function detector diagnostics
-│   └── liquidity_removals.log   # Fast path for removal function matches
+│   ├── liquidity_removals.log   # Fast path for removal function matches
+│   └── trading_enabled.log      # Creator-side trading enablement detections
 └── signals/                     # Per-signal outputs (one file per signal type)
     ├── trading_enabled.log      # TradingEnabled signals
     ├── tax_signals.log          # High tax / honeypot signals
