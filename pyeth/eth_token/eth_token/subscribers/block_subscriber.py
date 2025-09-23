@@ -19,7 +19,9 @@ import asyncio
 import orjson
 import uuid
 from typing import Optional, Callable, Dict, List
+
 import aio_pika
+from aiormq.exceptions import ChannelInvalidStateError
 from eth_token.utils.logger import get_logger
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 
@@ -87,20 +89,52 @@ class BlockSubscriber():
         raise NotImplementedError
 
     async def start(self):
-        """Start consuming messages and processing blocks immediately"""
+        """Start consuming messages and processing blocks immediately.
+
+        Exits only on explicit stop() or on connection fatal error. If the
+        consumption loop exits unexpectedly while still marked as processing,
+        raise to allow callers to react (e.g., trigger shutdown/logging).
+        """
         self._processing = True
         await self.connect()
         await self.queue.purge()
         self.logger.info(f"Purged messages from queue and starting immediate block processing")
         
         # Start consuming messages - process immediately, no internal queue
-        async with self.queue.iterator() as queue_iter:
-            async for message in queue_iter:
-                if not self._processing:
-                    break
-                await self.process_message(message)
-        
-        self.logger.info("Block subscriber started")
+        try:
+            async with self.queue.iterator() as queue_iter:
+                async for message in queue_iter:
+                    if not self._processing:
+                        break
+                    await self.process_message(message)
+        except asyncio.CancelledError:
+            # Propagate cancellation so callers can react appropriately
+            self.logger.info(f"Block subscriber for queue '{self.queue_name}' cancelled.")
+            raise
+        except ChannelInvalidStateError as e:
+            if self._processing:
+                self.logger.error(
+                    f"Block subscriber consumption error: {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                raise
+            # Channel closed while we were shutting down; treat as expected noise
+            self.logger.debug(
+                "ChannelInvalidStateError encountered during shutdown for queue '%s'",
+                self.queue_name,
+            )
+        except Exception as e:
+            # Surface unexpected consumption errors to caller
+            self.logger.error(f"Block subscriber consumption error: {type(e).__name__}: {e}", exc_info=True)
+            raise
+        finally:
+            # If we exit the loop while still marked as processing, this was unexpected
+            if self._processing:
+                msg = f"Block subscriber loop exited unexpectedly for queue '{self.queue_name}'"
+                self.logger.warning(msg)
+                raise RuntimeError(msg)
+            else:
+                self.logger.info(f"Block subscriber for queue '{self.queue_name}' stopped")
 
     async def stop(self):
         """Stop consuming messages"""
