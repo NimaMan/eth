@@ -43,7 +43,7 @@ class BlockSubscriber():
         self._processing = False
     
         # Create unique queue name for this consumer instance
-        self.queue_name = f"token_analyzer_blocks_{uuid.uuid4().hex[:8]}"
+        self.queue_name = f"token_tracking_blocks_{uuid.uuid4().hex[:8]}"
         self.exchange_name = "blocks_exchange"
         self.routing_key = ""
 
@@ -73,7 +73,9 @@ class BlockSubscriber():
                 }
             )
             await self.queue.bind(self.exchange, routing_key=self.routing_key)
-            self.logger.info(f"Connected to RabbitMQ exchange: {self.exchange_name} with exclusive queue: {self.queue_name}")
+            self.logger.info(
+                f"Subscribed to RabbitMQ blocks exchange '{self.exchange_name}' via exclusive queue '{self.queue_name}'"
+            )
         except Exception as e:
             self.logger.error(f"Failed to connect to RabbitMQ: {e}")
             raise
