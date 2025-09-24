@@ -11,16 +11,6 @@ This directory contains working examples demonstrating the usage of the RethChai
 - **What it does**: Initializes the RethQueryProvider and verifies connection to the Reth database
 - **Use case**: Quick verification that your Reth database is accessible
 
-#### `fetch_block_tx_and_receipts_simple`
-- **Purpose**: Demonstrates fetching block transactions and receipts
-- **What it does**: Retrieves all transactions and receipts for a specific block
-- **Use case**: Block analysis, transaction validation, gas usage analysis
-
-#### `test_block_fetching`
-- **Purpose**: Tests various block data fetching methods
-- **What it does**: Demonstrates different ways to fetch block data (headers, transactions, receipts)
-- **Use case**: Understanding different block query patterns and their performance
-
 ### Quickstart Examples
 
 #### `setup`
@@ -85,6 +75,13 @@ This directory contains working examples demonstrating the usage of the RethChai
 - **Purpose**: Verify data consistency
 - **What it does**: Compares database results with RPC results for validation
 - **Use case**: Data integrity verification, testing
+
+### Block Verification Examples
+
+#### `verify_block_receipts_rpc_equivalence`
+- **Purpose**: Validate block-level data parity
+- **What it does**: Compares block receipts and header metadata loaded from the MDBX database with RPC responses (`eth_getBlockReceipts`/`eth_getBlockByNumber`)
+- **Use case**: Confidence check before using local block data for downstream processing
 
 ## Suggested Examples to Add
 

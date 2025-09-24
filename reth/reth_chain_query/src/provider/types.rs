@@ -1,9 +1,8 @@
 /// Shared data types for the provider module
-/// 
+///
 /// This module contains all the data structures used across different
 /// provider operations including transactions, blocks, and traces.
-
-use alloy_primitives::{Address, B256, U256, Bytes};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Transaction metadata (the transaction parameters, not execution results)
@@ -14,11 +13,11 @@ pub struct TransactionMetadata {
     pub block_number: u64,
     pub block_timestamp: u64,
     pub tx_index: u64,
-    pub tx_number: u64,  // Sequential transaction ID in Reth
+    pub tx_number: u64, // Sequential transaction ID in Reth
     pub from: Address,
     pub to: Option<Address>,
     pub value: U256,
-    pub input: Bytes,  // The calldata sent with the transaction
+    pub input: Bytes, // The calldata sent with the transaction
     pub gas_price: U256,
     pub gas_limit: u64,
     pub nonce: u64,
@@ -156,6 +155,15 @@ pub struct BlockTransactions {
     pub transactions: Vec<FullTransactionData>,
 }
 
+/// Raw block data fetched from the database (optionally including traces)
+#[derive(Debug, Clone)]
+pub struct RawBlockData {
+    pub header: BlockHeader,
+    pub transactions: Vec<TransactionMetadata>,
+    pub receipts: Vec<TransactionReceipt>,
+    pub traces: Option<Vec<TransactionTrace>>,
+}
+
 /// Full transaction data including metadata, receipt, and optional trace
 #[derive(Debug, Clone)]
 pub struct FullTransactionData {
@@ -163,10 +171,10 @@ pub struct FullTransactionData {
     pub tx_metadata: TransactionMetadata,
     /// Transaction receipt with logs (from database)
     pub tx_receipt: TransactionReceipt,
-    
+
     /// Transaction trace from RPC or simulation (optional)
     pub tx_trace: Option<TransactionTrace>,
-    
+
     /// State changes computed from trace
     pub state_changes: Option<StateChanges>,
 }

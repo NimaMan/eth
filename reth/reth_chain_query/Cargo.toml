@@ -77,16 +77,7 @@ path = "examples/address_state/historical_analysis.rs"
 name = "address_tx_blocks"
 path = "examples/address_state/address_tx_blocks.rs"
 
-
 # Transaction examples
-[[example]]
-name = "fetch_block_tx_and_receipts_simple"
-path = "examples/transactions/fetch_block_tx_and_receipts_simple.rs"
-
-[[example]]
-name = "test_block_fetching"
-path = "examples/transactions/test_block_fetching.rs"
-
 [[example]]
 name = "fetch_transaction_data_receipts_and_traces"
 path = "examples/transactions/fetch_transaction_data_receipts_and_traces.rs"
@@ -94,6 +85,10 @@ path = "examples/transactions/fetch_transaction_data_receipts_and_traces.rs"
 [[example]]
 name = "verify_receipts_rpc_equivalence"
 path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
+
+[[example]]
+name = "verify_block_receipts_rpc_equivalence"
+path = "examples/block/verify_block_receipts_rpc_equivalence.rs"
 
 # Token examples
 [[example]]
