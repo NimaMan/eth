@@ -19,19 +19,19 @@ alloy-consensus = "1.0.27"
 hex = "0.4"
 
 # Reth dependencies - using GitHub references
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
 
-# REVM - exact version Reth uses
-revm = { version = "27.1.0", default-features = false, features = ["std"] }
-revm-inspectors = "0.27.2"
+# REVM - align with Reth v1.7.0 toolchain
+revm = { version = "29.0.1", default-features = false, features = ["std"] }
+revm-inspectors = "0.30.0"
 
 # For serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -128,5 +128,3 @@ path = "examples/block/verify_block_trace_rpc_equivalence.rs"
 [[example]]
 name = "buy_approve_sell_signed_chain_uniswap_v2"
 path = "examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs"
-
-## create_keystore example moved to eth_tx_executor
