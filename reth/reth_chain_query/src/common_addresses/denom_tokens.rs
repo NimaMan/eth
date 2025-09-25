@@ -163,11 +163,8 @@ pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|
     let mut m = HashMap::new();
     m.insert("zero_address", address!("0000000000000000000000000000000000000000"));
     m.insert("dead_address", address!("000000000000000000000000000000000000dEaD"));
-    // Default buyer EOA used in local buy-sim examples
-    // You can change this mapping or override at callsites as needed
-    m.insert("BuySimBuyer", address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689"));
     m.insert("WETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
-    m.insert("stETH", address!("ae7ab96520DE3A18E5e111B5EaAb095312D7fE84"));
+    m.insert("WBTC", address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"));
     m.insert("TrustSwap: Team Finance Lock", address!("E2fE530C047f2d85298b07D9333C05737f1435fB"));
     m.insert("UNCX Network Security: LP Lockers", address!("663A5C229c09b049E36dCc11a9B0d4a8Eb9db214"));
     m.insert("UNCX Network Security: Token Vesting", address!("Dba68f07d1b7Ca219f78ae8582C213d975c25cAf"));
