@@ -12,11 +12,10 @@ This directory contains examples demonstrating the `address_state` module functi
   - Historical balance queries at specific blocks
   - Account type detection (EOA vs Contract)
 
-- **[portfolio.rs](portfolio.rs)** - Build complete portfolio views
-  - Complete portfolio for an address (ETH + multiple tokens)
-  - Multi-address portfolio aggregation
-  - Historical portfolio snapshots
-  - Portfolio value tracking over time
+- **[account_history_blocks.rs](account_history_blocks.rs)** - Enumerate account-state touch points
+  - Lists blocks from `AccountsHistory` where balance/nonce/code changed
+  - Includes archive index/pruning diagnostics
+  - Use as an input to higher-level transaction processing
 
 ### Advanced Features
 
@@ -64,9 +63,6 @@ This directory contains examples demonstrating the `address_state` module functi
 ```bash
 # Basic balance queries
 cargo run --example balances
-
-# Portfolio management
-cargo run --example portfolio
 
 # Batch operations (shows performance gains)
 cargo run --example batch_operations

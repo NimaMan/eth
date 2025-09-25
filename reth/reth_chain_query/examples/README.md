@@ -42,20 +42,15 @@ This directory contains working examples demonstrating the usage of the RethChai
 
 ### Token Examples
 
-#### `token_metadata_basic`
-- **Purpose**: Query basic ERC20 token information
-- **What it does**: Fetches name, symbol, and decimals for popular tokens
-- **Use case**: Token identification, metadata collection
+#### `token_inspection`
+- **Purpose**: End-to-end token analysis
+- **What it does**: Pulls metadata, supply, holder balances, contract details, and historical context for one token
+- **Use case**: Investigations, due diligence, token monitoring
 
-#### `token_supply_historical`
-- **Purpose**: Track token supply changes over time
-- **What it does**: Monitors total supply changes to detect inflation/deflation
-- **Use case**: Tokenomics analysis, supply monitoring
-
-#### `token_comprehensive_info`
-- **Purpose**: Complete token analysis
-- **What it does**: Comprehensive token information including metadata, supply, and holder analysis
-- **Use case**: Deep token analysis, due diligence
+#### `token_blocks`
+- **Purpose**: Enumerate block numbers where a token contract’s state changed
+- **What it does**: Reads `AccountsHistory` to list candidate blocks for downstream transaction decoding
+- **Use case**: Kick off token activity reprocessing pipelines
 
 ### Entity Examples
 

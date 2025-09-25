@@ -1,6 +1,6 @@
 [package]
 name = "reth_chain_query"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Nima"]
 description = "Direct blockchain state queries using Reth database"
@@ -74,8 +74,8 @@ path = "examples/address_state/historical_analysis.rs"
 
 # Address tx blocks example
 [[example]]
-name = "address_tx_blocks"
-path = "examples/address_state/address_tx_blocks.rs"
+name = "account_history_blocks"
+path = "examples/address_state/account_history_blocks.rs"
 
 # Transaction examples
 [[example]]
@@ -90,22 +90,18 @@ path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
 name = "verify_block_receipts_rpc_equivalence"
 path = "examples/block/verify_block_receipts_rpc_equivalence.rs"
 
-# Token examples
-[[example]]
-name = "token_metadata_basic"
-path = "examples/tokens/token_metadata_basic.rs"
-
 [[example]]
 name = "stablecoin_total_supply"
 path = "examples/entities/stablecoin_total_supply.rs"
 
+# Token examples
 [[example]]
-name = "token_supply_historical"
-path = "examples/tokens/token_supply_historical.rs"
+name = "token_inspection"
+path = "examples/tokens/token_inspection.rs"
 
 [[example]]
-name = "token_comprehensive_info"
-path = "examples/tokens/token_comprehensive_info.rs"
+name = "token_blocks"
+path = "examples/tokens/token_blocks.rs"
 
 [dev-dependencies]
 tokio-test = "0.4"

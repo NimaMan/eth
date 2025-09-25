@@ -1,18 +1,19 @@
-/// Find all blocks where a given address appears in any transaction
+use alloy_primitives::Address;
+/// Find blocks where an address' *account state* changed (balance, nonce, code)
 ///
 /// Usage:
-///   cargo run --example address_tx_blocks [start_block] [end_block]
+///   cargo run --example account_history_blocks [start_block] [end_block]
 ///
-/// Defaults to scanning the entire chain (1..=latest) if no range is provided.
-/// You can pass a narrower range to speed up the run.
-
-use reth_chain_query::{RethQueryProvider, Result};
-use alloy_primitives::Address;
-use std::str::FromStr;
+/// The lookup reads the `AccountsHistory` table, so it captures only blocks that
+/// mutated the address' own account entry. Pure log-only/token events are not
+/// included; fetch the blocks first, then use the processed transaction pipeline
+/// to filter for richer participation.
+use reth_chain_query::{Result, RethQueryProvider};
 use reth_db::tables;
 use reth_db::transaction::DbTx;
-use reth_stages_types::StageId;
 use reth_prune_types::PruneSegment;
+use reth_stages_types::StageId;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,14 +27,8 @@ async fn main() -> Result<()> {
 
     // Optional CLI args: [start_block] [end_block]
     let mut args = std::env::args().skip(1);
-    let start_block: u64 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-    let end_block: u64 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(latest);
+    let start_block: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    let end_block: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(latest);
 
     // Print archive indexing and pruning status
     let pf = provider.provider_factory();
@@ -55,15 +50,21 @@ async fn main() -> Result<()> {
         start_block, end_block, addr
     );
 
-    let blocks = provider
-        .get_address_account_history_blocks(addr, start_block, end_block)
-        .await?;
+    let blocks = provider.get_account_history_blocks_for_address(addr, start_block, end_block)?;
 
-    println!("\nFound {} blocks with at least one tx involving the address.", blocks.len());
+    println!(
+        "\nFound {} blocks with at least one tx involving the address.",
+        blocks.len()
+    );
     if !blocks.is_empty() {
-        println!("First 20 blocks: {:?}", &blocks.iter().take(20).cloned().collect::<Vec<_>>());
+        println!(
+            "First 20 blocks: {:?}",
+            &blocks.iter().take(20).cloned().collect::<Vec<_>>()
+        );
         println!("\nAll blocks ({} total):", blocks.len());
-        for b in &blocks { println!("{}", b); }
+        for b in &blocks {
+            println!("{}", b);
+        }
     }
 
     Ok(())
