@@ -3,9 +3,10 @@
 //! Exposes a Python `PoolLiquidityInfo` data class and methods from `PyChainQuery`
 //! to fetch pool reserves/liquidity without RPC (direct from Reth).
 
+use alloy_primitives::U256;
 use pyo3::prelude::*;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
-use reth_chain_query::RethQueryProvider;
+use reth_chain_query::{provider::PoolLiquidityInfo, RethQueryProvider};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -61,25 +62,84 @@ pub fn get_pool_liquidity(
     let info = runtime
         .block_on(async move { provider.get_route_liquidity(&route, block).await })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+    let PoolLiquidityInfo {
+        protocol,
+        pool,
+        pool_id,
+        token0,
+        token1,
+        token0_symbol,
+        token1_symbol,
+        token0_decimals,
+        token1_decimals,
+        reserve0,
+        reserve1,
+        v3_liquidity,
+        tick,
+        sqrt_price_x96,
+        price_1e18,
+        block_number,
+    } = info;
+
+    let reserve0_scale_adjusted =
+        reserve0.and_then(|value| token0_decimals.map(|dec| format_scaled(value, dec)));
+    let reserve1_scale_adjusted =
+        reserve1.and_then(|value| token1_decimals.map(|dec| format_scaled(value, dec)));
 
     Ok(PyPoolLiquidityInfo {
-        protocol: info.protocol.to_string(),
-        pool: format!("0x{}", hex::encode(info.pool)),
-        pool_id: info.pool_id.map(|b| format!("0x{}", hex::encode(b))),
-        token0: info.token0.map(|a| format!("0x{}", hex::encode(a))),
-        token1: info.token1.map(|a| format!("0x{}", hex::encode(a))),
-        token0_symbol: info.token0_symbol,
-        token1_symbol: info.token1_symbol,
-        token0_decimals: info.token0_decimals,
-        token1_decimals: info.token1_decimals,
-        reserve0: info.reserve0.map(|v| v.to_string()),
-        reserve1: info.reserve1.map(|v| v.to_string()),
-        reserve0_scale_adjusted: info.reserve0_scale_adjusted,
-        reserve1_scale_adjusted: info.reserve1_scale_adjusted,
-        v3_liquidity: info.v3_liquidity.map(|v| v.to_string()),
-        tick: info.tick,
-        sqrt_price_x96: info.sqrt_price_x96.map(|v| v.to_string()),
-        price_1e18: info.price_1e18.map(|v| v.to_string()),
-        block_number: info.block_number,
+        protocol: protocol.to_string(),
+        pool: format!("0x{}", hex::encode(pool)),
+        pool_id: pool_id.map(|b| format!("0x{}", hex::encode(b))),
+        token0: token0.map(|a| format!("0x{}", hex::encode(a))),
+        token1: token1.map(|a| format!("0x{}", hex::encode(a))),
+        token0_symbol,
+        token1_symbol,
+        token0_decimals,
+        token1_decimals,
+        reserve0: reserve0.map(|v| v.to_string()),
+        reserve1: reserve1.map(|v| v.to_string()),
+        reserve0_scale_adjusted,
+        reserve1_scale_adjusted,
+        v3_liquidity: v3_liquidity.map(|v| v.to_string()),
+        tick,
+        sqrt_price_x96: sqrt_price_x96.map(|v| v.to_string()),
+        price_1e18: price_1e18.map(|v| v.to_string()),
+        block_number,
     })
+}
+
+fn format_scaled(value: U256, decimals: u8) -> String {
+    if decimals == 0 {
+        return value.to_string();
+    }
+
+    let scale = U256::from(10u8).pow(U256::from(decimals));
+    if scale.is_zero() {
+        return value.to_string();
+    }
+
+    let whole = value / scale;
+    let frac = value % scale;
+
+    if frac.is_zero() {
+        return whole.to_string();
+    }
+
+    let mut frac_str = frac.to_string();
+    let decimals_len = decimals as usize;
+    if frac_str.len() < decimals_len {
+        let mut padded = String::with_capacity(decimals_len);
+        for _ in 0..(decimals_len - frac_str.len()) {
+            padded.push('0');
+        }
+        padded.push_str(&frac_str);
+        frac_str = padded;
+    }
+
+    let frac_trimmed = frac_str.trim_end_matches('0');
+    if frac_trimmed.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{}.{}", whole, frac_trimmed)
+    }
 }
