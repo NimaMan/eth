@@ -33,13 +33,13 @@ pub struct PyPoolLiquidityInfo {
     #[pyo3(get)]
     pub token1_decimals: Option<u8>,
     #[pyo3(get)]
-    pub reserve0: Option<String>,
+    pub reserve0_raw: Option<String>,
     #[pyo3(get)]
-    pub reserve1: Option<String>,
+    pub reserve1_raw: Option<String>,
     #[pyo3(get)]
-    pub reserve0_scale_adjusted: Option<String>,
+    pub reserve0_scaled: Option<String>,
     #[pyo3(get)]
-    pub reserve1_scale_adjusted: Option<String>,
+    pub reserve1_scaled: Option<String>,
     #[pyo3(get)]
     pub v3_liquidity: Option<String>,
     #[pyo3(get)]
@@ -81,9 +81,9 @@ pub fn get_pool_liquidity(
         block_number,
     } = info;
 
-    let reserve0_scale_adjusted =
+    let reserve0_scaled =
         reserve0.and_then(|value| token0_decimals.map(|dec| format_scaled(value, dec)));
-    let reserve1_scale_adjusted =
+    let reserve1_scaled =
         reserve1.and_then(|value| token1_decimals.map(|dec| format_scaled(value, dec)));
 
     Ok(PyPoolLiquidityInfo {
@@ -96,10 +96,10 @@ pub fn get_pool_liquidity(
         token1_symbol,
         token0_decimals,
         token1_decimals,
-        reserve0: reserve0.map(|v| v.to_string()),
-        reserve1: reserve1.map(|v| v.to_string()),
-        reserve0_scale_adjusted,
-        reserve1_scale_adjusted,
+        reserve0_raw: reserve0.map(|v| v.to_string()),
+        reserve1_raw: reserve1.map(|v| v.to_string()),
+        reserve0_scaled,
+        reserve1_scaled,
         v3_liquidity: v3_liquidity.map(|v| v.to_string()),
         tick,
         sqrt_price_x96: sqrt_price_x96.map(|v| v.to_string()),
