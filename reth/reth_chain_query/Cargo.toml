@@ -20,17 +20,17 @@ futures = "0.3"
 tx_simulator = { path = "../tx_simulator" }
 
 # Reth dependencies for provider types
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-db-models = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-stages-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-prune-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-db-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db-models = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-stages-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-prune-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
 
 # PostgreSQL support
 sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "bigdecimal"] }
