@@ -50,7 +50,9 @@ async fn main() -> Result<()> {
         start_block, end_block, addr
     );
 
-    let blocks = provider.get_account_history_blocks_for_address(addr, start_block, end_block)?;
+    let blocks = provider
+        .get_address_account_history_blocks(addr, start_block, end_block)
+        .await?;
 
     println!(
         "\nFound {} blocks with at least one tx involving the address.",
