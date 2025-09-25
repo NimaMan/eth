@@ -27,37 +27,13 @@ Blockchain Interface:
 - getPoolKey(poolId): Retrieve PoolKey from PoolId
 """
 
-from typing import Dict, Optional, List, Tuple
-from dataclasses import dataclass, field
-from collections import deque
-import math
+from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
+from dataclasses import dataclass
 from .base_pool import BasePool
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
 
-
-# Uniswap V4 PoolManager contract ABI for blockchain queries
-UNISWAP_V4_POOL_MANAGER_ABI = [
-    {
-        "inputs": [{"internalType": "bytes32", "name": "poolId", "type": "bytes32"}],
-        "name": "getSlot0",
-        "outputs": [
-            {"internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160"},
-            {"internalType": "int24", "name": "tick", "type": "int24"},
-            {"internalType": "uint8", "name": "protocolFee", "type": "uint8"},
-            {"internalType": "uint8", "name": "hookFee", "type": "uint8"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [{"internalType": "bytes32", "name": "poolId", "type": "bytes32"}],
-        "name": "getLiquidity",
-        "outputs": [{"internalType": "uint128", "name": "liquidity", "type": "uint128"}],
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
-
+if TYPE_CHECKING:
+    from .pool_chain_data_fetcher import PoolChainDataFetcher
+    from ..token_chain_data_fetcher import TokenChainDataFetcher
 
 @dataclass
 class PoolKey:
@@ -67,6 +43,7 @@ class PoolKey:
     fee: int
     tick_spacing: int
     hooks: str
+
 
 @dataclass
 class V4Tick:
@@ -80,16 +57,58 @@ class UniswapV4Pool(BasePool):
     Uniswap V4 Pool, correctly modeling concentrated liquidity within the singleton architecture.
     """
     POOL_MANAGER = "0x000000000004444C5DC75cB358380d2E3de08a90"
+
+    # Discovered mainnet V4 pools for common pairs (via Reth DB logs)
+    # Note: V4 uses PoolId (bytes32) rather than pool addresses. These entries
+    # help manual wiring when constructing known pools for tokens.
+    KNOWN_POOLS: Dict[str, List[Dict[str, str | int]]] = {
+        # USDC / WETH
+        "USDC_WETH": [
+            {
+                "pool_id": "0x6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa",
+                "currency0": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "currency1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                "fee": 1000,
+                "tick_spacing": 1,
+                "hooks": "0x36FABF0DaCD49E94dDb3A21999F199068a9Fe8a8",
+            },
+            {
+                "pool_id": "0xf54122f945300a5230ce2bf95ceb7a70248368fe59125ca43dcf00052054a236",
+                "currency0": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "currency1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                "fee": 100,
+                "tick_spacing": 1,
+                "hooks": "0xf3621C65B9597819a854743ECe1A0f2d62c5A8A8",
+            },
+        ],
+        # USDT / WETH (no Initialize events found in recent history)
+        "USDT_WETH": [],
+    }
     
-    def __init__(self, pool_id: str, pool_key: PoolKey, token_address: str, 
-                 denom_address: str, token1_is_denom: bool = True):
-        super().__init__(self.POOL_MANAGER, token_address, denom_address, token1_is_denom)
+    def __init__(
+        self,
+        pool_id: str,
+        pool_key: PoolKey,
+        token_address: str,
+        denom_address: str,
+        token1_is_denom: bool = True,
+        pool_chain_fetcher: Optional['PoolChainDataFetcher'] = None,
+        token_chain_fetcher: Optional['TokenChainDataFetcher'] = None,
+    ):
+        super().__init__(
+            self.POOL_MANAGER,
+            token_address,
+            denom_address,
+            token1_is_denom,
+            pool_chain_fetcher=pool_chain_fetcher,
+            token_chain_fetcher=token_chain_fetcher,
+        )
         
         self.pool_id = pool_id
         self.pool_key = pool_key
         
         # Display address for compatibility (PoolManager#poolId format)
-        self.display_address = f"{self.POOL_MANAGER}#{pool_id}"
+        self.display_address = f"{self.POOL_MANAGER}-{pool_id}"
         
         self.sqrt_price_x96: int = 0
         self.current_tick: int = 0
@@ -98,20 +117,27 @@ class UniswapV4Pool(BasePool):
         self.ticks: Dict[int, V4Tick] = {}
 
     def get_protocol(self) -> str:
-        return "V4"
-        
-    def process_transaction(self, transaction: ProcessedTransaction):
-        # V4 uses ModifyLiquidity for both mints and burns
-        for modify in getattr(transaction, 'uniswap_v4_modifies', []):
-            if modify.get('pool_id') == self.pool_id:
-                self._process_modify_liquidity(modify, transaction)
-
-        for swap in getattr(transaction, 'uniswap_v4_swaps', []):
-            if swap.get('pool_id') == self.pool_id:
-                self._process_swap(swap, transaction)
+        return "Uniswap-V4"
     
-    def _process_swap(self, swap: dict, transaction: ProcessedTransaction):
-        self._mark_trading_enabled(transaction)
+    def process_transaction(self, transaction: Dict):
+        # V4 uses ModifyLiquidity for both mints and burns
+        if transaction.get('uniswap_v4_modifies'):
+            for modify in transaction['uniswap_v4_modifies']:
+                if modify.get('pool_id') == self.pool_id:
+                    self._process_modify_liquidity(modify, transaction)
+
+        if transaction.get('uniswap_v4_swaps'):
+            for swap in transaction['uniswap_v4_swaps']:
+                if swap.get('pool_id') == self.pool_id:
+                    self._process_swap(swap, transaction)
+        
+        # Check if trading is enabled after processing all events
+        self.check_and_update_trading_status(transaction)
+    
+    def _process_swap(self, swap: dict, transaction: Dict):
+        """Process a V4 swap event."""
+        # Mark token as buyable from first swap event
+        self.mark_can_buy_from_event(transaction, event_type='swap')
         
         self.sqrt_price_x96 = int(swap.get('sqrt_price_x96', 0))
         new_tick = int(swap.get('tick', 0))
@@ -133,8 +159,9 @@ class UniswapV4Pool(BasePool):
         
         self.swap_events.append(swap)
 
-    def _process_modify_liquidity(self, modify: dict, transaction: ProcessedTransaction):
-        self._mark_trading_enabled(transaction)
+    def _process_modify_liquidity(self, modify: dict, transaction: Dict):
+        # NOTE: Modifying liquidity does NOT mean trading is enabled
+        # We only mark trading enabled on swaps
 
         liquidity_delta = int(modify.get('liquidity_delta', 0))
         tick_lower = int(modify.get('tick_lower', 0))
@@ -210,70 +237,78 @@ class UniswapV4Pool(BasePool):
         # V4 PoolKey currency0/1 is already sorted, but our token/denom is not.
         # We must align them with the token1_is_denom flag.
         pool_key_token0 = self.pool_key.currency0
-        if self.token1_is_denom: # Our token is token0 in the pair
-            return self.get_token_decimals() if self.token_address == pool_key_token0 else self.get_denom_decimals()
-        else: # Our token is token1 in the pair
-            return self.get_denom_decimals() if self.denom_address == pool_key_token0 else self.get_token_decimals()
+        addr = None
+        try:
+            if self.token1_is_denom:  # Our token is token0 in the pair
+                addr = self.token_address if self.token_address == pool_key_token0 else self.denom_address
+            else:  # Our token is token1 in the pair
+                addr = self.denom_address if self.denom_address == pool_key_token0 else self.token_address
+            decimals = self.token_chain_fetcher.get_token_decimals(addr)
+        except Exception:
+            decimals = None
+        return int(decimals) if decimals is not None else 18
 
     def _get_token1_decimals(self) -> int:
         pool_key_token1 = self.pool_key.currency1
-        if self.token1_is_denom: # Our token is token0 in the pair
-            return self.get_denom_decimals() if self.denom_address == pool_key_token1 else self.get_token_decimals()
-        else: # Our token is token1 in the pair
-            return self.get_token_decimals() if self.token_address == pool_key_token1 else self.get_denom_decimals()
+        addr = None
+        try:
+            if self.token1_is_denom:  # Our token is token0 in the pair
+                addr = self.denom_address if self.denom_address == pool_key_token1 else self.token_address
+            else:  # Our token is token1 in the pair
+                addr = self.token_address if self.token_address == pool_key_token1 else self.denom_address
+            decimals = self.token_chain_fetcher.get_token_decimals(addr)
+        except Exception:
+            decimals = None
+        return int(decimals) if decimals is not None else 18
     
     def get_reserves_from_blockchain(self, block_identifier='latest') -> Tuple[float, float, bool]:
         """
-        Fetch V4 pool state from blockchain using multiple approaches.
-        
-        Returns:
-            Tuple of (denom_reserve, token_reserve, success)
+        Fetch V4 pool virtual reserves using PyReth ChainQuery (PoolManager + PoolId).
         """
         try:
-            if not hasattr(self, 'w3') or not self.w3.is_connected():
+            import math
+            # Resolve block number; None implies latest
+            block = None
+            if isinstance(block_identifier, int):
+                block = int(block_identifier)
+            elif isinstance(block_identifier, str) and block_identifier != 'latest':
+                try:
+                    block = int(block_identifier)
+                except Exception:
+                    block = None
+
+            info = self.pool_chain_fetcher.get_v4_liquidity(self.POOL_MANAGER, self.pool_id, block)
+            if not info:
                 return 0.0, 0.0, False
-                
-            # Try multiple approaches to get pool state
-            pool_state = self._get_pool_state()
-            
-            if not pool_state or pool_state.get('sqrtPriceX96', 0) == 0:
-                return 0.0, 0.0, False
-                
-            # Calculate reserves from pool state
-            reserve0, reserve1 = self._calculate_reserves_from_state(pool_state)
-            
-            # Determine which is denom vs token based on configuration
+
+            reserve0 = info.get('reserve0_scaled') or info.get('reserve0')
+            reserve1 = info.get('reserve1_scaled') or info.get('reserve1')
+            if reserve0 is None or reserve1 is None:
+                L = float(int(info.get('liquidity') or info.get('v3_liquidity') or 0))
+                tick = int(info.get('tick', 0))
+                sqrt_price = math.pow(1.0001, tick / 2)
+                if sqrt_price == 0 or L == 0:
+                    return 0.0, 0.0, True
+                reserve0_raw = L / sqrt_price
+                reserve1_raw = L * sqrt_price
+                token0_decimals = int(info.get('token0_decimals') or self.token_chain_fetcher.get_token_decimals(self.pool_key.currency0) or 18)
+                token1_decimals = int(info.get('token1_decimals') or self.token_chain_fetcher.get_token_decimals(self.pool_key.currency1) or 18)
+                reserve0 = reserve0_raw / (10 ** token0_decimals)
+                reserve1 = reserve1_raw / (10 ** token1_decimals)
+
+            # Map based on token1_is_denom and PoolKey currency mapping
             if self.token1_is_denom:
-                # token0 = our token, token1 = denom
                 denom_reserve = reserve1
                 token_reserve = reserve0
             else:
-                # token0 = denom, token1 = our token  
                 denom_reserve = reserve0
                 token_reserve = reserve1
-            
-            return denom_reserve, token_reserve, True
-            
+
+            return float(denom_reserve), float(token_reserve), True
         except Exception:
             return 0.0, 0.0, False
-    
-    def _get_pool_state(self) -> Optional[Dict]:
-        """Get pool state trying multiple approaches."""
-        approaches = [
-            self._try_pools_function,
-            self._try_getSlot0_function,
-            self._try_storage_read
-        ]
-        
-        for approach in approaches:
-            try:
-                result = approach()
-                if result and result.get('sqrtPriceX96', 0) > 0:
-                    return result
-            except Exception:
-                continue
-        
-        return None
+      
+    # Removed Web3-based fallbacks; ChainQuery provides the required data
     
     def _try_pools_function(self) -> Optional[Dict]:
         """Try pools() function approach."""
@@ -298,73 +333,6 @@ class UniswapV4Pool(BasePool):
             'sqrtPriceX96': result[0],
             'tick': result[1],
             'liquidity': result[2]
-        }
-    
-    def _try_getSlot0_function(self) -> Optional[Dict]:
-        """Try getSlot0 + getLiquidity approach."""
-        slot0_abi = [{
-            "inputs": [{"type": "bytes32"}],
-            "name": "getSlot0",
-            "outputs": [{"type": "uint160"}, {"type": "int24"}],
-            "stateMutability": "view",
-            "type": "function"
-        }]
-        
-        liquidity_abi = [{
-            "inputs": [{"type": "bytes32"}],
-            "name": "getLiquidity", 
-            "outputs": [{"type": "uint128"}],
-            "stateMutability": "view",
-            "type": "function"
-        }]
-        
-        pool_id_bytes = bytes.fromhex(self.pool_id[2:] if self.pool_id.startswith('0x') else self.pool_id)
-        
-        slot0_contract = self.w3.eth.contract(address=self.POOL_MANAGER, abi=slot0_abi)
-        liquidity_contract = self.w3.eth.contract(address=self.POOL_MANAGER, abi=liquidity_abi)
-        
-        slot0_result = slot0_contract.functions.getSlot0(pool_id_bytes).call()
-        liquidity = liquidity_contract.functions.getLiquidity(pool_id_bytes).call()
-        
-        return {
-            'sqrtPriceX96': slot0_result[0],
-            'tick': slot0_result[1],
-            'liquidity': liquidity
-        }
-    
-    def _try_storage_read(self) -> Optional[Dict]:
-        """Try direct storage reading."""
-        from eth_utils import keccak
-        
-        pool_id_bytes = bytes.fromhex(self.pool_id[2:] if self.pool_id.startswith('0x') else self.pool_id)
-        
-        # Calculate storage key for pools mapping (slot 0)
-        storage_key = keccak(pool_id_bytes + (0).to_bytes(32, 'big'))
-        
-        # Read slot0
-        slot0_data = self.w3.eth.get_storage_at(self.POOL_MANAGER, storage_key)
-        
-        # Read liquidity (next slot)
-        liquidity_slot = int.from_bytes(storage_key, 'big') + 1
-        liquidity_data = self.w3.eth.get_storage_at(self.POOL_MANAGER, liquidity_slot.to_bytes(32, 'big'))
-        
-        # Decode packed slot0
-        slot0_int = int.from_bytes(slot0_data, 'big')
-        
-        # Extract sqrtPriceX96 (160 bits) and tick (24 bits)
-        sqrtPriceX96 = slot0_int & ((1 << 160) - 1)
-        tick = (slot0_int >> 160) & ((1 << 24) - 1)
-        
-        # Handle negative ticks
-        if tick > 0x7FFFFF:
-            tick = tick - 0x1000000
-            
-        liquidity = int.from_bytes(liquidity_data, 'big')
-        
-        return {
-            'sqrtPriceX96': sqrtPriceX96,
-            'tick': tick,
-            'liquidity': liquidity
         }
     
     def _calculate_reserves_from_state(self, pool_state: Dict) -> Tuple[float, float]:

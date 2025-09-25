@@ -8,12 +8,15 @@ Key Features:
 - Virtual reserves calculated from current price and liquidity
 """
 
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 import math
 
 from .base_pool import BasePool
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
+
+if TYPE_CHECKING:
+    from .pool_chain_data_fetcher import PoolChainDataFetcher
+    from ..token_chain_data_fetcher import TokenChainDataFetcher
 
 
 @dataclass
@@ -36,9 +39,24 @@ class UniswapV3Pool(BasePool):
     Uniswap V3 pool that correctly processes concentrated liquidity events.
     """
     
-    def __init__(self, pool_address: str, token_address: str, denom_address: str, 
-                 token1_is_denom: bool = True, fee_tier: int = 3000):
-        super().__init__(pool_address, token_address, denom_address, token1_is_denom)
+    def __init__(
+        self,
+        pool_address: str,
+        token_address: str,
+        denom_address: str,
+        token1_is_denom: bool = True,
+        fee_tier: int = 3000,
+        pool_chain_fetcher: Optional['PoolChainDataFetcher'] = None,
+        token_chain_fetcher: Optional['TokenChainDataFetcher'] = None,
+    ):
+        super().__init__(
+            pool_address,
+            token_address,
+            denom_address,
+            token1_is_denom,
+            pool_chain_fetcher=pool_chain_fetcher,
+            token_chain_fetcher=token_chain_fetcher,
+        )
         
         self.fee_tier = fee_tier
         self.sqrt_price_x96: int = 0
@@ -56,7 +74,7 @@ class UniswapV3Pool(BasePool):
         self.burn_events = []
         
     def get_protocol(self) -> str:
-        return "V3"
+        return "Uniswap-V3"
     
     def _get_tick_spacing(self, fee: int) -> int:
         """Get tick spacing for fee tier."""
@@ -67,32 +85,41 @@ class UniswapV3Pool(BasePool):
             10000: 200  # 1.00%
         }.get(fee, 60)
     
-    def process_transaction(self, transaction: ProcessedTransaction):
+    def process_transaction(self, transaction: Dict):
         """
         Process V3 events from a transaction.
         
         V3 events:
-        - univ3_swaps: Swaps with tick/liquidity data
-        - univ3_mints: Position creations
-        - univ3_burns: Position removals
+        - uniswap_v3_swaps: Swaps with tick/liquidity data
+        - uniswap_v3_mints: Position creations (if present)
+        - uniswap_v3_burns: Position removals (if present)
         """
         # Correctly ordered processing: Mints/Burns first, then Swaps
-        for mint in getattr(transaction, 'univ3_mints', []):
-            if mint.get('pool_address', '').lower() == self.pool_address.lower():
-                self._process_mint(mint, transaction)
+        # Process v3 mints
+        if transaction.get('uniswap_v3_mints'):
+            for mint in transaction['uniswap_v3_mints']:
+                if mint.get('pool_address', '') == self.pool_address:
+                    self._process_mint(mint, transaction)
                 
-        for burn in getattr(transaction, 'univ3_burns', []):
-            if burn.get('pool_address', '').lower() == self.pool_address.lower():
-                self._process_burn(burn, transaction)
+        # Process v3 burns
+        if transaction.get('uniswap_v3_burns'):
+            for burn in transaction['uniswap_v3_burns']:
+                if burn.get('pool_address', '') == self.pool_address:
+                    self._process_burn(burn, transaction)
 
-        for swap in getattr(transaction, 'univ3_swaps', []):
-            if swap.get('pool_address', '').lower() == self.pool_address.lower():
-                self._process_swap(swap, transaction)
+        # Process v3 swaps
+        if transaction.get('uniswap_v3_swaps'):
+            for swap in transaction['uniswap_v3_swaps']:
+                if swap.get('pool_address', '') == self.pool_address:
+                    self._process_swap(swap, transaction)
+        
+        # Check if trading is enabled after processing all events
+        self.check_and_update_trading_status(transaction)
     
-    def _process_swap(self, swap: dict, transaction: ProcessedTransaction):
+    def _process_swap(self, swap: dict, transaction: Dict):
         """Process a V3 swap event."""
-        # Mark trading enabled
-        self._mark_trading_enabled(transaction)
+        # Mark token as buyable from first swap event
+        self.mark_can_buy_from_event(transaction, event_type='swap')
         
         self.sqrt_price_x96 = int(swap.get('sqrt_price_x96', 0))
         new_tick = int(swap.get('tick', 0))
@@ -115,20 +142,20 @@ class UniswapV3Pool(BasePool):
         
         # Store swap event
         self.swap_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+            'block': transaction['block_number'],
+            'txn_hash': transaction['hash'],
             'amount0': amount0,
             'amount1': amount1,
             'sqrt_price_x96': self.sqrt_price_x96,
             'liquidity': self.current_liquidity,
             'tick': self.current_tick,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction['block_timestamp']
         })
     
-    def _process_mint(self, mint: dict, transaction: ProcessedTransaction):
+    def _process_mint(self, mint: dict, transaction: Dict):
         """Process a V3 mint (add liquidity) event."""
-        # Mark trading enabled
-        self._mark_trading_enabled(transaction)
+        # NOTE: Adding liquidity does NOT mean trading is enabled
+        # Trading might still be disabled - we only mark trading enabled on swaps
         
         liquidity_delta = int(mint.get('amount', 0))
         tick_lower = int(mint.get('tick_lower', 0))
@@ -146,19 +173,19 @@ class UniswapV3Pool(BasePool):
         
         # Store mint event
         self.mint_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+            'block': transaction['block_number'],
+            'txn_hash': transaction['hash'],
             'owner': mint.get('owner', mint.get('to_address')),
             'amount': liquidity_delta,
             'tick_lower': tick_lower,
             'tick_upper': tick_upper,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction['block_timestamp']
         })
     
-    def _process_burn(self, burn: dict, transaction: ProcessedTransaction):
+    def _process_burn(self, burn: dict, transaction: Dict):
         """Process a V3 burn (remove liquidity) event."""
-        # Mark trading enabled
-        self._mark_trading_enabled(transaction)
+        # NOTE: Removing liquidity does NOT indicate trading status
+        # We only mark trading enabled on swaps
         
         liquidity_delta = int(burn.get('amount', 0))
         tick_lower = int(burn.get('tick_lower', 0))
@@ -176,13 +203,13 @@ class UniswapV3Pool(BasePool):
         
         # Store burn event
         self.burn_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+            'block': transaction['block_number'],
+            'txn_hash': transaction['hash'],
             'owner': burn.get('owner', burn.get('from_address')),
             'amount': liquidity_delta,
             'tick_lower': tick_lower,
             'tick_upper': tick_upper,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction['block_timestamp']
         })
     
     def _update_tick(self, tick_index: int, liquidity_delta: int):
@@ -250,21 +277,27 @@ class UniswapV3Pool(BasePool):
 
     def _get_token0_decimals(self) -> int:
         """Get token0 decimals based on configuration."""
-        if self.token1_is_denom:
-            # token0 is our token, token1 is denom
-            return self.get_token_decimals()
-        else:
-            # token0 is denom, token1 is our token
-            return self.get_denom_decimals()
-    
+        decimals = None
+        try:
+            if self.token1_is_denom:
+                decimals = self.token_chain_fetcher.get_token_decimals(self.token_address)
+            else:
+                decimals = self.token_chain_fetcher.get_token_decimals(self.denom_address)
+        except Exception:
+            decimals = None
+        return int(decimals) if decimals is not None else 18
+
     def _get_token1_decimals(self) -> int:
         """Get token1 decimals based on configuration."""
-        if self.token1_is_denom:
-            # token0 is our token, token1 is denom
-            return self.get_denom_decimals()
-        else:
-            # token0 is denom, token1 is our token
-            return self.get_token_decimals()
+        decimals = None
+        try:
+            if self.token1_is_denom:
+                decimals = self.token_chain_fetcher.get_token_decimals(self.denom_address)
+            else:
+                decimals = self.token_chain_fetcher.get_token_decimals(self.token_address)
+        except Exception:
+            decimals = None
+        return int(decimals) if decimals is not None else 18
     
     def get_current_tick(self) -> int:
         """Get current tick."""
@@ -313,9 +346,7 @@ class UniswapV3Pool(BasePool):
     
     def get_reserves_from_blockchain(self, block_identifier='latest') -> Tuple[float, float, bool]:
         """
-        Fetch actual pool state from the blockchain using slot0() and liquidity() calls.
-        
-        For V3 pools, reserves are virtual and calculated from current price and liquidity.
+        Fetch virtual reserves for V3 using PyReth ChainQuery (tick + liquidity).
         
         Args:
             block_identifier: Block number or 'latest'
@@ -324,73 +355,48 @@ class UniswapV3Pool(BasePool):
             Tuple of (denom_reserve, token_reserve, success)
         """
         try:
-            if not hasattr(self, 'w3') or not self.w3.is_connected():
+            import math
+            # Resolve block number; None implies latest
+            block = None
+            if isinstance(block_identifier, int):
+                block = int(block_identifier)
+            elif isinstance(block_identifier, str) and block_identifier != 'latest':
+                try:
+                    block = int(block_identifier)
+                except Exception:
+                    block = None
+
+            info = self.pool_chain_fetcher.get_v3_liquidity(self.pool_address, int(self.fee_tier), block)
+            if not info or info.get('liquidity') is None or info.get('tick') is None or not info.get('token0') or not info.get('token1'):
                 return 0.0, 0.0, False
-                
-            # V3 Pool ABI for slot0 and liquidity
-            v3_pool_abi = [
-                {
-                    "inputs": [],
-                    "name": "slot0",
-                    "outputs": [
-                        {"internalType": "uint160", "name": "sqrtPriceX96", "type": "uint160"},
-                        {"internalType": "int24", "name": "tick", "type": "int24"},
-                        {"internalType": "uint16", "name": "observationIndex", "type": "uint16"},
-                        {"internalType": "uint16", "name": "observationCardinality", "type": "uint16"},
-                        {"internalType": "uint16", "name": "observationCardinalityNext", "type": "uint16"},
-                        {"internalType": "uint8", "name": "feeProtocol", "type": "uint8"},
-                        {"internalType": "bool", "name": "unlocked", "type": "bool"}
-                    ],
-                    "stateMutability": "view",
-                    "type": "function"
-                },
-                {
-                    "inputs": [],
-                    "name": "liquidity",
-                    "outputs": [{"internalType": "uint128", "name": "", "type": "uint128"}],
-                    "stateMutability": "view",
-                    "type": "function"
-                }
-            ]
-            
-            pool_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(self.pool_address),
-                abi=v3_pool_abi
-            )
-            
-            # Get slot0 (current price and tick)
-            slot0 = pool_contract.functions.slot0().call(block_identifier=block_identifier)
-            sqrt_price_x96, tick = slot0[0], slot0[1]
-            
-            # Get current liquidity
-            liquidity = pool_contract.functions.liquidity().call(block_identifier=block_identifier)
-            
-            if sqrt_price_x96 == 0 or liquidity == 0:
-                return 0.0, 0.0, True  # Pool exists but no liquidity
-            
-            # Calculate virtual reserves from price and liquidity
-            # Correct V3 virtual reserve calculation
-            sqrt_price = sqrt_price_x96 / (2**96)
-            
-            # Virtual reserves: reserve0 = L/sqrt(P), reserve1 = L*sqrt(P)
-            reserve0 = float(liquidity) / sqrt_price
-            reserve1 = float(liquidity) * sqrt_price
-            
-            # Apply decimals (both tokens have 18 decimals)
-            reserve0 = reserve0 / (10 ** 18)  # token0 (WETH)
-            reserve1 = reserve1 / (10 ** 18)  # token1 (MIND)
-            
-            # Determine which is denom vs token based on configuration
-            if self.token1_is_denom:
-                # token0 = our token, token1 = denom
-                virtual_denom_reserve = reserve1  # token1 is denom
-                virtual_token_reserve = reserve0  # token0 is our token
+
+            token0_addr = info['token0']
+            token1_addr = info['token1']
+            reserve0 = info.get('reserve0_scaled') or info.get('reserve0')
+            reserve1 = info.get('reserve1_scaled') or info.get('reserve1')
+            if reserve0 is None or reserve1 is None:
+                L = float(int(info['liquidity']))
+                tick = int(info['tick'])
+                sqrt_price = math.pow(1.0001, tick / 2)
+                if sqrt_price == 0 or L == 0:
+                    return 0.0, 0.0, True
+                reserve0_raw = L / sqrt_price
+                reserve1_raw = L * sqrt_price
+                token0_decimals = int(info.get('token0_decimals') or self.token_chain_fetcher.get_token_decimals(token0_addr) or 18)
+                token1_decimals = int(info.get('token1_decimals') or self.token_chain_fetcher.get_token_decimals(token1_addr) or 18)
+                reserve0 = reserve0_raw / (10 ** token0_decimals)
+                reserve1 = reserve1_raw / (10 ** token1_decimals)
+
+            # Map to denom/token based on which side denom is on
+            if token0_addr.lower() == self.denom_address.lower():
+                denom_reserve = reserve0
+                token_reserve = reserve1
+            elif token1_addr.lower() == self.denom_address.lower():
+                denom_reserve = reserve1
+                token_reserve = reserve0
             else:
-                # token0 = denom, token1 = our token  
-                virtual_denom_reserve = reserve0  # token0 is denom
-                virtual_token_reserve = reserve1  # token1 is our token
-            
-            return virtual_denom_reserve, virtual_token_reserve, True
-            
-        except Exception as e:
+                return 0.0, 0.0, False
+
+            return float(denom_reserve), float(token_reserve), True
+        except Exception:
             return 0.0, 0.0, False
