@@ -1,0 +1,422 @@
+use super::super::tx_processor::py_processed_transaction::PyProcessedTransaction;
+use alloy_primitives::Address;
+/// Python bindings for Pool Buy Sell Simulator
+///
+/// Provides Python interface for pool trading viability analysis and simulation
+use pyo3::prelude::*;
+use std::str::FromStr;
+use std::sync::Arc;
+use tx_processor::ProcessedTransaction as RustProcessedTransaction;
+use tx_processor::{
+    simulator::{
+        config::PoolViabilityConfig,
+        pool_buy_sell_simulator::check_can_buy_sell_pool,
+        types::{PoolType, PoolViabilityResult},
+    },
+    tx_processor::TxProcessor,
+};
+use tx_simulator::TxSimulator;
+
+/// Python wrapper for PoolViabilityResult
+#[pyclass(name = "PoolViabilityResult")]
+#[derive(Clone)]
+pub struct PyPoolViabilityResult {
+    #[pyo3(get)]
+    pub can_buy: bool,
+    #[pyo3(get)]
+    pub can_approve: bool,
+    #[pyo3(get)]
+    pub can_sell: bool,
+    #[pyo3(get)]
+    pub buy_tax_percentage: f64,
+    #[pyo3(get)]
+    pub sell_tax_percentage: f64,
+    #[pyo3(get)]
+    pub pool_type: String,
+    #[pyo3(get)]
+    pub block_number: u64,
+    #[pyo3(get)]
+    pub error_message: Option<String>,
+}
+
+impl PyPoolViabilityResult {
+    fn from_rust_result(result: PoolViabilityResult) -> Self {
+        let pool_type_str = match result.pool_type {
+            PoolType::UniswapV2 => "UniswapV2".to_string(),
+            PoolType::SushiSwap => "SushiSwap".to_string(),
+            PoolType::UniswapV3 { fee_tier } => format!("UniswapV3({})", fee_tier),
+            PoolType::UniswapV4 => "UniswapV4".to_string(),
+            _ => "Unknown".to_string(),
+        };
+
+        Self {
+            can_buy: result.can_buy,
+            can_approve: result.can_approve,
+            can_sell: result.can_sell,
+            buy_tax_percentage: result.buy_tax_percent,
+            sell_tax_percentage: result.sell_tax_percent,
+            pool_type: pool_type_str,
+            block_number: result.block_number,
+            error_message: result.failure_reason,
+        }
+    }
+}
+
+/// Python wrapper for PoolViabilityConfig
+#[pyclass(name = "PoolViabilityConfig")]
+#[derive(Clone)]
+pub struct PyPoolViabilityConfig {
+    #[pyo3(get, set)]
+    pub test_amount_eth: f64,
+    #[pyo3(get, set)]
+    pub buyer_address: String,
+    #[pyo3(get, set)]
+    pub gas_limit: u64,
+    #[pyo3(get, set)]
+    pub gas_price_gwei: u64,
+    #[pyo3(get, set)]
+    pub block_number: Option<u64>,
+    #[pyo3(get, set)]
+    pub slippage_tolerance: f64,
+    #[pyo3(get, set)]
+    pub block_delay: u64,
+    #[pyo3(get, set)]
+    pub token_decimals: u8,
+    // Optional prior transaction to execute before buy/approve/sell
+    // Set via helper methods below
+    pub(crate) prior_tx: Option<RustProcessedTransaction>,
+}
+
+#[pymethods]
+impl PyPoolViabilityConfig {
+    #[new]
+    fn new() -> Self {
+        Self {
+            test_amount_eth: 0.01, // Default 0.01 ETH
+            buyer_address: "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".to_string(),
+            gas_limit: 300_000,
+            gas_price_gwei: 100,
+            block_number: None,
+            slippage_tolerance: 0.5,
+            block_delay: 0,
+            token_decimals: 18,
+            prior_tx: None,
+        }
+    }
+
+    /// Create config with custom buy amount in ETH
+    #[staticmethod]
+    fn with_buy_amount(amount_eth: f64) -> Self {
+        let mut config = Self::new();
+        config.test_amount_eth = amount_eth;
+        config
+    }
+
+    /// Set buyer address
+    fn with_buyer<'a>(mut slf: PyRefMut<'a, Self>, address: &str) -> PyRefMut<'a, Self> {
+        slf.buyer_address = address.to_string();
+        slf
+    }
+
+    /// Set a prior transaction from a processed transaction
+    /// This transaction executes before buy/approve/sell.
+    fn set_prior_tx_from_processed(&mut self, prior: &PyProcessedTransaction) {
+        self.prior_tx = Some(prior.to_processed_transaction());
+    }
+
+    /// Set a minimal prior transaction from unsigned parameters
+    /// Useful for setup calls (e.g., enabling trading) before viability checks.
+    #[pyo3(signature = (from_address, to_address=None, value_hex=None, data_hex=None, nonce=None))]
+    fn set_prior_tx_from_unsigned(
+        &mut self,
+        from_address: &str,
+        to_address: Option<&str>,
+        value_hex: Option<&str>,
+        data_hex: Option<&str>,
+        nonce: Option<u64>,
+    ) -> PyResult<()> {
+        use alloy_primitives::{Address, B256, U256};
+        // Parse inputs
+        let from = Address::from_str(from_address.trim_start_matches("0x")).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid from address: {}", e))
+        })?;
+        let to = if let Some(t) = to_address {
+            Some(Address::from_str(t.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid to address: {}",
+                    e
+                ))
+            })?)
+        } else {
+            None
+        };
+        let value = if let Some(vh) = value_hex {
+            U256::from_str_radix(vh.trim_start_matches("0x"), 16).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid value: {}", e))
+            })?
+        } else {
+            U256::ZERO
+        };
+        let input = if let Some(dh) = data_hex {
+            let clean = dh.trim_start_matches("0x");
+            hex::decode(clean).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid data: {}", e))
+            })?
+        } else {
+            vec![]
+        };
+        // Build minimal processed transaction
+        let ptx = RustProcessedTransaction::new(
+            B256::ZERO,
+            0,
+            0,
+            0,
+            from,
+            to,
+            value,
+            "1".to_string(),
+            nonce.unwrap_or(0),
+            input,
+        );
+        self.prior_tx = Some(ptx);
+        Ok(())
+    }
+}
+
+impl PyPoolViabilityConfig {
+    fn to_rust_config(
+        &self,
+        token_address: Address,
+        pool_address: Address,
+        pool_type: PoolType,
+    ) -> PyResult<PoolViabilityConfig> {
+        use alloy_primitives::U256;
+
+        let test_amount = U256::from((self.test_amount_eth * 1e18) as u128);
+        let buyer =
+            Address::from_str(&self.buyer_address.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid buyer address: {}",
+                    e
+                ))
+            })?;
+
+        Ok(PoolViabilityConfig {
+            token_address,
+            pool_address,
+            pool_type,
+            test_amount,
+            buyer_address: buyer,
+            prior_tx: self.prior_tx.clone(),
+            block_number: self.block_number,
+            slippage_tolerance: self.slippage_tolerance,
+            gas_limit: self.gas_limit,
+            gas_price: (self.gas_price_gwei as u128) * 1_000_000_000,
+            weth_address: Address::from([
+                0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+                0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+            ]),
+            block_delay: self.block_delay,
+            token_decimals: self.token_decimals,
+        })
+    }
+}
+
+/// Python wrapper for Pool Buy Sell Simulator
+#[pyclass(name = "PoolBuySellSimulator")]
+pub struct PyPoolBuySellSimulator {
+    simulator: Arc<TxSimulator>,
+    processor: Arc<TxProcessor>,
+    runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl PyPoolBuySellSimulator {
+    /// Create from shared TxSimulator and TxProcessor instances (used by PyReth)
+    pub fn from_shared(simulator: Arc<TxSimulator>, processor: Arc<TxProcessor>) -> PyResult<Self> {
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        Ok(Self {
+            simulator,
+            processor,
+            runtime: Arc::new(runtime),
+        })
+    }
+}
+
+#[pymethods]
+impl PyPoolBuySellSimulator {
+    /// Create new PoolBuySellSimulator instance
+    ///
+    /// DEPRECATED: Use PyReth().pool_buy_sell_simulator() instead to avoid multiple database connections
+    #[new]
+    fn new() -> PyResult<Self> {
+        eprintln!("WARNING: Creating standalone PoolBuySellSimulator is deprecated. Use PyReth().pool_buy_sell_simulator() instead.");
+
+        // Create TxSimulator and TxProcessor for standalone use
+        let simulator = Arc::new(
+            TxSimulator::new("/home/nima/.local/share/reth/mainnet")
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?,
+        );
+        let processor = Arc::new(TxProcessor::new());
+
+        Self::from_shared(simulator, processor)
+    }
+
+    /// Check if pool allows buying and selling tokens for Uniswap V2
+    ///
+    /// Args:
+    ///     token_address: Token contract address as string
+    ///     pool_address: Pool contract address as string  
+    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///
+    /// Returns:
+    ///     PoolViabilityResult with trading analysis
+    #[pyo3(signature = (token_address, pool_address, config=None))]
+    fn check_uniswap_v2_pool(
+        &self,
+        _py: Python,
+        token_address: &str,
+        pool_address: &str,
+        config: Option<&PyPoolViabilityConfig>,
+    ) -> PyResult<PyPoolViabilityResult> {
+        self.check_pool_internal(token_address, pool_address, PoolType::UniswapV2, config)
+    }
+
+    /// Check if pool allows buying and selling tokens for Uniswap V3
+    ///
+    /// Args:
+    ///     token_address: Token contract address as string
+    ///     pool_address: Pool contract address as string
+    ///     fee_tier: Fee tier (500, 3000, or 10000 for 0.05%, 0.3%, 1%)
+    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///
+    /// Returns:
+    ///     PoolViabilityResult with trading analysis
+    #[pyo3(signature = (token_address, pool_address, fee_tier, config=None))]
+    fn check_uniswap_v3_pool(
+        &self,
+        _py: Python,
+        token_address: &str,
+        pool_address: &str,
+        fee_tier: u32,
+        config: Option<&PyPoolViabilityConfig>,
+    ) -> PyResult<PyPoolViabilityResult> {
+        self.check_pool_internal(
+            token_address,
+            pool_address,
+            PoolType::UniswapV3 { fee_tier },
+            config,
+        )
+    }
+
+    /// Check if pool allows buying and selling tokens for SushiSwap
+    ///
+    /// Args:
+    ///     token_address: Token contract address as string
+    ///     pool_address: Pool contract address as string  
+    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///
+    /// Returns:
+    ///     PoolViabilityResult with trading analysis
+    #[pyo3(signature = (token_address, pool_address, config=None))]
+    fn check_sushiswap_pool(
+        &self,
+        _py: Python,
+        token_address: &str,
+        pool_address: &str,
+        config: Option<&PyPoolViabilityConfig>,
+    ) -> PyResult<PyPoolViabilityResult> {
+        self.check_pool_internal(token_address, pool_address, PoolType::SushiSwap, config)
+    }
+
+    /// Check if pool allows buying and selling tokens for Uniswap V4
+    ///
+    /// Note: V4 uses a PoolManager + PoolId architecture and requires Router/Lock integration.
+    /// This method returns a well-formed failure result indicating that v4 is not supported yet.
+    #[pyo3(signature = (token_address, pool_manager_address, _pool_id_hex, config=None))]
+    fn check_uniswap_v4_pool(
+        &self,
+        _py: Python,
+        token_address: &str,
+        pool_manager_address: &str,
+        _pool_id_hex: &str,
+        config: Option<&PyPoolViabilityConfig>,
+    ) -> PyResult<PyPoolViabilityResult> {
+        // For now, route through generic handler with PoolType::UniswapV4 and pool_address=pool_manager
+        self.check_pool_internal(
+            token_address,
+            pool_manager_address,
+            PoolType::UniswapV4,
+            config,
+        )
+    }
+}
+
+impl PyPoolBuySellSimulator {
+    /// Internal method to check pool viability
+    fn check_pool_internal(
+        &self,
+        token_address: &str,
+        pool_address: &str,
+        pool_type: PoolType,
+        config: Option<&PyPoolViabilityConfig>,
+    ) -> PyResult<PyPoolViabilityResult> {
+        let token_addr =
+            Address::from_str(token_address.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid token address: {}",
+                    e
+                ))
+            })?;
+
+        let pool_addr = Address::from_str(pool_address.trim_start_matches("0x")).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid pool address: {}", e))
+        })?;
+
+        // Use provided config or create default
+        let rust_config = if let Some(cfg) = config {
+            cfg.to_rust_config(token_addr, pool_addr, pool_type)?
+        } else {
+            PyPoolViabilityConfig::new().to_rust_config(token_addr, pool_addr, pool_type)?
+        };
+
+        let simulator = self.simulator.clone();
+        let processor = self.processor.clone();
+
+        let result = self
+            .runtime
+            .block_on(
+                async move { check_can_buy_sell_pool(simulator, processor, rust_config).await },
+            )
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Pool viability check failed: {}",
+                    e
+                ))
+            })?;
+
+        Ok(PyPoolViabilityResult::from_rust_result(result))
+    }
+
+    /// Get default configuration
+    fn default_config(&self) -> PyPoolViabilityConfig {
+        PyPoolViabilityConfig::new()
+    }
+
+    /// Get simulator information
+    fn get_info(&self, py: Python) -> PyResult<Py<pyo3::types::PyDict>> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("version", "0.2.0")?;
+        dict.set_item("type", "PoolBuySellSimulator")?;
+        dict.set_item("default_buy_amount", "0.01 ETH")?;
+        dict.set_item("supports_uniswap_v2", true)?;
+        dict.set_item("supports_uniswap_v3", true)?;
+        dict.set_item("supports_tax_calculation", true)?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        "PoolBuySellSimulator(type='viability_check', version='0.2.0')".to_string()
+    }
+}

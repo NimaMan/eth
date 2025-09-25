@@ -201,7 +201,7 @@ print(f"ETH price: ${price}")
 ## Dependencies
 
 - `tx_processor`: Core transaction processing logic
-- `reth_tx_simulator`: Transaction simulation engine
+- `tx_simulator`: Transaction simulation engine (replaces legacy reth_tx_simulator)
 - `eth_prices`: Historical price data access
 - `reth_chain_query`: Blockchain state queries
 - `pyo3`: Python bindings framework

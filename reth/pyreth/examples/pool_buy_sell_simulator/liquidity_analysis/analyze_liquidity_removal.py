@@ -33,7 +33,7 @@ def analyze_liquidity_removal():
     
     try:
         # Process the transaction
-        tx = processor.process_transaction(tx_hash)
+        tx = processor.process_transaction_from_hash_with_simulation(tx_hash)
         
         print(f"Block: {tx.block_number}")
         print(f"From: {tx.from_address}")
@@ -223,7 +223,7 @@ def analyze_multiple_removals():
         print(f"TX: {tx_hash}")
         
         try:
-            tx = processor.process_transaction(tx_hash)
+            tx = processor.process_transaction_from_hash_with_simulation(tx_hash)
             
             # Quick checks for liquidity removal
             has_burns = hasattr(tx, 'burns') and len(tx.burns) > 0

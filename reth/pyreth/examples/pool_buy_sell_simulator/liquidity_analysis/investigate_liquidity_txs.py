@@ -35,7 +35,7 @@ def investigate_transactions():
     # Process the actual transaction
     try:
         print("\nProcessing actual transaction...")
-        tx1_processed = processor.process_transaction(tx1_hash)
+        tx1_processed = processor.process_transaction_from_hash_with_simulation(tx1_hash)
         print(f"  Block: {tx1_processed.block_number}")
         print(f"  From: {tx1_processed.from_address}")
         print(f"  To: {tx1_processed.to_address}")
@@ -93,7 +93,7 @@ def investigate_transactions():
     
     try:
         print("\nProcessing actual transaction...")
-        tx2_processed = processor.process_transaction(tx2_hash)
+        tx2_processed = processor.process_transaction_from_hash_with_simulation(tx2_hash)
         print(f"  Block: {tx2_processed.block_number}")
         print(f"  From: {tx2_processed.from_address}")
         print(f"  To: {tx2_processed.to_address}")

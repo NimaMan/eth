@@ -27,12 +27,24 @@ def main():
         # Initialize
         reth = pyreth.PyReth()
         simulator = reth.pool_buy_sell_simulator()
+        txp = reth.tx_processor()
         
         # Create config for 1 ETH
         config = pyreth.PoolViabilityConfig()
         config.test_amount_eth = TEST_AMOUNT_ETH
         config.token_decimals = 6  # USDC decimals
         config.buyer_address = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689"
+
+        # Optional: set a prior transaction to run before buy/approve/sell
+        # You can pass a real processed transaction (e.g., enabling trading)
+        PRIOR_TX_HASH = os.environ.get("PRIOR_TX_HASH")
+        if PRIOR_TX_HASH:
+            try:
+                prior = txp.process_transaction_from_hash_with_simulation(PRIOR_TX_HASH)
+                config.set_prior_tx_from_processed(prior)
+                print(f"Using prior tx: {PRIOR_TX_HASH}")
+            except Exception as e:
+                print(f"Warning: failed to set prior tx {PRIOR_TX_HASH}: {e}")
         
         print(f"Simulating with {TEST_AMOUNT_ETH} ETH on block...")
         print()
@@ -65,21 +77,6 @@ def main():
         if result.error_message:
             print(f"Error Message: {result.error_message}")
         
-        # The simulation internally tracks:
-        # 1. ETH spent (1 ETH = 1000000000000000000 wei)
-        # 2. USDC tokens received from buy
-        # 3. ETH received back from sell
-        # These are the ACTUAL amounts from the simulated blockchain state
-        
-        print("What the buyer gets:")
-        print("-" * 40)
-        print("1. Buyer sends 1 ETH to router")
-        print("2. Router swaps ETH for USDC in pool")
-        print("3. Buyer receives USDC tokens (actual amount from simulation)")
-        print("4. Buyer approves router to spend USDC")
-        print("5. Router swaps USDC back to ETH")
-        print("6. Buyer receives ETH back (minus DEX fees)")
-        print()
         
         is_tradeable = result.can_buy and result.can_approve and result.can_sell
         print(f"Final Result: {'✅ TRADEABLE' if is_tradeable else '❌ NOT TRADEABLE'}")

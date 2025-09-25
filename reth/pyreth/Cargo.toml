@@ -1,6 +1,6 @@
 [package]
 name = "pyreth"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["PyReth Team"]
 description = "Python bindings for Reth-based Ethereum tools"
@@ -16,8 +16,12 @@ crate-type = ["cdylib", "rlib"]
 default = []
 
 [dependencies]
-# Core simulation dependency (minimal start)
+# Core dependencies
 tx_simulator = { path = "../tx_simulator" }
+tx_processor = { path = "../tx_processor" }
+reth_chain_query = { path = "../reth_chain_query" }
+eth_prices = { path = "../eth_prices" }
+eth_price_leverage = { path = "../eth_price_leverage" }
 
 # Python bindings
 pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"] }

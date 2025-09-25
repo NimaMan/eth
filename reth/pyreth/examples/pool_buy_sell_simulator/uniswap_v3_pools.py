@@ -126,18 +126,8 @@ def main():
             print(f"\n🏆 Recommended Pool: {best_pool['description']}")
             print(f"   Lowest total cost for small trades")
             
-            print("\n💡 Tips:")
-            print("  • Use 0.05% tier for stable pairs with high volume")
-            print("  • Use 0.3% tier for most token pairs")
-            print("  • Use 1% tier for volatile or exotic pairs")
-            print("  • Check liquidity depth before large trades")
-            
         else:
             print("❌ USDC not tradeable on tested V3 pools")
-            print("\nPossible reasons:")
-            print("  • Pool addresses might be incorrect")
-            print("  • Insufficient liquidity at current block")
-            print("  • V3 swap encoding issues")
             
     except Exception as e:
         print(f"❌ Error: {e}")

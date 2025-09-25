@@ -74,6 +74,22 @@ python batch_token_analysis.py
 python uniswap_v3_pools.py
 ```
 
+### 6. prior_tx_then_trade.py
+**Purpose**: Run a prior transaction before buy/approve/sell  
+**Features**:
+- Accepts either a real processed tx (by hash) or an unsigned tx as the prior step
+- Useful for tokens that require an enable/trading-on call first
+
+**Usage**:
+```bash
+# Using a real processed tx
+PRIOR_TX_HASH=0x... python prior_tx_then_trade.py
+
+# Using an unsigned setup tx
+PRIOR_UNSIGNED_FROM=0x... PRIOR_UNSIGNED_TO=0x... PRIOR_UNSIGNED_VALUE_WEI=0 \
+PRIOR_UNSIGNED_DATA_HEX=0x... python prior_tx_then_trade.py
+```
+
 ## API Reference
 
 ### Creating the Simulator

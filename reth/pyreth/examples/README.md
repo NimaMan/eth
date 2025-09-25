@@ -19,9 +19,11 @@ Python examples demonstrating pyreth module usage.
 - **`swap_simulation.py`** - DEX swap simulation including Uniswap V2 swaps and slippage analysis
 - **`resimulate_transaction.py`** - Re-simulate ProcessedTransaction objects at different blocks
 
-### `/tx_analysis/` - Transaction Analysis
-- `investigate_liquidity_txs.py` - Investigate specific liquidity removal transactions
-- `analyze_liquidity_removal.py` - Detailed analysis of liquidity removal patterns
+### `/tx_processor/` - Transaction Processing (core)
+- `process_single_tx.py` - Process a single tx by hash (simulation + DB-only)
+- `process_hash_list.py` - Batch processing of hashes with basic throughput
+- `process_transactions_detailed.py` - Batch with success/failed breakdown
+- `simulate_unsigned_tx.py` - Simulate an unsigned tx (preferred synthetic flow)
 
 ### `/chain_query/` - Blockchain Queries
 - `stablecoin_supplies.py` - Get current stablecoin total supplies
