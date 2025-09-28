@@ -1,6 +1,5 @@
 pub mod common;
 pub mod config;
-#[cfg(feature = "db")]
 pub mod db_writers;
 /// Mempool Processor Library
 ///

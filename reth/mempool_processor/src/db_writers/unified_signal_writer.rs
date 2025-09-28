@@ -3,6 +3,7 @@
 /// A single writer that orchestrates all signal types and routes them to the appropriate
 /// database writers. This keeps the signal publisher clean and makes it easy to add new
 /// signal types without modifying multiple places.
+use alloy_primitives::U256;
 use eyre::Result;
 use std::time::Duration;
 use tracing::{debug, error, info};
@@ -280,12 +281,17 @@ impl LiquidityRemovalSignalRecord {
 impl LpApprovalSignalRecord {
     /// Convert from LpApprovalSignal
     pub fn from_lp_approval_signal(signal: &LpApprovalSignal) -> Self {
-        let unlimited = signal
-            .amount
-            .to_string()
-            .parse::<f64>()
-            .map(|a| a >= 1e30)
-            .unwrap_or(false);
+        let is_unlimited_amount = signal.amount == U256::MAX;
+        let approval_pct = signal.approval_percentage.or_else(|| {
+            if is_unlimited_amount {
+                Some(100.0)
+            } else {
+                None
+            }
+        });
+        let unlimited = approval_pct
+            .map(|pct| pct >= 99.99)
+            .unwrap_or(is_unlimited_amount);
 
         Self {
             token_address: signal.token_address.clone(),
@@ -296,8 +302,7 @@ impl LpApprovalSignalRecord {
             detection_timestamp: chrono::Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             approved_spender: signal.router_address.clone(),
-            // Convert U256 to string first, then parse as f64
-            approval_amount: Some(signal.amount.to_string().parse::<f64>().unwrap_or(f64::MAX)),
+            approval_percentage: approval_pct,
             is_unlimited_approval: unlimited,
             approval_type: "LP_TOKEN".to_string(),
             previous_allowance: signal.previous_allowance,

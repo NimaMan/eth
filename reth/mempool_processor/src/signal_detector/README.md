@@ -1,7 +1,7 @@
 # Signal Detector Module
 
 ## Purpose
-Converts pool‑scoped simulation results into actionable, per‑pool trading signals and publishes them via logs/ZMQ (and optionally to a database when the `db` feature is enabled).
+Converts pool‑scoped simulation results into actionable, per‑pool trading signals and publishes them via logs/ZMQ (and optionally to a database, enabled by default).
 
 Key properties:
 - Per‑Pool: Every signal is specific to a (token_address, pool_address) pair.
@@ -76,9 +76,9 @@ Detection happens inside `signal_manager.rs`, which coordinates the following:
   - `lp_approval_signals.log`
   - `signal_manager.log` (summary/activity)
 
-- Database (optional, feature `db`)
-  - When built with `db` and `SignalPublisherConfig.enable_database = true`, signals are persisted via the unified database writer used by SignalPublisher.
-  - When built without `db` (e.g. `--no-default-features`), publisher disables DB writes automatically.
+- Database
+  - When `SignalPublisherConfig.enable_database = true` (the default), signals are persisted via the unified database writer used by SignalPublisher.
+  - Disable database writes by setting `enable_database = false` when constructing the publisher.
 
 ## Processing Flow (Per Pool)
 

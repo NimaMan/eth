@@ -3,6 +3,7 @@ use crate::signal_publisher::SignalPublisher;
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::{CreatorFunctionType, TransactionCategory};
+use alloy_primitives::U256;
 use hex;
 use reth_chain_query::to_checksum_address;
 use std::fs::OpenOptions;
@@ -733,7 +734,28 @@ impl SignalManager {
                 };
 
                 // Create an LP approval signal
-                let signal = Signal::LpApproval(lp_signal.clone());
+                let mut enriched_signal = lp_signal.clone();
+
+                // Compute approval percentage using cached pool data if available
+                if let Some(ref token_cache) = self.token_cache {
+                    if let Some(pool_state) = token_cache
+                        .get_pool_by_address(&lp_signal.lp_token_address)
+                        .await
+                    {
+                        if let Some(pct) = pool_state.lp_tokens_approved_percentage {
+                            enriched_signal.approval_percentage = Some(pct.min(100.0));
+                        }
+                    }
+                }
+
+                // Fallback: treat max approval as 100%
+                if enriched_signal.approval_percentage.is_none()
+                    && enriched_signal.amount == U256::MAX
+                {
+                    enriched_signal.approval_percentage = Some(100.0);
+                }
+
+                let signal = Signal::LpApproval(enriched_signal.clone());
 
                 // Log the signal
                 self.log_signal(&signal);
@@ -745,7 +767,7 @@ impl SignalManager {
                 } else {
                     info!(
                         "Successfully published LP approval signal for {}",
-                        lp_signal.tx_hash
+                        enriched_signal.tx_hash
                     );
                 }
             }

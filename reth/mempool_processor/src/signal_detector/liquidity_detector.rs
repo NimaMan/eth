@@ -97,7 +97,6 @@ impl LiquidityDetector {
     /// Set the token tracking cache
     pub fn set_token_cache(&mut self, token_cache: Arc<TokenTrackingCache>) {
         self.token_cache = Some(token_cache);
-        info!("📊 Token tracking cache connected to liquidity detector");
     }
 
     /// Detect liquidity changes and scams from state changes
@@ -134,43 +133,20 @@ impl LiquidityDetector {
         // Check if a pool was identified and drained
         let pool_address = removal_result.pool_address?;
 
-        info!(
-            "🔍 LIQUIDITY REMOVAL DETECTION: Pool {} | Drain: {:.1}% | TX: {}",
-            to_checksum_address(&pool_address),
-            removal_result.drain_percentage,
-            tx_hash
-        );
-
         // Determine signal type and change type based on drain percentage
         let (signal_type, change_type) = if removal_result.is_scam {
-            info!(
-                "  🚨 SCAM DETECTED - Pool drained {:.1}% with {:.4} ETH remaining",
-                removal_result.drain_percentage, removal_result.remaining_eth
-            );
             (SignalType::ScamDetected, LiquidityChangeType::CompleteDrain)
         } else if removal_result.drain_percentage > self.major_removal_threshold * 100.0 {
-            info!(
-                "  💧 Major liquidity removal: {:.1}%",
-                removal_result.drain_percentage
-            );
             (
                 SignalType::LiquidityRemoval,
                 LiquidityChangeType::MajorRemoval,
             )
         } else if removal_result.drain_percentage > self.significant_removal_threshold * 100.0 {
-            info!(
-                "  💧 Significant liquidity removal: {:.1}%",
-                removal_result.drain_percentage
-            );
             (
                 SignalType::LiquidityRemoval,
                 LiquidityChangeType::SignificantRemoval,
             )
         } else if removal_result.drain_percentage > 0.0 {
-            info!(
-                "  💧 Minor liquidity removal: {:.1}%",
-                removal_result.drain_percentage
-            );
             (
                 SignalType::LiquidityRemoval,
                 LiquidityChangeType::MinorRemoval,
@@ -186,10 +162,10 @@ impl LiquidityDetector {
             if let Some(pool_state) = token_cache.get_pool(&pool_address_str).await {
                 format!("{:?}", pool_state.pool_type)
             } else {
-                "V2".to_string() // Default to V2
+                "Uniswap-V2".to_string() // Default to V2
             }
         } else {
-            "V2".to_string()
+            "Uniswap-V2".to_string() // Default to Uniswap-V2
         };
 
         let details = match signal_type {
@@ -205,7 +181,10 @@ impl LiquidityDetector {
             ),
         };
 
-        info!("💧 {} for pool {}", details, pool_address_str);
+        info!(
+            "💧 {} | Pool: {} | Tx: {}",
+            details, pool_address_str, tx_hash
+        );
 
         Some(LiquiditySignal {
             signal_type,
@@ -242,10 +221,6 @@ impl LiquidityDetector {
         // Step 1: Check if this address is a tracked pool
         let pool_state = if let Some(ref token_cache) = self.token_cache {
             if let Some(ps) = token_cache.get_pool(&address_str).await {
-                info!(
-                    "🔍 LIQUIDITY CHECK: Pool {} | Initial ETH: {:.4} | TX: {}",
-                    address_str, ps.eth_reserve, tx_hash
-                );
                 ps
             } else {
                 debug!("Address {} is not a tracked pool", address_str);
@@ -260,10 +235,6 @@ impl LiquidityDetector {
         // Skip pools with very low initial liquidity (< 0.1 ETH)
         // These are likely already dead pools, not worth monitoring
         if pool_state.eth_reserve < 0.1 {
-            info!(
-                "  Skipping pool {} - too low liquidity ({:.4} ETH)",
-                address_str, pool_state.eth_reserve
-            );
             return None;
         }
 
@@ -276,29 +247,13 @@ impl LiquidityDetector {
             .unwrap_or(U256::ZERO);
         // Convert U256 to I256 for signed comparison
         let eth_change = I256::try_from(eth_change_u256).unwrap_or(I256::ZERO);
-        info!(
-            "  ETH change (raw): {:?} | Is negative: {}",
-            eth_change,
-            eth_change < I256::ZERO
-        );
-
         if eth_change >= I256::ZERO {
-            info!("  No drain detected - ETH change is positive or zero");
             return None; // No drain
         }
 
         // Step 3: Calculate drain metrics
         let eth_change_f64 = eth_change.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
-        info!("  ETH drained: {:.6} ETH", eth_change_f64.abs());
         let drain_result = self.calculate_drain_metrics(&pool_state, eth_change_f64);
-
-        info!(
-            "  Drain metrics: Current: {:.4} ETH | New: {:.4} ETH | Drain%: {:.1}% | Is scam: {}",
-            drain_result.current_reserve,
-            drain_result.new_reserve,
-            drain_result.drain_percent,
-            self.is_scam_drain(&drain_result)
-        );
 
         // Step 4: Determine signal type and change type
         let (signal_type, change_type) = if self.is_scam_drain(&drain_result) {
@@ -329,7 +284,7 @@ impl LiquidityDetector {
             ),
         };
 
-        info!("💧 {} for pool {}", details, address_str);
+        info!("💧 {} | Pool: {} | Tx: {}", details, address_str, tx_hash);
 
         Some(LiquiditySignal {
             signal_type,

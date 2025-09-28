@@ -1,4 +1,3 @@
-use crate::function_detector::CreatorFunctionType;
 /// LP Token Approval Detector
 ///
 /// Detects when token creators approve routers to spend their LP tokens,
@@ -7,8 +6,24 @@ use crate::mempool_fetcher::MempoolTransaction;
 use crate::tx_router::TransactionCategory;
 use alloy_primitives::{Address, U256};
 use chrono::Utc;
+use lazy_static::lazy_static;
+use reth_chain_query::common_addresses::get_address_by_name;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::Path;
+
+lazy_static! {
+    static ref KNOWN_ROUTER_ADDRESSES: HashSet<Address> = {
+        let mut set = HashSet::new();
+        const ROUTER_NAMES: [&str; 2] = ["UniswapV2Router02", "SushiSwapRouter"];
+        for name in ROUTER_NAMES {
+            if let Some(address) = get_address_by_name(name) {
+                set.insert(address);
+            }
+        }
+        set
+    };
+}
 
 /// Custom serialization for U256
 mod u256_serde {
@@ -45,7 +60,7 @@ pub struct LpApprovalSignal {
     pub token_address: String,
     pub pool_address: String,
     pub spender_address: String,
-    pub amount_approved: Option<f64>,
+    pub approval_percentage: Option<f64>,
     pub previous_allowance: Option<f64>,
     pub creator_address: String,
 }
@@ -86,16 +101,11 @@ impl LpApprovalDetector {
         // Extract amount from calldata
         let amount = U256::from_be_slice(&tx.input[36..68]);
 
-        // Known routers (extend as needed)
-        const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-        const SUSHISWAP_ROUTER: &str = "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F";
-        let router_hex = format!("0x{}", hex::encode(router_address));
-        let is_known_router = router_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
-            || router_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
-
-        if !is_known_router {
+        if !KNOWN_ROUTER_ADDRESSES.contains(&router_address) {
             return None;
         }
+
+        let router_hex = format!("0x{}", hex::encode(router_address));
 
         // Derive creator and LP token address directly from transaction fields
         let creator = format!("0x{}", hex::encode(&tx.from));
@@ -116,7 +126,7 @@ impl LpApprovalDetector {
             token_address: lp_token_address.clone(), // Will be resolved to actual token via LP token
             pool_address: lp_token_address.clone(),  // LP token address IS the pool address
             spender_address: router_hex.clone(),
-            amount_approved: Some(amount.to_string().parse::<f64>().unwrap_or(0.0)),
+            approval_percentage: None,
             previous_allowance: None,
             creator_address: creator.clone(),
         };

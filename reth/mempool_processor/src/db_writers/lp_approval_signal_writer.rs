@@ -1,3 +1,4 @@
+use alloy_primitives::U256;
 use chrono::{DateTime, Utc};
 use eyre::Result;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -25,7 +26,8 @@ pub struct LpApprovalSignalRecord {
     pub detection_timestamp: DateTime<Utc>,
     pub detection_tx_hash: String,
     pub approved_spender: String,
-    pub approval_amount: Option<f64>,
+    /// Percentage (0-100) of LP tokens approved for the router
+    pub approval_percentage: Option<f64>,
     pub is_unlimited_approval: bool,
     pub approval_type: String,
     pub previous_allowance: Option<f64>,
@@ -36,18 +38,28 @@ pub struct LpApprovalSignalRecord {
 impl LpApprovalSignalRecord {
     /// Create from LpApprovalSignal
     pub fn from_signal(signal: &LpApprovalSignal) -> Self {
-        let unlimited = signal.amount_approved.map(|a| a >= 1e30).unwrap_or(false);
+        let is_unlimited_amount = signal.amount == U256::MAX;
+        let approval_pct = signal.approval_percentage.or_else(|| {
+            if is_unlimited_amount {
+                Some(100.0)
+            } else {
+                None
+            }
+        });
+        let unlimited = approval_pct
+            .map(|pct| pct >= 99.99)
+            .unwrap_or(is_unlimited_amount);
 
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: "V2".to_string(),
+            pool_type: "Uniswap-V2".to_string(),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),
             detection_tx_hash: signal.tx_hash.clone(),
             approved_spender: signal.spender_address.clone(),
-            approval_amount: signal.amount_approved,
+            approval_percentage: approval_pct,
             is_unlimited_approval: unlimited,
             approval_type: "TOKEN".to_string(),
             previous_allowance: signal.previous_allowance,
@@ -150,8 +162,8 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
     let mut transaction = pool.begin().await?;
 
     for record in batch.iter() {
-        let approval_amount = record
-            .approval_amount
+        let approval_percentage = record
+            .approval_percentage
             .and_then(|v| BigDecimal::from_str(&v.to_string()).ok());
         let previous_allowance = record
             .previous_allowance
@@ -178,7 +190,7 @@ async fn write_batch(pool: &PgPool, batch: &mut Vec<LpApprovalSignalRecord>) -> 
         .bind(&detection_timestamp)
         .bind(&record.detection_tx_hash)
         .bind(&record.approved_spender)
-        .bind(approval_amount.as_ref())
+        .bind(approval_percentage.as_ref())
         .bind(&record.is_unlimited_approval)
         .bind(&record.approval_type)
         .bind(previous_allowance.as_ref())

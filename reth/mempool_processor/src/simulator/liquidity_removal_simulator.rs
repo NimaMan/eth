@@ -10,7 +10,8 @@ use reth_chain_query::RethQueryProvider;
 /// `ProcessedTransaction.address_balance_changes`.
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::error;
+use tokio::time::{sleep, Duration};
+use tracing::{error, warn};
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
 use tx_processor::{process_unsigned_tx, ProcessedTransaction};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
@@ -61,13 +62,33 @@ impl LiquidityRemovalSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
     ) -> Result<LiquidityRemovalResult> {
+        self.simulate_removal_internal(unsigned_tx, block_number, false)
+            .await
+    }
+
+    /// Run liquidity removal simulation with optional retry handling.
+    /// When `retry_on_missing_header` is true, we will retry a few times if
+    /// the provider has not yet materialized the header for the requested block.
+    pub async fn simulate_removal_with_retry(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: Option<u64>,
+        retry_on_missing_header: bool,
+    ) -> Result<LiquidityRemovalResult> {
+        self.simulate_removal_internal(unsigned_tx, block_number, retry_on_missing_header)
+            .await
+    }
+
+    async fn simulate_removal_internal(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: Option<u64>,
+        retry_on_missing_header: bool,
+    ) -> Result<LiquidityRemovalResult> {
         // 1) Process tx with full trace + deltas
-        let processed = match process_unsigned_tx(
-            &self.simulator,
-            unsigned_tx.clone(),
-            block_number,
-        )
-        .await
+        let processed = match self
+            .process_with_optional_retry(unsigned_tx.clone(), block_number, retry_on_missing_header)
+            .await
         {
             Ok(p) => p,
             Err(e) => {
@@ -267,5 +288,43 @@ impl LiquidityRemovalSimulator {
             }
         }
         best
+    }
+
+    async fn process_with_optional_retry(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_number: Option<u64>,
+        retry_on_missing_header: bool,
+    ) -> Result<ProcessedTransaction> {
+        const MAX_RETRIES: usize = 5;
+        const RETRY_DELAY_MS: u64 = 150;
+
+        let mut attempt = 0usize;
+
+        loop {
+            match process_unsigned_tx(&self.simulator, unsigned_tx.clone(), block_number).await {
+                Ok(processed) => return Ok(processed),
+                Err(err) => {
+                    let is_missing_header = Self::is_missing_header_error(&err);
+                    if retry_on_missing_header && is_missing_header && attempt < MAX_RETRIES {
+                        attempt += 1;
+                        warn!(
+                            "Header not yet available for block during liquidity removal simulation (attempt {}/{})",
+                            attempt,
+                            MAX_RETRIES
+                        );
+                        sleep(Duration::from_millis(RETRY_DELAY_MS)).await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+    }
+
+    fn is_missing_header_error(err: &eyre::Report) -> bool {
+        let message = err.to_string();
+        message.contains("Provider did not return header for block")
+            || message.contains("No header for block")
     }
 }

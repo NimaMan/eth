@@ -31,7 +31,9 @@ pub struct Stats {
 
 impl MempoolFetcherIPCClient {
     pub fn new(socket_path: Option<&str>) -> Result<Self> {
-        let socket_path = socket_path.unwrap_or("/tmp/reth.ipc").to_string();
+        let socket_path = socket_path
+            .unwrap_or(crate::config::DEFAULT_RETH_IPC_PATH)
+            .to_string();
         let (tx_sender, tx_receiver) = mpsc::channel(50000);
 
         Ok(Self {

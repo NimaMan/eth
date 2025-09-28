@@ -3,7 +3,19 @@ use serde::{Deserialize, Serialize};
 ///
 /// This module contains all configuration parameters for the mempool processor
 /// system, providing a single source of truth for all settings.
+use std::path::Path;
 use std::time::Duration;
+
+/// Default location of the local Reth data directory used by the processor.
+pub const DEFAULT_RETH_DATA_DIR: &str = "/home/nima/.local/share/reth/mainnet";
+/// Default IPC socket path exposed by the local Reth node.
+pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/.local/share/reth/mainnet/reth.ipc";
+/// Default number of simulation worker threads.
+pub const DEFAULT_SIM_WORKERS: usize = 4;
+
+fn default_simulation_workers() -> usize {
+    DEFAULT_SIM_WORKERS
+}
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +146,10 @@ pub struct SimulationConfig {
     /// Reth data directory path
     pub reth_datadir: String,
 
+    /// Number of simulation worker threads
+    #[serde(default = "default_simulation_workers")]
+    pub worker_threads: usize,
+
     /// Batch size for simulation
     pub batch_size: usize,
 
@@ -208,7 +224,7 @@ impl Default for MempoolProcessorConfig {
     fn default() -> Self {
         Self {
             ipc: IpcConfig {
-                socket_path: "/tmp/reth.ipc".to_string(),
+                socket_path: DEFAULT_RETH_IPC_PATH.to_string(),
                 buffer_size: 65536,
                 reconnect_delay: Duration::from_secs(5),
                 max_reconnect_attempts: 10,
@@ -242,7 +258,8 @@ impl Default for MempoolProcessorConfig {
 
             simulation: SimulationConfig {
                 enabled: true,
-                reth_datadir: "/home/nima/.local/share/reth/mainnet".to_string(),
+                reth_datadir: DEFAULT_RETH_DATA_DIR.to_string(),
+                worker_threads: DEFAULT_SIM_WORKERS,
                 batch_size: 50,
                 batch_timeout: Duration::from_millis(100),
                 max_queue_size: 1000,
@@ -304,6 +321,12 @@ impl MempoolProcessorConfig {
             config.simulation.reth_datadir = dir;
         }
 
+        if let Ok(workers) = std::env::var("MEMPOOL_SIM_WORKERS") {
+            if let Ok(val) = workers.parse() {
+                config.simulation.worker_threads = val;
+            }
+        }
+
         if let Ok(url) = std::env::var("MEMPOOL_DATABASE_URL") {
             config.database.url = Some(url);
             config.database.enabled = true;
@@ -315,6 +338,11 @@ impl MempoolProcessorConfig {
             if let Ok(val) = threshold.parse() {
                 config.signal_detection.min_liquidity_threshold = val;
             }
+        }
+
+        if config.ipc.socket_path == DEFAULT_RETH_IPC_PATH {
+            let derived = Path::new(&config.simulation.reth_datadir).join("reth.ipc");
+            config.ipc.socket_path = derived.to_string_lossy().into_owned();
         }
 
         config

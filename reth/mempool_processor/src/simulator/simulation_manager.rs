@@ -947,7 +947,7 @@ impl SimulationManager {
         // Run liquidity removal simulation with state override if needed
         let removal_result = match self
             .liquidity_removal_simulator
-            .simulate_removal(call_request, block_number)
+            .simulate_removal_with_retry(call_request, block_number, true)
             .await
         {
             Ok(result) => result,
