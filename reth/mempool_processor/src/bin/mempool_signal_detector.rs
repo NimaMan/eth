@@ -27,6 +27,16 @@ use tokio::time;
 use tracing::{error, info, warn};
 use tracing_subscriber::Layer;
 
+#[derive(Clone, Debug, Default)]
+struct LocalTimeFormatter;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimeFormatter {
+    fn format_time(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        let now = chrono::Local::now();
+        write!(w, "[{}]", now.format("%Y-%m-%d %H:%M:%S%.3f"))
+    }
+}
+
 // Mempool processor imports
 use ethers::types::H256;
 use hex;
@@ -49,14 +59,18 @@ struct Args {
     #[arg(long, env = "MEMPOOL_CONFIG_PATH")]
     config: Option<String>,
     /// IPC socket path
-    #[arg(long, env = "IPC_PATH", default_value = "/tmp/reth.ipc")]
+    #[arg(
+        long,
+        env = "IPC_PATH",
+        default_value_t = mempool_processor::config::DEFAULT_RETH_IPC_PATH.to_string()
+    )]
     ipc_path: String,
 
     /// Reth database path for simulations
     #[arg(
         long,
         env = "RETH_DB_PATH",
-        default_value = "/home/nima/.local/share/reth/mainnet"
+        default_value_t = mempool_processor::config::DEFAULT_RETH_DATA_DIR.to_string()
     )]
     reth_db_path: String,
 
@@ -72,7 +86,10 @@ struct Args {
     batch_size: usize,
 
     /// Simulation worker threads
-    #[arg(long, default_value = "10")]
+    #[arg(
+        long,
+        default_value_t = mempool_processor::config::DEFAULT_SIM_WORKERS
+    )]
     sim_workers: usize,
 
     /// Enable verbose logging
@@ -230,10 +247,10 @@ async fn main() -> Result<()> {
 
     // Load configuration (config file -> env/defaults)
     let base_config = if let Some(ref path) = args.config {
-        mempool_processor::config::MempoolProcessorConfig::from_file(path)
-            .unwrap_or_else(|_| mempool_processor::config::MempoolProcessorConfig::from_env())
+        MempoolProcessorConfig::from_file(path)
+            .unwrap_or_else(|_| MempoolProcessorConfig::from_env())
     } else {
-        mempool_processor::config::MempoolProcessorConfig::from_env()
+        MempoolProcessorConfig::from_env()
     };
 
     // Resolve key paths from config (CLI may still print separate values)
@@ -241,6 +258,15 @@ async fn main() -> Result<()> {
     let cfg_reth_db_path = base_config.simulation.reth_datadir.clone();
     let cfg_log_dir = base_config.logging.log_dir.clone();
     let cfg_report_interval = base_config.logging.metrics_interval.as_secs();
+    let cfg_sim_workers = base_config.simulation.worker_threads;
+
+    let sim_workers = if args.sim_workers == mempool_processor::config::DEFAULT_SIM_WORKERS
+        && cfg_sim_workers != mempool_processor::config::DEFAULT_SIM_WORKERS
+    {
+        cfg_sim_workers
+    } else {
+        args.sim_workers
+    };
 
     // Create timestamped run directory
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
@@ -249,12 +275,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging to run directory
     use tracing_appender::rolling::{RollingFileAppender, Rotation};
-    use tracing_subscriber::{
-        fmt::{self, time::UtcTime},
-        layer::SubscriberExt,
-        util::SubscriberInitExt,
-        EnvFilter,
-    };
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
     // Main log file for general logs
     let main_file_appender = RollingFileAppender::builder()
@@ -273,13 +294,14 @@ async fn main() -> Result<()> {
     let main_layer = fmt::layer()
         .with_target(false)
         .with_writer(main_file_appender)
-        .with_timer(UtcTime::rfc_3339())
+        .with_timer(LocalTimeFormatter::default())
+        .with_ansi(false)
         .with_filter(EnvFilter::new(main_filter));
 
     let console_layer = fmt::layer()
         .with_target(false)
         .with_writer(std::io::stdout)
-        .with_timer(UtcTime::rfc_3339())
+        .with_timer(LocalTimeFormatter::default())
         .with_filter(EnvFilter::new(main_filter));
 
     // Combine layers
@@ -295,7 +317,7 @@ async fn main() -> Result<()> {
     info!("  Reth DB: {}", cfg_reth_db_path);
     info!("  Log Directory: {}", cfg_log_dir);
     info!("  Batch Size: {}", args.batch_size);
-    info!("  Simulation Workers: {}", args.sim_workers);
+    info!("  Simulation Workers: {}", sim_workers);
     info!("  Report Interval: {}s", cfg_report_interval);
     info!("================================");
 
@@ -393,16 +415,18 @@ async fn main() -> Result<()> {
     info!("📡 Initializing signal publisher...");
     let signals_dir = run_dir.join("signals");
     std::fs::create_dir_all(&signals_dir)?;
-    let mut publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
-    // Enable database writing (connection is hardcoded in the module)
-    publisher_config.enable_database = true;
+    let publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    let db_enabled = publisher_config.enable_database;
     let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
-    info!("✅ Signal publisher ready with database writing enabled");
+    info!(
+        "✅ Signal publisher ready with database writing {}",
+        if db_enabled { "enabled" } else { "disabled" }
+    );
 
     // 7. Simulation manager (now includes signal detection and publishing)
     info!("📦 Starting simulation manager with integrated signal detection and publishing...");
     // Load configuration (from file or defaults)
-    let config = MempoolProcessorConfig::from_env();
+    let config = base_config.clone();
 
     let signal_config = SignalManagerConfig {
         log_dir: signals_dir.clone(),
@@ -414,13 +438,13 @@ async fn main() -> Result<()> {
         token_cache.clone(),
         signal_config.clone(),
         signal_publisher.clone(),
-        args.sim_workers,
+        sim_workers,
     );
 
     // Note: set_metric_counters has been removed from SimulationManager
     info!(
         "✅ Simulation manager ready with {} workers, signal detection and publishing",
-        args.sim_workers
+        sim_workers
     );
 
     info!("\n🏃 Starting main processing loop...\n");

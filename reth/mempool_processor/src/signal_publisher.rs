@@ -1,3 +1,4 @@
+use alloy_primitives::U256;
 use chrono::Utc;
 use eyre::Result;
 use std::fs::OpenOptions;
@@ -33,7 +34,7 @@ impl SignalPublisherConfig {
         Self {
             zmq_endpoint: "tcp://127.0.0.1:5556".to_string(),
             log_dir: log_dir.to_string(),
-            enable_database: false,
+            enable_database: true,
             db_channel_buffer_size: 1000,
         }
     }
@@ -167,7 +168,6 @@ impl SignalPublisher {
     }
 
     /// Spawn non-blocking database writer task
-    #[cfg(feature = "db")]
     async fn spawn_db_writer(
         mut receiver: mpsc::Receiver<Signal>,
         stats: Arc<PublisherStats>,
@@ -208,22 +208,6 @@ impl SignalPublisher {
                 }
             }
             warn!("Database writer task terminated");
-        });
-        Ok(())
-    }
-
-    #[cfg(not(feature = "db"))]
-    async fn spawn_db_writer(
-        mut receiver: mpsc::Receiver<Signal>,
-        _stats: Arc<PublisherStats>,
-    ) -> Result<()> {
-        // If DB feature is disabled, drop the receiver and log a message
-        info!("Database feature disabled; not spawning DB writer task");
-        // Drain and drop to avoid unused mut warning
-        tokio::spawn(async move {
-            while let Some(_signal) = receiver.recv().await {
-                // no-op
-            }
         });
         Ok(())
     }
@@ -319,7 +303,6 @@ impl SignalPublisher {
                     "[{}] TRADING_ENABLED | Token: {} | Pool: {} | PoolType: {} | Creator: {} | BuyTax: {}% | SellTax: {}% | TxHash: {}",
                     timestamp, s.token_address, s.pool_address, s.pool_type, s.creator_address, s.buy_tax, s.sell_tax, s.tx_hash
                 )?;
-                writeln!(self.log_files.trading_enabled, "")?; // Add empty line for readability
                 self.log_files.trading_enabled.flush()?;
             }
             Signal::TaxSignal(s) => {
@@ -329,7 +312,6 @@ impl SignalPublisher {
                     timestamp, s.token_address, s.pool_address, s.signal_type,
                     s.buy_tax.unwrap_or(-1.0), s.sell_tax.unwrap_or(-1.0), s.tx_hash
                 )?;
-                writeln!(self.log_files.tax_signals, "")?; // Add empty line for readability
                 self.log_files.tax_signals.flush()?;
             }
             Signal::LiquidityRemoval(s) => {
@@ -352,12 +334,35 @@ impl SignalPublisher {
             // ScamDetection is deprecated: no log output
             Signal::ScamDetection(_) => {}
             Signal::LpApproval(s) => {
+                let percent_str = s
+                    .approval_percentage
+                    .map(|pct| format!("{:.2}%", pct.min(100.0)))
+                    .or_else(|| {
+                        if s.amount == U256::MAX {
+                            Some("100.00%".to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "N/A".to_string());
+
+                let raw_display = if s.amount == U256::MAX {
+                    "MAX".to_string()
+                } else {
+                    s.amount.to_string()
+                };
+
                 writeln!(
                     self.log_files.lp_approval,
-                    "[{}] LP_APPROVAL | Creator: {} | LP Token: {} | Router: {} | Amount: {} | TxHash: {}",
-                    timestamp, s.creator, s.lp_token_address, s.router_address, s.amount, s.tx_hash
+                    "[{}] LP_APPROVAL | Creator: {} | LP Token: {} | Router: {} | Percent: {} | RawAmount: {} | TxHash: {}",
+                    timestamp,
+                    s.creator,
+                    s.lp_token_address,
+                    s.router_address,
+                    percent_str,
+                    raw_display,
+                    s.tx_hash
                 )?;
-                writeln!(self.log_files.lp_approval, "")?; // Add empty line for readability
                 self.log_files.lp_approval.flush()?;
             }
         }

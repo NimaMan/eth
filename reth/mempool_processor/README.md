@@ -4,6 +4,39 @@
 
 High-performance Rust system for real-time Ethereum mempool monitoring, transaction simulation, and automated signal detection. The system detects trading opportunities by analyzing mempool transactions, simulating their effects, and determining token tradability and tax rates.
 
+## 🚧 Next Steps (Live Scam Response)
+
+### 1. Tip-State Mirror (block feed ➜ in-memory cache)
+
+- Subscribe to the existing live block feed (Python publisher or Reth `CanonStateNotification`).
+- For every canonical block event, hydrate a persistent `CacheDB<StateProviderDatabase>` using the block’s execution bundle. 
+- Store the accompanying header (timestamp, base fee, gas limit, state root) alongside the cache. This combination becomes the authoritative “tip snapshot” without waiting for MDBX writes.
+
+### 2. Pending-Tx Layer (mempool ➜ overlay replay)
+
+- Maintain a lightweight queue of unmined transactions in canonical order (per sender nonce). 
+- As new mempool transactions arrive, replay them into the same `CacheDB` overlay so approvals/allowances/transfer effects are visible immediately. 
+- Provide an API to snapshot/rollback this overlay so simulations don’t permanently mutate the shared cache.
+
+### 3. Header Injection (skip `header_by_number` hot path)
+
+- Extend the tx simulator so callers can provide a `BlockHeader` directly. When present, skip the `header_by_number` lookup and instead build the EVM environment from the injected header.
+- Use the tip snapshot header for mempool simulations; this guarantees a consistent base fee and parent hash even if MDBX is a block behind.
+
+### 4. State Reset (new canonical block ➜ overlay prune)
+
+- Upon the next canonical block notification: 
+  - Drop any pending‑tx overlays that were layered on top of the previous tip. 
+  - Rebuild the cache from the new block outcome. 
+  - Re-apply outstanding mempool transactions whose nonces are still valid.
+
+### 5. Integration Checklist
+
+- [ ] Expose a `TipStateManager` struct responsible for block subscription, cache hydration, and overlay management.
+- [ ] Update `MempoolSimulator` to request state/env from `TipStateManager` instead of `get_latest_block()/header_by_number`.
+- [ ] Add metrics (tip-lag, overlay size, replay latency) to ensure the new path stays performant.
+- [ ] Provide fallbacks (retry with canonical MDBX) if the tip snapshot becomes unavailable.
+
 ## 🎯 Core Concept: Transaction Flow & Signal Detection
 
 ### **The Journey of a Transaction**
@@ -360,8 +393,8 @@ Per‑pool simulation (CreatorTransaction)
 │  • signals/trading_enabled   │    │  tcp://127.0.0.1:5556        │
 │  • signals/tax_signals       │    └──────────────────────────────┘
 │  • signals/liquidity_removals│
-│  • signals/scam_detections   │    (Optional DB via feature `db`)
-│  • signals/lp_approval       │    • Enabled/disabled at build time
+│  • signals/scam_detections   │    (DB writer enabled by default)
+│  • signals/lp_approval       │    • Toggle via SignalPublisherConfig.enable_database
 └──────────────────────────────┘
 
 Support services
@@ -489,7 +522,7 @@ simulation_manager.submit(request).await?;
 - **Reth Node**: Running with IPC enabled (`/tmp/reth.ipc`)
 - **Reth Database**: Read access to `/home/nima/.local/share/reth/mainnet`
 - **Python Token Tracker**: Optional; when offline the cache is sparse but pipeline still runs
-- **PostgreSQL**: Optional for audit logging (disabled by default when building with `--no-default-features`)
+- **PostgreSQL**: Optional for audit logging (set `SignalPublisherConfig.enable_database = false` to skip)
 
 ### Installation
 ```bash
