@@ -25,6 +25,7 @@ use tokio::task;
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::geth::CallConfig;
 use reth_evm::{ConfigureEvm, Evm};
+use reth_primitives::SealedHeader;
 use reth_provider::{HeaderProvider, StateProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
@@ -35,6 +36,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 pub(crate) struct ForkedState {
     pub db: CacheDB<StateProviderDatabase<Box<dyn StateProvider>>>,
     pub block_number: u64,
+    pub block_header: SealedHeader,
     pub nonces: HashMap<Address, u64>,
 }
 
@@ -140,7 +142,22 @@ impl TxSimulator {
 
     /// Create a forked state at a specific block for sequential simulation
     pub(crate) fn create_forked_state(&self, block_number: u64) -> Result<ForkedState> {
-        let _provider = self.provider_factory.provider()?;
+        let provider = self.provider_factory.provider()?;
+        // Important: fetching the canonical header can fail briefly if the MDBX mapping
+        // has not advanced yet even though the block is visible via RPC.
+        let header = provider
+            .header_by_number(block_number)?
+            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+        let sealed_header = SealedHeader::new(header.clone(), header.hash_slow());
+
+        self.create_forked_state_with_header(block_number, sealed_header)
+    }
+
+    pub(crate) fn create_forked_state_with_header(
+        &self,
+        block_number: u64,
+        block_header: SealedHeader,
+    ) -> Result<ForkedState> {
         let state = self
             .provider_factory
             .history_by_block_number(block_number)?;
@@ -149,6 +166,7 @@ impl TxSimulator {
         Ok(ForkedState {
             db,
             block_number,
+            block_header,
             nonces: HashMap::new(),
         })
     }
@@ -158,18 +176,9 @@ impl TxSimulator {
         &self,
         forked_state: &mut ForkedState,
         transaction: UnsignedTransaction,
-        block_number: u64,
+        _block_number: u64,
     ) -> Result<crate::types::FullSimulationResult> {
-        let provider = self.provider_factory.provider()?;
-        // Important: This fetches the canonical header by block NUMBER.
-        // In live pipelines, a block can be mined and visible over RPC while the
-        // MDBX canonical mapping has not yet advanced. In that short window
-        // `header_by_number(block_number)` returns `None`, yielding
-        // "No header for block {block_number}". This reflects DB commit timing,
-        // not that the network lacks the block.
-        let header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
+        let header = forked_state.block_header.clone();
 
         // Create tracer with full config
         let unsigned_tx_config = TracingInspectorConfig::default_geth().set_record_logs(true);
@@ -235,12 +244,7 @@ impl TxSimulator {
         transaction: UnsignedTransaction,
         inspector: &mut Option<TracingInspector>,
     ) -> Result<SequentialTransactionResult> {
-        let provider = self.provider_factory.provider()?;
-        // See note above: number-based canonical header lookup can momentarily be missing
-        // right after a new block is imported and before canonicalization commits.
-        let header = provider
-            .header_by_number(forked_state.block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", forked_state.block_number))?;
+        let header = forked_state.block_header.clone();
 
         // Get or create inspector with fusing
         let insp = inspector.get_or_insert_with(|| {
@@ -307,10 +311,7 @@ impl TxSimulator {
         forked_state: &mut ForkedState,
         transaction: UnsignedTransaction,
     ) -> Result<SequentialTransactionResult> {
-        let provider = self.provider_factory.provider()?;
-        let header = provider
-            .header_by_number(forked_state.block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", forked_state.block_number))?;
+        let header = forked_state.block_header.clone();
 
         // Create tracer
         let unsigned_tx_config = TracingInspectorConfig::default_geth().set_record_logs(true);
@@ -418,19 +419,21 @@ impl TxSimulator {
             }
         };
 
+        let fee_defaults = &self.defaults.fee;
+
         // Calculate fees with base fee awareness
         let (gas_price, gas_priority_fee) = if tx_type == 2 {
-            // EIP-1559
-            let priority_fee = request.max_priority_fee_per_gas.unwrap_or(1_000_000_000); // 1 gwei default
+            let priority_fee = request
+                .max_priority_fee_per_gas
+                .unwrap_or(fee_defaults.bundle_default_priority_fee);
 
             // If max_fee_per_gas is provided, use it; otherwise calculate from base fee
             let max_fee = if let Some(max_fee) = request.max_fee_per_gas {
                 max_fee
             } else {
-                // For EIP-1559, we need a base fee - it should always be available post-London
-                let base = base_fee.expect("EIP-1559 transaction requires base fee (post-London)");
-                // Set max fee to 10x base fee + priority fee as upper bound
-                base.saturating_mul(10).saturating_add(priority_fee)
+                let base = base_fee.unwrap_or(fee_defaults.pre_london_base_fee);
+                base.saturating_mul(fee_defaults.bundle_max_fee_multiplier)
+                    .saturating_add(priority_fee)
             };
 
             (max_fee, Some(priority_fee))
@@ -439,11 +442,8 @@ impl TxSimulator {
             let price = if let Some(price) = request.gas_price {
                 price
             } else {
-                // For legacy transactions on post-London blocks, use base fee
-                // For pre-London blocks, base_fee will be None, use a reasonable gas price
-                let base = base_fee.unwrap_or(20_000_000_000u128); // 20 gwei for pre-London
-                                                                   // For legacy transactions, use 3x base fee to ensure simulation succeeds
-                base.saturating_mul(3)
+                let base = base_fee.unwrap_or(fee_defaults.legacy_pre_london_base_fee);
+                base.saturating_mul(fee_defaults.legacy_gas_price_multiplier)
             };
             (price, None)
         };
@@ -463,10 +463,10 @@ impl TxSimulator {
             value: request.value.unwrap_or_default(),
             data: request.data.clone().unwrap_or_default(),
             nonce,
-            chain_id: Some(1), // Mainnet
+            chain_id: fee_defaults.chain_id,
             access_list: Default::default(),
             blob_hashes: Default::default(),
-            max_fee_per_blob_gas: 0,
+            max_fee_per_blob_gas: fee_defaults.max_fee_per_blob_gas,
             authorization_list: Default::default(),
         })
     }

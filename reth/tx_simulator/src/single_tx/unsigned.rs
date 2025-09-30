@@ -15,7 +15,8 @@ use tokio::task;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_trace::geth::CallConfig;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_provider::HeaderProvider;
+use reth_primitives::SealedHeader;
+use reth_provider::{HeaderProvider, StateProviderBox};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -43,18 +44,34 @@ impl TxSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<SimulationResult> {
+        let provider = self.provider_factory.provider()?;
+        let header = provider.header_by_number(block_number)?.ok_or_else(|| {
+            eyre::eyre!("Provider did not return header for block {}", block_number)
+        })?;
+
+        let state = self
+            .provider_factory
+            .history_by_block_number(block_number)?;
+
+        self.simulate_unsigned_transaction_with_header_and_state(
+            unsigned_tx,
+            SealedHeader::new_unhashed(header),
+            state,
+        )
+        .await
+    }
+
+    /// Simulate an unsigned transaction using a provided header/state snapshot.
+    pub async fn simulate_unsigned_transaction_with_header_and_state(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        header: SealedHeader,
+        state: StateProviderBox,
+    ) -> Result<SimulationResult> {
         let simulator = self.clone();
 
         task::spawn_blocking(move || {
-            let provider = simulator.provider_factory.provider()?;
-            let header = provider.header_by_number(block_number)?.ok_or_else(|| {
-                eyre::eyre!("Provider did not return header for block {}", block_number)
-            })?;
-
-            let state = simulator
-                .provider_factory
-                .history_by_block_number(block_number)?;
-
+            let header = header.into_header();
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
@@ -298,21 +315,22 @@ impl TxSimulator {
             }
         };
 
+        let fee_defaults = &self.defaults.fee;
+
         // Calculate fees with base fee awareness
         let (gas_price, gas_priority_fee) = if tx_type == 2 {
             // EIP-1559
-            // Derive a tip as 1% of base fee when not provided (0.01 × base).
-            // This keeps defaults proportional to conditions and very small when base is low.
-            let base = base_fee.unwrap_or(1_000_000_000u128); // default 1 gwei if unavailable (pre-London)
-            let derived_tip = (base / 100).max(1); // 1% of base, minimum 1 wei
+            let tip_divisor = fee_defaults.derived_tip_divisor.max(1);
+            let base = base_fee.unwrap_or(fee_defaults.pre_london_base_fee);
+            let derived_tip = (base / tip_divisor).max(fee_defaults.min_priority_fee);
             let priority_fee = request.max_priority_fee_per_gas.unwrap_or(derived_tip);
 
             // If max_fee_per_gas is provided, use it; otherwise calculate from base fee + tip + cushion
             let max_fee = if let Some(max_fee) = request.max_fee_per_gas {
                 max_fee
             } else {
-                // Small cushion proportional to base (>= 0.1 gwei)
-                let cushion = (base / 10).max(100_000_000u128);
+                let cushion_divisor = fee_defaults.priority_fee_cushion_divisor.max(1);
+                let cushion = (base / cushion_divisor).max(fee_defaults.priority_fee_min_cushion);
                 base.saturating_add(priority_fee).saturating_add(cushion)
             };
             (max_fee, Some(priority_fee))
@@ -321,11 +339,8 @@ impl TxSimulator {
             let price = if let Some(price) = request.gas_price {
                 price
             } else {
-                // For legacy transactions on post-London blocks, use base fee
-                // For pre-London blocks, base_fee will be None, use a reasonable gas price
-                let base = base_fee.unwrap_or(20_000_000_000u128); // 20 gwei for pre-London
-                                                                   // For legacy transactions, use 3x base fee to ensure simulation succeeds
-                base.saturating_mul(3)
+                let base = base_fee.unwrap_or(fee_defaults.legacy_pre_london_base_fee);
+                base.saturating_mul(fee_defaults.legacy_gas_price_multiplier)
             };
             (price, None)
         };
@@ -345,10 +360,10 @@ impl TxSimulator {
             value: request.value.unwrap_or_default(),
             data: request.data.clone().unwrap_or_default(),
             nonce,
-            chain_id: Some(1), // Mainnet
+            chain_id: fee_defaults.chain_id,
             access_list: Default::default(),
             blob_hashes: Default::default(),
-            max_fee_per_blob_gas: 0,
+            max_fee_per_blob_gas: fee_defaults.max_fee_per_blob_gas,
             authorization_list: Default::default(),
         })
     }

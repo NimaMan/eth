@@ -57,6 +57,7 @@ pub use tx_chain::signed::SignedTxChainSimulation;
 pub use tx_chain::unsigned::{ChainStateInfo, UnsignedTxChainSimulation};
 pub use tx_parallel::ParallelTxSimulationOptions;
 pub use types::{
-    CallFrame, FullSimulationResult, ParallelTxSimulationResult, SequentialSimulationOptions,
-    SequentialSimulationResult, SequentialTransactionResult, SimulationResult, ViewFunctionResult,
+    CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult,
+    SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,
+    SimulationDefaults, SimulationResult, ViewCallDefaults, ViewCallOverrides, ViewFunctionResult,
 };

@@ -1,9 +1,8 @@
 /// Type definitions for the transaction simulator
-/// 
+///
 /// This module contains all the public types used throughout the tx_simulator library.
 /// These types represent simulation results, internal transactions, and configuration options.
-
-use alloy_primitives::{Address, U256, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 pub use alloy_rpc_types_trace::geth::CallFrame;
 use std::collections::HashMap;
 
@@ -14,8 +13,6 @@ pub struct SimulationResult {
     pub gas_used: u64,
     pub revert_reason: Option<String>,
 }
-
-
 
 /// Full simulation result with call trace
 #[derive(Debug, Clone)]
@@ -88,12 +85,12 @@ impl ViewFunctionResult {
     pub fn decode_uint256(&self) -> U256 {
         crate::contract_method_simulator::decode_uint256_result(&self.output)
     }
-    
+
     /// Decode the output as a uint8 value
     pub fn decode_uint8(&self) -> u8 {
         crate::contract_method_simulator::decode_uint8_result(&self.output)
     }
-    
+
     /// Decode the output as a string
     pub fn decode_string(&self) -> String {
         crate::contract_method_simulator::decode_string_result(&self.output)
@@ -119,3 +116,84 @@ pub struct ParallelTxSimulationResult {
     pub avg_time_per_tx: std::time::Duration,
 }
 
+/// Default fee handling when transactions omit explicit gas parameters
+#[derive(Debug, Clone)]
+pub struct FeeDefaults {
+    pub pre_london_base_fee: u128,
+    pub derived_tip_divisor: u128,
+    pub min_priority_fee: u128,
+    pub priority_fee_cushion_divisor: u128,
+    pub priority_fee_min_cushion: u128,
+    pub legacy_pre_london_base_fee: u128,
+    pub legacy_gas_price_multiplier: u128,
+    pub bundle_default_priority_fee: u128,
+    pub bundle_max_fee_multiplier: u128,
+    pub chain_id: Option<u64>,
+    pub max_fee_per_blob_gas: u128,
+}
+
+impl Default for FeeDefaults {
+    fn default() -> Self {
+        Self {
+            pre_london_base_fee: 1_000_000_000,
+            derived_tip_divisor: 100,
+            min_priority_fee: 1,
+            priority_fee_cushion_divisor: 10,
+            priority_fee_min_cushion: 100_000_000,
+            legacy_pre_london_base_fee: 20_000_000_000,
+            legacy_gas_price_multiplier: 3,
+            bundle_default_priority_fee: 1_000_000_000,
+            bundle_max_fee_multiplier: 10,
+            chain_id: Some(1),
+            max_fee_per_blob_gas: 0,
+        }
+    }
+}
+
+/// Default parameters for constructing view calls
+#[derive(Debug, Clone)]
+pub struct ViewCallDefaults {
+    pub from: Address,
+    pub gas_limit: u64,
+}
+
+impl Default for ViewCallDefaults {
+    fn default() -> Self {
+        Self {
+            from: Address::ZERO,
+            gas_limit: 3_000_000,
+        }
+    }
+}
+
+/// Optional per-call overrides when building view transactions
+#[derive(Debug, Clone, Default)]
+pub struct ViewCallOverrides {
+    pub from: Option<Address>,
+    pub gas_limit: Option<u64>,
+}
+
+impl ViewCallOverrides {
+    pub fn resolve(&self, defaults: &ViewCallDefaults) -> ViewCallDefaults {
+        ViewCallDefaults {
+            from: self.from.unwrap_or(defaults.from),
+            gas_limit: self.gas_limit.unwrap_or(defaults.gas_limit),
+        }
+    }
+}
+
+/// Aggregated simulator defaults
+#[derive(Debug, Clone)]
+pub struct SimulationDefaults {
+    pub fee: FeeDefaults,
+    pub view_call: ViewCallDefaults,
+}
+
+impl Default for SimulationDefaults {
+    fn default() -> Self {
+        Self {
+            fee: FeeDefaults::default(),
+            view_call: ViewCallDefaults::default(),
+        }
+    }
+}

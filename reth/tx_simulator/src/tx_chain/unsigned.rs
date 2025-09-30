@@ -15,6 +15,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use eyre::Result;
+use reth_primitives::SealedHeader;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,6 +45,8 @@ pub struct UnsignedTxChainSimulation {
     total_gas_used: u64,
     /// Initial block number
     initial_block: u64,
+    /// Initial block header snapshot
+    initial_block_header: SealedHeader,
     /// Fused inspector that persists across transactions
     inspector: Option<TracingInspector>,
 }
@@ -55,12 +58,14 @@ impl UnsignedTxChainSimulation {
         forked_state: ForkedState,
         block_number: u64,
     ) -> Self {
+        let initial_block_header = forked_state.block_header.clone();
         Self {
             simulator,
             forked_state,
             results: Vec::new(),
             total_gas_used: 0,
             initial_block: block_number,
+            initial_block_header,
             inspector: None,
         }
     }
@@ -155,7 +160,11 @@ impl UnsignedTxChainSimulation {
     /// to the state it had when created.
     pub async fn reset(&mut self) -> Result<()> {
         // Create fresh forked state at initial block
-        self.forked_state = self.simulator.create_forked_state(self.initial_block)?;
+        self.forked_state = self.simulator.create_forked_state_with_header(
+            self.initial_block,
+            self.initial_block_header.clone(),
+        )?;
+        self.initial_block_header = self.forked_state.block_header.clone();
         self.results.clear();
         self.total_gas_used = 0;
         self.inspector = None; // Reset inspector
@@ -171,13 +180,9 @@ impl UnsignedTxChainSimulation {
     ) -> Result<SimulationResult> {
         use crate::simulation_revert_decoder::decode_revert_data;
         use reth_evm::{ConfigureEvm, Evm};
-        use reth_provider::HeaderProvider;
         use reth_revm::DatabaseCommit;
 
-        let provider = self.simulator.provider_factory.provider()?;
-        let header = provider
-            .header_by_number(self.forked_state.block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", self.forked_state.block_number))?;
+        let header = self.forked_state.block_header.clone();
 
         // Get or create inspector with fusing
         let inspector = self.inspector.get_or_insert_with(|| {
@@ -191,7 +196,7 @@ impl UnsignedTxChainSimulation {
 
         // Setup EVM environment
         let evm_env = self.simulator.evm_config.evm_env(&header);
-        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        let base_fee = header.header().base_fee_per_gas.map(|v| v as u128);
 
         // Create transaction environment
         let tx_env = self.simulator.create_tx_env_from_unsigned_tx(
@@ -311,6 +316,21 @@ impl TxSimulator {
 
         // Use the existing create_forked_state method
         let forked_state = self.create_forked_state(block_number)?;
+
+        Ok(UnsignedTxChainSimulation::new(
+            Arc::new(self.clone()),
+            forked_state,
+            block_number,
+        ))
+    }
+
+    /// Start a new simulation chain using a supplied block header snapshot.
+    pub async fn start_simulation_chain_with_header(
+        &self,
+        block_header: SealedHeader,
+    ) -> Result<UnsignedTxChainSimulation> {
+        let block_number = block_header.number;
+        let forked_state = self.create_forked_state_with_header(block_number, block_header)?;
 
         Ok(UnsignedTxChainSimulation::new(
             Arc::new(self.clone()),

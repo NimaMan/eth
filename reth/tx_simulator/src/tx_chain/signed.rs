@@ -7,14 +7,13 @@ use crate::single_tx::unsigned::UnsignedTransaction;
 use crate::{
     simulator::TxSimulator,
     tx_chain::bundle::ForkedState,
-    types::{FullSimulationResult, SimulationResult, ViewFunctionResult},
+    types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::{Recovered, TransactionSigned};
-use reth_provider::HeaderProvider;
+use reth_primitives::{Recovered, SealedHeader, TransactionSigned};
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
@@ -43,10 +42,7 @@ impl SignedTxChainSimulation {
 
     /// Execute a signed transaction and persist its state changes
     pub fn step(&mut self, tx: &TransactionSigned) -> Result<SimulationResult> {
-        let provider = self.simulator.provider_factory.provider()?;
-        let header = provider
-            .header_by_number(self.block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", self.block_number))?;
+        let header = self.forked_state.block_header.clone();
 
         let evm_env = self.simulator.evm_config.evm_env(&header);
 
@@ -81,10 +77,7 @@ impl SignedTxChainSimulation {
 
     /// Same as step() but returns full trace
     pub fn step_with_trace(&mut self, tx: &TransactionSigned) -> Result<FullSimulationResult> {
-        let provider = self.simulator.provider_factory.provider()?;
-        let header = provider
-            .header_by_number(self.block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", self.block_number))?;
+        let header = self.forked_state.block_header.clone();
 
         let evm_env = self.simulator.evm_config.evm_env(&header);
         let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
@@ -125,12 +118,20 @@ impl SignedTxChainSimulation {
     }
 
     /// Execute a read-only call against the current forked state and return raw output
-    pub fn view_call_on_fork(&mut self, to: Address, data: Bytes) -> Result<ViewFunctionResult> {
+    pub fn view_call_on_fork_with_options(
+        &mut self,
+        to: Address,
+        data: Bytes,
+        overrides: Option<ViewCallOverrides>,
+    ) -> Result<ViewFunctionResult> {
         // Build an unsigned view tx
+        let resolved = overrides
+            .unwrap_or_default()
+            .resolve(&self.simulator.simulation_defaults().view_call);
         let unsigned = UnsignedTransaction {
-            from: Some(Address::ZERO),
+            from: Some(resolved.from),
             to: Some(to),
-            gas: Some(3_000_000),
+            gas: Some(resolved.gas_limit),
             gas_price: None,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
@@ -155,6 +156,11 @@ impl SignedTxChainSimulation {
             output,
             gas_used: res.gas_used,
         })
+    }
+
+    /// Backward compatibility helper using default overrides
+    pub fn view_call_on_fork(&mut self, to: Address, data: Bytes) -> Result<ViewFunctionResult> {
+        self.view_call_on_fork_with_options(to, data, None)
     }
 
     /// Convenience: ERC-20 balanceOf on forked state
@@ -194,6 +200,20 @@ impl TxSimulator {
     pub fn start_signed_chain(&self, at_block: Option<u64>) -> Result<SignedTxChainSimulation> {
         let block = at_block.unwrap_or(self.get_latest_block()?);
         let fork = self.create_forked_state(block)?;
+        Ok(SignedTxChainSimulation::new(
+            Arc::new(self.clone()),
+            fork,
+            block,
+        ))
+    }
+
+    /// Start a signed-tx chain simulator using a provided block header snapshot.
+    pub fn start_signed_chain_with_header(
+        &self,
+        block_header: SealedHeader,
+    ) -> Result<SignedTxChainSimulation> {
+        let block = block_header.number;
+        let fork = self.create_forked_state_with_header(block, block_header)?;
         Ok(SignedTxChainSimulation::new(
             Arc::new(self.clone()),
             fork,

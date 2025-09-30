@@ -1,56 +1,63 @@
 /// Contract Method Simulator - for calling read-only contract methods
-/// 
+///
 /// This module provides functionality to call read-only methods (view/pure functions) on smart contracts
-/// without creating a transaction. These are commonly used for querying token balances, 
+/// without creating a transaction. These are commonly used for querying token balances,
 /// total supply, decimals, and other contract state.
-
 use crate::{
     simulator::TxSimulator,
-    types::ViewFunctionResult,
     single_tx::unsigned::UnsignedTransaction,
+    types::{ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 
 impl TxSimulator {
     /// Simulate a read-only contract method call (view/pure function)
-    /// 
+    ///
     /// This simulates calling a view/pure function on a smart contract.
     /// No state changes are made, just returns the output data.
-    /// 
+    ///
     /// # Arguments
     /// * `contract` - The contract address to call
     /// * `data` - The encoded function call data (selector + args)
     /// * `block_number` - Optional block number to query at (defaults to latest)
-    pub async fn simulate_contract_read_only_call(
+    /// * `overrides` - Optional overrides for from address / gas limit (defaults applied when None)
+    pub async fn simulate_contract_read_only_call_with_options(
         &self,
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
+        overrides: Option<ViewCallOverrides>,
     ) -> Result<ViewFunctionResult> {
+        let resolved = overrides
+            .unwrap_or_default()
+            .resolve(&self.defaults.view_call);
+
         // Build a call request for the view function
         let unsigned_tx = UnsignedTransaction {
-            from: Some(Address::ZERO), // View functions can be called from any address
+            from: Some(resolved.from),
             to: Some(contract),
             value: Some(U256::ZERO), // View functions shouldn't accept value
             data: Some(data),
-            gas: Some(3_000_000), // Reasonable gas limit for view functions
+            gas: Some(resolved.gas_limit),
             gas_price: None,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
         };
-        
+
         // Get block number
         let block = if let Some(bn) = block_number {
             bn
         } else {
             self.get_latest_block()?
         };
-        
+
         // We need to use the trace version to get the actual output data
-        let result = self.simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block)).await?;
-        
+        let result = self
+            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block))
+            .await?;
+
         // Extract the output from the call trace
         let output = if result.success {
             // Get the output from the top-level call frame
@@ -58,14 +65,25 @@ impl TxSimulator {
         } else {
             Bytes::new()
         };
-        
+
         Ok(ViewFunctionResult {
             success: result.success,
             output,
             gas_used: result.gas_used,
         })
     }
-    
+
+    /// Backward compatibility alias using default overrides
+    pub async fn simulate_contract_read_only_call(
+        &self,
+        contract: Address,
+        data: Bytes,
+        block_number: Option<u64>,
+    ) -> Result<ViewFunctionResult> {
+        self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
+            .await
+    }
+
     /// Backward compatibility alias for simulate_contract_read_only_call
     pub async fn simulate_view_function(
         &self,
@@ -73,7 +91,8 @@ impl TxSimulator {
         data: Bytes,
         block_number: Option<u64>,
     ) -> Result<ViewFunctionResult> {
-        self.simulate_contract_read_only_call(contract, data, block_number).await
+        self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
+            .await
     }
 }
 
@@ -117,15 +136,15 @@ pub fn decode_string_from_contract_output(output: &Bytes) -> String {
     if output.len() < 64 {
         return String::new();
     }
-    
+
     // Skip offset (32 bytes) and length (32 bytes)
     let len_bytes = &output[32..64];
     let len = U256::from_be_slice(len_bytes).to::<usize>();
-    
+
     if output.len() < 64 + len {
         return String::new();
     }
-    
+
     // Get the actual string bytes
     let string_bytes = &output[64..64 + len];
     String::from_utf8_lossy(string_bytes).to_string()
@@ -134,8 +153,8 @@ pub fn decode_string_from_contract_output(output: &Bytes) -> String {
 // ViewFunctionResult is already exported from lib.rs
 
 // Backward compatibility aliases
-pub use self::encode_contract_read_call_no_args as encode_view_function_call;
-pub use self::encode_contract_read_call_with_address_arg as encode_view_function_with_address;
+pub use self::decode_string_from_contract_output as decode_string_result;
 pub use self::decode_uint256_from_contract_output as decode_uint256_result;
 pub use self::decode_uint8_from_contract_output as decode_uint8_result;
-pub use self::decode_string_from_contract_output as decode_string_result;
+pub use self::encode_contract_read_call_no_args as encode_view_function_call;
+pub use self::encode_contract_read_call_with_address_arg as encode_view_function_with_address;
