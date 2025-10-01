@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
-use alloy_primitives::{Address, U256};
+use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
-use crate::tx_processor::TxProcessor;
+use super::types::PoolBuySellParameters;
 use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::TxProcessor;
 use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute, spender_for_route};
 
 #[derive(Debug, Clone)]
@@ -46,8 +47,8 @@ pub async fn simulate_cross_venue_buy_approve_sell(
     let slippage_bps = 50u32; // 0.5%
     let deadline = u64::MAX;
 
-    // Buyer/seller address: reuse default from PoolViabilityConfig for consistency
-    let buyer = super::config::PoolViabilityConfig::default().buyer_address;
+    // Buyer/seller address: reuse default from PoolBuySellParameters for consistency
+    let buyer = PoolBuySellParameters::default().buyer_address;
 
     // BUY
     let buy_tx: UnsignedTransaction = tx_builders::build_buy_swap(
@@ -72,7 +73,14 @@ pub async fn simulate_cross_venue_buy_approve_sell(
         .await?;
 
     // SELL entire bought amount
-    let sell_tx = tx_builders::build_sell_swap(&sell_route, buyer, token, tokens_bought, slippage_bps, deadline);
+    let sell_tx = tx_builders::build_sell_swap(
+        &sell_route,
+        buyer,
+        token,
+        tokens_bought,
+        slippage_bps,
+        deadline,
+    );
     let sell_sim = chain.step_with_trace(sell_tx.clone()).await?;
     let sell_processed = tx_processor
         .process_transaction_from_simulation_result(&sell_tx, &sell_sim, block, 2)
@@ -101,23 +109,38 @@ pub async fn simulate_cross_venue_buy_approve_sell(
     })
 }
 
-fn extract_token_increase(processed: &ProcessedTransaction, owner: Address, token: Address) -> U256 {
+fn extract_token_increase(
+    processed: &ProcessedTransaction,
+    owner: Address,
+    token: Address,
+) -> U256 {
     use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
     use reth_chain_query::to_checksum_address;
     if let Some(changes) = processed.address_balance_changes.get(&owner) {
         if let Some(sym) = get_token_symbol(&token) {
-            if let Some(&amt) = changes.currency_net.get(sym) { if amt > U256::ZERO { return amt; } }
+            if let Some(&amt) = changes.currency_net.get(sym) {
+                if amt > I256::ZERO {
+                    return amt.unsigned_abs();
+                }
+            }
         }
         let key = to_checksum_address(&token);
-        if let Some(&amt) = changes.token_net.get(&key) { if amt > U256::ZERO { return amt; } }
+        if let Some(&amt) = changes.token_net.get(&key) {
+            if amt > I256::ZERO {
+                return amt.unsigned_abs();
+            }
+        }
     }
     U256::ZERO
 }
 
 fn extract_eth_increase(processed: &ProcessedTransaction, owner: Address) -> U256 {
     if let Some(changes) = processed.address_balance_changes.get(&owner) {
-        if let Some(&amt) = changes.currency_net.get("ETH") { if amt > U256::ZERO { return amt; } }
+        if let Some(&amt) = changes.currency_net.get("ETH") {
+            if amt > I256::ZERO {
+                return amt.unsigned_abs();
+            }
+        }
     }
     U256::ZERO
 }
-

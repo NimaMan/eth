@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use alloy_primitives::{Address, B256, U256};
-use serde::{Serialize, Deserialize};
+use super::balance_changes::AddressBalanceChange;
 use super::events::*;
 use super::fees::TransactionFees;
-use super::balance_changes::AddressBalanceChange;
+use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ETHTransfer {
@@ -36,28 +36,28 @@ pub struct ProcessedTransaction {
     pub value: U256,
     pub status: String,
     pub nonce: u64,
-    
+
     // Transaction classification
     pub txn_type: String,
     pub actions: Vec<String>,
-    
+
     // Fee information
     pub fees: TransactionFees,
     pub bribe_amount: f64,
-    
+
     // Addresses and contracts involved
     pub unique_addresses: HashSet<Address>,
     pub erc20_contracts: HashSet<Address>,
     pub erc721_contracts: HashSet<Address>,
     pub erc1155_contracts: HashSet<Address>,
-    
+
     // Transfer events
     pub eth_transfers: Vec<ETHTransfer>,
     pub erc20_transfers: Vec<ERC20Transfer>,
     pub erc721_transfers: Vec<ERC721Transfer>,
     pub erc1155_transfers: Vec<ERC1155Transfer>,
     pub internal_transactions: Vec<InternalTransaction>,
-    
+
     // DEX events
     pub uniswap_v2_syncs: Vec<UniswapV2Sync>,
     pub uniswap_v2_swaps: Vec<UniswapV2Swap>,
@@ -73,7 +73,7 @@ pub struct ProcessedTransaction {
     pub uniswap_v4_modifies: Vec<UniswapV4ModifyLiquidity>,
     pub uniswap_v4_swaps: Vec<UniswapV4Swap>,
     pub permit2_events: Vec<Permit2>,
-    
+
     // Other events and actions
     pub approvals: Vec<ERC20Approval>,
     pub erc721_approvals: Vec<ERC721Approval>,
@@ -86,7 +86,7 @@ pub struct ProcessedTransaction {
     pub contract_creation_events: Vec<ContractCreationEvent>,
     pub trading_enabled_events: Vec<TradingEnabledEvent>,
     pub trading_disabled_events: Vec<TradingDisabledEvent>,
-    
+
     // Generic events and state
     pub other_events: Vec<HashMap<String, serde_json::Value>>,
     pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
@@ -96,30 +96,25 @@ pub struct ProcessedTransaction {
 
 impl ProcessedTransaction {
     /// Create a failed/empty transaction placeholder for skipped transactions
-    pub fn empty_failed(
-        from: Address,
-        to: Option<Address>,
-        nonce: u64,
-        reason: &str,
-    ) -> Self {
+    pub fn empty_failed(from: Address, to: Option<Address>, nonce: u64, reason: &str) -> Self {
         let hash = B256::from_slice(&[nonce as u8; 32]);
         let mut tx = Self::new(
             hash,
-            0,  // block_number
-            0,  // block_timestamp
-            nonce,  // txn_index  
+            0,     // block_number
+            0,     // block_timestamp
+            nonce, // txn_index
             from,
             to,
-            U256::ZERO,  // value
-            "0".to_string(),  // status (failed)
+            U256::ZERO,      // value
+            "0".to_string(), // status (failed)
             nonce,
-            vec![],  // input
+            vec![], // input
         );
         tx.txn_type = "skipped".to_string();
         tx.actions = vec![reason.to_string()];
         tx
     }
-    
+
     pub fn new(
         hash: B256,
         block_number: u64,
@@ -187,19 +182,27 @@ impl ProcessedTransaction {
             input,
         }
     }
-    
+
     /// Get currency balance change for an address by currency symbol (ETH, USDC, USDT, etc.)
-    /// Returns the U256 amount from currency_net
-    pub fn get_address_currency_balance_change(&self, address: &Address, symbol: &str) -> Option<U256> {
+    /// Returns the signed amount from currency_net
+    pub fn get_address_currency_balance_change(
+        &self,
+        address: &Address,
+        symbol: &str,
+    ) -> Option<I256> {
         self.address_balance_changes
             .get(address)
             .and_then(|changes| changes.currency_net.get(symbol))
             .copied()
     }
-    
+
     /// Get token balance change for an address by token contract address
-    /// Returns the U256 amount from token_net
-    pub fn get_address_token_balance_change(&self, address: &Address, token_address: &Address) -> Option<U256> {
+    /// Returns the signed amount from token_net
+    pub fn get_address_token_balance_change(
+        &self,
+        address: &Address,
+        token_address: &Address,
+    ) -> Option<I256> {
         let token_checksum = to_checksum_address(token_address);
         self.address_balance_changes
             .get(address)

@@ -80,6 +80,22 @@ path = "examples/simulation/specific_token_investigation/investigate_rfi_token_t
 name = "investigate_floki_token_taxes"
 path = "examples/simulation/specific_token_investigation/investigate_floki_token_taxes.rs"
 
+[[example]]
+name = "process_block"
+path = "examples/block/process_block.rs"
+
+[[example]]
+name = "process_block_batch"
+path = "examples/block/process_block_batch.rs"
+
+[[example]]
+name = "provider_process_block"
+path = "examples/provider/process_block.rs"
+
+[[example]]
+name = "provider_token_transactions"
+path = "examples/provider/token_transactions.rs"
+
 
 # Pool analysis examples
 [[example]]
@@ -123,6 +139,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
 hex-literal = "0.4"
 alloy-primitives = "1.1.2"
+rlp = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
@@ -143,9 +160,12 @@ alloy-rpc-types-trace = "1.0"
 reth_chain_query = { path = "../reth_chain_query" }
 
 # Reth dependencies for database access (matching reth_chain_query's v1.6.0)
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.6.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+
+[dev-dependencies]
+rand = "0.8"

@@ -1,14 +1,13 @@
+use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::tx_loader::TransactionLoader;
+use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
+use alloy_primitives::B256;
 /// Signed Transaction Builder - Load signed transactions from DB or from a processed tx
 ///
 /// Provides helpers to retrieve the original signed transaction for a given hash
 /// and to convert a ProcessedTransaction back into the signed form by looking up
 /// the transaction in the database.
-
 use eyre::Result;
-use alloy_primitives::B256;
-use alloy_consensus::{EthereumTxEnvelope, TxEip4844};
-use crate::tx_processor::tx_loader::TransactionLoader;
-use crate::tx_processor::data_models::ProcessedTransaction;
 
 /// Builder for retrieving signed transactions
 pub struct SignedTxBuilder {
@@ -26,7 +25,8 @@ impl SignedTxBuilder {
         &self,
         tx_hash: B256,
     ) -> Result<EthereumTxEnvelope<TxEip4844>> {
-        self.transaction_loader.load_signed_transaction_envelope_by_hash(tx_hash)
+        self.transaction_loader
+            .load_signed_transaction_envelope_by_hash(tx_hash)
     }
 
     /// Load the original signed transaction for a given ProcessedTransaction

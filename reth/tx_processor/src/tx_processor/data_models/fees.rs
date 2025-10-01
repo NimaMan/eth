@@ -1,14 +1,14 @@
 use alloy_primitives::U256;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TransactionFees {
-    pub gas_price: U256,  // Effective gas price paid
+    pub gas_price: U256, // Effective gas price paid
     pub gas_used: u64,
-    pub txn_fee: U256,    // Total fee in wei
-    
+    pub txn_fee: U256, // Total fee in wei
+
     // EIP-1559 fields
-    pub protocol_type: String,  // "legacy", "eip1559", "eip2930"
+    pub protocol_type: String,          // "legacy", "eip1559", "eip2930"
     pub max_fee_per_gas: Option<U256>,  // User's max willingness
     pub max_priority_fee: Option<U256>, // User's max tip
 }
@@ -25,7 +25,7 @@ impl TransactionFees {
             max_priority_fee: None,
         }
     }
-    
+
     pub fn new_eip1559(
         gas_price: U256,
         gas_used: u64,

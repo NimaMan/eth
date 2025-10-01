@@ -133,7 +133,7 @@ Module: `tx_processor::address_balance_change_calculator`
 
 Produces structured deltas per address:
 
-- `currency_net`: symbol → U256 delta (for known tokens from the registry; includes ETH as "ETH").
+- `currency_net`: symbol → signed delta (I256) for known tokens from the registry; includes ETH as "ETH".
 - `token_net`: checksum(token_address) → U256 delta (for arbitrary ERC20s).
 
 Notes:

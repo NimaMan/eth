@@ -45,11 +45,6 @@ impl AddressProcessedTxProvider {
             .get_address_account_history_blocks(address, start_block, end_block)
             .await?;
 
-        if blocks.is_empty() {
-            // Fallback: use the raw range if history index is empty.
-            blocks = (start_block..=end_block).collect();
-        }
-
         self.ensure_blocks_cached(&blocks).await?;
         Ok(())
     }

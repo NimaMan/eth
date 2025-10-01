@@ -1,28 +1,11 @@
+use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
+use crate::tx_processor::data_models::ProcessedTransaction;
 /// Tax Calculator for ERC20 Tokens using ProcessedTransaction
-/// 
+///
 /// Uses the modern currency_net approach from ProcessedTransaction
 /// to accurately calculate taxes from address balance changes.
-
-use alloy_primitives::{Address, U256};
-use crate::tx_processor::data_models::ProcessedTransaction;
-use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
+use alloy_primitives::{Address, I256, U256};
 use reth_chain_query::to_checksum_address;
-
-/// Check if U256 value represents a negative number (two's complement)
-fn is_negative_u256(value: U256) -> bool {
-    value > U256::MAX / U256::from(2)
-}
-
-/// Get absolute value of potentially negative U256 (two's complement)
-fn abs_u256(value: U256) -> U256 {
-    if is_negative_u256(value) {
-        // Negative value - convert to positive
-        U256::MAX - value + U256::from(1)
-    } else {
-        // Already positive
-        value
-    }
-}
 
 /// Result of tax calculation
 #[derive(Debug, Clone)]
@@ -43,7 +26,7 @@ impl TaxCalculationResult {
             TaxCalculationResult::InvalidSimulation { .. } => None,
         }
     }
-    
+
     /// Check if calculation was successful
     pub fn is_success(&self) -> bool {
         matches!(self, TaxCalculationResult::Calculated { .. })
@@ -52,7 +35,11 @@ impl TaxCalculationResult {
 
 /// Extract token change for an address from address_balance_changes
 /// Returns the raw U256 value (potentially negative in two's complement)
-fn extract_token_change(processed_tx: &ProcessedTransaction, address: Address, token_address: Address) -> Option<U256> {
+fn extract_token_change(
+    processed_tx: &ProcessedTransaction,
+    address: Address,
+    token_address: Address,
+) -> Option<I256> {
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&address) {
         // Check if it's a known token (in currency_net)
         if let Some(symbol) = get_token_symbol(&token_address) {
@@ -71,7 +58,7 @@ fn extract_token_change(processed_tx: &ProcessedTransaction, address: Address, t
 }
 
 /// Calculate buy tax from ProcessedTransaction using address balance changes
-/// 
+///
 /// Buy Tax Logic:
 /// 1. Pool should have negative token change (loses tokens)
 /// 2. Buyer should have positive token change (gains tokens)  
@@ -86,53 +73,62 @@ pub fn calculate_buy_tax_from_processed_transaction(
     // Get token changes from address_balance_changes
     let pool_token_change = extract_token_change(processed_tx, pool_address, token_address);
     let buyer_token_change = extract_token_change(processed_tx, buyer_address, token_address);
-    
+
     let pool_change = match pool_token_change {
         Some(change) => change,
-        None => return TaxCalculationResult::InvalidSimulation {
-            reason: "Pool has no token balance change".to_string()
+        None => {
+            return TaxCalculationResult::InvalidSimulation {
+                reason: "Pool has no token balance change".to_string(),
+            }
         }
     };
-    
+
     let buyer_change = match buyer_token_change {
         Some(change) => change,
-        None => return TaxCalculationResult::InvalidSimulation {
-            reason: "Buyer has no token balance change".to_string()
+        None => {
+            return TaxCalculationResult::InvalidSimulation {
+                reason: "Buyer has no token balance change".to_string(),
+            }
         }
     };
-    
+
     // Pool should have negative change (sending tokens)
-    if !is_negative_u256(pool_change) {
+    if !pool_change.is_negative() {
         return TaxCalculationResult::InvalidSimulation {
-            reason: format!("Pool token change is non-negative ({}) - pool should lose tokens in a buy", pool_change)
+            reason: format!(
+                "Pool token change is non-negative ({}) - pool should lose tokens in a buy",
+                pool_change
+            ),
         };
     }
-    
+
     // Buyer should have positive change (receiving tokens)
-    if is_negative_u256(buyer_change) {
+    if buyer_change.is_negative() {
         return TaxCalculationResult::InvalidSimulation {
-            reason: "Buyer has negative token change - should gain tokens in buy".to_string()
+            reason: "Buyer has negative token change - should gain tokens in buy".to_string(),
         };
     }
-    
+
     // Convert pool change to positive (tokens sent out)
-    let pool_tokens_sent = abs_u256(pool_change);
-    let buyer_tokens_received = buyer_change;
-    
+    let pool_tokens_sent = pool_change.unsigned_abs();
+    let buyer_tokens_received = buyer_change.unsigned_abs();
+
     // Calculate tax: tokens sent by pool - tokens received by buyer
     if pool_tokens_sent < buyer_tokens_received {
         // This shouldn't happen - buyer can't receive more than pool sent
         return TaxCalculationResult::InvalidSimulation {
-            reason: "Buyer received more tokens than pool sent".to_string()
+            reason: "Buyer received more tokens than pool sent".to_string(),
         };
     }
-    
+
     let tax_amount = pool_tokens_sent - buyer_tokens_received;
     // Avoid division by zero: if pool sent zero tokens, tax is zero
     if pool_tokens_sent == U256::ZERO {
-        return TaxCalculationResult::Calculated { tax_basis_points: 0 };
+        return TaxCalculationResult::Calculated {
+            tax_basis_points: 0,
+        };
     }
-    
+
     // tax_basis_points = (tax_amount * 10000) / pool_tokens_sent
     let tax_basis_points = if tax_amount == U256::ZERO {
         0
@@ -141,7 +137,7 @@ pub fn calculate_buy_tax_from_processed_transaction(
         // Convert to u32, capping at u32::MAX if somehow larger
         basis_points_calc.try_into().unwrap_or(u32::MAX)
     };
-    
+
     TaxCalculationResult::Calculated { tax_basis_points }
 }
 
@@ -178,19 +174,21 @@ pub fn calculate_sell_tax_from_processed_transaction(
 
     // Try to find the sold token in token_net first (unknown tokens),
     // then fallback to currency_net (known tokens like USDC/USDT/WETH but not ETH for gas).
-    let mut best_match: Option<(U256, U256)> = None; // (seller_negative, pool_positive)
+    let mut best_match: Option<(I256, I256)> = None; // (seller_negative, pool_positive)
 
     // token_net path: keys are checksum addresses
     for (token_key, &seller_amount) in &seller_changes.token_net {
-        if !is_negative_u256(seller_amount) {
+        if !seller_amount.is_negative() {
             continue; // seller must be sending tokens
         }
         if let Some(&pool_amount) = pool_changes.token_net.get(token_key) {
-            if pool_amount > U256::ZERO && !is_negative_u256(pool_amount) {
+            if pool_amount > I256::ZERO {
                 // Choose the largest absolute seller amount if multiple candidates
                 let pick = match best_match {
                     None => true,
-                    Some((prev_seller_amt, _)) => abs_u256(seller_amount) > abs_u256(prev_seller_amt),
+                    Some((prev_seller_amt, _)) => {
+                        seller_amount.unsigned_abs() > prev_seller_amt.unsigned_abs()
+                    }
                 };
                 if pick {
                     best_match = Some((seller_amount, pool_amount));
@@ -201,14 +199,16 @@ pub fn calculate_sell_tax_from_processed_transaction(
 
     // currency_net path: keys are symbols (exclude ETH since gas can make it negative)
     for (symbol, &seller_amount) in &seller_changes.currency_net {
-        if *symbol == "ETH" || !is_negative_u256(seller_amount) {
+        if *symbol == "ETH" || !seller_amount.is_negative() {
             continue;
         }
         if let Some(&pool_amount) = pool_changes.currency_net.get(symbol) {
-            if pool_amount > U256::ZERO && !is_negative_u256(pool_amount) {
+            if pool_amount > I256::ZERO {
                 let pick = match best_match {
                     None => true,
-                    Some((prev_seller_amt, _)) => abs_u256(seller_amount) > abs_u256(prev_seller_amt),
+                    Some((prev_seller_amt, _)) => {
+                        seller_amount.unsigned_abs() > prev_seller_amt.unsigned_abs()
+                    }
                 };
                 if pick {
                     best_match = Some((seller_amount, pool_amount));
@@ -227,19 +227,19 @@ pub fn calculate_sell_tax_from_processed_transaction(
     };
 
     // Sanity: seller must send (negative), pool must receive (positive)
-    if !is_negative_u256(seller_change) {
+    if !seller_change.is_negative() {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Seller token change is non-negative - should send tokens in sell".to_string(),
         };
     }
-    if is_negative_u256(pool_change) || pool_change == U256::ZERO {
+    if pool_change.is_negative() || pool_change == I256::ZERO {
         return TaxCalculationResult::InvalidSimulation {
             reason: "Pool token change is non-positive - should receive tokens in sell".to_string(),
         };
     }
 
-    let seller_tokens_sent = abs_u256(seller_change);
-    let pool_tokens_received = pool_change;
+    let seller_tokens_sent = seller_change.unsigned_abs();
+    let pool_tokens_received = pool_change.unsigned_abs();
 
     if pool_tokens_received > seller_tokens_sent {
         return TaxCalculationResult::InvalidSimulation {
@@ -249,7 +249,9 @@ pub fn calculate_sell_tax_from_processed_transaction(
 
     let tax_amount = seller_tokens_sent - pool_tokens_received;
     if seller_tokens_sent == U256::ZERO {
-        return TaxCalculationResult::Calculated { tax_basis_points: 0 };
+        return TaxCalculationResult::Calculated {
+            tax_basis_points: 0,
+        };
     }
 
     let tax_bps_u256 = (tax_amount * U256::from(10000)) / seller_tokens_sent;

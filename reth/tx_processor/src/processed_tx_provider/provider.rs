@@ -18,6 +18,7 @@ use crate::tx_processor::{LogDecoder, TransactionClassifier, TxProcessor};
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
 use reth_chain_query::ChainQuery;
+use reth_primitives::SealedHeader;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
@@ -221,6 +222,40 @@ impl ProcessedTxProvider {
                 &simulation_result,
                 block_number,
                 0, // tx_index (0 for simulated transactions)
+            )
+            .await?;
+
+        Ok(processed_tx)
+    }
+
+    /// Process transaction from unsigned tx using a provided block header snapshot
+    pub async fn process_transaction_from_unsigned_tx_with_header(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_header: SealedHeader,
+    ) -> Result<ProcessedTransaction> {
+        let block_number = block_header.number;
+
+        let state = self
+            .simulator
+            .provider_factory()
+            .history_by_block_number(block_number)?;
+
+        let simulation_result = self
+            .simulator
+            .simulate_unsigned_transaction_with_full_trace_using_header_and_state(
+                unsigned_tx.clone(),
+                block_header,
+                state,
+            )
+            .await?;
+
+        let processed_tx = self
+            .build_processed_transaction_from_simulation(
+                &unsigned_tx,
+                &simulation_result,
+                block_number,
+                0,
             )
             .await?;
 

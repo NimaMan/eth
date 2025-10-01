@@ -26,23 +26,20 @@ pub use block_processor::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockTransaction,
 };
 pub use processed_tx_provider::{
-    AddressProcessedTxProvider,
-    ProcessedTxProvider,
-    TokenProcessedTxProvider,
+    AddressProcessedTxProvider, ProcessedTxProvider, TokenProcessedTxProvider,
 };
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
-pub mod config;
-
 // Export ERC20 token buy-approve-sell simulator through simulator module
 pub use simulator::{
     check_can_buy_sell_pool, simulate_buy_swap, simulate_sell_swap, BuySwapResult,
-    OptionalSetupBuyApproveSellResult, PoolType, PoolViabilityConfig, PoolViabilityResult,
-    SellSwapResult,
+    OptionalSetupBuyApproveSellResult, PoolBuySellParameters, PoolBuySellSimulationResult,
+    PoolType, SellSwapResult,
 };
 
 // Convenience facade: simulate and return ProcessedTransaction directly
 use alloy_primitives::B256;
 use eyre::Result;
+use reth_primitives::SealedHeader;
 
 /// Simulate an unsigned transaction at a block (or latest) and return a fully processed transaction.
 pub async fn process_unsigned_tx(
@@ -54,6 +51,19 @@ pub async fn process_unsigned_tx(
         ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
     provider
         .process_transaction_from_unsigned_tx(unsigned_tx, block_number)
+        .await
+}
+
+/// Simulate an unsigned transaction using a provided block header snapshot
+pub async fn process_unsigned_tx_with_header(
+    simulator: &TxSimulator,
+    unsigned_tx: UnsignedTransaction,
+    block_header: SealedHeader,
+) -> Result<ProcessedTransaction> {
+    let provider =
+        ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
+    provider
+        .process_transaction_from_unsigned_tx_with_header(unsigned_tx, block_header)
         .await
 }
 

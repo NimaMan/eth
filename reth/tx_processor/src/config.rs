@@ -1,9 +1,8 @@
-/// Configuration module for tx_processor
-/// 
-/// Handles environment variables and configuration management
-
-use std::path::PathBuf;
 use eyre::Result;
+/// Configuration module for tx_processor
+///
+/// Handles environment variables and configuration management
+use std::path::PathBuf;
 
 /// Configuration for the tx_processor
 #[derive(Debug, Clone)]
@@ -20,7 +19,7 @@ impl Config {
         Ok(Self {
             reth_datadir: PathBuf::from(
                 std::env::var("RETH_DATADIR")
-                    .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string())
+                    .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string()),
             ),
             max_batch_size: std::env::var("MAX_BATCH_SIZE")
                 .unwrap_or_else(|_| "100".to_string())
@@ -28,7 +27,7 @@ impl Config {
                 .unwrap_or(100),
         })
     }
-    
+
     /// Create configuration with explicit values
     pub fn new(reth_datadir: impl Into<PathBuf>) -> Self {
         Self {

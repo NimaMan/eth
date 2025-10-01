@@ -143,7 +143,7 @@ let results = chain.step_multiple(transactions).await?;
 ### Pool Analysis
 ```rust
 // Pool viability testing pattern
-let config = PoolViabilityConfig::default();
+let config = PoolBuySellParameters::default();
 let result = check_can_buy_sell_pool(processor, pool_address, token_address, PoolType::UniswapV2, config).await?;
 ```
 

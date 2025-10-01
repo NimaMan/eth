@@ -6,8 +6,8 @@ use alloy_primitives::B256;
 use crate::block_processor::ProcessedBlock;
 use crate::tx_processor::data_models::ProcessedTransaction;
 
-/// Default number of blocks to retain in the cache (~2 weeks on Ethereum mainnet).
-const BLOCK_RETENTION: u64 = 100_000;
+/// Default number of blocks to retain in the cache (~2 days on Ethereum mainnet).
+const BLOCK_RETENTION: u64 = 10_000;
 
 /// In-memory cache of processed blocks keyed by block number.
 #[derive(Default)]

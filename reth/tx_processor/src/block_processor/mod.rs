@@ -1,14 +1,16 @@
 mod conversion;
 pub mod types;
 
-use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::data_models::{ContractCreationEvent, ProcessedTransaction};
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
+use alloy_primitives::{keccak256, Address};
 use eyre::Result;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::{
     provider::{RawBlockData, TransactionData, TransactionReceipt, TransactionTrace},
     RethQueryProvider,
 };
+use rlp::RlpStream;
 use std::sync::Arc;
 
 pub use types::{BlockBatchOptions, ProcessedBlock, ProcessedBlockTransaction};
@@ -191,6 +193,35 @@ impl BlockProcessor {
         )?;
         processed_tx.address_balance_changes = balance_changes;
 
+        if metadata.to.is_none() {
+            let contract_address = derive_create_address(metadata.from, metadata.nonce);
+            processed_tx.contract_address = Some(contract_address);
+
+            if receipt.status {
+                if let Ok(meta) = self.provider.get_token_metadata(contract_address).await {
+                    processed_tx
+                        .contract_creation_events
+                        .push(ContractCreationEvent {
+                            contract_address,
+                            contract_type: "ERC-20".to_string(),
+                            symbol: Some(meta.symbol.clone()),
+                            decimals: Some(meta.decimals),
+                            name: Some(meta.name.clone()),
+                            total_supply: Some(meta.total_supply),
+                        });
+                    processed_tx.erc20_contracts.insert(contract_address);
+                }
+            }
+        }
+
         Ok(processed_tx)
     }
+}
+
+fn derive_create_address(from: Address, nonce: u64) -> Address {
+    let mut stream = RlpStream::new_list(2);
+    stream.append(&from.as_slice());
+    stream.append(&nonce);
+    let hash = keccak256(stream.out());
+    Address::from_slice(&hash[12..])
 }

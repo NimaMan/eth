@@ -1,12 +1,12 @@
-use std::sync::Arc;
+use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
-use alloy_primitives::{Address, U256};
+use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
-use crate::tx_processor::TxProcessor;
 use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::TxProcessor;
 
-use super::types::PoolType;
+use super::types::{PoolBuySellParameters, PoolType};
 use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 
 /// Result of a single buy swap simulation
@@ -40,7 +40,7 @@ pub async fn simulate_buy_swap(
     let slippage_tolerance = 0.5_f64;
 
     // Reuse buyer address from existing config default to stay consistent
-    let default_cfg = super::config::PoolViabilityConfig::default();
+    let default_cfg = PoolBuySellParameters::default();
     let buyer_address = default_cfg.buyer_address;
 
     // Resolve block
@@ -53,8 +53,16 @@ pub async fn simulate_buy_swap(
     let route = match pool_type {
         PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 { pool: pool_address },
         PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 { pool: pool_address },
-        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 { pool: pool_address, fee_tier },
-        _ => return Err(eyre::eyre!("Pool type {:?} not yet supported for buy-only simulation", pool_type)),
+        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+            pool: pool_address,
+            fee_tier,
+        },
+        _ => {
+            return Err(eyre::eyre!(
+                "Pool type {:?} not yet supported for buy-only simulation",
+                pool_type
+            ))
+        }
     };
 
     // Build BUY transaction
@@ -68,10 +76,11 @@ pub async fn simulate_buy_swap(
         slippage_bps,
         deadline,
     );
-    
+
     // Use the provider that can simulate and return a ProcessedTransaction directly
     let provider_factory = simulator.provider_factory().clone();
-    let processed_tx_provider = crate::processed_tx_provider::ProcessedTxProvider::with_provider_factory(provider_factory)?;
+    let processed_tx_provider =
+        crate::processed_tx_provider::ProcessedTxProvider::with_provider_factory(provider_factory)?;
     let processed = processed_tx_provider
         .process_transaction_from_unsigned_tx(buy_tx.clone(), Some(block))
         .await?;
@@ -104,20 +113,20 @@ fn extract_tokens_received(
     token_address: Address,
 ) -> U256 {
     use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
-use reth_chain_query::to_checksum_address;
+    use reth_chain_query::to_checksum_address;
 
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&recipient_address) {
         if let Some(symbol) = get_token_symbol(&token_address) {
             if let Some(&amount) = balance_changes.currency_net.get(symbol) {
-                if amount > U256::ZERO {
-                    return amount;
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
                 }
             }
         } else {
             let token_key = to_checksum_address(&token_address);
             if let Some(&amount) = balance_changes.token_net.get(&token_key) {
-                if amount > U256::ZERO {
-                    return amount;
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
                 }
             }
         }

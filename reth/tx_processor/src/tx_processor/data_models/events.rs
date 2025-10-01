@@ -1,15 +1,24 @@
 use alloy_primitives::{Address, B256, U256};
-use serde::{Serialize, Deserialize};
-use reth_chain_query::utils::checksum::{serialize_address_checksum, deserialize_address_checksum};
+use reth_chain_query::utils::checksum::{deserialize_address_checksum, serialize_address_checksum};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ERC20Transfer {
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub token_address: Address,
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub from_address: Address,
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub to_address: Address,
     pub amount: U256,
     pub log_index: u64,
@@ -18,9 +27,18 @@ pub struct ERC20Transfer {
 impl fmt::Debug for ERC20Transfer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ERC20Transfer")
-            .field("token_address", &reth_chain_query::to_checksum_address(&self.token_address))
-            .field("from_address", &reth_chain_query::to_checksum_address(&self.from_address))
-            .field("to_address", &reth_chain_query::to_checksum_address(&self.to_address))
+            .field(
+                "token_address",
+                &reth_chain_query::to_checksum_address(&self.token_address),
+            )
+            .field(
+                "from_address",
+                &reth_chain_query::to_checksum_address(&self.from_address),
+            )
+            .field(
+                "to_address",
+                &reth_chain_query::to_checksum_address(&self.to_address),
+            )
             .field("amount", &self.amount)
             .field("log_index", &self.log_index)
             .finish()
@@ -29,20 +47,32 @@ impl fmt::Debug for ERC20Transfer {
 
 impl fmt::Display for ERC20Transfer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Transfer {} tokens from {} to {}", 
+        write!(
+            f,
+            "Transfer {} tokens from {} to {}",
             self.amount,
             reth_chain_query::to_checksum_address(&self.from_address),
-            reth_chain_query::to_checksum_address(&self.to_address))
+            reth_chain_query::to_checksum_address(&self.to_address)
+        )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ERC721Transfer {
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub token_address: Address,
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub from_address: Address,
-    #[serde(serialize_with = "serialize_address_checksum", deserialize_with = "deserialize_address_checksum")]
+    #[serde(
+        serialize_with = "serialize_address_checksum",
+        deserialize_with = "deserialize_address_checksum"
+    )]
     pub to_address: Address,
     pub token_id: U256,
     pub log_index: u64,

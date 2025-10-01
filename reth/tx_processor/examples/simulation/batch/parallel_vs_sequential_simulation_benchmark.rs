@@ -1,5 +1,6 @@
+use alloy_primitives::{Address, U256};
 /// Parallel vs Sequential Simulation Benchmark
-/// 
+///
 /// This example demonstrates the performance difference between sequential and parallel
 /// transaction simulation using the tx_simulator.
 ///
@@ -40,17 +41,16 @@
 /// ✓ Benchmark complete!
 /// ```
 use eyre::Result;
-use tx_simulator::{TxSimulator, UnsignedTransaction};
 use tokio::time::Instant;
-use alloy_primitives::{Address, U256};
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("\n=== Parallel vs Sequential Simulation Benchmark ===\n");
-    
+
     let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
     println!("✓ Simulator initialized");
-    
+
     // Determine a block to simulate at
     let block = simulator.get_latest_block()?;
 
@@ -70,13 +70,16 @@ async fn main() -> Result<()> {
         };
         calls.push(call);
     }
-    
+
     // Sequential processing
     println!("\n1. Sequential Processing:");
     let start = Instant::now();
     let mut sequential_success = 0;
     for (i, call) in calls.iter().enumerate() {
-        match simulator.simulate_unsigned_transaction_at_block(call.clone(), block).await {
+        match simulator
+            .simulate_unsigned_transaction_at_block(call.clone(), block)
+            .await
+        {
             Ok(_) => {
                 sequential_success += 1;
                 println!("   Call {} ✓", i);
@@ -85,32 +88,44 @@ async fn main() -> Result<()> {
         }
     }
     let sequential_time = start.elapsed();
-    println!("   Total: {} successful in {:?}", sequential_success, sequential_time);
-    
+    println!(
+        "   Total: {} successful in {:?}",
+        sequential_success, sequential_time
+    );
+
     // Parallel processing using futures
     println!("\n2. Parallel Processing:");
     let start = Instant::now();
-    
+
     use futures::future::join_all;
     let futures = calls.iter().map(|call| {
         let sim = simulator.clone();
         let call = call.clone();
         async move {
-            sim.simulate_unsigned_transaction_at_block(call, block).await
+            sim.simulate_unsigned_transaction_at_block(call, block)
+                .await
         }
     });
-    
+
     let results: Vec<_> = join_all(futures).await;
     let mut parallel_success = 0usize;
     for r in &results {
-        if r.is_ok() { parallel_success += 1; }
+        if r.is_ok() {
+            parallel_success += 1;
+        }
     }
     let parallel_time = start.elapsed();
-    
-    println!("   Total: {} successful in {:?}", parallel_success, parallel_time);
-    println!("   Speedup: {:.2}x", sequential_time.as_secs_f64() / parallel_time.as_secs_f64());
-    
+
+    println!(
+        "   Total: {} successful in {:?}",
+        parallel_success, parallel_time
+    );
+    println!(
+        "   Speedup: {:.2}x",
+        sequential_time.as_secs_f64() / parallel_time.as_secs_f64()
+    );
+
     println!("\n✓ Benchmark complete!");
-    
+
     Ok(())
 }

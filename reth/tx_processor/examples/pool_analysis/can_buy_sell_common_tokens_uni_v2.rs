@@ -1,20 +1,16 @@
+use alloy_primitives::{Address, U256};
 /// Token Trading Viability Simulation
-/// 
+///
 /// Demonstrates token trading viability analysis by simulating the complete
 /// trading sequence (buy -> approve -> sell) while maintaining blockchain state
 /// between each transaction for accurate tax calculation.
-
 use eyre::Result;
 use std::sync::Arc;
-use alloy_primitives::{Address, U256};
 use tx_processor::simulator::{
-    check_can_buy_sell_pool,
-    PoolViabilityConfig,
-    PoolType,
-    PoolViabilityResult,
+    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
-use tx_simulator::TxSimulator;
 use tx_processor::tx_processor::TxProcessor;
+use tx_simulator::TxSimulator;
 
 /// Configuration for testing a specific token
 #[derive(Debug, Clone)]
@@ -30,16 +26,16 @@ struct TokenConfig {
 /// Expected behavior for different token categories
 #[derive(Debug, Clone)]
 enum ExpectedBehavior {
-    ShouldWork,        // Blue chip tokens - should work perfectly
-    MayHaveTaxes,      // Meme tokens - may have transfer fees
-    MayFail,           // Known problematic tokens
+    ShouldWork,   // Blue chip tokens - should work perfectly
+    MayHaveTaxes, // Meme tokens - may have transfer fees
+    MayFail,      // Known problematic tokens
 }
 
 /// Result of testing a single token
 #[derive(Debug)]
 struct TokenTestResult {
     config: TokenConfig,
-    result: Option<PoolViabilityResult>,
+    result: Option<PoolBuySellSimulationResult>,
     error: Option<String>,
     test_duration: std::time::Duration,
 }
@@ -58,7 +54,7 @@ fn get_token_configs() -> Vec<TokenConfig> {
             decimals: 6,
         },
         TokenConfig {
-            symbol: "USDT", 
+            symbol: "USDT",
             token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
             pool_address: "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852", // USDT/WETH V2
             pool_type: PoolType::UniswapV2,
@@ -73,11 +69,10 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== WRAPPED ASSETS =====================
         TokenConfig {
             symbol: "WBTC",
-            token_address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", 
+            token_address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
             pool_address: "0xBb2b8038a1640196FbE3e38816F3e67Cba72D940", // WBTC/WETH V2
             pool_type: PoolType::UniswapV2,
             expected_behavior: ExpectedBehavior::ShouldWork,
@@ -91,7 +86,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== DEFI BLUE CHIPS =====================
         TokenConfig {
             symbol: "UNI",
@@ -105,7 +99,7 @@ fn get_token_configs() -> Vec<TokenConfig> {
             symbol: "LINK",
             token_address: "0x514910771AF9Ca656af840dff83E8264EcF986CA",
             pool_address: "0xa2107FA5B38d9bbd2C461D6EDf11B11A50F6b974", // LINK/WETH V2
-            pool_type: PoolType::UniswapV2, 
+            pool_type: PoolType::UniswapV2,
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
@@ -133,7 +127,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== LAYER 2 TOKENS =====================
         TokenConfig {
             symbol: "MATIC",
@@ -151,7 +144,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== MEME TOKENS =====================
         TokenConfig {
             symbol: "PEPE",
@@ -162,7 +154,7 @@ fn get_token_configs() -> Vec<TokenConfig> {
             decimals: 18,
         },
         TokenConfig {
-            symbol: "SHIB", 
+            symbol: "SHIB",
             token_address: "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
             pool_address: "0x811beEd0119b4AfCE20D2583EB608C6F7AF1954f", // SHIB/WETH V2
             pool_type: PoolType::UniswapV2,
@@ -172,7 +164,7 @@ fn get_token_configs() -> Vec<TokenConfig> {
         TokenConfig {
             symbol: "DOGE",
             token_address: "0x4206931337dc273a630d328dA6441786BfaD668f", // Wrapped DOGE
-            pool_address: "0xC0067d751FB1172DBAb1FA003eFe214EE8f419b6", // DOGE/WETH V2
+            pool_address: "0xC0067d751FB1172DBAb1FA003eFe214EE8f419b6",  // DOGE/WETH V2
             pool_type: PoolType::UniswapV2,
             expected_behavior: ExpectedBehavior::MayHaveTaxes,
             decimals: 8,
@@ -185,17 +177,15 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::MayHaveTaxes,
             decimals: 9,
         },
-        
         // ===================== EXCHANGE TOKENS =====================
         TokenConfig {
             symbol: "FTT",
-            token_address: "0x50D1c9771902476076eCFc8B2A83Ad6b9355a4c9", 
+            token_address: "0x50D1c9771902476076eCFc8B2A83Ad6b9355a4c9",
             pool_address: "0xFd9C58B4871348A77a04FBba594Cdb01F8972Ac6", // FTT/WETH V2
             pool_type: PoolType::UniswapV2,
             expected_behavior: ExpectedBehavior::MayHaveTaxes, // FTT might have issues after FTX collapse
             decimals: 18,
         },
-        
         // ===================== UTILITY TOKENS =====================
         TokenConfig {
             symbol: "GRT",
@@ -213,7 +203,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== ALGO STABLES =====================
         TokenConfig {
             symbol: "FRAX",
@@ -231,7 +220,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== GAMING/METAVERSE =====================
         TokenConfig {
             symbol: "AXS",
@@ -273,7 +261,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 8,
         },
-        
         // ===================== AI/TECH TOKENS =====================
         TokenConfig {
             symbol: "FET",
@@ -291,7 +278,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== INFRASTRUCTURE =====================
         TokenConfig {
             symbol: "GNO",
@@ -317,7 +303,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== L2/SCALING =====================
         TokenConfig {
             symbol: "ARB",
@@ -335,7 +320,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== DEFI 2.0/NEWER =====================
         TokenConfig {
             symbol: "BLUR",
@@ -353,7 +337,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== MORE MEME TOKENS =====================
         TokenConfig {
             symbol: "BONE",
@@ -379,7 +362,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::MayHaveTaxes,
             decimals: 18,
         },
-        
         // ===================== PRIVACY/CONTROVERSIAL =====================
         TokenConfig {
             symbol: "TORN",
@@ -389,7 +371,6 @@ fn get_token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::MayHaveTaxes, // Might fail due to sanctions
             decimals: 18,
         },
-        
         // ===================== TAX/REFLECTION TOKENS =====================
         TokenConfig {
             symbol: "BABYDOGE",
@@ -410,7 +391,7 @@ fn get_token_configs() -> Vec<TokenConfig> {
         TokenConfig {
             symbol: "SAFEMOON",
             token_address: "0x42981d0bfbAf196529376EE702F2a9Eb9092fcB5", // SafeMoon V2
-            pool_address: "0x4658EA7e9960D6158a261104aAA160cC953bb6ba", // SFM/WETH V2
+            pool_address: "0x4658EA7e9960D6158a261104aAA160cC953bb6ba",  // SFM/WETH V2
             pool_type: PoolType::UniswapV2,
             expected_behavior: ExpectedBehavior::MayHaveTaxes, // Known 10% tax structure
             decimals: 9,
@@ -423,70 +404,75 @@ async fn main() -> Result<()> {
     println!("🎯 Multi-Token Trading Viability Analysis");
     println!("==========================================");
     println!("Testing comprehensive token trading viability across multiple token categories.\n");
-    
+
     // Get reth datadir
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-    
+
     println!("Using Reth datadir: {}", reth_datadir);
-    
+
     // Create simulator and tx processor
     let simulator = Arc::new(TxSimulator::new(&reth_datadir)?);
     let tx_processor = Arc::new(TxProcessor::new());
-    
+
     // Get latest block to avoid pruned state
     let latest_block = simulator.get_latest_block()?;
     println!("Latest block: {}\n", latest_block);
-    
+
     // Get token configurations
     let token_configs = get_token_configs();
     let total_tokens = token_configs.len();
     let mut all_results = Vec::new();
-    
-    println!("📋 Testing {} tokens across different categories:", total_tokens);
-    
+
+    println!(
+        "📋 Testing {} tokens across different categories:",
+        total_tokens
+    );
+
     for config in &token_configs {
-        println!("  {} {} - Expected: {:?}", 
-                match config.expected_behavior {
-                    ExpectedBehavior::ShouldWork => "✅",
-                    ExpectedBehavior::MayHaveTaxes => "⚠️",
-                    ExpectedBehavior::MayFail => "❌",
-                }, 
-                config.symbol, 
-                config.expected_behavior
+        println!(
+            "  {} {} - Expected: {:?}",
+            match config.expected_behavior {
+                ExpectedBehavior::ShouldWork => "✅",
+                ExpectedBehavior::MayHaveTaxes => "⚠️",
+                ExpectedBehavior::MayFail => "❌",
+            },
+            config.symbol,
+            config.expected_behavior
         );
     }
     println!();
-    
+
     // Test each token
     for (idx, config) in token_configs.into_iter().enumerate() {
         println!("{}", "=".repeat(80));
-        println!("🔍 TESTING [{}/{}]: {} ({})", idx + 1, total_tokens, config.symbol, config.token_address);
+        println!(
+            "🔍 TESTING [{}/{}]: {} ({})",
+            idx + 1,
+            total_tokens,
+            config.symbol,
+            config.token_address
+        );
         println!("{}", "=".repeat(80));
-        
+
         // Token info already printed to console
-        
-        let test_result = test_single_token(
-            &config,
-            &simulator, 
-            &tx_processor,
-            latest_block
-        ).await;
-        
+
+        let test_result = test_single_token(&config, &simulator, &tx_processor, latest_block).await;
+
         // Results will be output to CSV at the end
-        
+
         all_results.push(test_result);
-        
+
         // Brief pause between tests
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    
+
     // Generate comprehensive summary
     print_comprehensive_summary(&all_results);
-    
+
     // Generate CSV output only
     generate_csv_output(&all_results)?;
-    
+
     Ok(())
 }
 
@@ -498,14 +484,14 @@ async fn test_single_token(
     latest_block: u64,
 ) -> TokenTestResult {
     let start_time = std::time::Instant::now();
-    
+
     println!("🔍 Configuration:");
     println!("  Token: {} ({})", config.symbol, config.token_address);
     println!("  Pool: {}", config.pool_address);
     println!("  Type: {:?}", config.pool_type);
     println!("  Expected: {:?}", config.expected_behavior);
     println!("  Decimals: {}", config.decimals);
-    
+
     // Parse addresses
     let token_address = match config.token_address.parse::<Address>() {
         Ok(addr) => addr,
@@ -520,7 +506,7 @@ async fn test_single_token(
             };
         }
     };
-    
+
     let pool_address = match config.pool_address.parse::<Address>() {
         Ok(addr) => addr,
         Err(e) => {
@@ -534,41 +520,43 @@ async fn test_single_token(
             };
         }
     };
-    
+
     // Test all tokens at latest block
     let buy_block = latest_block;
     let block_delays_to_test = vec![0]; // Test same-block for all tokens
-    
+
     for (test_index, block_delay) in block_delays_to_test.iter().enumerate() {
         if block_delays_to_test.len() > 1 {
             let sell_block = buy_block + block_delay;
-            println!("\n🔍 TEST #{}: Buy at {}, Sell at {} (delay: {})", 
-                     test_index + 1, 
-                     buy_block,
-                     sell_block,
-                     block_delay);
-            
+            println!(
+                "\n🔍 TEST #{}: Buy at {}, Sell at {} (delay: {})",
+                test_index + 1,
+                buy_block,
+                sell_block,
+                block_delay
+            );
         }
-        
+
         // Create pool configuration
-        let pool_config = PoolViabilityConfig::new(
-            token_address,
-            pool_address,
-            config.pool_type.clone(),
-        ).with_test_amount(U256::from(1_000_000_000_000_000_000u64)) // 1.0 ETH for testing
-        .with_block(buy_block)
-        .with_block_delay(*block_delay);
-        
-        println!("\n🚀 Running trading viability analysis (block_delay={})...", block_delay);
-        
+        let pool_config =
+            PoolBuySellParameters::new(token_address, pool_address, config.pool_type.clone())
+                .with_test_amount(U256::from(1_000_000_000_000_000_000u64)) // 1.0 ETH for testing
+                .with_block(buy_block)
+                .with_block_delay(*block_delay);
+
+        println!(
+            "\n🚀 Running trading viability analysis (block_delay={})...",
+            block_delay
+        );
+
         // Run the analysis
         match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), pool_config).await {
             Ok(result) => {
                 let duration = start_time.elapsed();
-                
+
                 // Print detailed results for this token
                 print_token_result_with_block_delay(config, &result, duration, *block_delay);
-                
+
                 // If this is a successful test, or if it's the last test for this token, return the result
                 if result.is_tradeable || test_index == block_delays_to_test.len() - 1 {
                     return TokenTestResult {
@@ -582,10 +570,13 @@ async fn test_single_token(
             Err(e) => {
                 let error_msg = format!("Analysis failed: {}", e);
                 let duration = start_time.elapsed();
-                
-                println!("❌ Analysis Error (block_delay={}): {}", block_delay, error_msg);
+
+                println!(
+                    "❌ Analysis Error (block_delay={}): {}",
+                    block_delay, error_msg
+                );
                 println!("⏱️  Test Duration: {:?}", duration);
-                
+
                 // If this is the last test, return the error
                 if test_index == block_delays_to_test.len() - 1 {
                     return TokenTestResult {
@@ -598,7 +589,7 @@ async fn test_single_token(
             }
         }
     }
-    
+
     // This should never be reached, but provide a fallback
     TokenTestResult {
         config: config.clone(),
@@ -609,34 +600,56 @@ async fn test_single_token(
 }
 
 /// Print detailed results for a single token test with block delay info
-fn print_token_result_with_block_delay(config: &TokenConfig, result: &PoolViabilityResult, duration: std::time::Duration, block_delay: u64) {
-    println!("📈 Analysis Results for {} (block_delay={}):", config.symbol, block_delay);
+fn print_token_result_with_block_delay(
+    config: &TokenConfig,
+    result: &PoolBuySellSimulationResult,
+    duration: std::time::Duration,
+    block_delay: u64,
+) {
+    println!(
+        "📈 Analysis Results for {} (block_delay={}):",
+        config.symbol, block_delay
+    );
     println!("==================================");
     println!("⏱️  Execution Time: {:?}", duration);
     println!("📦 Block Number: {}", result.block_number);
     if block_delay > 0 {
-        println!("🕒 Block Timing: Buy at {}, Sell at {} (delay: {})", result.block_number, result.block_number + block_delay, block_delay);
+        println!(
+            "🕒 Block Timing: Buy at {}, Sell at {} (delay: {})",
+            result.block_number,
+            result.block_number + block_delay,
+            block_delay
+        );
     }
-    
+
     println!("\n🔍 Individual Operations:");
     println!("  📈 Can Buy: {}", if result.can_buy { "✅" } else { "❌" });
-    println!("  ✅ Can Approve: {}", if result.can_approve { "✅" } else { "❌" });
-    println!("  📉 Can Sell: {}", if result.can_sell { "✅" } else { "❌" });
-    println!("  🎯 Overall Tradeable: {}", if result.is_tradeable { "✅" } else { "❌" });
-    
+    println!(
+        "  ✅ Can Approve: {}",
+        if result.can_approve { "✅" } else { "❌" }
+    );
+    println!(
+        "  📉 Can Sell: {}",
+        if result.can_sell { "✅" } else { "❌" }
+    );
+    println!(
+        "  🎯 Overall Tradeable: {}",
+        if result.is_tradeable { "✅" } else { "❌" }
+    );
+
     if result.is_tradeable {
         println!("\n💰 Tax Analysis:");
         println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
         println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
-        
+
         println!("\n🔢 Trade Details:");
         println!("  🪙 Tokens Received: {}", result.tokens_received);
         println!("  💵 ETH Received Back: {} wei", result.eth_received);
-        
+
         let loss = result.eth_spent.saturating_sub(result.eth_received);
         let loss_eth = loss.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
         println!("  📊 Net Loss: {:.6} ETH ({} wei)", loss_eth, loss);
-        
+
         // Tax analysis
         if result.buy_tax_percent > 0.0 || result.sell_tax_percent > 0.0 {
             println!("\n⚠️  Tax Detection:");
@@ -647,14 +660,20 @@ fn print_token_result_with_block_delay(config: &TokenConfig, result: &PoolViabil
                 println!("     Sell tax detected: {:.2}%", result.sell_tax_percent);
             }
         }
-        
-        println!("\n✅ {} is fully tradeable with block_delay={}!", config.symbol, block_delay);
+
+        println!(
+            "\n✅ {} is fully tradeable with block_delay={}!",
+            config.symbol, block_delay
+        );
     } else {
-        println!("\n❌ Trading failed for {} with block_delay={}!", config.symbol, block_delay);
+        println!(
+            "\n❌ Trading failed for {} with block_delay={}!",
+            config.symbol, block_delay
+        );
         if let Some(reason) = &result.failure_reason {
             println!("   Detailed Error: {}", reason);
         }
-        
+
         // Additional debug info
         println!("\n🔍 Debug Information:");
         println!("  💰 ETH Spent: {} wei", result.eth_spent);
@@ -662,41 +681,56 @@ fn print_token_result_with_block_delay(config: &TokenConfig, result: &PoolViabil
         println!("  💵 ETH Received Back: {} wei", result.eth_received);
         println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
         println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
-        
+
         if block_delay == 0 {
             println!("  💡 This was a same-block test. Testing next-block execution next...");
         } else {
-            println!("  💡 This was a next-block test. Same issue persists across block boundaries.");
+            println!(
+                "  💡 This was a next-block test. Same issue persists across block boundaries."
+            );
         }
     }
 }
 
 /// Print detailed results for a single token test
-fn print_token_result(config: &TokenConfig, result: &PoolViabilityResult, duration: std::time::Duration) {
+fn print_token_result(
+    config: &TokenConfig,
+    result: &PoolBuySellSimulationResult,
+    duration: std::time::Duration,
+) {
     println!("📈 Analysis Results for {}:", config.symbol);
     println!("==================================");
     println!("⏱️  Execution Time: {:?}", duration);
     println!("📦 Block Number: {}", result.block_number);
-    
+
     println!("\n🔍 Individual Operations:");
     println!("  📈 Can Buy: {}", if result.can_buy { "✅" } else { "❌" });
-    println!("  ✅ Can Approve: {}", if result.can_approve { "✅" } else { "❌" });
-    println!("  📉 Can Sell: {}", if result.can_sell { "✅" } else { "❌" });
-    println!("  🎯 Overall Tradeable: {}", if result.is_tradeable { "✅" } else { "❌" });
-    
+    println!(
+        "  ✅ Can Approve: {}",
+        if result.can_approve { "✅" } else { "❌" }
+    );
+    println!(
+        "  📉 Can Sell: {}",
+        if result.can_sell { "✅" } else { "❌" }
+    );
+    println!(
+        "  🎯 Overall Tradeable: {}",
+        if result.is_tradeable { "✅" } else { "❌" }
+    );
+
     if result.is_tradeable {
         println!("\n💰 Tax Analysis:");
         println!("  📈 Buy Tax: {:.2}%", result.buy_tax_percent);
         println!("  📉 Sell Tax: {:.2}%", result.sell_tax_percent);
-        
+
         println!("\n🔢 Trade Details:");
         println!("  🪙 Tokens Received: {}", result.tokens_received);
         println!("  💵 ETH Received Back: {} wei", result.eth_received);
-        
+
         let loss = result.eth_spent.saturating_sub(result.eth_received);
         let loss_eth = loss.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
         println!("  📊 Net Loss: {:.6} ETH ({} wei)", loss_eth, loss);
-        
+
         // Tax analysis
         if result.buy_tax_percent > 0.0 || result.sell_tax_percent > 0.0 {
             println!("\n⚠️  Tax Detection:");
@@ -707,14 +741,14 @@ fn print_token_result(config: &TokenConfig, result: &PoolViabilityResult, durati
                 println!("     Sell tax detected: {:.2}%", result.sell_tax_percent);
             }
         }
-        
+
         println!("\n✅ {} is fully tradeable!", config.symbol);
     } else {
         println!("\n❌ Trading failed for {}!", config.symbol);
         if let Some(reason) = &result.failure_reason {
             println!("   Detailed Error: {}", reason);
         }
-        
+
         // Additional debug info
         println!("\n🔍 Debug Information:");
         println!("  💰 ETH Spent: {} wei", result.eth_spent);
@@ -728,13 +762,13 @@ fn print_token_result(config: &TokenConfig, result: &PoolViabilityResult, durati
 /// Generate CSV output
 fn generate_csv_output(results: &[TokenTestResult]) -> Result<()> {
     use std::io::Write;
-    
+
     let csv_path = "/home/nima/code/crypto/rust/tx_processor/examples/pool_analysis/token_analysis_results.csv";
     let mut csv_file = std::fs::File::create(csv_path)?;
-    
+
     // CSV Header
     writeln!(csv_file, "Symbol,Address,Pool,ExpectedBehavior,Tradeable,CanBuy,CanApprove,CanSell,BuyTaxPercent,SellTaxPercent,TokensReceived,EthSpent,EthReceived,NetLoss,TestDurationMs,FailureReason")?;
-    
+
     // CSV Data
     for result in results {
         let symbol = result.config.symbol;
@@ -742,14 +776,28 @@ fn generate_csv_output(results: &[TokenTestResult]) -> Result<()> {
         let pool = result.config.pool_address;
         let expected = format!("{:?}", result.config.expected_behavior);
         let test_duration_ms = result.test_duration.as_secs_f64() * 1000.0;
-        
+
         if let Some(analysis) = &result.result {
-            let buy_tax = if analysis.can_buy && analysis.buy_tax_percent >= 0.0 { format!("{:.2}", analysis.buy_tax_percent) } else { "".to_string() };
-            let sell_tax = if analysis.can_sell && analysis.sell_tax_percent >= 0.0 { format!("{:.2}", analysis.sell_tax_percent) } else { "".to_string() };
-            let failure_reason = analysis.failure_reason.as_deref().unwrap_or("").replace(",", ";");
+            let buy_tax = if analysis.can_buy && analysis.buy_tax_percent >= 0.0 {
+                format!("{:.2}", analysis.buy_tax_percent)
+            } else {
+                "".to_string()
+            };
+            let sell_tax = if analysis.can_sell && analysis.sell_tax_percent >= 0.0 {
+                format!("{:.2}", analysis.sell_tax_percent)
+            } else {
+                "".to_string()
+            };
+            let failure_reason = analysis
+                .failure_reason
+                .as_deref()
+                .unwrap_or("")
+                .replace(",", ";");
             let net_loss = analysis.eth_spent.saturating_sub(analysis.eth_received);
-            
-            writeln!(csv_file, "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.1},\"{}\"",
+
+            writeln!(
+                csv_file,
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.1},\"{}\"",
                 symbol,
                 address,
                 pool,
@@ -768,18 +816,19 @@ fn generate_csv_output(results: &[TokenTestResult]) -> Result<()> {
                 failure_reason
             )?;
         } else {
-            let error_msg = result.error.as_deref().unwrap_or("Unknown error").replace(",", ";");
-            writeln!(csv_file, "{},{},{},{},false,false,false,false,,,0,0,0,0,{:.1},\"{}\"",
-                symbol,
-                address,
-                pool,
-                expected,
-                test_duration_ms,
-                error_msg
+            let error_msg = result
+                .error
+                .as_deref()
+                .unwrap_or("Unknown error")
+                .replace(",", ";");
+            writeln!(
+                csv_file,
+                "{},{},{},{},false,false,false,false,,,0,0,0,0,{:.1},\"{}\"",
+                symbol, address, pool, expected, test_duration_ms, error_msg
             )?;
         }
     }
-    
+
     println!("\n✅ CSV results saved to: {}", csv_path);
     Ok(())
 }
@@ -789,13 +838,13 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
     println!("\n{}", "=".repeat(80));
     println!("📊 COMPREHENSIVE RESULTS SUMMARY");
     println!("{}", "=".repeat(80));
-    
+
     // Count results by category
     let mut successful = 0;
     let mut failed = 0;
     let mut errors = 0;
     let mut tax_tokens = 0;
-    
+
     for result in results {
         if let Some(analysis) = &result.result {
             if analysis.is_tradeable {
@@ -810,24 +859,34 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
             errors += 1;
         }
     }
-    
+
     println!("\n📈 Overall Statistics:");
     println!("  ✅ Successful: {} tokens", successful);
     println!("  ❌ Failed Trading: {} tokens", failed);
     println!("  💥 Analysis Errors: {} tokens", errors);
     println!("  🏷️  Tax Tokens Detected: {} tokens", tax_tokens);
     println!("  📊 Total Tested: {} tokens", results.len());
-    
+
     // Detailed results table
     println!("\n📋 Detailed Results Table:");
     println!("{}", "-".repeat(120));
-    println!("{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}", 
-             "Symbol", "Tradeable", "Buy", "Approve", "Sell", "Buy Tax", "Sell Tax", "Net Loss", "Failure Reason");
+    println!(
+        "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+        "Symbol",
+        "Tradeable",
+        "Buy",
+        "Approve",
+        "Sell",
+        "Buy Tax",
+        "Sell Tax",
+        "Net Loss",
+        "Failure Reason"
+    );
     println!("{}", "-".repeat(120));
-    
+
     for result in results {
         let symbol = result.config.symbol;
-        
+
         if let Some(analysis) = &result.result {
             let tradeable = if analysis.is_tradeable { "✅" } else { "❌" };
             let can_buy = if analysis.can_buy { "✅" } else { "❌" };
@@ -835,7 +894,7 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
             let can_sell = if analysis.can_sell { "✅" } else { "❌" };
             let buy_tax = format!("{:.1}%", analysis.buy_tax_percent);
             let sell_tax = format!("{:.1}%", analysis.sell_tax_percent);
-            
+
             let net_loss = if analysis.is_tradeable {
                 let loss = analysis.eth_spent.saturating_sub(analysis.eth_received);
                 let loss_eth = loss.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
@@ -843,41 +902,67 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
             } else {
                 "-".to_string()
             };
-            
+
             let reason = if analysis.is_tradeable {
                 "-".to_string()
             } else {
-                analysis.failure_reason.as_deref()
+                analysis
+                    .failure_reason
+                    .as_deref()
                     .unwrap_or("Unknown")
                     .chars()
                     .take(18)
-                    .collect::<String>() + if analysis.failure_reason.as_deref().unwrap_or("").len() > 18 { "..." } else { "" }
+                    .collect::<String>()
+                    + if analysis.failure_reason.as_deref().unwrap_or("").len() > 18 {
+                        "..."
+                    } else {
+                        ""
+                    }
             };
-            
-            println!("{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
-                     symbol, tradeable, can_buy, can_approve, can_sell, buy_tax, sell_tax, net_loss, reason);
+
+            println!(
+                "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+                symbol,
+                tradeable,
+                can_buy,
+                can_approve,
+                can_sell,
+                buy_tax,
+                sell_tax,
+                net_loss,
+                reason
+            );
         } else {
-            let error_reason = result.error.as_deref()
+            let error_reason = result
+                .error
+                .as_deref()
                 .unwrap_or("Unknown error")
                 .chars()
                 .take(18)
-                .collect::<String>() + if result.error.as_deref().unwrap_or("").len() > 18 { "..." } else { "" };
-            
-            println!("{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
-                     symbol, "💥 ERROR", "-", "-", "-", "-", "-", "-", error_reason);
+                .collect::<String>()
+                + if result.error.as_deref().unwrap_or("").len() > 18 {
+                    "..."
+                } else {
+                    ""
+                };
+
+            println!(
+                "{:<6} | {:<10} | {:<8} | {:<8} | {:<8} | {:<8} | {:<8} | {:<10} | {:<20}",
+                symbol, "💥 ERROR", "-", "-", "-", "-", "-", "-", error_reason
+            );
         }
     }
-    
+
     println!("{}", "-".repeat(120));
-    
+
     // Performance summary
     let total_duration: std::time::Duration = results.iter().map(|r| r.test_duration).sum();
     let avg_duration = total_duration / results.len() as u32;
-    
+
     println!("\n⏱️  Performance Summary:");
     println!("  Total Testing Time: {:?}", total_duration);
     println!("  Average Per Token: {:?}", avg_duration);
-    
+
     // Component validation status
     println!("\n🔧 Component Validation Status:");
     if successful > 0 {
@@ -886,11 +971,11 @@ fn print_comprehensive_summary(results: &[TokenTestResult]) {
         println!("  ✅ Tax detection mechanisms functioning properly");
         println!("  ✅ Error reporting providing clear failure reasons");
     }
-    
+
     if failed > 0 || errors > 0 {
         println!("  📝 Some tokens failed as expected (taxes, low liquidity, etc.)");
         println!("  📝 Component correctly identifies non-tradeable tokens");
     }
-    
+
     println!("\n🎉 Multi-token analysis complete! Component validation successful.");
 }

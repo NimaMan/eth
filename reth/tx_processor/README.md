@@ -116,7 +116,7 @@ let sell_tax = calculate_sell_tax_from_processed_transaction(&processed_sell, po
   - `build_buy_swap(route, buyer, token_out, eth_in, slippage_bps, deadline)`
   - `build_approve_for_route(route, owner, token, amount)`
   - `build_sell_swap(route, seller, token_in, token_in_amount, slippage_bps, deadline)`
-- Simulator `check_can_buy_sell_pool(...)` orchestrates the sequence and produces `PoolViabilityResult`.
+- Simulator `check_can_buy_sell_pool(...)` orchestrates the sequence and produces `PoolBuySellSimulationResult`.
 - Supported routes today: Uniswap V2 (incl. Sushi) and Uniswap V3 (fee tier).
 
 Example (route + run):

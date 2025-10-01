@@ -1,20 +1,19 @@
 /// Transaction Trace Processor - Rust equivalent of Python's tx_trace_processor.py
-/// 
+///
 /// OBJECTIVE: Extract internal transactions from call traces
-/// 
+///
 /// This module processes call traces from simulation results to extract:
 /// 1. Internal ETH transfers with non-zero value
 /// 2. Contract creations (CREATE/CREATE2)
 /// 3. Failed transactions and their children
 /// 4. Initial transaction (depth == 0)
-/// 
+///
 /// Just like Python's tx_trace_processor.py, this converts raw simulation traces
 /// into structured InternalTransaction objects.
-
 use super::data_models::events::InternalTransaction;
-use alloy_primitives::{Address, U256, Bytes};
-use tx_simulator::CallFrame;
+use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
+use tx_simulator::CallFrame;
 
 /// Processes transaction traces to extract internal transactions
 pub struct TransactionTraceProcessor;
@@ -24,9 +23,9 @@ impl TransactionTraceProcessor {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// Extract internal transactions from CallFrame (moved from tx_simulator)
-    /// 
+    ///
     /// This recursively walks the call trace tree and extracts all internal transactions.
     /// Matches Python's process_trace() method behavior.
     pub fn extract_internal_transactions_from_call_trace(
@@ -37,7 +36,7 @@ impl TransactionTraceProcessor {
         self.extract_from_frame_recursive(call_trace, &mut internal_txs, 0, vec![]);
         internal_txs
     }
-    
+
     /// Recursively extract internal transactions from call frame with error tracking
     fn extract_from_frame_recursive(
         &self,
@@ -54,7 +53,7 @@ impl TransactionTraceProcessor {
         } else {
             None
         };
-        
+
         // Add this frame as internal transaction (including root at depth 0)
         internal_txs.push(InternalTransaction {
             from_address: frame.from,
@@ -66,22 +65,17 @@ impl TransactionTraceProcessor {
             depth,
             error: error.clone(),
         });
-        
+
         // Process child calls, passing down parent error state
         for (i, child) in frame.calls.iter().enumerate() {
             let mut child_trace = trace_address.clone();
             child_trace.push(i);
-            self.extract_from_frame_recursive(
-                child,
-                internal_txs,
-                depth + 1,
-                child_trace,
-            );
+            self.extract_from_frame_recursive(child, internal_txs, depth + 1, child_trace);
         }
     }
-    
+
     /// Process trace data from simulation to extract internal transactions
-    /// 
+    ///
     /// This is the Rust equivalent of Python's process_trace() method.
     /// It takes the internal transactions from tx_simulator and converts them
     /// to our ProcessedTransaction's InternalTransaction format.
@@ -94,12 +88,9 @@ impl TransactionTraceProcessor {
             .map(|tx| self.convert_to_internal_transaction(tx))
             .collect()
     }
-    
+
     /// Convert tx_simulator's InternalTransaction to our format
-    fn convert_to_internal_transaction(
-        &self,
-        sim_tx: &InternalTransaction,
-    ) -> InternalTransaction {
+    fn convert_to_internal_transaction(&self, sim_tx: &InternalTransaction) -> InternalTransaction {
         InternalTransaction {
             from_address: sim_tx.from_address,
             to_address: sim_tx.to_address,
@@ -111,9 +102,9 @@ impl TransactionTraceProcessor {
             error: None, // tx_simulator's internal tx doesn't have error field yet
         }
     }
-    
+
     /// Filter internal transactions to only include significant ones
-    /// 
+    ///
     /// Similar to Python's filtering logic:
     /// - Include if it's the initial transaction (depth == 0)
     /// - Include if it's a contract creation
@@ -130,13 +121,11 @@ impl TransactionTraceProcessor {
                 // 1. It's the initial transaction, or
                 // 2. It's a contract creation (CREATE/CREATE2), or
                 // 3. Has non-zero value
-                tx.depth == 0 
-                    || tx.trace_type.contains("CREATE")
-                    || tx.value > U256::ZERO
+                tx.depth == 0 || tx.trace_type.contains("CREATE") || tx.value > U256::ZERO
             })
             .collect()
     }
-    
+
     // TODO: Implement extract_eth_transfers if needed
     // This method was removed as EthTransfer type is not defined
     // The functionality is now handled in AddressBalanceChangeCalculator

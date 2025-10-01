@@ -40,13 +40,13 @@ impl TokenProcessedTxProvider {
             return Ok(());
         }
 
-        let mut blocks = self
+        let blocks = self
             .query_provider
             .get_address_account_history_blocks(token, start_block, end_block)
             .await?;
 
         if blocks.is_empty() {
-            blocks = (start_block..=end_block).collect();
+            return Ok(());
         }
 
         self.ensure_blocks_cached(&blocks).await?;
@@ -88,7 +88,6 @@ impl TokenProcessedTxProvider {
         self.core.process_transaction_by_hash(tx_hash).await
     }
 }
-
 fn filter_transactions_for_token(
     block: &Arc<ProcessedBlock>,
     token: Address,
@@ -102,7 +101,21 @@ fn filter_transactions_for_token(
 }
 
 fn transaction_involves_token(tx: &ProcessedTransaction, token: Address) -> bool {
-    tx.erc20_transfers.iter().any(|t| t.token_address == token)
-        || tx.approvals.iter().any(|a| a.token_address == token)
-        || tx.erc20_contracts.contains(&token)
+    if tx.erc20_contracts.contains(&token) {
+        return true;
+    }
+
+    if let Some(contract_address) = tx.contract_address {
+        if contract_address == token {
+            return true;
+        }
+    }
+
+    if let Some(to) = tx.to_address {
+        if to == token {
+            return true;
+        }
+    }
+
+    false
 }

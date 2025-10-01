@@ -7,7 +7,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, U256};
 use tx_simulator::TxSimulator;
 use tx_processor::tx_processor::TxProcessor;
-use tx_processor::simulator::{check_can_buy_sell_pool, PoolViabilityConfig, PoolType};
+use tx_processor::simulator::{check_can_buy_sell_pool, PoolBuySellParameters, PoolType};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
     println!("Pool: {}", usdc_pool);
     
     // Configure with block delay
-    let config = PoolViabilityConfig::new(
+    let config = PoolBuySellParameters::new(
         usdc_token,
         usdc_pool,
         PoolType::UniswapV2,

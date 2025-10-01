@@ -1,19 +1,15 @@
+use alloy_primitives::{Address, U256};
 /// UniswapV3 Token Trading Viability Analysis
-/// 
+///
 /// Tests multiple popular tokens on UniswapV3 pools with different fee tiers
 /// to verify buy→approve→sell sequences work correctly with concentrated liquidity.
-
 use eyre::Result;
 use std::sync::Arc;
-use alloy_primitives::{Address, U256};
 use tx_processor::simulator::{
-    check_can_buy_sell_pool,
-    PoolViabilityConfig,
-    PoolType,
-    PoolViabilityResult,
+    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
-use tx_simulator::TxSimulator;
 use tx_processor::tx_processor::TxProcessor;
+use tx_simulator::TxSimulator;
 
 /// Configuration for testing a specific V3 token
 #[derive(Debug, Clone)]
@@ -21,7 +17,7 @@ struct TokenConfig {
     symbol: &'static str,
     token_address: &'static str,
     pool_address: &'static str,
-    fee_tier: u32,  // V3 fee tier in basis points (500, 3000, 10000)
+    fee_tier: u32, // V3 fee tier in basis points (500, 3000, 10000)
     expected_behavior: ExpectedBehavior,
     decimals: u8,
 }
@@ -48,19 +44,21 @@ async fn test_token(
     tx_processor: Arc<TxProcessor>,
     token: &TokenConfig,
     block_number: u64,
-) -> Result<PoolViabilityResult> {
+) -> Result<PoolBuySellSimulationResult> {
     let token_address: Address = token.token_address.parse()?;
     let pool_address: Address = token.pool_address.parse()?;
-    
-    let config = PoolViabilityConfig::new(
+
+    let config = PoolBuySellParameters::new(
         token_address,
         pool_address,
-        PoolType::UniswapV3 { fee_tier: token.fee_tier },
+        PoolType::UniswapV3 {
+            fee_tier: token.fee_tier,
+        },
     )
     .with_test_amount(U256::from(10_000_000_000_000_000u64)) // 0.01 ETH
     .with_token_decimals(token.decimals)
     .with_block(block_number);
-    
+
     check_can_buy_sell_pool(simulator, tx_processor, config).await
 }
 
@@ -68,7 +66,7 @@ fn format_eth_amount(wei: U256) -> String {
     if wei == U256::ZERO {
         return "-".to_string();
     }
-    
+
     let eth_str = wei.to_string();
     if eth_str.len() <= 18 {
         let padded = format!("{:0>18}", eth_str);
@@ -76,17 +74,17 @@ fn format_eth_amount(wei: U256) -> String {
         let decimal = &padded[0..4];
         return format!("{}.{}E", whole, decimal);
     }
-    
+
     let (whole, decimal) = eth_str.split_at(eth_str.len() - 18);
     format!("{}.{}E", whole, &decimal[0..4.min(decimal.len())])
 }
 
-fn print_summary_table(results: &[(TokenConfig, Result<PoolViabilityResult>)]) {
+fn print_summary_table(results: &[(TokenConfig, Result<PoolBuySellSimulationResult>)]) {
     println!("\n📊 Summary Table:");
     println!("================================================================================");
     println!("Token  | Fee Tier | Tradeable | Buy ✓ | Approve ✓ | Sell ✓ | Buy Tax | Sell Tax | ETH Back | Failure");
     println!("--------------------------------------------------------------------------------");
-    
+
     for (token, result) in results {
         match result {
             Ok(res) => {
@@ -97,11 +95,16 @@ fn print_summary_table(results: &[(TokenConfig, Result<PoolViabilityResult>)]) {
                 let buy_tax = format!("{:.1}%", res.buy_tax_percent);
                 let sell_tax = format!("{:.1}%", res.sell_tax_percent);
                 let eth_back = format_eth_amount(res.eth_received);
-                let failure = res.failure_reason.as_deref().unwrap_or("-")
-                    .chars().take(20).collect::<String>();
-                
+                let failure = res
+                    .failure_reason
+                    .as_deref()
+                    .unwrap_or("-")
+                    .chars()
+                    .take(20)
+                    .collect::<String>();
+
                 println!("{:<6} | {:<8} | {:<9} | {:<5} | {:<9} | {:<6} | {:<7} | {:<8} | {:<8} | {:<20}",
-                    token.symbol, token.get_fee_tier_string(), tradeable, can_buy, can_approve, can_sell, 
+                    token.symbol, token.get_fee_tier_string(), tradeable, can_buy, can_approve, can_sell,
                     buy_tax, sell_tax, eth_back, failure
                 );
             }
@@ -112,7 +115,7 @@ fn print_summary_table(results: &[(TokenConfig, Result<PoolViabilityResult>)]) {
             }
         }
     }
-    
+
     println!("================================================================================");
 }
 
@@ -122,7 +125,7 @@ async fn main() -> Result<()> {
     println!("====================================================");
     println!("Testing popular tokens across different V3 fee tiers");
     println!();
-    
+
     // Tokens to test with their V3 pools
     let tokens = vec![
         // ===================== 0.05% FEE TIER (500) =====================
@@ -159,7 +162,6 @@ async fn main() -> Result<()> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 6,
         },
-        
         // ===================== 0.30% FEE TIER (3000) =====================
         // Most common fee tier for standard volatility tokens
         TokenConfig {
@@ -242,7 +244,6 @@ async fn main() -> Result<()> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        
         // ===================== 1.00% FEE TIER (10000) =====================
         // High volatility tokens, memecoins
         TokenConfig {
@@ -285,7 +286,6 @@ async fn main() -> Result<()> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 8,
         },
-        
         // ===================== ADDITIONAL TOKENS =====================
         TokenConfig {
             symbol: "RPL",
@@ -320,42 +320,42 @@ async fn main() -> Result<()> {
             decimals: 18,
         },
     ];
-    
+
     // Get reth datadir
     let reth_datadir = std::env::var("RETH_DATADIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-    
+
     println!("🔧 Initializing components...");
     println!("  Data directory: {}", reth_datadir);
-    
+
     // Create simulator and tx processor
     let simulator = Arc::new(TxSimulator::new(&reth_datadir)?);
     let tx_processor = Arc::new(TxProcessor::new());
-    
+
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
     println!("  Using block: {}", latest_block);
     println!();
-    
+
     println!("🧪 Testing {} tokens on Uniswap V3...", tokens.len());
     println!("  Test amount: 0.01 ETH");
     println!("  Fee tiers: 0.05% (500), 0.30% (3000), 1.00% (10000)");
     println!();
-    
+
     let start_time = std::time::Instant::now();
     let mut results = Vec::new();
-    
+
     for (i, token) in tokens.iter().enumerate() {
-        print!("  [{}/{}] Testing {} ({} tier)... ", 
-            i + 1, tokens.len(), token.symbol, token.get_fee_tier_string());
-        
-        let result = test_token(
-            simulator.clone(),
-            tx_processor.clone(),
-            token,
-            latest_block,
-        ).await;
-        
+        print!(
+            "  [{}/{}] Testing {} ({} tier)... ",
+            i + 1,
+            tokens.len(),
+            token.symbol,
+            token.get_fee_tier_string()
+        );
+
+        let result = test_token(simulator.clone(), tx_processor.clone(), token, latest_block).await;
+
         match &result {
             Ok(res) if res.is_tradeable => println!("✅ Tradeable"),
             Ok(res) => {
@@ -363,63 +363,66 @@ async fn main() -> Result<()> {
                 if let Some(ref reason) = res.failure_reason {
                     println!("    Full error: {}", reason);
                 }
-            },
+            }
             Err(e) => println!("❌ Error: {}", e),
         }
-        
+
         results.push((token.clone(), result));
     }
-    
+
     let elapsed = start_time.elapsed();
-    
+
     // Print summary table
     print_summary_table(&results);
-    
+
     // Statistics by fee tier
     println!("\n📈 Statistics by Fee Tier:");
     println!("================================");
-    
+
     for fee_tier in [500, 3000, 10000] {
-        let tier_results: Vec<_> = results.iter()
+        let tier_results: Vec<_> = results
+            .iter()
             .filter(|(t, _)| t.fee_tier == fee_tier)
             .collect();
-        
+
         if tier_results.is_empty() {
             continue;
         }
-        
-        let tradeable_count = tier_results.iter()
+
+        let tradeable_count = tier_results
+            .iter()
             .filter(|(_, r)| r.as_ref().map(|res| res.is_tradeable).unwrap_or(false))
             .count();
-        
+
         let tier_name = match fee_tier {
             500 => "0.05%",
             3000 => "0.30%",
             10000 => "1.00%",
             _ => "Unknown",
         };
-        
-        println!("  {} tier: {}/{} tradeable ({:.1}%)",
+
+        println!(
+            "  {} tier: {}/{} tradeable ({:.1}%)",
             tier_name,
             tradeable_count,
             tier_results.len(),
             (tradeable_count as f64 / tier_results.len() as f64) * 100.0
         );
     }
-    
+
     // Performance summary
     println!("\n⏱️  Performance Summary:");
     println!("  Total Testing Time: {:?}", elapsed);
     println!("  Average Per Token: {:?}", elapsed / tokens.len() as u32);
-    
+
     // Component validation
     println!("\n🔧 Component Validation Status:");
     println!("  ✅ V3 pool adapter working correctly");
     println!("  ✅ Fee tier handling validated");
     println!("  ✅ Concentrated liquidity simulation functional");
     println!("  📝 V3 pools show expected behavior for different fee tiers");
-    
+
     println!("\n🎉 Uniswap V3 multi-token analysis complete!");
-    
+
     Ok(())
 }
