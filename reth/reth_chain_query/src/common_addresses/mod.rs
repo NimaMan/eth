@@ -1,27 +1,26 @@
 //! Common addresses module
-//! 
+//!
 //! This module contains all common Ethereum addresses used throughout the system.
 //! All files are auto-generated from Python address files.
 
-pub mod denom_tokens;
-pub mod stablecoins;
 pub mod cex;
-pub mod etf;
-pub mod validators;
+pub mod denom_tokens;
 pub mod dex_pools;
+pub mod etf;
+pub mod pool_types;
+pub mod stablecoins;
+pub mod validators;
 
 // Re-export commonly used items
-pub use denom_tokens::{DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, ADDRESSES_BY_NAME};
-pub use denom_tokens::{get_token_symbol, get_token_decimals, is_denom_token, get_address_by_name};
-pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
-pub use cex::{CEX_ADDRESSES, CEX_ADDRESS_SET, ADDRESSES_BY_EXCHANGE};
-pub use etf::{ETF_ADDRESSES, ETF_ADDRESS_SET, ADDRESSES_BY_PROVIDER};
-pub use validators::{FEE_RECIPIENTS, FEE_RECIPIENT_LIST, is_fee_recipient, is_bribe};
+pub use cex::{ADDRESSES_BY_EXCHANGE, CEX_ADDRESSES, CEX_ADDRESS_SET};
+pub use denom_tokens::{get_address_by_name, get_token_decimals, get_token_symbol, is_denom_token};
+pub use denom_tokens::{ADDRESSES_BY_NAME, DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS};
 pub use dex_pools::{
-    UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY, SUSHISWAP_FACTORY,
-    V3_FEE_TIERS,
-    compute_uniswap_v2_pool, compute_uniswap_v3_pool, compute_sushiswap_pool,
-    get_all_v3_pools,
-    V4PoolInfo, find_uniswap_v4_pools_for_pair,
-    BALANCER_VAULT,
+    compute_sushiswap_pool, compute_uniswap_v2_pool, compute_uniswap_v3_pool,
+    find_uniswap_v4_pools_for_pair, get_all_v3_pools, V4PoolInfo, BALANCER_VAULT,
+    SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY, V3_FEE_TIERS,
 };
+pub use pool_types::{DEFAULT_POOL_TYPE, DEX_POOL_TYPES};
+pub use etf::{ADDRESSES_BY_PROVIDER, ETF_ADDRESSES, ETF_ADDRESS_SET};
+pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
+pub use validators::{is_bribe, is_fee_recipient, FEE_RECIPIENTS, FEE_RECIPIENT_LIST};
