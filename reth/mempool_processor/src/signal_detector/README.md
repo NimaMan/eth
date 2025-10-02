@@ -93,7 +93,6 @@ Non‑simulated LP approvals are routed directly to LpApprovalDetector.
 
 - TradingStatusDetector
   - `tax_threshold` (default: 25%)
-  - `min_liquidity_threshold` (default: 0.5 ETH)
 
 - TaxDetector (via `TaxDetectionConfig`)
   - `max_acceptable_buy_tax`, `max_acceptable_sell_tax`

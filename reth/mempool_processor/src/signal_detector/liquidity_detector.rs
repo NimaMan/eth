@@ -1,6 +1,6 @@
 use crate::simulator::LiquidityRemovalResult;
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, I256};
 use reth_chain_query::{alloy_address_to_checksum, to_checksum_address};
 /// Liquidity Change Detector
 ///
@@ -59,7 +59,6 @@ pub enum LiquidityChangeType {
 #[derive(Debug, Clone)]
 struct DrainResult {
     pub current_reserve: f64,
-    pub eth_change: f64,
     pub new_reserve: f64,
     pub drain_percent: f64,
 }
@@ -240,13 +239,11 @@ impl LiquidityDetector {
 
         // Step 2: Check if there's negative ETH change (drain)
         // Get ETH change from currency_net map
-        let eth_change_u256 = changes
+        let eth_change = changes
             .currency_net
             .get("ETH")
-            .cloned()
-            .unwrap_or(U256::ZERO);
-        // Convert U256 to I256 for signed comparison
-        let eth_change = I256::try_from(eth_change_u256).unwrap_or(I256::ZERO);
+            .copied()
+            .unwrap_or(I256::ZERO);
         if eth_change >= I256::ZERO {
             return None; // No drain
         }
@@ -320,7 +317,6 @@ impl LiquidityDetector {
         if current_reserve < 0.001 {
             return DrainResult {
                 current_reserve,
-                eth_change,
                 new_reserve: 0.0,
                 drain_percent: 0.0,
             };
@@ -332,7 +328,6 @@ impl LiquidityDetector {
 
         DrainResult {
             current_reserve,
-            eth_change,
             new_reserve,
             drain_percent,
         }

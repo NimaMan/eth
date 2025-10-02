@@ -17,6 +17,8 @@ pub use types::CacheConfig;
 pub use types::{Address, Pool, PoolType, Token, TokenUpdate, TokenWithPools};
 use zmq;
 
+use crate::canonical_head_cache::CanonicalHeadCache;
+
 use self::types::{
     PoolUpdatesMessage, TokenCreatorMessage, TokenCreatorsMessage, TokenQueryResponse,
     TokenUpdatesMessage,
@@ -30,6 +32,7 @@ pub struct TokenTrackingSubscriber {
     cache: Arc<TokenTrackingCache>,
     zmq_pub_endpoint: String,
     zmq_rep_endpoint: String,
+    head_cache: Option<Arc<CanonicalHeadCache>>,
 }
 
 impl TokenTrackingSubscriber {
@@ -51,6 +54,7 @@ impl TokenTrackingSubscriber {
             cache,
             zmq_pub_endpoint: pub_endpoint.to_string(),
             zmq_rep_endpoint: rep_endpoint.to_string(),
+            head_cache: None,
         }
     }
 
@@ -62,6 +66,10 @@ impl TokenTrackingSubscriber {
     /// Get a clone of the combined cache for backward compatibility
     pub fn get_pool_cache(&self) -> Arc<TokenTrackingCache> {
         self.cache.clone()
+    }
+
+    pub fn set_head_cache(&mut self, manager: Arc<CanonicalHeadCache>) {
+        self.head_cache = Some(manager);
     }
 
     /// Request initial pool state from Python service via REQ/REP socket
@@ -210,6 +218,28 @@ impl TokenTrackingSubscriber {
                             data: token_message.data,
                         };
 
+                        if let Some(manager) = &self.head_cache {
+                            if update.block_number > 0 {
+                                match manager.latest_block_number().await {
+                                    Some(head_block) => {
+                                        let delta = head_block as i64 - update.block_number as i64;
+                                        debug!(
+                                            head_block,
+                                            python_block = update.block_number,
+                                            delta,
+                                            "Block delta between head subscription and Python cache"
+                                        );
+                                    }
+                                    None => {
+                                        debug!(
+                                            python_block = update.block_number,
+                                            "Head subscription has not recorded a block number yet"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
                         // Update cache with batch update
                         let result = self.cache.batch_update(update).await;
 
@@ -229,9 +259,7 @@ impl TokenTrackingSubscriber {
                         // Note: Legacy pool updates don't contain full token info
                         // For now, we'll skip them as the new cache requires full token data
                         warn!("Legacy pool updates not supported with new cache. Skipping.");
-                    } else if let Ok(creator_message) =
-                        serde_json::from_str::<TokenCreatorMessage>(&msg_str)
-                    {
+                    } else if serde_json::from_str::<TokenCreatorMessage>(&msg_str).is_ok() {
                         // Handle single creator update
                         debug!("Received token creator update");
 

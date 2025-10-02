@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, U256};
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::str::FromStr;
 /// Test external PoolBuySellSimulator and demonstrate shared database connection
 ///
@@ -14,19 +14,19 @@ use std::str::FromStr;
 /// - 0xT token (should fail sell - honeypot)
 /// - FLOKI token (has buy tax)
 ///
-/// The external simulator returns PoolViabilityResult with tax percentages already calculated
+/// The external simulator returns PoolBuySellSimulationResult with tax percentages already calculated
 use std::sync::Arc;
 
 // Import MempoolSimulator for simple transaction simulation
+use mempool_processor::canonical_head_cache::CanonicalHeadCache;
 use mempool_processor::simulator::MempoolSimulator;
 
 // Import from tx_processor
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::{
-    config::PoolViabilityConfig,
-    pool_buy_sell_simulator::check_can_buy_sell_pool,
-    types::{PoolType, PoolViabilityResult},
-};
+use reth_primitives::SealedHeader;
 use tx_processor::tx_processor::TxProcessor;
+use tx_processor::{
+    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+};
 use tx_simulator::TxSimulator;
 
 fn format_token_amount(amount: U256, decimals: u8) -> String {
@@ -51,7 +51,7 @@ fn format_token_amount(amount: U256, decimals: u8) -> String {
     }
 }
 
-fn print_pool_results(result: &PoolViabilityResult, token_name: &str, decimals: u8) {
+fn print_pool_results(result: &PoolBuySellSimulationResult, token_name: &str, decimals: u8) {
     println!("\n🔍 Testing {}", token_name);
     println!("{}", "=".repeat(60));
 
@@ -137,9 +137,20 @@ async fn main() -> Result<()> {
 
     // Create one shared simulator and reuse it everywhere
     let shared_simulator = Arc::new(TxSimulator::new(reth_datadir)?);
+    let head_cache = Arc::new(CanonicalHeadCache::new());
 
     // Share with MempoolSimulator for simple transactions
-    let mempool_simulator = MempoolSimulator::from_shared_simulator(shared_simulator.clone())?;
+    let mempool_simulator =
+        MempoolSimulator::from_shared_simulator(shared_simulator.clone(), head_cache.clone())?;
+
+    let latest_block = mempool_simulator.get_latest_block()?;
+    let provider = shared_simulator.provider_factory().provider()?;
+    let header = provider
+        .header_by_number(latest_block)?
+        .ok_or_else(|| eyre!("No header available for block {}", latest_block))?;
+    head_cache
+        .set_latest_header(SealedHeader::new_unhashed(header))
+        .await;
 
     // Share with external processor for pool operations
     let simulator = shared_simulator.clone();
@@ -160,8 +171,6 @@ async fn main() -> Result<()> {
     // ========== Test 0: Simple ETH Transfer (Database Connection Test) ==========
     println!("\n🧪 Test 0: Simple ETH Transfer (Shared Database Connection)");
     {
-        // Test with a recent block for simple transfer
-        let latest_block = mempool_simulator.get_latest_block()?;
         println!("  Latest block: {}", latest_block);
 
         // Test simple pool buy/sell operation to show database connection works
@@ -171,7 +180,7 @@ async fn main() -> Result<()> {
 
         match mempool_simulator
             .simulate_pool_buy_sell_simple(
-                test_token, test_pool, None, // Use latest block
+                test_token, test_pool, 6, None, // USDC has 6 decimals, use latest block
             )
             .await
         {
@@ -198,7 +207,7 @@ async fn main() -> Result<()> {
         let aitai_pool = Address::from_str("0xa32d14c0d48ed4835179f33bc00d1bd7acea4aff")
             .map_err(|e| eyre::eyre!("Failed to parse AITAI pool: {}", e))?;
 
-        let config = PoolViabilityConfig {
+        let config = PoolBuySellParameters {
             token_address: aitai_token,
             pool_address: aitai_pool,
             pool_type: PoolType::UniswapV2,
@@ -206,12 +215,15 @@ async fn main() -> Result<()> {
             buyer_address,
             block_number: Some(23005264),
             gas_limit: 500_000,
-            gas_price: 30_000_000_000,
+            gas_price: Some(30_000_000_000),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
             prior_tx: None,
             block_delay: 0,
             slippage_tolerance: 0.05, // 5%
             token_decimals: 18,
             weth_address: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?,
+            block_header: None,
         };
 
         match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), config).await {
@@ -227,7 +239,7 @@ async fn main() -> Result<()> {
         let zerot_pool = Address::from_str("0x885cf65E1511D50Bb49e488839525fDE44cDE36b")
             .map_err(|e| eyre::eyre!("Failed to parse 0xT pool: {}", e))?;
 
-        let config = PoolViabilityConfig {
+        let config = PoolBuySellParameters {
             token_address: zerot_token,
             pool_address: zerot_pool,
             pool_type: PoolType::UniswapV2,
@@ -235,12 +247,15 @@ async fn main() -> Result<()> {
             buyer_address,
             block_number: Some(22954920),
             gas_limit: 500_000,
-            gas_price: 30_000_000_000,
+            gas_price: Some(30_000_000_000),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
             prior_tx: None,
             block_delay: 0,
             slippage_tolerance: 0.05, // 5%
             token_decimals: 18,
             weth_address: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?,
+            block_header: None,
         };
 
         match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), config).await {
@@ -256,7 +271,7 @@ async fn main() -> Result<()> {
         let floki_pool = Address::from_str("0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0")
             .map_err(|e| eyre::eyre!("Failed to parse FLOKI pool: {}", e))?;
 
-        let config = PoolViabilityConfig {
+        let config = PoolBuySellParameters {
             token_address: floki_address,
             pool_address: floki_pool,
             pool_type: PoolType::UniswapV2,
@@ -264,12 +279,15 @@ async fn main() -> Result<()> {
             buyer_address,
             block_number: None, // Use latest block
             gas_limit: 500_000,
-            gas_price: 30_000_000_000,
+            gas_price: Some(30_000_000_000),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
             prior_tx: None,
             block_delay: 0,
             slippage_tolerance: 0.05, // 5%
             token_decimals: 9,        // FLOKI has 9 decimals
             weth_address: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?,
+            block_header: None,
         };
 
         match check_can_buy_sell_pool(simulator.clone(), tx_processor.clone(), config).await {

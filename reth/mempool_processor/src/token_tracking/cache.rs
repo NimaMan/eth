@@ -6,12 +6,15 @@
 // 3. Indexed lookups for O(1) access
 // 4. Batch updates with single lock acquisition
 
+use chrono::Utc;
 use lru::LruCache;
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::num::NonZeroUsize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::info;
 
 pub use super::types::{Address, CacheConfig, Pool, Token, TokenUpdate, TokenWithPools};
 
@@ -34,6 +37,7 @@ pub struct TokenTrackingCache {
 
     // Configuration
     config: CacheConfig,
+    log_path: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl TokenTrackingCache {
@@ -52,6 +56,7 @@ impl TokenTrackingCache {
             active_pools: Arc::new(RwLock::new(HashSet::new())),
             high_liquidity_pools: Arc::new(RwLock::new(HashSet::new())),
             config,
+            log_path: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -130,16 +135,6 @@ impl TokenTrackingCache {
         result
     }
 
-    /// Get primary pool (highest liquidity) for a token
-    pub async fn get_primary_pool(&self, token: &Address) -> Option<Arc<Pool>> {
-        let pools = self.get_pools_for_token(token).await;
-        pools.into_iter().max_by(|a, b| {
-            a.eth_reserve
-                .partial_cmp(&b.eth_reserve)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-    }
-
     /// Get all creator addresses (reference, no clone)
     pub async fn creator_addresses(&self) -> HashSet<Address> {
         let creators = self.active_creators.read().await;
@@ -171,10 +166,13 @@ impl TokenTrackingCache {
 
     /// Update cache with new token data from Python (batch operation)
     pub async fn batch_update(&self, update: TokenUpdate) -> UpdateResult {
-        let start = std::time::Instant::now();
         let mut tokens_updated = 0;
         let mut pools_updated = 0;
         let mut creators_added = 0;
+
+        let TokenUpdate {
+            block_number, data, ..
+        } = update;
 
         // Acquire all write locks at once to avoid deadlock
         let mut tokens_cache = self.tokens.write().await;
@@ -187,21 +185,12 @@ impl TokenTrackingCache {
         let mut high_liquidity_pools = self.high_liquidity_pools.write().await;
 
         // Process each token and its pools
-        for (token_addr, token_with_pools) in update.data {
+        for (token_addr, token_with_pools) in data {
             let mut token = token_with_pools.token;
             let pools = token_with_pools.pools;
 
             // Calculate cached values
             token.total_liquidity = pools.values().map(|p| p.eth_reserve).sum();
-
-            token.primary_pool = pools
-                .values()
-                .max_by(|a, b| {
-                    a.eth_reserve
-                        .partial_cmp(&b.eth_reserve)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
-                .map(|p| p.address.clone());
 
             // Update token
             let token_arc = Arc::new(token.clone());
@@ -264,41 +253,51 @@ impl TokenTrackingCache {
             token_to_pools.insert(token_addr, pool_addrs);
         }
 
-        let elapsed = start.elapsed();
-        info!(
-            "Cache batch update: {} tokens, {} pools, {} creators in {:?}",
-            tokens_updated, pools_updated, creators_added, elapsed
-        );
+        self.log_update_to_file(block_number, tokens_updated, pools_updated, creators_added)
+            .await;
 
         UpdateResult {
             tokens_updated,
             pools_updated,
             creators_added,
-            duration_ms: elapsed.as_millis() as u64,
         }
     }
 
-    // ===== Compatibility Layer (matches old API) =====
+    pub async fn set_log_path<P: Into<PathBuf>>(&self, path: P) {
+        let mut guard = self.log_path.write().await;
+        *guard = Some(path.into());
+    }
 
-    /// Get pool by address (compatibility method)
+    async fn log_update_to_file(
+        &self,
+        block_number: u64,
+        tokens_updated: usize,
+        pools_updated: usize,
+        creators_added: usize,
+    ) {
+        let log_path = { self.log_path.read().await.clone() };
+        if let Some(path) = log_path {
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+                let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(
+                    file,
+                    "[{}] @block {}: tokens={}, pools={}, creators={} Token cache updated",
+                    timestamp, block_number, tokens_updated, pools_updated, creators_added
+                );
+            }
+        }
+    }
+
+    /// Get pool by address
     pub async fn get_pool_by_address(&self, address: &str) -> Option<Arc<Pool>> {
         self.get_pool(&address.to_string()).await
     }
 
-    /// Get token info (compatibility - returns cloned data)
+    /// Get token info
     pub async fn get_token_info(&self, address: &str) -> Option<Token> {
         self.get_token(&address.to_string())
             .await
             .map(|arc| (*arc).clone())
-    }
-
-    /// Get pools for token with tuple format (compatibility)
-    pub async fn get_pools_for_token_compat(&self, token: &str) -> Vec<(String, Pool)> {
-        let pools = self.get_pools_for_token(&token.to_string()).await;
-        pools
-            .into_iter()
-            .map(|pool| (pool.address.clone(), (*pool).clone()))
-            .collect()
     }
 
     /// Get creator count
@@ -330,7 +329,6 @@ pub struct UpdateResult {
     pub tokens_updated: usize,
     pub pools_updated: usize,
     pub creators_added: usize,
-    pub duration_ms: u64,
 }
 
 #[cfg(test)]
@@ -355,17 +353,14 @@ mod tests {
             renouncement_block: None,
             buy_tax: Some(5.0),
             sell_tax: Some(5.0),
-            tax_risk_score: 10.0,
             last_tax_change_block: None,
             tax_history: vec![],
-            pending_tax_changes: vec![],
             creation_block: 1000,
             creation_txn: "0xHASH".to_string(),
             creation_timestamp: Some(1234567890.0),
             latest_activity_block: 2000,
             is_scam: false,
             scam_label: None,
-            primary_pool: None,
             total_liquidity: 0.0,
         };
 

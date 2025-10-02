@@ -55,8 +55,6 @@ impl Default for SignalPublisherConfig {
 
 /// Signal publisher with fast ZMQ/logs and non-blocking DB
 pub struct SignalPublisher {
-    /// Configuration
-    config: SignalPublisherConfig,
     /// ZMQ socket
     zmq_socket: Socket,
     /// Log files
@@ -127,7 +125,6 @@ impl SignalPublisher {
         info!("📡 Signal publisher initialized");
 
         Ok(Self {
-            config,
             zmq_socket,
             log_files,
             db_sender,

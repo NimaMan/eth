@@ -9,11 +9,11 @@ Exports complete token ecosystem data from the cache to a CSV file with comprehe
 ### CSV Columns:
 - **Creator info**: creator_address
 - **Token metadata**: token_address, symbol, name, decimals, total_supply
-- **Tax info**: buy_tax, sell_tax, tax_risk_score
+- **Tax info**: buy_tax, sell_tax
 - **Ownership**: ownership_renounced, renouncement_block
 - **Creation**: creation_block, creation_txn, latest_activity_block
 - **Scam detection**: is_scam
-- **Liquidity**: total_liquidity, primary_pool
+- **Liquidity**: total_liquidity
 - **Pool data** (up to 3 pools per token):
   - pool_address, pool_type, eth_reserve, token_reserve
   - trading_enabled, trading_block

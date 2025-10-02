@@ -60,16 +60,11 @@ pub struct Token {
     #[serde(alias = "current_sell_tax")]
     pub sell_tax: Option<f64>,
     #[serde(default)]
-    pub tax_risk_score: f64,
-    #[serde(default)]
     pub last_tax_change_block: Option<BlockNumber>,
 
     // Tax history
     #[serde(default)]
     pub tax_history: Vec<TaxChange>,
-    #[serde(default)]
-    pub pending_tax_changes: Vec<PendingTaxChange>,
-
     // Metadata
     pub creation_block: BlockNumber,
     #[serde(alias = "creation_tx")]
@@ -82,9 +77,6 @@ pub struct Token {
     pub is_scam: bool,
     pub scam_label: Option<String>,
 
-    // Cached computations (not from Python)
-    #[serde(skip)]
-    pub primary_pool: Option<Address>,
     #[serde(skip)]
     pub total_liquidity: f64,
 }

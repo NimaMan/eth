@@ -28,7 +28,7 @@ impl Default for ArrivalRecorderConfig {
 pub struct MempoolArrivalRecorder {
     pending: Arc<Mutex<HashMap<B256, u64>>>,
     _db: Arc<RethIndexDB>,
-    writer: Arc<MempoolArrivalWriter>,
+    _writer: Arc<MempoolArrivalWriter>,
     _flush_task: tokio::task::JoinHandle<()>,
 }
 
@@ -74,7 +74,7 @@ impl MempoolArrivalRecorder {
         Self {
             pending,
             _db: db,
-            writer,
+            _writer: writer,
             _flush_task: handle,
         }
     }

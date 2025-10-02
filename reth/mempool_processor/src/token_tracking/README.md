@@ -120,6 +120,22 @@ let pools = token_cache.get_pools_for_token(&token_address).await;
 // Returns Vec<(String, PoolState)> - all pools for this token
 ```
 
+### Token metadata helpers
+```rust
+use alloy_primitives::Address;
+use mempool_processor::token_tracking::token_parameter_extraction::fetch_token_metadata;
+use reth_chain_query::provider::RethQueryProvider;
+
+async fn describe_token(provider: &RethQueryProvider, token: Address) {
+    if let Ok(meta) = fetch_token_metadata(provider, token).await {
+        tracing::info!(
+            "Token {} ({}): decimals={} total_supply={}",
+            meta.name, meta.symbol, meta.decimals, meta.total_supply
+        );
+    }
+}
+```
+
 ## Configuration
 
 ### ZMQ Endpoints
@@ -157,8 +173,54 @@ tail -f logs/mempool/signal_detector_*/signals/tax_signals.log
 
 ## Future Improvements
 
-See [DESIGN.md](./DESIGN.md) for proposed new architecture with:
-- Zero-copy access patterns
-- O(1) indexed lookups for all queries
-- Memory-bounded collections
-- Unified type system
+Planned refactors focus on cutting copy costs, tightening query paths, and putting a hard ceiling on memory usage.
+
+### Core Principles Under Review
+- Zero-copy read paths (return `Arc` handles or iterators instead of cloning `TokenInfo`).
+- Indexed O(1) lookups for creators, pools, and token relationships.
+- Explicit collection limits with LRU-style eviction to cap memory.
+- Single canonical type per concept (token, pool, creator) to avoid serde alias sprawl.
+- Data locality: keep frequently accessed fields together to stay cache-friendly.
+
+### Proposed Data Model
+```rust
+pub struct TokenTrackingCache {
+    // Primary storage (bounded LRU caches)
+    tokens: Arc<RwLock<LruCache<Address, Arc<Token>>>>,
+    pools: Arc<RwLock<LruCache<Address, Arc<Pool>>>>,
+
+    // Relationship indexes for O(1) lookups
+    creator_to_tokens: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
+    token_to_pools: Arc<RwLock<HashMap<Address, HashSet<Address>>>>,
+    pool_to_token: Arc<RwLock<HashMap<Address, Address>>>,
+
+    // Fast filters for hot-path checks
+    active_creators: Arc<RwLock<HashSet<Address>>>,
+    active_pools: Arc<RwLock<HashSet<Address>>>,
+    high_liquidity_pools: Arc<RwLock<HashSet<Address>>>,
+
+    config: CacheConfig,
+}
+```
+
+Tokens and pools themselves would be richer typed structs (ownership, taxes, liquidity metadata, etc.) kept behind `Arc` so readers never clone >1KB payloads just to inspect a field.
+
+### Update & Read Patterns (Target State)
+```
+Python publisher → TokenTrackingSubscriber → cache.batch_update()
+    └─ single write lock updates storage + indexes + stats
+
+Hot path routing:
+TxRouter::classify() → cache.is_creator(from) → cache.get_token_for_creator(from)
+
+Signal detection:
+SimulationResult → SignalManager → cache.get_pools_for_token(token) (indexed set)
+```
+
+Batch updates would continue to hold the write lock once, refreshing both primary storage and derived indexes atomically while emitting lightweight metrics (block number, counts).
+
+### Memory & Performance Targets
+- Tokens: 10k max entries, Pools: 100k max entries (LRU with scam-first eviction).
+- `is_creator()` in <1µs, `get_token()` in <5µs, `get_pools_for_token()` in <10µs.
+
+Work on this redesign lives behind feature branches; keep the current API stable until the new cache is production-ready.

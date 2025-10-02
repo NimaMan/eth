@@ -118,9 +118,6 @@ pub struct SignalDetectionConfig {
     /// Minimum ETH in pool to track
     pub min_pool_eth: f64,
 
-    /// Minimum ETH liquidity to consider trading already enabled
-    pub min_liquidity_threshold: f64,
-
     /// Scam detection ETH threshold
     pub scam_eth_threshold: f64,
 
@@ -248,7 +245,6 @@ impl Default for MempoolProcessorConfig {
 
             signal_detection: SignalDetectionConfig {
                 min_pool_eth: 0.7,
-                min_liquidity_threshold: 0.5, // 0.5 ETH minimum to consider trading enabled
                 scam_eth_threshold: 0.3,
                 scam_percentage_threshold: 60.0,
                 liquidity_warning_percentage: 20.0,
@@ -333,12 +329,6 @@ impl MempoolProcessorConfig {
         }
 
         // Honeypot threshold removed - now determined by can't sell condition
-
-        if let Ok(threshold) = std::env::var("MEMPOOL_MIN_LIQUIDITY_THRESHOLD") {
-            if let Ok(val) = threshold.parse() {
-                config.signal_detection.min_liquidity_threshold = val;
-            }
-        }
 
         if config.ipc.socket_path == DEFAULT_RETH_IPC_PATH {
             let derived = Path::new(&config.simulation.reth_datadir).join("reth.ipc");

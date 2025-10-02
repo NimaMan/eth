@@ -22,6 +22,7 @@ use tracing::{info, warn};
 // Mempool processor imports
 use alloy_primitives::{Address, U256};
 use mempool_processor::{
+    canonical_head_cache::CanonicalHeadCache,
     function_detector::FunctionDetector,
     mempool_fetcher::{MempoolFetcherIPCClient, MempoolTransaction},
     simulator::MempoolSimulator,
@@ -31,10 +32,7 @@ use mempool_processor::{
 use std::collections::{HashMap, VecDeque};
 // Import pool simulation types from tx_processor
 use std::str::FromStr;
-use tx_processor::simulator::erc20_token_buy_approve_sell_tx_simulator::{
-    config::PoolViabilityConfig,
-    types::{PoolType, PoolViabilityResult},
-};
+use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 // Import the correct types from simulation_manager
 use mempool_processor::simulator::simulation_manager::{
     BuySellResult, SimulationRequest, SimulationResult, SimulationType,
@@ -302,7 +300,7 @@ impl SimplifiedSimulationManager {
                         };
 
                     // Run pool buy/sell simulation
-                    let config = tx_processor::config::PoolViabilityConfig {
+                    let config = tx_processor::PoolBuySellParameters {
                         token_address: token_addr,
                         pool_address: pool_addr.to_string(),
                         pool_type: PoolType::UniswapV2,
@@ -313,7 +311,9 @@ impl SimplifiedSimulationManager {
                         .unwrap(),
                         block_number: None,
                         gas_limit: 500_000,
-                        gas_price: 30_000_000_000,
+                        gas_price: Some(30_000_000_000),
+                        max_fee_per_gas: None,
+                        max_priority_fee_per_gas: None,
                         prior_tx: tx_call_request,
                         block_delay: 0,
                         slippage_tolerance: 0.5,
@@ -322,6 +322,7 @@ impl SimplifiedSimulationManager {
                             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
                         )
                         .unwrap(),
+                        block_header: None,
                     };
 
                     match simulator.simulate_pool_buy_sell(config).await {
@@ -463,6 +464,8 @@ async fn main() -> Result<()> {
     // Initialize components
     info!("\n🔧 Initializing pipeline components...");
 
+    let head_cache = Arc::new(CanonicalHeadCache::new());
+
     // IPC client
     let ipc_client = MempoolFetcherIPCClient::new(Some(&args.ipc_path))?;
     ipc_client.start().await?;
@@ -477,8 +480,16 @@ async fn main() -> Result<()> {
     info!("✅ Transaction router initialized");
 
     // Initialize unified simulator with custom config
-    let simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path)?);
+    let simulator = Arc::new(MempoolSimulator::new(
+        &args.reth_db_path,
+        head_cache.clone(),
+    )?);
     info!("✅ MempoolSimulator initialized (no database lock issues!)");
+
+    let header_task = head_cache.spawn_head_listener(args.ipc_path.clone());
+    head_cache
+        .wait_for_latest_header(Duration::from_secs(10))
+        .await?;
 
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
@@ -753,6 +764,8 @@ async fn main() -> Result<()> {
     info!("📄 Results saved to: {}", log_path);
     info!("🔍 This test ran WITHOUT signal detection");
     info!("   Use this log to debug simulation issues");
+
+    header_task.abort();
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, I256, U256};
 /// Simulate liquidity removal for a given transaction hash using the dedicated
 /// LiquidityRemovalSimulator, and print the computed drain metrics.
 ///
@@ -129,20 +129,14 @@ async fn main() -> Result<()> {
     println!("Top ETH balance deltas from processed tx:");
     let mut entries: Vec<_> = processed.address_balance_changes.iter().collect();
     entries.sort_by(|a, b| {
-        let av = a.1.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
-        let bv = b.1.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
-        // compare by absolute value of signed interpretation
-        let ai = alloy_primitives::I256::try_from(av)
-            .unwrap_or(alloy_primitives::I256::ZERO)
-            .unsigned_abs();
-        let bi = alloy_primitives::I256::try_from(bv)
-            .unwrap_or(alloy_primitives::I256::ZERO)
-            .unsigned_abs();
+        let av = a.1.currency_net.get("ETH").copied().unwrap_or(I256::ZERO);
+        let bv = b.1.currency_net.get("ETH").copied().unwrap_or(I256::ZERO);
+        let ai = av.unsigned_abs();
+        let bi = bv.unsigned_abs();
         bi.cmp(&ai)
     });
     for (addr, ch) in entries.iter().take(10) {
-        let raw = ch.currency_net.get("ETH").cloned().unwrap_or(U256::ZERO);
-        let signed = alloy_primitives::I256::try_from(raw).unwrap_or(alloy_primitives::I256::ZERO);
+        let signed = ch.currency_net.get("ETH").copied().unwrap_or(I256::ZERO);
         let eth = signed.to_string().parse::<f64>().unwrap_or(0.0) / 1e18;
         println!("  {}: {:+.6} ETH", to_checksum_address(addr), eth);
     }

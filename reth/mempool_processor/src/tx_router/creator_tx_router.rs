@@ -6,13 +6,12 @@ use crate::token_tracking::TokenTrackingCache;
 /// Identifies and categorizes transactions from known token creators
 use std::sync::Arc;
 
-pub struct CreatorTransactionRouter {
-    token_cache: Option<Arc<TokenTrackingCache>>,
-}
+pub struct CreatorTransactionRouter;
 
 impl CreatorTransactionRouter {
     pub fn new(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
-        Self { token_cache }
+        let _ = token_cache;
+        Self
     }
 
     /// Get the function type from pre-categorized transaction

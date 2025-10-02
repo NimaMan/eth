@@ -39,10 +39,22 @@ impl TaxSignalRecord {
         creator_address: &str,
         tx_hash: &str,
     ) -> Self {
+        fn normalize_pool_type(pool_type: &str) -> String {
+            match pool_type.trim().to_lowercase().as_str() {
+                "uniswapv2" | "uniswap-v2" | "v2" => "UNISWAP-V2".to_string(),
+                "uniswapv3" | "uniswap-v3" | "v3" => "UNISWAP-V3".to_string(),
+                "uniswapv4" | "uniswap-v4" | "v4" => "UNISWAP-V4".to_string(),
+                "sushiswap" | "sushi" | "sushi-swap" => "SUSHI-SWAP".to_string(),
+                "curve" => "CURVE".to_string(),
+                "balancer" => "BALANCER".to_string(),
+                other => other.to_uppercase(),
+            }
+        }
+
         Self {
             token_address: signal.token_address.clone(),
             pool_address: pool_address.to_string(),
-            pool_type: pool_type.to_string(),
+            pool_type: normalize_pool_type(pool_type),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH default
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),

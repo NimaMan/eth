@@ -1,19 +1,19 @@
+/// Liquidity Removal Simulator
+/// A wrapper over `tx_processor::process_unsigned_tx` that returns a
+/// `LiquidityRemovalResult` by deriving pool-drain metrics from the
+/// `ProcessedTransaction.address_balance_changes`.
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, U256};
 use eyre::Result;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::RethQueryProvider;
-/// Liquidity Removal Simulator (minimal)
-///
-/// Thin wrapper over `tx_processor::process_unsigned_tx` that returns a
-/// `LiquidityRemovalResult` by deriving pool-drain metrics from the
-/// `ProcessedTransaction.address_balance_changes`.
+use reth_primitives::SealedHeader;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use tracing::{error, warn};
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
-use tx_processor::{process_unsigned_tx, ProcessedTransaction};
+use tx_processor::{process_unsigned_tx, process_unsigned_tx_with_header, ProcessedTransaction};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 #[derive(Debug, Clone)]
@@ -32,7 +32,6 @@ pub struct LiquidityRemovalResult {
 #[derive(Debug)]
 struct PoolDrainInfo {
     pool_address: Address,
-    initial_eth: f64,
     eth_removed: f64,
     remaining_eth: f64,
     percentage: f64,
@@ -61,8 +60,9 @@ impl LiquidityRemovalSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
     ) -> Result<LiquidityRemovalResult> {
-        self.simulate_removal_internal(unsigned_tx, block_number, false)
+        self.simulate_removal_internal(unsigned_tx, block_number, block_header, false)
             .await
     }
 
@@ -73,21 +73,33 @@ impl LiquidityRemovalSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
     ) -> Result<LiquidityRemovalResult> {
-        self.simulate_removal_internal(unsigned_tx, block_number, retry_on_missing_header)
-            .await
+        self.simulate_removal_internal(
+            unsigned_tx,
+            block_number,
+            block_header,
+            retry_on_missing_header,
+        )
+        .await
     }
 
     async fn simulate_removal_internal(
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
     ) -> Result<LiquidityRemovalResult> {
         // 1) Process tx with full trace + deltas
         let processed = match self
-            .process_with_optional_retry(unsigned_tx.clone(), block_number, retry_on_missing_header)
+            .process_with_optional_retry(
+                unsigned_tx.clone(),
+                block_number,
+                block_header.clone(),
+                retry_on_missing_header,
+            )
             .await
         {
             Ok(p) => p,
@@ -249,10 +261,10 @@ impl LiquidityRemovalSimulator {
 
         for (address, change) in address_balance_changes {
             // ETH delta in ETH units (negative for drains)
-            let mut eth_change = change
+            let eth_change = change
                 .currency_net
                 .get("ETH")
-                .and_then(|u| I256::try_from(*u).ok())
+                .copied()
                 .map(|s| s.to_string().parse::<f64>().unwrap_or(0.0) / 1e18)
                 .unwrap_or(0.0);
             if eth_change >= -0.01 {
@@ -270,7 +282,6 @@ impl LiquidityRemovalSimulator {
                         let pct = ((initial - remaining) / initial * 100.0).min(100.0);
                         let candidate = PoolDrainInfo {
                             pool_address: *address,
-                            initial_eth: initial,
                             eth_removed: removed,
                             remaining_eth: remaining,
                             percentage: pct,
@@ -294,15 +305,26 @@ impl LiquidityRemovalSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
     ) -> Result<ProcessedTransaction> {
         const MAX_RETRIES: usize = 5;
         const RETRY_DELAY_MS: u64 = 150;
 
         let mut attempt = 0usize;
+        let target_block_number = block_header
+            .as_ref()
+            .map(|header| header.number)
+            .or(block_number);
 
         loop {
-            match process_unsigned_tx(&self.simulator, unsigned_tx.clone(), block_number).await {
+            let result = if let Some(header) = block_header.clone() {
+                process_unsigned_tx_with_header(&self.simulator, unsigned_tx.clone(), header).await
+            } else {
+                process_unsigned_tx(&self.simulator, unsigned_tx.clone(), target_block_number).await
+            };
+
+            match result {
                 Ok(processed) => return Ok(processed),
                 Err(err) => {
                     let is_missing_header = Self::is_missing_header_error(&err);

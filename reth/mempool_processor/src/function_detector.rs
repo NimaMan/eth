@@ -90,28 +90,37 @@ lazy_static! {
     /// Global statistics
     static ref FUNCTION_STATS: Mutex<FunctionStats> = Mutex::new(FunctionStats::default());
 
-    /// ZMQ Publisher for signals
+    /// ZMQ Publisher for signals (legacy path)
     static ref ZMQ_PUBLISHER: Mutex<Option<Socket>> = {
+        let enabled = std::env::var("FUNCTION_DETECTOR_ENABLE_ZMQ")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if !enabled {
+            info!(
+                "Function detector ZMQ publisher disabled (set FUNCTION_DETECTOR_ENABLE_ZMQ=1 to enable)"
+            );
+            return Mutex::new(None);
+        }
+
         match Context::new().socket(zmq::PUB) {
             Ok(socket) => {
-                // Set socket options
                 let _ = socket.set_sndhwm(10000);
                 let _ = socket.set_linger(0);
 
-                // Bind to endpoint
                 match socket.bind("tcp://127.0.0.1:5556") {
                     Ok(_) => {
-                        info!("✅ ZMQ signal publisher bound to tcp://127.0.0.1:5556");
+                        info!("✅ Function detector ZMQ publisher bound to tcp://127.0.0.1:5556");
                         Mutex::new(Some(socket))
                     }
                     Err(e) => {
-                        error!("Failed to bind ZMQ publisher: {}", e);
+                        error!("Failed to bind function detector ZMQ publisher: {}", e);
                         Mutex::new(None)
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to create ZMQ socket: {}", e);
+                error!("Failed to create function detector ZMQ socket: {}", e);
                 Mutex::new(None)
             }
         }

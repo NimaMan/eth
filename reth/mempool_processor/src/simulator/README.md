@@ -44,7 +44,7 @@ Unified simulator that wraps a single shared `Arc<TxSimulator>` used across comp
 - `simulate_pool_buy_sell(_simple)` delegating to tx_processor via the PoolBuySellSimulator wrapper
 
 #### 3. PoolBuySellSimulator (wrapper)
-Thin wrapper around tx_processor’s `check_can_buy_sell_pool` building a PoolViabilityConfig and returning PoolViabilityResult (can_buy, can_sell, buy/sell tax, etc.).
+Thin wrapper around tx_processor’s `check_can_buy_sell_pool` building a PoolBuySellParameters and returning PoolBuySellSimulationResult (can_buy, can_sell, buy/sell tax, etc.).
 
 #### 4. LiquidityRemovalSimulator
 Specialized simulator for liquidity removals (MEV accounts with 0 balance). Supports simulating at the transaction’s block when available; falls back to latest if historical state is pruned.
@@ -75,7 +75,7 @@ Discover pools for token (TokenTrackingCache)
 For EACH pool (run independently / concurrently)
   ┌───────────────────────────────────────────────────────────────┐
   │ 1) Prepare optional tx call (if simulating tx itself)         │
-  │ 2) Build PoolViabilityConfig { token, pool, at_block?, … }    │
+  │ 2) Build PoolBuySellParameters { token, pool, at_block?, … }    │
   │ 3) mempool_simulator.simulate_pool_buy_sell(config)           │
   │ 4) Build SimulationResult {                                   │
   │       token_address, pool_address, pool_type,                 │
@@ -212,7 +212,11 @@ The SignalManager receives the SimulationResult and:
 
 ### SimulationManager Creation
 ```rust
-let mempool_simulator = Arc::new(MempoolSimulator::new(&reth_db_path)?);
+let head_manager = Arc::new(CanonicalHeadCache::new());
+let mempool_simulator = Arc::new(MempoolSimulator::new(&reth_db_path, head_manager.clone())?);
+// Start the canonical head listener so simulations always have fresh headers
+let _head_task = head_manager.spawn_head_listener(ipc_path);
+head_manager.wait_for_latest_header(Duration::from_secs(10)).await?;
 let publisher = Arc::new(tokio::sync::Mutex::new(SignalPublisher::new(cfg).await?));
 let simulation_manager = SimulationManager::new(
     mempool_simulator,
@@ -227,8 +231,7 @@ let simulation_manager = SimulationManager::new(
 ```rust
 SignalManagerConfig {
     log_dir: PathBuf,
-    enable_liquidity_detection: bool,
-    enable_stablecoin_detection: bool,
+    tax_detection: TaxDetectionConfig,
 }
 ```
 

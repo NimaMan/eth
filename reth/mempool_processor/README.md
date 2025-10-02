@@ -370,7 +370,7 @@ Reth Node (IPC @ /tmp/reth.ipc)
 Per‑pool simulation (CreatorTransaction)
   ┌──────────────────────────────────────────────────────────────────────────────┐
   │ 1) Optional tx simulation (mempool) with nonce retry on “too high”         │
-  │ 2) Build PoolViabilityConfig { token, pool, at_block?, … }                 │
+  │ 2) Build PoolBuySellParameters { token, pool, at_block?, … }                 │
   │ 3) Pool buy/sell via tx_processor (check_can_buy_sell_pool)                │
   │ 4) Build SimulationResult { token, pool, pool_viability_result, … }        │
   │ 5) Send to SignalManager                                                   │

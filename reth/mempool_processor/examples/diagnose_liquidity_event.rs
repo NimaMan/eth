@@ -13,7 +13,7 @@
 ///   Removal:     0xaeb040ae1f729900071e75007efee190186ade2fd7072ecc5cfc56678194c545
 ///   DB path:     /home/nima/.local/share/reth/mainnet
 use alloy_primitives::B256;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, I256};
 use eyre::Result;
 use reth_chain_query::to_checksum_address;
 use std::env;
@@ -38,11 +38,9 @@ fn print_eth_balance_changes(tx: &tx_processor::ProcessedTransaction) {
     use std::collections::BTreeMap;
     let mut changes: BTreeMap<Address, I256> = BTreeMap::new();
     for (addr, delta) in &tx.address_balance_changes {
-        if let Some(eth_u256) = delta.currency_net.get("ETH") {
-            // Interpret U256 as signed via two's complement
-            let eth_signed = I256::try_from(*eth_u256).unwrap_or(I256::ZERO);
-            if eth_signed != I256::ZERO {
-                changes.insert(*addr, eth_signed);
+        if let Some(eth_delta) = delta.currency_net.get("ETH") {
+            if *eth_delta != I256::ZERO {
+                changes.insert(*addr, *eth_delta);
             }
         }
     }
@@ -78,10 +76,9 @@ fn print_weth_token_deltas(tx: &tx_processor::ProcessedTransaction) {
     let weth_checksum = to_checksum_address(&weth_addr);
     let mut entries: Vec<(Address, I256)> = Vec::new();
     for (addr, delta) in &tx.address_balance_changes {
-        if let Some(amount_u256) = delta.token_net.get(&weth_checksum) {
-            let signed = I256::try_from(*amount_u256).unwrap_or(I256::ZERO);
-            if signed != I256::ZERO {
-                entries.push((*addr, signed));
+        if let Some(amount) = delta.token_net.get(&weth_checksum) {
+            if *amount != I256::ZERO {
+                entries.push((*addr, *amount));
             }
         }
     }
@@ -109,10 +106,9 @@ fn print_all_token_net(tx: &tx_processor::ProcessedTransaction) {
             continue;
         }
         let mut entries: Vec<(String, I256)> = Vec::new();
-        for (token_addr, amount_u256) in &delta.token_net {
-            let signed = I256::try_from(*amount_u256).unwrap_or(I256::ZERO);
-            if signed != I256::ZERO {
-                entries.push((token_addr.clone(), signed));
+        for (token_addr, amount) in &delta.token_net {
+            if *amount != I256::ZERO {
+                entries.push((token_addr.clone(), *amount));
             }
         }
         if !entries.is_empty() {

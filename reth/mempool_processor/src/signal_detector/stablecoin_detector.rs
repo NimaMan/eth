@@ -127,24 +127,4 @@ impl StablecoinDetector {
 
         signals
     }
-
-    /// Get stablecoin name from address using common_addresses registry
-    fn get_stablecoin_name(&self, address: &str) -> String {
-        if let Ok(addr) = Address::from_str(address) {
-            if let Some(info) = get_stablecoin_by_address(addr) {
-                return info.symbol.to_string();
-            }
-        }
-        "Unknown Stablecoin".to_string()
-    }
-
-    /// Get stablecoin decimals using common_addresses registry
-    fn get_stablecoin_decimals(&self, address: &str) -> i32 {
-        if let Ok(addr) = Address::from_str(address) {
-            if let Some(info) = get_stablecoin_by_address(addr) {
-                return info.decimals as i32;
-            }
-        }
-        18
-    }
 }

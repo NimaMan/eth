@@ -39,8 +39,6 @@ pub enum TradingStatusChange {
 pub struct TradingStatusDetector {
     /// Tax threshold for considering trading "enabled" (default: 25%)
     tax_threshold: f64,
-    /// Minimum ETH liquidity to consider trading already enabled
-    min_liquidity_threshold: f64,
     /// Path to the log file
     log_file_path: Option<PathBuf>,
     /// Token tracking cache to check existing trading status
@@ -50,8 +48,7 @@ pub struct TradingStatusDetector {
 impl TradingStatusDetector {
     pub fn new() -> Self {
         Self {
-            tax_threshold: 25.0,          // 25% tax threshold
-            min_liquidity_threshold: 0.5, // 0.5 ETH minimum liquidity
+            tax_threshold: 25.0, // 25% tax threshold
             log_file_path: None,
             token_cache: None,
         }
@@ -60,16 +57,6 @@ impl TradingStatusDetector {
     pub fn with_log_path(log_path: PathBuf) -> Self {
         Self {
             tax_threshold: 25.0,
-            min_liquidity_threshold: 0.5, // 0.5 ETH minimum liquidity
-            log_file_path: Some(log_path),
-            token_cache: None,
-        }
-    }
-
-    pub fn with_config(log_path: PathBuf, min_liquidity_threshold: f64) -> Self {
-        Self {
-            tax_threshold: 25.0,
-            min_liquidity_threshold,
             log_file_path: Some(log_path),
             token_cache: None,
         }

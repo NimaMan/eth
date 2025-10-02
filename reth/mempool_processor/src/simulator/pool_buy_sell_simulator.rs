@@ -6,19 +6,22 @@ use eyre::Result;
 /// It uses the PoolBuySellSimulator from tx_processor which:
 /// - Simulates buy, approve, and sell transactions
 /// - Calculates tax percentages automatically
-/// - Returns PoolViabilityResult with all trading information
+/// - Returns PoolBuySellSimulationResult with all trading information
 ///
 /// The tax calculation is now built into the result, so we no longer need
 /// separate tax_calculator modules.
 use std::sync::Arc;
 
 // Import from tx_processor
+use reth_primitives::SealedHeader;
 use tx_processor::tx_processor::TxProcessor;
-use tx_processor::{check_can_buy_sell_pool, PoolType, PoolViabilityConfig, PoolViabilityResult};
+use tx_processor::{
+    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
+};
 use tx_simulator::TxSimulator;
 
 // Re-export the result type for compatibility
-pub type PoolSimulationResult = PoolViabilityResult;
+pub type PoolSimulationResult = PoolBuySellSimulationResult;
 
 /// Wrapper around tx_processor's pool buy/sell simulator
 pub struct PoolBuySellSimulator {
@@ -108,8 +111,10 @@ impl PoolBuySellSimulator {
         pool_address: Address,
         pool_type: PoolType,
         block_number: Option<u64>,
-    ) -> Result<PoolViabilityResult> {
-        let config = PoolViabilityConfig {
+        token_decimals: u8,
+        block_header: Option<SealedHeader>,
+    ) -> Result<PoolBuySellSimulationResult> {
+        let config = PoolBuySellParameters {
             token_address,
             pool_address,
             pool_type,
@@ -117,7 +122,9 @@ impl PoolBuySellSimulator {
             buyer_address: self.default_buyer_address,
             block_number,
             gas_limit: 500_000,
-            gas_price: 30_000_000_000,
+            gas_price: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
             prior_tx: None,
             block_delay: 0,
             slippage_tolerance: 0.5,
@@ -125,25 +132,26 @@ impl PoolBuySellSimulator {
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
-            token_decimals: 18,
+            token_decimals,
+            block_header,
         };
 
-        check_can_buy_sell_pool(self.tx_simulator.clone(), self.tx_processor.clone(), config).await
+        self.simulate_with_config(config).await
     }
 
     /// Simulate buy/sell with custom configuration
     pub async fn simulate_with_config(
         &self,
-        config: PoolViabilityConfig,
-    ) -> Result<PoolViabilityResult> {
+        config: PoolBuySellParameters,
+    ) -> Result<PoolBuySellSimulationResult> {
         check_can_buy_sell_pool(self.tx_simulator.clone(), self.tx_processor.clone(), config).await
     }
 
     /// Simulate buy/sell with custom configuration (alias for simulate_with_config)
     pub async fn simulate_pool_with_config(
         &self,
-        config: PoolViabilityConfig,
-    ) -> Result<PoolViabilityResult> {
+        config: PoolBuySellParameters,
+    ) -> Result<PoolBuySellSimulationResult> {
         self.simulate_with_config(config).await
     }
 

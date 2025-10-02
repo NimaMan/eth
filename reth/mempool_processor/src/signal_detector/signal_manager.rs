@@ -2,7 +2,6 @@ use crate::config::TaxDetectionConfig;
 use crate::signal_publisher::SignalPublisher;
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
-use crate::tx_router::{CreatorFunctionType, TransactionCategory};
 use alloy_primitives::U256;
 use hex;
 use reth_chain_query::to_checksum_address;
@@ -24,8 +23,6 @@ use super::{
 pub struct SignalManagerConfig {
     /// Log directory for signal outputs
     pub log_dir: PathBuf,
-    /// Minimum ETH liquidity to consider trading already enabled (default: 0.5 ETH)
-    pub min_liquidity_threshold: f64,
     /// Tax detection configuration
     pub tax_detection: TaxDetectionConfig,
 }
@@ -38,7 +35,6 @@ impl Default for SignalManagerConfig {
 
         Self {
             log_dir,
-            min_liquidity_threshold: 0.5, // 0.5 ETH minimum liquidity
             tax_detection: TaxDetectionConfig::default(),
         }
     }
@@ -67,7 +63,6 @@ impl SignalManager {
         std::fs::create_dir_all(&config.log_dir).ok();
 
         // Create detector-specific log files
-        let trading_log_path = config.log_dir.join("trading_enabled.log");
         let simulation_results_log_path = config.log_dir.join("simulation_results.log");
         let tax_log_path = config.log_dir.join("tax_signals.log");
         let signal_log_path = config.log_dir.join("signal_manager.log");
@@ -88,9 +83,8 @@ impl SignalManager {
             _config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
             _stablecoin_detector: StablecoinDetector::new(),
-            trading_status_detector: TradingStatusDetector::with_config(
+            trading_status_detector: TradingStatusDetector::with_log_path(
                 simulation_results_log_path,
-                config.min_liquidity_threshold,
             ),
             tax_signal_detector: TaxDetector::with_log_path(
                 config.tax_detection.clone(),
@@ -205,13 +199,6 @@ impl SignalManager {
                         s.function_name
                     )
                 }
-                _ => {
-                    format!(
-                        "[{}] SIGNAL_DETECTED | UNKNOWN_SIGNAL | {:?}",
-                        timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        signal
-                    )
-                }
             };
 
             writeln!(file, "{}", log_entry).ok();
@@ -229,7 +216,11 @@ impl SignalManager {
             "📨 Signal Manager: Received simulation result for TX {}",
             result.request.tx.hash
         );
-        info!("  Simulation had error: {}", result.error.is_some());
+        if let Some(ref err) = result.error {
+            info!("  Simulation error: {}", err);
+        } else {
+            info!("  Simulation succeeded");
+        }
         if let Some(ref bs) = result.buy_sell_result() {
             info!(
                 "  Buy/Sell result: can_buy={}, can_sell={}",
@@ -279,7 +270,7 @@ impl SignalManager {
         // Log creator token info if this is a creator transaction
         if let crate::tx_router::TransactionCategory::CreatorTransaction {
             creator,
-            target_token,
+            target_token: _,
             target_address,
             function_type,
             ..
@@ -305,8 +296,6 @@ impl SignalManager {
                             token.address, pool_count, total_liquidity
                         ));
                     }
-                    let token_info = token_info_parts.join(", ");
-
                     // Trim: omit verbose creator/token listing
 
                     // Check if this is an approve on a pool/LP token
@@ -323,7 +312,6 @@ impl SignalManager {
                             }
                         }
                     }
-                } else {
                 }
             }
         }
@@ -527,7 +515,7 @@ impl SignalManager {
             alloy_primitives::Address::try_from(result.request.tx.from.as_slice()).ok()
         {
             // Prefer dedicated removal result if present
-            let mut liquidity_signals = if let Some(ref removal_result) =
+            let liquidity_signals = if let Some(ref removal_result) =
                 result.liquidity_removal_result
             {
                 info!(
@@ -719,20 +707,6 @@ impl SignalManager {
         {
             // Publish the signal immediately if we have a publisher
             if let Some(ref publisher) = self.publisher {
-                // Get pool type from cache if available
-                let pool_type = if let Some(ref token_cache) = self.token_cache {
-                    if let Some(pool_state) = token_cache
-                        .get_pool_by_address(&lp_signal.lp_token_address)
-                        .await
-                    {
-                        format!("{:?}", pool_state.pool_type)
-                    } else {
-                        "V2".to_string() // Default to V2 if unknown
-                    }
-                } else {
-                    "V2".to_string()
-                };
-
                 // Create an LP approval signal
                 let mut enriched_signal = lp_signal.clone();
 

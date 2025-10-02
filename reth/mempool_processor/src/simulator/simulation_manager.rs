@@ -3,9 +3,8 @@ use crate::mempool_fetcher::MempoolTransaction;
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::{CreatorFunctionType, SimulationPriority, TransactionCategory};
-use alloy_primitives::U256;
+use alloy_primitives::{I256, U256};
 use ethers::types::H256;
-use std::collections::HashMap;
 /// Simulation Manager
 ///
 /// Manages transaction simulations on a PER-POOL basis.
@@ -30,10 +29,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
-use tx_processor::{PoolType, PoolViabilityConfig, PoolViabilityResult};
-
-// AddressStateChange is now AddressBalanceChange in tx_processor
-use tx_processor::tx_processor::data_models::AddressBalanceChange as AddressStateChange;
+use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 
 /// Types of simulation to perform
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,7 +64,7 @@ pub struct SimulationResult {
     pub pool_type: Option<String>, // Pool type (V2, V3, V4)
     // Debug info for error analysis
     pub debug_info: Option<String>,
-    pub pool_viability_result: Option<PoolViabilityResult>,
+    pub pool_viability_result: Option<PoolBuySellSimulationResult>,
     // Liquidity removal result (only populated for liquidity removal transactions)
     pub liquidity_removal_result: Option<LiquidityRemovalResult>,
 }
@@ -80,8 +76,8 @@ impl SimulationResult {
     }
 }
 
-/// Buy/sell simulation result - now using PoolViabilityResult
-/// This struct is kept for backward compatibility but delegates to PoolViabilityResult
+/// Buy/sell simulation result - now using PoolBuySellSimulationResult
+/// This struct is kept for backward compatibility but delegates to PoolBuySellSimulationResult
 #[derive(Debug, Clone)]
 pub struct BuySellResult {
     pub can_buy: bool,
@@ -92,8 +88,8 @@ pub struct BuySellResult {
     pub sell_tax_error: Option<String>, // Error message if sell tax calculation failed
 }
 
-impl From<&PoolViabilityResult> for BuySellResult {
-    fn from(result: &PoolViabilityResult) -> Self {
+impl From<&PoolBuySellSimulationResult> for BuySellResult {
+    fn from(result: &PoolBuySellSimulationResult) -> Self {
         Self {
             can_buy: result.can_buy,
             can_sell: result.can_sell,
@@ -124,7 +120,7 @@ impl From<&PoolViabilityResult> for BuySellResult {
 /// Manager for transaction simulations
 pub struct SimulationManager {
     mempool_simulator: Arc<MempoolSimulator>,
-    liquidity_removal_simulator: Arc<super::LiquidityRemovalSimulator>,
+    liquidity_removal_simulator: Arc<LiquidityRemovalSimulator>,
     queue: Arc<Mutex<SimulationQueue>>,
 
     // Signal detection
@@ -139,7 +135,7 @@ pub struct SimulationManager {
 }
 
 #[derive(Debug, Default, Clone)]
-struct ManagerStats {
+pub struct ManagerStats {
     total_requests: u64,
     successful_simulations: u64,
     failed_simulations: u64,
@@ -163,7 +159,7 @@ impl SimulationManager {
 
         // Create liquidity removal simulator with the same underlying simulator
         let mut liquidity_removal_simulator =
-            super::LiquidityRemovalSimulator::new(mempool_simulator.get_tx_simulator());
+            LiquidityRemovalSimulator::new(mempool_simulator.get_tx_simulator());
         liquidity_removal_simulator.set_token_cache(token_cache.clone());
 
         Self {
@@ -709,7 +705,30 @@ impl SimulationManager {
                 _ => PoolType::UniswapV2,
             };
 
-            let config: PoolViabilityConfig = PoolViabilityConfig {
+            let token_key = token_address.to_checksum(None);
+            let token_decimals = if let Some(token) = self.token_cache.get_token(&token_key).await {
+                token.decimals
+            } else {
+                let error_msg = format!(
+                    "Missing token decimals for pool {:?} (token {:?})",
+                    pool_address, token_address
+                );
+                error!("{}", error_msg);
+                results.push(SimulationResult {
+                    request: request.clone(),
+                    pool_viability_result: None,
+                    error: Some(error_msg),
+                    simulation_time_ms: 0.0,
+                    token_address: Some(token_address),
+                    pool_address: Some(pool_address),
+                    pool_type: Some(pool_type.clone()),
+                    debug_info: None,
+                    liquidity_removal_result: None,
+                });
+                continue;
+            };
+
+            let config: PoolBuySellParameters = PoolBuySellParameters {
                 token_address,
                 pool_address,
                 pool_type: pool_type_enum,
@@ -717,7 +736,9 @@ impl SimulationManager {
                 buyer_address: tx_call_request.from.unwrap_or_default(),
                 block_number,
                 gas_limit: tx_call_request.gas.unwrap_or(500_000) as u64,
-                gas_price: tx_call_request.gas_price.unwrap_or(30_000_000_000) as u128,
+                gas_price: tx_call_request.gas_price.map(|v| v as u128),
+                max_fee_per_gas: tx_call_request.max_fee_per_gas,
+                max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
                 prior_tx: None, // TODO: Convert tx_call_request to ProcessedTransaction
                 block_delay: 0,
                 slippage_tolerance: 0.5, // 0.5% default slippage
@@ -725,7 +746,8 @@ impl SimulationManager {
                     0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27,
                     0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
                 ]), // Mainnet WETH
-                token_decimals: 18,      // Default to 18 decimals
+                token_decimals,
+                block_header: None,
             };
 
             let simulation_result = match self
@@ -756,7 +778,7 @@ impl SimulationManager {
                         );
 
                         // Retry with higher gas price
-                        let retry_config: PoolViabilityConfig = PoolViabilityConfig {
+                        let retry_config: PoolBuySellParameters = PoolBuySellParameters {
                             token_address,
                             pool_address,
                             pool_type: pool_type_enum,
@@ -764,7 +786,9 @@ impl SimulationManager {
                             buyer_address: tx_call_request.from.unwrap_or_default(),
                             block_number,
                             gas_limit: tx_call_request.gas.unwrap_or(500_000) as u64,
-                            gas_price: new_gas_price.unwrap_or(90_000_000_000) as u128, // 3x default
+                            gas_price: new_gas_price.map(|v| v as u128),
+                            max_fee_per_gas: new_max_fee,
+                            max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
                             prior_tx: None, // TODO: Convert tx_call_request to ProcessedTransaction
                             block_delay: 0,
                             slippage_tolerance: 0.5, // 0.5% default slippage
@@ -772,7 +796,8 @@ impl SimulationManager {
                                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C,
                                 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
                             ]), // Mainnet WETH
-                            token_decimals: 18,      // Default to 18 decimals
+                            token_decimals,
+                            block_header: None,
                         };
 
                         self.mempool_simulator
@@ -817,10 +842,6 @@ impl SimulationManager {
                         }
                     }
 
-                    // State changes are in buy_transaction.address_balance_changes
-                    let tx_state_changes =
-                        Some(result.buy_transaction.address_balance_changes.clone());
-
                     // Debug logging for liquidity removal transactions
                     if matches!(
                         request.category,
@@ -854,8 +875,8 @@ impl SimulationManager {
                             let eth_change = changes
                                 .currency_net
                                 .get("ETH")
-                                .cloned()
-                                .unwrap_or(U256::ZERO);
+                                .copied()
+                                .unwrap_or(I256::ZERO);
                             info!("  [DEBUG] Address {} ETH change: {:?}", addr, eth_change);
                         }
                     }
@@ -924,7 +945,7 @@ impl SimulationManager {
             Ok(req) => req,
             Err(e) => {
                 error!("Failed to convert transaction to call request: {}", e);
-                let mut result = SimulationResult {
+                let result = SimulationResult {
                     request: request.clone(),
                     pool_viability_result: None,
                     error: Some(format!("Failed to convert transaction: {}", e)),
@@ -939,15 +960,19 @@ impl SimulationManager {
             }
         };
 
-        // Get current block number (simulate at latest)
-        let block_number = None; // Use latest block
+        // Resolve block context using canonical head snapshot
+        let snapshot = self.mempool_simulator.head_cache().latest_snapshot().await;
+        let (block_number, block_header) = match snapshot {
+            Some(snap) => (Some(snap.number), Some(snap.header.clone())),
+            None => (None, None),
+        };
 
         let sim_start = std::time::Instant::now();
 
         // Run liquidity removal simulation with state override if needed
         let removal_result = match self
             .liquidity_removal_simulator
-            .simulate_removal_with_retry(call_request, block_number, true)
+            .simulate_removal_with_retry(call_request, block_number, block_header, true)
             .await
         {
             Ok(result) => result,

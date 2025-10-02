@@ -74,8 +74,6 @@ impl TransactionRouter {
 
     /// Classify a transaction
     pub async fn classify(&self, tx: &MempoolTransaction) -> ClassificationResult {
-        let start = std::time::Instant::now();
-
         // First check if it's a contract creation
         let to_str = tx
             .to

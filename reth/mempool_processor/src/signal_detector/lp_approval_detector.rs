@@ -133,10 +133,6 @@ impl LpApprovalDetector {
 
         Some(signal)
     }
-
-    // No-op: per-detector file logging removed in favor of centralized logging
-    fn log_approval_warning(&mut self, _signal: &LpApprovalSignal) {}
-
     /// Log database write for tracking
     pub fn log_db_write(&mut self, _signal: &LpApprovalSignal, _success: bool) {}
 }

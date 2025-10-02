@@ -12,7 +12,7 @@ use std::sync::Arc;
 /// 3. Routes transactions by category (contract creation, creator actions)
 /// 4. Simulates relevant transactions
 /// 5. Detects signals (trading enabled, liquidity removal, honeypots, etc.)
-/// 6. Publishes signals via ZMQ and logs
+/// 6. Publishes signals via ZMQ and logs and writes to database
 ///
 /// Performance targets:
 /// - Function detection: <10μs per transaction
@@ -31,7 +31,7 @@ use tracing_subscriber::Layer;
 struct LocalTimeFormatter;
 
 impl tracing_subscriber::fmt::time::FormatTime for LocalTimeFormatter {
-    fn format_time(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
         let now = chrono::Local::now();
         write!(w, "[{}]", now.format("%Y-%m-%d %H:%M:%S%.3f"))
     }
@@ -42,6 +42,7 @@ use ethers::types::H256;
 use hex;
 use mempool_processor::{
     arrival_recorder::{ArrivalRecorderConfig, MempoolArrivalRecorder},
+    canonical_head_cache::CanonicalHeadCache,
     config::MempoolProcessorConfig,
     function_detector::CreatorFunctionType,
     function_detector::FunctionDetector,
@@ -128,7 +129,6 @@ struct ServiceMetrics {
 
     // Timing metrics (using Mutex for simplicity with vectors)
     detection_latencies: Arc<Mutex<Vec<Duration>>>,
-    routing_latencies: Arc<Mutex<Vec<Duration>>>,
     simulation_times: Arc<Mutex<Vec<Duration>>>,
 }
 
@@ -148,7 +148,6 @@ impl ServiceMetrics {
             honeypot_signals: Arc::new(AtomicU64::new(0)),
             tax_change_signals: Arc::new(AtomicU64::new(0)),
             detection_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
-            routing_latencies: Arc::new(Mutex::new(Vec::with_capacity(10000))),
             simulation_times: Arc::new(Mutex::new(Vec::with_capacity(1000))),
         }
     }
@@ -157,14 +156,6 @@ impl ServiceMetrics {
         let mut latencies = self.detection_latencies.lock().await;
         if latencies.len() >= 10000 {
             latencies.drain(0..5000); // Keep last 5000
-        }
-        latencies.push(latency);
-    }
-
-    async fn add_routing_latency(&self, latency: Duration) {
-        let mut latencies = self.routing_latencies.lock().await;
-        if latencies.len() >= 10000 {
-            latencies.drain(0..5000);
         }
         latencies.push(latency);
     }
@@ -201,11 +192,6 @@ impl ServiceMetrics {
         let (avg_detect, max_detect, _p99_detect) =
             self.calculate_latency_stats(&detection_latencies).await;
         drop(detection_latencies);
-
-        let routing_latencies = self.routing_latencies.lock().await;
-        let (avg_route, max_route, _p99_route) =
-            self.calculate_latency_stats(&routing_latencies).await;
-        drop(routing_latencies);
 
         let simulation_times = self.simulation_times.lock().await;
         let (avg_sim, max_sim, _p99_sim) = self.calculate_latency_stats(&simulation_times).await;
@@ -318,6 +304,9 @@ async fn main() -> Result<()> {
     info!("  Log Directory: {}", cfg_log_dir);
     info!("  Batch Size: {}", args.batch_size);
     info!("  Simulation Workers: {}", sim_workers);
+
+    // Shared canonical head cache updated by the subscription task
+    let head_cache = Arc::new(CanonicalHeadCache::new());
     info!("  Report Interval: {}s", cfg_report_interval);
     info!("================================");
 
@@ -331,6 +320,7 @@ async fn main() -> Result<()> {
     // 1. Token tracking subscriber
     info!("📊 Starting token tracking subscriber...");
     let mut token_subscriber = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
+    token_subscriber.set_head_cache(head_cache.clone());
     let token_cache = token_subscriber.get_cache();
 
     // Start token subscriber in background
@@ -350,9 +340,6 @@ async fn main() -> Result<()> {
         "✅ Token cache initialized: {} pools, {} creators",
         initial_pools, initial_creators
     );
-
-    // Arrival time recorder writes first-seen timestamps into `<RETH_DB_PATH>/reth_index`
-    let mut arrival_recorder: Option<MempoolArrivalRecorder> = None;
 
     // 2. IPC client
     info!("\n🔌 Connecting to Reth IPC...");
@@ -382,8 +369,29 @@ async fn main() -> Result<()> {
 
     // 5. Mempool Simulator (single database connection)
     info!("🧪 Initializing mempool simulator...");
-    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path)?);
+    let mempool_simulator = Arc::new(MempoolSimulator::new(
+        &cfg_reth_db_path,
+        head_cache.clone(),
+    )?);
     info!("✅ Mempool simulator initialized");
+
+    info!("🔄 Starting canonical head listener...");
+    let header_task = head_cache.spawn_head_listener(cfg_ipc_path.clone());
+    info!("⏳ Waiting for canonical head snapshot...");
+    match head_cache
+        .wait_for_latest_block_number(Duration::from_secs(10))
+        .await
+    {
+        Ok(initial_block) => {
+            info!("✅ Canonical head detected at block {}", initial_block);
+        }
+        Err(err) => {
+            warn!(
+                "Canonical head subscription has not yielded a block number yet: {}",
+                err
+            );
+        }
+    }
 
     // Initialize arrival recorder only after simulator (to reuse provider)
     let index_dir = Path::new(&args.reth_db_path).join("reth_index");
@@ -405,7 +413,7 @@ async fn main() -> Result<()> {
         flush_interval: Duration::from_secs(5),
         batch_size: 1000,
     };
-    arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
+    let arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
     info!(
         "✅ Arrival recorder initialized at {} (ms precision)",
         index_dir.display()
@@ -415,6 +423,8 @@ async fn main() -> Result<()> {
     info!("📡 Initializing signal publisher...");
     let signals_dir = run_dir.join("signals");
     std::fs::create_dir_all(&signals_dir)?;
+    let token_cache_log = run_dir.join("token_cache_updates.log");
+    token_cache.set_log_path(token_cache_log).await;
     let publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
     let db_enabled = publisher_config.enable_database;
     let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
@@ -430,8 +440,7 @@ async fn main() -> Result<()> {
 
     let signal_config = SignalManagerConfig {
         log_dir: signals_dir.clone(),
-        min_liquidity_threshold: config.signal_detection.min_liquidity_threshold,
-        tax_detection: config.tax_detection,
+        tax_detection: config.tax_detection.clone(),
     };
     let simulation_manager = SimulationManager::new(
         mempool_simulator,
@@ -637,7 +646,9 @@ async fn main() -> Result<()> {
 
             if let Some(ref error) = result.error {
                 metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
-                warn!("Simulation error: {}", error);
+                if !error.contains("No pools found for token") {
+                    warn!("Simulation error: {}", error);
+                }
             } else {
                 metrics
                     .simulations_completed
@@ -651,19 +662,9 @@ async fn main() -> Result<()> {
 
         // Periodic reporting (only refresh cache stats now)
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
-            // Update cache statistics
-            let current_pools = token_cache.get_pool_count().await;
-            let current_creators = token_cache.get_creator_count().await;
-            if current_pools != initial_pools || current_creators != initial_creators {
-                info!(
-                    "📊 Token cache updated: {} pools (+{}), {} creators (+{})",
-                    current_pools,
-                    current_pools.saturating_sub(initial_pools),
-                    current_creators,
-                    current_creators.saturating_sub(initial_creators)
-                );
-            }
-
+            // Touch cache metrics to maintain interval cadence without emitting console logs.
+            let _ = token_cache.get_pool_count().await;
+            let _ = token_cache.get_creator_count().await;
             last_report = Instant::now();
         }
     }
@@ -688,6 +689,7 @@ async fn main() -> Result<()> {
     // Shutdown components
     drop(signal_publisher);
     drop(simulation_manager);
+    header_task.abort();
     subscriber_handle.abort();
 
     info!("✅ Mempool signal detector shutdown complete");

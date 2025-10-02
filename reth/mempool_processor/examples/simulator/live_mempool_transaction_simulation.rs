@@ -4,10 +4,12 @@ use eyre::Result;
 ///
 /// Fetches live transactions from mempool using MempoolFetcherIPCClient
 /// and simulates them with MempoolSimulator for automatic nonce retry.
+use mempool_processor::canonical_head_cache::CanonicalHeadCache;
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use mempool_processor::simulator::MempoolSimulator;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{info, warn};
@@ -21,8 +23,17 @@ async fn main() -> Result<()> {
 
     // Initialize MempoolSimulator with automatic nonce retry
     let start = Instant::now();
-    let mempool_simulator = MempoolSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let head_cache = Arc::new(CanonicalHeadCache::new());
+    let mempool_simulator =
+        MempoolSimulator::new("/home/nima/.local/share/reth/mainnet", head_cache.clone())?;
     info!("✅ MempoolSimulator initialized in {:?}", start.elapsed());
+
+    // Start canonical head listener so simulations have the latest context
+    let header_task =
+        head_cache.spawn_head_listener("/home/nima/.local/share/reth/mainnet/reth.ipc");
+    head_cache
+        .wait_for_latest_header(Duration::from_secs(10))
+        .await?;
 
     // Connect to mempool
     info!("📡 Connecting to mempool via IPC...");
@@ -167,6 +178,7 @@ async fn main() -> Result<()> {
     }
 
     println!("\n✅ Complete! Log saved to: {}", log_path);
+    header_task.abort();
     Ok(())
 }
 

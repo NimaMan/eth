@@ -1,5 +1,5 @@
 use clap::Parser;
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::str::FromStr;
 /// Isolated Simulation Test (no Signal Manager)
 ///
@@ -11,7 +11,9 @@ use tracing::info;
 
 use alloy_primitives::Address;
 
+use mempool_processor::canonical_head_cache::CanonicalHeadCache;
 use mempool_processor::simulator::MempoolSimulator;
+use reth_primitives::SealedHeader;
 use tx_simulator::TxSimulator;
 
 #[derive(Parser, Debug)]
@@ -35,6 +37,10 @@ struct Args {
     /// Optional block number (default: latest)
     #[arg(long)]
     block: Option<u64>,
+
+    /// Token decimals (no default; must be provided)
+    #[arg(long)]
+    token_decimals: u8,
 }
 
 #[tokio::main]
@@ -51,19 +57,30 @@ async fn main() -> Result<()> {
 
     // Create a single shared simulator for all components
     let shared = Arc::new(TxSimulator::new(&args.reth_db_path)?);
-    let mempool_simulator = MempoolSimulator::from_shared_simulator(shared.clone())?;
+    let head_cache = Arc::new(CanonicalHeadCache::new());
+    let mempool_simulator =
+        MempoolSimulator::from_shared_simulator(shared.clone(), head_cache.clone())?;
 
     let latest = mempool_simulator.get_latest_block()?;
+    let target_block = args.block.unwrap_or(latest);
+    let provider = shared.provider_factory().provider()?;
+    let header = provider
+        .header_by_number(target_block)?
+        .ok_or_else(|| eyre!("No header available for block {}", target_block))?;
+    head_cache
+        .set_latest_header(SealedHeader::new_unhashed(header))
+        .await;
+
     println!("Config:");
     println!("  Reth DB: {}", args.reth_db_path);
     println!("  Latest block: {}", latest);
     println!("  Token: {:?}", token_address);
     println!("  Pool:  {:?}", pool_address);
-    println!("  Block: {:?}", args.block.unwrap_or(latest));
+    println!("  Block: {:?}", target_block);
 
     // Run simple pool simulation to verify DB sharing + simulation
     match mempool_simulator
-        .simulate_pool_buy_sell_simple(token_address, pool_address, args.block)
+        .simulate_pool_buy_sell_simple(token_address, pool_address, args.token_decimals, args.block)
         .await
     {
         Ok(result) => {

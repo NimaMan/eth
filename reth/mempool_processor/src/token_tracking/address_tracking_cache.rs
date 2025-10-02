@@ -73,7 +73,6 @@ pub struct PoolMonitoringInfo {
     pub current_token_reserve: f64,
     pub last_update_block: u64,
     pub creation_block: u64,
-    pub is_primary_pool: bool, // Main liquidity pool for this token
 }
 
 /// Complete token information including creators, owners, and pools
@@ -106,10 +105,6 @@ pub struct AddressTrackingCache {
 
     /// High-risk addresses for priority monitoring
     high_risk_addresses: Arc<RwLock<HashMap<String, String>>>, // address -> reason
-
-    /// Configuration
-    max_addresses: usize,
-    max_tokens: usize,
 }
 
 impl AddressTrackingCache {
@@ -119,8 +114,6 @@ impl AddressTrackingCache {
             token_info: Arc::new(RwLock::new(HashMap::new())),
             pool_to_token: Arc::new(RwLock::new(HashMap::new())),
             high_risk_addresses: Arc::new(RwLock::new(HashMap::new())),
-            max_addresses: 200_000, // Track up to 200K addresses
-            max_tokens: 100_000,    // Track up to 100K tokens
         }
     }
 
@@ -172,7 +165,6 @@ impl AddressTrackingCache {
                 current_token_reserve: *token_reserve,
                 last_update_block: 0, // TODO: Get from data
                 creation_block: 0,
-                is_primary_pool: true, // TODO: Determine primary
             };
             token_info.pools.insert(pool_addr.clone(), pool_info);
         }

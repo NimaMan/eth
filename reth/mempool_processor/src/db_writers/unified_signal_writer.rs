@@ -18,6 +18,19 @@ use crate::signal_detector::{
     LiquidityRemovalSignal, LpApprovalSignal, Signal, TradingEnabledSignal,
 };
 
+fn normalize_pool_type(pool_type: &str) -> String {
+    let canonical = match pool_type.trim().to_lowercase().as_str() {
+        "uniswapv2" | "uniswap-v2" | "v2" => "UNISWAP-V2",
+        "uniswapv3" | "uniswap-v3" | "v3" => "UNISWAP-V3",
+        "uniswapv4" | "uniswap-v4" | "v4" => "UNISWAP-V4",
+        "sushiswap" | "sushi" | "sushi-swap" => "SUSHI-SWAP",
+        "curve" => "CURVE",
+        "balancer" => "BALANCER",
+        other => return other.to_uppercase(),
+    };
+    canonical.to_string()
+}
+
 /// Unified writer that handles all signal types
 pub struct UnifiedSignalWriter {
     trading_writer: Option<TradingSignalWriter>,
@@ -215,7 +228,7 @@ impl TradingSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: signal.pool_type.clone(),
+            pool_type: normalize_pool_type(&signal.pool_type),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: chrono::Utc::now(),
@@ -239,7 +252,7 @@ impl TaxSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: signal.pool_type.clone(),
+            pool_type: normalize_pool_type(&signal.pool_type),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: chrono::Utc::now(),
@@ -264,7 +277,7 @@ impl LiquidityRemovalSignalRecord {
         Self {
             token_address: signal.token_address.clone().unwrap_or_default(),
             pool_address: signal.pool_address.clone(),
-            pool_type: signal.pool_type.clone(),
+            pool_type: normalize_pool_type(&signal.pool_type),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: chrono::Utc::now(),
