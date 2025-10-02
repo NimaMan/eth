@@ -4,6 +4,7 @@ from .all_etf_addresses import *
 from .stablecoin_addresses import *
 from .validators import *
 from .misc import *
+from .dex_pool_types import DEX_POOL_TYPES, DEX_POOL_TYPE_SET
 
 
 DENOM_ADDRESSES = {
@@ -45,6 +46,24 @@ DENOM_ADDRESSES = {
     '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84': 'stETH',
     '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704': 'cbETH',
     '0xae78736Cd615f374D3085123A210448E74Fc6393': 'rETH',
+    
+    # Major DeFi Governance Tokens
+    '0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2': 'MKR',
+    '0xD533a949740bb3306d119CC777fa900bA034cd52': 'CRV',
+    '0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F': 'SNX',
+    '0xc00e94Cb662C3520282E6f5717214004A7f26888': 'COMP',
+    '0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e': 'YFI',
+    '0x6B3595068778DD592e39A122f4f5a5cF09C90fE2': 'SUSHI',
+    '0xba100000625a3754423978a60c9317c58a424e3D': 'BAL',
+    '0x111111111117dC0aa78b770fA6A738034120C302': '1INCH',
+    
+    # L2 Tokens
+    '0xB50721BCf8d664c30412Cfbc6cf7a15145234ad1': 'ARB',
+    '0x4200000000000000000000000000000000000042': 'OP',
+    
+    # High-volume tokens
+    '0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE': 'SHIB',
+    '0x6982508145454Ce325dDbE47a25d4ec3d2311933': 'PEPE',
 }
 
 
@@ -123,6 +142,24 @@ ERC20_TOKEN_DECIMALS = {
     'stETH': 18,  # Lido staked ETH
     'cbETH': 18,  # Coinbase staked ETH
     'rETH': 18,   # Rocket Pool ETH
+    
+    # Major DeFi Governance Tokens
+    'MKR': 18,
+    'CRV': 18,
+    'SNX': 18,
+    'COMP': 18,
+    'YFI': 18,
+    'SUSHI': 18,
+    'BAL': 18,
+    '1INCH': 18,
+    
+    # L2 Tokens
+    'ARB': 18,
+    'OP': 18,
+    
+    # High-volume tokens
+    'SHIB': 18,
+    'PEPE': 18,
 }
 
 
@@ -133,6 +170,7 @@ addresses_by_name = {
     'zero_address': '0x0000000000000000000000000000000000000000',
     'dead_address': '0x000000000000000000000000000000000000dEaD',
     'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    'WBTC': '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
     'TrustSwap: Team Finance Lock': '0xE2fE530C047f2d85298b07D9333C05737f1435fB',
     'UNCX Network Security: LP Lockers': '0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214',
     'UNCX Network Security: Token Vesting': '0xDba68f07d1b7Ca219f78ae8582C213d975c25cAf',

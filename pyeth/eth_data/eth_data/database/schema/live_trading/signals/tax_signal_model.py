@@ -9,13 +9,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any
 from sqlalchemy import (
-    Column, BigInteger, String, Numeric, Boolean, 
-    TIMESTAMP, JSON, ForeignKey, CheckConstraint, 
+    Column, BigInteger, String, Numeric, Boolean,
+    TIMESTAMP, JSON, ForeignKey, CheckConstraint,
     UniqueConstraint, Index, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field, validator
+
+from eth_data.chain_utils.common_addresses import DEX_POOL_TYPES, DEX_POOL_TYPE_SET
 
 Base = declarative_base()
 
@@ -27,8 +29,10 @@ class TaxSignal(Base):
     __table_args__ = (
         UniqueConstraint('pool_address', 'detection_tx_hash', 
                         name='uq_tax_pool_tx'),
-        CheckConstraint("pool_type IN ('V2', 'V3', 'V4')", 
-                       name='check_tax_pool_type'),
+        CheckConstraint(
+            "pool_type IN ('UNISWAP-V2', 'UNISWAP-V3', 'UNISWAP-V4', 'SUSHI-SWAP', 'CURVE', 'BALANCER')",
+            name='check_tax_pool_type'
+        ),
         CheckConstraint("signal_type IN ('HighTaxOrHoneypot', 'TaxChange', 'SuspiciousPattern')",
                        name='check_tax_signal_type'),
         Index('idx_tax_signals_token_address', 'token_address'),
@@ -39,7 +43,7 @@ class TaxSignal(Base):
         Index('idx_tax_signals_high_taxes', 'buy_tax_exceeds_threshold', 'sell_tax_exceeds_threshold',
               postgresql_where=text('buy_tax_exceeds_threshold = true OR sell_tax_exceeds_threshold = true')),
         Index('idx_tax_signals_token_pool_time', 'token_address', 'pool_address', 'detection_timestamp'),
-        {'schema': 'signals'}
+        {'schema': 'live_trading'}
     )
     
     # Primary key
@@ -82,7 +86,7 @@ class TaxSignalRequest(BaseModel):
     
     token_address: str = Field(..., description="Token contract address")
     pool_address: str = Field(..., description="Pool contract address") 
-    pool_type: str = Field(default="V2", description="Pool type (V2, V3, V4)")
+    pool_type: str = Field(default=DEX_POOL_TYPES[0], description="Pool type (canonical DEX identifiers)")
     denom_address: str = Field(..., description="Denomination token address (WETH, etc)")
     denom_currency: Optional[str] = Field(None, description="Denomination currency symbol")
     detection_tx_hash: str = Field(..., description="Transaction that triggered the signal")
@@ -114,8 +118,8 @@ class TaxSignalRequest(BaseModel):
     @validator('pool_type')
     def validate_pool_type(cls, v):
         """Validate pool type"""
-        if v not in ['V2', 'V3', 'V4']:
-            raise ValueError('Pool type must be V2, V3, or V4')
+        if v not in DEX_POOL_TYPE_SET:
+            raise ValueError(f"Pool type must be one of {DEX_POOL_TYPES}")
         return v
 
     @validator('signal_type')
