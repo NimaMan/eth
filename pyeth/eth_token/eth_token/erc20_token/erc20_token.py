@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import pandas as pd
 from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
 from eth_token.erc20_token.network.token_network import LiveTokenNetwork
@@ -15,9 +15,25 @@ class ERC20Token:
 
     """
 
-    def __init__(self, contract_address):
+    def __init__(
+        self,
+        contract_address: str,
+        *,
+        name: Optional[str] = None,
+        symbol: Optional[str] = None,
+        decimals: Optional[int] = None,
+        total_supply: Optional[int] = None,
+    ):
         self.contract_address = contract_address
-        self.token_data = ERC20TokenData(contract_address=contract_address)
+        normalized_decimals = int(decimals) if decimals is not None else None
+        normalized_supply = int(total_supply) if total_supply is not None else None
+        self.token_data = ERC20TokenData(
+            contract_address=contract_address,
+            name=name,
+            symbol=symbol,
+            decimals=normalized_decimals,
+            total_supply=normalized_supply,
+        )
         self.token_network = LiveTokenNetwork(live_token=self)
         self.token_health_predictor = TokenHealthPredictor()
 

@@ -401,7 +401,6 @@ class UniswapV2Pool(BasePool):
         # Check if trading is enabled after processing all events
         self.check_and_update_trading_status(transaction)
 
-    
     def _process_sync(self, sync: dict, transaction: Dict):
         """Process a sync event to update reserves."""
         # Get decimals for proper conversion
@@ -516,7 +515,7 @@ class UniswapV2Pool(BasePool):
             'tx_hash': transaction['hash'],
             'from': from_address,
             'amount': amount,
-            'timestamp': timestamp
+            'timestamp': transaction["block_timestamp"],
         })
 
     def get_latest_sync(self) -> Optional[dict]:

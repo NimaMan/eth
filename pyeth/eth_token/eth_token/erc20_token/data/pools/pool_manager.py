@@ -946,7 +946,8 @@ class PoolManager:
         except Exception as e:
             raise RuntimeError(
                 "PoolManager._discover_and_register_v3_pool failed: "
-                f"pool={pool_address} token={self.token_address} error={e}"
+                f"pool={pool_address} token={self.token_address} "
+                f"block={transaction.get('block_number')} tx={transaction.get('hash')} error={e}"
             ) from e
         finally:
             self._processing_pools.discard(pool_address)

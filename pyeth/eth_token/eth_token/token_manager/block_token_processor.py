@@ -13,13 +13,14 @@ Objective:
 import asyncio
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
-from typing import Dict, List, Set, Any
+from typing import Dict, List, Set, Any, Optional
 from collections import OrderedDict
 from tqdm import tqdm
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.utils.logger import get_logger
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 
 
 class BlockTokenProcessor:
@@ -35,6 +36,7 @@ class BlockTokenProcessor:
 
         # Introduce concurrency semaphore
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
+        self.token_chain_fetcher = TokenChainDataFetcher()
 
     async def process_block(self, block_data: List[Dict]) -> int:
         """Process a single block's transactions with concurrency limit."""
@@ -69,8 +71,9 @@ class BlockTokenProcessor:
         transaction = self._ensure_tx_dict(transaction)
         try:
             # Handle contract creation
-            if self._is_token_creation(transaction):
-                await self._handle_token_creation(transaction, block_number)
+            is_token_creation, token_metadata, contract_address = self._is_token_creation(transaction)
+            if is_token_creation:
+                await self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
                 return
                 
             # Handle regular transactions
@@ -79,30 +82,41 @@ class BlockTokenProcessor:
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
 
-    def _is_token_creation(self, transaction: Dict) -> bool:
-        """Check if transaction creates a new token"""
-        return (
-            transaction.get('tx_type', transaction.get('tx_type')) == 'Contract Creation' 
-            and transaction.get('contract_address')
-            and transaction.get('contract_creation_events', [])
-            and transaction['contract_creation_events'][0]["contract_type"] == "ERC-20"
-        )
+    def _is_token_creation(self, transaction: Dict) -> Optional[Dict[str, Any]]:
+        """Return token metadata if transaction deploys a new ERC-20 contract."""
+        contract_address = transaction.get('contract_address')
+        block_number = transaction.get('block_number')
+        try:
+            token_metadata = self.token_chain_fetcher.get_token_metadata(contract_address, block_number)
+            return True, token_metadata, contract_address
+        except Exception as exc:
+            return False, None, None
 
-    async def _handle_token_creation(self, transaction: Dict, block_number: int):
+    async def _handle_token_creation(
+        self,
+        transaction: Dict,
+        block_number: int,
+        token_metadata: Optional[Dict[str, Any]] = None,
+        contract_address: Optional[str] = None,
+    ):
         """Handle creation of a new token"""
-        new_token_address = transaction['contract_address']
-        if new_token_address not in self.live_tokens_cache:
+        if contract_address not in self.live_tokens_cache:
             try:
-                token = ERC20Token(new_token_address)
+                token = ERC20Token(
+                    contract_address,
+                    name=token_metadata.name,
+                    symbol=token_metadata.symbol,
+                    decimals=token_metadata.decimals,
+                    total_supply=token_metadata.total_supply,
+                )
                 token.update_from_transaction(transaction)
-                
-                self.live_tokens_cache[new_token_address] = token
-                self.updated_tokens[new_token_address] = token
+                self.live_tokens_cache[contract_address] = token
+                self.updated_tokens[contract_address] = token
                 if self.logger:
-                    self.logger.info(f"New token created: {new_token_address} in block {block_number}")
-                
+                    self.logger.info(f"New token created: {contract_address} in block {block_number}")
+
             except Exception as e:
-                self.logger.error(f"{self.__class__.__name__} Failed to create token {new_token_address} at tx {transaction.get('hash')}: {e}")
+                self.logger.error(f"{self.__class__.__name__} Failed to create token {contract_address} at tx {transaction.get('hash')}: {e}")
 
     async def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""

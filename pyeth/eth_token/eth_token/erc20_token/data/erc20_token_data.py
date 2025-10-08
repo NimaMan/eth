@@ -456,7 +456,8 @@ class ERC20TokenData:
         self.creator_address = transaction['from_address']
         self.creator_nonce = transaction['nonce']
         self.current_owner = transaction['from_address'] # Set initial owner
-        self.set_erc20_contract_info()
+        if self.total_supply is None:
+            self.set_erc20_contract_info()
 
     def set_erc20_contract_info(self):
         """Fetch and update ERC20 contract info from on-chain data"""

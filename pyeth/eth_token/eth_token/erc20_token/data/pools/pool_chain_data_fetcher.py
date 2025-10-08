@@ -171,14 +171,24 @@ class PoolChainDataFetcher:
 
         Returns a dict with keys: protocol, pool, token0, token1, reserve0, reserve1, block_number.
         """
-        info = self._chain_query.get_uniswap_v2_liquidity(pool_address, block)
+        try:
+            info = self._chain_query.get_uniswap_v2_liquidity(pool_address, block)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"get_uniswap_v2_liquidity failed for pool={pool_address} block={block}: {exc}"
+            ) from exc
         if info is None:
             raise RuntimeError(f"Missing V2 liquidity for pool {pool_address}")
         return self._normalize_liquidity_info(info)
 
     def get_v3_liquidity(self, pool_address: str, fee_tier: int, block: Optional[int] = None) -> Dict[str, Any]:
         """Get UniswapV3 liquidity using PyReth (liquidity, tick at block)."""
-        info = self._chain_query.get_uniswap_v3_liquidity(pool_address, int(fee_tier), block)
+        try:
+            info = self._chain_query.get_uniswap_v3_liquidity(pool_address, int(fee_tier), block)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"get_uniswap_v3_liquidity failed for pool={pool_address} fee={fee_tier} block={block}: {exc}"
+            ) from exc
         if info is None:
             raise RuntimeError(f"Missing V3 liquidity for pool {pool_address}")
         return self._normalize_liquidity_info(info)
