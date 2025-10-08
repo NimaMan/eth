@@ -39,17 +39,31 @@ Interaction with Blockchain:
 """
 
 from typing import Dict, List, Optional, Tuple, Any
-import logging
 from collections import defaultdict
 from web3 import Web3
 
 from .base_pool import BasePool
-from .uniswap_v2_pool import UniswapV2Pool, UNISWAP_V2_PAIR_ABI
+from .uniswap_v2_pool import UniswapV2Pool
 from .uniswap_v3_pool import UniswapV3Pool
 from .uniswap_v4_pool import UniswapV4Pool, PoolKey
-from .arbitrage_detector import ArbitrageDetector, ArbitrageOpportunity
-from eth_block_processor.chain_utils.pool_addresses import POOL_FACTORIES
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
+from .pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_data.chain_utils.common_addresses import (
+    DENOM_ADDRESSES,
+    canonicalize_dex_pool_type,
+)
+from ..token_chain_data_fetcher import TokenChainDataFetcher
+
+
+UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
+UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
+UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
+
+
+PROTOCOL_ALIASES = {
+    "V2": UNISWAP_V2_PROTOCOL,
+    "V3": UNISWAP_V3_PROTOCOL,
+    "V4": UNISWAP_V4_PROTOCOL,
+}
 
 
 class PoolManager:
@@ -60,32 +74,53 @@ class PoolManager:
     and provides aggregated views across all pools.
     """
     
-    def __init__(self, token_address: str, logger):
-        from web3 import Web3
-        self.token_address = Web3.to_checksum_address(token_address)
+    def __init__(self, token_address: str, history_limit: int = 100):
+        self.token_address = token_address
+        self.history_limit = history_limit
         
         # Pool storage by address
         self.pools: Dict[str, BasePool] = {}
+        # Track pools being processed to avoid race conditions
+        self._processing_pools: set = set()
         
         # Indexes for quick lookup
         self.pools_by_protocol: Dict[str, List[str]] = defaultdict(list)
         self.pools_by_denom: Dict[str, List[str]] = defaultdict(list)
         
         # V4 pools tracked separately by PoolId
-        self.v4_pools: Dict[str, UniswapV4Pool] = {}  # poolId -> V4Pool    
-        self.v4_pool_manager = '0x000000000004444c5dc75cb358380d2e3de08a90'
-        
-        # Trading enabled tracking
-        self.trading_enabled = False
-        self.trading_enabled_block = 0
-        self.trading_enabled_txn = ""
-    
-        self.logger = logger
-        
-        # Initialize arbitrage detector
-        self.arbitrage_detector = ArbitrageDetector(token_address)
-        
-    def process_transaction(self, transaction: ProcessedTransaction):
+        self.v4_pools: Dict[str, UniswapV4Pool] = {}  # poolId -> V4Pool                
+        # Initialize pool chain data fetcher
+        self.chain_data_fetcher = PoolChainDataFetcher()
+        self.token_chain_data_fetcher = TokenChainDataFetcher()
+
+        # Cached decimals to avoid repeat lookups
+        self._token_decimals: Optional[int] = None
+        self._denom_decimals_cache: Dict[str, int] = {}
+
+
+    def _get_token_decimals(self) -> Optional[int]:
+        if self._token_decimals is None:
+            self._token_decimals = int(
+                self.token_chain_data_fetcher.get_token_decimals(self.token_address)
+            )
+        return self._token_decimals
+
+    def _get_denom_decimals(self, denom_address: str) -> int:
+        checksum_address = Web3.to_checksum_address(denom_address)
+        if checksum_address not in self._denom_decimals_cache:
+            self._denom_decimals_cache[checksum_address] = int(
+                self.token_chain_data_fetcher.get_token_decimals(checksum_address)
+            )
+        return self._denom_decimals_cache[checksum_address]
+
+    def _pool_decimal_kwargs(self, denom_address: str) -> Dict[str, int]:
+        return {
+            'token_decimals': self._get_token_decimals(),
+            'denom_decimals': self._get_denom_decimals(denom_address),
+            'history_limit': self.history_limit,
+        }
+
+    def process_transaction(self, transaction: Dict):
         """
         Process a transaction and route events to appropriate pools.
         
@@ -106,30 +141,31 @@ class PoolManager:
         for v4_pool in self.v4_pools.values():
             v4_pool.process_transaction(transaction)
             
-        # Check for trading enabled after processing all pools
-        self._check_trading_enabled(transaction)
+        # Trading enabled is now checked at individual pool level
             
-    def _check_pool_creations(self, transaction: ProcessedTransaction):
+    def _check_pool_creations(self, transaction: Dict):
         """Check for new pool creation events."""
         # V2 pair creation
-        for pair_event in getattr(transaction, 'pair_events', []):
-            self._handle_v2_creation(pair_event, transaction)
+        if transaction.get('pair_events'):
+            for pair_event in transaction['pair_events']:
+                self._handle_v2_creation(pair_event, transaction)
             
         # V3 pool creation
-        for pool_event in getattr(transaction, 'uniswap_v3_pools', []):
-            self._handle_v3_creation(pool_event, transaction)
+        if transaction.get('uniswap_v3_pools'):
+            for pool_event in transaction['uniswap_v3_pools']:
+                self._handle_v3_creation(pool_event, transaction)
             
         # V4 pool initialization (different pattern - uses PoolId)
-        for init_event in getattr(transaction, 'uniswap_v4_initializes', []):
-            self._handle_v4_initialization(init_event, transaction)
+        if transaction.get('uniswap_v4_initializes'):
+            for init_event in transaction['uniswap_v4_initializes']:
+                self._handle_v4_initialization(init_event, transaction)
         
-    def _handle_v2_creation(self, pair_event: dict, transaction: ProcessedTransaction):
+    def _handle_v2_creation(self, pair_event: dict, transaction: Dict):
         """Handle V2 pair creation."""
-        from web3 import Web3
-        
-        pair_address = Web3.to_checksum_address(pair_event['pair_address'])
-        token0 = Web3.to_checksum_address(pair_event['token0'])
-        token1 = Web3.to_checksum_address(pair_event['token1'])
+
+        pair_address = pair_event['pair_address']
+        token0 = pair_event['token0']
+        token1 = pair_event['token1']
         
         # Skip if already registered
         if pair_address in self.pools:
@@ -147,25 +183,29 @@ class PoolManager:
             return
             
         # Create V2 pool instance
+        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
         pool = UniswapV2Pool(
             pool_address=pair_address,
             token_address=self.token_address,
             denom_address=denom_address,
-            token1_is_denom=token1_is_denom
+            **decimal_kwargs,
+            token1_is_denom=token1_is_denom,
+            pool_chain_fetcher=self.chain_data_fetcher,
+            token_chain_fetcher=self.token_chain_data_fetcher,
         )
         
-        pool.creation_block = transaction.block_number
-        pool.creation_txn = transaction.hash
-        self._register_pool(pool)# Register pool
+        pool.creation_block = transaction['block_number']
+        pool.creation_txn = transaction['hash']
+        pool.creation_timestamp = transaction['block_timestamp']
+        self._register_pool(pool)
         
-    def _handle_v3_creation(self, pool_event: dict, transaction: ProcessedTransaction):
+    def _handle_v3_creation(self, pool_event: dict, transaction: Dict):
         """Handle V3 pool creation."""
-        from web3 import Web3
         
         # V3 pool creation events use 'pool' field for address
-        pool_address = Web3.to_checksum_address(pool_event.get('pool', pool_event.get('pool_address', '')))
-        token0 = Web3.to_checksum_address(pool_event['token0'])
-        token1 = Web3.to_checksum_address(pool_event['token1'])
+        pool_address = pool_event.get('pool', pool_event.get('pool_address', ''))
+        token0 = pool_event['token0']
+        token1 = pool_event['token1']
         fee = pool_event.get('fee', 3000)
         
         # Skip if already registered
@@ -183,30 +223,34 @@ class PoolManager:
             return
             
         # Create V3 pool instance
+        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
         pool = UniswapV3Pool(
             pool_address=pool_address,
             token_address=self.token_address,
             denom_address=denom_address,
+            **decimal_kwargs,
             token1_is_denom=token1_is_denom,
-            fee_tier=fee
+            fee_tier=fee,
+            pool_chain_fetcher=self.chain_data_fetcher,
+            token_chain_fetcher=self.token_chain_data_fetcher,
         )
         
-        pool.creation_block = transaction.block_number
-        pool.creation_txn = transaction.hash
-        self._register_pool(pool)# Register pool
+        pool.creation_block = transaction['block_number']
+        pool.creation_txn = transaction['hash']
+        pool.creation_timestamp = transaction['block_timestamp']
+        self._register_pool(pool)
         
-    def _handle_v4_initialization(self, init_event: dict, transaction: ProcessedTransaction):
+    def _handle_v4_initialization(self, init_event: dict, transaction: Dict):
         """Handle V4 pool initialization.
         
         V4 pools are identified by PoolId, not address.
         All V4 pools share the same PoolManager address.
         """
-        from web3 import Web3
         
         # V4 events use event_id for pool identification
         pool_id = init_event.get('event_id', init_event.get('pool_id', ''))
-        currency0 = Web3.to_checksum_address(init_event['currency0'])
-        currency1 = Web3.to_checksum_address(init_event['currency1'])
+        currency0 = init_event['currency0']
+        currency1 = init_event['currency1']
         fee = init_event.get('fee', 3000)
         tick_spacing = init_event.get('tick_spacing', 60)
         hooks = init_event.get('hooks', '0x0000000000000000000000000000000000000000')
@@ -235,22 +279,28 @@ class PoolManager:
         )
         
         # Create V4 pool instance
+        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
         pool = UniswapV4Pool(
             pool_id=pool_id,
             pool_key=pool_key,
             token_address=self.token_address,
             denom_address=denom_address,
-            token1_is_denom=token1_is_denom
+            **decimal_kwargs,
+            token1_is_denom=token1_is_denom,
+            pool_chain_fetcher=self.chain_data_fetcher,
+            token_chain_fetcher=self.token_chain_data_fetcher,
         )
         
-        pool.creation_block = transaction.block_number
-        pool.creation_txn = transaction.hash
-        self._register_v4_pool(pool)# Register V4 pool
+        pool.creation_block = transaction['block_number']
+        pool.creation_txn = transaction['hash']
+        pool.creation_timestamp = transaction['block_timestamp']
+        self._register_v4_pool(pool)
         
     def _register_pool(self, pool: BasePool):
         """Register a pool in the manager."""
         self.pools[pool.pool_address] = pool
-        self.pools_by_protocol[pool.get_protocol()].append(pool.pool_address)
+        protocol_name = pool.get_protocol()
+        self.pools_by_protocol[protocol_name].append(pool.pool_address)
         self.pools_by_denom[pool.denom_address].append(pool.pool_address)
         
     def _register_v4_pool(self, pool: UniswapV4Pool):
@@ -259,7 +309,7 @@ class PoolManager:
         V4 pools are tracked separately by PoolId.
         """
         self.v4_pools[pool.pool_id] = pool
-        self.pools_by_protocol['V4'].append(pool.pool_id)
+        self.pools_by_protocol[UNISWAP_V4_PROTOCOL].append(pool.pool_id)
         self.pools_by_denom[pool.denom_address].append(pool.pool_id)
         
     def add_pool(self, pool_address: str, protocol: str, denom_address: str, 
@@ -269,47 +319,108 @@ class PoolManager:
         
         Used for pools that already exist when we start tracking a token.
         """
-        # Convert to checksum addresses first
-        from web3 import Web3
-        pool_address = Web3.to_checksum_address(pool_address)
-        denom_address = Web3.to_checksum_address(denom_address)
         
         # Skip if already exists
         if pool_address in self.pools:
-            return self.pools[pool_address]# Return pool if already exists
-            
+            return self.pools[pool_address]
+
+        normalized_protocol = canonicalize_dex_pool_type(
+            PROTOCOL_ALIASES.get(protocol, protocol)
+        )
+
         # Create appropriate pool instance
-        if protocol == "V2":
+        if normalized_protocol == UNISWAP_V2_PROTOCOL:
+            decimal_kwargs = self._pool_decimal_kwargs(denom_address)
             pool = UniswapV2Pool(
                 pool_address=pool_address,
                 token_address=self.token_address,
                 denom_address=denom_address,
-                token1_is_denom=token1_is_denom
+                **decimal_kwargs,
+                token1_is_denom=token1_is_denom,
+                pool_chain_fetcher=self.chain_data_fetcher,
+                token_chain_fetcher=self.token_chain_data_fetcher,
             )
-        elif protocol == "V3":
+        elif normalized_protocol == UNISWAP_V3_PROTOCOL:
+            decimal_kwargs = self._pool_decimal_kwargs(denom_address)
             pool = UniswapV3Pool(
                 pool_address=pool_address,
                 token_address=self.token_address,
                 denom_address=denom_address,
+                **decimal_kwargs,
                 token1_is_denom=token1_is_denom,
-                fee_tier=kwargs.get('fee_tier', 3000)
+                fee_tier=kwargs.get('fee_tier', 3000),
+                pool_chain_fetcher=self.chain_data_fetcher,
+                token_chain_fetcher=self.token_chain_data_fetcher,
             )
-        elif protocol == "V4":
-            # V4 pools should be created through initialization events, not manual addition
-            # This is a placeholder that won't work properly
-            self.logger.warning(f"V4 pools should be created through initialization events, not manual addition")
-            return None
+        elif normalized_protocol == UNISWAP_V4_PROTOCOL:
+            # V4 requires pool_id instead of pool_address
+            pool_id = kwargs.get('pool_id')
+            if not pool_id:
+                raise ValueError("V4 pools require pool_id parameter")
+
+            return self.add_v4_pool(
+                pool_id=pool_id,
+                denom_address=denom_address,
+                token1_is_denom=token1_is_denom,
+                **kwargs
+            )
         else:
-            self.logger.error(f"Unknown protocol {protocol} for pool {pool_address} and token {self.token_address}")
-            return None
+            raise ValueError(f"Unknown protocol {protocol} for pool {pool_address} and token {self.token_address}")
             
-        self._register_pool(pool)# Register pool
+        self._register_pool(pool)
+        return pool
+    
+    def add_v4_pool(self, pool_id: str, denom_address: str, 
+                    token1_is_denom: bool = True, **kwargs):
+        """
+        Manually add a V4 pool.
+        
+        Args:
+            pool_id: The V4 pool ID (bytes32 hash)
+            denom_address: The paired token address
+            token1_is_denom: Whether token1 is the denomination token
+            **kwargs: Additional parameters (fee, tick_spacing, hooks)
+        
+        Returns:
+            The created V4 pool instance or None if creation fails
+        """
+        # Check if already exists
+        if pool_id in self.v4_pools:
+            return self.v4_pools[pool_id]
+        
+        # Create PoolKey
+        pool_key = PoolKey(
+            currency0=self.token_address if not token1_is_denom else denom_address,
+            currency1=denom_address if not token1_is_denom else self.token_address,
+            fee=kwargs.get('fee', 3000),
+            tick_spacing=kwargs.get('tick_spacing', 60),
+            hooks=kwargs.get('hooks', '0x0000000000000000000000000000000000000000')
+        )
+        
+        # Create V4 pool instance
+        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
+        pool = UniswapV4Pool(
+            pool_id=pool_id,
+            pool_key=pool_key,
+            token_address=self.token_address,
+            denom_address=denom_address,
+            **decimal_kwargs,
+            token1_is_denom=token1_is_denom,
+            pool_chain_fetcher=self.chain_data_fetcher,
+            token_chain_fetcher=self.token_chain_data_fetcher,
+        )
+        
+        self._register_v4_pool(pool)
         return pool
         
     def get_pool(self, pool_address: str) -> Optional[BasePool]:
         """Get a specific pool by address or display address."""
-        from web3 import Web3
-        
+        # Support V4 display address formats (POOL_MANAGER-prefix or PoolManager#id)
+        if '-' in pool_address:
+            prefix, _, pool_id = pool_address.partition('-')
+            if prefix == UniswapV4Pool.POOL_MANAGER and pool_id:
+                return self.v4_pools.get(pool_id)
+
         # Check if it's a V4 display address (PoolManager#poolId)
         if '#' in pool_address:
             parts = pool_address.split('#')
@@ -318,27 +429,30 @@ class PoolManager:
                 return self.v4_pools.get(pool_id)
         
         # Try regular pools with checksum conversion
+        checksum_address = None
         try:
-            pool = self.pools.get(Web3.to_checksum_address(pool_address))
-            if pool:
-                return pool
+            checksum_address = Web3.to_checksum_address(pool_address)
         except ValueError:
-            # If checksum conversion fails, try as-is
-            pool = self.pools.get(pool_address)
+            checksum_address = None
+
+        if checksum_address:
+            pool = self.pools.get(checksum_address)
             if pool:
                 return pool
-                
-        return None
+
+        return self.pools.get(pool_address)
         
     def get_pools_by_protocol(self, protocol: str) -> List[BasePool]:
         """Get all pools for a specific protocol."""
-        addresses = self.pools_by_protocol.get(protocol, [])
+        normalized_protocol = canonicalize_dex_pool_type(
+            PROTOCOL_ALIASES.get(protocol, protocol)
+        )
+        addresses = self.pools_by_protocol.get(normalized_protocol, [])
         return [self.pools[addr] for addr in addresses]
         
     def get_pools_by_denom(self, denom_address: str) -> List[BasePool]:
         """Get all pools paired with a specific denomination token."""
-        from web3 import Web3
-        addresses = self.pools_by_denom.get(Web3.to_checksum_address(denom_address), [])
+        addresses = self.pools_by_denom.get(denom_address, [])
         return [self.pools[addr] for addr in addresses]
         
     def get_all_pools(self) -> List[BasePool]:
@@ -372,7 +486,7 @@ class PoolManager:
         
         for address, pool in self.pools.items():
             health_stats[address] = {
-                'protocol': pool.get_protocol(),
+                'pool_type': pool.get_protocol(),
                 'is_scam': bool(pool.scam_label),
                 'scam_label': pool.scam_label,
                 'scam_block': pool.scam_block,
@@ -380,13 +494,13 @@ class PoolManager:
                 'denom_reserve': pool.get_denom_reserve(),
                 'token_reserve': pool.get_token_reserve(),
                 'price': pool.get_price(),
-                'has_liquidity': pool.get_denom_reserve() > 0
+                'has_liquidity': pool.get_denom_reserve() > 0,
             }
             
         # Add V4 pools
         for pool_id, pool in self.v4_pools.items():
             health_stats[pool.display_address] = {
-                'protocol': 'V4',
+                'pool_type': UNISWAP_V4_PROTOCOL,
                 'pool_id': pool_id,
                 'is_scam': bool(pool.scam_label),
                 'scam_label': pool.scam_label,
@@ -395,7 +509,7 @@ class PoolManager:
                 'denom_reserve': pool.get_denom_reserve(),
                 'token_reserve': pool.get_token_reserve(),
                 'price': pool.get_price(),
-                'has_liquidity': pool.get_denom_reserve() > 0
+                'has_liquidity': pool.get_denom_reserve() > 0, 
             }
             
         return health_stats
@@ -438,36 +552,64 @@ class PoolManager:
         
         # Add V2/V3 pools
         for address, pool in self.pools.items():
-            denom_symbol = self._get_token_symbol(pool.denom_address)
+            denom_symbol = self._get_denom_symbol(pool.denom_address)
+            token_decimals = pool.get_token_decimals()
+            denom_decimals = pool.get_denom_decimals()
+
             pool_data = {
-                'pool_type': pool.get_protocol().upper(),  # "V2", "V3"
+                'pool_type': pool.get_protocol(),
                 'denom_address': pool.denom_address,
                 'denom_currency': denom_symbol,
-                'decimals': 18,  # Default, should get from token contract
-                "token_reserve": pool.get_token_reserve(),
-                "denom_reserve": pool.get_denom_reserve(),
-                'token1_is_denom': pool.token1_is_denom
+                'token_decimals': token_decimals,
+                'denom_decimals': denom_decimals,
+                'token_reserve': pool.get_token_reserve(),
+                'denom_reserve': pool.get_denom_reserve(),
+                'price': pool.get_price(),
+                'price_ratio': pool.reserve_tracker.get_price_ratio_to_initial(),
+                'scam_tx': pool.scam_tx_hash,
+                'trading_enabled': pool.trading_enabled,
+                'trading_enabled_block': pool.trading_enabled_block,
+                'buy_tax': pool.buy_tax,
+                'sell_tax': pool.sell_tax
             }
             
-            # Add LP holder information for V2 pools
-            if pool.get_protocol() == 'V2' and hasattr(pool, 'get_lp_holders'):
+            # Add LP holder information and approval percentage for V2 pools
+            if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
                 lp_holders = pool.get_lp_holders()
                 if lp_holders:
                     pool_data['lp_holders'] = lp_holders
+                # Add LP approval percentage
+                pool_data['lp_tokens_approved_percentage'] = pool.get_lp_approved_percentage()
+                # Add last LP approval information
+                last_approval_event = pool.get_last_lp_approval_event()
+                pool_data['lp_last_approval_block'] = (
+                    last_approval_event.get('block_number') if last_approval_event else None
+                )
+                pool_data['lp_last_approval'] = last_approval_event
                     
             pool_info[address] = pool_data
             
         # Add V4 pools (use display address for compatibility)
         for pool_id, pool in self.v4_pools.items():
+            v4_token_decimals = pool.get_token_decimals()
+            v4_denom_decimals = pool.get_denom_decimals()
+
             pool_info[pool.display_address] = {
-                'pool_type': 'V4',
+                'pool_type': UNISWAP_V4_PROTOCOL,
                 'denom_address': pool.denom_address,
-                'denom_currency': self._get_token_symbol(pool.denom_address),
-                'decimals': 18,
+                'denom_currency': self._get_denom_symbol(pool.denom_address),
+                'token_decimals': v4_token_decimals,
+                'denom_decimals': v4_denom_decimals,
                 'token_reserve': pool.get_token_reserve(),
                 'denom_reserve': pool.get_denom_reserve(),
-                'token1_is_denom': pool.token1_is_denom,
-                'pool_id': pool_id  # Extra field for V4
+                'price': pool.get_price(),
+                'price_ratio': pool.reserve_tracker.get_price_ratio_to_initial(),
+                'scam_tx': pool.scam_tx_hash,
+                'pool_id': pool_id,  # Extra field for V4
+                'trading_enabled': pool.trading_enabled,
+                'trading_enabled_block': pool.trading_enabled_block,
+                'buy_tax': pool.buy_tax,
+                'sell_tax': pool.sell_tax
             }
             
         return pool_info
@@ -491,89 +633,101 @@ class PoolManager:
         currencies = {}
         
         for address, pool in self.pools.items():
-            currencies[address] = self._get_token_symbol(pool.denom_address)
+            currencies[address] = self._get_denom_symbol(pool.denom_address)
             
         for pool in self.v4_pools.values():
-            currencies[pool.display_address] = self._get_token_symbol(pool.denom_address)
+            currencies[pool.display_address] = self._get_denom_symbol(pool.denom_address)
             
         return currencies
         
+    def get_trading_enabled_pools(self) -> List[Dict[str, Any]]:
+        """
+        Get list of pools where trading is enabled.
+        
+        Returns:
+            List of dicts with pool info including address, protocol, and tax rates
+        """
+        enabled_pools = []
+        
+        # Check regular pools (V2/V3)
+        for address, pool in self.pools.items():
+            if pool.trading_enabled:
+                enabled_pools.append({
+                    'address': address,
+                    'protocol': pool.get_protocol(),
+                    'buy_tax': pool.buy_tax,
+                    'sell_tax': pool.sell_tax,
+                    'trading_enabled_block': pool.trading_enabled_block,
+                    'denom': self._get_denom_symbol(pool.denom_address)
+                })
+        
+        # Check V4 pools
+        for pool_id, pool in self.v4_pools.items():
+            if pool.trading_enabled:
+                enabled_pools.append({
+                    'address': pool.display_address,
+                    'protocol': UNISWAP_V4_PROTOCOL,
+                    'buy_tax': pool.buy_tax,
+                    'sell_tax': pool.sell_tax,
+                    'trading_enabled_block': pool.trading_enabled_block,
+                    'denom': self._get_denom_symbol(pool.denom_address)
+                })
+                
+        return enabled_pools
+    
+    def get_pool_taxes(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
+        """
+        Get tax rates for all pools.
+        
+        Returns:
+            Dict mapping pool_address -> (buy_tax, sell_tax)
+        """
+        taxes = {}
+        
+        # Regular pools
+        for address, pool in self.pools.items():
+            taxes[address] = (pool.buy_tax, pool.sell_tax)
+            
+        # V4 pools
+        for pool in self.v4_pools.values():
+            taxes[pool.display_address] = (pool.buy_tax, pool.sell_tax)
+            
+        return taxes
+    
+    def get_lowest_tax_pool(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the pool with the lowest combined tax rate.
+        
+        Returns:
+            Dict with pool info or None if no pools have taxes calculated
+        """
+        lowest_pool = None
+        lowest_combined_tax = float('inf')
+        
+        for pool_info in self.get_trading_enabled_pools():
+            if pool_info['buy_tax'] is not None and pool_info['sell_tax'] is not None:
+                combined_tax = pool_info['buy_tax'] + pool_info['sell_tax']
+                if combined_tax < lowest_combined_tax:
+                    lowest_combined_tax = combined_tax
+                    lowest_pool = pool_info
+                    
+        return lowest_pool
+    
     def has_pools(self) -> bool:
         """Check if token has any pools."""
         return len(self.pools) > 0 or len(self.v4_pools) > 0
     
     def has_v2_pools(self) -> bool:
         """Check if any V2 pools exist."""
-        return len(self.pools_by_protocol.get('V2', [])) > 0
-    
+        return len(self.pools_by_protocol.get(UNISWAP_V2_PROTOCOL, [])) > 0
+
     def has_v3_pools(self) -> bool:
         """Check if any V3 pools exist."""
-        return len(self.pools_by_protocol.get('V3', [])) > 0
+        return len(self.pools_by_protocol.get(UNISWAP_V3_PROTOCOL, [])) > 0
     
     def has_v4_pools(self) -> bool:
         """Check if any V4 pools exist."""
         return len(self.v4_pools) > 0
-    
-    def compute_v2_pool_address(self, denom_address: str) -> str:
-        """
-        Compute deterministic V2 pool address.
-        
-        Pool addresses in V2 are deterministic based on token pair.
-        """
-        from eth_utils import keccak
-        
-        # Sort tokens
-        token0, token1 = sorted([self.token_address, denom_address])
-        
-        # V2 uses CREATE2 with salt = keccak(token0, token1)
-        salt = keccak(bytes.fromhex(token0[2:]) + bytes.fromhex(token1[2:]))
-        
-        # This is a simplified version - actual implementation would use CREATE2
-        return f"0x{salt.hex()[:40]}"
-    
-    def compute_v3_pool_address(self, denom_address: str, fee: int = 3000) -> str:
-        """
-        Compute deterministic V3 pool address.
-        
-        Pool addresses in V3 are deterministic based on token pair and fee.
-        """
-        from eth_utils import keccak
-        
-        # Sort tokens
-        token0, token1 = sorted([self.token_address, denom_address])
-        
-        # V3 includes fee in the salt
-        fee_bytes = fee.to_bytes(3, 'big')
-        salt_data = bytes.fromhex(token0[2:]) + bytes.fromhex(token1[2:]) + fee_bytes
-        salt = keccak(salt_data)
-        
-        return f"0x{salt.hex()[:40]}"
-    
-    def get_or_create_v2_pool(self, denom_address: str) -> Optional[BasePool]:
-        """
-        Get existing V2 pool or compute its address if it should exist.
-        """
-        pool_address = self.compute_v2_pool_address(denom_address)
-        
-        if pool_address in self.pools:
-            return self.pools[pool_address]
-        
-        # Check if pool exists on-chain and create if so
-        # For now, return None - would need to call factory.getPair()
-        return None
-    
-    def get_or_create_v3_pool(self, denom_address: str, fee: int = 3000) -> Optional[BasePool]:
-        """
-        Get existing V3 pool or compute its address if it should exist.
-        """
-        pool_address = self.compute_v3_pool_address(denom_address, fee)
-        
-        if pool_address in self.pools:
-            return self.pools[pool_address]
-        
-        # Check if pool exists on-chain and create if so
-        # For now, return None - would need to call factory.getPool()
-        return None
     
     def get_total_lp_supply(self) -> Dict[str, float]:
         """Get total LP supply for all V2 pools.
@@ -583,7 +737,7 @@ class PoolManager:
         """
         lp_supplies = {}
         for address, pool in self.pools.items():
-            if pool.get_protocol() == 'V2' and hasattr(pool, 'lp_total_supply'):
+            if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
                 lp_supplies[address] = pool.lp_total_supply
         return lp_supplies
     
@@ -612,7 +766,7 @@ class PoolManager:
         all_provider_balances = defaultdict(float)  # Aggregate LP holdings across pools
         
         for address, pool in self.pools.items():
-            if pool.get_protocol() == 'V2' and hasattr(pool, 'lp_holders'):
+            if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
                 stats['pools_with_lp'] += 1
                 
                 # Track unique holders
@@ -620,7 +774,7 @@ class PoolManager:
                 unique_holders.update(pool_holders)
                 
                 # Find pool with highest LP supply
-                if hasattr(pool, 'lp_total_supply') and pool.lp_total_supply > max_supply:
+                if pool.lp_total_supply > max_supply:
                     max_supply = pool.lp_total_supply
                     stats['largest_lp_pool'] = address
                     
@@ -649,18 +803,17 @@ class PoolManager:
                     'address': addr,
                     'total_lp_balance': balance,
                     'pools_count': sum(
-                        1 for p in self.pools.values() 
-                        if p.get_protocol() == 'V2' and 
-                        hasattr(p, 'lp_holders') and 
+                        1 for p in self.pools.values()
+                        if p.get_protocol() == UNISWAP_V2_PROTOCOL and 
                         addr in p.lp_holders and 
                         p.lp_holders[addr] > 0
                     )
                 }
                 for addr, balance in sorted_providers
             ]
-        
+
         return stats
-    
+
     def get_pool_ownership_distribution(self, pool_address: str) -> Dict:
         """Get ownership distribution for a specific pool.
         
@@ -671,14 +824,12 @@ class PoolManager:
             Dictionary with ownership distribution data
         """
         pool = self.get_pool(pool_address)
-        if not pool or pool.get_protocol() != 'V2':
+        if not pool or pool.get_protocol() != UNISWAP_V2_PROTOCOL:
             return {}
-        
-        if hasattr(pool, 'get_lp_holders'):
-            return pool.get_lp_holders()
-        return {}
+
+        return pool.get_lp_holders()
     
-    def _check_swap_events_for_pools(self, transaction: ProcessedTransaction):
+    def _check_swap_events_for_pools(self, transaction: Dict):
         """
         Check swap events for pools we haven't seen yet.
         
@@ -688,366 +839,119 @@ class PoolManager:
         3. We want to discover pools from trading activity
         """
         # Check V2 swaps
-        for swap in getattr(transaction, 'uniswap_v2_swaps', []):
-            pair_address = swap.get('pair_address', '')
-            if pair_address:
-                from web3 import Web3
-                pair_address = Web3.to_checksum_address(pair_address)
-                if pair_address not in self.pools:
-                    self._try_create_v2_pool_from_swap(pair_address, transaction)
+        if transaction.get('uniswap_v2_swaps'):
+            for swap in transaction['uniswap_v2_swaps']:
+                pair_address = swap.get('pair_address', '')
+                if pair_address and pair_address not in self.pools:
+                    self._discover_and_register_v2_pool(pair_address, transaction)
                 
         # Check V3 swaps  
-        for swap in getattr(transaction, 'uniswap_v3_swaps', []):
-            pool_address = swap.get('pool_address', '')
-            if pool_address:
-                from web3 import Web3
-                pool_address = Web3.to_checksum_address(pool_address)
-                if pool_address not in self.pools:
-                    self._try_create_v3_pool_from_swap(pool_address, transaction)
+        if transaction.get('uniswap_v3_swaps'):
+            for swap in transaction['uniswap_v3_swaps']:
+                pool_address = swap.get('pool_address', '')
+                if pool_address and pool_address not in self.pools:
+                    self._discover_and_register_v3_pool(pool_address, transaction)
                 
-    def _try_create_v2_pool_from_swap(self, pair_address: str, transaction: ProcessedTransaction):
+    def _discover_and_register_v2_pool(self, pair_address: str, transaction: Dict):
         """
-        Try to create a V2 pool from a swap event by querying the blockchain.
+        Discover V2 pool configuration from blockchain and register it.
+        
+        Used when a pool is detected through swap events rather than creation events.
         """
         try:
             # Skip if already being processed
-            if hasattr(self, '_processing_pools'):
-                if pair_address in self._processing_pools:
-                    return
-            else:
-                self._processing_pools = set()
+            if pair_address in self._processing_pools:
+                return
                 
             self._processing_pools.add(pair_address)
             
-            
-            # Get Web3 instance (assuming available via pool instances)
-            if not hasattr(self, 'w3'):
-                from web3 import Web3
-                import os
-                eth_node_url = os.environ.get("ETH_NODE_URL", "http://127.0.0.1:8545")
-                self.w3 = Web3(Web3.HTTPProvider(eth_node_url))
-                
-            # Get pool contract
-            pair_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(pair_address),
-                abi=UNISWAP_V2_PAIR_ABI
+            # Use chain data fetcher to get pool info
+            pool_info = self.chain_data_fetcher.discover_pool_for_token(
+                pool_address=pair_address,
+                token_address=self.token_address,
+                protocol_hint=UNISWAP_V2_PROTOCOL
             )
             
-            # Get token addresses
-            token0 = self.w3.to_checksum_address(pair_contract.functions.token0().call())
-            token1 = self.w3.to_checksum_address(pair_contract.functions.token1().call())
-            
-            # Check if our token is involved
-            if token0 == self.token_address:
-                denom_address = token1
-                token1_is_denom = True
-            elif token1 == self.token_address:
-                denom_address = token0
-                token1_is_denom = False
-            else:
-                # Our token not in this pair
+            if pool_info is None:
                 return
-                
+            
             # Create pool instance
+            decimal_kwargs = self._pool_decimal_kwargs(pool_info['denom_address'])
             pool = UniswapV2Pool(
                 pool_address=pair_address,
                 token_address=self.token_address,
-                denom_address=denom_address,
-                token1_is_denom=token1_is_denom
+                denom_address=pool_info['denom_address'],
+                **decimal_kwargs,
+                token1_is_denom=pool_info['token1_is_denom']
             )
             
-            pool.creation_block = transaction.block_number
-            pool.creation_txn = transaction.hash
+            pool.creation_block = transaction.get('block_number')
+            pool.creation_txn = transaction.get('hash')
+            pool.creation_timestamp = transaction.get('block_timestamp')
             pool.detected_from_swap = True
             
             # Register pool
             self._register_pool(pool)
             
-            
         except Exception as e:
-            self.logger.debug(f"Failed to create V2 pool from swap {pair_address}: {e}")
+            raise RuntimeError(
+                "PoolManager._discover_and_register_v2_pool failed: "
+                f"pair={pair_address} token={self.token_address} error={e}"
+            ) from e
         finally:
             self._processing_pools.discard(pair_address)
             
-    def _try_create_v3_pool_from_swap(self, pool_address: str, transaction: ProcessedTransaction):
+    def _discover_and_register_v3_pool(self, pool_address: str, transaction: Dict):
         """
-        Try to create a V3 pool from a swap event by querying the blockchain.
+        Discover V3 pool configuration from blockchain and register it.
+        
+        Used when a pool is detected through swap events rather than creation events.
         """
         try:
             # Skip if already being processed
-            if hasattr(self, '_processing_pools'):
-                if pool_address in self._processing_pools:
-                    return
-            else:
-                self._processing_pools = set()
+            if pool_address in self._processing_pools:
+                return
                 
             self._processing_pools.add(pool_address)
             
-            # Import V3 pool class
-            from .uniswap_v3_pool import UniswapV3Pool
-            
-            # V3 pool ABI (minimal)
-            V3_POOL_ABI = [
-                {
-                    "constant": True,
-                    "inputs": [],
-                    "name": "token0",
-                    "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                    "payable": False,
-                    "stateMutability": "view",
-                    "type": "function"
-                },
-                {
-                    "constant": True,
-                    "inputs": [],
-                    "name": "token1",
-                    "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-                    "payable": False,
-                    "stateMutability": "view",
-                    "type": "function"
-                },
-                {
-                    "constant": True,
-                    "inputs": [],
-                    "name": "fee",
-                    "outputs": [{"internalType": "uint24", "name": "", "type": "uint24"}],
-                    "payable": False,
-                    "stateMutability": "view",
-                    "type": "function"
-                }
-            ]
-            
-            # Get Web3 instance
-            if not hasattr(self, 'w3'):
-                from web3 import Web3
-                import os
-                eth_node_url = os.environ.get("ETH_NODE_URL", "http://127.0.0.1:8545")
-                self.w3 = Web3(Web3.HTTPProvider(eth_node_url))
-                
-            # Get pool contract
-            pool_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(pool_address),
-                abi=V3_POOL_ABI
+            # Use chain data fetcher to get pool info
+            pool_info = self.chain_data_fetcher.discover_pool_for_token(
+                pool_address=pool_address,
+                token_address=self.token_address,
+                protocol_hint=UNISWAP_V3_PROTOCOL
             )
             
-            # Get pool details
-            token0 = self.w3.to_checksum_address(pool_contract.functions.token0().call())
-            token1 = self.w3.to_checksum_address(pool_contract.functions.token1().call())
-            fee = pool_contract.functions.fee().call()
-            
-            # Check if our token is involved
-            if token0 == self.token_address:
-                denom_address = token1
-                token1_is_denom = True
-            elif token1 == self.token_address:
-                denom_address = token0
-                token1_is_denom = False
-            else:
-                # Our token not in this pool
+            if pool_info is None:
                 return
-                
+            
             # Create pool instance
+            decimal_kwargs = self._pool_decimal_kwargs(pool_info['denom_address'])
             pool = UniswapV3Pool(
                 pool_address=pool_address,
                 token_address=self.token_address,
-                denom_address=denom_address,
-                token1_is_denom=token1_is_denom,
-                fee_tier=fee
+                denom_address=pool_info['denom_address'],
+                **decimal_kwargs,
+                token1_is_denom=pool_info['token1_is_denom'],
+                fee_tier=pool_info.get('fee', 3000)
             )
             
-            pool.creation_block = transaction.block_number
-            pool.creation_txn = transaction.hash
+            pool.creation_block = transaction.get('block_number')
+            pool.creation_txn = transaction.get('hash')
+            pool.creation_timestamp = transaction.get('block_timestamp')
             pool.detected_from_swap = True
             
             # Register pool
             self._register_pool(pool)
             
-            self.logger.info(
-                f"Detected V3 pool {pool_address[:8]}... from swap event "
-                f"(paired with {self._get_token_symbol(denom_address)}, fee: {fee/10000}%)"
-            )
-            
         except Exception as e:
-            self.logger.debug(f"Failed to create V3 pool from swap {pool_address}: {e}")
+            raise RuntimeError(
+                "PoolManager._discover_and_register_v3_pool failed: "
+                f"pool={pool_address} token={self.token_address} error={e}"
+            ) from e
         finally:
             self._processing_pools.discard(pool_address)
     
-    def _get_token_symbol(self, token_address: str) -> str:
-        """Get token symbol helper.
+    def _get_denom_symbol(self, token_address: str) -> str:
+        return DENOM_ADDRESSES.get(token_address, 'Unknown')
         
-        For now returns a simple mapping. Should be enhanced to 
-        query from blockchain or database.
-        """
-        # Common token mappings
-        # Use checksum addresses for keys
-        common_tokens = {
-            '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2': 'WETH',
-            '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48': 'USDC',
-            '0xdAC17F958D2ee523a2206206994597C13D831ec7': 'USDT',
-            '0x6B175474E89094C44Da98b954EedeAC495271d0F': 'DAI',
-        }
-        
-        # Convert to checksum for lookup
-        try:
-            checksum_address = Web3.to_checksum_address(token_address)
-            return common_tokens.get(checksum_address, 'Unknown')
-        except:
-            return 'Unknown'
     
-    def _check_trading_enabled(self, transaction: ProcessedTransaction):
-        """
-        Check if trading is enabled on any pool.
-        
-        Trading is enabled when we see any swap, mint, or burn events on any pool.
-        """
-        if self.trading_enabled:
-            return  # Already enabled
-            
-        # Check for any activity that indicates trading is enabled
-        has_activity = False
-        
-        # Check V2 swaps
-        if getattr(transaction, 'uniswap_v2_swaps', []):
-            has_activity = True
-            
-        # Check V3 swaps
-        if getattr(transaction, 'uniswap_v3_swaps', []):
-            has_activity = True
-            
-        # Check V4 swaps
-        if getattr(transaction, 'uniswap_v4_swaps', []):
-            has_activity = True
-            
-        # Check mints/burns (liquidity operations)
-        if (getattr(transaction, 'uniswap_v3_mints', []) or 
-            getattr(transaction, 'uniswap_v3_burns', []) or
-            getattr(transaction, 'uniswap_v4_modifies', [])):
-            has_activity = True
-        
-        if has_activity:
-            self.trading_enabled = True
-            self.trading_enabled_block = transaction.block_number
-            self.trading_enabled_txn = transaction.hash
-            self.logger.info(f"Trading enabled detected at block {transaction.block_number}, tx {transaction.hash}")
-    
-    def is_trading_enabled(self) -> bool:
-        """Check if trading is enabled on any pool."""
-        return self.trading_enabled
-    
-    def get_trading_enabled_info(self):
-        """Get trading enabled information."""
-        return {
-            'enabled': self.trading_enabled,
-            'block': self.trading_enabled_block,
-            'txn': self.trading_enabled_txn
-        }
-    
-    def detect_arbitrage(self, min_profit_threshold: float = None) -> List[ArbitrageOpportunity]:
-        """
-        Detect arbitrage opportunities across all pools.
-        
-        Args:
-            min_profit_threshold: Minimum profit percentage to report (overrides detector default)
-            
-        Returns:
-            List of arbitrage opportunities sorted by profit percentage
-        """
-        if min_profit_threshold is not None:
-            old_threshold = self.arbitrage_detector.min_profit_threshold
-            self.arbitrage_detector.min_profit_threshold = min_profit_threshold
-            opportunities = self.arbitrage_detector.detect_arbitrage(self)
-            self.arbitrage_detector.min_profit_threshold = old_threshold
-        else:
-            opportunities = self.arbitrage_detector.detect_arbitrage(self)
-        
-        # Log if significant opportunities found
-        if opportunities:
-            self.arbitrage_detector.log_opportunities(opportunities)
-        
-        return opportunities
-    
-    def get_arbitrage_stats(self) -> Dict:
-        """
-        Get arbitrage statistics including price spreads and opportunities.
-        
-        Returns:
-            Dict with arbitrage statistics
-        """
-        # Get price spread stats
-        spread_stats = self.arbitrage_detector.get_price_spread_stats(self)
-        
-        # Detect current opportunities
-        opportunities = self.detect_arbitrage()
-        
-        # Format opportunity data
-        opp_data = []
-        for opp in opportunities[:10]:  # Top 10 opportunities
-            opp_data.append({
-                'buy_pool': opp.buy_pool,
-                'sell_pool': opp.sell_pool,
-                'profit_pct': opp.profit_percentage,
-                'buy_price': opp.buy_price,
-                'sell_price': opp.sell_price,
-                'max_amount': opp.max_profitable_amount
-            })
-        
-        return {
-            'price_spread': spread_stats,
-            'num_opportunities': len(opportunities),
-            'top_opportunities': opp_data,
-            'max_profit_pct': opportunities[0].profit_percentage if opportunities else 0,
-            'has_significant_arbitrage': any(opp.profit_percentage > 5 for opp in opportunities)
-        }
-    
-    def check_price_consistency(self, tolerance: float = 0.05) -> Dict:
-        """
-        Check if prices across pools are consistent within tolerance.
-        
-        Args:
-            tolerance: Maximum acceptable price deviation (default 5%)
-            
-        Returns:
-            Dict with consistency check results
-        """
-        pools_with_prices = []
-        
-        for pool in self.get_all_pools():
-            if pool.get_denom_reserve() > 0:
-                price = pool.get_price()
-                if price > 0:
-                    pools_with_prices.append({
-                        'pool': pool,
-                        'price': price,
-                        'address': pool.pool_address,
-                        'protocol': pool.get_protocol()
-                    })
-        
-        if len(pools_with_prices) < 2:
-            return {
-                'is_consistent': True,
-                'reason': 'Less than 2 pools with valid prices',
-                'num_pools': len(pools_with_prices)
-            }
-        
-        prices = [p['price'] for p in pools_with_prices]
-        avg_price = sum(prices) / len(prices)
-        
-        inconsistent_pools = []
-        for pool_data in pools_with_prices:
-            deviation = abs(pool_data['price'] - avg_price) / avg_price
-            if deviation > tolerance:
-                inconsistent_pools.append({
-                    'address': pool_data['address'],
-                    'protocol': pool_data['protocol'],
-                    'price': pool_data['price'],
-                    'deviation_pct': deviation * 100
-                })
-        
-        return {
-            'is_consistent': len(inconsistent_pools) == 0,
-            'avg_price': avg_price,
-            'num_pools': len(pools_with_prices),
-            'inconsistent_pools': inconsistent_pools,
-            'max_deviation_pct': max(p['deviation_pct'] for p in inconsistent_pools) if inconsistent_pools else 0
-        }
-

@@ -6,63 +6,13 @@ Each pool instance tracks its own events and updates its state accordingly.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple
-from collections import deque
-from dataclasses import dataclass, field
-from web3 import Web3
+from dataclasses import dataclass
 
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
-from eth_block_processor.chain_utils.common_addresses import (
-    DENOM_ADDRESSES, ERC20_TOKEN_DECIMALS, DENOM_NAMES_TO_ADDRESS,
-    denominator_addresses_by_name, known_denom_decimals
-)
 from .pool_reserve_tracker import PoolReserveTracker
-
-
-# Uniswap V2 Pair contract ABI for getReserves()
-UNISWAP_V2_PAIR_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "getReserves",
-        "outputs": [
-            {"internalType": "uint112", "name": "_reserve0", "type": "uint112"},
-            {"internalType": "uint112", "name": "_reserve1", "type": "uint112"},
-            {"internalType": "uint32", "name": "_blockTimestampLast", "type": "uint32"}
-        ],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "token0",
-        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "token1",
-        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
-
-# Minimal ERC20 ABI for fetching decimals
-ERC20_DECIMALS_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "decimals",
-        "outputs": [{"name": "", "type": "uint8"}],
-        "type": "function"
-    }
-]
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
+from ..token_chain_data_fetcher import TokenChainDataFetcher
+from .pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_data.utils.pyreth_client import PyrethClient
 
 
 @dataclass
@@ -94,9 +44,22 @@ class BasePool(ABC):
     
     Each pool manages its own events and state updates.
     """
+    # Default ETH amount used for viability test buys in simulations
+    DEFAULT_TEST_BUY_ETH: float = 0.01
     
-    def __init__(self, pool_address: str, token_address: str, 
-                 denom_address: str, token1_is_denom: bool = True):
+    def __init__(
+        self,
+        pool_address: str,
+        token_address: str,
+        denom_address: str,
+        *,
+        token_decimals: int,
+        denom_decimals: Optional[int] = None,
+        history_limit: int = 100,
+        token1_is_denom: bool = None,
+        pool_chain_fetcher: Optional[PoolChainDataFetcher] = None,
+        token_chain_fetcher: Optional[TokenChainDataFetcher] = None,
+    ):
         """
         Initialize a pool.
         
@@ -110,15 +73,16 @@ class BasePool(ABC):
         self.token_address = token_address
         self.denom_address = denom_address
         self.token1_is_denom = token1_is_denom
+        self.history_limit = history_limit
             
         # Current state
         self.state = PoolState()
         
         # Event storage (bounded to prevent memory issues)
-        self.sync_events = deque(maxlen=1000)
-        self.swap_events = deque(maxlen=5000)
-        self.mint_events = deque(maxlen=1000)
-        self.burn_events = deque(maxlen=1000)
+        self.sync_events: List[Dict[str, Any]] = []
+        self.swap_events: List[Dict[str, Any]] = []
+        self.mint_events: List[Dict[str, Any]] = []
+        self.burn_events: List[Dict[str, Any]] = []
         
         # Keep track of price history list (each txn -> price)
         self.price_history = []
@@ -126,69 +90,71 @@ class BasePool(ABC):
         # Creation info
         self.creation_block: Optional[int] = None
         self.creation_txn: Optional[str] = None
+        self.creation_timestamp: Optional[int] = None
         
-        # Trading enabled tracking
-        self.trading_enabled = False
-        self.trading_enabled_block = 0
-        self.trading_enabled_timestamp = 0
-        self.trading_enabled_txn = ''
-        self.trading_enabled_event_index = 0
+        # Trading capability tracking (internal naming for clarity)
+        self.can_buy: bool = False
+        self.can_buy_block: Optional[int] = None  # Maps to DB: trading_enabled_block
+        self.can_buy_txn: Optional[str] = None    # Maps to DB: trading_enabled_txn
+        self.can_buy_timestamp: Optional[int] = None
         
-        # Web3 connection (lazy loaded)
-        self._w3: Optional[Web3] = None
+        # Runtime-only fields (not persisted to DB)
+        self.can_sell: bool = False  # For honeypot detection
+        self.buy_tax: Optional[float] = None
+        self.sell_tax: Optional[float] = None
+        self.tax_check_block: Optional[int] = None
+        self.tax_check_txn: Optional[str] = None
         
         # Token decimals (cached)
-        self._token_decimals: Optional[int] = None
-        self._denom_decimals: Optional[int] = None
-        
-        # Pool-specific reserve tracker
-        self.reserve_tracker = PoolReserveTracker(
-            pool_address=pool_address,
-            denom_address=denom_address,
-            logger=None  # Logger can be set later if needed
+        self._token_decimals: Optional[int] = int(token_decimals)
+        self._denom_decimals: Optional[int] = (
+            int(denom_decimals) if denom_decimals is not None else None
         )
+
+        # Simulation settings
+        # Per-pool override for test buy amount used in viability checks
+        self.test_buy_amount_eth: float = self.DEFAULT_TEST_BUY_ETH
         
-        # Logger (can be set by subclasses)
-        self.logger = None
+        # Shared chain data helpers
+        self.pool_chain_fetcher = pool_chain_fetcher or PoolChainDataFetcher()
+        self.token_chain_fetcher = token_chain_fetcher or TokenChainDataFetcher()
+        self.pyreth_client = PyrethClient.instance()
         
         # Scam detection (from reserve tracker)
         self.scam_label: Optional[str] = None
         self.scam_block: Optional[int] = None        
         self.scam_tx_hash: Optional[str] = None
-        
+
+        # Reserve tracker with bounded history
+        self.reserve_tracker = PoolReserveTracker(
+            pool_address=pool_address,
+            denom_address=denom_address,
+            history_limit=history_limit,
+        )
+
     @abstractmethod
     def get_protocol(self) -> str:
         """Get the protocol name (V2, V3, V4, etc.)."""
         pass
         
     @abstractmethod
-    def process_transaction(self, transaction: ProcessedTransaction):
+    def process_transaction(self, transaction: Dict):
         """
         Process a transaction and extract relevant events.
         
         Each pool type knows how to extract its specific events.
         """
         pass
-    
-    @abstractmethod
-    def get_reserves_from_blockchain(self, block_identifier='latest') -> Tuple[float, float, bool]:
-        """
-        Fetch actual pool reserves from the blockchain.
-        
-        Args:
-            block_identifier: Block number or 'latest'
-            
-        Returns:
-            Tuple of (denom_reserve, token_reserve, success)
-        """
-        pass
-    
+
     def get_reserves(self) -> Tuple[float, float]:
         """Get current reserves."""
         return self.state.reserve0, self.state.reserve1
         
     def get_price(self) -> float:
         """Get current price of our token in terms of denom."""
+        # Return zero if the pool is scam
+        if self.is_scam:
+            return 0.0
         if self.token1_is_denom:
             # Our token is token0, denom is token1
             # Price = denom_per_token = reserve1 / reserve0
@@ -211,6 +177,11 @@ class BasePool(ABC):
             return self.state.reserve1
         else:
             return self.state.reserve0
+
+    def _append_event(self, collection: List[Any], entry: Any) -> None:
+        collection.append(entry)
+        if len(collection) > self.history_limit:
+            del collection[: len(collection) - self.history_limit]
             
     def update_reserves(self, reserve0: float, reserve1: float, block_number: int, 
                        timestamp: int = 0, tx_hash: str = ''):
@@ -222,13 +193,17 @@ class BasePool(ABC):
         # Calculate prices
         if reserve0 > 0:
             self.state.price0 = reserve1 / reserve0
+        else:
+            self.state.price0 = 0.0
         if reserve1 > 0:
             self.state.price1 = reserve0 / reserve1
+        else:
+            self.state.price1 = 0.0
             
         # Store price history
         price = self.get_price()
         if price > 0:
-            self.price_history.append((block_number, price))
+            self._append_event(self.price_history, (block_number, price))
             
         # Update reserve tracker
         denom_reserve = self.get_denom_reserve()
@@ -252,80 +227,130 @@ class BasePool(ABC):
             self.scam_block = None
             self.scam_tx_hash = None
     
-    def _mark_trading_enabled(self, transaction: ProcessedTransaction):
-        """Mark trading as enabled for this pool."""
-        if not self.trading_enabled:
-            self.trading_enabled = True
-            self.trading_enabled_block = transaction.block_number
-            self.trading_enabled_txn = transaction.hash
+    def mark_can_buy_from_event(self, transaction: Dict, event_type: str = 'swap'):
+        """Mark token as buyable when detected from a DEX event (typically first swap).
+
+        Args:
+            transaction: The processed transaction dict
+            event_type: Type of event that enabled buying (usually 'swap')
+        """
+        if not self.can_buy:
+            self.can_buy = True
+            self.can_buy_block = transaction['block_number']
+            self.can_buy_txn = transaction['hash']
+            # Persist when the first buy was observed on-chain
+            self.can_buy_timestamp = transaction['block_timestamp']
+            
+    def evaluate_trading_status(self, transaction: Dict) -> None:
+        """Pool-specific hook implemented by subclasses to enable trading."""
+        return
     
     def is_trading_enabled(self) -> bool:
-        """Check if trading is enabled on this pool."""
         return self.trading_enabled
     
-    def get_trading_enabled_info(self) -> Dict[str, Any]:
-        """Get trading enabled information for this pool."""
+    def get_trading_status(self) -> Dict[str, Any]:
+        """Get comprehensive trading status information."""
         return {
-            'enabled': self.trading_enabled,
+            'can_buy': self.can_buy,
+            'can_sell': self.can_sell,
+            'trading_enabled': self.trading_enabled,
+            'can_buy_and_sell': self.can_buy_and_sell,
             'block': self.trading_enabled_block,
-            'txn': self.trading_enabled_txn
+            'txn': self.trading_enabled_txn,
+            'buy_tax': self.buy_tax,
+            'sell_tax': self.sell_tax,
+            'tax_check_block': self.tax_check_block,
+            'tax_check_txn': self.tax_check_txn
         }
     
     @property
     def is_scam(self) -> bool:
-        """
-        Check if this pool is a scam based on the reserve tracker's detection.
-        """
         return self.reserve_tracker.is_scam
     
-    @property
-    def w3(self) -> Web3:
-        """Get Web3 connection (lazy loaded)."""
-        if self._w3 is None:
-            self._w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-        return self._w3
-    
-    def get_token_decimals(self) -> int:
-        """Get our token's decimals from the contract."""
+    def _ensure_token_decimals(self) -> int:
         if self._token_decimals is None:
-            try:
-                token_contract = self.w3.eth.contract(address=self.token_address, abi=ERC20_DECIMALS_ABI)
-                self._token_decimals = token_contract.functions.decimals().call()
-            except Exception:
-                # Default to 18 if decimals call fails
-                self._token_decimals = 18
+            self._token_decimals = int(
+                self.token_chain_fetcher.get_token_decimals(self.token_address)
+            )
         return self._token_decimals
-    
-    def get_denom_decimals(self) -> int:
-        """Get denomination token decimals."""
+
+    def _ensure_denom_decimals(self) -> int:
         if self._denom_decimals is None:
-            if self.denom_address in DENOM_ADDRESSES:
-                denom_name = DENOM_ADDRESSES[self.denom_address]
-                self._denom_decimals = known_denom_decimals.get(denom_name)
-            else:
-                # For unknown tokens, fetch decimals from blockchain
-                try:
-                    denom_contract = self.w3.eth.contract(address=self.denom_address, abi=ERC20_DECIMALS_ABI)
-                    self._denom_decimals = denom_contract.functions.decimals().call()
-                except Exception as e:
-                    # Log the error and return None
-                    if hasattr(self, 'logger') and self.logger:
-                        self.logger.error(f"Failed to fetch decimals for token {self.denom_address}: {e}")
-                    else:
-                        print(f"Failed to fetch decimals for token {self.denom_address}: {e}")
-                    self._denom_decimals = None
+            self._denom_decimals = int(
+                self.token_chain_fetcher.get_token_decimals(self.denom_address)
+            )
         return self._denom_decimals
-    
+
+    def set_token_decimals(self, decimals: Optional[int]) -> None:
+        if decimals is not None:
+            self._token_decimals = int(decimals)
+
+    def set_denom_decimals(self, decimals: Optional[int]) -> None:
+        if decimals is not None:
+            self._denom_decimals = int(decimals)
+
+    def get_token_decimals(self) -> int:
+        return self._ensure_token_decimals()
+
+    def get_denom_decimals(self) -> int:
+        return self._ensure_denom_decimals()
+        
     def get_denom_name(self) -> str:
         """Get denomination token name."""
-        # Convert to checksum address for lookup
-        try:
-            checksum_address = Web3.to_checksum_address(self.denom_address)
-            return DENOM_ADDRESSES.get(checksum_address)
-        except Exception:
-            # Fallback to original address if checksum conversion fails
-            return DENOM_ADDRESSES.get(self.denom_address)
+        name = DENOM_ADDRESSES.get(self.denom_address)
+        if name:
+            return name
+        symbol = self.token_chain_fetcher.get_token_symbol(self.denom_address)
+        return symbol
     
+    def pool_age_blocks(self, current_block: int) -> Optional[int]:
+        if self.creation_block is None:
+            return None
+        return current_block - self.creation_block
+    
+    def trading_age_blocks(self, current_block: int) -> Optional[int]:
+        if not self.can_buy or not self.can_buy_block:
+            return None
+        return current_block - self.can_buy_block
+    
+    def pool_age_hours(self) -> Optional[float]:        
+        if self.creation_timestamp is None or self.creation_timestamp == 0:
+            return None
+        current_timestamp = self.pyreth_client.get_current_block_timestamp()
+        return (current_timestamp - self.creation_timestamp) / 3600
+
+    def trading_age_hours(self) -> Optional[float]:
+        current_timestamp = self.pyreth_client.get_current_block_timestamp()
+        if not self.can_buy or not self.can_buy_timestamp:
+            return None
+        return (current_timestamp - self.can_buy_timestamp) / 3600
+    
+    @property
+    def trading_enabled(self) -> bool:
+        """Token is tradeable if can_buy is True."""
+        return self.can_buy
+    
+    @property
+    def trading_enabled_block(self) -> Optional[int]:
+        """Maps to database column trading_enabled_block."""
+        return self.can_buy_block
+    
+    @property
+    def trading_enabled_txn(self) -> Optional[str]:
+        """Maps to database column trading_enabled_txn."""
+        return self.can_buy_txn
+    
+    @property
+    def can_buy_and_sell(self) -> bool:
+        """True if token can be both bought AND sold (not a honeypot)."""
+        return self.can_buy and self.can_sell
+    
+    def check_and_update_trading_status(self, transaction: Dict) -> bool:
+        """Check if trading is enabled on this pool and calculate taxes."""
+        if not self.trading_enabled:
+            self.evaluate_trading_status(transaction)
+        return self.trading_enabled            
+
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         return {
@@ -339,4 +364,3 @@ class BasePool(ABC):
             'total_burns': self.state.total_burns,
             'last_update_block': self.state.last_update_block,
         }
-    
