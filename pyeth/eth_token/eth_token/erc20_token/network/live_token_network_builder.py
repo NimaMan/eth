@@ -5,7 +5,6 @@ from networkx.readwrite import json_graph
 from eth_data.tx_processor.address_balance_change_calculator import AddressBalanceChangeCalculator
 from eth_token.erc20_token.network.address_activity_tracker import AddressTokenActivityTracker
 
-
 class LiveTokenNetworkBuilder:
     def __init__(self, live_token):
         self.live_token = live_token

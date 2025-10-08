@@ -82,7 +82,7 @@ class BlockTokenProcessor:
     def _is_token_creation(self, transaction: Dict) -> bool:
         """Check if transaction creates a new token"""
         return (
-            transaction.get('tx_type', transaction.get('txn_type')) == 'Contract Creation' 
+            transaction.get('tx_type', transaction.get('tx_type')) == 'Contract Creation' 
             and transaction.get('contract_address')
             and transaction.get('contract_creation_events', [])
             and transaction['contract_creation_events'][0]["contract_type"] == "ERC-20"

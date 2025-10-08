@@ -1,4 +1,4 @@
-from eth_data.tx_processor.data_models import txn_models as tx_models
+from eth_data.tx_processor.data_models import tx_models as tx_models
 from eth_token.alert.base_alert import BaseAlert
 from typing import List
 from dataclasses import dataclass
@@ -18,8 +18,8 @@ ProcessedTransaction = tx_models.ProcessedTransaction
 
 
 def _tx_type(detailed_tx: ProcessedTransaction) -> str:
-    """Handle legacy txn_type attribute during tx naming transition."""
-    return getattr(detailed_tx, "tx_type", getattr(detailed_tx, "txn_type", ""))
+    """Handle legacy tx_type attribute during tx naming transition."""
+    return getattr(detailed_tx, "tx_type", getattr(detailed_tx, "tx_type", ""))
 
 
 class TradingEnabledAlert(BaseAlert):

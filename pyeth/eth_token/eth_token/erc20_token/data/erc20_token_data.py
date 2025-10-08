@@ -758,7 +758,7 @@ class ERC20TokenData:
         self.tx_hashes_to_makers[transaction['hash']] = transaction['from_address']
 
         # Handle contract creation
-        tx_type = transaction.get('tx_type', transaction.get('txn_type'))
+        tx_type = transaction.get('tx_type', transaction.get('tx_type'))
         if tx_type == 'Contract Creation' or transaction.get('contract_creation_events'):
             self._handle_creation(transaction)
 
