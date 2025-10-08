@@ -1,18 +1,10 @@
-import os
-import pandas as pd
 from typing import Set
 from functools import lru_cache
-from sqlalchemy.orm import Session
-from sarigoz.data.db.eth_db_conn import get_db_engine
-from sarigoz.data.db.queries.scam_queries import get_mimic_octopus_addresses_query
+from eth_data.database.eth_db_conn import get_db_engine
+from eth_data.database.queries.scam_queries import get_mimic_octopus_addresses_query
 
 
-ETH_DATA_DIR = os.environ["ETH_DATA_DIR"]
-scammers_df_dir = os.path.join(os.environ["ETH_DATA_DIR"], "scammers.parquet") 
-
-scammers_address_set = set(pd.read_parquet(scammers_df_dir)["address"].tolist())
-HIDDEN_MINT_MODEL_PATH = "/home/nima/code/crypto/Aladdin3_Models/scripts/models/bytecode/best_hidden_mint_model.pth"
-
+scammers_address_set = set()
 
 bribe_threshold = 0.1
 

@@ -13,6 +13,14 @@ Event Processing:
 - univ2_mints: Liquidity provision with LP token minting
 - univ2_burns: Liquidity removal with LP token burning
 
+LP Token Tracking:
+- `LPTokenTracker` keeps ERC20 LP balances, approvals, and history isolated
+  from the pool's AMM state transitions.
+- Router approvals surface as early warnings for liquidity exits—key for
+  scam detection workflows.
+- The pool delegates LP transfer/approval events to the tracker, keeping AMM
+  logic focused on reserves, pricing, and trading enablement.
+
 Blockchain Interface:
 - getReserves(): Current reserve amounts and last update timestamp
 - token0()/token1(): Token addresses in deterministic order
@@ -24,45 +32,250 @@ Price Calculation:
 - Price impact calculations using constant product formula
 """
 
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict, List, Iterable, Any
+from dataclasses import dataclass, field
+import pyreth
 from .base_pool import BasePool
-from eth_block_processor.data_models.txn_models import ProcessedTransaction
+from .pool_chain_data_fetcher import PoolChainDataFetcher
+from ..token_chain_data_fetcher import TokenChainDataFetcher
+from eth_data.utils.type_converter import convert_scaled_amount
+from eth_data.chain_utils.common_addresses import (
+    ROUTER_ADDRESSES as KNOWN_ROUTERS,
+    canonicalize_dex_pool_type,
+)
+UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
 
 
-# Uniswap V2 Pair contract ABI for getReserves()
-UNISWAP_V2_PAIR_ABI = [
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "getReserves",
-        "outputs": [
-            {"internalType": "uint112", "name": "_reserve0", "type": "uint112"},
-            {"internalType": "uint112", "name": "_reserve1", "type": "uint112"},
-            {"internalType": "uint32", "name": "_blockTimestampLast", "type": "uint32"}
-        ],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "token0",
-        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "constant": True,
-        "inputs": [],
-        "name": "token1",
-        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-        "payable": False,
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
+@dataclass
+class ApprovalInfo:
+    """Stores information about an LP token approval"""
+    amount: float
+    tx_hash: str
+    block_number: int
+    timestamp: Optional[int] = None
+    
+
+@dataclass
+class LPHolderInfo:
+    """Stores LP holder balance and approval information"""
+    balance: float = 0.0
+    approvals: Dict[str, ApprovalInfo] = field(default_factory=dict)  # spender -> approval info
+
+
+class LPTokenTracker:
+    """Tracks ERC20 LP balances, approvals, and related events."""
+
+    ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+    BALANCE_EPSILON = 1e-18
+
+    def __init__(
+        self,
+        *,
+        lp_decimals: int = 18,
+        known_routers: Optional[Iterable[str]] = None,
+        history_limit: int = 100,
+    ):
+        self.lp_decimals = lp_decimals
+        self.known_routers = set(known_routers or [])
+        self.history_limit = history_limit
+
+        self._holders: Dict[str, LPHolderInfo] = {}
+        self._total_supply: float = 0.0
+
+        # Event history (bounded)
+        self._transfers: List[Dict[str, Any]] = []
+        self._mint_events: List[Dict[str, Any]] = []
+        self._burn_events: List[Dict[str, Any]] = []
+        self._approval_events: List[Dict[str, Any]] = []
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _append_event(self, collection: List[Dict[str, Any]], entry: Dict[str, Any]) -> None:
+        collection.append(entry)
+        if len(collection) > self.history_limit:
+            del collection[: len(collection) - self.history_limit]
+
+    def _get_or_create_holder(self, address: str) -> LPHolderInfo:
+        if address not in self._holders:
+            self._holders[address] = LPHolderInfo()
+        return self._holders[address]
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def record_transfer(self, transfer: Dict[str, Any]) -> None:
+        """
+        Track an LP token transfer, updating balances and supply.
+
+        Args:
+            transfer: Raw ERC20 transfer event dict.
+        """
+        amount = float(transfer['amount']) / (10 ** self.lp_decimals)
+        event = {
+            'block_number': transfer.get('block_number'),
+            'tx_hash': transfer.get('tx_hash'),
+            'from_address': transfer['from_address'],
+            'to_address': transfer['to_address'],
+            'amount': amount,
+            'log_index': transfer.get('log_index'),
+        }
+        self._append_event(self._transfers, event)
+
+        from_address = transfer['from_address']
+        to_address = transfer['to_address']
+
+        if from_address != self.ZERO_ADDRESS:
+            holder = self._get_or_create_holder(from_address)
+            holder.balance -= amount
+            if abs(holder.balance) < self.BALANCE_EPSILON and not holder.approvals:
+                del self._holders[from_address]
+        else:
+            self._total_supply += amount
+            # Keep the original shape for downstream consumers
+            self._append_event(self._mint_events, dict(transfer))
+
+        if to_address != self.ZERO_ADDRESS:
+            holder = self._get_or_create_holder(to_address)
+            holder.balance += amount
+        else:
+            self._total_supply = max(0.0, self._total_supply - amount)
+            self._append_event(self._burn_events, dict(transfer))
+
+    def record_approval(self, approval: Dict[str, Any]) -> ApprovalInfo:
+        """
+        Track an LP token approval, returning normalized approval info.
+
+        Args:
+            approval: Approval event dict with owner, spender, value, etc.
+
+        Returns:
+            ApprovalInfo instance for the approval.
+        """
+        owner = approval['owner']
+        spender = approval['spender']
+        raw_value = approval.get('value', approval.get('amount', 0))
+        amount = convert_scaled_amount(raw_value, self.lp_decimals)
+
+        holder = self._get_or_create_holder(owner)
+        approval_info = ApprovalInfo(
+            amount=amount,
+            tx_hash=approval.get('tx_hash', ''),
+            block_number=approval.get('block_number', 0),
+            timestamp=approval.get('block_timestamp'),
+        )
+        holder.approvals[spender] = approval_info
+
+        event = {
+            'block_number': approval.get('block_number'),
+            'tx_hash': approval.get('tx_hash'),
+            'owner': owner,
+            'spender': spender,
+            'amount': amount,
+            'is_router': spender in self.known_routers,
+            'timestamp': approval.get('block_timestamp'),
+        }
+        self._append_event(self._approval_events, event)
+        return approval_info
+
+    # ------------------------------------------------------------------
+    # Accessors
+    # ------------------------------------------------------------------
+    @property
+    def total_supply(self) -> float:
+        return self._total_supply
+
+    def get_balances(self) -> Dict[str, float]:
+        """Return current LP balances by address."""
+        return {
+            address: holder.balance
+            for address, holder in self._holders.items()
+        }
+
+    def get_share(self, address: str) -> float:
+        """Return the percentage ownership for an address."""
+        if self._total_supply == 0:
+            return 0.0
+        holder = self._holders.get(address)
+        if not holder:
+            return 0.0
+        return (holder.balance / self._total_supply) * 100
+
+    def get_holder_snapshots(self) -> Dict[str, Dict[str, Any]]:
+        """Return balance, share, and approval details for each holder."""
+        result: Dict[str, Dict[str, Any]] = {}
+        for address, holder in self._holders.items():
+            if holder.balance <= 0 and not holder.approvals:
+                continue
+            approvals = {
+                spender: {
+                    'amount': info.amount,
+                    'tx_hash': info.tx_hash,
+                    'block_number': info.block_number,
+                    'is_router': spender in self.known_routers,
+                }
+                for spender, info in holder.approvals.items()
+            }
+            result[address] = {
+                'balance': holder.balance,
+                'share': self.get_share(address),
+                'approvals': approvals,
+            }
+        return dict(
+            sorted(result.items(), key=lambda item: item[1]['balance'], reverse=True)
+        )
+
+    def get_total_approved_to_routers(self) -> float:
+        """Return the aggregate LP amount approved to known routers."""
+        total_approved = 0.0
+        for holder in self._holders.values():
+            for spender, approval in holder.approvals.items():
+                if spender in self.known_routers:
+                    effective = min(approval.amount, holder.balance)
+                    total_approved += effective
+        return total_approved
+
+    def get_approved_percentage(self) -> float:
+        """Return percentage of total supply approved to known routers."""
+        if self._total_supply == 0:
+            return 0.0
+        return (self.get_total_approved_to_routers() / self._total_supply) * 100
+
+    def get_last_approval_block(self) -> Optional[int]:
+        if not self._approval_events:
+            return None
+        return self._approval_events[-1].get('block_number')
+
+    def get_last_approval_event(self) -> Optional[Dict[str, Any]]:
+        if not self._approval_events:
+            return None
+        return dict(self._approval_events[-1])
+
+    def get_holders_with_approvals(self) -> List[str]:
+        return [
+            address
+            for address, holder in self._holders.items()
+            if holder.approvals
+        ]
+
+    # ------------------------------------------------------------------
+    # Event history accessors
+    # ------------------------------------------------------------------
+    @property
+    def transfers(self) -> List[Dict[str, Any]]:
+        return self._transfers
+
+    @property
+    def mint_events(self) -> List[Dict[str, Any]]:
+        return self._mint_events
+
+    @property
+    def burn_events(self) -> List[Dict[str, Any]]:
+        return self._burn_events
+
+    @property
+    def approval_events(self) -> List[Dict[str, Any]]:
+        return self._approval_events
 
 
 class UniswapV2Pool(BasePool):
@@ -73,8 +286,19 @@ class UniswapV2Pool(BasePool):
     easy to track.
     """
     
-    def __init__(self, pool_address: str, token_address: str, 
-                 denom_address: str, token1_is_denom: bool = True):
+    def __init__(
+        self,
+        pool_address: str,
+        token_address: str,
+        denom_address: str,
+        *,
+        token_decimals: Optional[int] = None,
+        denom_decimals: Optional[int] = None,
+        token1_is_denom: bool = True,
+        pool_chain_fetcher: Optional[PoolChainDataFetcher] = None,
+        token_chain_fetcher: Optional[TokenChainDataFetcher] = None,
+        history_limit: int = 1000,
+    ):
         """
         Initialize V2 pool.
         
@@ -84,98 +308,141 @@ class UniswapV2Pool(BasePool):
             denom_address: The paired token address (WETH, USDC, etc.)
             token1_is_denom: Whether token1 is the denomination token
         """
-        super().__init__(pool_address, token_address, denom_address, token1_is_denom)
+        super().__init__(
+            pool_address=pool_address,
+            token_address=token_address,
+            denom_address=denom_address,
+            token_decimals=token_decimals,
+            denom_decimals=denom_decimals,
+            token1_is_denom=token1_is_denom,
+            pool_chain_fetcher=pool_chain_fetcher,
+            token_chain_fetcher=token_chain_fetcher,
+            history_limit=history_limit,
+        )
             
         # LP Token tracking (V2 pools ARE ERC20 LP tokens)
         self.lp_decimals = 18  # V2 LP tokens always have 18 decimals
-        self.lp_total_supply = 0.0  # Total LP tokens in circulation
-        self.lp_holders = {}  # Dict[address, balance] - LP token holders
-        self.lp_transfers = []  # List of all LP token transfers
-        self.lp_mint_events = []  # Liquidity addition events
-        self.lp_burn_events = []  # Liquidity removal events
-    
+        self.lp_tracker = LPTokenTracker(
+            lp_decimals=self.lp_decimals,
+            known_routers=KNOWN_ROUTERS,
+            history_limit=self.history_limit,
+        )
+
     def get_protocol(self) -> str:
-        return "V2"
+        return UNISWAP_V2_PROTOCOL
+
+    def evaluate_trading_status(self, transaction: Dict) -> None:
+        if self.can_buy and self.can_sell:
+            return
         
-    def process_transaction(self, transaction: ProcessedTransaction):
-        """
-        Process V2 events from a transaction.
-        
-        V2 events we care about:
+        config = pyreth.PoolBuySellParameters()
+        config.test_amount_eth = float(self.test_buy_amount_eth)
+        config.token_decimals = int(self.get_token_decimals())
+        config.block_number = int(transaction['block_number'])
+
+        # The tranaction is already mined, so we dont need to include it as a prior tx 
+        simulator = self.pyreth_client.pool_buy_sell_simulator()
+        result = simulator.check_uniswap_v2_pool(
+            self.token_address,
+            self.pool_address,
+            config,
+        )
+
+        if result.can_buy and not self.can_buy:
+            self.can_buy = True
+            self.can_buy_block = transaction['block_number']
+            self.can_buy_tx = transaction['hash']
+            self.can_buy_timestamp = transaction.get('block_timestamp', 0)
+
+        self.can_sell = bool(result.can_sell)
+        self.buy_tax = result.buy_tax_percentage
+        self.sell_tax = result.sell_tax_percentage
+        self.tax_check_block = transaction['block_number']
+        self.tax_check_tx = transaction['hash']
+    
+    def process_transaction(self, transaction: Dict):
+        """Process V2 events from a transaction.        
         - univ2_syncs: Reserve updates
         - univ2_swaps: Trade events
         - univ2_mints: Liquidity additions
         - univ2_burns: Liquidity removals
         """
         # Process sync events
-        for sync in getattr(transaction, 'uniswap_v2_syncs', []):
-            if sync.get('pair_address', '').lower() == self.pool_address.lower():
-                self._process_sync(sync, transaction)
+        if transaction.get('uniswap_v2_syncs'):
+            for sync in transaction['uniswap_v2_syncs']:
+                if sync.get('pair_address', '') == self.pool_address:
+                    self._process_sync(sync, transaction)
                 
         # Process swap events  
-        for swap in getattr(transaction, 'uniswap_v2_swaps', []):
-            if swap.get('pair_address', '').lower() == self.pool_address:
-                self._process_swap(swap, transaction)
+        if transaction.get('uniswap_v2_swaps'):
+            for swap in transaction['uniswap_v2_swaps']:
+                if swap.get('pair_address', '') == self.pool_address:
+                    self._process_swap(swap, transaction)
                 
         # Process mint events
-        for mint in getattr(transaction, 'mints', getattr(transaction, 'uniswap_v2_mints', [])):
-            if mint.get('token_address', mint.get('pair_address', '')).lower() == self.pool_address:
+        mint_events = transaction.get('mints', [])
+        if not mint_events and 'uniswap_v2_mints' in transaction:
+            mint_events = transaction['uniswap_v2_mints']
+        
+        for mint in mint_events:
+            if mint.get('token_address', mint.get('pair_address', '')) == self.pool_address:
                 self._process_mint(mint, transaction)
                 
         # Process burn events
-        for burn in getattr(transaction, 'burns', getattr(transaction, 'uniswap_v2_burns', [])):
-            if burn.get('token_address', burn.get('pair_address', '')).lower() == self.pool_address:
+        # Check both 'burns' and 'uniswap_v2_burns' attributes
+        burn_events = transaction.get('burns', [])
+        if not burn_events and 'uniswap_v2_burns' in transaction:
+            burn_events = transaction['uniswap_v2_burns']
+            
+        for burn in burn_events:
+            if burn.get('token_address', burn.get('pair_address', '')) == self.pool_address:
                 self._process_burn(burn, transaction)
+        
+        # Check if trading is enabled after processing all events
+        self.check_and_update_trading_status(transaction)
 
     
-    def _process_sync(self, sync: dict, transaction: ProcessedTransaction):
+    def _process_sync(self, sync: dict, transaction: Dict):
         """Process a sync event to update reserves."""
         # Get decimals for proper conversion
         token0_decimals = self._get_token0_decimals()
         token1_decimals = self._get_token1_decimals()
         
         # Update reserves from sync event (convert from raw values)
-        reserve0_raw = float(sync.get('reserve0', 0))
-        reserve1_raw = float(sync.get('reserve1', 0))
+        reserve0_raw = float(sync['reserve0'])
+        reserve1_raw = float(sync['reserve1'])
         
         # Handle cases where decimals might be None
         if token0_decimals is not None and token1_decimals is not None:
             reserve0 = reserve0_raw / (10 ** token0_decimals)
             reserve1 = reserve1_raw / (10 ** token1_decimals)
         else:
-            # Skip processing if we can't get decimals
-            if hasattr(self, 'logger') and self.logger:
-                self.logger.warning(f"Cannot process sync for pool {self.pool_address}: missing decimals (token0: {token0_decimals}, token1: {token1_decimals})")
-            return
-        
-        # Update pool state with reserve tracker
-        timestamp = transaction.block_timestamp
-        if hasattr(timestamp, 'timestamp'):
-            timestamp = int(timestamp.timestamp())
-        else:
-            timestamp = int(timestamp) if timestamp else 0
+            raise RuntimeError(
+                "UniswapV2Pool._process_sync: "
+                f"missing decimals (token0={token0_decimals}, token1={token1_decimals}) for pool {self.pool_address}"
+            )
             
         self.update_reserves(
             reserve0=reserve0, 
             reserve1=reserve1, 
-            block_number=transaction.block_number,
-            timestamp=timestamp,
-            tx_hash=transaction.hash
+            block_number=transaction['block_number'],
+            timestamp=transaction["block_timestamp"],
+            tx_hash=transaction['hash']
         )
         
         # Store sync event
-        self.sync_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+        self._append_event(self.sync_events, {
+            'block': transaction['block_number'],
+            'tx_hash': transaction['hash'],
             'reserve0': reserve0,
             'reserve1': reserve1,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction["block_timestamp"],
         })
 
-    def _process_swap(self, swap: dict, transaction: ProcessedTransaction):
+    def _process_swap(self, swap: dict, transaction: Dict):
         """Process a V2 swap event."""
-        # Mark trading enabled
-        self._mark_trading_enabled(transaction)
+        # Mark token as buyable from first swap event
+        self.mark_can_buy_from_event(transaction, event_type='swap')
         
         # Extract swap data
         sender = swap.get('sender')
@@ -197,9 +464,9 @@ class UniswapV2Pool(BasePool):
         is_sell = amount0_in > 0 and amount1_out > 0  # Giving token0 for token1
         
         # Store swap event
-        self.swap_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+        self._append_event(self.swap_events, {
+            'block': transaction['block_number'],
+            'tx_hash': transaction['hash'],
             'sender': sender,
             'to': to,
             'amount0_in': amount0_in,
@@ -208,10 +475,10 @@ class UniswapV2Pool(BasePool):
             'amount1_out': amount1_out,
             'is_buy': is_buy,
             'is_sell': is_sell,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction["block_timestamp"]
         })
 
-    def _process_mint(self, mint: dict, transaction: ProcessedTransaction):
+    def _process_mint(self, mint: dict, transaction: Dict):
         """Process a V2 mint (add liquidity) event."""
         to = mint.get('to_address', mint.get('to'))
         amount = float(mint.get('amount', 0))
@@ -220,15 +487,15 @@ class UniswapV2Pool(BasePool):
         self.state.total_mints += 1
         
         # Store mint event
-        self.mint_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+        self._append_event(self.mint_events, {
+            'block': transaction['block_number'],
+            'tx_hash': transaction['hash'],
             'to': to,
             'amount': amount,
-            'timestamp': transaction.block_timestamp
+            'timestamp': transaction["block_timestamp"]
         })
 
-    def _process_burn(self, burn: dict, transaction: ProcessedTransaction):
+    def _process_burn(self, burn: dict, transaction: Dict):
         """Process a V2 burn (remove liquidity) event."""
         from_address = burn.get('from_address', burn.get('sender'))
         amount = float(burn.get('amount', 0))
@@ -244,197 +511,96 @@ class UniswapV2Pool(BasePool):
         self.state.total_burns += 1
         
         # Store burn event
-        self.burn_events.append({
-            'block': transaction.block_number,
-            'txn_hash': transaction.hash,
+        self._append_event(self.burn_events, {
+            'block': transaction['block_number'],
+            'tx_hash': transaction['hash'],
             'from': from_address,
             'amount': amount,
-            'timestamp': transaction.block_timestamp
+            'timestamp': timestamp
         })
-                
 
     def get_latest_sync(self) -> Optional[dict]:
-        """Get the latest sync event."""
         return self.sync_events[-1] if self.sync_events else None
         
     def get_recent_swaps(self, count: int = 10) -> list:
-        """Get the last N swaps."""
         return list(self.swap_events)[-count:]
         
-    def calculate_price_impact(self, amount_in: float, is_token0: bool) -> float:
-        """
-        Calculate price impact for a given trade size.
-        
-        Args:
-            amount_in: The amount of token being traded in
-            is_token0: Whether the input token is token0
-            
-        Returns:
-            Price impact as a percentage (e.g., 1.5 for 1.5%)
-        """
-        if is_token0:
-            reserve_in = self.state.reserve0
-            reserve_out = self.state.reserve1
-        else:
-            reserve_in = self.state.reserve1
-            reserve_out = self.state.reserve0
-            
-        if reserve_in == 0 or reserve_out == 0:
-            return 0.0
-            
-        # Calculate amount out based on constant product formula
-        amount_in_with_fee = amount_in * 0.997  # V2 fee is 0.3%
-        k = reserve_in * reserve_out
-        new_reserve_in = reserve_in + amount_in_with_fee
-        new_reserve_out = k / new_reserve_in
-        amount_out = reserve_out - new_reserve_out
-        
-        # Calculate prices
-        market_price = reserve_out / reserve_in
-        exec_price = amount_out / amount_in
-        
-        # Calculate price impact
-        price_impact = (abs(market_price - exec_price) / market_price) * 100
-        return price_impact
-
     def _get_token0_decimals(self) -> int:
-        """Get token0 decimals."""
-        if self.token1_is_denom:
-            # Our token is token0
-            return self.get_token_decimals()
-        else:
-            # Denom token is token0
-            return self.get_denom_decimals()
+        return self.get_token_decimals() if self.token1_is_denom else self.get_denom_decimals()
 
     def _get_token1_decimals(self) -> int:
-        """Get token1 decimals."""
-        if self.token1_is_denom:
-            # Denom token is token1
-            return self.get_denom_decimals()
-        else:
-            # Our token is token1
-            return self.get_token_decimals()
-    
-    def get_reserves_from_blockchain(self, block_identifier='latest') -> Tuple[float, float, bool]:
-        """
-        Fetch actual pool reserves from the blockchain using getReserves() call.
-        
-        Args:
-            block_identifier: Block number or 'latest'
-            
-        Returns:
-            Tuple of (denom_reserve, token_reserve, success)
-        """
-        try:
-            if not self.w3.is_connected():
-                return 0.0, 0.0, False
-                
-            pair_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(self.pool_address),
-                abi=UNISWAP_V2_PAIR_ABI
-            )
-            
-            token0 = pair_contract.functions.token0().call(block_identifier=block_identifier)
-            token1 = pair_contract.functions.token1().call(block_identifier=block_identifier)
-            reserves = pair_contract.functions.getReserves().call(block_identifier=block_identifier)
-            
-            reserve0, reserve1, _ = reserves
-            
-            denom_decimals = self.get_denom_decimals()
-            token_decimals = self.get_token_decimals()  # Use actual token decimals, not hardcoded 18
-            
-            if token0.lower() == self.denom_address.lower():
-                denom_reserve = float(reserve0) / (10 ** denom_decimals)
-                token_reserve = float(reserve1) / (10 ** token_decimals)
-            elif token1.lower() == self.denom_address.lower():
-                denom_reserve = float(reserve1) / (10 ** denom_decimals)
-                token_reserve = float(reserve0) / (10 ** token_decimals)
-            else:
-                return 0.0, 0.0, False
-                
-            return denom_reserve, token_reserve, True
-            
-        except Exception as e:
-            return 0.0, 0.0, False
+        return self.get_denom_decimals() if self.token1_is_denom else self.get_token_decimals()
     
     def process_lp_transfer(self, transfer: Dict):
-        """
-        Process an LP token transfer for this V2 pool.
-        
-        V2 pools ARE ERC20 tokens, so transfers of the pool address
-        are actually LP token transfers representing liquidity ownership.
-        
-        Args:
-            transfer: Transfer event dict with from_address, to_address, amount, etc.
-        """
-        amount = float(transfer['amount']) / (10 ** self.lp_decimals)
-        zero_address = '0x0000000000000000000000000000000000000000'
-        
-        # Store the transfer
-        self.lp_transfers.append({
-            'block_number': transfer.get('block_number'),
-            'txn_hash': transfer.get('txn_hash'),
-            'from_address': transfer['from_address'],
-            'to_address': transfer['to_address'],
-            'amount': amount,
-            'log_index': transfer.get('log_index')
-        })
-        
-        # Update holder balances
-        if transfer['from_address'] != zero_address:
-            if transfer['from_address'] not in self.lp_holders:
-                self.lp_holders[transfer['from_address']] = 0
-            self.lp_holders[transfer['from_address']] -= amount
-            # Remove if balance is effectively zero
-            if abs(self.lp_holders[transfer['from_address']]) < 1e-18:
-                del self.lp_holders[transfer['from_address']]
-                
-        if transfer['to_address'] != zero_address:
-            if transfer['to_address'] not in self.lp_holders:
-                self.lp_holders[transfer['to_address']] = 0
-            self.lp_holders[transfer['to_address']] += amount
-            
-        # Track mints and burns
-        if transfer['from_address'] == zero_address:
-            # Mint - liquidity added
-            self.lp_total_supply += amount
-            self.lp_mint_events.append(transfer)
-        elif transfer['to_address'] == zero_address:
-            # Burn - liquidity removed
-            self.lp_total_supply -= amount
-            self.lp_burn_events.append(transfer)
+        self.lp_tracker.record_transfer(transfer)
+    
+    def process_lp_approval(self, approval: Dict):
+        self.lp_tracker.record_approval(approval)
     
     def get_lp_share(self, address: str) -> float:
-        """
-        Get the percentage share of the pool owned by an address.
-        
-        Args:
-            address: The address to check
-            
-        Returns:
-            Percentage of pool owned (0-100)
-        """
-        if self.lp_total_supply == 0:
-            return 0
-        balance = self.lp_holders.get(address, 0)
-        return (balance / self.lp_total_supply) * 100
+        return self.lp_tracker.get_share(address)
     
-    def get_lp_holders(self) -> List[Tuple[str, float, float]]:
+    def get_lp_holders(self) -> Dict[str, Dict]:
+        return self.lp_tracker.get_holder_snapshots()
+    
+    def get_total_approved_to_routers(self) -> float:
+        return self.lp_tracker.get_total_approved_to_routers()
+    
+    def get_lp_approved_percentage(self) -> float:
+        return self.lp_tracker.get_approved_percentage()
+    
+    def get_last_lp_approval_block(self) -> Optional[int]:
+        return self.lp_tracker.get_last_approval_block()
+
+    def get_last_lp_approval_event(self) -> Optional[Dict[str, Any]]:
+        return self.lp_tracker.get_last_approval_event()
+    
+    def get_holders_with_approvals(self) -> List[str]:
+        return self.lp_tracker.get_holders_with_approvals()
+    
+    # ------------------------------------------------------------------
+    # LP tracker views (for backwards compatibility with callers that
+    # expect attributes on the pool instance)
+    # ------------------------------------------------------------------
+    @property
+    def lp_total_supply(self) -> float:
+        return self.lp_tracker.total_supply
+
+    @property
+    def lp_holders(self) -> Dict[str, float]:
+        return self.lp_tracker.get_balances()
+
+    @property
+    def lp_transfers(self) -> List[Dict[str, Any]]:
+        return self.lp_tracker.transfers
+
+    @property
+    def lp_mint_events(self) -> List[Dict[str, Any]]:
+        return self.lp_tracker.mint_events
+
+    @property
+    def lp_burn_events(self) -> List[Dict[str, Any]]:
+        return self.lp_tracker.burn_events
+
+    @property
+    def lp_approval_events(self) -> List[Dict[str, Any]]:
+        return self.lp_tracker.approval_events
+    
+    def get_pool_data_for_publishing(self) -> Dict:
         """
-        Get the top N LP token holders.
+        Get pool data with LP approval percentage for publishing.
         
-        Args:
-            n: Number of top holders to return
-            
         Returns:
-            List of tuples (address, balance, percentage_share)
+            Dict with pool data including lp_tokens_approved_percentage
         """
-        
-        result = {}
-        for address, balance in self.lp_holders.items():
-            if balance > 0:  # Only include positive balances
-                share = self.get_lp_share(address)
-                result[address] = (balance, share)
-        # Sort by balance descending
-        return dict(sorted(result.items(), key=lambda x: x[1][0], reverse=True))
+        pool_data = {
+            'pool_address': self.pool_address,
+            'token_reserve': self.state.reserve_token,
+            'denom_reserve': self.state.reserve_denom,
+            'trading_enabled': self.trading_enabled,
+            'trading_enabled_block': self.trading_enabled_block,
+            'trading_enabled_tx': self.trading_enabled_tx,
+            'lp_tokens_approved_percentage': self.get_lp_approved_percentage()
+        }
+        return pool_data
     

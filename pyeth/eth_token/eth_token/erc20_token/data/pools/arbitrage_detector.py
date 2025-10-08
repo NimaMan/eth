@@ -76,15 +76,15 @@ folder. Significant opportunities (>5% profit) trigger WARNING level logs.
 
 from typing import Dict, List, Optional, TYPE_CHECKING
 from dataclasses import dataclass
-from web3 import Web3
-from eth_token.utils.logger import get_logger
+
+from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+
+UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
+UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
+UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
 
 if TYPE_CHECKING:
     from .pool_manager import PoolManager
-
-# Set up dedicated logger for arbitrage detection
-arbitrage_logger = get_logger('arbitrage_detector', log_folder='Arbitrage_detection')
-
 
 @dataclass
 class ArbitrageOpportunity:
@@ -118,20 +118,19 @@ class ArbitrageDetector:
             token_address: The token to monitor for arbitrage
             min_profit_threshold: Minimum profit percentage to report (default 1%)
         """
-        self.token_address = Web3.to_checksum_address(token_address)
+        self.token_address = token_address
         self.min_profit_threshold = min_profit_threshold
-        self.logger = arbitrage_logger
         
         # Fee structures for different protocols
         self.protocol_fees = {
-            'V2': 0.003,  # 0.3%
-            'V3': {  # Variable fees
+            UNISWAP_V2_PROTOCOL: 0.003,  # 0.3%
+            UNISWAP_V3_PROTOCOL: {  # Variable fees
                 100: 0.0001,    # 0.01%
                 500: 0.0005,    # 0.05%
                 3000: 0.003,    # 0.3%
                 10000: 0.01     # 1%
             },
-            'V4': 0.003  # Default, but can be dynamic
+            UNISWAP_V4_PROTOCOL: 0.003  # Default, but can be dynamic
         }
     
     def detect_arbitrage(self, pool_manager: 'PoolManager') -> List[ArbitrageOpportunity]:
@@ -207,12 +206,6 @@ class ArbitrageDetector:
                         
                         opportunities.append(opportunity)
                         
-                        # Log significant opportunities
-                        if profit_pct > 5:  # Log if > 5% profit
-                            self.logger.warning(
-                                f"High arbitrage opportunity detected: {profit_pct:.2f}% profit "
-                                f"between {buy_pool.get_protocol()} and {sell_pool.get_protocol()} pools"
-                            )
         
         # Sort by profit percentage (highest first)
         opportunities.sort(key=lambda x: x.profit_percentage, reverse=True)
@@ -221,18 +214,18 @@ class ArbitrageDetector:
     
     def _get_pool_fee(self, pool) -> float:
         """Get the fee for a specific pool."""
-        protocol = pool.get_protocol()
-        
-        if protocol == 'V2':
-            return self.protocol_fees['V2']
-        elif protocol == 'V3':
+        protocol = canonicalize_dex_pool_type(pool.get_protocol())
+
+        if protocol == UNISWAP_V2_PROTOCOL:
+            return self.protocol_fees[UNISWAP_V2_PROTOCOL]
+        elif protocol == UNISWAP_V3_PROTOCOL:
             # V3 pools have variable fees stored in fee_tier attribute
             fee_tier = pool.fee_tier  # Will raise AttributeError if missing
-            return self.protocol_fees['V3'].get(fee_tier, 0.003)
-        elif protocol == 'V4':
+            return self.protocol_fees[UNISWAP_V3_PROTOCOL].get(fee_tier, 0.003)
+        elif protocol == UNISWAP_V4_PROTOCOL:
             # V4 can have dynamic fees, but use default for now
             # TODO: Implement dynamic fee fetching for V4
-            return self.protocol_fees['V4']
+            return self.protocol_fees[UNISWAP_V4_PROTOCOL]
         else:
             raise ValueError(f"Unknown protocol: {protocol}")
     
@@ -297,16 +290,5 @@ class ArbitrageDetector:
         }
     
     def log_opportunities(self, opportunities: List[ArbitrageOpportunity]):
-        """Log detected arbitrage opportunities."""
-        if not opportunities:
-            self.logger.info("No arbitrage opportunities detected")
-            return
-        
-        self.logger.info(f"Found {len(opportunities)} arbitrage opportunities:")
-        
-        for opp in opportunities[:5]:  # Log top 5
-            self.logger.info(
-                f"  {opp.buy_protocol} -> {opp.sell_protocol}: "
-                f"{opp.profit_percentage:.2f}% profit "
-                f"(buy: {opp.buy_price:.6f}, sell: {opp.sell_price:.6f})"
-            )
+        """Retained for backward compatibility; no-op."""
+        return

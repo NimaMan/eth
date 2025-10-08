@@ -38,19 +38,30 @@ class LiveTokensCache:
         self._lock = Lock()
         self.logger = logger
         self.add_pnl_to_db = add_pnl_to_db
+        self.pool_to_token: Dict[str, str] = {}  # Pool address -> Token address mapping
         
         # Initialize token PnL writer if PnL writing is enabled
         if add_pnl_to_db:
-            from sarigoz.data.db.writers.token_pnl_writer import TokenPnLWriter
+            from eth_data.database.writers.token_pnl_writer import TokenPnLWriter
             self.pnl_writer = TokenPnLWriter(logger=logger)
             self.log("Token PnL writer initialized for database operations")
         else:
             self.pnl_writer = None
 
-    def log(self, message: str):
-        """Log a message"""
-        if self.logger:
-            self.logger.info(message)
+    def log(self, message: str, level: str = "info", **kwargs):
+        """Log a message with optional level and kwargs passthrough.
+
+        Accepts arbitrary keyword args (e.g., exc_info=True) to mirror the
+        standard logging API. If exc_info is provided and level is left as
+        default, the log level is escalated to 'error'.
+        """
+        if not self.logger:
+            return
+        # Promote to error if exception info is provided
+        if kwargs.get("exc_info") and level == "info":
+            level = "error"
+        log_fn = getattr(self.logger, level, self.logger.info)
+        log_fn(message, **kwargs)
  
     def clear_cache(self):
         """Clear the cache"""
@@ -81,12 +92,30 @@ class LiveTokensCache:
                     if entry.token_status == 'Active':
                         active_tokens[addr] = entry.token
             return active_tokens
+    
+    def get_token_by_pool(self, pool_address: str) -> Optional[str]:
+        """Get token address that owns this pool.
+        
+        Args:
+            pool_address: The pool contract address
+            
+        Returns:
+            Token address if pool is known, None otherwise
+        """
+        return self.pool_to_token.get(pool_address)
 
     def __getitem__(self, item: str):
-        """Get attribute from token_data"""
+        """Get token from cache by token address OR pool address"""
         try:
-            return self.cache[item].token
-        except KeyError:
+            # First try direct lookup (it's a token address)
+            if item in self.cache:
+                return self.cache[item].token
+            
+            # Not found - check if it's a pool address
+            token_address = self.pool_to_token.get(item)
+            if token_address and token_address in self.cache:
+                return self.cache[token_address].token
+                
             return None
         except Exception as e:
             self.log(f"{__name__}: Error getting item {item}: {str(e)}")
@@ -108,7 +137,13 @@ class LiveTokensCache:
                     timestamp=time.time(),
                     token_status="Creation"
                 )
-                self.cache.move_to_end(key)                
+                self.cache.move_to_end(key)
+                
+                # Index pool addresses for this token
+                if value.token_data and value.token_data.pool_addresses:
+                    for pool_addr in value.token_data.pool_addresses:
+                        self.pool_to_token[pool_addr] = key
+                        
             except Exception as e:
                 self.log(f"{__name__}: Error adding token {key}: {str(e)}")
 
@@ -138,6 +173,14 @@ class LiveTokensCache:
             # Write PnL data if enabled
             if self.add_pnl_to_db and self.pnl_writer:
                 self._write_token_pnl(key)
+            
+            # Clean up pool mappings before deleting token
+            if key in self.cache:
+                token_entry = self.cache[key]
+                if token_entry.token and token_entry.token.token_data and token_entry.token.token_data.pool_addresses:
+                    for pool_addr in token_entry.token.token_data.pool_addresses:
+                        self.pool_to_token.pop(pool_addr, None)
+            
             # Delete from cache
             del self.cache[key]
 
@@ -148,6 +191,7 @@ class LiveTokensCache:
     def _write_token_pnl(self, token_address: str) -> bool:
         """
         Write PnL data for a token to the database.
+        Only writes if at least one pool has trading enabled (trading_enabled_tx is set).
         
         Args:
             token_address: Address of the token to write PnL data for
@@ -160,8 +204,19 @@ class LiveTokensCache:
             
         try:
             token_entry = self.cache.get(token_address)
-            if token_entry and token_entry.token.token_trading_age_blocks is not None:
-                return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
+            if not token_entry or not token_entry.token:
+                return False
+                
+            # Check if any pool has trading enabled (trading_enabled_tx is not None)
+            if hasattr(token_entry.token, 'token_data') and token_entry.token.token_data:
+                pool_manager = token_entry.token.token_data.pool_manager
+                if pool_manager:
+                    # Get all pools and check if any have trading enabled
+                    pools = pool_manager.get_all_pools()
+                    # Trading is enabled if trading_enabled_tx is set
+                    has_trading = any(pool.trading_enabled_tx is not None for pool in pools.values())
+                    if has_trading:
+                        return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
             return False
         except Exception as e:
             self.log(f"Error writing PnL data for token {token_address}: {str(e)}", exc_info=True)

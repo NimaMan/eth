@@ -19,7 +19,7 @@ graph TD
 
 1. **LiveERC20Token**
    - Orchestrates token data processing
-   - updates the token state in real-time with incoming txn data
+   - updates the token state in real-time with incoming tx data
 
 2. **TokenEventSubscriber**
    - Subscribes to RabbitMQ exchanges

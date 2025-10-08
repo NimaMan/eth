@@ -1,6 +1,6 @@
 '''
 Logger Module Documentation Objective:
-The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_block_processor` project. It aims to:
+The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_data` project. It aims to:
 
 1. Create a standardized logging format across all modules.
 2. Allow for easy integration of logging in any part of the project.
@@ -59,7 +59,7 @@ def cleanup_empty_logs():
 atexit.register(cleanup_empty_logs)
 
 
-def get_logger(name="sarigoz", log_folder="sarigoz", base_log_dir=None, console_output=False):
+def get_logger(name="baygus", log_folder="baygus", base_log_dir=None, console_output=False):
     """
     Initializes and returns a logger with the specified name.
     

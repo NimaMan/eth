@@ -2,20 +2,15 @@ import orjson
 import networkx as nx
 from networkx.readwrite import json_graph
 
-from eth_block_processor.txn.processed_tx_state_diff_calculator import ProcessedTxStateDiffCalculator
-from eth_token.erc20_token.network.address_activity_tracker import UserTokenActivityTracker
+from eth_data.tx_processor.address_balance_change_calculator import AddressBalanceChangeCalculator
+from eth_token.erc20_token.network.address_activity_tracker import AddressTokenActivityTracker
 
 
 class LiveTokenNetworkBuilder:
-    def __init__(self, live_token, logger=None):
-        self.logger = logger
+    def __init__(self, live_token):
         self.live_token = live_token
         self.graph = nx.MultiDiGraph()
-        self.state_diff_calculator = ProcessedTxStateDiffCalculator(logger=self.logger)
-
-    def log(self, message):
-        if self.logger:
-            self.logger.info(message)
+        self.state_diff_calculator = AddressBalanceChangeCalculator()
 
     def __iter__(self):
         return iter(self.graph.nodes)
@@ -28,8 +23,8 @@ class LiveTokenNetworkBuilder:
         return self.live_token.token_data.fee_sources
     
     @property
-    def txn_hashes(self):
-        return self.live_token.token_data.txn_hashes
+    def tx_hashes(self):
+        return self.live_token.token_data.tx_hashes
     
     def _add_fee_source_edges(self, fee_source: str, addresses: list):
         """Add edges from fee source to all addresses involved in its transaction"""
@@ -40,13 +35,13 @@ class LiveTokenNetworkBuilder:
             if address in self.graph and address != fee_source:
                 # Add directed edge from fee source to address if it does not exist
                 if not self.graph.has_edge(fee_source, address):
-                    self.graph.add_edge(fee_source, address, type='txn owner')
+                    self.graph.add_edge(fee_source, address, type='tx owner')
 
     def graph_add_or_update_address(self, 
                                address: str, 
                                state_changes: dict, 
                                block_number: int, 
-                               txn_index: int, 
+                               tx_index: int, 
                                fee_source: str, 
                                bribe_amount: float,
                                tx_fee: float):
@@ -56,13 +51,13 @@ class LiveTokenNetworkBuilder:
             # Create new node if it doesn't exist
             self.graph.add_node(
                 address, 
-                data=UserTokenActivityTracker(
+                data=AddressTokenActivityTracker(
                     address=address,
                     address_type=None,
                     token_data=self.live_token.token_data,
                     entry_block=block_number,
                     latest_block=block_number,
-                    entry_index=txn_index,
+                    entry_index=tx_index,
                     entry_log_index=None,
                     is_fee_source=is_fee_source,
                     fee_source=fee_source,
@@ -72,7 +67,7 @@ class LiveTokenNetworkBuilder:
         # Get the user activity tracker
         user_activity = self.graph.nodes[address]['data']
         user_activity.latest_block = block_number
-        user_activity.txn_fees.append(tx_fee)
+        user_activity.tx_fees.append(tx_fee)
         if is_fee_source:
             # Add bribe amount
             user_activity.bribe_amount += bribe_amount
@@ -88,45 +83,48 @@ class LiveTokenNetworkBuilder:
                 for transfer_id, amount in token_movements.get('out', {}).items():
                     user_activity.token_out_dict[transfer_id] = amount
             
-        # Add denomination movements (ETH)
-        if 'denom' in movements:
-            for transfer_id, amount in movements['denom'].get('in', {}).items():
-                user_activity.denom_in_dict[transfer_id] = amount
-            for transfer_id, amount in movements['denom'].get('out', {}).items():
-                user_activity.denom_out_dict[transfer_id] = amount
+        # Add denomination movements (ETH) from currencies map
+        if 'currencies' in movements:
+            eth_movements = movements['currencies'].get('ETH') if isinstance(movements['currencies'], dict) else None
+            if eth_movements:
+                # Convert wei to ETH for denom tracking
+                for transfer_id, amount in eth_movements.get('in', {}).items():
+                    user_activity.denom_in_dict[transfer_id] = amount / 1e18
+                for transfer_id, amount in eth_movements.get('out', {}).items():
+                    user_activity.denom_out_dict[transfer_id] = amount / 1e18
     
-    def update_from_transaction(self, txn_dict: dict):
+    def update_from_transaction(self, tx_dict: dict):
         """Process transaction and update network with significant changes"""
-        block_number = txn_dict['block_number']
-        txn_hash = txn_dict['hash']
-        txn_index = txn_dict['txn_index']
-        fee_source = txn_dict['from_address']
-        bribe_amount = txn_dict['bribe_amount']
-        tx_fee = txn_dict['fees']['txn_fee']
-        erc20_transfers = self.live_token.token_data.erc20_transfers.get(txn_hash, [])
-        eth_transfers = self.live_token.token_data.eth_transfers.get(txn_hash, [])
-        # Get state changes (only significant ones are returned by calculator)
-        state_changes = self.state_diff_calculator.calculate_state_changes(
-            txn_hash, 
+        block_number = tx_dict['block_number']
+        tx_hash = tx_dict['hash']
+        tx_index = tx_dict['tx_index']
+        fee_source = tx_dict['from_address']
+        bribe_amount = tx_dict['bribe_amount']
+        tx_fee = tx_dict['fees']['tx_fee']
+        erc20_transfers = self.live_token.token_data.erc20_transfers.get(tx_hash, [])
+        eth_transfers = self.live_token.token_data.eth_transfers.get(tx_hash, [])
+        # Get balance changes (only significant ones are returned by calculator)
+        balance_changes = self.state_diff_calculator.calculate_address_balance_changes(
+            tx_hash, 
             fee_source,
             block_number, 
-            txn_index, 
+            tx_index, 
             eth_transfers, 
             erc20_transfers
             )
         
         # Add or update addresses with their movements
-        for address, addr_state_changes in state_changes.items():
+        for address, addr_state_changes in balance_changes.items():
             self.graph_add_or_update_address(address, 
                                              addr_state_changes, 
                                              block_number, 
-                                             txn_index, 
+                                             tx_index, 
                                              fee_source, 
                                              bribe_amount,
                                              tx_fee
                                              )
         
-        self._add_fee_source_edges(fee_source, state_changes.keys())
+        self._add_fee_source_edges(fee_source, balance_changes.keys())
 
     def serialize_for_frontend(self, graph: nx.MultiDiGraph=None):
         if graph is None:

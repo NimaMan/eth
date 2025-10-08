@@ -9,7 +9,7 @@ and detecting potential scam patterns.
 from typing import List, Optional, Tuple, Any, Dict
 from dataclasses import dataclass
 from web3 import Web3
-from eth_token.utils.common_addresses import DENOM_ADDRESSES
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
 from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
 
 
@@ -32,10 +32,10 @@ class PoolReserveTracker:
     scam detection based on liquidity thresholds.
     """
     
-    def __init__(self, pool_address: str, denom_address: str, logger=None):
-        self.pool_address = Web3.to_checksum_address(pool_address)
-        self.denom_address = Web3.to_checksum_address(denom_address)
-        self.logger = logger        
+    def __init__(self, pool_address: str, denom_address: str, history_limit: int = 100):
+        self.pool_address = pool_address
+        self.denom_address = denom_address
+        self.history_limit = history_limit
         self.reserve_history: List[ReserveSnapshot] = [] # Reserve history
         self.latest_snapshot: Optional[ReserveSnapshot] = None # Latest snapshot
                 
@@ -69,6 +69,8 @@ class PoolReserveTracker:
         
         # Store snapshot
         self.reserve_history.append(snapshot)
+        if len(self.reserve_history) > self.history_limit:
+            del self.reserve_history[: len(self.reserve_history) - self.history_limit]
         self.latest_snapshot = snapshot
         
         # Check for scam patterns
@@ -117,12 +119,6 @@ class PoolReserveTracker:
         return self.latest_snapshot.denom_reserve, self.latest_snapshot.token_reserve
     
     def get_price_history(self) -> List[Tuple[str, int, float]]:
-        """
-        Get the full price history.
-        
-        Returns:
-            List of (tx_hash, block_number, price) tuples
-        """
         return [(s.tx_hash, s.block_number, s.price) for s in self.reserve_history]
     
     def get_initial_price(self) -> Optional[float]:
@@ -130,29 +126,17 @@ class PoolReserveTracker:
         return self.reserve_history[0].price if self.reserve_history else None
     
     def get_price_ratio_to_initial(self) -> Optional[float]:
-        """
-        Calculate the ratio of current price to initial price.
-        
-        Returns:
-            Price ratio, or None if no history available
-        """
+        """Calculate the ratio of current price to initial price."""
         if not self.reserve_history or len(self.reserve_history) < 1:
             return None
             
         initial_price = self.reserve_history[0].price
-        latest_price = self.latest_snapshot.price
-        
+        latest_price = self.latest_snapshot.price        
         if initial_price > 0:
             return latest_price / initial_price
         return None
     
     def get_scam_label(self) -> Optional[str]:
-        """
-        Get a concise scam label for this pool.
-        
-        Returns:
-            Scam label like "Denom_removal (ETH<0.05)", or None if not a scam
-        """
         return self.scam_label
     
     def get_reserve_history_df(self):

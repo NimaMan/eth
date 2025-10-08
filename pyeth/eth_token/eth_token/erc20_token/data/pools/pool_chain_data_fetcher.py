@@ -16,7 +16,13 @@ import math
 from typing import Optional, Dict, Tuple, Any
 from eth_utils import to_checksum_address
 from eth_data.utils.pyreth_client import PyrethClient
+from eth_utils import keccak
+from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
+
+UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
+UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
+        
 
 def _format_scaled(raw_value: int, decimals: int) -> str:
     if decimals <= 0:
@@ -77,12 +83,7 @@ class PoolChainDataFetcher:
     # Normalization helpers
     # -----------------------------
     def _to_checksum(self, addr: Optional[str]) -> Optional[str]:
-        if not addr:
-            return None
-        try:
-            return to_checksum_address(addr)
-        except Exception:
-            return addr
+        return to_checksum_address(addr)
 
     def _normalize_liquidity_info(self, raw: Any) -> Dict[str, Any]:
         """Normalize PyReth liquidity info into a consistent dict schema.
@@ -100,7 +101,7 @@ class PoolChainDataFetcher:
           - pool_id: str hex (V4 only, not provided by this call)
         """
         # raw is a PyPoolLiquidityInfo
-        protocol = raw.protocol
+        protocol = canonicalize_dex_pool_type(raw.protocol)
         pool = raw.pool
         token0 = raw.token0
         token1 = raw.token1
@@ -165,40 +166,33 @@ class PoolChainDataFetcher:
     # -----------------------------
     # Unified PyReth-backed helpers
     # -----------------------------
-    def get_v2_liquidity(self, pool_address: str, block: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def get_v2_liquidity(self, pool_address: str, block: Optional[int] = None) -> Dict[str, Any]:
         """Get UniswapV2/SushiswapV2 style liquidity using PyReth (reserves at block).
 
         Returns a dict with keys: protocol, pool, token0, token1, reserve0, reserve1, block_number.
         """
-        if not self._chain_query:
-            return None
-        try:
-            info = self._chain_query.get_uniswap_v2_liquidity(pool_address, block)
-            return self._normalize_liquidity_info(info)
-        except Exception:
-            return None
+        info = self._chain_query.get_uniswap_v2_liquidity(pool_address, block)
+        if info is None:
+            raise RuntimeError(f"Missing V2 liquidity for pool {pool_address}")
+        return self._normalize_liquidity_info(info)
 
-    def get_v3_liquidity(self, pool_address: str, fee_tier: int, block: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def get_v3_liquidity(self, pool_address: str, fee_tier: int, block: Optional[int] = None) -> Dict[str, Any]:
         """Get UniswapV3 liquidity using PyReth (liquidity, tick at block)."""
-        if not self._chain_query:
-            return None
-        try:
-            info = self._chain_query.get_uniswap_v3_liquidity(pool_address, int(fee_tier), block)
-            return self._normalize_liquidity_info(info)
-        except Exception:
-            return None
+        info = self._chain_query.get_uniswap_v3_liquidity(pool_address, int(fee_tier), block)
+        if info is None:
+            raise RuntimeError(f"Missing V3 liquidity for pool {pool_address}")
+        return self._normalize_liquidity_info(info)
 
-    def get_v4_liquidity(self, pool_manager: str, pool_id_hex: str, block: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def get_v4_liquidity(self, pool_manager: str, pool_id_hex: str, block: Optional[int] = None) -> Dict[str, Any]:
         """Get UniswapV4 liquidity using PyReth via PoolManager + PoolId."""
-        if not self._chain_query:
-            return None
-        try:
-            info = self._chain_query.get_uniswap_v4_liquidity(pool_manager, pool_id_hex, block)
-            out = self._normalize_liquidity_info(info)
-            out['pool_id'] = pool_id_hex
-            return out
-        except Exception:
-            return None
+        info = self._chain_query.get_uniswap_v4_liquidity(pool_manager, pool_id_hex, block)
+        if info is None:
+            raise RuntimeError(
+                f"Missing V4 liquidity for pool manager {pool_manager} pool {pool_id_hex}"
+            )
+        out = self._normalize_liquidity_info(info)
+        out['pool_id'] = pool_id_hex
+        return out
     
     def discover_v2_pool(self, pool_address: str) -> Optional[Dict]:
         """
@@ -217,7 +211,7 @@ class PoolChainDataFetcher:
                 'pool_address': self._to_checksum(pool_address),
                 'token0': self._to_checksum(info['token0']) if isinstance(info['token0'], str) else info['token0'],
                 'token1': self._to_checksum(info['token1']) if isinstance(info['token1'], str) else info['token1'],
-                'protocol': 'UniswapV2'
+                'protocol': UNISWAP_V2_PROTOCOL
             }
             self.pools[f"v2_{pool_address}"] = result
             return result
@@ -241,7 +235,7 @@ class PoolChainDataFetcher:
                 'token0': self._to_checksum(info['token0']) if isinstance(info['token0'], str) else info['token0'],
                 'token1': self._to_checksum(info['token1']) if isinstance(info['token1'], str) else info['token1'],
                 'fee': 3000,  # If fee not known, default commonly used; caller can override
-                'protocol': 'UniswapV3'
+                'protocol': UNISWAP_V3_PROTOCOL
             }
             self.pools[f"v3_{pool_address}"] = result
             return result
@@ -265,9 +259,11 @@ class PoolChainDataFetcher:
         token_address = to_checksum_address(token_address)
         
         # Try protocol hint first if provided
-        if protocol_hint in {'V2', 'Uniswap-V2'}:
+        hint = canonicalize_dex_pool_type(protocol_hint) if protocol_hint else None
+
+        if hint == UNISWAP_V2_PROTOCOL:
             pool_info = self.discover_v2_pool(pool_address)
-        elif protocol_hint in {'V3', 'Uniswap-V3'}:
+        elif hint == UNISWAP_V3_PROTOCOL:
             pool_info = self.discover_v3_pool(pool_address)
         else:
             # Try V3 first (has fee field), then V2
@@ -301,9 +297,7 @@ class PoolChainDataFetcher:
         Compute deterministic V2 pool address.
         
         Pool addresses in V2 are deterministic based on token pair.
-        """
-        from eth_utils import keccak
-        
+        """        
         # Sort tokens
         token0, token1 = sorted([self.token_address, denom_address])
         
@@ -319,8 +313,6 @@ class PoolChainDataFetcher:
         
         Pool addresses in V3 are deterministic based on token pair and fee.
         """
-        from eth_utils import keccak
-        
         # Sort tokens
         token0, token1 = sorted([self.token_address, denom_address])
         

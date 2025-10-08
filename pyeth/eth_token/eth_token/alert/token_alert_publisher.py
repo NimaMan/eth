@@ -87,7 +87,7 @@ class TokenAlertPublisher:
                 'bribe_amount': float(bribe_amount),
                 'from_address': live_token.creator,
                 'to_address': live_token.creator,
-                'transaction_hash': live_token.creation_txn_hash,
+                'transaction_hash': live_token.creation_tx_hash,
                 'block_number': live_token.creation_block_number
             }
         return None

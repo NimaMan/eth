@@ -2,8 +2,8 @@
 
 import pytest
 from web3 import Web3
-from eth_block_processor.txn.txn_processor import TransactionProcessor
-from eth_block_processor.txn.txn_data_fetcher import TransactionDataFetcher
+from eth_data.tx_processor.tx_processor import TransactionProcessor
+from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_token.token_manager.live_block_token_processor import LiveBlockTokenProcessor
 
 
@@ -17,13 +17,13 @@ def w3():
 
 
 @pytest.fixture
-def txn_data_fetcher(w3):
+def tx_data_fetcher(w3):
     """Shared transaction data fetcher"""
     return TransactionDataFetcher(w3)
 
 
 @pytest.fixture
-def txn_analyzer(w3):
+def tx_analyzer(w3):
     """Shared transaction analyzer"""
     return TransactionProcessor(w3)
 

@@ -1,1 +1,0 @@
-from eth_data.chain_utils.common_addresses import *

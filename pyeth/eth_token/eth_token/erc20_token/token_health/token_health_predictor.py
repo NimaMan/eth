@@ -35,7 +35,7 @@ class TokenHealthPredictor:
     def __init__(self):
         self.volume_analyzr = VolumeAnalyzer()
         self.scam_scores: OrderedDict[str, ScamScore] = OrderedDict()
-        self.involved_green_actors: OrderedDict[str, ScamScore] = OrderedDict() # txn hash -> green actors
+        self.involved_green_actors: OrderedDict[str, ScamScore] = OrderedDict() # tx hash -> green actors
         self.involved_mal_actors: Set[str] = set()
         
     def update_from_transaction(self, transaction: Dict, live_token) -> Dict:
@@ -94,12 +94,12 @@ class TokenHealthPredictor:
                 from_address=transaction.get('from_address'),
                 is_scam=True,
                 confidence=1,
-                reason=f"{live_token.scam_label}",
+                reason=f"{live_token.token_data.scam_label}",
             )
     
     @property
-    def is_scam(self) -> bool:
-        """Return whether token is currently flagged as scam"""
+    def has_malicious_activity(self) -> bool:
+        """Return whether token has detected malicious activity"""
         return any(score.is_scam for score in self.scam_scores.values())
     
     @property
@@ -113,7 +113,7 @@ class TokenHealthPredictor:
         return tuple(set(score.reason for score in self.scam_scores.values())) if self.scam_scores else ""
     
     @property
-    def scam_detection_block_and_txn(self):
+    def scam_detection_block_and_tx(self):
         """Return block number and transaction hash where scam was detected"""
         if not self.scam_scores:
             return None
@@ -135,11 +135,11 @@ class TokenHealthPredictor:
     def scam_assessment(self) -> Dict:
         """Return assessment of token health"""
         return {
-            "is_scam": self.is_scam,
+            "has_malicious_activity": self.has_malicious_activity,
             "scam_probability": self.scam_probability,
             "scam_reason": self.scam_reason,
-            "block_number": self.scam_detection_block_and_txn[0] if self.scam_detection_block_and_txn else None,
-            "transaction_hash": self.scam_detection_block_and_txn[1] if self.scam_detection_block_and_txn else None,
+            "block_number": self.scam_detection_block_and_tx[0] if self.scam_detection_block_and_tx else None,
+            "transaction_hash": self.scam_detection_block_and_tx[1] if self.scam_detection_block_and_tx else None,
             'involved_grey_addresses': list(self.involved_mal_actors),
             'num_greys': len(self.involved_mal_actors),
         }

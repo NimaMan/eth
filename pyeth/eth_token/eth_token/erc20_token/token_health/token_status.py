@@ -18,19 +18,19 @@ class TokenStatus:
     """
     def __init__(self, live_token, 
                  inactivity_block_threshold: int=7200, 
-                 min_daily_txns: int=5):
+                 min_daily_txs: int=5):
         self.live_token = live_token
         self.price_df = live_token.token_data.price_df.copy()
         self.inactivity_block_threshold = inactivity_block_threshold
-        self.min_daily_txns = min_daily_txns
+        self.min_daily_txs = min_daily_txs
         self.remove_anomalies_from_price_df()
     
     def remove_anomalies_from_price_df(self):
-        """Remove anomalies from the price dataframe by removing some of the latest txns
+        """Remove anomalies from the price dataframe by removing some of the latest txs
             - Check block gaps at the end of the dataset
             - If gaps exceed threshold, remove those periods
         """
-        if self.price_df.empty or len(self.price_df) < self.min_daily_txns:
+        if self.price_df.empty or len(self.price_df) < self.min_daily_txs:
             return           
         # Calculate block differences
         block_diffs = self.price_df['block_number'].diff()
@@ -53,7 +53,13 @@ class TokenStatus:
         - No price data exists
         - Last activity was more than inactivity_threshold ago
         """
-        if self.price_df.empty or self.token_data.trading_enabled_datetime is None:
+        # Check if any pool has trading enabled
+        has_trading = False
+        if self.token_data.pool_manager:
+            enabled_pools = self.token_data.pool_manager.get_trading_enabled_pools()
+            has_trading = len(enabled_pools) > 0
+            
+        if self.price_df.empty or not has_trading:
             return "Creation"
         
         try:

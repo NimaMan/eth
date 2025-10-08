@@ -54,10 +54,10 @@ class GreenActorAlert(BaseAlert):
         involved_addresses = green_actors_dict.values() # get all green actors
         
         # Get last transaction from OrderedDict
-        latest_txn_hash = next(reversed(green_actors_dict))
+        latest_tx_hash = next(reversed(green_actors_dict))
         
         return GreenActorAlertData(
-            transaction_hash=latest_txn_hash,
+            transaction_hash=latest_tx_hash,
             contract_address=live_erc20_token.contract_address,
             block_number=live_erc20_token.latest_block_number,
             involved_addresses=involved_addresses,

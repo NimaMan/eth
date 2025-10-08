@@ -3,7 +3,7 @@ from typing import List
 
 from eth_token.alert.base_alert import BaseAlert
 from eth_token.erc20_token.erc20_token import ERC20Token
-from eth_token.alert.config import bribe_threshold
+from eth_token.config import bribe_threshold
 from eth_token.utils.logger import get_logger
 
 

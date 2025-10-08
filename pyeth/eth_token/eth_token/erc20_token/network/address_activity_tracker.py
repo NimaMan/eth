@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-class UserTokenActivityTracker:
+class AddressTokenActivityTracker:
     def __init__(self, init_denom_balance=0, 
                  init_token_balance=0, 
                  entry_block=None, 
@@ -19,7 +19,7 @@ class UserTokenActivityTracker:
                  address_type=None,
                  is_fee_source=None,
                  fee_source=None, 
-                 init_txn_fee=None):
+                 init_tx_fee=None):
         self.token_data = token_data
         self.entry_block = entry_block
         self.latest_block = latest_block
@@ -33,7 +33,7 @@ class UserTokenActivityTracker:
         self.got_from = []
         self.sent_to = []
         self.bribe_amount = 0
-        self.txn_fees = [] if init_txn_fee is None else [init_txn_fee]
+        self.tx_fees = [] if init_tx_fee is None else [init_tx_fee]
 
         self.address = address
         self.address_type = address_type
@@ -58,7 +58,7 @@ class UserTokenActivityTracker:
             f"denom_balance={self.denom_balance:.2f}, "
             f"token_balance={self.token_balance:.2f}, "
             f"realized_profit={self.realized_profit:.2f}, "
-            f"num_txn={self.num_txn}, "
+            f"num_tx={self.num_tx}, "
             f"address_type={self.address_type}, "
         )
     
@@ -91,8 +91,8 @@ class UserTokenActivityTracker:
     
     def _net_movements(self, movements):
         net = defaultdict(float)
-        for (block, txn_index, _), val in movements.items():
-            net[(block, txn_index)] += val
+        for (block, tx_index, _), val in movements.items():
+            net[(block, tx_index)] += val
         return net    
     
     @property
@@ -117,17 +117,9 @@ class UserTokenActivityTracker:
     
     @property
     def token_latest_price(self):
-        """
-        Gets the most reliable, liquidity-weighted price for the token.
+        pool_snapshot, best_price = self.token_data.liquidity_analyzer.get_best_price(for_buy=True)
+        return best_price if best_price is not None else 0.0
         
-        This delegates the "best price" logic to the PoolReservePriceTracker,
-        which selects the price from the pool with the highest reserves.
-        """
-        if self.token_data and self.token_data.reserve_tracker:
-            best_price = self.token_data.reserve_tracker.get_best_price()
-            return best_price if best_price is not None else 0.0
-        return 0.0
-    
     @property
     def token_balance(self):
         balance = np.sum(self.token_got_list) - np.sum(self.token_sent_list)
@@ -143,7 +135,7 @@ class UserTokenActivityTracker:
         return len(self.denom_got_list)
     
     @property
-    def num_txn(self):
+    def num_tx(self):
         return self.num_buys + self.num_sells
     
     @property
@@ -224,7 +216,7 @@ class UserTokenActivityTracker:
     
     @property
     def total_tx_fees(self):
-        return np.sum(self.txn_fees)
+        return np.sum(self.tx_fees)
     
     def get_user_features(self):
         return {
@@ -241,7 +233,7 @@ class UserTokenActivityTracker:
             'total_profit': self.total_profit,
             'num_buys': self.num_buys,
             'num_sells': self.num_sells,
-            'num_txn': self.num_txn,
+            'num_tx': self.num_tx,
             'mean_buy': self.mean_buy,
             #'buy_volatility': self.buy_volatility,
             'mean_sell': self.mean_sell,
@@ -267,7 +259,7 @@ class UserTokenActivityTracker:
 
         :param other: Another UserTokenActivity instance
         """
-        if not isinstance(other, UserTokenActivityTracker):
+        if not isinstance(other, AddressTokenActivityTracker):
             raise ValueError("Can only merge with another UserTokenActivity instance.")
 
         # Merge token movements
@@ -280,7 +272,7 @@ class UserTokenActivityTracker:
         self.got_from.extend(other.got_from)
         self.sent_to.extend(other.sent_to)
         self.bribe_amount += other.bribe_amount
-        self.txn_fees.extend(other.txn_fees)
+        self.tx_fees.extend(other.tx_fees)
 
         # Merge associated addresses
         for addr, activity in other.associated_addresses.items():
@@ -296,10 +288,10 @@ class UserTokenActivityTracker:
         :param other: Another UserTokenActivity instance
         :return: A new merged UserTokenActivity instance
         """
-        if not isinstance(other, UserTokenActivityTracker):
+        if not isinstance(other, AddressTokenActivityTracker):
             return NotImplemented
         
-        merged = UserTokenActivityTracker(
+        merged = AddressTokenActivityTracker(
             init_denom_balance=self.denom_balance + other.denom_balance,
             init_token_balance=self.token_balance + other.token_balance,
             entry_block=min(self.entry_block, other.entry_block),

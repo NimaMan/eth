@@ -1,5 +1,8 @@
-from eth_token.utils.common_addresses import STABLECOINS_ADDRESS_BY_NAME, ERC20_TOKEN_DECIMALS
-from eth_block_processor.address.contract_type import get_erc20_contract_info
+from eth_data.chain_utils.common_addresses import (
+    STABLECOINS_ADDRESS_BY_NAME,
+    ERC20_TOKEN_DECIMALS,
+)
+from eth_data.address.contract_type import get_erc20_contract_info
 from web3 import Web3
 
 
@@ -26,4 +29,3 @@ if mismatches:
     raise AssertionError(f"{len(mismatches)} mismatches found")
 
 print("All stablecoin decimal values matched.")
-

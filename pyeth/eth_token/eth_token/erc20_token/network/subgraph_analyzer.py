@@ -22,13 +22,13 @@ Network Structure:
 
 2. Edges:
    - Types:
-     * 'txn owner': if address has been in the txn of another address, we have an edge from the txn owner to the address
+     * 'tx owner': if address has been in the tx of another address, we have an edge from the tx owner to the address
 
 Simplification Process:
 --------------------
 1. Remove the high degree and default addresses
 2. Degree Calculation:
-We create a direct graph for the tx_owner type of edges. This shows all the addresses that have been in the txn of another address. 
+We create a direct graph for the tx_owner type of edges. This shows all the addresses that have been in the tx of another address. 
 
 # TODO:
 define the high degree nodes.   
@@ -90,7 +90,7 @@ class NetworkSubgraphAnalyzer:
         self.degree_threshold = degree_threshold
         self.frequency_threshold = frequency_threshold
         self.removed_nodes = set()
-        self._edge_types = {'txn owner'}
+        self._edge_types = {'tx owner'}
         self.simplified_graph = None
 
     def default_addresses_to_remove(self) -> set:
@@ -114,17 +114,17 @@ class NetworkSubgraphAnalyzer:
         3. Removing high-degree nodes (unless they're fee sources)
         """
         simplified_graph = self.graph.copy()
-        total_txns = len(self.token_data.txn_hashes)
+        total_txs = len(self.token_data.tx_hashes)
         
         # Skip if no transactions
-        if total_txns == 0:
+        if total_txs == 0:
             return simplified_graph
         
         # Get default addresses to remove
         default_addresses = self.default_addresses_to_remove()
         
         # 1. Handle high-frequency addresses
-        min_appearances = int(total_txns * self.frequency_threshold)
+        min_appearances = int(total_txs * self.frequency_threshold)
         
         for address, count in self.token_data.address_tx_counter.items():
             if (address is not None and 

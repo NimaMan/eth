@@ -6,7 +6,7 @@ from eth_token.erc20_token.network.subgraph_analyzer import NetworkSubgraphAnaly
 
 
 class LiveTokenNetwork(LiveTokenNetworkBuilder):
-    def __init__(self, live_token, logger, high_degree_node_threshold=5):
+    def __init__(self, live_token, high_degree_node_threshold=5):
         """
         Initialize LiveTokenNetwork with token data and network analysis parameters
         
@@ -17,7 +17,7 @@ class LiveTokenNetwork(LiveTokenNetworkBuilder):
             verbose: Enable detailed logging
         """
         # Initialize parent class first
-        super().__init__(live_token=live_token, logger=logger)
+        super().__init__(live_token=live_token)
         
         self.live_token = live_token
         self.connected_components = []
@@ -32,11 +32,7 @@ class LiveTokenNetwork(LiveTokenNetworkBuilder):
         self.connected_components = self.subgraph_analyzer.find_subgraphs()
         
         for address in self.fee_sources:
-            try:
-                node_data = self.graph.nodes[address]['data']
-            except:
-                self.log(f"Address {address} not found in the graph of {self.live_token.contract_address}.")
-                continue
+            node_data = self.graph.nodes[address]['data']
             user_activity = node_data.get_user_features()
             # Add component information
             subgraph_addresses = self.subgraph_analyzer.get_related_addresses(address)

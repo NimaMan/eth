@@ -24,7 +24,7 @@ class ScamAlert(BaseAlert):
     """Alert for detected scam patterns"""
     def __init__(self):
         super().__init__()
-        # Track all alerts per token: token_address -> OrderedDict[txn_hash -> alert_data]
+        # Track all alerts per token: token_address -> OrderedDict[tx_hash -> alert_data]
         self._token_alerts: Dict[str, OrderedDict[str, ScamAlertData]] = defaultdict(OrderedDict)
         
     def _is_alert(self, live_erc20_token: ERC20Token) -> bool:
@@ -34,11 +34,11 @@ class ScamAlert(BaseAlert):
             return False
             
         scam_data = assessment.get('scam_assessment', {})
-        txn_hash = scam_data.get('transaction_hash', '')
+        tx_hash = scam_data.get('transaction_hash', '')
         contract_address = live_erc20_token.contract_address
         
-        # If we've already alerted on this txn, skip
-        if txn_hash in self._token_alerts[contract_address]:
+        # If we've already alerted on this tx, skip
+        if tx_hash in self._token_alerts[contract_address]:
             return False
             
         # If it's a scam, alert

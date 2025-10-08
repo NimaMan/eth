@@ -21,7 +21,7 @@ Architecture:
 """
 
 from typing import List, Set, Dict
-from eth_token.alert.config import get_mimic_octopus_addresses, get_green_addresses
+from eth_token.config import get_mimic_octopus_addresses, get_green_addresses
 
 
 class VolumeAnalyzer:

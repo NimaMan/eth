@@ -12,11 +12,11 @@ Objective:
 
 import asyncio
 from web3 import Web3
-from dataclasses import asdict
-from typing import Dict, List, Set
+from dataclasses import asdict, is_dataclass
+from typing import Dict, List, Set, Any
 from collections import OrderedDict
 from tqdm import tqdm
-from eth_block_processor.blockchain.block_processor import BlockProcessor
+from eth_data.blockchain.block_processor import BlockProcessor
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.utils.logger import get_logger
@@ -39,19 +39,20 @@ class BlockTokenProcessor:
     async def process_block(self, block_data: List[Dict]) -> int:
         """Process a single block's transactions with concurrency limit."""
         if not block_data:
-            return
+            self.logger.warning("Received empty block_data - this should not happen")
+            return None
         
-        if isinstance(block_data[0], dict):
-           block_number = block_data[0].get('block_number')
-        else:
-            block_number = block_data[0].block_number
+        if not isinstance(block_data[0], dict):
+            block_data = [self._ensure_tx_dict(tx) for tx in block_data]
+
+        block_number = int(block_data[0].get('block_number'))
         
         self.updated_tokens.clear() # Clear the updated tokens cache
         tasks = []
-        for txn in block_data:
-            async def sem_task(txn_data=txn):
+        for tx in block_data:
+            async def sem_task(tx_data=self._ensure_tx_dict(tx)):
                 async with self.semaphore:
-                    return await self._process_transaction(txn_data, block_number)
+                    return await self._process_transaction(tx_data, block_number)
 
             tasks.append(asyncio.create_task(sem_task()))
         await asyncio.gather(*tasks)
@@ -65,8 +66,7 @@ class BlockTokenProcessor:
 
     async def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
-        if not isinstance(transaction, dict):
-            transaction = asdict(transaction)
+        transaction = self._ensure_tx_dict(transaction)
         try:
             # Handle contract creation
             if self._is_token_creation(transaction):
@@ -82,7 +82,7 @@ class BlockTokenProcessor:
     def _is_token_creation(self, transaction: Dict) -> bool:
         """Check if transaction creates a new token"""
         return (
-            transaction.get('txn_type') == 'Contract Creation' 
+            transaction.get('tx_type', transaction.get('txn_type')) == 'Contract Creation' 
             and transaction.get('contract_address')
             and transaction.get('contract_creation_events', [])
             and transaction['contract_creation_events'][0]["contract_type"] == "ERC-20"
@@ -102,14 +102,14 @@ class BlockTokenProcessor:
                     self.logger.info(f"New token created: {new_token_address} in block {block_number}")
                 
             except Exception as e:
-                self.logger.error(f"{self.__class__.__name__} Failed to create token {new_token_address} at txn {transaction.get('hash')}: {e}")
+                self.logger.error(f"{self.__class__.__name__} Failed to create token {new_token_address} at tx {transaction.get('hash')}: {e}")
 
     async def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""
         try:
             await token.update_from_transaction_async(transaction)
         except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} for txn {transaction.get('hash')}: {e}") 
+            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} for tx {transaction.get('hash')}: {e}") 
 
     async def _handle_token_update_from_transaction(self, transaction: Dict):
         """Handle transaction involving existing tokens"""
@@ -132,6 +132,18 @@ class BlockTokenProcessor:
                 
         if update_tasks:
             await asyncio.gather(*update_tasks)
+
+    @staticmethod
+    def _ensure_tx_dict(tx: Any) -> Dict:
+        if isinstance(tx, dict):
+            return tx
+        if hasattr(tx, "to_dict"):
+            return tx.to_dict()
+        if is_dataclass(tx):
+            return asdict(tx)
+        if hasattr(tx, "__dict__"):
+            return dict(vars(tx))
+        raise TypeError(f"Unsupported transaction type: {type(tx)!r}")
 
 
 class HistoricalBlockTokenProcessor:
@@ -162,10 +174,10 @@ class HistoricalBlockTokenProcessor:
                  block_token_processor: BlockTokenProcessor = None,
                  w3: Web3 = None,
                  logger=None,
-                 save_txn_to_db: bool = False):
+                 index_address_txs: bool = False):
         self.logger = logger or get_logger(name="token_manager")
         self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
-        self.block_processor = BlockProcessor(logger=self.logger, save_txn_to_db=save_txn_to_db)
+        self.block_processor = BlockProcessor(logger=self.logger, index_address_txs=index_address_txs)
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
             logger=self.logger
         )

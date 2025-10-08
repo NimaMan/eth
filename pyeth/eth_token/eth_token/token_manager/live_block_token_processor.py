@@ -76,6 +76,29 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         self._is_shutting_down = False
         self._subscriber_task = None
         self._monitor_task = None
+        self._watcher_task = None
+
+    async def _on_task_done(self, name: str, task: asyncio.Task):
+        """Handle unexpected background task completion by logging and initiating shutdown."""
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            self.logger.info(f"{name} task cancelled.")
+            return
+        except Exception as e:
+            self.logger.error(f"Error retrieving exception from {name} task: {e}", exc_info=True)
+            exc = None
+
+        if exc:
+            self.logger.error(f"{name} task exited with error: {exc}", exc_info=True)
+        else:
+            self.logger.warning(f"{name} task exited unexpectedly without error.")
+
+        # Trigger processor shutdown
+        try:
+            await self.stop()
+        except Exception as e:
+            self.logger.error(f"Error during shutdown after {name} task exit: {e}", exc_info=True)
 
     async def process_block_live(self, block_data: List[Dict]):
         """Process incoming blocks"""
@@ -142,13 +165,19 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                     raise
           
             # 2. Create a task to start the block subscriber for getting live processed blocks
-            self._subscriber_task = asyncio.create_task(
-                self.block_subscriber.start()
+            self._subscriber_task = asyncio.create_task(self.block_subscriber.start())
+            # Watch for unexpected termination of subscriber task
+            self._subscriber_task.add_done_callback(
+                lambda t: asyncio.create_task(self._on_task_done("BlockSubscriber", t))
             )
             
             # 3. Start monitoring for updates
             self._monitor_task = asyncio.create_task(self._monitor_token_updates())
             self.logger.info("Token update monitoring started")
+            # Watch for unexpected termination of monitoring task
+            self._monitor_task.add_done_callback(
+                lambda t: asyncio.create_task(self._on_task_done("TokenUpdateMonitor", t))
+            )
             
             # Keep running until shutdown
             while not self._shutdown_event.is_set():
@@ -156,8 +185,18 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
             
         except Exception as e:
             self.logger.error(f"Error starting live processor: {e}")
-            await self.stop()
+            try:
+                await self.stop()
+            except Exception:
+                pass
             raise
+        finally:
+            # Ensure we shutdown cleanly whenever start() exits
+            if not self._is_shutting_down:
+                try:
+                    await self.stop()
+                except Exception:
+                    pass
 
     async def stop(self):
         """Stop processing live blocks"""

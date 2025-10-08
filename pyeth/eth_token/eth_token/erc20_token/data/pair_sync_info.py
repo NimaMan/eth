@@ -40,7 +40,7 @@ class UniV2PairSyncInfo:
         mask = price_ratios.isna() | (price_ratios <= threshold)
         clean_price_jumps_df = self.price_df[mask].copy()
         
-        return clean_price_jumps_df.sort_values(by=['block_number', 'txn_index', 'log_index'], ascending=True)
+        return clean_price_jumps_df.sort_values(by=['block_number', 'tx_index', 'log_index'], ascending=True)
 
     def remove_price_drops(self, threshold: float = 0.1) -> pd.DataFrame:
         """
@@ -61,7 +61,7 @@ class UniV2PairSyncInfo:
         # Get clean price drops
         mask = price_ratios.isna() | (price_ratios >= threshold)
         clean_price_drops_df = self.price_df[mask].copy()
-        return clean_price_drops_df.sort_values(by=['block_number', 'txn_index', 'log_index'], ascending=True)
+        return clean_price_drops_df.sort_values(by=['block_number', 'tx_index', 'log_index'], ascending=True)
     
     def remove_anomalies_from_price_df(self):
         """Remove anomalies from the price dataframe using the relative price jump threshold.
@@ -220,11 +220,14 @@ class UniV2PairSyncInfo:
     # region Addresses
     @property
     def unique_addresses(self) -> set:
-        if hasattr(self.token_obj, 'unique_addresses'):
+        # Check if token_obj has unique_addresses property
+        try:
             return self.token_obj.unique_addresses
-        elif self.price_df.empty:
-            return set()
-        return set(self.price_df['from_address'].unique())
+        except AttributeError:
+            # If not available or price_df is empty, return empty set
+            if self.price_df.empty:
+                return set()
+            return set(self.price_df['from_address'].unique())
     
     @property
     def num_unique_addresses(self) -> int:

@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from eth_token.utils.common_addresses import addresses_by_name
+from eth_data.chain_utils.common_addresses import addresses_by_name
 
 
 class UniV2PairSyncData:
@@ -11,9 +11,9 @@ class UniV2PairSyncData:
     def to_dataframe(self) -> pd.DataFrame:
         syncs_df = pd.DataFrame(self.syncs)
         if not syncs_df.empty:
-            syncs_df = syncs_df.sort_values(by=['block_number', 'txn_index', 'log_index']).reset_index(drop=True)
+            syncs_df = syncs_df.sort_values(by=['block_number', 'tx_index', 'log_index']).reset_index(drop=True)
             syncs_df = self._add_additional_columns(syncs_df)
-            syncs_df = syncs_df.set_index('txn_hash')
+            syncs_df = syncs_df.set_index('tx_hash')
         return syncs_df
 
     def _add_additional_columns(self, syncs_df: pd.DataFrame, ) -> pd.DataFrame:
@@ -73,24 +73,24 @@ class UniV2PairSyncData:
             unique_actions = actions.unique()
             return 'Buy' in unique_actions and 'Sell' in unique_actions
 
-        # syncs_df['sandwich_attack'] = syncs_df.groupby(['block', 'from_address'])['action'].transform(contains_buy_and_sell) & syncs_df.groupby(['block', 'from_address'])['txn_hash'].transform(lambda x: x.nunique() > 1)
+        # syncs_df['sandwich_attack'] = syncs_df.groupby(['block', 'from_address'])['action'].transform(contains_buy_and_sell) & syncs_df.groupby(['block', 'from_address'])['tx_hash'].transform(lambda x: x.nunique() > 1)
 
         # Compute the groupby once
         grouped = syncs_df.groupby(['block_number', 'from_address'])
 
-        # Compute the unique actions and txn counts once
+        # Compute the unique actions and tx counts once
         unique_actions = grouped['action'].apply(contains_buy_and_sell).reset_index(name='unique_actions')
-        txn_counts = grouped['txn_hash'].nunique().reset_index(name='txn_counts')
+        tx_counts = grouped['tx_hash'].nunique().reset_index(name='tx_counts')
 
         # Merge these new dataframes with the original dataframe
         syncs_df = pd.merge(syncs_df, unique_actions, on=['block_number', 'from_address'])
-        syncs_df = pd.merge(syncs_df, txn_counts, on=['block_number', 'from_address'])
+        syncs_df = pd.merge(syncs_df, tx_counts, on=['block_number', 'from_address'])
 
         # Compute the sandwich_attack_ column
-        syncs_df['sandwich_attack'] = syncs_df['unique_actions'] & (syncs_df['txn_counts'] > 1)
+        syncs_df['sandwich_attack'] = syncs_df['unique_actions'] & (syncs_df['tx_counts'] > 1)
 
         # Drop the intermediate columns
-        syncs_df.drop(columns=['unique_actions', 'txn_counts'], inplace=True)
+        syncs_df.drop(columns=['unique_actions', 'tx_counts'], inplace=True)
 
         return syncs_df
     
@@ -103,7 +103,7 @@ class ERC20TokenApprovalData:
         df = pd.DataFrame(self.approvals)
         if not df.empty:
             df = df.sort_values(by=['block_number', 'index', 'log_index']).reset_index(drop=True)
-            df = df.set_index('txn_hash')
+            df = df.set_index('tx_hash')
         return df
     
     def get_spender_label(self, spender: str) -> str:

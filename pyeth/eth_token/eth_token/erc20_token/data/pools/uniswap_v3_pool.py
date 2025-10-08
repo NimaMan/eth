@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 import math
 
 from .base_pool import BasePool
+from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+
+UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
 
 if TYPE_CHECKING:
     from .pool_chain_data_fetcher import PoolChainDataFetcher
@@ -44,18 +47,25 @@ class UniswapV3Pool(BasePool):
         pool_address: str,
         token_address: str,
         denom_address: str,
+        *,
+        token_decimals: Optional[int] = None,
+        denom_decimals: Optional[int] = None,
         token1_is_denom: bool = True,
         fee_tier: int = 3000,
         pool_chain_fetcher: Optional['PoolChainDataFetcher'] = None,
         token_chain_fetcher: Optional['TokenChainDataFetcher'] = None,
+        history_limit: int = 100,
     ):
         super().__init__(
-            pool_address,
-            token_address,
-            denom_address,
-            token1_is_denom,
+            pool_address=pool_address,
+            token_address=token_address,
+            denom_address=denom_address,
+            token_decimals=token_decimals,
+            denom_decimals=denom_decimals,
+            token1_is_denom=token1_is_denom,
             pool_chain_fetcher=pool_chain_fetcher,
             token_chain_fetcher=token_chain_fetcher,
+            history_limit=history_limit,
         )
         
         self.fee_tier = fee_tier
@@ -72,9 +82,9 @@ class UniswapV3Pool(BasePool):
         self.swap_events = []
         self.mint_events = []
         self.burn_events = []
-        
+    
     def get_protocol(self) -> str:
-        return "Uniswap-V3"
+        return UNISWAP_V3_PROTOCOL
     
     def _get_tick_spacing(self, fee: int) -> int:
         """Get tick spacing for fee tier."""
@@ -141,9 +151,9 @@ class UniswapV3Pool(BasePool):
         self.state.total_swaps += 1
         
         # Store swap event
-        self.swap_events.append({
+        self._append_event(self.swap_events, {
             'block': transaction['block_number'],
-            'txn_hash': transaction['hash'],
+            'tx_hash': transaction['hash'],
             'amount0': amount0,
             'amount1': amount1,
             'sqrt_price_x96': self.sqrt_price_x96,
@@ -172,9 +182,9 @@ class UniswapV3Pool(BasePool):
         self.state.total_mints += 1
         
         # Store mint event
-        self.mint_events.append({
+        self._append_event(self.mint_events, {
             'block': transaction['block_number'],
-            'txn_hash': transaction['hash'],
+            'tx_hash': transaction['hash'],
             'owner': mint.get('owner', mint.get('to_address')),
             'amount': liquidity_delta,
             'tick_lower': tick_lower,
@@ -202,9 +212,9 @@ class UniswapV3Pool(BasePool):
         self.state.total_burns += 1
         
         # Store burn event
-        self.burn_events.append({
+        self._append_event(self.burn_events, {
             'block': transaction['block_number'],
-            'txn_hash': transaction['hash'],
+            'tx_hash': transaction['hash'],
             'owner': burn.get('owner', burn.get('from_address')),
             'amount': liquidity_delta,
             'tick_lower': tick_lower,
@@ -273,31 +283,15 @@ class UniswapV3Pool(BasePool):
         if self.state.reserve0 > 0 and self.state.reserve1 > 0:
             self.state.price0 = self.state.reserve1 / self.state.reserve0
             self.state.price1 = self.state.reserve0 / self.state.reserve1
-            self.price_history.append((self.state.last_update_block, self.get_price()))
+            self._append_event(self.price_history, (self.state.last_update_block, self.get_price()))
 
     def _get_token0_decimals(self) -> int:
         """Get token0 decimals based on configuration."""
-        decimals = None
-        try:
-            if self.token1_is_denom:
-                decimals = self.token_chain_fetcher.get_token_decimals(self.token_address)
-            else:
-                decimals = self.token_chain_fetcher.get_token_decimals(self.denom_address)
-        except Exception:
-            decimals = None
-        return int(decimals) if decimals is not None else 18
+        return self.get_token_decimals() if self.token1_is_denom else self.get_denom_decimals()
 
     def _get_token1_decimals(self) -> int:
         """Get token1 decimals based on configuration."""
-        decimals = None
-        try:
-            if self.token1_is_denom:
-                decimals = self.token_chain_fetcher.get_token_decimals(self.denom_address)
-            else:
-                decimals = self.token_chain_fetcher.get_token_decimals(self.token_address)
-        except Exception:
-            decimals = None
-        return int(decimals) if decimals is not None else 18
+        return self.get_denom_decimals() if self.token1_is_denom else self.get_token_decimals()
     
     def get_current_tick(self) -> int:
         """Get current tick."""
@@ -343,60 +337,3 @@ class UniswapV3Pool(BasePool):
             return False
             
         return True
-    
-    def get_reserves_from_blockchain(self, block_identifier='latest') -> Tuple[float, float, bool]:
-        """
-        Fetch virtual reserves for V3 using PyReth ChainQuery (tick + liquidity).
-        
-        Args:
-            block_identifier: Block number or 'latest'
-            
-        Returns:
-            Tuple of (denom_reserve, token_reserve, success)
-        """
-        try:
-            import math
-            # Resolve block number; None implies latest
-            block = None
-            if isinstance(block_identifier, int):
-                block = int(block_identifier)
-            elif isinstance(block_identifier, str) and block_identifier != 'latest':
-                try:
-                    block = int(block_identifier)
-                except Exception:
-                    block = None
-
-            info = self.pool_chain_fetcher.get_v3_liquidity(self.pool_address, int(self.fee_tier), block)
-            if not info or info.get('liquidity') is None or info.get('tick') is None or not info.get('token0') or not info.get('token1'):
-                return 0.0, 0.0, False
-
-            token0_addr = info['token0']
-            token1_addr = info['token1']
-            reserve0 = info.get('reserve0_scaled') or info.get('reserve0')
-            reserve1 = info.get('reserve1_scaled') or info.get('reserve1')
-            if reserve0 is None or reserve1 is None:
-                L = float(int(info['liquidity']))
-                tick = int(info['tick'])
-                sqrt_price = math.pow(1.0001, tick / 2)
-                if sqrt_price == 0 or L == 0:
-                    return 0.0, 0.0, True
-                reserve0_raw = L / sqrt_price
-                reserve1_raw = L * sqrt_price
-                token0_decimals = int(info.get('token0_decimals') or self.token_chain_fetcher.get_token_decimals(token0_addr) or 18)
-                token1_decimals = int(info.get('token1_decimals') or self.token_chain_fetcher.get_token_decimals(token1_addr) or 18)
-                reserve0 = reserve0_raw / (10 ** token0_decimals)
-                reserve1 = reserve1_raw / (10 ** token1_decimals)
-
-            # Map to denom/token based on which side denom is on
-            if token0_addr.lower() == self.denom_address.lower():
-                denom_reserve = reserve0
-                token_reserve = reserve1
-            elif token1_addr.lower() == self.denom_address.lower():
-                denom_reserve = reserve1
-                token_reserve = reserve0
-            else:
-                return 0.0, 0.0, False
-
-            return float(denom_reserve), float(token_reserve), True
-        except Exception:
-            return 0.0, 0.0, False

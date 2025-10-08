@@ -84,18 +84,18 @@ class BasePool(ABC):
         self.mint_events: List[Dict[str, Any]] = []
         self.burn_events: List[Dict[str, Any]] = []
         
-        # Keep track of price history list (each txn -> price)
+        # Keep track of price history list (each tx -> price)
         self.price_history = []
         
         # Creation info
         self.creation_block: Optional[int] = None
-        self.creation_txn: Optional[str] = None
+        self.creation_tx: Optional[str] = None
         self.creation_timestamp: Optional[int] = None
         
         # Trading capability tracking (internal naming for clarity)
         self.can_buy: bool = False
         self.can_buy_block: Optional[int] = None  # Maps to DB: trading_enabled_block
-        self.can_buy_txn: Optional[str] = None    # Maps to DB: trading_enabled_txn
+        self.can_buy_tx: Optional[str] = None    # Maps to DB: trading_enabled_tx
         self.can_buy_timestamp: Optional[int] = None
         
         # Runtime-only fields (not persisted to DB)
@@ -103,7 +103,7 @@ class BasePool(ABC):
         self.buy_tax: Optional[float] = None
         self.sell_tax: Optional[float] = None
         self.tax_check_block: Optional[int] = None
-        self.tax_check_txn: Optional[str] = None
+        self.tax_check_tx: Optional[str] = None
         
         # Token decimals (cached)
         self._token_decimals: Optional[int] = int(token_decimals)
@@ -237,7 +237,7 @@ class BasePool(ABC):
         if not self.can_buy:
             self.can_buy = True
             self.can_buy_block = transaction['block_number']
-            self.can_buy_txn = transaction['hash']
+            self.can_buy_tx = transaction['hash']
             # Persist when the first buy was observed on-chain
             self.can_buy_timestamp = transaction['block_timestamp']
             
@@ -256,11 +256,11 @@ class BasePool(ABC):
             'trading_enabled': self.trading_enabled,
             'can_buy_and_sell': self.can_buy_and_sell,
             'block': self.trading_enabled_block,
-            'txn': self.trading_enabled_txn,
+            'tx': self.trading_enabled_tx,
             'buy_tax': self.buy_tax,
             'sell_tax': self.sell_tax,
             'tax_check_block': self.tax_check_block,
-            'tax_check_txn': self.tax_check_txn
+            'tax_check_tx': self.tax_check_tx
         }
     
     @property
@@ -336,9 +336,9 @@ class BasePool(ABC):
         return self.can_buy_block
     
     @property
-    def trading_enabled_txn(self) -> Optional[str]:
-        """Maps to database column trading_enabled_txn."""
-        return self.can_buy_txn
+    def trading_enabled_tx(self) -> Optional[str]:
+        """Maps to database column trading_enabled_tx."""
+        return self.can_buy_tx
     
     @property
     def can_buy_and_sell(self) -> bool:

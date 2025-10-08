@@ -195,7 +195,7 @@ class PoolManager:
         )
         
         pool.creation_block = transaction['block_number']
-        pool.creation_txn = transaction['hash']
+        pool.creation_tx = transaction['hash']
         pool.creation_timestamp = transaction['block_timestamp']
         self._register_pool(pool)
         
@@ -236,7 +236,7 @@ class PoolManager:
         )
         
         pool.creation_block = transaction['block_number']
-        pool.creation_txn = transaction['hash']
+        pool.creation_tx = transaction['hash']
         pool.creation_timestamp = transaction['block_timestamp']
         self._register_pool(pool)
         
@@ -292,7 +292,7 @@ class PoolManager:
         )
         
         pool.creation_block = transaction['block_number']
-        pool.creation_txn = transaction['hash']
+        pool.creation_tx = transaction['hash']
         pool.creation_timestamp = transaction['block_timestamp']
         self._register_v4_pool(pool)
         
@@ -886,7 +886,7 @@ class PoolManager:
             )
             
             pool.creation_block = transaction.get('block_number')
-            pool.creation_txn = transaction.get('hash')
+            pool.creation_tx = transaction.get('hash')
             pool.creation_timestamp = transaction.get('block_timestamp')
             pool.detected_from_swap = True
             
@@ -936,7 +936,7 @@ class PoolManager:
             )
             
             pool.creation_block = transaction.get('block_number')
-            pool.creation_txn = transaction.get('hash')
+            pool.creation_tx = transaction.get('hash')
             pool.creation_timestamp = transaction.get('block_timestamp')
             pool.detected_from_swap = True
             
