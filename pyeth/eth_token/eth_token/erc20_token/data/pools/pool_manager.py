@@ -427,20 +427,8 @@ class PoolManager:
             if len(parts) == 2:
                 pool_id = parts[1]
                 return self.v4_pools.get(pool_id)
-        
-        # Try regular pools with checksum conversion
-        checksum_address = None
-        try:
-            checksum_address = Web3.to_checksum_address(pool_address)
-        except ValueError:
-            checksum_address = None
-
-        if checksum_address:
-            pool = self.pools.get(checksum_address)
-            if pool:
-                return pool
-
-        return self.pools.get(pool_address)
+        pool = self.pools.get(Web3.to_checksum_address(pool_address))
+        return pool
         
     def get_pools_by_protocol(self, protocol: str) -> List[BasePool]:
         """Get all pools for a specific protocol."""
@@ -617,7 +605,6 @@ class PoolManager:
     def get_all_pool_addresses(self) -> List[str]:
         """
         Get all pool addresses including V4 display addresses.
-        
         For V4 pools, returns the display address (PoolManager#poolId)
         """
         addresses = list(self.pools.keys())
@@ -676,12 +663,6 @@ class PoolManager:
         return enabled_pools
     
     def get_pool_taxes(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
-        """
-        Get tax rates for all pools.
-        
-        Returns:
-            Dict mapping pool_address -> (buy_tax, sell_tax)
-        """
         taxes = {}
         
         # Regular pools
@@ -694,40 +675,9 @@ class PoolManager:
             
         return taxes
     
-    def get_lowest_tax_pool(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the pool with the lowest combined tax rate.
-        
-        Returns:
-            Dict with pool info or None if no pools have taxes calculated
-        """
-        lowest_pool = None
-        lowest_combined_tax = float('inf')
-        
-        for pool_info in self.get_trading_enabled_pools():
-            if pool_info['buy_tax'] is not None and pool_info['sell_tax'] is not None:
-                combined_tax = pool_info['buy_tax'] + pool_info['sell_tax']
-                if combined_tax < lowest_combined_tax:
-                    lowest_combined_tax = combined_tax
-                    lowest_pool = pool_info
-                    
-        return lowest_pool
-    
     def has_pools(self) -> bool:
         """Check if token has any pools."""
         return len(self.pools) > 0 or len(self.v4_pools) > 0
-    
-    def has_v2_pools(self) -> bool:
-        """Check if any V2 pools exist."""
-        return len(self.pools_by_protocol.get(UNISWAP_V2_PROTOCOL, [])) > 0
-
-    def has_v3_pools(self) -> bool:
-        """Check if any V3 pools exist."""
-        return len(self.pools_by_protocol.get(UNISWAP_V3_PROTOCOL, [])) > 0
-    
-    def has_v4_pools(self) -> bool:
-        """Check if any V4 pools exist."""
-        return len(self.v4_pools) > 0
     
     def get_total_lp_supply(self) -> Dict[str, float]:
         """Get total LP supply for all V2 pools.
@@ -740,94 +690,6 @@ class PoolManager:
             if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
                 lp_supplies[address] = pool.lp_total_supply
         return lp_supplies
-    
-    def get_lp_holder_stats(self) -> Dict:
-        """Get LP holder statistics across all pools.
-        
-        Returns:
-            Dictionary with LP holder statistics:
-            - total_lp_holders: Unique LP holders across all pools
-            - pools_with_lp: Number of V2 pools
-            - largest_lp_pool: Pool with highest LP supply
-            - most_holders_pool: Pool with most LP holders
-            - top_lp_providers: Top LP providers across all pools
-        """
-        stats = {
-            'total_lp_holders': 0,
-            'pools_with_lp': 0,
-            'largest_lp_pool': None,
-            'most_holders_pool': None,
-            'top_lp_providers': []
-        }
-        
-        unique_holders = set()
-        max_supply = 0
-        max_holders = 0
-        all_provider_balances = defaultdict(float)  # Aggregate LP holdings across pools
-        
-        for address, pool in self.pools.items():
-            if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
-                stats['pools_with_lp'] += 1
-                
-                # Track unique holders
-                pool_holders = {addr for addr, balance in pool.lp_holders.items() if balance > 0}
-                unique_holders.update(pool_holders)
-                
-                # Find pool with highest LP supply
-                if pool.lp_total_supply > max_supply:
-                    max_supply = pool.lp_total_supply
-                    stats['largest_lp_pool'] = address
-                    
-                # Find pool with most holders
-                if len(pool_holders) > max_holders:
-                    max_holders = len(pool_holders)
-                    stats['most_holders_pool'] = address
-                    
-                # Aggregate LP holdings across all pools
-                for holder, balance in pool.lp_holders.items():
-                    if balance > 0:
-                        all_provider_balances[holder] += balance
-        
-        stats['total_lp_holders'] = len(unique_holders)
-        
-        # Get top LP providers across all pools
-        if all_provider_balances:
-            sorted_providers = sorted(
-                all_provider_balances.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:10]  # Top 10
-            
-            stats['top_lp_providers'] = [
-                {
-                    'address': addr,
-                    'total_lp_balance': balance,
-                    'pools_count': sum(
-                        1 for p in self.pools.values()
-                        if p.get_protocol() == UNISWAP_V2_PROTOCOL and 
-                        addr in p.lp_holders and 
-                        p.lp_holders[addr] > 0
-                    )
-                }
-                for addr, balance in sorted_providers
-            ]
-
-        return stats
-
-    def get_pool_ownership_distribution(self, pool_address: str) -> Dict:
-        """Get ownership distribution for a specific pool.
-        
-        Args:
-            pool_address: The pool address to analyze
-            
-        Returns:
-            Dictionary with ownership distribution data
-        """
-        pool = self.get_pool(pool_address)
-        if not pool or pool.get_protocol() != UNISWAP_V2_PROTOCOL:
-            return {}
-
-        return pool.get_lp_holders()
     
     def _check_swap_events_for_pools(self, transaction: Dict):
         """
@@ -866,10 +728,11 @@ class PoolManager:
             self._processing_pools.add(pair_address)
             
             # Use chain data fetcher to get pool info
-            pool_info = self.chain_data_fetcher.discover_pool_for_token(
+            pool_info = self.chain_data_fetcher.fetch_pool_metadata_for_token(
                 pool_address=pair_address,
                 token_address=self.token_address,
-                protocol_hint=UNISWAP_V2_PROTOCOL
+                protocol_hint=UNISWAP_V2_PROTOCOL,
+                block_number=transaction.get('block_number'),
             )
             
             if pool_info is None:
@@ -915,10 +778,11 @@ class PoolManager:
             self._processing_pools.add(pool_address)
             
             # Use chain data fetcher to get pool info
-            pool_info = self.chain_data_fetcher.discover_pool_for_token(
+            pool_info = self.chain_data_fetcher.fetch_pool_metadata_for_token(
                 pool_address=pool_address,
                 token_address=self.token_address,
-                protocol_hint=UNISWAP_V3_PROTOCOL
+                protocol_hint=UNISWAP_V3_PROTOCOL,
+                block_number=transaction.get('block_number'),
             )
             
             if pool_info is None:

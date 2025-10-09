@@ -204,7 +204,7 @@ class PoolChainDataFetcher:
         out['pool_id'] = pool_id_hex
         return out
     
-    def discover_v2_pool(self, pool_address: str) -> Optional[Dict]:
+    def discover_v2_pool(self, pool_address: str, block_number: Optional[int] = None) -> Optional[Dict]:
         """
         Discover V2 pool configuration from blockchain.
         
@@ -215,7 +215,7 @@ class PoolChainDataFetcher:
             Dict with token0, token1 addresses or None if discovery fails
         """
         # PyReth route (no RPC), yields token0/1 for V2
-        info = self.get_v2_liquidity(pool_address)
+        info = self.get_v2_liquidity(pool_address, block_number)
         if info is not None and info.get('token0') and info.get('token1'):
             result = {
                 'pool_address': self._to_checksum(pool_address),
@@ -227,7 +227,7 @@ class PoolChainDataFetcher:
             return result
         return None
     
-    def discover_v3_pool(self, pool_address: str) -> Optional[Dict]:
+    def discover_v3_pool(self, pool_address: str, block_number: Optional[int] = None) -> Optional[Dict]:
         """
         Discover V3 pool configuration from blockchain.
         
@@ -238,7 +238,7 @@ class PoolChainDataFetcher:
             Dict with token0, token1, and fee or None if discovery fails
         """
         # PyReth route for V3
-        info = self.get_v3_liquidity(pool_address, fee_tier=3000)
+        info = self.get_v3_liquidity(pool_address, fee_tier=3000, block=block_number)
         if info is not None and info.get('token0') and info.get('token1'):
             result = {
                 'pool_address': self._to_checksum(pool_address),
@@ -251,10 +251,15 @@ class PoolChainDataFetcher:
             return result
         return None
     
-    def discover_pool_for_token(self, pool_address: str, token_address: str, 
-                               protocol_hint: Optional[str] = None) -> Optional[Dict]:
+    def fetch_pool_metadata_for_token(
+        self,
+        pool_address: str,
+        token_address: str,
+        protocol_hint: Optional[str] = None,
+        block_number: Optional[int] = None,
+    ) -> Optional[Dict]:
         """
-        Discover pool configuration and check if it involves the specified token.
+        Fetch pool metadata and check if it involves the specified token.
         
         Args:
             pool_address: The pool contract address
@@ -272,14 +277,14 @@ class PoolChainDataFetcher:
         hint = canonicalize_dex_pool_type(protocol_hint) if protocol_hint else None
 
         if hint == UNISWAP_V2_PROTOCOL:
-            pool_info = self.discover_v2_pool(pool_address)
+            pool_info = self.discover_v2_pool(pool_address, block_number)
         elif hint == UNISWAP_V3_PROTOCOL:
-            pool_info = self.discover_v3_pool(pool_address)
+            pool_info = self.discover_v3_pool(pool_address, block_number)
         else:
             # Try V3 first (has fee field), then V2
-            pool_info = self.discover_v3_pool(pool_address)
+            pool_info = self.discover_v3_pool(pool_address, block_number)
             if pool_info is None:
-                pool_info = self.discover_v2_pool(pool_address)
+                pool_info = self.discover_v2_pool(pool_address, block_number)
         
         if pool_info is None:
             return None
