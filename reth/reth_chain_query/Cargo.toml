@@ -124,6 +124,9 @@ path = "examples/defi/verify_dex_pool_computation.rs"
 name = "liquidity_readers"
 path = "examples/defi/liquidity_readers.rs"
 [[example]]
+name = "liquidity_with_header"
+path = "examples/defi/liquidity_with_header.rs"
+[[example]]
 name = "tx_arrival_index_smoke"
 path = "examples/reth_index/tx_arrival_index_smoke.rs"
 
