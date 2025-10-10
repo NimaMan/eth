@@ -7,7 +7,8 @@ use tx_processor::{BlockBatchOptions, BlockProcessor};
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let datadir = std::env::var("RETH_DATADIR")?;
+    let datadir = std::env::var("RETH_DATADIR")
+        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
     let provider = Arc::new(reth_chain_query::RethQueryProvider::new(&datadir)?);
     let processor = BlockProcessor::new(provider.clone());
 

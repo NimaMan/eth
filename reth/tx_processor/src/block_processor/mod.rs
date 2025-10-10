@@ -198,7 +198,11 @@ impl BlockProcessor {
             processed_tx.contract_address = Some(contract_address);
 
             if receipt.status {
-                if let Ok(meta) = self.provider.get_token_metadata(contract_address).await {
+                if let Ok(meta) = self
+                    .provider
+                    .get_token_metadata(contract_address, None, None)
+                    .await
+                {
                     processed_tx
                         .contract_creation_events
                         .push(ContractCreationEvent {

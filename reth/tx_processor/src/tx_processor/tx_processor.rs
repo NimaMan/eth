@@ -155,7 +155,7 @@ impl TxProcessor {
         let fees = TransactionFees {
             gas_price,
             gas_used,
-            txn_fee: gas_price * U256::from(gas_used),
+            tx_fee: gas_price * U256::from(gas_used),
             max_fee_per_gas: None,  // Not available from simulation
             max_priority_fee: None, // Not available from simulation
             protocol_type: "simulation".to_string(),
@@ -243,7 +243,7 @@ impl TxProcessor {
 
         // STEP 5: Classify transaction type based on decoded events
         // TODO: Implement proper classification logic
-        processed_tx.txn_type = self.determine_transaction_type(&processed_tx);
+        processed_tx.tx_type = self.determine_transaction_type(&processed_tx);
 
         Ok(processed_tx)
     }
@@ -342,6 +342,7 @@ impl TxProcessor {
 
         // Set the extracted internal transactions
         processed_tx.internal_transactions = internal_transactions;
+        processed_tx.struct_logs = simulation_result.struct_logs.clone();
 
         Ok(processed_tx)
     }

@@ -159,13 +159,12 @@ alloy-rpc-types-trace = "1.0"
 # Add reth_chain_query for direct database access
 reth_chain_query = { path = "../reth_chain_query" }
 
-# Reth dependencies for database access (matching reth_chain_query's v1.6.0)
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
 
 [dev-dependencies]
 rand = "0.8"

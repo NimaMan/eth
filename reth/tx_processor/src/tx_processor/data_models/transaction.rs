@@ -5,6 +5,7 @@ use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use tx_simulator::types::StructLog;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ETHTransfer {
@@ -29,7 +30,7 @@ pub struct ProcessedTransaction {
     pub hash: B256,
     pub block_number: u64,
     pub block_timestamp: u64,
-    pub txn_index: u64,
+    pub tx_index: u64,
     pub from_address: Address,
     pub to_address: Option<Address>,
     pub contract_address: Option<Address>,
@@ -38,7 +39,7 @@ pub struct ProcessedTransaction {
     pub nonce: u64,
 
     // Transaction classification
-    pub txn_type: String,
+    pub tx_type: String,
     pub actions: Vec<String>,
 
     // Fee information
@@ -92,6 +93,7 @@ pub struct ProcessedTransaction {
     pub address_balance_changes: HashMap<Address, AddressBalanceChange>,
     pub latest_states: HashMap<Address, serde_json::Value>,
     pub input: Vec<u8>,
+    pub struct_logs: Option<Vec<StructLog>>,
 }
 
 impl ProcessedTransaction {
@@ -102,7 +104,7 @@ impl ProcessedTransaction {
             hash,
             0,     // block_number
             0,     // block_timestamp
-            nonce, // txn_index
+            nonce, // tx_index
             from,
             to,
             U256::ZERO,      // value
@@ -110,7 +112,7 @@ impl ProcessedTransaction {
             nonce,
             vec![], // input
         );
-        tx.txn_type = "skipped".to_string();
+        tx.tx_type = "skipped".to_string();
         tx.actions = vec![reason.to_string()];
         tx
     }
@@ -119,7 +121,7 @@ impl ProcessedTransaction {
         hash: B256,
         block_number: u64,
         block_timestamp: u64,
-        txn_index: u64,
+        tx_index: u64,
         from_address: Address,
         to_address: Option<Address>,
         value: U256,
@@ -131,14 +133,14 @@ impl ProcessedTransaction {
             hash,
             block_number,
             block_timestamp,
-            txn_index,
+            tx_index,
             from_address,
             to_address,
             contract_address: None,
             value,
             status,
             nonce,
-            txn_type: String::new(),
+            tx_type: String::new(),
             actions: Vec::new(),
             fees: TransactionFees::default(),
             bribe_amount: 0.0,
@@ -180,6 +182,7 @@ impl ProcessedTransaction {
             address_balance_changes: HashMap::new(),
             latest_states: HashMap::new(),
             input,
+            struct_logs: None,
         }
     }
 
