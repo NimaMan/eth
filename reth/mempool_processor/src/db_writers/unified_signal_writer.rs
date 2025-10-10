@@ -5,6 +5,7 @@
 /// signal types without modifying multiple places.
 use alloy_primitives::U256;
 use eyre::Result;
+use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
@@ -309,7 +310,7 @@ impl LpApprovalSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: "V2".to_string(),
+            pool_type: DEFAULT_POOL_TYPE.to_string(),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: chrono::Utc::now(),

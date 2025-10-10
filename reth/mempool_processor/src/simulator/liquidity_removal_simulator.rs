@@ -61,8 +61,9 @@ impl LiquidityRemovalSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
+        tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
-        self.simulate_removal_internal(unsigned_tx, block_number, block_header, false)
+        self.simulate_removal_internal(unsigned_tx, block_number, block_header, false, tx_hash)
             .await
     }
 
@@ -75,12 +76,14 @@ impl LiquidityRemovalSimulator {
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
+        tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
         self.simulate_removal_internal(
             unsigned_tx,
             block_number,
             block_header,
             retry_on_missing_header,
+            tx_hash,
         )
         .await
     }
@@ -91,6 +94,7 @@ impl LiquidityRemovalSimulator {
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
+        tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
         // 1) Process tx with full trace + deltas
         let processed = match self
@@ -104,6 +108,23 @@ impl LiquidityRemovalSimulator {
         {
             Ok(p) => p,
             Err(e) => {
+                if let Some(expected_nonce) = Self::parse_nonce_mismatch(&e) {
+                    return Ok(LiquidityRemovalResult {
+                        success: false,
+                        revert_reason: Some(format!(
+                            "Nonce mismatch: expected nonce {} before liquidity removal",
+                            expected_nonce
+                        )),
+                        address_balance_changes: HashMap::new(),
+                        pool_address: None,
+                        eth_removed: 0.0,
+                        drain_percentage: 0.0,
+                        remaining_eth: 0.0,
+                        is_scam: true,
+                        debug_info: None,
+                    });
+                }
+
                 // If this looks like an insufficient funds error, log sender balance at the block
                 let mut debug_info: Option<String> = None;
                 let msg = e.to_string();
@@ -193,7 +214,14 @@ impl LiquidityRemovalSimulator {
                         }
                     }
                 }
-                error!("Liquidity removal processing failed: {}", msg);
+                if let Some(hash) = tx_hash {
+                    error!(
+                        "Liquidity removal processing failed for tx {}: {}",
+                        hash, msg
+                    );
+                } else {
+                    error!("Liquidity removal processing failed: {}", msg);
+                }
                 return Ok(LiquidityRemovalResult {
                     success: false,
                     revert_reason: Some(msg),
@@ -301,9 +329,9 @@ impl LiquidityRemovalSimulator {
         best
     }
 
-    async fn process_with_optional_retry(
+    pub(crate) async fn process_with_optional_retry(
         &self,
-        unsigned_tx: UnsignedTransaction,
+        mut unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
@@ -316,6 +344,11 @@ impl LiquidityRemovalSimulator {
             .as_ref()
             .map(|header| header.number)
             .or(block_number);
+        let header_base_fee = block_header
+            .as_ref()
+            .and_then(|header| header.header().base_fee_per_gas)
+            .map(|fee| fee as u128);
+        let mut adjusted_for_base_fee = false;
 
         loop {
             let result = if let Some(header) = block_header.clone() {
@@ -327,6 +360,24 @@ impl LiquidityRemovalSimulator {
             match result {
                 Ok(processed) => return Ok(processed),
                 Err(err) => {
+                    if !adjusted_for_base_fee && Self::is_base_fee_error(&err) {
+                        if let Some(base_fee) = header_base_fee {
+                            if Self::adjust_for_base_fee(&mut unsigned_tx, base_fee) {
+                                adjusted_for_base_fee = true;
+                                let base_fee_gwei = (base_fee as f64) / 1_000_000_000f64;
+                                warn!(
+                                    "Base fee {:.3} gwei exceeded tx caps; repricing for simulation",
+                                    base_fee_gwei
+                                );
+                                continue;
+                            }
+                        } else {
+                            warn!(
+                                "Base fee validation error but no header base fee available; unable to reprice"
+                            );
+                        }
+                    }
+
                     let is_missing_header = Self::is_missing_header_error(&err);
                     if retry_on_missing_header && is_missing_header && attempt < MAX_RETRIES {
                         attempt += 1;
@@ -348,5 +399,81 @@ impl LiquidityRemovalSimulator {
         let message = err.to_string();
         message.contains("Provider did not return header for block")
             || message.contains("No header for block")
+    }
+
+    fn is_base_fee_error(err: &eyre::Report) -> bool {
+        let message = err.to_string();
+        if message.contains("GasPriceLessThanBasefee") {
+            return true;
+        }
+        message.to_lowercase().contains("base fee")
+    }
+
+    fn adjust_for_base_fee(unsigned_tx: &mut UnsignedTransaction, base_fee: u128) -> bool {
+        const MIN_PRIORITY_FEE: u128 = 1_000_000_000; // 1 gwei
+        const DEFAULT_PRIORITY_FEE: u128 = 2_000_000_000; // 2 gwei
+
+        if base_fee == 0 {
+            return false;
+        }
+
+        if let Some(mut max_fee) = unsigned_tx.max_fee_per_gas {
+            let mut priority = unsigned_tx
+                .max_priority_fee_per_gas
+                .unwrap_or(DEFAULT_PRIORITY_FEE)
+                .max(MIN_PRIORITY_FEE);
+
+            let required_max_fee = base_fee.saturating_add(priority);
+            let mut changed = false;
+            if max_fee < required_max_fee {
+                max_fee = required_max_fee;
+                changed = true;
+            }
+
+            let max_priority_allowed = max_fee.saturating_sub(base_fee).max(MIN_PRIORITY_FEE);
+            let adjusted_priority = priority.min(max_priority_allowed);
+            if unsigned_tx
+                .max_priority_fee_per_gas
+                .map(|existing| existing != adjusted_priority)
+                .unwrap_or(true)
+            {
+                priority = adjusted_priority;
+                changed = true;
+            }
+
+            if changed {
+                unsigned_tx.max_fee_per_gas = Some(max_fee);
+                unsigned_tx.max_priority_fee_per_gas = Some(priority);
+            }
+
+            changed
+        } else {
+            let required_price = base_fee.saturating_add(DEFAULT_PRIORITY_FEE);
+            let current_price = unsigned_tx.gas_price.unwrap_or(0);
+            if current_price >= required_price {
+                return false;
+            }
+            unsigned_tx.gas_price = Some(required_price);
+            true
+        }
+    }
+
+    fn parse_nonce_mismatch(err: &eyre::Report) -> Option<u64> {
+        let message = err.to_string();
+        if !message.contains("nonce") || !message.contains("expected") {
+            return None;
+        }
+
+        // Extract the substring after "expected " and parse consecutive digits
+        let expected_part = message.split("expected ").nth(1)?;
+        let expected_str = expected_part
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>();
+        if expected_str.is_empty() {
+            return None;
+        }
+
+        expected_str.parse::<u64>().ok()
     }
 }

@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(output_file)?;
 
     // Write CSV header
-    writeln!(file, "creator_address,token_address,token_symbol,token_name,decimals,total_supply,buy_tax,sell_tax,ownership_renounced,renouncement_block,creation_block,creation_txn,latest_activity_block,is_scam,total_liquidity,pool1_address,pool1_type,pool1_eth_reserve,pool1_token_reserve,pool1_trading_enabled,pool1_trading_block,pool2_address,pool2_type,pool2_eth_reserve,pool2_token_reserve,pool2_trading_enabled,pool2_trading_block,pool3_address,pool3_type,pool3_eth_reserve,pool3_token_reserve,pool3_trading_enabled,pool3_trading_block")?;
+    writeln!(file, "creator_address,token_address,token_symbol,token_name,decimals,total_supply,buy_tax,sell_tax,ownership_renounced,renouncement_block,creation_block,creation_tx,latest_activity_block,is_scam,total_liquidity,pool1_address,pool1_type,pool1_eth_reserve,pool1_token_reserve,pool1_trading_enabled,pool1_trading_block,pool2_address,pool2_type,pool2_eth_reserve,pool2_token_reserve,pool2_trading_enabled,pool2_trading_block,pool3_address,pool3_type,pool3_eth_reserve,pool3_token_reserve,pool3_trading_enabled,pool3_trading_block")?;
 
     // Get all creators
     let all_creators = cache.creator_addresses().await;
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .renouncement_block
                     .map_or(String::new(), |b| b.to_string()),
                 token.creation_block,
-                token.creation_txn,
+                token.creation_tx,
                 token.latest_activity_block,
                 token.is_scam,
                 pools.iter().map(|p| p.eth_reserve).sum::<f64>()

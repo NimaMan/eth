@@ -607,7 +607,7 @@ OPTIONS:
 
 ### 3. Mempool Arrival Index (Optional)
 - Records first-seen mempool timestamps and persists only when the tx is mined
-- Minimal mapping: `TxNumber → first_seen_ns`
+- Minimal mapping: `txumber → first_seen_ns`
 - Enable with `--arrival-index-dir <DIR>` or `ARRIVAL_INDEX_DIR` env var
 - Default backend: file-backed CSV (`tx_arrivals.csv`); MDBX backend available behind feature flag `arrival_mdbx`
 

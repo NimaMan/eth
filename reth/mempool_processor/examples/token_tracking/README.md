@@ -11,7 +11,7 @@ Exports complete token ecosystem data from the cache to a CSV file with comprehe
 - **Token metadata**: token_address, symbol, name, decimals, total_supply
 - **Tax info**: buy_tax, sell_tax
 - **Ownership**: ownership_renounced, renouncement_block
-- **Creation**: creation_block, creation_txn, latest_activity_block
+- **Creation**: creation_block, creation_tx, latest_activity_block
 - **Scam detection**: is_scam
 - **Liquidity**: total_liquidity
 - **Pool data** (up to 3 pools per token):

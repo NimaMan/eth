@@ -1,6 +1,7 @@
 use alloy_primitives::U256;
 use chrono::{DateTime, Utc};
 use eyre::Result;
+use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::types::BigDecimal;
 use std::str::FromStr;
@@ -53,7 +54,7 @@ impl LpApprovalSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: "Uniswap-V2".to_string(),
+            pool_type: DEFAULT_POOL_TYPE.to_string(),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),

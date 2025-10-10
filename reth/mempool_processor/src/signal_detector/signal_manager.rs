@@ -217,7 +217,9 @@ impl SignalManager {
             result.request.tx.hash
         );
         if let Some(ref err) = result.error {
-            info!("  Simulation error: {}", err);
+            if !err.contains("No pools found for token") {
+                info!("  Simulation error: {}", err);
+            }
         } else {
             info!("  Simulation succeeded");
         }

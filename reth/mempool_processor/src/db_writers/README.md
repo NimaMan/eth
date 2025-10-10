@@ -2,8 +2,8 @@ Mempool Arrival Time Writing
 
 Overview
 - Goal: Persist first-seen mempool arrival times only for transactions that get mined.
-- Storage: Compact MDBX table in `reth_chain_query` (TxNumber → first_seen_ms).
-- Writer flow: Resolve `tx_hash → TxNumber` via local Reth DB, then batch-write `(tx_number, first_seen_ms)` in a single transaction.
+- Storage: Compact MDBX table in `reth_chain_query` (txumber → first_seen_ms).
+- Writer flow: Resolve `tx_hash → txumber` via local Reth DB, then batch-write `(tx_number, first_seen_ms)` in a single transaction.
 
 Why milliseconds?
 - Milliseconds (`first_seen_ms: u64`) are sufficient for analytics and smaller than nanoseconds.
@@ -11,13 +11,13 @@ Why milliseconds?
 
 Data Model
 - Table name: `mempool_tx_arrival_times`
-- Key: `TxNumber` (u64, big‑endian) — the Reth sequential transaction id
+- Key: `txumber` (u64, big‑endian) — the Reth sequential transaction id
 - Value: `first_seen_ms` (u64, big‑endian)
 
 Where it lives
 - DB/table: `rust/reth_chain_query/src/reth_index/{database.rs,tables/mempool_tx_arrivals.rs}`
 - High-level writer: `rust/reth_chain_query/src/reth_index/writers/mempool_arrival_writer.rs`
-  - Resolves tx hashes to TxNumbers using a shared `ProviderFactory`
+  - Resolves tx hashes to txumbers using a shared `ProviderFactory`
   - Performs batch writes in one MDBX RW transaction
 
 End-to-end Flow
@@ -26,7 +26,7 @@ End-to-end Flow
 3) Periodic flush (or delay window):
    - Take up to `batch_size` pending entries: `[(hash, first_seen_ms)]`
    - Call `MempoolArrivalWriter.write_arrivals_by_hashes_ms(entries)`
-   - Writer uses shared `ProviderFactory` to resolve `hash → TxNumber` via `provider.transaction_id(hash)`
+   - Writer uses shared `ProviderFactory` to resolve `hash → txumber` via `provider.transaction_id(hash)`
    - Batch write resolved `(tx_number, first_seen_ms)` with `db.put_tx_arrivals_ms(...)`
    - Remove only resolved hashes from the pending map; re-try unresolved later
 

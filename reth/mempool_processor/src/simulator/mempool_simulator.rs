@@ -306,7 +306,7 @@ impl MempoolSimulator {
         let state = self.fetch_state_with_retry(block_number).await?;
 
         self.tx_simulator
-            .simulate_unsigned_transaction_with_header_and_state(unsigned_tx, header, state)
+            .simulate_unsigned_transaction_on_state(unsigned_tx, header, state)
             .await
     }
 

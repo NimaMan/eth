@@ -92,12 +92,12 @@ async fn main() -> Result<()> {
 
     // Try simulation at pre-state (block-1); if fee validation fails, try at block
     let mut result = lr
-        .simulate_removal(unsigned.clone(), Some(sim_block))
+        .simulate_removal(unsigned.clone(), Some(sim_block), None)
         .await?;
     if !result.success {
         // Retry at the actual block height (more permissive for analysis)
         result = lr
-            .simulate_removal(unsigned, Some(processed.block_number))
+            .simulate_removal(unsigned, Some(processed.block_number), None)
             .await?;
     }
 

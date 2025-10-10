@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
             .unwrap_or("");
         let creator_tx = token_info
             .as_ref()
-            .map(|i| i.creation_txn.as_str())
+            .map(|i| i.creation_tx.as_str())
             .unwrap_or("");
         let block_number = token_info.as_ref().map(|i| i.creation_block).unwrap_or(0);
         let creation_time = "".to_string(); // Not available in current structure

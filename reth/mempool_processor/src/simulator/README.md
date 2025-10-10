@@ -89,6 +89,7 @@ For EACH pool (run independently / concurrently)
 Notes:
 - Each pool generates its own SimulationResult and downstream signals; one noisy pool does not block others.
 - If no pools are found for a creator, a single “no-pools” result is sent to SignalManager (for logging/consistency).
+- **Current limitation**: the creator transaction itself is not yet baked into the buy/approve/sell probe. The current test therefore reflects the state *before* the pending creator call executes. The follow-up work on `feature/apply-creator-tx-before-buysell` will capture the creator mempool tx and inject it as the `prior_tx` when running the pool buy/approve/sell chain so the probe reflects post-call state without a separate primary simulation.
 
 ### Other Categories
 

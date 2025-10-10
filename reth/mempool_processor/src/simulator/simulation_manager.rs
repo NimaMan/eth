@@ -1,10 +1,14 @@
-use super::{LiquidityRemovalResult, LiquidityRemovalSimulator, MempoolSimulator, SimulationQueue};
+use super::{
+    mempool_simulator::mempool_tx_to_unsigned_tx, LiquidityRemovalResult,
+    LiquidityRemovalSimulator, MempoolSimulator, SimulationQueue,
+};
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
 use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::{CreatorFunctionType, SimulationPriority, TransactionCategory};
 use alloy_primitives::{I256, U256};
 use ethers::types::H256;
+use eyre::Result as EyreResult;
 /// Simulation Manager
 ///
 /// Manages transaction simulations on a PER-POOL basis.
@@ -29,7 +33,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
-use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use tx_processor::{
+    PoolBuySellParameters, PoolBuySellSimulationResult, PoolType, ProcessedTransaction,
+};
 
 /// Types of simulation to perform
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -417,6 +423,22 @@ impl SimulationManager {
     /// - Each pool's results are collected separately
     /// - Returns a Vec with one result per pool
     /// - Failed pools don't affect successful ones
+    async fn simulate_prior_transaction(
+        &self,
+        request: &SimulationRequest,
+    ) -> EyreResult<ProcessedTransaction> {
+        let unsigned_tx = mempool_tx_to_unsigned_tx(&request.tx)?;
+        let snapshot = self.mempool_simulator.head_cache().latest_snapshot().await;
+        let (block_number, block_header) = match snapshot {
+            Some(snap) => (Some(snap.number), Some(snap.header.clone())),
+            None => (None, None),
+        };
+
+        self.liquidity_removal_simulator
+            .process_with_optional_retry(unsigned_tx, block_number, block_header, true)
+            .await
+    }
+
     async fn simulate_tx_with_buy_sell_all_pools(
         &self,
         request: &SimulationRequest,
@@ -728,18 +750,29 @@ impl SimulationManager {
                 continue;
             };
 
+            let prior_tx = match self.simulate_prior_transaction(request).await {
+                Ok(tx) => Some(tx),
+                Err(err) => {
+                    warn!(
+                        "  [Pool {}] Failed to simulate creator transaction before buy/sell: {}",
+                        pool_idx, err
+                    );
+                    None
+                }
+            };
+
             let config: PoolBuySellParameters = PoolBuySellParameters {
                 token_address,
                 pool_address,
                 pool_type: pool_type_enum,
                 test_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
                 buyer_address: tx_call_request.from.unwrap_or_default(),
+                prior_tx,
                 block_number,
                 gas_limit: tx_call_request.gas.unwrap_or(500_000) as u64,
                 gas_price: tx_call_request.gas_price.map(|v| v as u128),
                 max_fee_per_gas: tx_call_request.max_fee_per_gas,
                 max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
-                prior_tx: None, // TODO: Convert tx_call_request to ProcessedTransaction
                 block_delay: 0,
                 slippage_tolerance: 0.5, // 0.5% default slippage
                 weth_address: alloy_primitives::Address::from([
@@ -778,6 +811,17 @@ impl SimulationManager {
                         );
 
                         // Retry with higher gas price
+                        let retry_prior_tx = match self.simulate_prior_transaction(request).await {
+                            Ok(tx) => Some(tx),
+                            Err(err) => {
+                                warn!(
+                                    "  [Pool {}] Retrying buy/sell without creator state (simulation failed): {}",
+                                    pool_idx, err
+                                );
+                                None
+                            }
+                        };
+
                         let retry_config: PoolBuySellParameters = PoolBuySellParameters {
                             token_address,
                             pool_address,
@@ -789,7 +833,7 @@ impl SimulationManager {
                             gas_price: new_gas_price.map(|v| v as u128),
                             max_fee_per_gas: new_max_fee,
                             max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
-                            prior_tx: None, // TODO: Convert tx_call_request to ProcessedTransaction
+                            prior_tx: retry_prior_tx,
                             block_delay: 0,
                             slippage_tolerance: 0.5, // 0.5% default slippage
                             weth_address: alloy_primitives::Address::from([
@@ -972,7 +1016,13 @@ impl SimulationManager {
         // Run liquidity removal simulation with state override if needed
         let removal_result = match self
             .liquidity_removal_simulator
-            .simulate_removal_with_retry(call_request, block_number, block_header, true)
+            .simulate_removal_with_retry(
+                call_request,
+                block_number,
+                block_header,
+                true,
+                Some(request.tx.hash.as_str()),
+            )
             .await
         {
             Ok(result) => result,

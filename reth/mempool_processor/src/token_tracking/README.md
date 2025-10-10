@@ -127,7 +127,7 @@ use mempool_processor::token_tracking::token_parameter_extraction::fetch_token_m
 use reth_chain_query::provider::RethQueryProvider;
 
 async fn describe_token(provider: &RethQueryProvider, token: Address) {
-    if let Ok(meta) = fetch_token_metadata(provider, token).await {
+    if let Ok(meta) = fetch_token_metadata(provider, token, None).await {
         tracing::info!(
             "Token {} ({}): decimals={} total_supply={}",
             meta.name, meta.symbol, meta.decimals, meta.total_supply

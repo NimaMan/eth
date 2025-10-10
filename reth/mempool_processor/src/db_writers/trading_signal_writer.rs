@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use eyre::Result;
+use reth_chain_query::common_addresses::DEFAULT_POOL_TYPE;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -35,7 +36,7 @@ impl TradingSignalRecord {
         Self {
             token_address: signal.token_address.clone(),
             pool_address: signal.pool_address.clone(),
-            pool_type: "V2".to_string(), // Default, could be extracted from signal
+            pool_type: DEFAULT_POOL_TYPE.to_string(),
             denom_address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string(), // WETH default
             denom_currency: Some("WETH".to_string()),
             detection_timestamp: Utc::now(),

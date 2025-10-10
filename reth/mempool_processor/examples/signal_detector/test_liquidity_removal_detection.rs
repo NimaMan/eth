@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
         if let Some(block) = block_opt {
             info!("🧪 Simulating liquidity removal at tx block {}...", block);
             match liquidity_sim
-                .simulate_removal(unsigned.clone(), Some(block))
+                .simulate_removal(unsigned.clone(), Some(block), None)
                 .await
             {
                 Ok(res) => {
@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
                     println!("\n❌ Removal simulation at block {} failed: {}", block, e);
                     // Fall back to latest if pruned
                     info!("Falling back to latest block simulation...");
-                    match liquidity_sim.simulate_removal(unsigned, None).await {
+                    match liquidity_sim.simulate_removal(unsigned, None, None).await {
                         Ok(res) => {
                             println!("\n✅ Removal simulation complete (latest)");
                             println!("  Success: {}", res.success);
@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
         // If no block is present, simulate at latest
         // Simulate liquidity removal
         info!("🧪 Simulating liquidity removal...");
-        match liquidity_sim.simulate_removal(unsigned, None).await {
+        match liquidity_sim.simulate_removal(unsigned, None, None).await {
             Ok(res) => {
                 println!("\n✅ Removal simulation complete");
                 println!("  Success: {}", res.success);

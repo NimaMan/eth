@@ -68,7 +68,7 @@ pub struct Token {
     // Metadata
     pub creation_block: BlockNumber,
     #[serde(alias = "creation_tx")]
-    pub creation_txn: TxHash,
+    pub creation_tx: TxHash,
     #[serde(default)]
     pub creation_timestamp: Option<f64>,
     pub latest_activity_block: BlockNumber,
@@ -102,7 +102,7 @@ pub struct Pool {
     #[serde(default)]
     pub trading_enabled: bool,
     pub trading_enabled_block: Option<BlockNumber>,
-    pub trading_enabled_txn: Option<TxHash>,
+    pub trading_enabled_tx: Option<TxHash>,
 
     // Metadata
     pub fee_tier: Option<u32>,

@@ -281,7 +281,7 @@ impl TokenTrackingCache {
                 let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
                 let _ = writeln!(
                     file,
-                    "[{}] @block {}: tokens={}, pools={}, creators={} Token cache updated",
+                    "[{}] @block {}: tokens={}, pools={}, creators={}",
                     timestamp, block_number, tokens_updated, pools_updated, creators_added
                 );
             }
@@ -356,7 +356,7 @@ mod tests {
             last_tax_change_block: None,
             tax_history: vec![],
             creation_block: 1000,
-            creation_txn: "0xHASH".to_string(),
+            creation_tx: "0xHASH".to_string(),
             creation_timestamp: Some(1234567890.0),
             latest_activity_block: 2000,
             is_scam: false,
@@ -375,7 +375,7 @@ mod tests {
             denom_address: "0xWETH".to_string(),
             trading_enabled: true,
             trading_enabled_block: Some(1500),
-            trading_enabled_txn: Some("0xTRADING".to_string()),
+            trading_enabled_tx: Some("0xTRADING".to_string()),
             fee_tier: None,
             pool_id: None,
             last_updated_block: 2000,
