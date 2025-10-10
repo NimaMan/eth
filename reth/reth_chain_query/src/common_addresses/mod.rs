@@ -20,7 +20,7 @@ pub use dex_pools::{
     find_uniswap_v4_pools_for_pair, get_all_v3_pools, V4PoolInfo, BALANCER_VAULT,
     SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY, V3_FEE_TIERS,
 };
-pub use pool_types::{DEFAULT_POOL_TYPE, DEX_POOL_TYPES};
 pub use etf::{ADDRESSES_BY_PROVIDER, ETF_ADDRESSES, ETF_ADDRESS_SET};
+pub use pool_types::{DEFAULT_POOL_TYPE, DEX_POOL_TYPES};
 pub use stablecoins::{STABLECOINS, STABLECOIN_BY_ADDRESS, STABLECOIN_BY_SYMBOL};
 pub use validators::{is_bribe, is_fee_recipient, FEE_RECIPIENTS, FEE_RECIPIENT_LIST};

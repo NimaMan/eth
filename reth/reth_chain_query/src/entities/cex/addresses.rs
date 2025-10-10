@@ -1,11 +1,11 @@
 //! CEX (Centralized Exchange) addresses
-//!
+//! 
 //! This file is auto-generated from Python address files.
 //! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
 
 use alloy_primitives::{address, Address};
-use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
+use once_cell::sync::Lazy;
 
 /// CEX address entry
 #[derive(Debug, Clone)]
@@ -13896,15 +13896,16 @@ pub const CEX_ADDRESSES: &[CexAddress] = &[
         address: address!("15C5312E24482547FF35899AFeDCAEB572ECB029"),
         name: "xs2.exchange",
         exchange: "xs2.exchange",
-    },
+    }
 ];
 
 /// Total number of CEX addresses
 pub const CEX_ADDRESS_COUNT: usize = 2776;
 
 /// Lazy static HashSet for quick lookups
-pub static CEX_ADDRESS_SET: Lazy<HashSet<Address>> =
-    Lazy::new(|| CEX_ADDRESSES.iter().map(|entry| entry.address).collect());
+pub static CEX_ADDRESS_SET: Lazy<HashSet<Address>> = Lazy::new(|| {
+    CEX_ADDRESSES.iter().map(|entry| entry.address).collect()
+});
 
 /// Lazy static HashMap for address to exchange mapping
 pub static CEX_BY_ADDRESS: Lazy<HashMap<Address, &'static CexAddress>> = Lazy::new(|| {
@@ -13939,6 +13940,7 @@ pub fn get_cex_by_address(address: Address) -> Option<&'static CexAddress> {
 pub fn get_exchange_addresses(exchange: &str) -> Option<&'static Vec<Address>> {
     ADDRESSES_BY_EXCHANGE.get(exchange)
 }
+
 
 /// Exchange counts:
 /// - OKX: 165 addresses

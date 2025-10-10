@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256, Bytes, keccak256};
+use alloy_primitives::{keccak256, Address, Bytes, U256};
 use tx_simulator::UnsignedTransaction;
 
 /// Encode Curve V1 exchange or exchange_underlying call data.
@@ -51,7 +51,7 @@ pub fn build_buy_swap_curve_v1(
         from: Some(buyer),
         to: Some(pool),
         gas: Some(500_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         // Send ETH as input amount

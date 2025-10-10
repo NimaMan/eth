@@ -1,10 +1,12 @@
 /// Trade Queries
-/// 
+///
 /// Queries for trade-level data and PnL calculations for address-token pairs.
-
-use crate::postgres_db::{connection::PostgresDB, models::{Trade, PnLAnalysis}};
+use crate::postgres_db::{
+    connection::PostgresDB,
+    models::{PnLAnalysis, Trade},
+};
 use eyre::Result;
-use sqlx::{query_as, query};
+use sqlx::{query, query_as};
 
 /// Get all trades for an address, optionally filtered by token
 pub async fn get_trades_for_address(
@@ -37,25 +39,25 @@ pub async fn get_trades_for_address(
         FROM eth_db.trades t
         JOIN eth_db.addresses a ON t.address_id = a.address_id
         WHERE a.address = $1
-        "#
+        "#,
     );
-    
+
     if token_address.is_some() {
         sql.push_str(" AND t.token_address = $2");
-        
+
         let trades = sqlx::query_as::<_, Trade>(&sql)
             .bind(address)
             .bind(token_address.unwrap())
             .fetch_all(db.pool())
             .await?;
-        
+
         Ok(trades)
     } else {
         let trades = sqlx::query_as::<_, Trade>(&sql)
             .bind(address)
             .fetch_all(db.pool())
             .await?;
-        
+
         Ok(trades)
     }
 }
@@ -84,13 +86,13 @@ pub async fn get_address_token_pnl(
         FROM eth_db.trades t
         JOIN eth_db.addresses a ON t.address_id = a.address_id
         WHERE a.address = $1 AND t.token_address = $2
-        "#
+        "#,
     )
     .bind(address)
     .bind(token_address)
     .fetch_optional(db.pool())
     .await?;
-    
+
     Ok(result)
 }
 
@@ -124,20 +126,23 @@ pub async fn get_most_profitable_trades(
             t.agg_token_balance
         FROM eth_db.trades t
         WHERE t.realized_profit IS NOT NULL
-        "#
+        "#,
     );
-    
+
     if let Some(min_vol) = min_volume {
-        sql.push_str(&format!(" AND (t.total_denom_spent + t.total_denom_received) >= {}", min_vol));
+        sql.push_str(&format!(
+            " AND (t.total_denom_spent + t.total_denom_received) >= {}",
+            min_vol
+        ));
     }
-    
+
     sql.push_str(" ORDER BY t.realized_profit DESC");
     sql.push_str(&format!(" LIMIT {}", limit));
-    
+
     let trades = sqlx::query_as::<_, Trade>(&sql)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(trades)
 }
 
@@ -173,19 +178,19 @@ pub async fn get_recent_trades(
         FROM eth_db.trades t
         WHERE t.latest_block >= $1 AND t.latest_block <= $2
         ORDER BY t.latest_block DESC
-        "#
+        "#,
     );
-    
+
     if let Some(lim) = limit {
         sql.push_str(&format!(" LIMIT {}", lim));
     }
-    
+
     let trades = sqlx::query_as::<_, Trade>(&sql)
         .bind(start_block)
         .bind(end_block)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(trades)
 }
 
@@ -219,12 +224,12 @@ pub async fn get_trades_for_aggregation(
         FROM eth_db.trades t
         WHERE t.address_id = ANY($1)
         ORDER BY t.address_id, t.latest_block DESC
-        "#
+        "#,
     )
     .bind(address_ids)
     .fetch_all(db.pool())
     .await?;
-    
+
     Ok(trades)
 }
 
@@ -234,7 +239,7 @@ pub async fn get_address_trade_summary(
     address: &str,
 ) -> Result<Option<TradeSummary>> {
     use sqlx::Row;
-    
+
     let row = query(
         r#"
         SELECT 
@@ -254,12 +259,12 @@ pub async fn get_address_trade_summary(
         JOIN eth_db.addresses a ON t.address_id = a.address_id
         WHERE a.address = $1
         GROUP BY a.address
-        "#
+        "#,
     )
     .bind(address)
     .fetch_optional(db.pool())
     .await?;
-    
+
     match row {
         Some(r) => Ok(Some(TradeSummary {
             address: r.get("address"),

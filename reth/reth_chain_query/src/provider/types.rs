@@ -36,6 +36,7 @@ pub struct TransactionReceipt {
     pub logs: Vec<Log>,
     pub cumulative_gas_used: u64,
     pub effective_gas_price: U256,
+    pub contract_address: Option<Address>,
 }
 
 /// Event log from transaction

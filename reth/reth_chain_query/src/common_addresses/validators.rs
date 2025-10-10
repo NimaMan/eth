@@ -1,11 +1,11 @@
 //! Validator and MEV builder fee recipient addresses
-//! 
+//!
 //! This file is auto-generated from Python address files.
 //! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
 
 use alloy_primitives::{address, Address};
-use std::collections::{HashMap, HashSet};
 use once_cell::sync::Lazy;
+use std::collections::{HashMap, HashSet};
 
 /// Validator/Builder fee recipient entry
 #[derive(Debug, Clone)]
@@ -391,7 +391,7 @@ pub const FEE_RECIPIENT_LIST: &[FeeRecipient] = &[
     FeeRecipient {
         address: address!("f573d99385C05c23B24ed33De616ad16a43a0919"),
         name: "bloXroute: Ethical Builder",
-    }
+    },
 ];
 
 /// Total number of fee recipients
@@ -399,7 +399,10 @@ pub const FEE_RECIPIENT_COUNT: usize = 94;
 
 /// Lazy static HashSet for quick lookups
 pub static FEE_RECIPIENTS: Lazy<HashSet<Address>> = Lazy::new(|| {
-    FEE_RECIPIENT_LIST.iter().map(|entry| entry.address).collect()
+    FEE_RECIPIENT_LIST
+        .iter()
+        .map(|entry| entry.address)
+        .collect()
 });
 
 /// Lazy static HashMap for address to name mapping
@@ -433,7 +436,7 @@ pub fn fee_recipient_stats() -> Vec<(&'static str, usize)> {
     let mut titan = 0usize;
     let mut rsync = 0usize;
     let mut bloxroute = 0usize;
-    
+
     for entry in FEE_RECIPIENT_LIST {
         let name_lower = entry.name.to_lowercase();
         if name_lower.contains("flashbots") {
@@ -445,14 +448,14 @@ pub fn fee_recipient_stats() -> Vec<(&'static str, usize)> {
         } else if name_lower.contains("bloxroute") {
             bloxroute += 1;
         }
-        
+
         if name_lower.contains("builder") {
             builders += 1;
         } else {
             validators += 1;
         }
     }
-    
+
     vec![
         ("Total Fee Recipients", FEE_RECIPIENT_COUNT),
         ("Builders", builders),

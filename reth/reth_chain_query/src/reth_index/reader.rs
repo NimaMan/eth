@@ -1,14 +1,13 @@
-/// Reader interface for RethIndex
-/// 
-/// Provides read-only access to all RethIndex tables with convenient query methods.
-
-use alloy_primitives::Address;
-use eyre::Result;
 use crate::reth_index::{
     database::RethIndexDB,
-    models::{TradeData, AddressMetrics, TokenMetadata, PoolData},
-    tables::address_index::TxNumber,
+    models::{AddressMetrics, PoolData, TokenMetadata, TradeData},
+    tables::address_index::txumber,
 };
+/// Reader interface for RethIndex
+///
+/// Provides read-only access to all RethIndex tables with convenient query methods.
+use alloy_primitives::Address;
+use eyre::Result;
 
 /// Read-only interface to RethIndex database
 pub struct RethIndexReader {
@@ -22,21 +21,23 @@ impl RethIndexReader {
     }
 
     /// Get all transactions for an address
-    pub fn get_transactions(&self, address: Address) -> Result<Vec<TxNumber>> {
-        // TODO: Implement MDBX read transaction
-        Ok(Vec::new())
+    pub fn get_transactions(&self, address: Address) -> Result<Vec<txumber>> {
+        self.db.get_transactions(address)
     }
 
     /// Get transaction count for an address
     pub fn get_transaction_count(&self, address: Address) -> Result<usize> {
-        let txs = self.get_transactions(address)?;
-        Ok(txs.len())
+        self.get_transactions(address).map(|txs| txs.len())
     }
 
     /// Get latest N transactions for an address
-    pub fn get_latest_transactions(&self, address: Address, count: usize) -> Result<Vec<TxNumber>> {
-        // TODO: Implement
-        Ok(Vec::new())
+    pub fn get_latest_transactions(&self, address: Address, count: usize) -> Result<Vec<txumber>> {
+        let mut txs = self.get_transactions(address)?;
+        if count >= txs.len() {
+            return Ok(txs);
+        }
+        let start = txs.len() - count;
+        Ok(txs.split_off(start))
     }
 
     /// Get trade data for an address-token pair

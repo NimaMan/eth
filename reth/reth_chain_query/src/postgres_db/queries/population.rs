@@ -1,12 +1,11 @@
 /// Population Helper Queries
-/// 
+///
 /// Helper queries for populating and maintaining database integrity.
 /// Includes functions for identifying missing data and incremental updates.
-
 use crate::postgres_db::connection::PostgresDB;
 use eyre::Result;
-use sqlx::{query, query_as, Row};
 use serde::{Deserialize, Serialize};
+use sqlx::{query, query_as, Row};
 
 /// Main function to populate addresses from trades
 pub async fn populate_addresses_from_trades(
@@ -15,21 +14,23 @@ pub async fn populate_addresses_from_trades(
 ) -> Result<PopulationResult> {
     // Start transaction
     let mut tx = db.pool().begin().await?;
-    
+
     // Clear existing metrics if full refresh
     if full_refresh {
-        query("UPDATE eth_db.addresses SET 
+        query(
+            "UPDATE eth_db.addresses SET 
             total_profit = NULL,
             total_volume = NULL,
             total_realized_profit = NULL,
             total_erc20_trades = NULL,
             scam_ratio = NULL,
             total_tx_fee = NULL
-        ")
+        ",
+        )
         .execute(&mut *tx)
         .await?;
     }
-    
+
     // Aggregate metrics from trades
     let profit_rows = query(
         r#"
@@ -64,7 +65,7 @@ pub async fn populate_addresses_from_trades(
     )
     .execute(&mut *tx)
     .await?;
-    
+
     // Calculate scam ratios
     let scam_rows = query(
         r#"
@@ -82,14 +83,14 @@ pub async fn populate_addresses_from_trades(
             GROUP BY t.address_id
         ) scam_stats
         WHERE a.address_id = scam_stats.address_id
-        "#
+        "#,
     )
     .execute(&mut *tx)
     .await?;
-    
+
     // Commit transaction
     tx.commit().await?;
-    
+
     Ok(PopulationResult {
         addresses_updated_profit: profit_rows.rows_affected(),
         addresses_updated_scam: scam_rows.rows_affected(),
@@ -118,12 +119,12 @@ pub async fn get_addresses_needing_update(
         GROUP BY a.address_id, a.address, a.last_seen
         ORDER BY COUNT(t.id) DESC
         LIMIT $1
-        "#
+        "#,
     )
     .bind(limit)
     .fetch_all(db.pool())
     .await?;
-    
+
     Ok(addresses)
 }
 
@@ -159,7 +160,7 @@ pub async fn calculate_profit_metrics_for_addresses(
     .bind(address_ids)
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -177,11 +178,11 @@ pub async fn update_address_balances(db: &PostgresDB) -> Result<u64> {
             ORDER BY address_id, latest_block DESC
         ) balance_calc
         WHERE a.address_id = balance_calc.address_id
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -201,11 +202,11 @@ pub async fn ensure_addresses_exist(db: &PostgresDB) -> Result<u64> {
         LEFT JOIN eth_db.addresses a ON t.address_id = a.address_id
         WHERE a.address_id IS NULL
         ON CONFLICT (address_id) DO NOTHING
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -227,7 +228,7 @@ pub async fn get_population_statistics(db: &PostgresDB) -> Result<PopulationStat
     )
     .fetch_one(db.pool())
     .await?;
-    
+
     Ok(PopulationStats {
         total_addresses: row.get("total_addresses"),
         addresses_with_profit: row.get("addresses_with_profit"),

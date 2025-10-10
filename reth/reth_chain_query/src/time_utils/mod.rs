@@ -1,5 +1,6 @@
+pub mod cache;
 /// Fundamental Block-Time Conversion System
-/// 
+///
 /// Core functionality for bidirectional block ↔ time conversion,
 /// time period aggregation, and consistent time handling across
 /// Rust and Python interfaces.
@@ -10,14 +11,12 @@
 /// - Time period boundaries in blocks
 /// - Caching for performance
 /// - Integration with both Reth DB and PostgreSQL
-
 pub mod converter;
 pub mod periods;
-pub mod cache;
 
-pub use converter::{BlockTimeConverter, BlockTimestamp};
-pub use periods::{TimePeriod, PeriodType, PeriodBoundary};
 pub use cache::TimestampCache;
+pub use converter::{BlockTimeConverter, BlockTimestamp};
+pub use periods::{PeriodBoundary, PeriodType, TimePeriod};
 
 use chrono::{DateTime, Utc};
 
@@ -30,10 +29,8 @@ pub const ETHEREUM_GENESIS_TIMESTAMP: i64 = 1438269973; // July 30, 2015
 /// Estimate timestamp for a block number (fallback when DB unavailable)
 pub fn estimate_timestamp(block_number: u64) -> DateTime<Utc> {
     let seconds_since_genesis = block_number * AVERAGE_BLOCK_TIME;
-    DateTime::from_timestamp(
-        ETHEREUM_GENESIS_TIMESTAMP + seconds_since_genesis as i64,
-        0
-    ).unwrap_or_else(|| Utc::now())
+    DateTime::from_timestamp(ETHEREUM_GENESIS_TIMESTAMP + seconds_since_genesis as i64, 0)
+        .unwrap_or_else(|| Utc::now())
 }
 
 /// Estimate block number for a timestamp (fallback when DB unavailable)

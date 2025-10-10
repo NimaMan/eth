@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, B256, U256};
-use reth_provider::BlockReader;
 use eyre::Result;
+use reth_provider::BlockReader;
 
 use crate::provider::RethQueryProvider;
 
@@ -17,7 +17,9 @@ impl RethQueryProvider {
         let state = self.tx_simulator.get_chain_state_at_block(block_number)?;
 
         // slot0 at storage slot 0
-        let slot0_storage = state.storage(pool, B256::from(U256::ZERO))?.unwrap_or_default();
+        let slot0_storage = state
+            .storage(pool, B256::from(U256::ZERO))?
+            .unwrap_or_default();
         let slot0_packed = U256::from_be_bytes(slot0_storage.to_be_bytes::<32>());
 
         // Decode sqrtPriceX96 (low 160 bits) and tick (next 24 bits, signed)
@@ -35,7 +37,9 @@ impl RethQueryProvider {
         };
 
         // liquidity at storage slot 4
-        let liquidity_storage = state.storage(pool, B256::from(U256::from(4)))?.unwrap_or_default();
+        let liquidity_storage = state
+            .storage(pool, B256::from(U256::from(4)))?
+            .unwrap_or_default();
         let liquidity = U256::from_be_bytes(liquidity_storage.to_be_bytes::<32>());
 
         // Fetch timestamp for the block

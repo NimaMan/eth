@@ -1,14 +1,13 @@
+use crate::reth_index::models::PoolData;
 /// Pools Table
-/// 
+///
 /// Stores DEX pool information.
-/// 
+///
 /// Schema:
 /// - Key: PoolAddress
 /// - Value: PoolData struct
-
 use alloy_primitives::Address;
 use eyre::Result;
-use crate::reth_index::models::PoolData;
 
 /// Pools table interface
 pub struct PoolsTable;

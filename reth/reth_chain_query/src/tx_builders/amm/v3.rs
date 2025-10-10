@@ -1,20 +1,18 @@
+use crate::tx_builders::PermitData;
 use alloy_primitives::{Address, Bytes, U256};
 use tx_simulator::UnsignedTransaction;
-use crate::tx_builders::PermitData;
 
 fn router_address_v3() -> Address {
     Address::from([
-        0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D,
-        0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0, 0x15, 0x7C,
-        0x05, 0x86, 0x15, 0x64,
+        0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0, 0x15,
+        0x7C, 0x05, 0x86, 0x15, 0x64,
     ])
 }
 
 fn weth_address() -> Address {
     Address::from([
-        0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D,
-        0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9, 0x08,
-        0x3C, 0x75, 0x6C, 0xc2,
+        0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xD9,
+        0x08, 0x3C, 0x75, 0x6C, 0xc2,
     ])
 }
 
@@ -88,7 +86,7 @@ pub fn build_buy_swap_v3(
         from: Some(buyer),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(amount_in_eth), // SwapRouter handles WETH wrapping
@@ -121,7 +119,7 @@ pub fn build_buy_swap_v3_with_min_out(
         from: Some(buyer),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(amount_in_eth),
@@ -146,7 +144,7 @@ pub fn build_approve_v3(owner: Address, token: Address, amount: U256) -> Unsigne
         from: Some(owner),
         to: Some(token),
         gas: Some(120_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
@@ -179,7 +177,7 @@ pub fn build_sell_swap_v3(
         from: Some(seller),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
@@ -212,7 +210,7 @@ pub fn build_sell_swap_v3_with_min_out(
         from: Some(seller),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
@@ -246,7 +244,7 @@ pub fn build_token_to_token_swap_v3(
         from: Some(trader),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
@@ -280,7 +278,7 @@ pub fn build_token_to_token_swap_v3_with_min_out(
         from: Some(trader),
         to: Some(router_address_v3()),
         gas: Some(350_000),
-        gas_price: Some(100_000_000_000),
+        gas_price: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
@@ -302,12 +300,5 @@ pub fn build_sell_with_self_permit_v3(
     deadline: u64,
 ) -> UnsignedTransaction {
     // Fallback: build standard sell (no permit bundling yet)
-    build_sell_swap_v3(
-        seller,
-        token_in,
-        amount_in_tokens,
-        fee_tier,
-        0,
-        deadline,
-    )
+    build_sell_swap_v3(seller, token_in, amount_in_tokens, fee_tier, 0, deadline)
 }

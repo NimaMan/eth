@@ -1,11 +1,11 @@
 //! Stablecoin addresses and metadata
-//!
+//! 
 //! This file is auto-generated from Python address files.
 //! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
 
 use alloy_primitives::{address, Address};
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use once_cell::sync::Lazy;
 
 /// Information about a stablecoin
 #[derive(Debug, Clone)]
@@ -245,21 +245,24 @@ pub const STABLECOINS: &[StablecoinInfo] = &[
         symbol: "ZUSD",
         decimals: 6,
         unit: "US Dollar",
-    },
+    }
 ];
 
 /// Lazy static HashMap for quick lookups by address
-pub static STABLECOIN_BY_ADDRESS: Lazy<HashMap<Address, &'static StablecoinInfo>> =
-    Lazy::new(|| {
-        STABLECOINS
-            .iter()
-            .map(|info| (info.address, info))
-            .collect()
-    });
+pub static STABLECOIN_BY_ADDRESS: Lazy<HashMap<Address, &'static StablecoinInfo>> = Lazy::new(|| {
+    STABLECOINS
+        .iter()
+        .map(|info| (info.address, info))
+        .collect()
+});
 
 /// Lazy static HashMap for quick lookups by symbol
-pub static STABLECOIN_BY_SYMBOL: Lazy<HashMap<&'static str, &'static StablecoinInfo>> =
-    Lazy::new(|| STABLECOINS.iter().map(|info| (info.symbol, info)).collect());
+pub static STABLECOIN_BY_SYMBOL: Lazy<HashMap<&'static str, &'static StablecoinInfo>> = Lazy::new(|| {
+    STABLECOINS
+        .iter()
+        .map(|info| (info.symbol, info))
+        .collect()
+});
 
 /// Check if an address is a stablecoin
 pub fn is_stablecoin(address: Address) -> bool {

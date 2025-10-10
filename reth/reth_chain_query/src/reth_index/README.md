@@ -9,7 +9,7 @@ RethIndex is a complementary MDBX database that provides fast entity-centric (ad
 ## Core Problem Statement
 
 Reth stores blockchain data optimized for node operation:
-- Transactions indexed by TxNumber
+- Transactions indexed by txumber
 - Blocks indexed by BlockNumber  
 - State indexed by Address
 
@@ -40,11 +40,11 @@ Understanding reth's native tables is crucial for designing our analytics databa
 
 | Table | Key → Value | Purpose |
 |-------|-------------|---------|
-| **Transactions** | `TxNumber` → `TransactionSigned` | Full transaction data by sequential ID |
-| **TransactionHashNumbers** | `TxHash` → `TxNumber` | Maps transaction hash to its number |
-| **TransactionBlocks** | `TxNumber` → `BlockNumber` | Maps transaction to its block (key is the highest transaction ID in the block) |
-| **TransactionSenders** | `TxNumber` → `Address` | Cached sender addresses for fast lookup |
-| **Receipts** | `TxNumber` → `Receipt` | Transaction receipts including logs |
+| **Transactions** | `txumber` → `TransactionSigned` | Full transaction data by sequential ID |
+| **TransactionHashNumbers** | `TxHash` → `txumber` | Maps transaction hash to its number |
+| **TransactionBlocks** | `txumber` → `BlockNumber` | Maps transaction to its block (key is the highest transaction ID in the block) |
+| **TransactionSenders** | `txumber` → `Address` | Cached sender addresses for fast lookup |
+| **Receipts** | `txumber` → `Receipt` | Transaction receipts including logs |
 
 ### State Tables
 
@@ -84,16 +84,16 @@ Understanding reth's native tables is crucial for designing our analytics databa
 
 ### Key Insights for Our Design
 
-1. **Transaction Numbering**: Reth uses sequential `TxNumber` (u64) as primary key, not hashes
+1. **Transaction Numbering**: Reth uses sequential `txumber` (u64) as primary key, not hashes
 2. **Block-Transaction Mapping**: `BlockBodyIndices` gives us transaction ranges per block
 3. **No Address Index**: Reth has no reverse index from address to transactions (our main value-add)
-4. **Efficient Lookups**: Can convert `TxHash → TxNumber` and `TxNumber → Block` easily
+4. **Efficient Lookups**: Can convert `TxHash → txumber` and `txumber → Block` easily
 5. **State vs History**: Plain tables for current state, ChangeSets for historical
 
 ### Critical Tables for Integration
 
 For our analytics database, we'll frequently need to query:
-- `TransactionHashNumbers`: Convert hash from ProcessedTransaction to TxNumber
+- `TransactionHashNumbers`: Convert hash from ProcessedTransaction to txumber
 - `BlockBodyIndices`: Get transaction ranges for block-based queries
 - `Transactions`: Fetch full transaction details when needed
 - `TransactionBlocks`: Map transactions to blocks
@@ -116,11 +116,11 @@ Block N
 #### Layer 2: Transaction Data
 ```
 Transaction Numbers 1000-1049 (Block N)
-├── Transactions table: Full transaction data by TxNumber
-├── TransactionHashNumbers: Hash → TxNumber lookup
-├── TransactionSenders: TxNumber → From address (cached)
+├── Transactions table: Full transaction data by txumber
+├── TransactionHashNumbers: Hash → txumber lookup
+├── TransactionSenders: txumber → From address (cached)
 ├── Receipts table: Logs, gas used, status
-└── TransactionBlocks: TxNumber → BlockNumber (reverse lookup)
+└── TransactionBlocks: txumber → BlockNumber (reverse lookup)
 ```
 
 #### Layer 3: World State
@@ -174,7 +174,7 @@ Address X → [tx_num1, tx_num2, ...] → Query reth for details ✅
 ```
 
 **Integration Pattern**:
-1. Get TxNumbers from our index: `analytics_db[address] = [1000, 1001, 1005]`
+1. Get txumbers from our index: `analytics_db[address] = [1000, 1001, 1005]`
 2. Fetch details from reth: `reth_db.Transactions[1000], reth_db.Transactions[1001]...`
 
 #### trades: Aggregated Trading Data
@@ -192,7 +192,7 @@ Our Flow (Pre-computed):
 3. Update our aggregated trade data
 4. Store tx_number for traceability
 
-**Note**: We can avoid TransactionHashNumbers lookup entirely by calculating TxNumber from block data!
+**Note**: We can avoid TransactionHashNumbers lookup entirely by calculating txumber from block data!
 
 #### address_metrics: Pre-computed Analytics
 ```
@@ -247,7 +247,7 @@ Token address → {name: "USDC", symbol: "USDC", decimals: 6} ✅
 #### Example 3: "Block range query: transactions 20M-20.1M for address X"
 
 ```
-1. Block to TxNumber Range (Reth):
+1. Block to txumber Range (Reth):
    reth_db.BlockBodyIndices[20000000] = {first_tx_num: 500000000, tx_count: 200}
    reth_db.BlockBodyIndices[20100000] = {first_tx_num: 502000000, tx_count: 150}
    Range: 500000000..502000150
@@ -266,7 +266,7 @@ Token address → {name: "USDC", symbol: "USDC", decimals: 6} ✅
 ### Key Architectural Insights
 
 1. **Complementary Design**: Reth provides raw data, we provide indexes and aggregations
-2. **No Data Duplication**: We store only TxNumbers (8 bytes) not full transactions (200+ bytes)  
+2. **No Data Duplication**: We store only txumbers (8 bytes) not full transactions (200+ bytes)  
 3. **Hybrid Queries**: Most queries touch both databases for complete picture
 4. **Write-Once, Read-Many**: Our tables are append-only during sync, read-heavy in production
 5. **Atomic Consistency**: Both databases updated in same block processing loop
@@ -278,7 +278,7 @@ New Block Processing:
 1. Reth processes block → Updates all reth tables
 2. Our processor reads ProcessedTransactions
 3. For each ProcessedTransaction:
-   a. Calculate TxNumber = BlockBodyIndices[block_num].first_tx_num + tx_index
+   a. Calculate txumber = BlockBodyIndices[block_num].first_tx_num + tx_index
    b. Update address_to_txs[addr] += tx_number
    c. If swap: Update trades aggregation
    d. Update address_metrics counters
@@ -286,7 +286,7 @@ New Block Processing:
 4. Commit analytics transaction
 
 Optimization: No need to query TransactionHashNumbers!
-We calculate TxNumber directly from block data + tx index.
+We calculate txumber directly from block data + tx index.
 ```
 
 This design ensures our analytics database is always a few milliseconds behind reth but provides 10-100x faster queries for address-centric and aggregated data.
@@ -312,7 +312,7 @@ Single MDBX environment with multiple named databases (tables), each serving a s
 
 **Schema**:
 - **Key**: `Address` (20 bytes)
-- **Value**: `Vec<TxNumber>` (list of u64, sorted by block order)
+- **Value**: `Vec<txumber>` (list of u64, sorted by block order)
 
 **Queries Enabled**:
 - "Get all transactions for address X" → O(1) lookup
@@ -320,7 +320,7 @@ Single MDBX environment with multiple named databases (tables), each serving a s
 - "Get transactions in block range for address X" → O(1) lookup + filter
 
 **Size Estimate**: ~70GB
-- 87M addresses × average 100 transactions × 8 bytes per TxNumber
+- 87M addresses × average 100 transactions × 8 bytes per txumber
 
 **Update Pattern**: Append-only (new transactions always added to end)
 
@@ -512,10 +512,10 @@ Considered using sequential IDs (u32/u64) instead of addresses (20 bytes):
 
 **Decision**: Use direct addresses for simplicity and maintainability
 
-### Why TxNumber Instead of TxHash?
+### Why txumber Instead of TxHash?
 
 - **Space**: 8 bytes vs 32 bytes (75% reduction)
-- **Reth native**: TxNumber is reth's primary index
+- **Reth native**: txumber is reth's primary index
 - **Sequential**: Natural ordering for range queries
 - **Performance**: Integer comparison faster than hash comparison
 

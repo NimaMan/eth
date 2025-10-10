@@ -16,8 +16,8 @@ impl RethQueryProvider {
 
     /// Get block gas metadata: (gas_limit, gas_used, base_fee_wei Option)
     pub fn get_block_gas_metadata(&self, block_number: u64) -> Result<(u64, u64, Option<u128>)> {
-        let (_ts, gas_limit, gas_used, base_fee_opt) = self.tx_simulator.get_block_metadata(block_number)?;
+        let (_ts, gas_limit, gas_used, base_fee_opt) =
+            self.tx_simulator.get_block_metadata(block_number)?;
         Ok((gas_limit, gas_used, base_fee_opt))
     }
 }
-

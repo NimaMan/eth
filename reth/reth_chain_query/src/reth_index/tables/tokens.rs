@@ -1,14 +1,13 @@
+use crate::reth_index::models::TokenMetadata;
 /// Tokens Table
-/// 
+///
 /// Stores token metadata.
-/// 
+///
 /// Schema:
 /// - Key: TokenAddress
 /// - Value: TokenMetadata struct
-
 use alloy_primitives::Address;
 use eyre::Result;
-use crate::reth_index::models::TokenMetadata;
 
 /// Tokens table interface
 pub struct TokensTable;

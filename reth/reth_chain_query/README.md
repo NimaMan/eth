@@ -54,13 +54,13 @@ Understanding Reth's database structure is crucial for optimizing queries. Reth 
 
 | Table | Key → Value | Purpose |
 |-------|-------------|---------|
-| **Transactions** | `TxNumber` → `TransactionSigned` | Full transaction data |
-| **TransactionHashNumbers** | `TxHash` → `TxNumber` | Hash to sequential ID mapping |
-| **TransactionBlocks** | `TxNumber` → `BlockNumber` | Transaction to block mapping* |
-| **TransactionSenders** | `TxNumber` → `Address` | Cached sender addresses |
-| **Receipts** | `TxNumber` → `Receipt` | Logs, gas used, status |
+| **Transactions** | `txumber` → `TransactionSigned` | Full transaction data |
+| **TransactionHashNumbers** | `TxHash` → `txumber` | Hash to sequential ID mapping |
+| **TransactionBlocks** | `txumber` → `BlockNumber` | Transaction to block mapping* |
+| **TransactionSenders** | `txumber` → `Address` | Cached sender addresses |
+| **Receipts** | `txumber` → `Receipt` | Logs, gas used, status |
 
-*Note: Key is the highest TxNumber in the block
+*Note: Key is the highest txumber in the block
 
 ### Current State Tables (4 tables)
 

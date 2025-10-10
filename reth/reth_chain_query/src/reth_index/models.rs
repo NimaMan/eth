@@ -1,9 +1,8 @@
 /// Data models for the analytics database
-/// 
+///
 /// These structures represent the data stored in various tables
 /// of the analytics MDBX database.
-
-use alloy_primitives::{Address, U256, B256};
+use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// Aggregated trading data for an address-token pair

@@ -29,7 +29,7 @@ pub struct RethQueryProvider {
 
 ### Transaction Operations (`transactions.rs`)
 - `get_transaction_by_hash()` - Load transaction metadata from Transactions table
-- `get_transaction_by_number()` - Load by sequential TxNumber (more efficient)
+- `get_transaction_by_number()` - Load by sequential txumber (more efficient)
 - `get_transaction_receipt()` - Get receipt with logs from Receipts table
 - `build_call_data_from_tx_hash()` - Convert historical tx to CallRequest for re-simulation
 - `get_transaction_with_trace()` - Optional trace data via RPC or simulation

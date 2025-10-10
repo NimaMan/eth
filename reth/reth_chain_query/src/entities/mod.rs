@@ -1,37 +1,33 @@
+pub mod cex;
+pub mod etf;
+pub mod stablecoins;
 /// Entity tracking and analysis module
-/// 
+///
 /// Provides comprehensive analysis for major blockchain entities:
 /// - Stablecoins: Market share, supply tracking, concentration metrics
 /// - CEX (Centralized Exchanges): Balance tracking, flow analysis
 /// - ETF (Exchange-Traded Funds): Holdings tracking, provider analysis
-
 pub mod types;
-pub mod stablecoins;
-pub mod cex;
-pub mod etf;
 
 // Re-export common types
-pub use types::{EntityType, format_token_amount};
+pub use types::{format_token_amount, EntityType};
 
 // Re-export stablecoin types
 pub use stablecoins::{
-    StablecoinMarketData, StablecoinMarketAnalysis, 
-    MarketByUnitAnalysis, UnitMarketData,
+    MarketByUnitAnalysis, StablecoinMarketAnalysis, StablecoinMarketData, UnitMarketData,
 };
 
 // Re-export CEX types
-pub use cex::{ExchangeBalance, CexBalanceSummary};
+pub use cex::{CexBalanceSummary, ExchangeBalance};
 
 // Re-export ETF types
-pub use etf::{ProviderHoldings, EtfHoldingsSummary};
+pub use etf::{EtfHoldingsSummary, ProviderHoldings};
 
-use alloy_primitives::Address;
-use crate::provider::RethQueryProvider;
 use crate::common_addresses::{
-    stablecoins::get_stablecoin_by_address,
-    cex::get_cex_by_address,
-    etf::get_etf_by_address,
+    cex::get_cex_by_address, etf::get_etf_by_address, stablecoins::get_stablecoin_by_address,
 };
+use crate::provider::RethQueryProvider;
+use alloy_primitives::Address;
 
 impl RethQueryProvider {
     /// Identify entity type for an address

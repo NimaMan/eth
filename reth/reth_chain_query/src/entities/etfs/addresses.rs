@@ -1,11 +1,11 @@
 //! ETF (Exchange-Traded Fund) addresses
-//!
+//! 
 //! This file is auto-generated from Python address files.
 //! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
 
 use alloy_primitives::{address, Address};
-use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
+use once_cell::sync::Lazy;
 
 /// ETF address entry
 #[derive(Debug, Clone)]
@@ -5771,15 +5771,16 @@ pub const ETF_ADDRESSES: &[EtfAddress] = &[
         address: address!("AD10A0Ec7A7FdD54B9d13fa8e2Ee1d5f4E94627A"),
         name: "VanEck ETHV_1",
         provider: "VanEck",
-    },
+    }
 ];
 
 /// Total number of ETF addresses
 pub const ETF_ADDRESS_COUNT: usize = 1151;
 
 /// Lazy static HashSet for quick lookups
-pub static ETF_ADDRESS_SET: Lazy<HashSet<Address>> =
-    Lazy::new(|| ETF_ADDRESSES.iter().map(|entry| entry.address).collect());
+pub static ETF_ADDRESS_SET: Lazy<HashSet<Address>> = Lazy::new(|| {
+    ETF_ADDRESSES.iter().map(|entry| entry.address).collect()
+});
 
 /// Lazy static HashMap for address to ETF mapping
 pub static ETF_BY_ADDRESS: Lazy<HashMap<Address, &'static EtfAddress>> = Lazy::new(|| {
@@ -5814,6 +5815,7 @@ pub fn get_etf_by_address(address: Address) -> Option<&'static EtfAddress> {
 pub fn get_provider_addresses(provider: &str) -> Option<&'static Vec<Address>> {
     ADDRESSES_BY_PROVIDER.get(provider)
 }
+
 
 /// Provider counts:
 /// - Grayscale: 978 addresses

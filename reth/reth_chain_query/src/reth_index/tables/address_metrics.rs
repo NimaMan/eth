@@ -1,14 +1,13 @@
+use crate::reth_index::models::AddressMetrics;
 /// Address Metrics Table
-/// 
+///
 /// Stores pre-computed metrics for addresses.
-/// 
+///
 /// Schema:
 /// - Key: Address
 /// - Value: AddressMetrics struct
-
 use alloy_primitives::Address;
 use eyre::Result;
-use crate::reth_index::models::AddressMetrics;
 
 /// Address metrics table interface
 pub struct AddressMetricsTable;

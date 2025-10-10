@@ -1,39 +1,40 @@
+use alloy_primitives::{Address, B256, U256};
+use eyre::Result;
+use reth_provider::BlockReader;
 /// RethQueryProvider - Central provider for all blockchain queries
-/// 
+///
 /// This provider wraps Reth's database access and provides a unified interface
 /// for all query operations. It manages shared resources like database connections,
 /// caches, and the TxSimulator instance.
-
 use std::sync::Arc;
-use alloy_primitives::{Address, B256, U256};
-use eyre::Result;
 use tx_simulator::TxSimulator;
-use reth_provider::BlockReader;
 
 // Import our modules
 use crate::reth_index::RethIndexDB;
 use crate::time_utils::TimestampCache;
 
 // Re-export submodules
-mod contract_methods;
-mod batch_ops;
-mod caching;
-mod types;
-mod transactions;
-mod block_transactions;
+mod address_index;
 mod address_state;
-mod gas;
 mod amm;
+mod batch_ops;
+mod block_transactions;
+mod caching;
+mod contract_methods;
+mod gas;
+mod transactions;
+mod types;
 
-pub use contract_methods::*;
-pub use batch_ops::*;
-pub use caching::*;
-pub use types::*;
-pub use transactions::*;
-pub use block_transactions::*;
+pub use address_index::*;
 pub use address_state::*;
-pub use gas::*;
 pub use amm::*;
+pub use batch_ops::*;
+pub use block_transactions::*;
+pub use caching::*;
+pub use contract_methods::*;
+pub use gas::*;
+pub use transactions::*;
+pub use types::*;
 
 /// Storage slot cache for tracking known slot positions
 pub struct StorageSlotCache {
@@ -48,11 +49,13 @@ impl StorageSlotCache {
             known_slots: std::collections::HashMap::new(),
         }
     }
-    
+
     pub fn get_slot(&self, contract: Address, mapping: &str) -> Option<u64> {
-        self.known_slots.get(&(contract, mapping.to_string())).copied()
+        self.known_slots
+            .get(&(contract, mapping.to_string()))
+            .copied()
     }
-    
+
     pub fn set_slot(&mut self, contract: Address, mapping: String, slot: u64) {
         self.known_slots.insert((contract, mapping), slot);
     }
@@ -62,19 +65,26 @@ impl StorageSlotCache {
 pub struct RethQueryProvider {
     /// Core TxSimulator for database access and view function simulation
     tx_simulator: Arc<TxSimulator>,
-    
+
     /// Provider factory for direct database access
-    provider_factory: Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>>,
-    
+    provider_factory: Arc<
+        reth_provider::ProviderFactory<
+            reth_node_types::NodeTypesWithDBAdapter<
+                reth_node_ethereum::EthereumNode,
+                Arc<reth_db::DatabaseEnv>,
+            >,
+        >,
+    >,
+
     /// Optional RPC provider for trace data (temporary until local tracing)
     rpc_provider: Option<Arc<dyn std::any::Any + Send + Sync>>,
-    
+
     /// Block timestamp cache for efficient time conversions
     block_cache: Arc<TimestampCache>,
-    
+
     /// Storage slot cache for known token balance positions
     slot_cache: Arc<parking_lot::RwLock<StorageSlotCache>>,
-    
+
     /// Optional RethIndex database for fast entity-centric queries
     reth_index: Option<Arc<RethIndexDB>>,
 }
@@ -84,7 +94,7 @@ impl RethQueryProvider {
     pub fn new(reth_datadir: &str) -> Result<Self> {
         let tx_simulator = Arc::new(TxSimulator::new(reth_datadir)?);
         let provider_factory = Arc::new(tx_simulator.provider_factory().clone());
-        
+
         Ok(Self {
             tx_simulator,
             provider_factory,
@@ -94,11 +104,11 @@ impl RethQueryProvider {
             reth_index: None,
         })
     }
-    
+
     /// Create with an existing TxSimulator (for resource sharing)
     pub fn with_simulator(simulator: Arc<TxSimulator>) -> Result<Self> {
         let provider_factory = Arc::new(simulator.provider_factory().clone());
-        
+
         Ok(Self {
             tx_simulator: simulator,
             provider_factory,
@@ -108,13 +118,22 @@ impl RethQueryProvider {
             reth_index: None,
         })
     }
-    
+
     /// Create with an existing provider factory
     pub fn with_provider_factory(
-        provider_factory: Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>>
+        provider_factory: Arc<
+            reth_provider::ProviderFactory<
+                reth_node_types::NodeTypesWithDBAdapter<
+                    reth_node_ethereum::EthereumNode,
+                    Arc<reth_db::DatabaseEnv>,
+                >,
+            >,
+        >,
     ) -> Result<Self> {
-        let simulator = Arc::new(TxSimulator::with_provider_factory((*provider_factory).clone())?);
-        
+        let simulator = Arc::new(TxSimulator::with_provider_factory(
+            (*provider_factory).clone(),
+        )?);
+
         Ok(Self {
             tx_simulator: simulator,
             provider_factory,
@@ -124,30 +143,45 @@ impl RethQueryProvider {
             reth_index: None,
         })
     }
-    
+
     // RPC-based tracing intentionally omitted for direct DB-only usage.
-    
+
     /// Enable RethIndex for fast entity-centric queries
     pub fn with_reth_index(mut self, reth_index_path: &str) -> Result<Self> {
-        self.reth_index = Some(Arc::new(RethIndexDB::open(reth_index_path)?));
+        self.reth_index = Some(Arc::new(RethIndexDB::open_read_only(reth_index_path)?));
         Ok(self)
     }
-    
+
+    /// Attach an existing RethIndex handle (useful when sharing within the same process).
+    pub fn with_reth_index_db(mut self, reth_index_db: Arc<RethIndexDB>) -> Self {
+        self.reth_index = Some(reth_index_db);
+        self
+    }
+
     /// Get the underlying TxSimulator for advanced operations
     pub fn simulator(&self) -> &Arc<TxSimulator> {
         &self.tx_simulator
     }
-    
+
     /// Get the provider factory for direct database access
-    pub fn provider_factory(&self) -> &Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>> {
+    pub fn provider_factory(
+        &self,
+    ) -> &Arc<
+        reth_provider::ProviderFactory<
+            reth_node_types::NodeTypesWithDBAdapter<
+                reth_node_ethereum::EthereumNode,
+                Arc<reth_db::DatabaseEnv>,
+            >,
+        >,
+    > {
         &self.provider_factory
     }
-    
+
     /// Get the RethIndex database if available
     pub fn reth_index(&self) -> Option<&Arc<RethIndexDB>> {
         self.reth_index.as_ref()
     }
-    
+
     /// Get the latest block number
     pub fn get_latest_block(&self) -> Result<u64> {
         self.tx_simulator.get_latest_block()
@@ -161,19 +195,19 @@ impl RethQueryProvider {
             .ok_or_else(|| eyre::eyre!("Invalid block number {}", block_number))?;
         Ok(block.timestamp)
     }
-    
+
     // === Internal Helper Methods ===
-    
+
     /// Get account from PlainAccountState table (internal helper)
     async fn get_account_internal(&self, address: Address, block: Option<u64>) -> Result<Account> {
         let block = block.unwrap_or(self.get_latest_block()?);
-        
+
         // Get state provider for this block
         let state = self.tx_simulator.get_chain_state_at_block(block)?;
-        
+
         // Get account info directly from PlainAccountState
         let account_opt = state.basic_account(&address)?;
-        
+
         match account_opt {
             Some(account_info) => {
                 // Check if it's a contract by looking for code
@@ -182,7 +216,7 @@ impl RethQueryProvider {
                 } else {
                     None
                 };
-                
+
                 Ok(Account {
                     nonce: account_info.nonce,
                     balance: account_info.balance,
@@ -199,45 +233,65 @@ impl RethQueryProvider {
             }
         }
     }
-    
+
     /// Get storage value from PlainStorageState table (internal helper)
-    async fn get_storage_internal(&self, contract: Address, slot: B256, block: Option<u64>) -> Result<U256> {
+    async fn get_storage_internal(
+        &self,
+        contract: Address,
+        slot: B256,
+        block: Option<u64>,
+    ) -> Result<U256> {
         let block = block.unwrap_or(self.get_latest_block()?);
-        
+
         // Get state provider for this block
         let state = self.tx_simulator.get_chain_state_at_block(block)?;
-        
+
         // Read storage directly from PlainStorageState
         let value = state.storage(contract, slot.into())?;
-        
+
         Ok(value.unwrap_or(U256::ZERO))
     }
-    
+
     // === Core Query Methods ===
-    
+
     /// Get account information (balance, nonce, code_hash)
     /// Uses PlainAccountState table
     pub async fn get_account(&self, address: Address, block: Option<u64>) -> Result<Account> {
         self.get_account_internal(address, block).await
     }
-    
+
     /// Get storage value at specific slot
     /// Uses PlainStorageState table
-    pub async fn get_storage(&self, contract: Address, slot: B256, block: Option<u64>) -> Result<U256> {
+    pub async fn get_storage(
+        &self,
+        contract: Address,
+        slot: B256,
+        block: Option<u64>,
+    ) -> Result<U256> {
         self.get_storage_internal(contract, slot, block).await
     }
-    
+
     /// Get token balance using view function
     /// Executes balanceOf(address) on the token contract
-    pub async fn get_token_balance(&self, token: Address, holder: Address, block: Option<u64>) -> Result<U256> {
+    pub async fn get_token_balance(
+        &self,
+        token: Address,
+        holder: Address,
+        block: Option<u64>,
+    ) -> Result<U256> {
         self.get_token_balance_internal(token, holder, block).await
     }
-    
+
     /// Get complete portfolio for an address
     /// Combines ETH balance with token balances
-    pub async fn get_portfolio(&self, address: Address, tokens: Vec<Address>, block: Option<u64>) -> Result<Portfolio> {
+    pub async fn get_portfolio(
+        &self,
+        address: Address,
+        tokens: Vec<Address>,
+        block: Option<u64>,
+    ) -> Result<Portfolio> {
         let eth_balance = self.get_account(address, block).await?.balance;
-        
+
         let mut token_balances = std::collections::HashMap::new();
         for token in tokens {
             let balance = self.get_token_balance(token, address, block).await?;
@@ -245,7 +299,7 @@ impl RethQueryProvider {
                 token_balances.insert(token, balance);
             }
         }
-        
+
         Ok(Portfolio {
             address,
             eth_balance,
@@ -253,25 +307,32 @@ impl RethQueryProvider {
             block_number: block.unwrap_or(self.get_latest_block()?),
         })
     }
-    
+
     // === RethIndex Methods (when available) ===
-    
+
     /// Get all transactions for an address (requires RethIndex)
     pub fn get_address_transactions(&self, address: Address) -> Result<Vec<u64>> {
         if let Some(reth_index) = &self.reth_index {
             reth_index.get_transactions(address)
         } else {
-            Err(eyre::eyre!("RethIndex not available. Enable with with_reth_index()"))
+            Err(eyre::eyre!(
+                "RethIndex not available. Enable with with_reth_index()"
+            ))
         }
     }
-    
+
     /// Get aggregated metrics for an address (requires RethIndex)
-    pub fn get_address_metrics(&self, address: Address) -> Result<crate::reth_index::AddressMetrics> {
+    pub fn get_address_metrics(
+        &self,
+        address: Address,
+    ) -> Result<crate::reth_index::AddressMetrics> {
         if let Some(reth_index) = &self.reth_index {
             // TODO: Implement get_address_metrics in RethIndexDB
             Err(eyre::eyre!("get_address_metrics not yet implemented"))
         } else {
-            Err(eyre::eyre!("RethIndex not available. Enable with with_reth_index()"))
+            Err(eyre::eyre!(
+                "RethIndex not available. Enable with with_reth_index()"
+            ))
         }
     }
 }
@@ -282,8 +343,17 @@ impl RethQueryProvider {
 /// TxSimulator and internal caches in a consistent way, then returns a clone of
 /// the underlying ProviderFactory for components that only need the factory.
 pub fn provider_factory_from_datadir(
-    reth_datadir: &str
-) -> Result<Arc<reth_provider::ProviderFactory<reth_node_types::NodeTypesWithDBAdapter<reth_node_ethereum::EthereumNode, Arc<reth_db::DatabaseEnv>>>>> {
+    reth_datadir: &str,
+) -> Result<
+    Arc<
+        reth_provider::ProviderFactory<
+            reth_node_types::NodeTypesWithDBAdapter<
+                reth_node_ethereum::EthereumNode,
+                Arc<reth_db::DatabaseEnv>,
+            >,
+        >,
+    >,
+> {
     let rqp = RethQueryProvider::new(reth_datadir)?;
     Ok(rqp.provider_factory().clone())
 }
@@ -308,13 +378,11 @@ pub struct Portfolio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_provider_creation() {
         // This would need a valid reth_datadir for actual testing
         // For now, just verify the structure compiles
-        let _provider = RethQueryProvider::from_simulator(
-            Arc::new(unsafe { std::mem::zeroed() })
-        );
+        let _provider = RethQueryProvider::from_simulator(Arc::new(unsafe { std::mem::zeroed() }));
     }
 }

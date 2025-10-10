@@ -1,11 +1,10 @@
+use eyre::Result;
 /// Database Connection Pool Management
-/// 
+///
 /// Handles PostgreSQL connection pooling with configurable settings.
 /// Uses sqlx for async operations and automatic reconnection.
-
-use sqlx::{postgres::{PgPool, PgPoolOptions}};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
-use eyre::Result;
 
 /// PostgreSQL database connection pool
 pub struct PostgresDB {
@@ -22,10 +21,10 @@ impl PostgresDB {
             .idle_timeout(Duration::from_secs(600))
             .connect(database_url)
             .await?;
-            
+
         Ok(Self { pool })
     }
-    
+
     /// Create connection pool with custom settings
     pub async fn with_options(
         database_url: &str,
@@ -39,23 +38,21 @@ impl PostgresDB {
             .idle_timeout(Duration::from_secs(600))
             .connect(database_url)
             .await?;
-            
+
         Ok(Self { pool })
     }
-    
+
     /// Get reference to the underlying pool
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
-    
+
     /// Test database connectivity
     pub async fn ping(&self) -> Result<()> {
-        sqlx::query("SELECT 1")
-            .fetch_one(&self.pool)
-            .await?;
+        sqlx::query("SELECT 1").fetch_one(&self.pool).await?;
         Ok(())
     }
-    
+
     /// Get pool statistics
     pub fn stats(&self) -> PoolStats {
         PoolStats {

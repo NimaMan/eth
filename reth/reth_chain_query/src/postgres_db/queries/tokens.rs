@@ -1,8 +1,10 @@
 /// Token Queries
-/// 
+///
 /// Queries for token metadata, pools, and scam detection.
-
-use crate::postgres_db::{connection::PostgresDB, models::{Token, Pool}};
+use crate::postgres_db::{
+    connection::PostgresDB,
+    models::{Pool, Token},
+};
 use eyre::Result;
 use sqlx::query_as;
 
@@ -15,16 +17,16 @@ pub async fn get_token_info(db: &PostgresDB, token_address: &str) -> Result<Opti
             creator_address_id,
             is_scam,
             scam_label,
-            creation_txn,
-            trading_enabled_txn
+            creation_tx,
+            trading_enabled_tx
         FROM eth_db.tokens
         WHERE contract_address = $1
-        "#
+        "#,
     )
     .bind(token_address)
     .fetch_optional(db.pool())
     .await?;
-    
+
     Ok(token)
 }
 
@@ -46,16 +48,16 @@ pub async fn get_token_pools(db: &PostgresDB, token_address: &str) -> Result<Vec
             scam_tx_hash,
             trading_enabled,
             trading_enabled_block,
-            trading_enabled_txn
+            trading_enabled_tx
         FROM eth_db.pools
         WHERE token_address = $1
         ORDER BY pool_type, fee_tier
-        "#
+        "#,
     )
     .bind(token_address)
     .fetch_all(db.pool())
     .await?;
-    
+
     Ok(pools)
 }
 
@@ -68,21 +70,21 @@ pub async fn get_scam_tokens(db: &PostgresDB, limit: Option<i64>) -> Result<Vec<
             creator_address_id,
             is_scam,
             scam_label,
-            creation_txn,
-            trading_enabled_txn
+            creation_tx,
+            trading_enabled_tx
         FROM eth_db.tokens
         WHERE is_scam = true
-        "#
+        "#,
     );
-    
+
     if let Some(lim) = limit {
         sql.push_str(&format!(" LIMIT {}", lim));
     }
-    
+
     let tokens = sqlx::query_as::<_, Token>(&sql)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(tokens)
 }
 
@@ -95,17 +97,17 @@ pub async fn get_tokens_by_creator(db: &PostgresDB, creator_address: &str) -> Re
             t.creator_address_id,
             t.is_scam,
             t.scam_label,
-            t.creation_txn,
-            t.trading_enabled_txn
+            t.creation_tx,
+            t.trading_enabled_tx
         FROM eth_db.tokens t
         JOIN eth_db.addresses a ON t.creator_address_id = a.address_id
         WHERE a.address = $1
-        "#
+        "#,
     )
     .bind(creator_address)
     .fetch_all(db.pool())
     .await?;
-    
+
     Ok(tokens)
 }
 
@@ -131,22 +133,22 @@ pub async fn get_pools_by_type(
             scam_tx_hash,
             trading_enabled,
             trading_enabled_block,
-            trading_enabled_txn
+            trading_enabled_tx
         FROM eth_db.pools
         WHERE pool_type = $1
         ORDER BY trading_enabled_block DESC
-        "#
+        "#,
     );
-    
+
     if let Some(lim) = limit {
         sql.push_str(&format!(" LIMIT {}", lim));
     }
-    
+
     let pools = sqlx::query_as::<_, Pool>(&sql)
         .bind(pool_type)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(pools)
 }
 
@@ -158,7 +160,7 @@ pub async fn get_recently_enabled_pools(
 ) -> Result<Vec<Pool>> {
     // Estimate current block (roughly 20M as of 2024)
     let min_block = 20_000_000 - blocks_back;
-    
+
     let mut sql = String::from(
         r#"
         SELECT 
@@ -175,23 +177,23 @@ pub async fn get_recently_enabled_pools(
             scam_tx_hash,
             trading_enabled,
             trading_enabled_block,
-            trading_enabled_txn
+            trading_enabled_tx
         FROM eth_db.pools
         WHERE trading_enabled = true 
         AND trading_enabled_block >= $1
         ORDER BY trading_enabled_block DESC
-        "#
+        "#,
     );
-    
+
     if let Some(lim) = limit {
         sql.push_str(&format!(" LIMIT {}", lim));
     }
-    
+
     let pools = sqlx::query_as::<_, Pool>(&sql)
         .bind(min_block)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(pools)
 }
 
@@ -201,7 +203,7 @@ pub async fn get_scam_token_interactions(
     address: &str,
 ) -> Result<Vec<ScamTokenInteraction>> {
     use sqlx::{query, Row};
-    
+
     let rows = query(
         r#"
         SELECT 
@@ -217,21 +219,24 @@ pub async fn get_scam_token_interactions(
         WHERE a.address = $1 AND tok.is_scam = true
         GROUP BY tr.token_address, tok.scam_label
         ORDER BY interaction_count DESC
-        "#
+        "#,
     )
     .bind(address)
     .fetch_all(db.pool())
     .await?;
-    
-    let interactions = rows.into_iter().map(|row| ScamTokenInteraction {
-        token_address: row.get("token_address"),
-        scam_label: row.get("scam_label"),
-        interaction_count: row.get("interaction_count"),
-        total_spent: row.get("total_spent"),
-        total_received: row.get("total_received"),
-        realized_profit: row.get("realized_profit"),
-    }).collect();
-    
+
+    let interactions = rows
+        .into_iter()
+        .map(|row| ScamTokenInteraction {
+            token_address: row.get("token_address"),
+            scam_label: row.get("scam_label"),
+            interaction_count: row.get("interaction_count"),
+            total_spent: row.get("total_spent"),
+            total_received: row.get("total_received"),
+            realized_profit: row.get("realized_profit"),
+        })
+        .collect();
+
     Ok(interactions)
 }
 
@@ -241,7 +246,7 @@ pub async fn get_tokens_by_pool_count(
     limit: i64,
 ) -> Result<Vec<TokenWithPoolCount>> {
     use sqlx::{query, Row};
-    
+
     let rows = query(
         r#"
         SELECT 
@@ -256,21 +261,24 @@ pub async fn get_tokens_by_pool_count(
         GROUP BY t.contract_address, t.is_scam, t.scam_label
         ORDER BY pool_count DESC
         LIMIT $1
-        "#
+        "#,
     )
     .bind(limit)
     .fetch_all(db.pool())
     .await?;
-    
-    let tokens = rows.into_iter().map(|row| TokenWithPoolCount {
-        token_address: row.get("contract_address"),
-        is_scam: row.get("is_scam"),
-        scam_label: row.get("scam_label"),
-        pool_count: row.get("pool_count"),
-        protocol_count: row.get("protocol_count"),
-        protocols: row.get("protocols"),
-    }).collect();
-    
+
+    let tokens = rows
+        .into_iter()
+        .map(|row| TokenWithPoolCount {
+            token_address: row.get("contract_address"),
+            is_scam: row.get("is_scam"),
+            scam_label: row.get("scam_label"),
+            pool_count: row.get("pool_count"),
+            protocol_count: row.get("protocol_count"),
+            protocols: row.get("protocols"),
+        })
+        .collect();
+
     Ok(tokens)
 }
 

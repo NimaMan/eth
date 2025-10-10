@@ -1,7 +1,6 @@
 /// Address Metrics Queries
-/// 
+///
 /// Queries for address-level aggregated metrics including PnL, volume, and activity.
-
 use crate::postgres_db::{connection::PostgresDB, models::AddressMetrics};
 use eyre::Result;
 use sqlx::query_as;
@@ -14,7 +13,7 @@ pub async fn get_address_metrics(db: &PostgresDB, address: &str) -> Result<Optio
             address_id,
             address,
             is_contract,
-            total_erc20_txn,
+            total_erc20_tx,
             total_erc20_trades,
             scam_ratio,
             total_profit,
@@ -35,12 +34,12 @@ pub async fn get_address_metrics(db: &PostgresDB, address: &str) -> Result<Optio
             cluster_label
         FROM eth_db.addresses
         WHERE address = $1
-        "#
+        "#,
     )
     .bind(address)
     .fetch_optional(db.pool())
     .await?;
-    
+
     Ok(metrics)
 }
 
@@ -57,7 +56,7 @@ pub async fn get_top_profitable_addresses(
             address_id,
             address,
             is_contract,
-            total_erc20_txn,
+            total_erc20_tx,
             total_erc20_trades,
             scam_ratio,
             total_profit,
@@ -78,24 +77,24 @@ pub async fn get_top_profitable_addresses(
             cluster_label
         FROM eth_db.addresses
         WHERE 1=1
-        "#
+        "#,
     );
-    
+
     if let Some(min_vol) = min_volume {
         query.push_str(&format!(" AND total_volume >= {}", min_vol));
     }
-    
+
     if exclude_contracts {
         query.push_str(" AND is_contract = false");
     }
-    
+
     query.push_str(" ORDER BY total_profit DESC NULLS LAST");
     query.push_str(&format!(" LIMIT {}", limit));
-    
+
     let addresses = sqlx::query_as::<_, AddressMetrics>(&query)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(addresses)
 }
 
@@ -111,7 +110,7 @@ pub async fn get_high_scam_ratio_addresses(
             address_id,
             address,
             is_contract,
-            total_erc20_txn,
+            total_erc20_tx,
             total_erc20_trades,
             scam_ratio,
             total_profit,
@@ -134,13 +133,13 @@ pub async fn get_high_scam_ratio_addresses(
         WHERE scam_ratio >= $1
         ORDER BY scam_ratio DESC
         LIMIT $2
-        "#
+        "#,
     )
     .bind(min_scam_ratio)
     .bind(limit)
     .fetch_all(db.pool())
     .await?;
-    
+
     Ok(addresses)
 }
 
@@ -156,7 +155,7 @@ pub async fn get_most_active_addresses(
             address_id,
             address,
             is_contract,
-            total_erc20_txn,
+            total_erc20_tx,
             total_erc20_trades,
             scam_ratio,
             total_profit,
@@ -177,20 +176,20 @@ pub async fn get_most_active_addresses(
             cluster_label
         FROM eth_db.addresses
         WHERE total_erc20_trades IS NOT NULL
-        "#
+        "#,
     );
-    
+
     if let Some(window) = time_window_blocks {
         // Get current block estimate (roughly 20M as of 2024)
         query.push_str(&format!(" AND last_seen >= (20000000 - {})", window));
     }
-    
+
     query.push_str(" ORDER BY total_erc20_trades DESC");
     query.push_str(&format!(" LIMIT {}", limit));
-    
+
     let addresses = sqlx::query_as::<_, AddressMetrics>(&query)
         .fetch_all(db.pool())
         .await?;
-    
+
     Ok(addresses)
 }

@@ -1,8 +1,7 @@
 /// Aggregation Queries
-/// 
+///
 /// Queries for aggregating trade data into address-level metrics.
 /// Used to populate the addresses table from trades data.
-
 use crate::postgres_db::connection::PostgresDB;
 use eyre::Result;
 use sqlx::{query, Row};
@@ -38,11 +37,11 @@ pub async fn aggregate_address_metrics(db: &PostgresDB) -> Result<u64> {
             GROUP BY address_id
         ) agg
         WHERE a.address_id = agg.address_id
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -64,11 +63,11 @@ pub async fn calculate_scam_ratios(db: &PostgresDB) -> Result<u64> {
             GROUP BY t.address_id
         ) scam_stats
         WHERE a.address_id = scam_stats.address_id
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -79,7 +78,7 @@ pub async fn update_address_trade_counts(db: &PostgresDB) -> Result<u64> {
         UPDATE eth_db.addresses a
         SET 
             total_erc20_trades = trade_stats.total_trades,
-            total_erc20_txn = trade_stats.total_transactions
+            total_erc20_tx = trade_stats.total_transactions
         FROM (
             SELECT 
                 address_id,
@@ -89,20 +88,16 @@ pub async fn update_address_trade_counts(db: &PostgresDB) -> Result<u64> {
             GROUP BY address_id
         ) trade_stats
         WHERE a.address_id = trade_stats.address_id
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
 /// Batch update addresses with aggregated metrics (with progress tracking)
-pub async fn batch_update_addresses(
-    db: &PostgresDB,
-    batch_size: i64,
-    offset: i64,
-) -> Result<u64> {
+pub async fn batch_update_addresses(db: &PostgresDB, batch_size: i64, offset: i64) -> Result<u64> {
     let result = query(
         r#"
         WITH batch_addresses AS (
@@ -131,21 +126,18 @@ pub async fn batch_update_addresses(
             GROUP BY t.address_id
         ) agg
         WHERE a.address_id = agg.address_id
-        "#
+        "#,
     )
     .bind(batch_size)
     .bind(offset)
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
 /// Calculate profit metrics for addresses with recent trades
-pub async fn calculate_profit_metrics(
-    db: &PostgresDB,
-    block_threshold: i32,
-) -> Result<u64> {
+pub async fn calculate_profit_metrics(db: &PostgresDB, block_threshold: i32) -> Result<u64> {
     let result = query(
         r#"
         UPDATE eth_db.addresses a
@@ -171,7 +163,7 @@ pub async fn calculate_profit_metrics(
     .bind(block_threshold)
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -193,11 +185,11 @@ pub async fn update_bribe_amounts(db: &PostgresDB) -> Result<u64> {
             GROUP BY address_id
         ) bribe_stats
         WHERE a.address_id = bribe_stats.address_id
-        "#
+        "#,
     )
     .execute(db.pool())
     .await?;
-    
+
     Ok(result.rows_affected())
 }
 
@@ -215,7 +207,7 @@ pub async fn get_aggregation_progress(db: &PostgresDB) -> Result<AggregationProg
     )
     .fetch_one(db.pool())
     .await?;
-    
+
     Ok(AggregationProgress {
         addresses_with_trades: row.get("addresses_with_trades"),
         addresses_aggregated: row.get("addresses_aggregated"),

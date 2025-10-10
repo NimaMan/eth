@@ -1,14 +1,13 @@
+use crate::reth_index::models::{Currency, TradeData};
 /// Trades Table
-/// 
+///
 /// Tracks aggregated trading activity for address-token pairs.
-/// 
+///
 /// Schema:
 /// - Key: (Address, TokenAddress, Currency)
 /// - Value: TradeData struct
-
 use alloy_primitives::Address;
 use eyre::Result;
-use crate::reth_index::models::{TradeData, Currency};
 
 /// Key for the trades table
 #[derive(Debug, Clone)]
@@ -39,13 +38,13 @@ impl TradesTable {
         if bytes.len() != 41 {
             return Err(eyre::eyre!("Invalid trade key length: {}", bytes.len()));
         }
-        
+
         let mut address_bytes = [0u8; 20];
         address_bytes.copy_from_slice(&bytes[0..20]);
-        
+
         let mut token_bytes = [0u8; 20];
         token_bytes.copy_from_slice(&bytes[20..40]);
-        
+
         Ok(TradeKey {
             address: Address::from(address_bytes),
             token: Address::from(token_bytes),

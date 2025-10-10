@@ -1,8 +1,8 @@
-use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::Result;
 
-use crate::provider::RethQueryProvider;
 use crate::common_addresses::dex_pools::BALANCER_VAULT;
+use crate::provider::RethQueryProvider;
 
 /// Function selectors
 const GET_POOL_TOKENS_SEL: [u8; 4] = [0xf9, 0x4d, 0x46, 0x68]; // getPoolTokens(bytes32)
@@ -20,7 +20,7 @@ impl RethQueryProvider {
         data.extend_from_slice(pool_id.as_slice());
         let res = self
             .tx_simulator
-            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block)
+            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
             .await?;
         if !res.success || res.output.len() < 64 {
             return Err(eyre::eyre!("getPool(bytes32) call failed"));
@@ -43,7 +43,7 @@ impl RethQueryProvider {
         data.extend_from_slice(pool_id.as_slice());
         let res = self
             .tx_simulator
-            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block)
+            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
             .await?;
         if !res.success || res.output.len() < 96 {
             return Err(eyre::eyre!("getPoolTokens(bytes32) call failed"));
@@ -64,37 +64,46 @@ impl RethQueryProvider {
 
         Ok((tokens, balances, last_change_block))
     }
-
 }
 
 fn decode_address_array(data: &[u8], offset: usize) -> Option<Vec<Address>> {
-    if data.len() < offset + 32 { return None; }
-    let len = be_word_to_usize(&data[offset..offset+32]);
+    if data.len() < offset + 32 {
+        return None;
+    }
+    let len = be_word_to_usize(&data[offset..offset + 32]);
     let mut out = Vec::with_capacity(len);
     let mut cur = offset + 32;
     for _ in 0..len {
-        if data.len() < cur + 32 { return None; }
-        out.push(Address::from_slice(&data[cur+12..cur+32]));
+        if data.len() < cur + 32 {
+            return None;
+        }
+        out.push(Address::from_slice(&data[cur + 12..cur + 32]));
         cur += 32;
     }
     Some(out)
 }
 
 fn decode_u256_array(data: &[u8], offset: usize) -> Option<Vec<U256>> {
-    if data.len() < offset + 32 { return None; }
-    let len = be_word_to_usize(&data[offset..offset+32]);
+    if data.len() < offset + 32 {
+        return None;
+    }
+    let len = be_word_to_usize(&data[offset..offset + 32]);
     let mut out = Vec::with_capacity(len);
     let mut cur = offset + 32;
     for _ in 0..len {
-        if data.len() < cur + 32 { return None; }
-        out.push(U256::from_be_slice(&data[cur..cur+32]));
+        if data.len() < cur + 32 {
+            return None;
+        }
+        out.push(U256::from_be_slice(&data[cur..cur + 32]));
         cur += 32;
     }
     Some(out)
 }
 
 fn be_word_to_usize(word: &[u8]) -> usize {
-    if word.len() < 32 { return 0; }
+    if word.len() < 32 {
+        return 0;
+    }
     let mut bytes = [0u8; 8];
     bytes.copy_from_slice(&word[24..32]);
     u64::from_be_bytes(bytes) as usize

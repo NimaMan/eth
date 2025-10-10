@@ -1,11 +1,10 @@
 /// Analytics Queries
-/// 
+///
 /// Complex analytical queries for ranking, network analysis, and aggregated metrics.
-
 use crate::postgres_db::connection::PostgresDB;
 use eyre::Result;
-use sqlx::{query, Row};
 use serde::{Deserialize, Serialize};
+use sqlx::{query, Row};
 
 /// Address ranking result
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +14,7 @@ pub struct AddressRanking {
     pub volume_rank: i32,
     pub activity_rank: i32,
     pub composite_score: f64,
-    pub bird_tier: String,  // Mapping to bird-themed ranking
+    pub bird_tier: String, // Mapping to bird-themed ranking
 }
 
 /// Network relationship result
@@ -29,10 +28,7 @@ pub struct NetworkRelationship {
 }
 
 /// Calculate address ranking based on multiple metrics
-pub async fn calculate_address_ranking(
-    db: &PostgresDB,
-    limit: i64,
-) -> Result<Vec<AddressRanking>> {
+pub async fn calculate_address_ranking(db: &PostgresDB, limit: i64) -> Result<Vec<AddressRanking>> {
     let rows = query(
         r#"
         WITH ranked_addresses AS (
@@ -77,23 +73,24 @@ pub async fn calculate_address_ranking(
         FROM scored_addresses
         ORDER BY composite_score DESC
         LIMIT $1
-        "#
+        "#,
     )
     .bind(limit)
     .fetch_all(db.pool())
     .await?;
-    
-    let rankings = rows.into_iter().map(|row| {
-        AddressRanking {
+
+    let rankings = rows
+        .into_iter()
+        .map(|row| AddressRanking {
             address: row.get("address"),
             profit_rank: row.get("profit_rank"),
             volume_rank: row.get("volume_rank"),
             activity_rank: row.get("activity_rank"),
             composite_score: row.get("composite_score"),
             bird_tier: row.get("bird_tier"),
-        }
-    }).collect();
-    
+        })
+        .collect();
+
     Ok(rankings)
 }
 
@@ -129,22 +126,23 @@ pub async fn get_network_relationships(
         FROM address_trades
         ORDER BY total_volume DESC
         LIMIT 100
-        "#
+        "#,
     )
     .bind(address)
     .fetch_all(db.pool())
     .await?;
-    
-    let relationships = rows.into_iter().map(|row| {
-        NetworkRelationship {
+
+    let relationships = rows
+        .into_iter()
+        .map(|row| NetworkRelationship {
             from_address: row.get("from_address"),
             to_address: row.get("to_address"),
             interaction_count: row.get("interaction_count"),
             total_volume: row.get("total_volume"),
             relationship_type: row.get("relationship_type"),
-        }
-    }).collect();
-    
+        })
+        .collect();
+
     Ok(relationships)
 }
 
@@ -172,11 +170,11 @@ pub async fn get_global_statistics(db: &PostgresDB) -> Result<GlobalStats> {
             FROM eth_db.addresses a
             LEFT JOIN eth_db.trades t ON a.address_id = t.address_id
         ) stats
-        "#
+        "#,
     )
     .fetch_one(db.pool())
     .await?;
-    
+
     Ok(GlobalStats {
         total_addresses: row.get("total_addresses"),
         total_contracts: row.get("total_contracts"),

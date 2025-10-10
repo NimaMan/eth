@@ -1,9 +1,9 @@
 pub mod amm;
 pub mod amm_swap_route;
 
+use self::amm_swap_route::AmmSwapRoute;
 use alloy_primitives::{Address, U256};
 use tx_simulator::UnsignedTransaction;
-use self::amm_swap_route::AmmSwapRoute;
 
 /// Build a buy (ETH -> Token) swap UnsignedTransaction for the given pool spec.
 ///
@@ -45,7 +45,12 @@ pub fn build_buy_swap(
             slippage_bps,
             deadline,
         ),
-        AmmSwapRoute::CurveV1 { pool, i, j, use_underlying } => amm::curve::build_buy_swap_curve_v1(
+        AmmSwapRoute::CurveV1 {
+            pool,
+            i,
+            j,
+            use_underlying,
+        } => amm::curve::build_buy_swap_curve_v1(
             buyer,
             pool,
             i,
@@ -119,8 +124,12 @@ pub fn build_approve_for_route(
     amount: U256,
 ) -> UnsignedTransaction {
     match *route {
-        AmmSwapRoute::UniswapV2 { .. } => amm::v2::build_approve_v2(amm::v2::Router::UniswapV2, owner, token, amount),
-        AmmSwapRoute::SushiswapV2 { .. } => amm::v2::build_approve_v2(amm::v2::Router::SushiswapV2, owner, token, amount),
+        AmmSwapRoute::UniswapV2 { .. } => {
+            amm::v2::build_approve_v2(amm::v2::Router::UniswapV2, owner, token, amount)
+        }
+        AmmSwapRoute::SushiswapV2 { .. } => {
+            amm::v2::build_approve_v2(amm::v2::Router::SushiswapV2, owner, token, amount)
+        }
         AmmSwapRoute::UniswapV3 { .. } => amm::v3::build_approve_v3(owner, token, amount),
         // Default to V2 router if unknown (can refine when Balancer/Curve supported)
         _ => amm::v2::build_approve_v2(amm::v2::Router::UniswapV2, owner, token, amount),
@@ -296,15 +305,17 @@ pub fn build_token_to_token_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
-        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::v3::build_token_to_token_swap_v3_with_min_out(
-            trader,
-            token_in,
-            token_out,
-            amount_in,
-            fee_tier,
-            amount_out_min,
-            deadline,
-        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => {
+            amm::v3::build_token_to_token_swap_v3_with_min_out(
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         _ => amm::v2::build_token_to_token_swap_v2_with_min_out(
             amm::v2::Router::UniswapV2,
             trader,
@@ -322,25 +333,21 @@ pub fn build_token_to_token_swap_with_min_out(
 pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
     match *route {
         AmmSwapRoute::UniswapV2 { .. } => Address::from([
-            0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53,
-            0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6,
-            0x59, 0xF2, 0x48, 0x8D,
+            0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
+            0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
         ]),
         AmmSwapRoute::SushiswapV2 { .. } => Address::from([
-            0xd9, 0xe1, 0xcE, 0x17, 0xf2, 0x64, 0x1f, 0x24,
-            0xaE, 0x83, 0x63, 0x7a, 0xb6, 0x6a, 0x2c, 0xca,
-            0x9C, 0x37, 0x8B, 0x9F,
+            0xd9, 0xe1, 0xcE, 0x17, 0xf2, 0x64, 0x1f, 0x24, 0xaE, 0x83, 0x63, 0x7a, 0xb6, 0x6a,
+            0x2c, 0xca, 0x9C, 0x37, 0x8B, 0x9F,
         ]),
         AmmSwapRoute::UniswapV3 { .. } => Address::from([
-            0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D,
-            0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0, 0x15, 0x7C,
-            0x05, 0x86, 0x15, 0x64,
+            0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0,
+            0x15, 0x7C, 0x05, 0x86, 0x15, 0x64,
         ]),
         // Defaults for not-yet-implemented protocols
         _ => Address::from([
-            0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53,
-            0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc, 0xb4, 0xc6,
-            0x59, 0xF2, 0x48, 0x8D,
+            0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
+            0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
         ]),
     }
 }
@@ -348,8 +355,8 @@ pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
 /// Permit payload for single-tx permit + swap flows.
 #[derive(Clone, Debug)]
 pub struct PermitData {
-    pub value: U256,     // allowance value to permit
-    pub deadline: u64,   // permit deadline (unix ts)
+    pub value: U256,   // allowance value to permit
+    pub deadline: u64, // permit deadline (unix ts)
     pub v: u8,
     pub r: [u8; 32],
     pub s: [u8; 32],
@@ -378,6 +385,13 @@ pub fn build_sell_with_permit(
             slippage_bps,
             deadline,
         ),
-        _ => build_sell_swap(route, seller, token_in, amount_in_tokens, slippage_bps, deadline),
+        _ => build_sell_swap(
+            route,
+            seller,
+            token_in,
+            amount_in_tokens,
+            slippage_bps,
+            deadline,
+        ),
     }
 }

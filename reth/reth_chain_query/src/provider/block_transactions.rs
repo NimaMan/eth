@@ -302,6 +302,7 @@ impl RethQueryProvider {
                 logs,
                 cumulative_gas_used: cumulative,
                 effective_gas_price: U256::from(tx.effective_gas_price(header.base_fee_per_gas)),
+                contract_address: None,
             });
         }
 

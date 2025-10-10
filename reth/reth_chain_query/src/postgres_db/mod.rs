@@ -1,28 +1,27 @@
+pub mod connection;
 /// PostgreSQL Database Query Module
-/// 
+///
 /// Provides efficient queries for aggregated Ethereum trading data stored in PostgreSQL.
 /// This module complements the blockchain queries by accessing pre-processed analytics data.
-/// 
+///
 /// # Architecture
-/// 
+///
 /// - `models`: Rust structs matching the PostgreSQL schema
 /// - `queries`: Specialized query modules for different data types
 /// - `connection`: Database connection pool management
-/// 
+///
 /// # Performance
-/// 
+///
 /// Uses sqlx for zero-copy deserialization and prepared statements.
 /// Connection pooling ensures efficient resource usage for concurrent queries.
-
 pub mod models;
 pub mod queries;
-pub mod connection;
 
 // Re-export main types
 pub use connection::PostgresDB;
 pub use models::{
-    AddressMetrics, Trade, Token, Pool, 
-    Transaction, TxParticipant, AddressTransaction, TransactionWithParticipants
+    AddressMetrics, AddressTransaction, Pool, Token, Trade, Transaction,
+    TransactionWithParticipants, TxParticipant,
 };
 
 use eyre::Result;
@@ -38,7 +37,7 @@ impl PostgresQuery {
         let db = PostgresDB::new(database_url).await?;
         Ok(Self { db })
     }
-    
+
     /// Get reference to database connection pool
     pub fn db(&self) -> &PostgresDB {
         &self.db
