@@ -182,7 +182,7 @@ impl UnsignedTxChainSimulation {
         use reth_evm::{ConfigureEvm, Evm};
         use reth_revm::DatabaseCommit;
 
-        let header = self.forked_state.block_header.clone();
+        let block_header = self.forked_state.block_header.clone();
 
         // Get or create inspector with fusing
         let inspector = self.inspector.get_or_insert_with(|| {
@@ -195,8 +195,12 @@ impl UnsignedTxChainSimulation {
         });
 
         // Setup EVM environment
-        let evm_env = self.simulator.evm_config.evm_env(&header);
-        let base_fee = header.header().base_fee_per_gas.map(|v| v as u128);
+        let evm_env = self
+            .simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
+        let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
 
         // Create transaction environment
         let tx_env = self.simulator.create_tx_env_from_unsigned_tx(

@@ -78,7 +78,7 @@ pub struct TxSimulator {
 - `get_base_fee_at_block()` - Get base fee for EIP-1559 transactions
 - `provider_factory()` - Get direct database access for advanced use cases
 
-**Example:** See `examples/basic/verify_database_setup.rs`
+**Example:** See `examples/general/verify_database_setup.rs`
 
 ### 2. Type Definitions (`types.rs`)
 
@@ -135,20 +135,20 @@ Handles transactions with valid signatures (v, r, s):
 
 Core module for `debug_traceCall` equivalent functionality:
 
-- `simulate_call()` - Basic unsigned simulation (alias)
-- `simulate_call_at_block()` - Basic simulation at specific block
+- `simulate_unsigned_transaction()` - Basic unsigned simulation (latest block)
+- `simulate_unsigned_transaction_at_block()` - Basic simulation at a specific block
 - `simulate_unsigned_transaction_with_trace()` - Returns raw CallFrame traces
 - `simulate_unsigned_transaction_with_full_trace_at_block()` - Full simulation with CallFrame
 
 **Examples:**
-- `examples/basic/unsigned_transaction_example.rs` - Basic UnsignedTransaction usage
-- `examples/basic/trace_extraction_example.rs` - CallFrame structure demonstration
+- `examples/general/unsigned_transaction_example.rs` - Basic UnsignedTransaction usage
+- `examples/general/trace_extraction_example.rs` - CallFrame structure demonstration
 
 #### Sequential Processing (`batch_sequence_simulation.rs`)
 
 For MEV bundle simulation and complex transaction sequences where all transactions are known upfront:
 
-- `simulate_transaction_sequence()` - Process complete sequence with state preservation
+- `simulate_unsigned_tx_sequence()` - Process complete sequence with state preservation
 - Configurable failure handling (stop_on_failure)
 - Automatic nonce management
 
@@ -203,8 +203,8 @@ For calling view/pure functions that don't modify state:
 - Optimized for read-only operations
 
 **Examples:**
-- `examples/basic/contract_method_simulation.rs` - ERC20 view function calls
-- `examples/basic/contract_method_simulation_weth_total_supply.rs` - Simple totalSupply call
+- `examples/general/contract_method_simulation.rs` - ERC20 view function calls
+- `examples/general/contract_method_simulation_weth_total_supply.rs` - Simple totalSupply call
 
 ### 4. Advanced Features
 
@@ -228,10 +228,10 @@ Robust timeout mechanisms:
 
 ```rust
 // Unsigned transaction (like debug_traceCall)
-let result = simulator.simulate_call(unsigned_tx).await?;
+let result = simulator.simulate_unsigned_transaction(unsigned_tx).await?;
 
 // At specific block
-let result = simulator.simulate_call_at_block(unsigned_tx, block_number).await?;
+let result = simulator.simulate_unsigned_transaction_at_block(unsigned_tx, block_number).await?;
 ```
 
 ### Advanced Simulation
@@ -253,13 +253,14 @@ println!("Call trace depth: {}", full_result.call_trace.calls.len());
 ```rust
 let options = SequentialSimulationOptions {
     at_block: Some(block_number),
+    block_header: None,
     stop_on_failure: true,
     auto_increment_nonces: true,
     gas_limit_per_tx: Some(300_000),
 };
 
 let result = simulator
-    .simulate_transaction_sequence(transactions, options)
+    .simulate_unsigned_tx_sequence(transactions, options)
     .await?;
 ```
 
@@ -456,7 +457,7 @@ let result = simulator.simulate_unsigned_transaction_with_full_trace_at_block(ca
 
 ```rust
 let simulator = TxSimulator::new("/path/to/reth/db")?;
-let result = simulator.simulate_call(unsigned_tx).await?;
+let result = simulator.simulate_unsigned_transaction(unsigned_tx).await?;
 
 if result.success {
     println!("Transaction would succeed, gas: {}", result.gas_used);
@@ -475,7 +476,7 @@ let mev_bundle = vec![
 ];
 
 let result = simulator
-    .simulate_transaction_sequence(mev_bundle, SequentialSimulationOptions::default())
+    .simulate_unsigned_tx_sequence(mev_bundle, SequentialSimulationOptions::default())
     .await?;
 
 println!("Bundle success: {}", result.sequence_success);
@@ -545,7 +546,7 @@ println!("Success rate: {}/{}", results.successful, results.total);
 ### Error Recovery Patterns
 
 ```rust
-match simulator.simulate_call(unsigned_tx).await {
+match simulator.simulate_unsigned_transaction(unsigned_tx).await {
     Ok(result) => {
         if result.success {
             process_success(&result);

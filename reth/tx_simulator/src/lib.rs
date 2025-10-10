@@ -1,3 +1,4 @@
+pub mod config;
 pub mod simulator;
 /// Transaction Simulator Library
 ///
@@ -38,9 +39,7 @@ pub mod unsigned_tx_chain_simulator {
 pub mod signed_tx_chain_simulator {
     pub use crate::tx_chain::signed::*;
 }
-pub mod unsigned_tx_bundle_simulator {
-    pub use crate::tx_chain::bundle::*;
-}
+
 pub mod parallel_tx_simulator {
     pub use crate::tx_parallel::*;
 }

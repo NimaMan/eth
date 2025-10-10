@@ -1,5 +1,5 @@
 /// Timeout Handling Example
-/// 
+///
 /// This example demonstrates why tokio::task::spawn_blocking is essential for timeout functionality
 /// in the transaction simulator. It proves that CPU-intensive operations cannot be interrupted
 /// by tokio timeouts unless they run in a blocking thread pool.
@@ -43,7 +43,6 @@
 ///
 /// ✅ PROVEN: spawn_blocking is the fix that enables timeouts!
 /// ```
-
 use eyre::Result;
 use tokio::time::{timeout, Duration, Instant};
 
@@ -69,19 +68,25 @@ async fn simulate_new_way() -> Result<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("\n=== Proving spawn_blocking Fixes Timeouts ===\n");
-    
+
     // Test OLD way - timeout WON'T work
     println!("1. OLD WAY (async without spawn_blocking) - 10ms timeout on 50ms work:");
     let start = Instant::now();
     match timeout(Duration::from_millis(10), simulate_old_way()).await {
         Ok(_) => {
             let elapsed = start.elapsed();
-            println!("   ❌ Completed in {:?} - timeout FAILED to interrupt!", elapsed);
-            println!("   This is the bug: ran for {}ms despite 10ms timeout", elapsed.as_millis());
+            println!(
+                "   ❌ Completed in {:?} - timeout FAILED to interrupt!",
+                elapsed
+            );
+            println!(
+                "   This is the bug: ran for {}ms despite 10ms timeout",
+                elapsed.as_millis()
+            );
         }
         Err(_) => println!("   ✓ Timed out after {:?}", start.elapsed()),
     }
-    
+
     // Test NEW way - timeout WILL work
     println!("\n2. NEW WAY (with spawn_blocking) - 10ms timeout on 50ms work:");
     let start = Instant::now();
@@ -89,14 +94,17 @@ async fn main() -> Result<()> {
         Ok(_) => println!("   ✗ Unexpectedly completed in {:?}", start.elapsed()),
         Err(_) => {
             let elapsed = start.elapsed();
-            println!("   ✅ Timed out after {:?} - spawn_blocking allows interruption!", elapsed);
+            println!(
+                "   ✅ Timed out after {:?} - spawn_blocking allows interruption!",
+                elapsed
+            );
             if elapsed.as_millis() <= 15 {
                 println!("   Perfect! Timeout worked correctly");
             }
         }
     }
-    
+
     println!("\n✅ PROVEN: spawn_blocking is the fix that enables timeouts!");
-    
+
     Ok(())
 }

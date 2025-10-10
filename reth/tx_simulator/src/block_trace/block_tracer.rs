@@ -136,12 +136,15 @@ impl<'a> BlockTracer<'a> {
 
         // Get block environment
         let provider = simulator.provider_factory.provider()?;
-        let header = provider
+        let block_header = provider
             .header_by_number(block_number)?
             .ok_or_else(|| eyre::eyre!("Header not found for block {}", block_number))?;
 
         // Setup EVM environment
-        let evm_env = simulator.evm_config.evm_env(&header);
+        let evm_env = simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
         // Create transaction environment from recovered transaction
         let tx_env = simulator.evm_config.tx_env(&recovered);

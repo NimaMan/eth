@@ -49,7 +49,7 @@ impl TxSimulator {
 
         task::spawn_blocking(move || {
             let provider = simulator.provider_factory.provider()?;
-            let header = provider
+            let block_header = provider
                 .header_by_number(block_number)?
                 .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
 
@@ -61,7 +61,10 @@ impl TxSimulator {
 
             let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
 
-            let evm_env = simulator.evm_config.evm_env(&header);
+            let evm_env = simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 
@@ -101,7 +104,7 @@ impl TxSimulator {
 
         task::spawn_blocking(move || {
             let provider = simulator.provider_factory.provider()?;
-            let header = provider
+            let block_header = provider
                 .header_by_number(block_number)?
                 .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
 
@@ -112,10 +115,17 @@ impl TxSimulator {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             // Create tracer with call config
-            let call_config = TracingInspectorConfig::default_geth().set_record_logs(true);
+            let call_config = TracingInspectorConfig::default_geth()
+                .set_steps(false)
+                .set_state_diffs(false)
+                .disable_stack_snapshots()
+                .set_record_logs(true);
             let mut inspector = TracingInspector::new(call_config);
 
-            let evm_env = simulator.evm_config.evm_env(&header);
+            let evm_env = simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 
@@ -153,6 +163,7 @@ impl TxSimulator {
                 gas_used,
                 revert_reason,
                 call_trace: call_frame,
+                struct_logs: None,
             })
         })
         .await
@@ -171,7 +182,7 @@ impl TxSimulator {
 
         task::spawn_blocking(move || {
             let provider = simulator.provider_factory.provider()?;
-            let header = provider
+            let block_header = provider
                 .header_by_number(block)?
                 .ok_or_else(|| eyre::eyre!("No header for block {}", block))?;
 
@@ -180,10 +191,17 @@ impl TxSimulator {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
             // Create tracer with call config
-            let call_config = TracingInspectorConfig::default_geth().set_record_logs(true);
+            let call_config = TracingInspectorConfig::default_geth()
+                .set_steps(false)
+                .set_state_diffs(false)
+                .disable_stack_snapshots()
+                .set_record_logs(true);
             let mut inspector = TracingInspector::new(call_config);
 
-            let evm_env = simulator.evm_config.evm_env(&header);
+            let evm_env = simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 
@@ -218,6 +236,7 @@ impl TxSimulator {
                 gas_used,
                 revert_reason,
                 call_trace: call_frame,
+                struct_logs: None,
             })
         })
         .await

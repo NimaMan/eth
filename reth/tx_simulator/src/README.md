@@ -24,13 +24,13 @@ Relevant Reth Source (for parity)
 Key Building Blocks Here
 - TxSimulator (core): rust/tx_simulator/src/simulator.rs:1
   - Block metadata, provider factory, fork creation, base fee, and low‑level on‑fork execution helpers.
-- Unsigned single‑call: rust/tx_simulator/src/unsigned_tx_simulator.rs:1
-- Signed single‑call: rust/tx_simulator/src/signed_tx_simulator.rs:1
-- Stateful unsigned chain: rust/tx_simulator/src/unsigned_tx_chain_simulator.rs:1
+- Unsigned single‑call: rust/tx_simulator/src/single_tx/unsigned.rs:1
+- Signed single‑call: rust/tx_simulator/src/single_tx/signed.rs:1
+- Stateful unsigned chain: rust/tx_simulator/src/tx_chain/unsigned.rs:1
   - Persists state and nonces; fuses inspector between steps for performance and parity.
-- Stateful signed chain: rust/tx_simulator/src/signed_tx_chain_simulator.rs:1
+- Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
   - Recovers signer, persists state; fuses inspector between steps.
-- Batch sequence (bundle): rust/tx_simulator/src/unsigned_tx_bundle_simulator.rs:1
+- Batch sequence (bundle): rust/tx_simulator/src/tx_chain/bundle.rs:1
   - Creates a fork, reuses a single inspector across the bundle, and fuses between txs.
 - Trace decoding helpers: rust/tx_simulator/src/simulation_revert_decoder.rs:1
 
@@ -46,9 +46,9 @@ Typical Uses
 - Run high‑throughput offline analyses and benchmarks.
 
 Quick Checks
-- Verify database/setup: rust/tx_simulator/examples/basic/verify_database_setup.rs:1
+- Verify database/setup: rust/tx_simulator/examples/general/verify_database_setup.rs:1
 - Compare vs RPC: rust/tx_simulator/examples/block/verify_block_trace_rpc_equivalence.rs:1
-- Contract reads: rust/tx_simulator/examples/basic/contract_method_simulation.rs:1
+- Contract reads: rust/tx_simulator/examples/general/contract_method_simulation.rs:1
 - Signed chain demo: rust/tx_simulator/examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs:1
 
 Setup Notes
@@ -57,4 +57,3 @@ Setup Notes
 
 Scope
 - tx_simulator focuses on fast and faithful execution/tracing only. Any higher‑level enrichment (log decoding, balance deltas, tax logic) lives in sibling crates like `tx_processor`.
-

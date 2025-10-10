@@ -114,14 +114,14 @@ impl TxSimulator {
     /// Returns the base fee in wei.
     pub fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
         let provider = self.provider_factory.provider()?;
-        let header = provider.header_by_number(block_number)?.ok_or_else(|| {
+        let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
             eyre::eyre!(
                 "No header for block whilst getting base-fee {}",
                 block_number
             )
         })?;
 
-        let base_fee = header
+        let base_fee = block_header
             .base_fee_per_gas
             .ok_or_else(|| eyre::eyre!("No base fee for block {} (pre-London?)", block_number))?;
 
@@ -146,7 +146,7 @@ impl TxSimulator {
     /// Get block metadata (timestamp, gas_limit, gas_used, base_fee)
     pub fn get_block_metadata(&self, block_number: u64) -> Result<(u64, u64, u64, Option<u128>)> {
         let provider = self.provider_factory.provider()?;
-        let header = provider.header_by_number(block_number)?.ok_or_else(|| {
+        let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
             eyre::eyre!(
                 "No header for block whilst getting block metadata {}",
                 block_number
@@ -154,10 +154,10 @@ impl TxSimulator {
         })?;
 
         Ok((
-            header.timestamp,
-            header.gas_limit,
-            header.gas_used,
-            header.base_fee_per_gas.map(|v| v as u128),
+            block_header.timestamp,
+            block_header.gas_limit,
+            block_header.gas_used,
+            block_header.base_fee_per_gas.map(|v| v as u128),
         ))
     }
 }

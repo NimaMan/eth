@@ -23,7 +23,7 @@ use tokio::task;
 
 // Reth imports
 use alloy_primitives::Address;
-use alloy_rpc_types_trace::geth::CallConfig;
+use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
 use reth_provider::{HeaderProvider, StateProvider};
@@ -41,16 +41,12 @@ pub(crate) struct ForkedState {
 }
 
 impl TxSimulator {
-    /// Simulate a sequence of transactions where each builds on previous state changes
+    /// Simulate a sequence of unsigned transactions where each builds on the previous state.
     ///
-    /// This is crucial for:
-    /// - MEV bundle simulation
-    /// - Protocol testing (e.g., enable trading -> swap)
-    /// - Complex DeFi interactions
-    /// - Transaction dependency analysis
-    ///
-    /// Uses inspector fusing for optimal performance across the bundle.
-    pub async fn simulate_transaction_sequence(
+    /// This variant runs the bundle in one shot and returns aggregate statistics. It reuses a
+    /// fused inspector under the hood so the cost stays close to a single `debug_traceBlock`
+    /// despite running multiple transactions.
+    pub async fn simulate_unsigned_tx_sequence(
         &self,
         transactions: Vec<UnsignedTransaction>,
         options: SequentialSimulationOptions,
@@ -67,11 +63,21 @@ impl TxSimulator {
         }
 
         let simulator = self.clone();
-        let block_number = options.at_block.unwrap_or(self.get_latest_block()?);
 
         task::spawn_blocking(move || {
-            // Create forked state
-            let mut forked_state = simulator.create_forked_state(block_number)?;
+            // Determine the forked context (either reuse a supplied header or resolve one now).
+            let (mut forked_state, _resolved_block) = if let Some(header) =
+                options.block_header.clone()
+            {
+                let block_number = header.number;
+                (
+                    simulator.create_forked_state_with_header(block_number, header)?,
+                    block_number,
+                )
+            } else {
+                let block_number = options.at_block.unwrap_or(simulator.get_latest_block()?);
+                (simulator.create_forked_state(block_number)?, block_number)
+            };
 
             let mut results = Vec::new();
             let mut cumulative_gas_used = 0u64;
@@ -140,15 +146,16 @@ impl TxSimulator {
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
     }
 
+    /// Simulate a sequence of transactions where each builds on previous state changes.
     /// Create a forked state at a specific block for sequential simulation
     pub(crate) fn create_forked_state(&self, block_number: u64) -> Result<ForkedState> {
         let provider = self.provider_factory.provider()?;
         // Important: fetching the canonical header can fail briefly if the MDBX mapping
         // has not advanced yet even though the block is visible via RPC.
-        let header = provider
+        let block_header = provider
             .header_by_number(block_number)?
             .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-        let sealed_header = SealedHeader::new(header.clone(), header.hash_slow());
+        let sealed_header = SealedHeader::new(block_header.clone(), block_header.hash_slow());
 
         self.create_forked_state_with_header(block_number, sealed_header)
     }
@@ -178,17 +185,22 @@ impl TxSimulator {
         transaction: UnsignedTransaction,
         _block_number: u64,
     ) -> Result<crate::types::FullSimulationResult> {
-        let header = forked_state.block_header.clone();
+        let block_header = forked_state.block_header.clone();
 
-        // Create tracer with full config
-        let unsigned_tx_config = TracingInspectorConfig::default_geth().set_record_logs(true);
+        // Create tracer with full config (call hierarchy + per-opcode struct logs)
+        let unsigned_tx_config = TracingInspectorConfig::default_geth()
+            .set_record_logs(true)
+            .set_steps(true);
         let mut inspector = TracingInspector::new(unsigned_tx_config);
 
         // Setup EVM environment
-        let evm_env = self.evm_config.evm_env(&header);
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
         // Get base fee for gas price adjustment
-        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(
@@ -212,20 +224,31 @@ impl TxSimulator {
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
+        let raw_output = res.result.output().cloned();
         let revert_reason = if !success {
-            res.result
-                .output()
-                .map(|bytes| decode_revert_data(&bytes))
+            raw_output
+                .as_ref()
+                .map(|bytes| decode_revert_data(bytes))
                 .or_else(|| Some("Transaction reverted without data".to_string()))
         } else {
             None
         };
 
-        // Extract unsigned_tx trace
-        let call_frame = inspector
+        // Extract unsigned_tx trace and step logs
+        let builder = inspector
             .with_transaction_gas_limit(gas_limit)
-            .into_geth_builder()
-            .geth_call_traces(CallConfig::default().with_log(), gas_used);
+            .into_geth_builder();
+        let call_frame =
+            builder.geth_call_traces(CallConfig::default().with_log(), gas_used);
+        let struct_logs = Some(
+            builder
+                .geth_traces(
+                    gas_used,
+                    raw_output.clone().unwrap_or_default(),
+                    GethDefaultTracingOptions::default(),
+                )
+                .struct_logs,
+        );
 
         // Note: Nonce updating is handled by the unsigned_txer (SimulationChain)
 
@@ -234,6 +257,7 @@ impl TxSimulator {
             gas_used,
             revert_reason,
             call_trace: call_frame,
+            struct_logs,
         })
     }
 
@@ -244,19 +268,22 @@ impl TxSimulator {
         transaction: UnsignedTransaction,
         inspector: &mut Option<TracingInspector>,
     ) -> Result<SequentialTransactionResult> {
-        let header = forked_state.block_header.clone();
+        let block_header = forked_state.block_header.clone();
 
         // Get or create inspector with fusing
         let insp = inspector.get_or_insert_with(|| {
-            let config = TracingInspectorConfig::default_geth().set_record_logs(true);
+            let config = TracingInspectorConfig::default_parity().set_record_logs(true);
             TracingInspector::new(config)
         });
 
         // Setup EVM environment
-        let evm_env = self.evm_config.evm_env(&header);
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
         // Get base fee for gas price adjustment
-        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(
@@ -311,17 +338,20 @@ impl TxSimulator {
         forked_state: &mut ForkedState,
         transaction: UnsignedTransaction,
     ) -> Result<SequentialTransactionResult> {
-        let header = forked_state.block_header.clone();
+        let block_header = forked_state.block_header.clone();
 
         // Create tracer
         let unsigned_tx_config = TracingInspectorConfig::default_geth().set_record_logs(true);
         let mut inspector = TracingInspector::new(unsigned_tx_config);
 
         // Setup EVM environment
-        let evm_env = self.evm_config.evm_env(&header);
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
         // Get base fee for gas price adjustment
-        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
+        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(

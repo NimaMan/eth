@@ -19,18 +19,18 @@ alloy-consensus = "1.0.27"
 hex = "0.4"
 
 # Reth dependencies - using GitHub references
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.7.0" }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
 
-# REVM - align with Reth v1.7.0 toolchain
-revm = { version = "29.0.1", default-features = false, features = ["std"] }
+# REVM - aligned with Reth v1.8.2 toolchain
+revm = { version = "30.0.0", default-features = false, features = ["std"] }
 revm-inspectors = "0.30.0"
 
 # For serialization
@@ -43,7 +43,6 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 [dev-dependencies]
 ethers = { version = "2.0.7", features = ["rustls"] }
 alloy-rlp = "0.3"
-reth_chain_query = { path = "../reth_chain_query" }
 reth-storage-api = { path = "../reth/crates/storage/storage-api" }
 secrecy = "0.8"
 tempfile = "3.10"
@@ -52,26 +51,26 @@ chrono = "0.4"
 
 # Examples
 
-# Basic examples
+# General single-transaction examples
 [[example]]
 name = "verify_database_setup"
-path = "examples/basic/verify_database_setup.rs"
+path = "examples/general/verify_database_setup.rs"
 
 [[example]]
 name = "unsigned_transaction_example"
-path = "examples/basic/unsigned_transaction_example.rs"
+path = "examples/general/unsigned_transaction_example.rs"
 
 [[example]]
 name = "contract_method_simulation"
-path = "examples/basic/contract_method_simulation.rs"
+path = "examples/general/contract_method_simulation.rs"
 
 [[example]]
 name = "contract_method_simulation_weth_total_supply"
-path = "examples/basic/contract_method_simulation_weth_total_supply.rs"
+path = "examples/general/contract_method_simulation_weth_total_supply.rs"
 
 [[example]]
 name = "trace_extraction_example"
-path = "examples/basic/trace_extraction_example.rs"
+path = "examples/general/trace_extraction_example.rs"
 
 # Sequential examples
 [[example]]
@@ -107,14 +106,14 @@ path = "examples/performance/rpc_vs_direct_simulation_benchmark.rs"
 name = "inspector_fusing_test"
 path = "examples/performance/inspector_fusing_test.rs"
 
-# Advanced examples
+# Additional single-transaction examples
 [[example]]
 name = "timeout_handling_example"
-path = "examples/advanced/timeout_handling_example.rs"
+path = "examples/general/timeout_handling_example.rs"
 
 [[example]]
 name = "revert_reason_decoder_example"
-path = "examples/advanced/revert_reason_decoder_example.rs"
+path = "examples/general/revert_reason_decoder_example.rs"
 
 # Block simulation examples
 [[example]]
@@ -124,7 +123,3 @@ path = "examples/block/trace_block_transactions.rs"
 [[example]]
 name = "verify_block_trace_rpc_equivalence"
 path = "examples/block/verify_block_trace_rpc_equivalence.rs"
-
-[[example]]
-name = "buy_approve_sell_signed_chain_uniswap_v2"
-path = "examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs"

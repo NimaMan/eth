@@ -1,23 +1,22 @@
-/// Basic simulation example - test the pure simulation functionality
-
-use tx_simulator::{TxSimulator, UnsignedTransaction};
-use alloy_primitives::{Address, U256, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
+/// Basic simulation example - test the pure simulation functionality
+use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     println!("Testing tx_simulator - pure simulation library\n");
-    
+
     // Initialize simulator
     let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
-    
+
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
     println!("Latest block: {}", latest_block);
-    
+
     // Create a simple call request (check ETH balance)
     let call = UnsignedTransaction {
         from: Some(Address::ZERO),
@@ -30,21 +29,21 @@ async fn main() -> Result<()> {
         max_priority_fee_per_gas: None,
         nonce: None,
     };
-    
+
     // Simulate the call
     println!("\nSimulating WETH totalSupply() call...");
-    let result = simulator.simulate_call_at_block(call, latest_block).await?;
-    
+    let result = simulator.simulate_unsigned_transaction_at_block(call, latest_block).await?;
+
     println!("Simulation result:");
     println!("  Success: {}", result.success);
     println!("  Gas used: {}", result.gas_used);
     if let Some(reason) = result.revert_reason {
         println!("  Revert reason: {}", reason);
     }
-    
+
     println!("\n✅ tx_simulator is working correctly!");
     println!("This is a clean library focused only on transaction simulation.");
     println!("Balance change calculations are handled in tx_processor.");
-    
+
     Ok(())
 }

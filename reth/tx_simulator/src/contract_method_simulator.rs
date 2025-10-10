@@ -4,12 +4,17 @@
 /// without creating a transaction. These are commonly used for querying token balances,
 /// total supply, decimals, and other contract state.
 use crate::{
+    config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     types::{ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_primitives::{Address, Bytes, U256};
-use eyre::Result;
+use eyre::{eyre, Result};
+use reth_primitives::SealedHeader;
+use reth_provider::StateProviderBox;
+use tokio::time::{sleep, Duration};
+
 
 impl TxSimulator {
     /// Simulate a read-only contract method call (view/pure function)
@@ -27,6 +32,7 @@ impl TxSimulator {
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
         overrides: Option<ViewCallOverrides>,
     ) -> Result<ViewFunctionResult> {
         let resolved = overrides
@@ -47,15 +53,11 @@ impl TxSimulator {
         };
 
         // Get block number
-        let block = if let Some(bn) = block_number {
-            bn
-        } else {
-            self.get_latest_block()?
-        };
+        let block = block_number.unwrap_or(self.get_latest_block()?);
 
         // We need to use the trace version to get the actual output data
         let result = self
-            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block))
+            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block), block_header)
             .await?;
 
         // Extract the output from the call trace
@@ -73,26 +75,66 @@ impl TxSimulator {
         })
     }
 
-    /// Backward compatibility alias using default overrides
-    pub async fn simulate_contract_read_only_call(
-        &self,
-        contract: Address,
-        data: Bytes,
-        block_number: Option<u64>,
-    ) -> Result<ViewFunctionResult> {
-        self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
-            .await
-    }
-
-    /// Backward compatibility alias for simulate_contract_read_only_call
+    /// Convenience wrapper for simulate_contract_read_only_call_with_options
     pub async fn simulate_view_function(
         &self,
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
+        block_header: Option<SealedHeader>,
     ) -> Result<ViewFunctionResult> {
-        self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
+        self.simulate_contract_read_only_call_with_options(
+            contract,
+            data,
+            block_number,
+            block_header,
+            None,
+        )
+        .await
+    }
+
+    /// Attempt to load state for the requested block, retrying briefly if the database
+    /// has not indexed the block yet (common for live feeds).
+    pub(crate) async fn load_state_for_block(&self, block_number: u64) -> Result<StateProviderBox> {
+        let retry_delay = Duration::from_millis(STATE_RETRY_DELAY_MS);
+
+        for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
+            let simulator = self.clone();
+            match tokio::task::spawn_blocking(move || {
+                simulator
+                    .provider_factory
+                    .history_by_block_number(block_number)
+            })
             .await
+            {
+                Ok(Ok(state)) => return Ok(state),
+                Ok(Err(err)) => {
+                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
+                        return Err(eyre!(
+                            "Failed to fetch state for block {}: {}",
+                            block_number,
+                            err
+                        ));
+                    }
+                }
+                Err(join_err) => {
+                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
+                        return Err(eyre!(
+                            "State fetch task panicked for block {}: {}",
+                            block_number,
+                            join_err
+                        ));
+                    }
+                }
+            }
+
+            sleep(retry_delay).await;
+        }
+
+        Err(eyre!(
+            "Failed to obtain state provider for block {}",
+            block_number
+        ))
     }
 }
 
@@ -149,12 +191,3 @@ pub fn decode_string_from_contract_output(output: &Bytes) -> String {
     let string_bytes = &output[64..64 + len];
     String::from_utf8_lossy(string_bytes).to_string()
 }
-
-// ViewFunctionResult is already exported from lib.rs
-
-// Backward compatibility aliases
-pub use self::decode_string_from_contract_output as decode_string_result;
-pub use self::decode_uint256_from_contract_output as decode_uint256_result;
-pub use self::decode_uint8_from_contract_output as decode_uint8_result;
-pub use self::encode_contract_read_call_no_args as encode_view_function_call;
-pub use self::encode_contract_read_call_with_address_arg as encode_view_function_with_address;

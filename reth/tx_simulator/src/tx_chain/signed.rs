@@ -42,9 +42,13 @@ impl SignedTxChainSimulation {
 
     /// Execute a signed transaction and persist its state changes
     pub fn step(&mut self, tx: &TransactionSigned) -> Result<SimulationResult> {
-        let header = self.forked_state.block_header.clone();
+        let block_header = self.forked_state.block_header.clone();
 
-        let evm_env = self.simulator.evm_config.evm_env(&header);
+        let evm_env = self
+            .simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
 
         // Recover sender and build tx env
         let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
@@ -77,9 +81,13 @@ impl SignedTxChainSimulation {
 
     /// Same as step() but returns full trace
     pub fn step_with_trace(&mut self, tx: &TransactionSigned) -> Result<FullSimulationResult> {
-        let header = self.forked_state.block_header.clone();
+        let block_header = self.forked_state.block_header.clone();
 
-        let evm_env = self.simulator.evm_config.evm_env(&header);
+        let evm_env = self
+            .simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
         let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
         let tx_env = self.simulator.evm_config.tx_env(&recovered);
         let gas_limit = tx_env.gas_limit;
@@ -114,6 +122,7 @@ impl SignedTxChainSimulation {
             gas_used,
             revert_reason,
             call_trace: call_frame,
+            struct_logs: None,
         })
     }
 

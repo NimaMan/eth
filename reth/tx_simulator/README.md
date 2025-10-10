@@ -41,6 +41,7 @@ Reth MDBX ──► Provider ──► Header(N)
 - Unsigned simulation: debug_traceCall-equivalent at any block
 - Signed simulation: execute real signatures (mempool/RPC artifacts)
 - Stateful chains: interactive step() / step_with_trace() with nonce tracking
+- Batch unsigned sequences: one-shot `simulate_unsigned_tx_sequence` with fused inspector
 - Parallel evaluation: concurrent unsigned calls at a chosen block with timeouts
 - Block tracing: trace every tx in a block with geth-compatible frames
 - Revert decoding: human-readable error strings when available
@@ -48,11 +49,11 @@ Reth MDBX ──► Provider ──► Header(N)
 ## Modules (Responsibility Map)
 
 - `simulator.rs`: TxSimulator core (DB/provider wiring, block metadata, fork creation)
-- `unsigned_tx_simulator.rs`: Unsigned single-call execution and tracing
-- `signed_tx_simulator.rs`: Signed single-tx execution and tracing
-- `unsigned_tx_chain_simulator.rs`: Stateful unsigned chain (step, trace, nonces)
-- `signed_tx_chain_simulator.rs`: Stateful signed chain (step, trace, nonces)
-- `unsigned_tx_bundle_simulator.rs`: On-fork helpers and block-level utilities
+- `single_tx::unsigned`: Unsigned single-call execution and tracing
+- `single_tx::signed`: Signed single-tx execution and tracing
+- `tx_chain::unsigned`: Stateful unsigned chain (step, trace, nonces)
+- `tx_chain::signed`: Stateful signed chain (step, trace, nonces)
+- `tx_chain::bundle`: Batch execution helpers (unsigned tx sequences, fork utilities)
 - `parallel_tx_simulator.rs`: Parallel unsigned evaluation with concurrency/timeout controls
 - `block_simulation/`: Block-wide tracing utilities
 - `simulation_revert_decoder.rs`: Revert data -> message decoding
@@ -158,7 +159,7 @@ Block/chain metadata:
 
 State/Fork management:
 - `create_forked_state(&self, block_number: u64) -> eyre::Result<ForkedState>`
-  - ForkedState contains: `{ db: InMemoryDBOverlay, block_number: u64, nonces: HashMap<Address, u64> }`.
+  - ForkedState contains: `{ db: InMemoryDBOverlay, block_number: u64, header: SealedHeader, nonces: HashMap<Address, u64> }`.
 - `get_nonce_from_state(&self, forked: &mut ForkedState, addr: Address) -> eyre::Result<u64>`
 
 Low-level execution helpers (used by higher modules):
@@ -167,15 +168,54 @@ Low-level execution helpers (used by higher modules):
   - Behavior: constructs header, builds EVM env, executes once without a persistent inspector, returns basic result.
 
 Notes:
-- Header selection is by `header_by_number(block_number)`. Immediately after a new block import there may be a short canonicalization window where this returns None.
+- Header selection happens inside `create_forked_state` using `header_by_number(block_number)`. Immediately after a new block import there may be a short canonicalization window where this returns `None`.
 
 #### unsigned_tx_simulator.rs
 
-Single-call, unsigned entry points:
-- `simulate_call(&self, unsigned: UnsignedTransaction) -> eyre::Result<SimulationResult>`
-  - Uses `get_latest_block()`.
-- `simulate_call_at_block(&self, unsigned: UnsignedTransaction, block_number: u64) -> eyre::Result<SimulationResult>`
-- `simulate_unsigned_transaction_with_call_trace_at_block(&self, unsigned: UnsignedTransaction, block_number: u64) -> eyre::Result<FullSimulationResult>`
+The **single-tx** entrypoints expose the minimal surface for evaluating an `UnsignedTransaction`
+against Reth’s local state without broadcasting anything. They all share the same execution
+pipeline:
+
+1. Resolve the block context (header + state snapshot). Callers may provide a `SealedHeader`; if
+   they pass `None` we pull the canonical header from MDBX and wait for the state snapshot to
+   become available.
+2. Build an `TxEnv` from the `UnsignedTransaction`, including automatic nonce detection and
+   gas-price resolution (legacy or EIP-1559) when fields are omitted.
+3. Spin up a revm instance with tracing configured to the requested fidelity, execute the call, and
+   return either a lightweight `SimulationResult` or a full `FullSimulationResult` with call traces.
+
+Available methods:
+
+| Method | What it does | When to use |
+| --- | --- | --- |
+| `simulate_unsigned_transaction(unsigned)` | Runs the call against the latest canonical block and returns a `SimulationResult`. | Quick “does it succeed, how much gas?” checks. |
+| `simulate_unsigned_transaction_at_block(unsigned, block_number)` | Same as above but pinned to a specific block. | Historical replays or deterministic diffs. |
+| `simulate_unsigned_transaction_on_state(unsigned, block_header, state)` | Executes using a pre-fetched header/state snapshot. | Callers that already hold their own fork/context (e.g., bundle simulators). |
+| `simulate_unsigned_transaction_with_trace(unsigned, block_number?, block_header?)` | Returns a `FullSimulationResult` that includes the `CallFrame` tree (logs/returns, no `struct_logs`). Automatically resolves the block context unless both arguments are supplied. | When you need decoded internal calls/logs similar to `debug_traceCall`. |
+| `simulate_unsigned_transaction_with_trace_on_state(unsigned, block_header, state)` | Same as above but accepts a prepared context. | Fork-aware callers that reuse state snapshots. |
+| `simulate_unsigned_transaction_with_full_trace_at_block(unsigned, block_number)` | Highest-fidelity trace (logs + step recording) for a block. | Deep debugging, MEV/arb research, replaying DeFi interactions. |
+| `simulate_unsigned_transaction_with_full_trace_on_state(unsigned, block_header, state)` | Full trace using a prepared context. | When the caller already fetched header/state (e.g., parallel pipelines). |
+
+All of the public APIs return:
+
+* `SimulationResult` – `{ success: bool, gas_used: u64, revert_reason: Option<String> }`
+* `FullSimulationResult` – extends the above with a `call_trace: CallFrame` tree plus an optional
+  `struct_logs: Vec<StructLog>` matching the `structLogs` payload from `debug_traceTransaction`.
+
+Implementation notes:
+
+* `prepare_block_context` orchestrates header resolution (`fetch_block_header`) and the
+  retrying state loader (`load_state_for_block`). The defaults are tuned for live usage (12
+  attempts with 25 ms delay) to smooth over the brief gap between header import and state
+  availability.
+* `create_tx_env` handles nonce detection, legacy vs. EIP-1559 pricing rules, and default gas
+  limits when none are supplied.
+* The actual execution happens in `run_unsigned_transaction[_with_trace]`, ensuring every public
+  method produces consistent results regardless of which convenience wrapper is used.
+
+Errors are bubbled up unchanged (e.g., missing headers/state, decoding failures). Because the
+simulator runs inside a `tokio::task::spawn_blocking`, callers should expect the usual `JoinError`
+wrapping; the helpers already map those into a clean `eyre::Result`.
 
 Encoding helpers:
 - Selected read-only helpers live in `contract_method_simulator.rs` (e.g., basic ABI-less encoders).
@@ -190,10 +230,11 @@ Single-call, signed entry points:
 Behavior:
 - Recovers signer (via alloy consensus), builds `TxEnv`, executes, returns results as above.
 
-#### unsigned_tx_chain_simulator.rs (Stateful Unsigned Chain)
+#### tx_chain::unsigned (Stateful Unsigned Chain)
 
 Entry point:
 - `TxSimulator::start_simulation_chain(&self, at_block: Option<u64>) -> eyre::Result<UnsignedTxChainSimulation>`
+- `TxSimulator::start_simulation_chain_with_header(&self, header: SealedHeader) -> eyre::Result<UnsignedTxChainSimulation>`
 
 Methods:
 - `step(&mut self, unsigned: UnsignedTransaction) -> eyre::Result<SimulationResult>`
@@ -207,11 +248,13 @@ Methods:
 Semantics:
 - Each step commits writes into the overlay DB, so subsequent steps see previous effects.
 - Gas limit for calls may be set by the caller; otherwise a safe default is used by the builder.
+- Accepts optional pre-fetched headers when starting the chain to avoid redundant MDBX lookups.
 
-#### signed_tx_chain_simulator.rs (Stateful Signed Chain)
+#### tx_chain::signed (Stateful Signed Chain)
 
 Entry point:
 - `TxSimulator::start_signed_chain(&self, at_block: Option<u64>) -> eyre::Result<SignedTxChainSimulation>`
+- `TxSimulator::start_signed_chain_with_header(&self, header: SealedHeader) -> eyre::Result<SignedTxChainSimulation>`
 
 Methods:
 - `step(&mut self, tx: &TransactionSigned) -> eyre::Result<SimulationResult>`
@@ -224,6 +267,19 @@ Methods:
 Semantics:
 - Recovers signer to build an accurate `TxEnv` (chain ID as per header/spec).
 - Uses a (reused) inspector for consistent traces; commits writes between steps.
+
+#### tx_chain::bundle (Batch Unsigned Sequences)
+
+Entry point:
+- `TxSimulator::simulate_unsigned_tx_sequence(&self, txs: Vec<UnsignedTransaction>, options: SequentialSimulationOptions) -> eyre::Result<SequentialSimulationResult>`
+
+Options:
+- `SequentialSimulationOptions { at_block: Option<u64>, block_header: Option<SealedHeader>, stop_on_failure: bool, auto_increment_nonces: bool, gas_limit_per_tx: Option<u64> }`
+
+Semantics:
+- Resolves a forked state once (using `block_header` when supplied) and reuses a fused inspector across the entire sequence.
+- Returns per-transaction results plus aggregate counters; respects `stop_on_failure`.
+- `simulate_on_fork_with_trace` now populates `struct_logs` when full tracing is requested.
 
 #### parallel_tx_simulator.rs
 

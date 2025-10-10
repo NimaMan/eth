@@ -33,7 +33,6 @@ pub struct TransactionTraceResult {
     pub gas_used: u64,
 }
 
-
 /// Options for block simulation
 #[derive(Debug, Clone, Default)]
 pub struct BlockSimulationOptions {

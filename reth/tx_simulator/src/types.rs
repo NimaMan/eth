@@ -3,7 +3,8 @@
 /// This module contains all the public types used throughout the tx_simulator library.
 /// These types represent simulation results, internal transactions, and configuration options.
 use alloy_primitives::{Address, Bytes, U256};
-pub use alloy_rpc_types_trace::geth::CallFrame;
+pub use alloy_rpc_types_trace::geth::{CallFrame, StructLog};
+use reth_primitives::SealedHeader;
 use std::collections::HashMap;
 
 /// Basic simulation result
@@ -14,13 +15,17 @@ pub struct SimulationResult {
     pub revert_reason: Option<String>,
 }
 
-/// Full simulation result with call trace
+/// Full simulation result with call trace (mirrors reth `/debug/trace_*` responses)
 #[derive(Debug, Clone)]
 pub struct FullSimulationResult {
     pub success: bool,
     pub gas_used: u64,
     pub revert_reason: Option<String>,
+    /// Geth-style call frame produced by the call tracer (mirrors `/debug/trace_*`).
     pub call_trace: CallFrame,
+    /// Optional per-opcode logs from geth's default tracer (`structLogs` in RPC responses).
+    /// Present when the simulation was executed with step recording enabled (full trace helpers).
+    pub struct_logs: Option<Vec<StructLog>>,
 }
 
 /// Result of a single transaction in a sequence
@@ -53,6 +58,8 @@ pub struct SequentialSimulationResult {
 pub struct SequentialSimulationOptions {
     /// Block number to simulate at (None = latest)
     pub at_block: Option<u64>,
+    /// Optional pre-fetched block header to reuse (bypasses header lookup when provided)
+    pub block_header: Option<SealedHeader>,
     /// Whether to stop simulation on first failure (default: true)
     pub stop_on_failure: bool,
     /// Whether to auto-increment nonces for repeated senders (default: true)
@@ -65,6 +72,7 @@ impl Default for SequentialSimulationOptions {
     fn default() -> Self {
         Self {
             at_block: None,
+            block_header: None,
             stop_on_failure: true,
             auto_increment_nonces: true,
             gas_limit_per_tx: None,
@@ -83,17 +91,17 @@ pub struct ViewFunctionResult {
 impl ViewFunctionResult {
     /// Decode the output as a U256 value
     pub fn decode_uint256(&self) -> U256 {
-        crate::contract_method_simulator::decode_uint256_result(&self.output)
+        crate::contract_method_simulator::decode_uint256_from_contract_output(&self.output)
     }
 
     /// Decode the output as a uint8 value
     pub fn decode_uint8(&self) -> u8 {
-        crate::contract_method_simulator::decode_uint8_result(&self.output)
+        crate::contract_method_simulator::decode_uint8_from_contract_output(&self.output)
     }
 
     /// Decode the output as a string
     pub fn decode_string(&self) -> String {
-        crate::contract_method_simulator::decode_string_result(&self.output)
+        crate::contract_method_simulator::decode_string_from_contract_output(&self.output)
     }
 }
 
