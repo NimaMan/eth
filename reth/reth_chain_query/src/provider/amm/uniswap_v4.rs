@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, U256, Bytes, keccak256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::Result;
 
 use crate::provider::RethQueryProvider;
@@ -23,8 +23,9 @@ impl RethQueryProvider {
         params.extend_from_slice(pool_id.as_slice());
         let call_data_slot0 = Bytes::from(params);
 
-        let slot0_res = self.tx_simulator
-            .simulate_view_function(pool_manager, call_data_slot0, Some(block_number))
+        let slot0_res = self
+            .tx_simulator
+            .simulate_view_function(pool_manager, call_data_slot0, Some(block_number), None)
             .await?;
 
         // Expect ABI-encoded (uint160 sqrtPriceX96, int24 tick, uint8 protocolFee, uint8 hookFee)
@@ -35,8 +36,10 @@ impl RethQueryProvider {
         let sqrt_price_x96 = U256::from_be_bytes::<32>(slot0_res.output[0..32].try_into().unwrap());
         // Second 32 bytes: tick padded (take last 3 bytes as int24 with sign)
         let tick_bytes = &slot0_res.output[32..64];
-        let t2 = (tick_bytes[29] as u32) << 16 | (tick_bytes[30] as u32) << 8 | (tick_bytes[31] as u32);
-        let tick = if (t2 & (1 << 23)) != 0 { // negative
+        let t2 =
+            (tick_bytes[29] as u32) << 16 | (tick_bytes[30] as u32) << 8 | (tick_bytes[31] as u32);
+        let tick = if (t2 & (1 << 23)) != 0 {
+            // negative
             let signed = (t2 as i32) - (1 << 24);
             signed
         } else {
@@ -51,8 +54,9 @@ impl RethQueryProvider {
         params_liq.extend_from_slice(pool_id.as_slice());
         let call_data_liq = Bytes::from(params_liq);
 
-        let liq_res = self.tx_simulator
-            .simulate_view_function(pool_manager, call_data_liq, Some(block_number))
+        let liq_res = self
+            .tx_simulator
+            .simulate_view_function(pool_manager, call_data_liq, Some(block_number), None)
             .await?;
         if !liq_res.success || liq_res.output.len() < 32 {
             return Err(eyre::eyre!("getLiquidity failed"));
@@ -77,7 +81,8 @@ impl RethQueryProvider {
         blocks_back: u64,
     ) -> Result<Option<(B256, u64)>> {
         // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
-        let init_sig = keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
+        let init_sig =
+            keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
 
         let latest = self.get_latest_block()?;
         let start = latest.saturating_sub(blocks_back);

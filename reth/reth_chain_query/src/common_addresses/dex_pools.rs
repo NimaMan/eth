@@ -1,5 +1,5 @@
 //! DEX pool address computation and factory addresses
-//! 
+//!
 //! Provides both deterministic pool address calculation and dynamic pool discovery
 //! for various DEX protocols.
 //!
@@ -9,21 +9,21 @@
 //!    - Calculate salt = keccak256(token0 || token1) for V2
 //!    - Calculate salt = keccak256(abi.encode(token0, token1, fee)) for V3
 //!    - Use CREATE2 formula: address = keccak256(0xff || factory || salt || init_code_hash)[12:]
-//! 
+//!
 //! 2. **Dynamic Discovery** (Curve, Balancer):
 //!    - Query registry/vault contracts using view function simulation
 //!    - Curve: Use Registry.find_pool_for_coins(token_a, token_b)
 //!    - Balancer: Query Vault.getPoolTokens(poolId) to verify token composition
-//! 
-//! 3. **Hybrid Approach**: 
+//!
+//! 3. **Hybrid Approach**:
 //!    - Fast CREATE2 for standardized factories
 //!    - Chain queries for complex deployment patterns
 
-use alloy_primitives::{address, Address, keccak256, U256, Bytes, B256};
-use eyre::Result;
 use crate::TxSimulator;
-use std::collections::HashSet;
+use alloy_primitives::{address, keccak256, Address, Bytes, B256, U256};
+use eyre::Result;
 use reth_provider::ReceiptProvider;
+use std::collections::HashSet;
 
 /// Factory addresses for different DEX protocols
 pub const UNISWAP_V2_FACTORY: Address = address!("5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f");
@@ -31,13 +31,16 @@ pub const UNISWAP_V3_FACTORY: Address = address!("1F98431c8aD98523631AE4a59f2673
 pub const SUSHISWAP_FACTORY: Address = address!("C0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac");
 
 /// Uniswap V2 init code hash (used for CREATE2 address calculation)
-pub const UNISWAP_V2_INIT_CODE_HASH: [u8; 32] = hex_literal::hex!("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f");
+pub const UNISWAP_V2_INIT_CODE_HASH: [u8; 32] =
+    hex_literal::hex!("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f");
 
 /// Uniswap V3 init code hash
-pub const UNISWAP_V3_INIT_CODE_HASH: [u8; 32] = hex_literal::hex!("e34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54");
+pub const UNISWAP_V3_INIT_CODE_HASH: [u8; 32] =
+    hex_literal::hex!("e34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54");
 
 /// SushiSwap init code hash  
-pub const SUSHISWAP_INIT_CODE_HASH: [u8; 32] = hex_literal::hex!("e18a34eb0e04b04f7a0ac29a6e80748dca96319b42c54d679cb821dca90c6303");
+pub const SUSHISWAP_INIT_CODE_HASH: [u8; 32] =
+    hex_literal::hex!("e18a34eb0e04b04f7a0ac29a6e80748dca96319b42c54d679cb821dca90c6303");
 
 /// Curve Registry contract address (for dynamic pool discovery)
 pub const CURVE_REGISTRY: Address = address!("90E00ACe148ca3b23Ac1bC8C240C2a7Dd9c2d7f5");
@@ -68,12 +71,7 @@ pub fn compute_uniswap_v2_pool(token_a: Address, token_b: Address) -> Address {
 /// Compute SushiSwap pool address (same algorithm as Uniswap V2)
 pub fn compute_sushiswap_pool(token_a: Address, token_b: Address) -> Address {
     let (token0, token1) = sort_tokens(token_a, token_b);
-    compute_create2_address(
-        SUSHISWAP_FACTORY,
-        token0,
-        token1,
-        SUSHISWAP_INIT_CODE_HASH,
-    )
+    compute_create2_address(SUSHISWAP_FACTORY, token0, token1, SUSHISWAP_INIT_CODE_HASH)
 }
 
 /// Compute Uniswap V3 pool address for specific fee tier
@@ -119,14 +117,14 @@ fn compute_create2_address(
     salt_input.extend_from_slice(token0.as_slice());
     salt_input.extend_from_slice(token1.as_slice());
     let salt = keccak256(&salt_input);
-    
+
     // CREATE2 formula: keccak256(0xff ++ factory ++ salt ++ init_code_hash)[12:]
     let mut input = Vec::with_capacity(85);
     input.push(0xff);
     input.extend_from_slice(factory.as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(&init_code_hash);
-    
+
     let hash = keccak256(&input);
     Address::from_slice(&hash[12..])
 }
@@ -142,28 +140,28 @@ fn compute_v3_create2_address(
     // V3 uses abi.encode(token0, token1, fee) for salt - NOT encodePacked!
     // abi.encode pads each parameter to 32 bytes
     let mut salt_input = Vec::with_capacity(96); // 32 * 3
-    
+
     // Pad token0 address to 32 bytes (12 zero bytes + 20 address bytes)
     salt_input.extend_from_slice(&[0u8; 12]);
     salt_input.extend_from_slice(token0.as_slice());
-    
+
     // Pad token1 address to 32 bytes
     salt_input.extend_from_slice(&[0u8; 12]);
     salt_input.extend_from_slice(token1.as_slice());
-    
+
     // Pad fee to 32 bytes (28 zero bytes + 4 bytes for uint32)
     salt_input.extend_from_slice(&[0u8; 28]);
     salt_input.extend_from_slice(&fee.to_be_bytes());
-    
+
     let salt = keccak256(&salt_input);
-    
+
     // CREATE2 formula
     let mut input = Vec::with_capacity(85);
     input.push(0xff);
     input.extend_from_slice(factory.as_slice());
     input.extend_from_slice(salt.as_slice());
     input.extend_from_slice(&init_code_hash);
-    
+
     let hash = keccak256(&input);
     Address::from_slice(&hash[12..])
 }
@@ -185,34 +183,34 @@ fn encode_function_call(selector: [u8; 4], params: &[u8]) -> Bytes {
 /// Encode two addresses as ABI parameters
 fn encode_two_addresses(addr1: Address, addr2: Address) -> Vec<u8> {
     let mut params = Vec::with_capacity(64); // 32 bytes each
-    
+
     // First address (padded to 32 bytes)
     params.extend_from_slice(&[0u8; 12]); // 12 zero bytes
     params.extend_from_slice(addr1.as_slice()); // 20 address bytes
-    
+
     // Second address (padded to 32 bytes)
-    params.extend_from_slice(&[0u8; 12]); // 12 zero bytes  
+    params.extend_from_slice(&[0u8; 12]); // 12 zero bytes
     params.extend_from_slice(addr2.as_slice()); // 20 address bytes
-    
+
     params
 }
 
 /// Encode two addresses and one uint256 as ABI parameters
 fn encode_two_addresses_and_uint256(addr1: Address, addr2: Address, value: U256) -> Vec<u8> {
     let mut params = Vec::with_capacity(96); // 32 bytes each
-    
+
     // First address (padded to 32 bytes)
     params.extend_from_slice(&[0u8; 12]);
     params.extend_from_slice(addr1.as_slice());
-    
+
     // Second address (padded to 32 bytes)
     params.extend_from_slice(&[0u8; 12]);
     params.extend_from_slice(addr2.as_slice());
-    
+
     // Uint256 value (32 bytes, big-endian)
     let value_bytes = value.to_be_bytes::<32>();
     params.extend_from_slice(&value_bytes);
-    
+
     params
 }
 
@@ -228,18 +226,16 @@ pub async fn find_curve_pool_for_coins(
     simulator: &TxSimulator,
     token_a: Address,
     token_b: Address,
-    block_number: Option<u64>
+    block_number: Option<u64>,
 ) -> Result<Option<Address>> {
     // Call find_pool_for_coins(address,address,uint256) with index 0
     let params = encode_two_addresses_and_uint256(token_a, token_b, U256::ZERO);
     let call_data = encode_function_call(CURVE_FIND_POOL_FOR_COINS, &params);
-    
-    let result = simulator.simulate_view_function(
-        CURVE_REGISTRY,
-        call_data,
-        block_number
-    ).await?;
-    
+
+    let result = simulator
+        .simulate_view_function(CURVE_REGISTRY, call_data, block_number, None)
+        .await?;
+
     // Decode address from result (last 32 bytes, take last 20 bytes for address)
     if result.success && result.output.len() >= 32 {
         let pool_address = Address::from_slice(&result.output[12..32]);
@@ -247,7 +243,7 @@ pub async fn find_curve_pool_for_coins(
             return Ok(Some(pool_address));
         }
     }
-    
+
     Ok(None)
 }
 
@@ -259,18 +255,16 @@ pub async fn verify_balancer_pool_tokens(
     pool_id: [u8; 32],
     token_a: Address,
     token_b: Address,
-    block_number: Option<u64>
+    block_number: Option<u64>,
 ) -> Result<bool> {
     // Call getPoolTokens(bytes32)
     let params = encode_bytes32(pool_id);
     let call_data = encode_function_call(BALANCER_GET_POOL_TOKENS, &params);
-    
-    let result = simulator.simulate_view_function(
-        BALANCER_VAULT,
-        call_data,
-        block_number
-    ).await?;
-    
+
+    let result = simulator
+        .simulate_view_function(BALANCER_VAULT, call_data, block_number, None)
+        .await?;
+
     // Decode response: (address[] tokens, uint256[] balances, uint256 lastChangeBlock)
     // This is complex ABI decoding - for now we'll do basic pattern matching
     if result.success {
@@ -280,7 +274,7 @@ pub async fn verify_balancer_pool_tokens(
             return Ok(has_token_a && has_token_b);
         }
     }
-    
+
     Ok(false)
 }
 
@@ -289,46 +283,49 @@ pub async fn verify_balancer_pool_tokens(
 pub async fn get_balancer_pool_tokens(
     simulator: &TxSimulator,
     pool_id: [u8; 32],
-    block_number: Option<u64>
+    block_number: Option<u64>,
 ) -> Result<Option<(Vec<Address>, Vec<U256>)>> {
     // Call getPoolTokens(bytes32)
     let params = encode_bytes32(pool_id);
     let call_data = encode_function_call(BALANCER_GET_POOL_TOKENS, &params);
-    
-    let result = simulator.simulate_view_function(
-        BALANCER_VAULT,
-        call_data,
-        block_number
-    ).await?;
-    
+
+    let result = simulator
+        .simulate_view_function(BALANCER_VAULT, call_data, block_number, None)
+        .await?;
+
     // Decode response: (address[] tokens, uint256[] balances, uint256 lastChangeBlock)
     if result.success {
         if let (Some(tokens), Some(balances)) = (
             decode_address_array_from_result(&result.output),
-            decode_uint256_array_from_result(&result.output, 32) // Skip first array offset
+            decode_uint256_array_from_result(&result.output, 32), // Skip first array offset
         ) {
             return Ok(Some((tokens, balances)));
         }
     }
-    
+
     Ok(None)
 }
 
 /// Basic ABI decoder for address arrays (simplified)
 /// This is a basic implementation - in production you'd want more robust ABI decoding
 fn decode_address_array_from_result(result: &[u8]) -> Option<Vec<Address>> {
-    if result.len() < 96 { // Need head with 3 slots
+    if result.len() < 96 {
+        // Need head with 3 slots
         return None;
     }
     // First slot: offset to tokens array
     let tokens_off = be_word_to_usize(&result[0..32]);
-    if tokens_off == 0 || result.len() < tokens_off + 32 { return None; }
-    let len = be_word_to_usize(&result[tokens_off..tokens_off+32]);
+    if tokens_off == 0 || result.len() < tokens_off + 32 {
+        return None;
+    }
+    let len = be_word_to_usize(&result[tokens_off..tokens_off + 32]);
     let mut out = Vec::with_capacity(len);
     let mut cur = tokens_off + 32;
     for _ in 0..len {
-        if result.len() < cur + 32 { return None; }
-        out.push(Address::from_slice(&result[cur+12..cur+32]));
+        if result.len() < cur + 32 {
+            return None;
+        }
+        out.push(Address::from_slice(&result[cur + 12..cur + 32]));
         cur += 32;
     }
     Some(out)
@@ -336,23 +333,31 @@ fn decode_address_array_from_result(result: &[u8]) -> Option<Vec<Address>> {
 
 /// Basic ABI decoder for uint256 arrays (simplified)
 fn decode_uint256_array_from_result(result: &[u8], _offset: usize) -> Option<Vec<U256>> {
-    if result.len() < 64 { return None; }
+    if result.len() < 64 {
+        return None;
+    }
     // Second slot: offset to balances array
     let balances_off = be_word_to_usize(&result[32..64]);
-    if balances_off == 0 || result.len() < balances_off + 32 { return None; }
-    let len = be_word_to_usize(&result[balances_off..balances_off+32]);
+    if balances_off == 0 || result.len() < balances_off + 32 {
+        return None;
+    }
+    let len = be_word_to_usize(&result[balances_off..balances_off + 32]);
     let mut out = Vec::with_capacity(len);
     let mut cur = balances_off + 32;
     for _ in 0..len {
-        if result.len() < cur + 32 { return None; }
-        out.push(U256::from_be_slice(&result[cur..cur+32]));
+        if result.len() < cur + 32 {
+            return None;
+        }
+        out.push(U256::from_be_slice(&result[cur..cur + 32]));
         cur += 32;
     }
     Some(out)
 }
 
 fn be_word_to_usize(word: &[u8]) -> usize {
-    if word.len() < 32 { return 0; }
+    if word.len() < 32 {
+        return 0;
+    }
     let mut bytes = [0u8; 8];
     bytes.copy_from_slice(&word[24..32]);
     u64::from_be_bytes(bytes) as usize
@@ -380,7 +385,8 @@ pub async fn find_uniswap_v4_pools_for_pair(
     blocks_back: u64,
     max_results: usize,
 ) -> Result<Vec<V4PoolInfo>> {
-    let init_sig = keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
+    let init_sig =
+        keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
     let (want0, want1) = sort_tokens(token_a, token_b);
 
     let latest = simulator.get_latest_block()?;
@@ -397,33 +403,55 @@ pub async fn find_uniswap_v4_pools_for_pair(
         };
         for receipt in receipts {
             for log in receipt.logs {
-                if log.address != pool_manager { continue; }
+                if log.address != pool_manager {
+                    continue;
+                }
                 let topics = log.topics();
-                if topics.len() < 4 || topics[0] != init_sig { continue; }
+                if topics.len() < 4 || topics[0] != init_sig {
+                    continue;
+                }
 
                 // topics[1] = pool_id (bytes32)
                 let pool_id = topics[1];
-                if seen.contains(&pool_id) { continue; }
+                if seen.contains(&pool_id) {
+                    continue;
+                }
 
                 // topics[2], topics[3] are Currency (address) left-padded in topic
                 let c0b: &[u8] = topics[2].as_ref();
                 let c1b: &[u8] = topics[3].as_ref();
-                if c0b.len() < 32 || c1b.len() < 32 { continue; }
+                if c0b.len() < 32 || c1b.len() < 32 {
+                    continue;
+                }
                 let currency0 = Address::from_slice(&c0b[12..32]);
                 let currency1 = Address::from_slice(&c1b[12..32]);
 
-                if !(currency0 == want0 && currency1 == want1) { continue; }
+                if !(currency0 == want0 && currency1 == want1) {
+                    continue;
+                }
 
                 // Decode fee(uint24), tickSpacing(int24), hooks(address) from data
                 let data = &log.data.data;
-                if data.len() < 96 { continue; }
-                let fee = u32::from_be_bytes([ data[28], data[29], data[30], data[31] ]);
-                let tick_spacing = i32::from_be_bytes([ data[60], data[61], data[62], data[63] ]);
+                if data.len() < 96 {
+                    continue;
+                }
+                let fee = u32::from_be_bytes([data[28], data[29], data[30], data[31]]);
+                let tick_spacing = i32::from_be_bytes([data[60], data[61], data[62], data[63]]);
                 let hooks = Address::from_slice(&data[76..96]);
 
-                results.push(V4PoolInfo { pool_id, currency0, currency1, fee, tick_spacing, hooks, block_number: block });
+                results.push(V4PoolInfo {
+                    pool_id,
+                    currency0,
+                    currency1,
+                    fee,
+                    tick_spacing,
+                    hooks,
+                    block_number: block,
+                });
                 seen.insert(pool_id);
-                if results.len() >= max_results { return Ok(results); }
+                if results.len() >= max_results {
+                    return Ok(results);
+                }
             }
         }
     }
@@ -441,34 +469,34 @@ mod tests {
         // Test with known WETH/USDC pool
         let weth = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
         let usdc = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-        
+
         let pool = compute_uniswap_v2_pool(weth, usdc);
         let expected = address!("B4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc");
-        
+
         assert_eq!(pool, expected, "WETH/USDC V2 pool address mismatch");
     }
-    
+
     #[test]
     fn test_uniswap_v3_pool_address() {
         // Test with known WETH/USDC 0.05% pool
         let weth = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
         let usdc = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-        
+
         let pool = compute_uniswap_v3_pool(weth, usdc, 500);
         let expected = address!("88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640");
-        
+
         assert_eq!(pool, expected, "WETH/USDC V3 0.05% pool address mismatch");
     }
-    
+
     #[test]
     fn test_token_sorting() {
         let token_a = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
         let token_b = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-        
+
         // Should be sorted with smaller address first
         let (token0, token1) = sort_tokens(token_a, token_b);
         assert!(token0 < token1, "Tokens not properly sorted");
-        
+
         // Order shouldn't matter
         let (token0_rev, token1_rev) = sort_tokens(token_b, token_a);
         assert_eq!(token0, token0_rev);

@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, Bytes, U256, keccak256};
+use alloy_primitives::{keccak256, Address, Bytes, U256};
 use eyre::Result;
 
 use crate::provider::RethQueryProvider;
@@ -18,24 +18,28 @@ impl RethQueryProvider {
         if use_underlying {
             if let Some(addr) = self
                 .curve_try_get_address(pool, "underlying_coins(uint256)", index, block)
-                .await? {
+                .await?
+            {
                 return Ok(addr);
             }
             if let Some(addr) = self
                 .curve_try_get_address(pool, "underlying_coins(int128)", index, block)
-                .await? {
+                .await?
+            {
                 return Ok(addr);
             }
         }
         // Fallback to base coins()
         if let Some(addr) = self
             .curve_try_get_address(pool, "coins(uint256)", index, block)
-            .await? {
+            .await?
+        {
             return Ok(addr);
         }
         if let Some(addr) = self
             .curve_try_get_address(pool, "coins(int128)", index, block)
-            .await? {
+            .await?
+        {
             return Ok(addr);
         }
         Ok(Address::ZERO)
@@ -50,12 +54,14 @@ impl RethQueryProvider {
     ) -> Result<U256> {
         if let Some(val) = self
             .curve_try_get_u256(pool, "balances(uint256)", index, block)
-            .await? {
+            .await?
+        {
             return Ok(val);
         }
         if let Some(val) = self
             .curve_try_get_u256(pool, "balances(int128)", index, block)
-            .await? {
+            .await?
+        {
             return Ok(val);
         }
         Ok(U256::ZERO)
@@ -71,9 +77,15 @@ impl RethQueryProvider {
         block: Option<u64>,
     ) -> Result<Option<u8>> {
         for i in 0..max_coins {
-            let coin = self.curve_v1_get_coin(pool, i, use_underlying, block).await?;
-            if coin == Address::ZERO { continue; }
-            if coin == token { return Ok(Some(i)); }
+            let coin = self
+                .curve_v1_get_coin(pool, i, use_underlying, block)
+                .await?;
+            if coin == Address::ZERO {
+                continue;
+            }
+            if coin == token {
+                return Ok(Some(i));
+            }
         }
         Ok(None)
     }
@@ -93,9 +105,11 @@ impl RethQueryProvider {
         data.extend_from_slice(&idx);
         let res = self
             .tx_simulator
-            .simulate_view_function(pool, Bytes::from(data), block)
+            .simulate_view_function(pool, Bytes::from(data), block, None)
             .await?;
-        if !res.success || res.output.len() < 32 { return Ok(None); }
+        if !res.success || res.output.len() < 32 {
+            return Ok(None);
+        }
         Ok(Some(Address::from_slice(&res.output[12..32])))
     }
 
@@ -114,10 +128,11 @@ impl RethQueryProvider {
         data.extend_from_slice(&idx);
         let res = self
             .tx_simulator
-            .simulate_view_function(pool, Bytes::from(data), block)
+            .simulate_view_function(pool, Bytes::from(data), block, None)
             .await?;
-        if !res.success || res.output.len() < 32 { return Ok(None); }
+        if !res.success || res.output.len() < 32 {
+            return Ok(None);
+        }
         Ok(Some(U256::from_be_slice(&res.output[0..32])))
     }
 }
-

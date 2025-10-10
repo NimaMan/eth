@@ -17,12 +17,12 @@ impl RethQueryProvider {
     ) -> Result<(Address, Address)> {
         let token0_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block)
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block, None)
             .await?;
 
         let token1_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block)
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block, None)
             .await?;
 
         if !token0_res.success || token0_res.output.len() < 32 {
@@ -48,11 +48,13 @@ impl RethQueryProvider {
     ) -> Result<(U256, U256, u32)> {
         let res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_GET_RESERVES.to_vec()), block)
+            .simulate_view_function(pair, Bytes::from(SELECTOR_GET_RESERVES.to_vec()), block, None)
             .await?;
 
         if !res.success || res.output.len() < 96 {
-            return Err(eyre::eyre!("getReserves() view call failed or insufficient output"));
+            return Err(eyre::eyre!(
+                "getReserves() view call failed or insufficient output"
+            ));
         }
 
         // ABI: (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)
@@ -60,9 +62,8 @@ impl RethQueryProvider {
         let reserve0 = U256::from_be_slice(&res.output[0..32]);
         let reserve1 = U256::from_be_slice(&res.output[32..64]);
         let ts_bytes = &res.output[64..96];
-        let block_timestamp_last = u32::from_be_bytes([
-            ts_bytes[28], ts_bytes[29], ts_bytes[30], ts_bytes[31],
-        ]);
+        let block_timestamp_last =
+            u32::from_be_bytes([ts_bytes[28], ts_bytes[29], ts_bytes[30], ts_bytes[31]]);
 
         Ok((reserve0, reserve1, block_timestamp_last))
     }
@@ -81,7 +82,10 @@ impl RethQueryProvider {
         let amount_in_with_fee = amount_in * U256::from(997u64);
         let numerator = amount_in_with_fee * reserve_out;
         let denominator = reserve_in * U256::from(1000u64) + amount_in_with_fee;
-        if denominator.is_zero() { U256::ZERO } else { numerator / denominator }
+        if denominator.is_zero() {
+            U256::ZERO
+        } else {
+            numerator / denominator
+        }
     }
 }
-
