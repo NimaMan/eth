@@ -457,12 +457,17 @@ class ERC20TokenData:
         self.creator_nonce = transaction['nonce']
         self.current_owner = transaction['from_address'] # Set initial owner
         if self.total_supply is None:
-            self.set_erc20_contract_info()
+            self.set_erc20_contract_info(transaction.get('block_header_json'))
 
-    def set_erc20_contract_info(self):
+    def set_erc20_contract_info(
+        self,
+        creation_block_header: Optional[Union[Dict[str, Any], str]] = None,
+    ):
         """Fetch and update ERC20 contract info from on-chain data"""
         info = self.token_chain_fetcher.get_token_metadata(
-            self.contract_address, self.creation_block
+            self.contract_address,
+            self.creation_block,
+            creation_block_header,
         )
         if info is None:
             raise RuntimeError(
@@ -772,7 +777,6 @@ class ERC20TokenData:
         """Process pool-related events"""
         if not self.pool_manager:
             return
-            
         # Process pool events through PoolManager
         self.pool_manager.process_transaction(transaction)
         #Todo: This is handled within each pool. but this one might be token level 

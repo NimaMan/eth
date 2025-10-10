@@ -168,13 +168,20 @@ class BlockSubscriber():
         """Process block immediately without queuing"""
         try:
             async with message.process():
-                block_data = orjson.loads(message.body.decode())
-                
-                # Process block immediately
+                payload = orjson.loads(message.body.decode())
+
                 if self.callback:
-                    await self.callback(block_data)
+                    await self.callback(payload)
                 elif self.block_token_processor:
-                    await self.block_token_processor.process_block(block_data)
+                    block_header_json = None
+                    block_transactions = payload
+                    if isinstance(payload, dict):
+                        block_header_json = payload.get("block_header_json")
+                        block_transactions = payload.get("transactions", [])
+                    await self.block_token_processor.process_block(
+                        block_transactions,
+                        block_header_json=block_header_json,
+                    )
                     
         except Exception as e:
             self.logger.error(f"Error processing block in BlockSubscriber: {e}", exc_info=True)

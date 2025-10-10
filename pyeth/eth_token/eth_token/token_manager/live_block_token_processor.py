@@ -100,12 +100,20 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         except Exception as e:
             self.logger.error(f"Error during shutdown after {name} task exit: {e}", exc_info=True)
 
-    async def process_block_live(self, block_data: List[Dict]):
+    async def process_block_live(self, block_data):
         """Process incoming blocks"""
         if self._is_shutting_down:
             return
         try:
-            self.latest_processed_block = await self.process_block(block_data)  
+            block_header_json = None
+            transactions = block_data  # historical/backfill calls pass the raw tx list
+            if isinstance(block_data, dict):
+                block_header_json = block_data.get("block_header_json")
+                transactions = block_data.get("transactions", [])
+            self.latest_processed_block = await self.process_block(
+                transactions,
+                block_header_json=block_header_json,
+            )
             self.block_processed_event.set() # Signal block processed            
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}", exc_info=True)

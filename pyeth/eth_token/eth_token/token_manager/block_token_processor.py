@@ -38,7 +38,11 @@ class BlockTokenProcessor:
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
         self.token_chain_fetcher = TokenChainDataFetcher()
 
-    async def process_block(self, block_data: List[Dict]) -> int:
+    async def process_block(
+        self,
+        block_data: List[Dict],
+        block_header_json: Optional[str] = None,
+    ) -> int:
         """Process a single block's transactions with concurrency limit."""
         if not block_data:
             self.logger.warning("Received empty block_data - this should not happen")
@@ -48,11 +52,18 @@ class BlockTokenProcessor:
             block_data = [self._ensure_tx_dict(tx) for tx in block_data]
 
         block_number = int(block_data[0].get('block_number'))
-        
+        if self.logger:
+            self.logger.debug(
+                "Processing block %s with %s header payload",
+                block_number,
+                "a" if block_header_json else "no",
+            )
+
         self.updated_tokens.clear() # Clear the updated tokens cache
         tasks = []
         for tx in block_data:
             async def sem_task(tx_data=self._ensure_tx_dict(tx)):
+                tx_data['block_header_json'] = block_header_json
                 async with self.semaphore:
                     return await self._process_transaction(tx_data, block_number)
 
@@ -71,7 +82,9 @@ class BlockTokenProcessor:
         transaction = self._ensure_tx_dict(transaction)
         try:
             # Handle contract creation
-            is_token_creation, token_metadata, contract_address = self._is_token_creation(transaction)
+            is_token_creation, token_metadata, contract_address = self._is_token_creation(
+                transaction, block_number
+            )
             if is_token_creation:
                 await self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
                 return
@@ -82,14 +95,37 @@ class BlockTokenProcessor:
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
 
-    def _is_token_creation(self, transaction: Dict) -> Optional[Dict[str, Any]]:
+    def _is_token_creation(self, transaction: Dict, block_number: int) -> Optional[Dict[str, Any]]:
         """Return token metadata if transaction deploys a new ERC-20 contract."""
         contract_address = transaction.get('contract_address')
-        block_number = transaction.get('block_number')
+        if not contract_address:
+            return False, None, None
+
+        header_json = transaction.get('block_header_json')
         try:
-            token_metadata = self.token_chain_fetcher.get_token_metadata(contract_address, block_number)
+            token_metadata = self.token_chain_fetcher.get_token_metadata(
+                contract_address,
+                block_number,
+                header_json,
+            )
+            if self.logger:
+                self.logger.debug(
+                    "Token creation detected for %s in block %s (header provided: %s)",
+                    contract_address,
+                    block_number,
+                    bool(header_json),
+                )
             return True, token_metadata, contract_address
         except Exception as exc:
+            if self.logger:
+                self.logger.warning(
+                    "%s failed metadata lookup for %s in block %s (header provided: %s): %s",
+                    self.__class__.__name__,
+                    contract_address,
+                    block_number,
+                    bool(header_json),
+                    exc,
+                )
             return False, None, None
 
     async def _handle_token_creation(

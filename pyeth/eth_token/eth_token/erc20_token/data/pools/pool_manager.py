@@ -98,25 +98,52 @@ class PoolManager:
         self._denom_decimals_cache: Dict[str, int] = {}
 
 
-    def _get_token_decimals(self) -> Optional[int]:
+    def _get_token_decimals(
+        self,
+        block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Optional[int]:
         if self._token_decimals is None:
             self._token_decimals = int(
-                self.token_chain_data_fetcher.get_token_decimals(self.token_address)
+                self.token_chain_data_fetcher.get_token_decimals(
+                    self.token_address,
+                    block_number,
+                    block_header_json,
+                )
             )
         return self._token_decimals
 
-    def _get_denom_decimals(self, denom_address: str) -> int:
+    def _get_denom_decimals(
+        self,
+        denom_address: str,
+        block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> int:
         checksum_address = Web3.to_checksum_address(denom_address)
         if checksum_address not in self._denom_decimals_cache:
             self._denom_decimals_cache[checksum_address] = int(
-                self.token_chain_data_fetcher.get_token_decimals(checksum_address)
+                self.token_chain_data_fetcher.get_token_decimals(
+                    checksum_address,
+                    block_number,
+                    block_header_json,
+                )
             )
         return self._denom_decimals_cache[checksum_address]
 
-    def _pool_decimal_kwargs(self, denom_address: str) -> Dict[str, int]:
+    def _pool_decimal_kwargs(
+        self,
+        denom_address: str,
+        *,
+        block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Dict[str, int]:
         return {
-            'token_decimals': self._get_token_decimals(),
-            'denom_decimals': self._get_denom_decimals(denom_address),
+            'token_decimals': self._get_token_decimals(block_number, block_header_json),
+            'denom_decimals': self._get_denom_decimals(
+                denom_address,
+                block_number,
+                block_header_json,
+            ),
             'history_limit': self.history_limit,
         }
 
@@ -183,7 +210,11 @@ class PoolManager:
             return
             
         # Create V2 pool instance
-        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
+        decimal_kwargs = self._pool_decimal_kwargs(
+            denom_address,
+            block_number=transaction.get('block_number'),
+            block_header_json=transaction.get('block_header_json'),
+        )
         pool = UniswapV2Pool(
             pool_address=pair_address,
             token_address=self.token_address,
@@ -223,7 +254,11 @@ class PoolManager:
             return
             
         # Create V3 pool instance
-        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
+        decimal_kwargs = self._pool_decimal_kwargs(
+            denom_address,
+            block_number=transaction.get('block_number'),
+            block_header_json=transaction.get('block_header_json'),
+        )
         pool = UniswapV3Pool(
             pool_address=pool_address,
             token_address=self.token_address,
@@ -279,7 +314,11 @@ class PoolManager:
         )
         
         # Create V4 pool instance
-        decimal_kwargs = self._pool_decimal_kwargs(denom_address)
+        decimal_kwargs = self._pool_decimal_kwargs(
+            denom_address,
+            block_number=transaction.get('block_number'),
+            block_header_json=transaction.get('block_header_json'),
+        )
         pool = UniswapV4Pool(
             pool_id=pool_id,
             pool_key=pool_key,
@@ -733,13 +772,18 @@ class PoolManager:
                 token_address=self.token_address,
                 protocol_hint=UNISWAP_V2_PROTOCOL,
                 block_number=transaction.get('block_number'),
+                block_header_json=transaction.get('block_header_json'),
             )
             
             if pool_info is None:
                 return
             
             # Create pool instance
-            decimal_kwargs = self._pool_decimal_kwargs(pool_info['denom_address'])
+            decimal_kwargs = self._pool_decimal_kwargs(
+                pool_info['denom_address'],
+                block_number=transaction.get('block_number'),
+                block_header_json=transaction.get('block_header_json'),
+            )
             pool = UniswapV2Pool(
                 pool_address=pair_address,
                 token_address=self.token_address,
@@ -783,13 +827,18 @@ class PoolManager:
                 token_address=self.token_address,
                 protocol_hint=UNISWAP_V3_PROTOCOL,
                 block_number=transaction.get('block_number'),
+                block_header_json=transaction.get('block_header_json'),
             )
             
             if pool_info is None:
                 return
             
             # Create pool instance
-            decimal_kwargs = self._pool_decimal_kwargs(pool_info['denom_address'])
+            decimal_kwargs = self._pool_decimal_kwargs(
+                pool_info['denom_address'],
+                block_number=transaction.get('block_number'),
+                block_header_json=transaction.get('block_header_json'),
+            )
             pool = UniswapV3Pool(
                 pool_address=pool_address,
                 token_address=self.token_address,

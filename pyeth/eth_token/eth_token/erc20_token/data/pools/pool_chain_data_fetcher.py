@@ -12,8 +12,7 @@ Goals:
 - Keep a small Web3 fallback path (legacy) where helpful.
 """
 
-import math
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Any
 from eth_utils import to_checksum_address
 from eth_data.utils.pyreth_client import PyrethClient
 from eth_utils import keccak
@@ -22,32 +21,7 @@ from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
 UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
-        
-
-def _format_scaled(raw_value: int, decimals: int) -> str:
-    if decimals <= 0:
-        return str(raw_value)
-    digits = str(raw_value)
-    if len(digits) <= decimals:
-        digits = digits.zfill(decimals + 1)
-        integer_part = '0'
-        fractional = digits[-decimals:]
-    else:
-        integer_part = digits[:-decimals]
-        fractional = digits[-decimals:]
-    fractional = fractional.rstrip('0')
-    if not fractional:
-        return integer_part
-    return f"{integer_part}.{fractional}"
-
-
-def _estimate_price_from_tick(tick: int, token0_decimals: int, token1_decimals: int) -> float:
-    try:
-        price = math.pow(1.0001, int(tick))
-        scale = 10 ** (int(token1_decimals) - int(token0_decimals))
-        return price / scale
-    except Exception:
-        return 0.0
+UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
 
 
 class PoolChainDataFetcher:
@@ -133,69 +107,63 @@ class PoolChainDataFetcher:
             'block_number': block_number,
         }
 
-        if (
-            (reserve0_raw is None or reserve1_raw is None)
-            and v3_liquidity is not None
-            and tick is not None
-            and token0_decimals is not None
-            and token1_decimals is not None
-            and raw.sqrt_price_x96 is not None
-        ):
-            try:
-                liquidity_int = int(v3_liquidity)
-                sqrt_price_x96 = int(raw.sqrt_price_x96)
-                if sqrt_price_x96 > 0:
-                    reserve0_int = (liquidity_int << 96) // sqrt_price_x96
-                    reserve1_int = (liquidity_int * sqrt_price_x96) >> 96
-                    reserve0_raw = str(reserve0_int)
-                    reserve1_raw = str(reserve1_int)
-                    reserve0_adjusted = _format_scaled(reserve0_int, token0_decimals)
-                    reserve1_adjusted = _format_scaled(reserve1_int, token1_decimals)
-                    data['reserve0_raw'] = reserve0_raw
-                    data['reserve1_raw'] = reserve1_raw
-                    data['reserve0_scaled'] = reserve0_adjusted
-                    data['reserve1_scaled'] = reserve1_adjusted
-                    data['price_token1_per_token0'] = _estimate_price_from_tick(
-                        tick, token0_decimals, token1_decimals
-                    )
-            except Exception:
-                pass
-
         return data
 
     # -----------------------------
     # Unified PyReth-backed helpers
     # -----------------------------
-    def get_v2_liquidity(self, pool_address: str, block: Optional[int] = None) -> Dict[str, Any]:
+    def get_v2_liquidity(
+        self,
+        pool_address: str,
+        block: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Get UniswapV2/SushiswapV2 style liquidity using PyReth (reserves at block).
 
         Returns a dict with keys: protocol, pool, token0, token1, reserve0, reserve1, block_number.
         """
-        try:
-            info = self._chain_query.get_uniswap_v2_liquidity(pool_address, block)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"get_uniswap_v2_liquidity failed for pool={pool_address} block={block}: {exc}"
-            ) from exc
+        info = self._chain_query.get_uniswap_v2_liquidity(
+            pool_address,
+            block,
+            block_header_json,
+        )
         if info is None:
             raise RuntimeError(f"Missing V2 liquidity for pool {pool_address}")
         return self._normalize_liquidity_info(info)
 
-    def get_v3_liquidity(self, pool_address: str, fee_tier: int, block: Optional[int] = None) -> Dict[str, Any]:
+    def get_v3_liquidity(
+        self,
+        pool_address: str,
+        fee_tier: int,
+        block: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Get UniswapV3 liquidity using PyReth (liquidity, tick at block)."""
-        try:
-            info = self._chain_query.get_uniswap_v3_liquidity(pool_address, int(fee_tier), block)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"get_uniswap_v3_liquidity failed for pool={pool_address} fee={fee_tier} block={block}: {exc}"
-            ) from exc
+        fee_tier = int(fee_tier)
+        info = self._chain_query.get_uniswap_v3_liquidity(
+            pool_address,
+            fee_tier,
+            block,
+            block_header_json,
+        )
         if info is None:
             raise RuntimeError(f"Missing V3 liquidity for pool {pool_address}")
         return self._normalize_liquidity_info(info)
 
-    def get_v4_liquidity(self, pool_manager: str, pool_id_hex: str, block: Optional[int] = None) -> Dict[str, Any]:
+    def get_v4_liquidity(
+        self,
+        pool_manager: str,
+        pool_id_hex: str,
+        block: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Get UniswapV4 liquidity using PyReth via PoolManager + PoolId."""
-        info = self._chain_query.get_uniswap_v4_liquidity(pool_manager, pool_id_hex, block)
+        info = self._chain_query.get_uniswap_v4_liquidity(
+            pool_manager,
+            pool_id_hex,
+            block,
+            block_header_json,
+        )
         if info is None:
             raise RuntimeError(
                 f"Missing V4 liquidity for pool manager {pool_manager} pool {pool_id_hex}"
@@ -204,7 +172,12 @@ class PoolChainDataFetcher:
         out['pool_id'] = pool_id_hex
         return out
     
-    def discover_v2_pool(self, pool_address: str, block_number: Optional[int] = None) -> Optional[Dict]:
+    def discover_v2_pool(
+        self,
+        pool_address: str,
+        block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Optional[Dict]:
         """
         Discover V2 pool configuration from blockchain.
         
@@ -215,7 +188,7 @@ class PoolChainDataFetcher:
             Dict with token0, token1 addresses or None if discovery fails
         """
         # PyReth route (no RPC), yields token0/1 for V2
-        info = self.get_v2_liquidity(pool_address, block_number)
+        info = self.get_v2_liquidity(pool_address, block_number, block_header_json)
         if info is not None and info.get('token0') and info.get('token1'):
             result = {
                 'pool_address': self._to_checksum(pool_address),
@@ -227,7 +200,12 @@ class PoolChainDataFetcher:
             return result
         return None
     
-    def discover_v3_pool(self, pool_address: str, block_number: Optional[int] = None) -> Optional[Dict]:
+    def discover_v3_pool(
+        self,
+        pool_address: str,
+        block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
+    ) -> Optional[Dict]:
         """
         Discover V3 pool configuration from blockchain.
         
@@ -238,7 +216,12 @@ class PoolChainDataFetcher:
             Dict with token0, token1, and fee or None if discovery fails
         """
         # PyReth route for V3
-        info = self.get_v3_liquidity(pool_address, fee_tier=3000, block=block_number)
+        info = self.get_v3_liquidity(
+            pool_address,
+            fee_tier=3000,
+            block=block_number,
+            block_header_json=block_header_json,
+        )
         if info is not None and info.get('token0') and info.get('token1'):
             result = {
                 'pool_address': self._to_checksum(pool_address),
@@ -257,6 +240,7 @@ class PoolChainDataFetcher:
         token_address: str,
         protocol_hint: Optional[str] = None,
         block_number: Optional[int] = None,
+        block_header_json: Optional[str] = None,
     ) -> Optional[Dict]:
         """
         Fetch pool metadata and check if it involves the specified token.
@@ -269,22 +253,18 @@ class PoolChainDataFetcher:
         Returns:
             Dict with pool configuration if token is involved, None otherwise
         """
-        # NOTE: This method previously relied on Web3 and is not required for unified fetcher.
-        # Consider removing or re-implementing with ChainQuery if needed.
         token_address = to_checksum_address(token_address)
+        hint = canonicalize_dex_pool_type(protocol_hint) if protocol_hint else None # Try protocol hint first if provided
         
-        # Try protocol hint first if provided
-        hint = canonicalize_dex_pool_type(protocol_hint) if protocol_hint else None
-
         if hint == UNISWAP_V2_PROTOCOL:
-            pool_info = self.discover_v2_pool(pool_address, block_number)
+            pool_info = self.discover_v2_pool(pool_address, block_number, block_header_json)
         elif hint == UNISWAP_V3_PROTOCOL:
-            pool_info = self.discover_v3_pool(pool_address, block_number)
+            pool_info = self.discover_v3_pool(pool_address, block_number, block_header_json)
         else:
             # Try V3 first (has fee field), then V2
-            pool_info = self.discover_v3_pool(pool_address, block_number)
+            pool_info = self.discover_v3_pool(pool_address, block_number, block_header_json)
             if pool_info is None:
-                pool_info = self.discover_v2_pool(pool_address, block_number)
+                pool_info = self.discover_v2_pool(pool_address, block_number, block_header_json)
         
         if pool_info is None:
             return None

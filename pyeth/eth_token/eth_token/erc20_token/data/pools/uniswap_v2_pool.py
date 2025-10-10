@@ -339,6 +339,9 @@ class UniswapV2Pool(BasePool):
         config.test_amount_eth = float(self.test_buy_amount_eth)
         config.token_decimals = int(self.get_token_decimals())
         config.block_number = int(transaction['block_number'])
+        block_header_json = transaction.get('block_header_json')
+        if block_header_json:
+            config.set_block_header_json(block_header_json)
 
         # The tranaction is already mined, so we dont need to include it as a prior tx 
         simulator = self.pyreth_client.pool_buy_sell_simulator()
