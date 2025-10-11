@@ -122,6 +122,7 @@ from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 import aio_pika
 
+from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.tx_alert.block_alert_processor import BlockAlertProcessor
 from eth_data.utils.logger import get_logger
@@ -129,6 +130,8 @@ from eth_data.utils.logger import get_logger
 
 def transaction_serializer(obj):
     """Serializer that handles dataclasses and Decimal values"""
+    if isinstance(obj, BlockHeader):
+        return obj.to_rpc_dict()
     if dataclasses.is_dataclass(obj):
         return transaction_serializer(dataclasses.asdict(obj))
     if isinstance(obj, (HexBytes, bytes)):
@@ -174,21 +177,21 @@ class LiveBlockProcessor:
         websocket_url: str = "ws://127.0.0.1:8546",
         http_url: str = "http://127.0.0.1:8545",
         rabbitmq_url: str = "amqp://guest:guest@localhost/",
-        save_txn_to_db: bool = False, 
+        index_address_txs: bool = False, 
         logger=None
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
         self.w3 = AsyncWeb3(self.provider)
         self.rabbitmq_url = rabbitmq_url
-        self.save_txn_to_db = save_txn_to_db
+        self.index_address_txs = index_address_txs
         self.logger = logger or get_logger(name="live_block_processor")
         
         # Initialize BlockProcessor with HTTP connection for detailed data fetching
         self.block_processor = BlockProcessor(
             node_url=http_url,
             logger=self.logger,
-            save_txn_to_db=False
+            index_address_txs=self.index_address_txs
         )
         self.block_alert_processor = BlockAlertProcessor()
         # RabbitMQ connection and channel
@@ -249,7 +252,7 @@ class LiveBlockProcessor:
                 
         raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")
 
-    async def publish_block(self, block_number: int, processed_block):
+    async def publish_block(self, block_number: int, processed_block: ProcessedBlockResult):
         """Publish the processed block to RabbitMQ. Continue on failure."""
         try:
             # Only try to setup if we don't have an exchange
@@ -260,9 +263,13 @@ class LiveBlockProcessor:
                     return False  # Return False but don't reset exchange
             
             try:
-                # Try to serialize first to catch any serialization errors
+                payload = {
+                    "block_number": block_number,
+                    "block_header": processed_block.block_header,
+                    "transactions": processed_block.transactions,
+                }
                 block_data = orjson.dumps(
-                    processed_block,
+                    payload,
                     default=transaction_serializer,
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )
@@ -337,7 +344,7 @@ class LiveBlockProcessor:
     async def process_latest_block_alerts(self, processed_block):
         """Process alerts for the latest block"""
         try:
-            alerts = await self.block_alert_processor.process_block_transactions(processed_block)
+            alerts = await self.block_alert_processor.process_block_transactions(processed_block.transactions)
             return alerts
         except Exception as e:
             self.logger.error(f" {__name__} Error processing alerts: {e}")
@@ -360,11 +367,11 @@ class LiveBlockProcessor:
                             continue
                         
                         block_number = block_data["number"] if isinstance(block_data["number"], int) else int(block_data["number"], 16)
-                        processed_block = await self.block_processor.process_block(block_number=block_number)
+                        processed_block_result = await self.block_processor.process_block(block_number=block_number)
                         
-                        if processed_block:
+                        if processed_block_result:
                             # Continue with alerts even if block publish fails
-                            publish_success = await self.publish_block(block_number, processed_block)
+                            publish_success = await self.publish_block(block_number, processed_block_result)
                             if not publish_success:
                                 self.logger.warning(f"Failed to publish block {block_number}, continuing with next block")
                               
@@ -372,9 +379,11 @@ class LiveBlockProcessor:
                             #if alerts and len(alerts) > 0:
                             #     await self.publish_alert(alerts)
                             
-                            if self.save_txn_to_db:
-                                self.block_processor.transaction_writer.save_transactions(processed_block)
-                                self.block_processor.stablecoin_analyzer.process_block_transactions(block_number, processed_block)
+                            if self.index_address_txs:
+                                self.block_processor.transaction_writer.write_transactions_address_tx(
+                                    processed_block_result.transactions
+                                )
+                                #self.block_processor.stablecoin_analyzer.process_block_transactions(block_number, processed_block)
                     except Exception as e:
                         self.logger.error(f"{__name__} Error processing live block {block_number}: {e}", exc_info=True)
                         continue  # Continue with next block regardless of error

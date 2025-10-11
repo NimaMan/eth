@@ -56,7 +56,7 @@ self.blocks_exchange = await self.channel.declare_exchange(
 #### BlockSubscriber
 ```python
 # NEW: Unique queue name per consumer instance
-self.queue_name = f"token_analyzer_blocks_{uuid.uuid4().hex[:8]}"
+self.queue_name = f"token_tracking_blocks_{uuid.uuid4().hex[:8]}"
 
 # NEW: Exclusive, auto-delete queue with latest-only policy
 self.queue = await self.channel.declare_queue(
@@ -133,8 +133,8 @@ await subscriber.start()
 ## Technical Details
 
 ### Queue Naming Strategy
-- Format: `token_analyzer_blocks_{8_char_uuid}`
-- Example: `token_analyzer_blocks_a1b2c3d4`
+- Format: `token_tracking_blocks_{8_char_uuid}`
+- Example: `token_tracking_blocks_a1b2c3d4`
 - Ensures uniqueness across multiple instances
 
 ### Message Flow

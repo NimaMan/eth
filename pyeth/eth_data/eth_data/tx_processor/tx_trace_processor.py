@@ -68,7 +68,7 @@ class TransactionTraceProcessor:
                         InternalTransaction(
                             from_address=from_address_checksum,
                             to_address=to_address_checksum, # Use the potentially resolved address
-                            value=float(self.w3.from_wei(value, 'ether')),
+                            value=float(value),  # Keep in wei for consistency
                             depth=depth,
                             type=trace['type'],
                             gas=int(trace.get('gas', 0), 16),

@@ -1,5 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
+import json
 from enum import Enum
 from typing import List, Optional, Dict, Any, Union, Set
 from web3.types import ChecksumAddress, Wei, Hash32
@@ -35,8 +36,17 @@ class ContractCreationEvent:
 class TransactionFees:
     gas_price: Wei  # Effective gas price paid (for backward compatibility)
     gas_used: int
-    txn_fee: Wei    # Total transaction fee in ETH (gas_price * gas_used)
+    tx_fee: Wei    # Total transaction fee in ETH (gas_price * gas_used)
     
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "gas_price": self.gas_price,
+            "gas_used": self.gas_used,
+            "tx_fee": self.tx_fee,
+            "protocol_type": self.protocol_type,
+            "max_fee_per_gas": self.max_fee_per_gas,
+            "max_priority_fee": self.max_priority_fee,
+        }
     # New fields for gas ranking
     protocol_type: str = "unknown"  # "legacy", "eip1559", "eip2930"
     max_fee_per_gas: Optional[Wei] = None  # User's max willingness
@@ -48,7 +58,7 @@ class ProcessedTransaction:
     hash: str
     block_number: int
     block_timestamp: int
-    txn_index: int
+    tx_index: int
     from_address: ChecksumAddress
     to_address: Optional[ChecksumAddress]
     contract_address: Optional[ChecksumAddress]
@@ -56,7 +66,7 @@ class ProcessedTransaction:
     status: str
     nonce: int
     
-    txn_type: str
+    tx_type: str
     actions: List[str]
     
     fees: TransactionFees
@@ -102,9 +112,88 @@ class ProcessedTransaction:
     permit2_events: List[Permit2] = field(default_factory=list)
 
     other_events: List[Dict[str, Any]] = field(default_factory=list)
-    state_changes: Dict[str, Any] = field(default_factory=dict)
+    address_balance_changes: Dict[str, Any] = field(default_factory=dict)
     latest_states: Dict[str, Any] = field(default_factory=dict)
     input: str = ""
+    
+    @staticmethod
+    def _list_to_dicts(items: Optional[List[Any]]) -> Optional[List[Dict[str, Any]]]:
+        if items is None:
+            return None
+        out: List[Dict[str, Any]] = []
+        for x in items:
+            if hasattr(x, "to_dict"):
+                out.append(x.to_dict())
+            elif hasattr(x, "__dict__"):
+                out.append(dict(x.__dict__))
+            else:
+                out.append(x)
+        return out
+
+    @staticmethod
+    def _set_to_list(s: Optional[Set[Any]]) -> Optional[List[Any]]:
+        if s is None:
+            return None
+        return list(s)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "hash": self.hash,
+            "block_number": self.block_number,
+            "block_timestamp": self.block_timestamp,
+            "tx_index": self.tx_index,
+            "from_address": self.from_address,
+            "to_address": self.to_address,
+            "contract_address": self.contract_address,
+            "value": self.value,
+            "status": self.status,
+            "nonce": self.nonce,
+            "tx_type": self.tx_type,
+            "actions": self.actions,
+            "fees": self.fees.to_dict() if isinstance(self.fees, TransactionFees) else self.fees,
+            "bribe_amount": self.bribe_amount,
+            "unique_addresses": self._set_to_list(self.unique_addresses),
+            "erc20_contracts": self._set_to_list(self.erc20_contracts),
+            "erc721_contracts": self._set_to_list(self.erc721_contracts),
+            "erc1155_contracts": self._set_to_list(self.erc1155_contracts),
+            "eth_transfers": self._list_to_dicts(self.eth_transfers),
+            "erc20_transfers": self._list_to_dicts(self.erc20_transfers),
+            "erc721_transfers": self._list_to_dicts(self.erc721_transfers),
+            "erc1155_transfers": self._list_to_dicts(self.erc1155_transfers),
+            "internal_transactions": self._list_to_dicts(self.internal_transactions),
+            "uniswap_v2_syncs": self._list_to_dicts(self.uniswap_v2_syncs),
+            "uniswap_v2_swaps": self._list_to_dicts(self.uniswap_v2_swaps),
+            "approvals": self._list_to_dicts(self.approvals),
+            "erc721_approvals": self._list_to_dicts(self.erc721_approvals),
+            "mints": self._list_to_dicts(self.mints),
+            "burns": self._list_to_dicts(self.burns),
+            "deposits": self._list_to_dicts(self.deposits),
+            "withdraws": self._list_to_dicts(self.withdraws),
+            "pair_events": self._list_to_dicts(self.pair_events),
+            "owner_events": self._list_to_dicts(self.owner_events),
+            "contract_creation_events": self._list_to_dicts(self.contract_creation_events),
+            "trading_enabled_events": self._list_to_dicts(self.trading_enabled_events),
+            "trading_disabled_events": self._list_to_dicts(self.trading_disabled_events),
+            "uniswap_v3_pools": self._list_to_dicts(self.uniswap_v3_pools),
+            "uniswap_v3_initializations": self._list_to_dicts(self.uniswap_v3_initializations),
+            "uniswap_v3_burns": self._list_to_dicts(self.uniswap_v3_burns),
+            "uniswap_v3_mints": self._list_to_dicts(self.uniswap_v3_mints),
+            "uniswap_v3_swaps": self._list_to_dicts(self.uniswap_v3_swaps),
+            "uniswap_v3_positions": self._list_to_dicts(self.uniswap_v3_positions),
+            "uniswap_v3_increases": self._list_to_dicts(self.uniswap_v3_increases),
+            "uniswap_v3_decreases": self._list_to_dicts(self.uniswap_v3_decreases),
+            "uniswap_v4_initializes": self._list_to_dicts(self.uniswap_v4_initializes),
+            "uniswap_v4_modifies": self._list_to_dicts(self.uniswap_v4_modifies),
+            "uniswap_v4_swaps": self._list_to_dicts(self.uniswap_v4_swaps),
+            "permit2_events": self._list_to_dicts(self.permit2_events),
+            "other_events": self.other_events,
+            "state_changes": self.address_balance_changes,
+            "latest_states": self.latest_states,
+            "input": self.input,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), separators=(",", ":"))
     
     @classmethod
     def from_dict(cls, tx_dict: Dict[str, Any]) -> 'ProcessedTransaction':
@@ -122,18 +211,18 @@ class ProcessedTransaction:
             fees = TransactionFees(
                 gas_price=fees_data.get('gas_price', 0),
                 gas_used=fees_data.get('gas_used', 0),
-                txn_fee=fees_data.get('txn_fee', 0),
+                tx_fee=fees_data.get('tx_fee', 0),
                 protocol_type=fees_data.get('protocol_type', 'unknown'),
                 max_fee_per_gas=fees_data.get('max_fee_per_gas'),
                 max_priority_fee=fees_data.get('max_priority_fee')
             )
         else:
-            fees = TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
+            fees = TransactionFees(gas_price=0, gas_used=0, tx_fee=0)
         
         return cls(
             hash=tx_dict['hash'],
             block_number=tx_dict['block_number'],
-            txn_index=tx_dict.get('txn_index', 0),
+            tx_index=tx_dict.get('tx_index', 0),
             from_address=tx_dict['from_address'],
             to_address=tx_dict.get('to_address'),
             contract_address=tx_dict.get('contract_address'),
@@ -141,7 +230,7 @@ class ProcessedTransaction:
             status=tx_dict.get('status', 'success'),
             nonce=tx_dict.get('nonce', 0),
             input=tx_dict.get('input', '0x'),
-            txn_type=tx_dict.get('txn_type', 'unknown'),
+            tx_type=tx_dict.get('tx_type', 'unknown'),
             actions=tx_dict.get('actions'),
             eth_transfers=tx_dict.get('eth_transfers'),
             erc20_transfers=tx_dict.get('erc20_transfers'),
@@ -188,7 +277,7 @@ class ProcessedTransaction:
     def __init__(self, 
                  hash: str,
                  block_number: int,
-                 txn_index: int,
+                 tx_index: int,
                  from_address: str,
                  to_address: Optional[str],
                  contract_address: Optional[str],
@@ -196,7 +285,7 @@ class ProcessedTransaction:
                  status: str,
                  nonce: int,
                  input: str,
-                 txn_type: str,
+                 tx_type: str,
                  actions: Optional[List[str]] = None,
                  eth_transfers: Optional[List[ETHTransfer]] = None,
                  erc20_transfers: Optional[List[ERC20Transfer]] = None,
@@ -234,7 +323,7 @@ class ProcessedTransaction:
                  erc20_contracts: Optional[Set[ChecksumAddress]] = None,
                  erc721_contracts: Optional[Set[ChecksumAddress]] = None,
                  erc1155_contracts: Optional[Set[ChecksumAddress]] = None,
-                 state_changes: Optional[Dict[str, Any]] = None,
+                 address_balance_changes: Optional[Dict[str, Any]] = None,
                  latest_states: Optional[Dict[str, Any]] = None,
                  bribe_amount: float = 0,
                  block_timestamp: int = 0):
@@ -243,7 +332,7 @@ class ProcessedTransaction:
         # Core transaction fields
         self.hash = convert_to_hex_str(hash)
         self.block_number = convert_block_number(block_number)
-        self.txn_index = convert_transaction_index(txn_index)
+        self.tx_index = convert_transaction_index(tx_index)
         self.from_address = normalize_address(from_address)
         self.to_address = normalize_address(to_address) if to_address else None
         self.value = value
@@ -251,7 +340,7 @@ class ProcessedTransaction:
         self.status = convert_status(status)
         self.nonce = convert_to_int(nonce)
         self.input = convert_to_hex_str(input)
-        self.txn_type = txn_type
+        self.tx_type = tx_type
 
         # Lists initialization with empty defaults
         self.actions = actions or []
@@ -292,12 +381,12 @@ class ProcessedTransaction:
         self.permit2_events = permit2_events or []
 
         # Complex fields
-        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, txn_fee=0)
+        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, tx_fee=0)
         self.unique_addresses = unique_addresses or set()
         self.erc20_contracts = erc20_contracts or set()
         self.erc721_contracts = erc721_contracts or set()
         self.erc1155_contracts = erc1155_contracts or set()
-        self.state_changes = state_changes or {}
+        self.address_balance_changes = address_balance_changes or {}
         self.latest_states = latest_states or {}
         self.bribe_amount = float(bribe_amount)
         self.block_timestamp = block_timestamp
@@ -308,7 +397,7 @@ class ProcessedTransaction:
             raise ValueError("Transaction hash cannot be empty")
         if self.block_number < 0:
             raise ValueError("Block number cannot be negative")
-        if self.txn_index < 0:
+        if self.tx_index < 0:
             raise ValueError("Transaction index cannot be negative")
 
     def __eq__(self, other):
@@ -319,14 +408,14 @@ class ProcessedTransaction:
         basic_fields_match = (
             self.hash == other.hash and
             self.block_number == other.block_number and
-            self.txn_index == other.txn_index and
+            self.tx_index == other.tx_index and
             self.from_address == other.from_address and
             self.to_address == other.to_address and
             self.contract_address == other.contract_address and
             self.value == other.value and
             self.status == other.status and
             self.nonce == other.nonce and
-            self.txn_type == other.txn_type and
+            self.tx_type == other.tx_type and
             self.erc20_transfers == other.erc20_transfers and
             self.eth_transfers == other.eth_transfers and
             self.mints == other.mints and
@@ -351,7 +440,7 @@ class ProcessedTransaction:
             self.permit2_events == other.permit2_events and
             self.other_events == other.other_events and
             self.fees == other.fees and
-            self.state_changes == other.state_changes and
+            self.address_balance_changes == other.address_balance_changes and
             self.latest_states == other.latest_states and
             self.bribe_amount == other.bribe_amount
         )

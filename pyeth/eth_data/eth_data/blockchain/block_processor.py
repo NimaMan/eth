@@ -21,15 +21,15 @@ The `BlockProcessor` coordinates the following steps:
     *   **Input**: `block_number`.
     *   **Fetch Block Data**: Use `BlockFetcher` to get block details (timestamp, list of transaction hashes/objects).
     *   **Process Transactions**: Pass the list of transactions and block metadata to `TransactionBatchProcessor.process_block_transactions`. This sub-processor handles fetching receipts/traces and analyzing each transaction individually (using `TransactionProcessor`).
-    *   **Save Results (Optional)**: If configured, pass the list of `ProcessedTransaction` objects returned by the batch processor to `TransactionWriter.save_transactions`.
-    *   **Return**: List of `ProcessedTransaction` objects for the block.
+    *   **Save Results (Optional)**: If configured, pass the list of `ProcessedTransaction` objects returned by the batch processor to `TransactionWriter`.
+    *   **Return**: `ProcessedBlockResult` bundling processed transactions and the serialized block header.
 
 3.  **Block Range Processing (`process_block_range`)**:
     *   **Input**: `start_block`, `end_block`.
     *   **Iterate**: Loop through each `block_number` in the range.
     *   **Delegate**: Call `process_block(block_number)` for each block.
     *   **Aggregate**: Collect results per block number.
-    *   **Return**: Dictionary mapping block numbers to their lists of `ProcessedTransaction` objects.
+    *   **Return**: Dictionary mapping block numbers to `ProcessedBlockResult` instances.
 
 (Note: Batch processing of *multiple blocks* concurrently (`process_block_batch` mentioned in original docstring) is not implemented in the current code version provided but could be a future optimization.)
 
@@ -78,7 +78,10 @@ Usage Examples:
 -------------
 1. Process Single Block:   ```python
    processor = BlockProcessor(node_url)
-   result = await processor.process_block(block_number)   ```
+   result = await processor.process_block(block_number)
+   print(result.block_header)
+   for tx in result:
+       ...   ```
 
 2. Process Block Range:   ```python
    processor = BlockProcessor(node_url)
@@ -102,43 +105,92 @@ Error Handling:
 """
 
 import time
+from typing import Any, Dict, Optional
+
 from tqdm import tqdm
 from web3 import Web3
-from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
+
+from .block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_fetcher import BlockFetcher
-from eth_data.database.writers.transaction_writer import TransactionWriter 
-from baygus.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
-from baygus.etfs.etf_analyzer import BlockLevelETFAnalyzer
+from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
+from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
+from baygus.qarqa.ethereum_today.etfs.etf_analyzer import BlockLevelETFAnalyzer
+from baygus.qarqa.ethereum_today.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
 
 
 class BlockProcessor:
     def __init__(self, node_url: str = "http://127.0.0.1:8545", 
-                 save_txn_to_db: bool = False,
-                 calculate_state_changes: bool = False,
+                 index_address_txs: bool = False,
+                 calculate_address_balance_changes: bool = False,
                  logger=None, 
                  w3=None):
         self.w3 = w3 or Web3(Web3.HTTPProvider(node_url))
+        self.index_address_txs = index_address_txs
         self.logger = logger
         self.block_fetcher = BlockFetcher(node_url)
         self.tx_batch_processor = TransactionBatchProcessor(
             w3=self.w3,
             logger=logger,
-            calculate_state_changes=calculate_state_changes
+            calculate_address_balance_changes=calculate_address_balance_changes
         )
-        self.transaction_writer = TransactionWriter(w3=self.w3, logger=logger)
-        self.stablecoin_analyzer = BlockLevelStablecoinAnalyzer(w3=self.w3)
-        self.etf_analyzer = BlockLevelETFAnalyzer(w3=self.w3)
-        self.save_txn_to_db = save_txn_to_db
+        self.transaction_writer = TransactionAddresstoTxIndexer() if index_address_txs else None
+        self.stablecoin_analyzer = None
+        self.etf_analyzer = None
+
+    def _extract_block_header(self, block_data: Dict[str, Any]) -> Optional[BlockHeader]:
+        if not block_data:
+            return None
+        return BlockHeader.from_rpc_dict(block_data)
     
-    async def process_block_range(self, start_block: int, end_block: int):
+    async def process_block(
+        self,
+        block_number: int,
+        transactions=None,
+    ) -> ProcessedBlockResult:
+        """Process a single block."""
+        try:
+            start_time = time.perf_counter()
+            block_data = await self.block_fetcher.fetch_block_by_number(block_number)
+            block_timestamp = block_data['timestamp']
+            block_header = self._extract_block_header(block_data)
+            if transactions is None:
+                transactions = block_data['transactions']
+            processed_transactions = await self.tx_batch_processor.process_block_transactions(
+                block_number=block_number,
+                transactions=transactions,
+                block_timestamp=block_timestamp,
+            )
+            end_time = time.perf_counter()
+            if self.index_address_txs and self.transaction_writer is not None:
+                self.transaction_writer.write_transactions_address_tx(processed_transactions)
+
+            if self.logger is not None:
+                num_failed_txs = len(transactions) - len(processed_transactions)
+                self.logger.info(
+                    f"{block_number}->{len(processed_transactions)}|{num_failed_txs} in {end_time - start_time:.2f}s"
+                )
+
+            result = ProcessedBlockResult(
+                transactions=processed_transactions,
+                block_header=block_header,
+            )
+            return result
+        except Exception as e:
+            if self.logger is not None:
+                self.logger.error(
+                    f"{__name__} Error processing block {block_number} with {len(transactions)} transactions: {str(e)}",
+                    exc_info=True,
+                )
+            raise
+
+    async def process_block_range(self, start_block: int, end_block: int) -> Dict[int, ProcessedBlockResult]:
         """
         Process a range of blocks sequentially with progress bar
         Args:
             start_block: Starting block number
             end_block: Ending block number
         """
-        results = {}
-        
+        results: Dict[int, ProcessedBlockResult] = {}
         for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks", unit="blocks"):    
             try:
                 result = await self.process_block(block_number)
@@ -149,57 +201,31 @@ class BlockProcessor:
 
         return results
 
-    async def process_block(self, block_number: int, transactions=None):
-        """Process a single block"""
-        try:
-            start_time = time.perf_counter()
-            block_data = await self.block_fetcher.fetch_block_by_number(block_number)
-            block_timestamp = block_data['timestamp']
-            
-            if transactions is None:
-                # Fetch block
-                transactions = block_data['transactions']
-                
-            # Process all transactions in the block 
-            processed_transactions = await self.tx_batch_processor.process_block_transactions(
-                block_number=block_number,
-                transactions=transactions,
-                block_timestamp=block_timestamp
-            )
-            end_time = time.perf_counter()
-            num_failed_txns = len(transactions) - len(processed_transactions)
-            if self.save_txn_to_db:
-                self.transaction_writer.save_transactions(processed_transactions)
-                self.stablecoin_analyzer.process_block_transactions(block_number, processed_transactions)
-                self.etf_analyzer.process_block_transactions(block_number, processed_transactions)
-            if self.logger is not None:
-                self.logger.info(f"{block_number}->{len(processed_transactions)}|{num_failed_txns} in {end_time - start_time:.2f}s")                
-            return processed_transactions
-        except Exception as e:
-            if self.logger is not None:
-                self.logger.error(f"{__name__} Error processing block {block_number} with {len(transactions)} transactions: {str(e)}", exc_info=True)
-            raise
-
-    async def process_blocks_in_batch(self, block_numbers: list[int]):
+    async def process_blocks_in_batch(self, block_numbers: list[int]) -> Dict[int, ProcessedBlockResult]:
         """Process a batch of blocks"""
         try:
             start_time = time.perf_counter()
             blocks = await self.block_fetcher.fetch_blocks_batch(block_numbers[0], block_numbers[-1])
-            processed_transactions = {}
+            processed_results: Dict[int, ProcessedBlockResult] = {}
             for block_number, block_data in blocks.items():
                 transactions = block_data['transactions']
                 block_timestamp = block_data['timestamp']
                     
-                processed_transactions[block_number] = await self.tx_batch_processor.process_block_transactions(
+                processed_txs = await self.tx_batch_processor.process_block_transactions(
                     block_number=block_number,
                     transactions=transactions,
                     block_timestamp=block_timestamp
+                )
+                header = self._extract_block_header(block_data)
+                processed_results[block_number] = ProcessedBlockResult(
+                    transactions=processed_txs,
+                    block_header=header,
                 )
 
             end_time = time.perf_counter()
             if self.logger is not None:
                 self.logger.info(f"Processed {len(block_numbers)} blocks in batch in {end_time - start_time:.4f} seconds")
-            return processed_transactions
+            return processed_results
         except Exception as e:
             if self.logger is not None:
                 self.logger.error(f"{__name__} Error processing blocks in batch: {str(e)}", exc_info=True)
@@ -211,4 +237,4 @@ class BlockProcessor:
         await self.block_fetcher.close()    
         if self.logger:
             self.logger.info("BlockProcessor core resources cleaned up (fetcher, batch processor)")
-            
+    

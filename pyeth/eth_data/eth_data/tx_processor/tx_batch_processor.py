@@ -20,20 +20,20 @@ Key Components:
 """
 
 from web3 import Web3
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any
 import asyncio
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionBatchDataFetcher
 from eth_data.utils.logger import get_logger
 
 
 class TransactionBatchProcessor:
-    def __init__(self, w3: Web3 = None, logger=None, calculate_state_changes: bool = False):
+    def __init__(self, w3: Web3 = None, logger=None, calculate_address_balance_changes: bool = True):
         if w3 is None:
             w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
         self.w3 = w3
-        self.transaction_processor = TransactionProcessor(w3=w3, calculate_state_changes=calculate_state_changes)
+        self.transaction_processor = TransactionProcessor(w3=w3, calculate_address_balance_changes=calculate_address_balance_changes)
         self.batch_data_fetcher = TransactionBatchDataFetcher(w3=w3)
         self.logger = logger
 
@@ -42,21 +42,21 @@ class TransactionBatchProcessor:
             transaction: Dict[str, Any], 
             receipt: Dict[str, Any] = None,
             trace: Dict[str, Any] = None,
-            txn_hash: str = None,
+            tx_hash: str = None,
             block_timestamp: int = 0) -> ProcessedTransaction:
         """Safely analyze a single transaction with error handling"""
         try:
-            processed_txn = await self.transaction_processor.process_transaction_async(
+            processed_tx = await self.transaction_processor.process_transaction_async(
                 transaction=transaction,
                 receipt=receipt,
                 trace=trace,
                 block_timestamp=block_timestamp
             )
-            return processed_txn
+            return processed_tx
         except Exception as e:
             if self.logger is not None:
-                self.logger.error(f"{__name__} Error analyzing transaction {txn_hash}: {str(e)}")
-            e.txn_hash = txn_hash  # Attach txn_hash to exception for tracking
+                self.logger.error(f"{__name__} Error analyzing transaction {tx_hash}: {str(e)}")
+            e.tx_hash = tx_hash  # Attach tx_hash to exception for tracking
             raise
     
     def _check_rpc_error(self, data: Dict[str, Any], block_number: int) -> bool:
@@ -76,22 +76,22 @@ class TransactionBatchProcessor:
             trace_map = {}
         # Pre-process transaction data
         batch_data = []
-        for txn in transactions:
-            txn_hash = f"0x{txn['hash'].hex()}" if not isinstance(txn['hash'], str) else txn['hash']
-            receipt = receipt_map.get(txn_hash)
-            trace = trace_map.get(txn_hash)
+        for tx in transactions:
+            tx_hash = f"0x{tx['hash'].hex()}" if not isinstance(tx['hash'], str) else tx['hash']
+            receipt = receipt_map.get(tx_hash)
+            trace = trace_map.get(tx_hash)
             if receipt:
-                batch_data.append((txn, receipt, trace, txn_hash))
+                batch_data.append((tx, receipt, trace, tx_hash))
         
         # Process transactions concurrently using asyncio
         tasks = []
-        for txn, receipt, trace, txn_hash in batch_data:
+        for tx, receipt, trace, tx_hash in batch_data:
             task = asyncio.create_task(
                 self._process_single_transaction(
-                    transaction=txn,
+                    transaction=tx,
                     receipt=receipt,
                     trace=trace,
-                    txn_hash=txn_hash,
+                    tx_hash=tx_hash,
                     block_timestamp=block_timestamp
                 )
             )
@@ -99,18 +99,18 @@ class TransactionBatchProcessor:
         
         # Wait for all tasks to complete
         results = []
-        failed_txns = []
+        failed_txs = []
         completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
         for result in completed_tasks:
             if isinstance(result, Exception):
-                if hasattr(result, 'txn_hash'):
-                    failed_txns.append(result.txn_hash)
+                if hasattr(result, 'tx_hash'):
+                    failed_txs.append(result.tx_hash)
                 continue
             if result is not None:
                 results.append(result)
-        if failed_txns:
+        if failed_txs:
             if self.logger is not None:
-                self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+                self.logger.warning(f"{__name__} Failed to process {len(failed_txs)} transactions: {failed_txs}")
         
         return results
 
@@ -126,21 +126,21 @@ class TransactionBatchProcessor:
             batch_data = []
             
             # Match exactly how the working version handles transactions
-            for txn in block['transactions']:
-                txn_hash = f"0x{txn['hash'].hex()}" if not isinstance(txn['hash'], str) else txn['hash']
-                receipt = receipts.get(txn_hash)
-                trace = traces.get(txn_hash)
+            for tx in block['transactions']:
+                tx_hash = f"0x{tx['hash'].hex()}" if not isinstance(tx['hash'], str) else tx['hash']
+                receipt = receipts.get(tx_hash)
+                trace = traces.get(tx_hash)
                 if receipt:  # Only check receipt like the working version
-                    batch_data.append((txn, receipt, trace, txn_hash))
+                    batch_data.append((tx, receipt, trace, tx_hash))
             
             # Process transactions
             tasks = []
-            for txn, receipt, trace, txn_hash in batch_data:
+            for tx, receipt, trace, tx_hash in batch_data:
                 task = self._process_single_transaction(
-                    transaction=txn,
+                    transaction=tx,
                     receipt=receipt,
                     trace=trace,
-                    txn_hash=txn_hash
+                    tx_hash=tx_hash
                 )
                 tasks.append(task)
             
@@ -163,7 +163,7 @@ class TransactionBatchProcessor:
             
         # Fetch all transaction data in one optimized operation
         start_time = asyncio.get_event_loop().time()
-        transaction_map, receipt_map, trace_map = await self.batch_data_fetcher.fetch_transaction_list_data(tx_hashes)
+        transaction_map, receipt_map, trace_map = await self.batch_data_fetcher.fetch_tx_hash_list(tx_hashes)
         fetch_time = asyncio.get_event_loop().time() - start_time
         
         if self.logger:
@@ -181,33 +181,33 @@ class TransactionBatchProcessor:
         
         # Process transactions concurrently
         tasks = []
-        for txn, receipt, trace, txn_hash in batch_data:
+        for tx, receipt, trace, tx_hash in batch_data:
             task = asyncio.create_task(
                 self._process_single_transaction(
-                    transaction=txn,
+                    transaction=tx,
                     receipt=receipt,
                     trace=trace,
-                    txn_hash=txn_hash
+                    tx_hash=tx_hash
                 )
             )
             tasks.append(task)
         
         # Wait for all tasks to complete
         results = []
-        failed_txns = []
+        failed_txs = []
         
         if tasks:
             completed_tasks = await asyncio.gather(*tasks, return_exceptions=True)
             for result in completed_tasks:
                 if isinstance(result, Exception):
-                    if hasattr(result, 'txn_hash'):
-                        failed_txns.append(result.txn_hash)
+                    if hasattr(result, 'tx_hash'):
+                        failed_txs.append(result.tx_hash)
                     continue
                 if result is not None:
                     results.append(result)
         
-        if failed_txns and self.logger:
-            self.logger.warning(f"{__name__} Failed to process {len(failed_txns)} transactions: {failed_txns}")
+        if failed_txs and self.logger:
+            self.logger.warning(f"{__name__} Failed to process {len(failed_txs)} transactions: {failed_txs}")
         
         if self.logger:
             process_time = asyncio.get_event_loop().time() - start_time

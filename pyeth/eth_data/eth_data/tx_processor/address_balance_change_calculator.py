@@ -63,7 +63,7 @@ class AddressBalanceChangeCalculator:
             from_addr: Source address
             to_addr: Target address
             amount: Amount transferred
-            transfer_id: Unique transfer identifier (block, txn_index, log_index)
+            transfer_id: Unique transfer identifier (block, tx_index, log_index)
             token_address: Token contract address (for unknown token movements)
             currency: Currency symbol (ETH, USDC, USDT, etc.) for currency movements
         """
@@ -171,10 +171,10 @@ class AddressBalanceChangeCalculator:
     # ------------------------------------------------------------------ #
     def calculate_address_balance_changes(
         self,
-        txn_hash: str,
+        tx_hash: str,
         from_address: str,
         block_number: int,
-        txn_index: int,
+        tx_index: int,
         eth_transfers: list,
         erc20_transfers: list,
     ) -> dict:
@@ -189,7 +189,7 @@ class AddressBalanceChangeCalculator:
 
         # ERC-20 transfers
         for tr in erc20_transfers:
-            tid = (block_number, txn_index, tr["log_index"])
+            tid = (block_number, tx_index, tr["log_index"])
             token_addr = tr["token_address"]
             
             if token_addr in DENOM_ADDRESSES:
@@ -219,7 +219,7 @@ class AddressBalanceChangeCalculator:
         # ETH (internal) transfers
         for tr in eth_transfers:
             log_index_or_depth = tr.get("log_index") or tr.get('depth')
-            tid = (block_number, txn_index, log_index_or_depth)
+            tid = (block_number, tx_index, log_index_or_depth)
             self._track_movement(
                 "currency", tr["from_address"], tr["to_address"], tr["amount"], tid, currency="ETH"
             )
@@ -229,7 +229,7 @@ class AddressBalanceChangeCalculator:
         except Exception as exc:
             if self.logger:
                 self.logger.error(
-                    f"State diff error for {txn_hash}: {exc}", exc_info=True
+                    f"State diff error for {tx_hash}: {exc}", exc_info=True
                 )
             return {}
 
@@ -243,7 +243,7 @@ class AddressBalanceChangeCalculator:
             "tokens": defaultdict(lambda: defaultdict(lambda: {"in": OrderedDict(), "out": OrderedDict()})),
         }
 
-        bn, txi = processed_tx.block_number, processed_tx.txn_index
+        bn, txi = processed_tx.block_number, processed_tx.tx_index
 
         # 0️⃣ Handle basic transaction value transfer (if any)
         # Skip if there's a depth-0 internal transaction that already captures this transfer

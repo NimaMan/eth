@@ -64,14 +64,14 @@ class TransactionSimulator:
             return int(value, 16) if value.startswith('0x') else int(value)
         return 0
     
-    async def simulate_transaction(self, txn: Dict[str, Any], 
+    async def simulate_transaction(self, tx: Dict[str, Any], 
                                   block_identifier: Union[str, int] = 'latest', 
                                   simulation_type: str = 'trace_call') -> Dict[str, Any]:
         """
         Simulate a transaction using the specified simulation type.
         
         Args:
-            txn: Transaction to simulate
+            tx: Transaction to simulate
             block_identifier: Block state to use for simulation
             simulation_type: Simulation strategy to use
             
@@ -83,7 +83,7 @@ class TransactionSimulator:
             - logs: Attempt to capture logs (if available)
         """
         # Prepare transaction for simulation
-        sim_txn = await self._prepare_transaction(txn)
+        sim_tx = await self._prepare_transaction(tx)
         
         # Format block identifier
         formatted_block_id = self._format_block_identifier(block_identifier)
@@ -100,7 +100,7 @@ class TransactionSimulator:
         }
         
         # Check if transaction would revert
-        revert_info = await self._check_revert(sim_txn, formatted_block_id)
+        revert_info = await self._check_revert(sim_tx, formatted_block_id)
         simulation_result['revert'] = revert_info
         
         # If transaction would revert and we wanted basic revert check, we're done
@@ -109,45 +109,45 @@ class TransactionSimulator:
         
         # Get detailed simulation data
         if simulation_type == 'trace_call':
-            trace_result = await self._execute_trace_call(sim_txn, formatted_block_id)
+            trace_result = await self._execute_trace_call(sim_tx, formatted_block_id)
             if trace_result:
                 simulation_result.update(trace_result)
                 simulation_result['success'] = True
                 
         elif simulation_type == 'debug_traceCall':
-            debug_result = await self._execute_debug_trace_call(sim_txn, formatted_block_id)
+            debug_result = await self._execute_debug_trace_call(sim_tx, formatted_block_id)
             if debug_result:
                 simulation_result.update(debug_result)
                 simulation_result['success'] = True
         
         return simulation_result
     
-    async def _prepare_transaction(self, txn: Dict[str, Any]) -> Dict[str, Any]:
+    async def _prepare_transaction(self, tx: Dict[str, Any]) -> Dict[str, Any]:
         """
         Prepare a transaction for simulation by normalizing all fields.
         
         Args:
-            txn: Raw transaction data
+            tx: Raw transaction data
             
         Returns:
             Normalized transaction dictionary ready for simulation
         """
-        sim_txn = {
-            'from': self.w3.to_checksum_address(txn['from']),
-            'data': txn.get('input', txn.get('data', '0x')),
-            'value': self._safe_hex_to_int(txn.get('value', 0)),
-            'gas': self._safe_hex_to_int(txn.get('gas', 0)),
-            'gasPrice': self._safe_hex_to_int(txn.get('gasPrice', 0))
+        sim_tx = {
+            'from': self.w3.to_checksum_address(tx['from']),
+            'data': tx.get('input', tx.get('data', '0x')),
+            'value': self._safe_hex_to_int(tx.get('value', 0)),
+            'gas': self._safe_hex_to_int(tx.get('gas', 0)),
+            'gasPrice': self._safe_hex_to_int(tx.get('gasPrice', 0))
         }
         
         # Add 'to' only if it exists (contract creation transactions don't have 'to')
-        if txn.get('to'):
-            sim_txn['to'] = self.w3.to_checksum_address(txn.get('to'))
+        if tx.get('to'):
+            sim_tx['to'] = self.w3.to_checksum_address(tx.get('to'))
             
         # Remove any None values
-        sim_txn = {k: v for k, v in sim_txn.items() if v is not None}
+        sim_tx = {k: v for k, v in sim_tx.items() if v is not None}
         
-        return sim_txn
+        return sim_tx
     
     def _format_block_identifier(self, block_identifier: Union[str, int]) -> Union[str, Dict]:
         """
@@ -163,12 +163,12 @@ class TransactionSimulator:
             return hex(block_identifier)  # Convert to hex for EIP-1898 compliance
         return block_identifier
     
-    async def _check_revert(self, sim_txn: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
+    async def _check_revert(self, sim_tx: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
         """
         Check if a transaction would revert using eth_call.
         
         Args:
-            sim_txn: Transaction to check
+            sim_tx: Transaction to check
             block_identifier: Block state to use
             
         Returns:
@@ -181,7 +181,7 @@ class TransactionSimulator:
         
         try:
             # Use eth_call to check for reverts
-            await asyncio.to_thread(self.w3.eth.call, sim_txn, block_identifier)
+            await asyncio.to_thread(self.w3.eth.call, sim_tx, block_identifier)
         except Exception as e:
             revert_info['would_revert'] = True
             revert_info['reason'] = str(e)
@@ -189,26 +189,26 @@ class TransactionSimulator:
         
         return revert_info
     
-    async def _execute_trace_call(self, sim_txn: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
+    async def _execute_trace_call(self, sim_tx: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
         """
         Execute a trace_call simulation.
         
         Args:
-            sim_txn: Transaction to simulate
+            sim_tx: Transaction to simulate
             block_identifier: Block state to use
             
         Returns:
             Dictionary with trace and stateDiff data
         """
         # Clean the transaction values to prevent floating point errors
-        cleaned_txn = {}
-        for key, value in sim_txn.items():
+        cleaned_tx = {}
+        for key, value in sim_tx.items():
             if key in ['value', 'gas', 'gasPrice'] and isinstance(value, (int, float)):
-                cleaned_txn[key] = hex(int(value))  # Convert to hex to avoid floating point
+                cleaned_tx[key] = hex(int(value))  # Convert to hex to avoid floating point
             else:
-                cleaned_txn[key] = value
+                cleaned_tx[key] = value
         
-        trace_params = [cleaned_txn, self.trace_options, block_identifier]
+        trace_params = [cleaned_tx, self.trace_options, block_identifier]
         
         try:
             # Use timeout to prevent blocking
@@ -268,12 +268,12 @@ class TransactionSimulator:
             
         return None
     
-    async def _execute_debug_trace_call(self, sim_txn: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
+    async def _execute_debug_trace_call(self, sim_tx: Dict[str, Any], block_identifier: Union[str, Dict]) -> Dict[str, Any]:
         """
         Execute a debug_traceCall with custom tracer.
         
         Args:
-            sim_txn: Transaction to simulate
+            sim_tx: Transaction to simulate
             block_identifier: Block state to use
             
         Returns:
@@ -288,7 +288,7 @@ class TransactionSimulator:
             }
         }
         
-        debug_params = [sim_txn, block_identifier, tracer_config]
+        debug_params = [sim_tx, block_identifier, tracer_config]
         
         try:
             result = await asyncio.to_thread(
@@ -307,7 +307,7 @@ class TransactionSimulator:
         return None
 
     async def simulate_transactions_batch(self, 
-                                         txns: List[Dict[str, Any]], 
+                                         txs: List[Dict[str, Any]], 
                                          block_identifier: Union[str, int] = 'latest',
                                          simulation_type: str = 'trace_call') -> List[Dict[str, Any]]:
         """
@@ -320,24 +320,24 @@ class TransactionSimulator:
         4. Process the results and map them back to the original transactions
         
         Args:
-            txns: List of transactions to simulate
+            txs: List of transactions to simulate
             block_identifier: Block state to use for simulation
             simulation_type: Simulation strategy to use
             
         Returns:
             List of simulation results in the same order as the input transactions
         """
-        if not txns:
+        if not txs:
             return []
         
         # Format block identifier once for all transactions
         formatted_block_id = self._format_block_identifier(block_identifier)
         
         # Prepare all transactions for simulation
-        prepared_txns = []
-        for txn in txns:
-            prepared_txn = await self._prepare_transaction(txn)
-            prepared_txns.append(prepared_txn)
+        prepared_txs = []
+        for tx in txs:
+            prepared_tx = await self._prepare_transaction(tx)
+            prepared_txs.append(prepared_tx)
         
         # Initialize results with transaction hashes for identification
         results = []
@@ -345,26 +345,26 @@ class TransactionSimulator:
         # Build batch requests based on simulation type
         if simulation_type == 'trace_call':
             # Create batch of trace_call requests
-            batch_results = await self._execute_trace_call_batch(prepared_txns, formatted_block_id)
+            batch_results = await self._execute_trace_call_batch(prepared_txs, formatted_block_id)
             results = batch_results
             
         elif simulation_type == 'eth_call':
             # Create batch of eth_call requests for revert checking
-            batch_results = await self._check_revert_batch(prepared_txns, formatted_block_id)
+            batch_results = await self._check_revert_batch(prepared_txs, formatted_block_id)
             results = batch_results
             
         elif simulation_type == 'debug_traceCall':
             # Create batch of debug_traceCall requests
-            batch_results = await self._execute_debug_trace_call_batch(prepared_txns, formatted_block_id)
+            batch_results = await self._execute_debug_trace_call_batch(prepared_txs, formatted_block_id)
             results = batch_results
         
         # If we need both trace_call and revert checks, we can combine them
         if simulation_type == 'comprehensive':
             # First check for reverts
-            revert_results = await self._check_revert_batch(prepared_txns, formatted_block_id)
+            revert_results = await self._check_revert_batch(prepared_txs, formatted_block_id)
             
             # Then get trace data for transactions that wouldn't revert
-            trace_txns = []
+            trace_txs = []
             trace_indices = []
             
             for i, revert_info in enumerate(revert_results):
@@ -377,12 +377,12 @@ class TransactionSimulator:
                 
                 # Add to trace batch if it wouldn't revert
                 if not revert_info['would_revert']:
-                    trace_txns.append(prepared_txns[i])
+                    trace_txs.append(prepared_txs[i])
                     trace_indices.append(i)
             
             # Execute trace_call for non-reverting transactions
-            if trace_txns:
-                trace_results = await self._execute_trace_call_batch(trace_txns, formatted_block_id)
+            if trace_txs:
+                trace_results = await self._execute_trace_call_batch(trace_txs, formatted_block_id)
                 
                 # Map trace results back to the original indices
                 for batch_idx, result_idx in enumerate(trace_indices):
@@ -392,13 +392,13 @@ class TransactionSimulator:
         return results
 
     async def _execute_trace_call_batch(self, 
-                                       prepared_txns: List[Dict[str, Any]], 
+                                       prepared_txs: List[Dict[str, Any]], 
                                        block_identifier: Union[str, Dict]) -> List[Dict[str, Any]]:
         """
         Execute trace_call for multiple transactions as a batch.
         
         Args:
-            prepared_txns: List of prepared transactions
+            prepared_txs: List of prepared transactions
             block_identifier: Block state to use
             
         Returns:
@@ -407,8 +407,8 @@ class TransactionSimulator:
         batch_requests = []
         
         # Build the batch request array
-        for i, txn in enumerate(prepared_txns):
-            trace_params = [txn, ['trace', 'stateDiff'], block_identifier]
+        for i, tx in enumerate(prepared_txs):
+            trace_params = [tx, ['trace', 'stateDiff'], block_identifier]
             
             batch_requests.append({
                 "jsonrpc": "2.0",
@@ -439,8 +439,8 @@ class TransactionSimulator:
                 
                 # Rebuild batch requests with 'latest'
                 retry_batch_requests = []
-                for i, txn in enumerate(prepared_txns):
-                    trace_params = [txn, ['trace', 'stateDiff'], 'latest']
+                for i, tx in enumerate(prepared_txs):
+                    trace_params = [tx, ['trace', 'stateDiff'], 'latest']
                     retry_batch_requests.append({
                         "jsonrpc": "2.0",
                         "method": "trace_call",
@@ -456,7 +456,7 @@ class TransactionSimulator:
             
             # Process results
             results = []
-            for i in range(len(prepared_txns)):
+            for i in range(len(prepared_txs)):
                 # Find the corresponding response by ID
                 response = next((r for r in batch_response if r.get('id') == i + 1), None)
                 
@@ -479,16 +479,16 @@ class TransactionSimulator:
         except Exception as e:
             self.log(f"Error in batch trace_call: {str(e)}")
             # Return a list of failed results
-            return [{'success': False, 'error': {'message': str(e)}} for _ in prepared_txns]
+            return [{'success': False, 'error': {'message': str(e)}} for _ in prepared_txs]
 
     async def _check_revert_batch(self, 
-                                   prepared_txns: List[Dict[str, Any]], 
+                                   prepared_txs: List[Dict[str, Any]], 
                                    block_identifier: Union[str, Dict]) -> List[Dict[str, Any]]:
         """
         Check for reverts for multiple transactions as a batch.
         
         Args:
-            prepared_txns: List of prepared transactions
+            prepared_txs: List of prepared transactions
             block_identifier: Block state to use
             
         Returns:
@@ -497,11 +497,11 @@ class TransactionSimulator:
         batch_requests = []
         
         # Build the batch request array
-        for i, txn in enumerate(prepared_txns):
+        for i, tx in enumerate(prepared_txs):
             batch_requests.append({
                 "jsonrpc": "2.0",
                 "method": "eth_call",
-                "params": [txn, block_identifier],
+                "params": [tx, block_identifier],
                 "id": i + 1
             })
         
@@ -514,7 +514,7 @@ class TransactionSimulator:
             
             # Process results
             results = []
-            for i in range(len(prepared_txns)):
+            for i in range(len(prepared_txs)):
                 # Find the corresponding response by ID
                 response = next((r for r in batch_response if r.get('id') == i + 1), None)
                 
@@ -539,7 +539,7 @@ class TransactionSimulator:
             self.log(f"Error in batch eth_call: {str(e)}")
             
             # Return a list of failed results indicating potential reverts
-            return [{'would_revert': True, 'reason': str(e)} for _ in prepared_txns]
+            return [{'would_revert': True, 'reason': str(e)} for _ in prepared_txs]
 
     def _send_batch_request(self, batch_requests):
         """

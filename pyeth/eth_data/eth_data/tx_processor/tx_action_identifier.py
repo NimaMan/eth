@@ -17,7 +17,7 @@ class TransactionActionIdentifier:
     of token transfers and other events.
     """
     def identify_transaction_actions(self, 
-                                    txn_type: str,
+                                    tx_type: str,
                                     parsed_logs: Dict[str, List[Any]]) -> List[str]:
         """
         Determine all actions in the transaction based on log analysis
@@ -35,12 +35,12 @@ class TransactionActionIdentifier:
         actions = []
         
         # Check for contract creation
-        if txn_type == 'Contract Creation':
+        if tx_type == 'Contract Creation':
             actions.append("Contract Creation")
         
-        if txn_type == 'Trading Enable':
+        if tx_type == 'Trading Enable':
             actions.append("Trading Enable")
-        elif txn_type == 'Trading Disable':
+        elif tx_type == 'Trading Disable':
             actions.append("Trading Disable")
         
         # Check for liquidity actions

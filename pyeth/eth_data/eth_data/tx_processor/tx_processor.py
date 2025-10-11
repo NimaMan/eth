@@ -14,7 +14,7 @@ To dissect a single Ethereum transaction, along with its receipt and trace data,
 5.  **Trace Processing (`trace_processor.process_trace`)**: If the transaction involves a contract call (`needs_trace`) and a trace is provided, parse the trace structure to identify internal ETH transfers (call/delegatecall with value > 0) and potentially other internal contract interactions. Collect addresses from internal transactions.
 6.  **Address Aggregation (`extend_unique_addresses`)**: Combine addresses from the transaction (from/to), logs, internal transactions, and created contract address into a single set of unique participants.
 7.  **Transaction Classification (`transaction_classifier.classify_transaction`)**: Analyze transaction input data, target address (`to`), and potentially logs/value to assign a high-level type (e.g., "Swap", "Transfer", "Contract Creation", "Approval", "Trading Enabled").
-8.  **Synthetic Event Generation (`_add_txn_type_events`)**: Based on the classified `tx_type`, potentially add synthetic events to the processed logs (e.g., add `ContractCreationEvent` if type is "Contract Creation" and contract info is available).
+8.  **Synthetic Event Generation (`_add_tx_type_events`)**: Based on the classified `tx_type`, potentially add synthetic events to the processed logs (e.g., add `ContractCreationEvent` if type is "Contract Creation" and contract info is available).
 9.  **Bribe Calculation (`_get_bribe_amount`)**: Sum the value of internal ETH transfers directed to known fee recipients/builder addresses.
 10. **Action Identification (`action_identifier.identify_transaction_actions`)**: Based on the `tx_type` and decoded logs, identify higher-level actions performed by the transaction (e.g., "Swap ETH for Token", "Add Liquidity").
 11. **State Change Calculation (Optional) (`_calculate_state_changes`)**: If `calculate_state_changes` is enabled, use `ProcessedTxStateDiffCalculator` (which likely needs the trace/state diff data from the node) to compute detailed state changes (balance changes, storage diffs).
@@ -49,7 +49,7 @@ Key Components and Flow:
 Performance Characteristics:
 -------------------------
 - Primarily CPU-bound for decoding logs and processing traces once data is available.
-- Some operations might involve Web3 calls (e.g., `get_erc20_contract_info` within `_add_txn_type_events`), potentially adding I/O latency if not cached.
+- Some operations might involve Web3 calls (e.g., `get_erc20_contract_info` within `_add_tx_type_events`), potentially adding I/O latency if not cached.
 
 Usage:
 -----
@@ -57,43 +57,43 @@ This processor is typically invoked by a higher-level component like `Transactio
 
 Note on Design Choice:
 ------------------------------
-The core `process_transaction` logic is synchronous, assuming the caller provides the required data (txn, receipt, trace). Asynchronous operations are handled by the caller (e.g., fetching data in batches). The `process_transaction_async` method provides an async wrapper but performs the same core synchronous logic internally after awaiting data fetching by the caller.
+The core `process_transaction` logic is synchronous, assuming the caller provides the required data (tx, receipt, trace). Asynchronous operations are handled by the caller (e.g., fetching data in batches). The `process_transaction_async` method provides an async wrapper but performs the same core synchronous logic internally after awaiting data fetching by the caller.
 """
 import numpy as np
 from web3 import Web3
 from typing import Dict, Any, Tuple, List
 from eth_data.chain_utils.common_addresses import fee_recipients
-from eth_data.chain_utils.contract_type import get_erc20_contract_info
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction, TransactionFees
+from eth_data.chain_utils.contract_type import get_erc20_contract_info_rpc
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction, TransactionFees
 from eth_data.tx_processor.tx_type_classifier import EthTransactionClassifier, EthProtocolTypeClassifier
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_log_processor import TransactionLogProcessor
 from eth_data.tx_processor.tx_trace_processor import TransactionTraceProcessor
-from eth_data.tx_processor.tx_state_diff_calculator import ProcessedTxStateDiffCalculator
+from eth_data.tx_processor.address_balance_change_calculator import AddressBalanceChangeCalculator
 from eth_data.tx_processor.data_models.receipt_models import TradingEnabledEvent
 from eth_data.tx_processor.tx_action_identifier import TransactionActionIdentifier
 from eth_data.tx_processor.data_models.trace_models import InternalTransaction
-from eth_data.tx_processor.data_models.txn_models import ContractCreationEvent
+from eth_data.tx_processor.data_models.tx_models import ContractCreationEvent
 
 
 class TransactionProcessor:
-    def __init__(self, w3: Web3 = None, calculate_state_changes: bool = False, eth_state_change_threshold: int = 0.005):
+    def __init__(self, w3: Web3 = None, calculate_address_balance_changes: bool = False, eth_state_change_threshold: int = 0.005):
         self.w3 = w3
-        self.calculate_state_changes = calculate_state_changes
+        self.calculate_address_balance_changes = calculate_address_balance_changes
         self.transaction_classifier = EthTransactionClassifier(w3=w3)
         self.protocol_classifier = EthProtocolTypeClassifier()
         self.data_fetcher = TransactionDataFetcher(w3=w3)
         self.log_processor = TransactionLogProcessor(w3=w3)
         self.trace_processor = TransactionTraceProcessor(w3=w3)
-        self.state_diff_calculator = ProcessedTxStateDiffCalculator(eth_state_change_threshold=eth_state_change_threshold)
+        self.address_balance_change_calculator = AddressBalanceChangeCalculator(eth_state_change_threshold=eth_state_change_threshold)
         self.action_identifier = TransactionActionIdentifier()
 
-    def needs_trace(self, txn: Dict[str, Any]) -> bool:
+    def needs_trace(self, tx: Dict[str, Any]) -> bool:
         # Always get trace for contract creation transactions
-        if txn['to'] is None:
+        if tx['to'] is None:
             return True
         # Otherwise check if there's input data
-        return len(txn['input']) > 2  # '0x' is 2 characters
+        return len(tx['input']) > 2  # '0x' is 2 characters
 
     def extend_unique_addresses(self, 
                                 from_address, 
@@ -106,9 +106,9 @@ class TransactionProcessor:
         unique_addresses.add(to_address)
         for address in erc20_contracts:
             unique_addresses.add(address)
-        for internal_txn in internal_transactions:
-            unique_addresses.add(internal_txn.from_address)
-            unique_addresses.add(internal_txn.to_address)
+        for internal_tx in internal_transactions:
+            unique_addresses.add(internal_tx.from_address)
+            unique_addresses.add(internal_tx.to_address)
         if contract_address:
             unique_addresses.add(self.w3.to_checksum_address(contract_address))
         # remove None from unique_addresses if it exists
@@ -133,13 +133,13 @@ class TransactionProcessor:
         return TransactionFees(
             gas_price=effective_gas_price,  # For backward compatibility
             gas_used=gas_used,
-            txn_fee=total_fee_eth,
+            tx_fee=total_fee_eth,
             protocol_type=gas_fields.get('protocol_type', 'unknown'),
             max_fee_per_gas=gas_fields.get('max_fee_per_gas'),
             max_priority_fee=gas_fields.get('max_priority_fee')
         )
     
-    def _add_txn_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
+    def _add_tx_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
         """Add synthetic events based on transaction type"""
         if tx_type == "Trading Enabled":
             logs['trading_enabled_events'].append(
@@ -155,16 +155,17 @@ class TransactionProcessor:
             logs['erc20_contracts'].add(transaction['to'])
         elif tx_type == "Contract Creation":
             contract_address = self.w3.to_checksum_address(receipt['contractAddress'])
-            contract_info = get_erc20_contract_info(contract_address, self.w3)
-            if contract_info is not None:
-                logs['contract_creation_events'].append(
+            #TODO: can use the helper TokenChainDataFetcher.get_token_metadata defined in py/eth_token/eth_token/erc20_token/data/token_chain_data_fetcher.py 
+            #contract_info = get_erc20_contract_info_rpc(contract_address, self.w3)
+            #if contract_info is not None:
+            logs['contract_creation_events'].append(
                     ContractCreationEvent(
                         contract_address=contract_address,
-                        contract_type="ERC-20",
-                        symbol=contract_info['symbol'],
-                        decimals=contract_info['decimals'],
-                        name=contract_info['name'],
-                        total_supply=contract_info['total_supply'],
+                        contract_type=None,
+                        symbol=None, #contract_info['symbol'],
+                        decimals=None, #contract_info['decimals'],
+                        name=None, #contract_info['name'],
+                        total_supply=None, #contract_info['total_supply'],
                     )
                 )
                 
@@ -176,9 +177,9 @@ class TransactionProcessor:
     
     def _get_bribe_amount(self, internal_transactions: List[InternalTransaction]) -> float:
         bribe_amount = 0
-        for internal_txn in internal_transactions:
-            if internal_txn.to_address in fee_recipients:
-                bribe_amount += internal_txn.value
+        for internal_tx in internal_transactions:
+            if internal_tx.to_address in fee_recipients:
+                bribe_amount += internal_tx.value
         return bribe_amount
 
     def _extract_eth_transfers(self, 
@@ -201,7 +202,7 @@ class TransactionProcessor:
         Returns:
             List of ETHTransfer objects (empty or single item)
         """
-        from eth_data.tx_processor.data_models.txn_models import ETHTransfer
+        from eth_data.tx_processor.data_models.tx_models import ETHTransfer
         
         eth_transfers = []
         
@@ -227,11 +228,11 @@ class TransactionProcessor:
         
         return eth_transfers
 
-    def _calculate_state_changes(self, processed_tx: ProcessedTransaction) -> Dict[str, Any]:
+    def _calculate_address_balance_changes(self, processed_tx: ProcessedTransaction) -> Dict[str, Any]:
         """Calculate state changes for a processed transaction"""
-        if not self.calculate_state_changes:
+        if not self.calculate_address_balance_changes:
             return {}
-        return self.state_diff_calculator.calculate_state_changes_from_processed_tx(processed_tx)
+        return self.address_balance_change_calculator.calculate_address_balance_changes_from_processed_tx(processed_tx)
     
     def process_transaction(self, 
                             transaction: Dict[str, Any], 
@@ -241,7 +242,7 @@ class TransactionProcessor:
         """
         Analyzes a transaction and returns a DetailedTransaction object.
         """
-        txn_hash = transaction['hash'] if isinstance(transaction['hash'], str) else transaction['hash'].hex()
+        tx_hash = transaction['hash'] if isinstance(transaction['hash'], str) else transaction['hash'].hex()
         from_address = self.w3.to_checksum_address(transaction['from'])
         to_address = self.w3.to_checksum_address(transaction['to']) if transaction['to'] is not None else None
         logs = self.log_processor.process_logs(receipt['logs'])
@@ -269,7 +270,7 @@ class TransactionProcessor:
             )
         value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
-        self._add_txn_type_events(tx_type, logs, transaction, receipt)
+        self._add_tx_type_events(tx_type, logs, transaction, receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
         
@@ -279,11 +280,11 @@ class TransactionProcessor:
         )
 
         processed_tx = ProcessedTransaction(
-            hash=txn_hash,
-            txn_type=tx_type,
+            hash=tx_hash,
+            tx_type=tx_type,
             block_number=receipt['blockNumber'],
             block_timestamp=block_timestamp,
-            txn_index=receipt['transactionIndex'],
+            tx_index=receipt['transactionIndex'],
             from_address=from_address,
             to_address=to_address,
             contract_address=contract_address,
@@ -326,8 +327,7 @@ class TransactionProcessor:
             uniswap_v4_swaps=logs['uniswap_v4_swaps'],
             permit2_events=logs['permit2_events'],
         )
-        state_changes = self._calculate_state_changes(processed_tx)
-        processed_tx.state_changes = state_changes
+        processed_tx.address_balance_changes = self._calculate_address_balance_changes(processed_tx)
         return processed_tx
 
     async def process_transaction_async(self, 
@@ -372,7 +372,7 @@ class TransactionProcessor:
         
         value = np.float64(self.w3.from_wei(self.log_processor._process_integer(transaction['value']), 'ether'))
         tx_type = self.transaction_classifier.classify_transaction(transaction)
-        self._add_txn_type_events(tx_type, logs, transaction, receipt)
+        self._add_tx_type_events(tx_type, logs, transaction, receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
         
@@ -383,10 +383,10 @@ class TransactionProcessor:
         
         processed_tx = ProcessedTransaction(
             hash=transaction['hash'],
-            txn_type=tx_type,
+            tx_type=tx_type,
             block_number=receipt['blockNumber'],
             block_timestamp=block_timestamp,
-            txn_index=receipt['transactionIndex'],
+            tx_index=receipt['transactionIndex'],
             from_address=from_address,
             to_address=to_address,
             contract_address=contract_address,
@@ -416,7 +416,7 @@ class TransactionProcessor:
             erc20_contracts=erc20_contracts,
             internal_transactions=internal_transactions,
             fees=fees,
-            state_changes={},
+            address_balance_changes={},
             latest_states={},
             bribe_amount=bribe_amount,
             uniswap_v3_pools=logs['uniswap_v3_pools'],
@@ -432,8 +432,7 @@ class TransactionProcessor:
             permit2_events=logs['permit2_events'],
         )
         
-        state_changes = self._calculate_state_changes(processed_tx)
-        processed_tx.state_changes = state_changes
+        processed_tx.address_balance_changes = self._calculate_address_balance_changes(processed_tx)
         return processed_tx
 
     
