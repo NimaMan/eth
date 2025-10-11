@@ -643,16 +643,18 @@ impl PyEthPriceClient {
         let pool_usdt = compute_uniswap_v2_pool(weth, usdt);
         let (usdc_t0, _usdc_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block)).await })
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block), None)
+                        .await
+                })
             })
             .unwrap_or((usdc, weth));
         let (usdt_t0, _usdt_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block)).await })
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block), None)
+                        .await
+                })
             })
             .unwrap_or((usdt, weth));
 
@@ -784,16 +786,18 @@ impl PyEthPriceClient {
         let pool_usdt = compute_uniswap_v2_pool(weth, usdt);
         let (usdc_t0, _usdc_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block)).await })
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block), None)
+                        .await
+                })
             })
             .unwrap_or((usdc, weth));
         let (usdt_t0, _usdt_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block)).await })
+                tokio::runtime::Runtime::new().unwrap().block_on(async {
+                    rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block), None)
+                        .await
+                })
             })
             .unwrap_or((usdt, weth));
 

@@ -13,14 +13,18 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::header_utils::parse_sealed_header_from_json;
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
 use reth_chain_query::common_addresses::find_uniswap_v4_pools_for_pair;
-use reth_chain_query::provider::BalanceDiff;
+use reth_chain_query::provider::{AddressTransactionRef, BalanceDiff};
+use reth_chain_query::reth_index::RethIndexDB;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
+use reth_primitives::SealedHeader;
 use tokio::runtime::Runtime;
 
 /// Python wrapper for Account information
@@ -128,6 +132,31 @@ impl PyCompleteBalances {
     }
 }
 
+/// Python wrapper for address transaction references returned by the address index.
+#[pyclass(name = "AddressTransactionRef")]
+#[derive(Clone)]
+pub struct PyAddressTransactionRef {
+    #[pyo3(get)]
+    pub tx_number: u64,
+    #[pyo3(get)]
+    pub tx_hash: String,
+    #[pyo3(get)]
+    pub block_number: u64,
+    #[pyo3(get)]
+    pub tx_index: u64,
+}
+
+impl From<AddressTransactionRef> for PyAddressTransactionRef {
+    fn from(value: AddressTransactionRef) -> Self {
+        Self {
+            tx_number: value.tx_number,
+            tx_hash: format!("0x{}", hex::encode(value.tx_hash.as_slice())),
+            block_number: value.block_number,
+            tx_index: value.tx_index,
+        }
+    }
+}
+
 /// Main ChainQuery wrapper for Python
 #[pyclass(name = "ChainQuery")]
 pub struct PyChainQuery {
@@ -140,13 +169,41 @@ pub struct PyChainQuery {
 }
 
 impl PyChainQuery {
+    fn parse_optional_header(block_header_json: Option<&str>) -> PyResult<Option<SealedHeader>> {
+        if let Some(json) = block_header_json {
+            let sealed = parse_sealed_header_from_json(json).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid block header: {e}"
+                ))
+            })?;
+            Ok(Some(sealed))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Create from shared TxSimulator
     pub fn from_simulator(simulator: Arc<tx_simulator::TxSimulator>) -> PyResult<Self> {
         let runtime = Runtime::new()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
+        let datadir = std::env::var("PYRETH_DATADIR")
+            .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
+        let index_dir = std::env::var("PYRETH_ADDRESS_INDEX_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| Path::new(&datadir).join("reth_index"));
+
+        let index_db = Arc::new(RethIndexDB::open_read_only(&index_dir).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to open Reth address index at {}: {}",
+                index_dir.display(),
+                e
+            ))
+        })?);
+
         let provider = RethQueryProvider::with_simulator(simulator)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
+            .with_reth_index_db(index_db);
 
         Ok(Self {
             runtime: Arc::new(runtime),
@@ -211,6 +268,28 @@ impl PyChainQuery {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         Ok(balance.to_string())
+    }
+
+    /// Get all indexed transactions that involve the given address.
+    ///
+    /// Returns ordered \[tx_number, tx_hash, block_number, tx_index]. Requires the
+    /// optional address index to be configured on the underlying provider.
+    fn address_transactions(&self, address: &str) -> PyResult<Vec<PyAddressTransactionRef>> {
+        let addr = super::utils::parse_address(address)?;
+        let provider = self.provider.clone();
+        let refs = self
+            .runtime
+            .block_on(async move { provider.transactions_for_address(addr).await })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(refs
+            .into_iter()
+            .map(PyAddressTransactionRef::from)
+            .collect())
+    }
+
+    /// Whether address index entries exist for the given block number.
+    fn block_has_indices(&self, block_number: u64) -> PyResult<bool> {
+        Ok(self.provider.get_block_tx_indices(block_number).is_ok())
     }
 
     /// Get account information (nonce, balance, is_contract)
@@ -520,49 +599,79 @@ impl PyChainQuery {
     }
 
     /// Get Uniswap V2 pool liquidity (reserves) at a block
+    #[pyo3(signature = (pool, block=None, block_header_json=None))]
     fn get_uniswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
+        block_header_json: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV2 { pool: pool_addr };
-        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
+        super::amm::get_pool_liquidity(
+            self.runtime.clone(),
+            self.provider.clone(),
+            route,
+            block,
+            block_header,
+        )
     }
 
     /// Get Sushiswap V2 pool liquidity (reserves) at a block
+    #[pyo3(signature = (pool, block=None, block_header_json=None))]
     fn get_sushiswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
+        block_header_json: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::SushiswapV2 { pool: pool_addr };
-        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
+        super::amm::get_pool_liquidity(
+            self.runtime.clone(),
+            self.provider.clone(),
+            route,
+            block,
+            block_header,
+        )
     }
 
     /// Get Uniswap V3 pool liquidity/tick at a block
+    #[pyo3(signature = (pool, fee_tier, block=None, block_header_json=None))]
     fn get_uniswap_v3_liquidity(
         &self,
         pool: &str,
         fee_tier: u32,
         block: Option<u64>,
+        block_header_json: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV3 {
             pool: pool_addr,
             fee_tier,
         };
-        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
+        super::amm::get_pool_liquidity(
+            self.runtime.clone(),
+            self.provider.clone(),
+            route,
+            block,
+            block_header,
+        )
     }
 
     /// Get Uniswap V4 pool liquidity/tick via PoolManager and PoolId
+    #[pyo3(signature = (pool_manager, pool_id_hex, block=None, block_header_json=None))]
     fn get_uniswap_v4_liquidity(
         &self,
         pool_manager: &str,
         pool_id_hex: &str,
         block: Option<u64>,
+        block_header_json: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let pm = super::utils::parse_address(pool_manager)?;
         let pid_clean = pool_id_hex.trim_start_matches("0x");
         let mut arr = [0u8; 32];
@@ -574,7 +683,13 @@ impl PyChainQuery {
             pool_manager: pm,
             pool_id: pid,
         };
-        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
+        super::amm::get_pool_liquidity(
+            self.runtime.clone(),
+            self.provider.clone(),
+            route,
+            block,
+            block_header,
+        )
     }
 
     /// Find a recent Uniswap V4 pool id by scanning Initialize events on PoolManager.
@@ -633,50 +748,134 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token decimals via on-chain query
-    fn get_token_decimals(&self, token: &str, block: Option<u64>) -> PyResult<u8> {
+    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    fn get_token_decimals(
+        &self,
+        token: &str,
+        block: Option<u64>,
+        block_header_json: Option<&str>,
+    ) -> PyResult<u8> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let block_header = Self::parse_optional_header(block_header_json)?;
         self.runtime
-            .block_on(async move { provider.get_token_decimals(token_addr, block).await })
+            .block_on(async move {
+                match block_header {
+                    Some(header) => {
+                        provider
+                            .get_token_decimals(token_addr, block, Some(header))
+                            .await
+                    }
+                    None => provider.get_token_decimals(token_addr, block, None).await,
+                }
+            })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token symbol via on-chain query
-    fn get_token_symbol(&self, token: &str, block: Option<u64>) -> PyResult<String> {
+    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    fn get_token_symbol(
+        &self,
+        token: &str,
+        block: Option<u64>,
+        block_header_json: Option<&str>,
+    ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let block_header = Self::parse_optional_header(block_header_json)?;
         self.runtime
-            .block_on(async move { provider.get_token_symbol(token_addr, block).await })
+            .block_on(async move {
+                match block_header {
+                    Some(header) => {
+                        provider
+                            .get_token_symbol(token_addr, block, Some(header))
+                            .await
+                    }
+                    None => provider.get_token_symbol(token_addr, block, None).await,
+                }
+            })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token name via on-chain query
-    fn get_token_name(&self, token: &str, block: Option<u64>) -> PyResult<String> {
+    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    fn get_token_name(
+        &self,
+        token: &str,
+        block: Option<u64>,
+        block_header_json: Option<&str>,
+    ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let block_header = Self::parse_optional_header(block_header_json)?;
         self.runtime
-            .block_on(async move { provider.get_token_name(token_addr, block).await })
+            .block_on(async move {
+                match block_header {
+                    Some(header) => {
+                        provider
+                            .get_token_name(token_addr, block, Some(header))
+                            .await
+                    }
+                    None => provider.get_token_name(token_addr, block, None).await,
+                }
+            })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 total supply as string (wei) via on-chain query
-    fn get_token_total_supply(&self, token: &str, block: Option<u64>) -> PyResult<String> {
+    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    fn get_token_total_supply(
+        &self,
+        token: &str,
+        block: Option<u64>,
+        block_header_json: Option<&str>,
+    ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let supply = self
             .runtime
-            .block_on(async move { provider.get_token_total_supply(token_addr, block).await })
+            .block_on(async move {
+                match block_header {
+                    Some(header) => {
+                        provider
+                            .get_token_total_supply(token_addr, block, Some(header))
+                            .await
+                    }
+                    None => {
+                        provider
+                            .get_token_total_supply(token_addr, block, None)
+                            .await
+                    }
+                }
+            })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
         Ok(supply.to_string())
     }
 
     /// Get complete token metadata in a single call
-    fn get_token_metadata(&self, token: &str) -> PyResult<super::tokens::PyTokenMetadata> {
+    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    fn get_token_metadata(
+        &self,
+        token: &str,
+        block: Option<u64>,
+        block_header_json: Option<&str>,
+    ) -> PyResult<super::tokens::PyTokenMetadata> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let block_header = Self::parse_optional_header(block_header_json)?;
         let meta = self
             .runtime
-            .block_on(async move { provider.get_token_metadata(token_addr).await })
+            .block_on(async move {
+                match block_header {
+                    Some(header) => {
+                        provider
+                            .get_token_metadata(token_addr, block, Some(header))
+                            .await
+                    }
+                    None => provider.get_token_metadata(token_addr, block, None).await,
+                }
+            })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
         Ok(super::tokens::PyTokenMetadata {
