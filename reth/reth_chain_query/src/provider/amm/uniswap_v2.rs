@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
+use reth_primitives::SealedHeader;
 
 use crate::provider::RethQueryProvider;
 
@@ -14,15 +15,16 @@ impl RethQueryProvider {
         &self,
         pair: Address,
         block: Option<u64>,
+        header: Option<&SealedHeader>,
     ) -> Result<(Address, Address)> {
         let token0_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block, None)
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block, header.cloned())
             .await?;
 
         let token1_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block, None)
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block, header.cloned())
             .await?;
 
         if !token0_res.success || token0_res.output.len() < 32 {
@@ -45,10 +47,16 @@ impl RethQueryProvider {
         &self,
         pair: Address,
         block: Option<u64>,
+        header: Option<&SealedHeader>,
     ) -> Result<(U256, U256, u32)> {
         let res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_GET_RESERVES.to_vec()), block, None)
+            .simulate_view_function(
+                pair,
+                Bytes::from(SELECTOR_GET_RESERVES.to_vec()),
+                block,
+                header.cloned(),
+            )
             .await?;
 
         if !res.success || res.output.len() < 96 {

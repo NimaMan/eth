@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         pool: uni_v2_usdc_weth,
     };
     let liquidity = provider
-        .get_route_liquidity(&route, Some(latest_block))
+        .get_route_liquidity(&route, Some(latest_block), Some(sealed_header.clone()))
         .await?;
     println!(
         "UniswapV2 reserves @{} → reserve0={} reserve1={}",
