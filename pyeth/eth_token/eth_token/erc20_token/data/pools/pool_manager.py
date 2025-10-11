@@ -744,19 +744,19 @@ class PoolManager:
             for swap in transaction['uniswap_v2_swaps']:
                 pair_address = swap.get('pair_address', '')
                 if pair_address and pair_address not in self.pools:
-                    self._discover_and_register_v2_pool(pair_address, transaction)
+                    self._load_and_register_v2_pool(pair_address, transaction)
                 
         # Check V3 swaps  
         if transaction.get('uniswap_v3_swaps'):
             for swap in transaction['uniswap_v3_swaps']:
                 pool_address = swap.get('pool_address', '')
                 if pool_address and pool_address not in self.pools:
-                    self._discover_and_register_v3_pool(pool_address, transaction)
+                    self._load_and_register_v3_pool(pool_address, transaction)
                 
-    def _discover_and_register_v2_pool(self, pair_address: str, transaction: Dict):
+    def _load_and_register_v2_pool(self, pair_address: str, transaction: Dict):
         """
-        Discover V2 pool configuration from blockchain and register it.
-        
+        Load V2 pool configuration from the blockchain and register it.
+
         Used when a pool is detected through swap events rather than creation events.
         """
         try:
@@ -765,14 +765,13 @@ class PoolManager:
                 return
                 
             self._processing_pools.add(pair_address)
-            
             # Use chain data fetcher to get pool info
             pool_info = self.chain_data_fetcher.fetch_pool_metadata_for_token(
                 pool_address=pair_address,
                 token_address=self.token_address,
                 protocol_hint=UNISWAP_V2_PROTOCOL,
                 block_number=transaction.get('block_number'),
-                block_header_json=transaction.get('block_header_json'),
+                block_header_json=transaction.get('block_header_json', None),
             )
             
             if pool_info is None:
@@ -782,7 +781,7 @@ class PoolManager:
             decimal_kwargs = self._pool_decimal_kwargs(
                 pool_info['denom_address'],
                 block_number=transaction.get('block_number'),
-                block_header_json=transaction.get('block_header_json'),
+                block_header_json=transaction.get('block_header_json', None),
             )
             pool = UniswapV2Pool(
                 pool_address=pair_address,
@@ -802,16 +801,16 @@ class PoolManager:
             
         except Exception as e:
             raise RuntimeError(
-                "PoolManager._discover_and_register_v2_pool failed: "
+                "PoolManager._load_and_register_v2_pool failed: "
                 f"pair={pair_address} token={self.token_address} error={e}"
             ) from e
         finally:
             self._processing_pools.discard(pair_address)
             
-    def _discover_and_register_v3_pool(self, pool_address: str, transaction: Dict):
+    def _load_and_register_v3_pool(self, pool_address: str, transaction: Dict):
         """
-        Discover V3 pool configuration from blockchain and register it.
-        
+        Load V3 pool configuration from the blockchain and register it.
+
         Used when a pool is detected through swap events rather than creation events.
         """
         try:
@@ -858,7 +857,7 @@ class PoolManager:
             
         except Exception as e:
             raise RuntimeError(
-                "PoolManager._discover_and_register_v3_pool failed: "
+                "PoolManager._load_and_register_v3_pool failed: "
                 f"pool={pool_address} token={self.token_address} "
                 f"block={transaction.get('block_number')} tx={transaction.get('hash')} error={e}"
             ) from e

@@ -11,6 +11,7 @@ Objective:
 """
 
 import asyncio
+import orjson
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, List, Set, Any, Optional
@@ -240,8 +241,22 @@ class HistoricalBlockTokenProcessor:
                 try:
                     # Use shared base processor for token processing            
                     block_data = await self.block_processor.process_block(block_number)
+                    header = self.block_processor.get_block_header(block_number)
+                    header_json = (
+                        orjson.dumps(header.to_rpc_dict(), option=orjson.OPT_SORT_KEYS).decode()
+                        if header is not None
+                        else None
+                    )
+                    if header_json is None and self.logger:
+                        self.logger.warning(
+                            "HistoricalBlockTokenProcessor missing header for block %s",
+                            block_number,
+                        )
                     # Process block data for token updates
-                    await self.block_token_processor.process_block(block_data)                    
+                    await self.block_token_processor.process_block(
+                        block_data,
+                        block_header_json=header_json,
+                    )
                     self.block_token_processor.latest_processed_block = block_number
                 except Exception as e:
                     self.logger.error(f"{self.__class__.__name__} Error processing block {block_number}: {e}", exc_info=True)
@@ -255,8 +270,22 @@ class HistoricalBlockTokenProcessor:
         while not self._has_caught_up_to_live:
             try:
                 current_block_data = await self.block_processor.process_block(block_number=current_block)
+                header = self.block_processor.get_block_header(current_block)
+                header_json = (
+                    orjson.dumps(header.to_rpc_dict(), option=orjson.OPT_SORT_KEYS).decode()
+                    if header is not None
+                    else None
+                )
+                if header_json is None and self.logger:
+                    self.logger.warning(
+                        "HistoricalBlockTokenProcessor missing header for block %s",
+                        current_block,
+                    )
                 # Process block data for token updates 
-                await self.block_token_processor.process_block(current_block_data)
+                await self.block_token_processor.process_block(
+                    current_block_data,
+                    block_header_json=header_json,
+                )
                 self.block_token_processor.latest_processed_block = current_block
                 # Check if we're caught up after processing this range
                 latest_block = self.w3.eth.get_block_number()

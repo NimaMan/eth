@@ -178,6 +178,11 @@ class BlockSubscriber():
                     if isinstance(payload, dict):
                         block_header_json = payload.get("block_header_json")
                         block_transactions = payload.get("transactions", [])
+                    if block_header_json is None:
+                        self.logger.warning(
+                            "Received block %s without block_header_json",
+                            payload.get("block_number") if isinstance(payload, dict) else "unknown",
+                        )
                     await self.block_token_processor.process_block(
                         block_transactions,
                         block_header_json=block_header_json,
