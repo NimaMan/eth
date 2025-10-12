@@ -5,7 +5,7 @@ Each pool instance tracks its own events and updates its state accordingly.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 from dataclasses import dataclass
 
 from .pool_reserve_tracker import PoolReserveTracker
@@ -13,6 +13,10 @@ from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
 from ..token_chain_data_fetcher import TokenChainDataFetcher
 from .pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_data.utils.pyreth_client import PyrethClient
+from eth_token.utils.logger import get_logger
+
+
+logger = get_logger(name="TradingState", log_folder="pools")
 
 
 @dataclass
@@ -131,6 +135,7 @@ class BasePool(ABC):
             denom_address=denom_address,
             history_limit=history_limit,
         )
+        self._token_control_addresses: Set[str] = set()
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -324,7 +329,7 @@ class BasePool(ABC):
         if not self.can_buy or not self.can_buy_timestamp:
             return None
         return (current_timestamp - self.can_buy_timestamp) / 3600
-    
+
     @property
     def trading_enabled(self) -> bool:
         """Token is tradeable if can_buy is True."""
@@ -347,10 +352,23 @@ class BasePool(ABC):
     
     def check_and_update_trading_status(self, transaction: Dict) -> bool:
         """Check if trading is enabled on this pool and calculate taxes."""
-        if not self.trading_enabled:
+        if not (self.can_buy and self.can_sell):
             self.evaluate_trading_status(transaction)
-        return self.trading_enabled            
+        if self._has_control_address(transaction):
+            self.evaluate_trading_status(transaction)   
+        return self.trading_enabled                   
 
+    def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
+        for address in addresses:
+            if address:
+                self._token_control_addresses.add(address)
+
+    def _has_control_address(self, transaction: Dict)  -> bool:
+        unique_addresses = set(transaction.get('unique_addresses') or [])
+        if not unique_addresses or not self._token_control_addresses:
+            return False
+        return bool(self._token_control_addresses.intersection(unique_addresses))
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         return {

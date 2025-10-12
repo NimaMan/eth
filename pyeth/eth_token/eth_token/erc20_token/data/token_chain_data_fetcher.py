@@ -20,12 +20,12 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block: Optional[int] = None,
-        block_header_json: Optional[str] = None,
+        block_header: Optional[str] = None,
     ) -> int:
         decimals = self._chain_query.get_token_decimals(
             token_address,
             block,
-            block_header_json,
+            block_header,
         )
         if decimals is None:
             raise RuntimeError(f"Token {token_address} is missing decimals in PyReth")
@@ -35,12 +35,12 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block: Optional[int] = None,
-        block_header_json: Optional[str] = None,
+        block_header: Optional[str] = None,
     ) -> str:
         symbol = self._chain_query.get_token_symbol(
             token_address,
             block,
-            block_header_json,
+            block_header,
         )
         if symbol is None:
             raise RuntimeError(f"Token {token_address} is missing symbol in PyReth")
@@ -50,12 +50,12 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block: Optional[int] = None,
-        block_header_json: Optional[str] = None,
+        block_header: Optional[str] = None,
     ) -> str:
         name = self._chain_query.get_token_name(
             token_address,
             block,
-            block_header_json,
+            block_header,
         )
         if name is None:
             raise RuntimeError(f"Token {token_address} is missing name in PyReth")
@@ -65,12 +65,12 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block: Optional[int] = None,
-        block_header_json: Optional[str] = None,
+        block_header: Optional[str] = None,
     ):
         metadata = self._chain_query.get_token_metadata(
             token_address,
             block,
-            block_header_json,
+            block_header,
         )
         if metadata is None:
             raise RuntimeError(f"Token {token_address} is missing metadata in PyReth")

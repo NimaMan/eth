@@ -456,8 +456,9 @@ class ERC20TokenData:
         self.creator_address = transaction['from_address']
         self.creator_nonce = transaction['nonce']
         self.current_owner = transaction['from_address'] # Set initial owner
+        self.pool_manager.register_token_control_addresses([self.creator_address, self.current_owner])
         if self.total_supply is None:
-            self.set_erc20_contract_info(transaction.get('block_header_json'))
+            self.set_erc20_contract_info(transaction.get('block_header'))
 
     def set_erc20_contract_info(
         self,
@@ -648,6 +649,7 @@ class ERC20TokenData:
         for owner_event in transaction.get('owner_events', []):
             self._append_with_limit(self.all_owners, owner_event['new_owner'])
             self.current_owner = owner_event['new_owner']
+            self.pool_manager.register_token_control_addresses([self.current_owner])
             if owner_event['previous_owner'] == '0x0000000000000000000000000000000000000000':
                 self.ownership_renounced = True
                 self.ownership_renounced_block = block_number

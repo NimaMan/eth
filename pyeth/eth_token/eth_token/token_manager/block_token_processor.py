@@ -39,32 +39,19 @@ class BlockTokenProcessor:
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
         self.token_chain_fetcher = TokenChainDataFetcher()
 
-    async def process_block(
+    async def process_block_tokens(
         self,
-        block_data: List[Dict],
-        block_header_json: Optional[str] = None,
+        process_block_result, 
+        block_number
     ) -> int:
         """Process a single block's transactions with concurrency limit."""
-        if not block_data:
-            self.logger.warning("Received empty block_data - this should not happen")
-            return None
-        
-        if not isinstance(block_data[0], dict):
-            block_data = [self._ensure_tx_dict(tx) for tx in block_data]
-
-        block_number = int(block_data[0].get('block_number'))
-        if self.logger:
-            self.logger.debug(
-                "Processing block %s with %s header payload",
-                block_number,
-                "a" if block_header_json else "no",
-            )
-
+        block_tx_list = process_block_result.get('transactions')
+        block_header = process_block_result.get('block_header')
         self.updated_tokens.clear() # Clear the updated tokens cache
         tasks = []
-        for tx in block_data:
+        for tx in block_tx_list:
             async def sem_task(tx_data=self._ensure_tx_dict(tx)):
-                tx_data['block_header_json'] = block_header_json
+                tx_data['block_header'] = block_header
                 async with self.semaphore:
                     return await self._process_transaction(tx_data, block_number)
 
@@ -102,31 +89,16 @@ class BlockTokenProcessor:
         if not contract_address:
             return False, None, None
 
-        header_json = transaction.get('block_header_json')
         try:
             token_metadata = self.token_chain_fetcher.get_token_metadata(
                 contract_address,
                 block_number,
-                header_json,
+                transaction.get('block_header'),
             )
-            if self.logger:
-                self.logger.debug(
-                    "Token creation detected for %s in block %s (header provided: %s)",
-                    contract_address,
-                    block_number,
-                    bool(header_json),
-                )
             return True, token_metadata, contract_address
         except Exception as exc:
             if self.logger:
-                self.logger.warning(
-                    "%s failed metadata lookup for %s in block %s (header provided: %s): %s",
-                    self.__class__.__name__,
-                    contract_address,
-                    block_number,
-                    bool(header_json),
-                    exc,
-                )
+                self.logger.error(f"{self.__class__.__name__} failed metadata lookup for {contract_address} in block {block_number}: {exc}")
             return False, None, None
 
     async def _handle_token_creation(
@@ -239,23 +211,12 @@ class HistoricalBlockTokenProcessor:
         for block_number in tqdm(range(start_block, end_block + 1), desc="Processing blocks"):
             if block_number not in self.processed_blocks:
                 try:
-                    # Use shared base processor for token processing            
-                    block_data = await self.block_processor.process_block(block_number)
-                    header = self.block_processor.get_block_header(block_number)
-                    header_json = (
-                        orjson.dumps(header.to_rpc_dict(), option=orjson.OPT_SORT_KEYS).decode()
-                        if header is not None
-                        else None
-                    )
-                    if header_json is None and self.logger:
-                        self.logger.warning(
-                            "HistoricalBlockTokenProcessor missing header for block %s",
-                            block_number,
-                        )
+                    # Use shared base processor for token processing
+                    processed_block_result = await self.block_processor.process_block(block_number)
                     # Process block data for token updates
-                    await self.block_token_processor.process_block(
-                        block_data,
-                        block_header_json=header_json,
+                    await self.block_token_processor.process_block_tokens(
+                        processed_block_result,
+                        block_number=block_number
                     )
                     self.block_token_processor.latest_processed_block = block_number
                 except Exception as e:
@@ -269,22 +230,11 @@ class HistoricalBlockTokenProcessor:
         current_block = start_block
         while not self._has_caught_up_to_live:
             try:
-                current_block_data = await self.block_processor.process_block(block_number=current_block)
-                header = self.block_processor.get_block_header(current_block)
-                header_json = (
-                    orjson.dumps(header.to_rpc_dict(), option=orjson.OPT_SORT_KEYS).decode()
-                    if header is not None
-                    else None
-                )
-                if header_json is None and self.logger:
-                    self.logger.warning(
-                        "HistoricalBlockTokenProcessor missing header for block %s",
-                        current_block,
-                    )
+                processed_block_result = await self.block_processor.process_block(block_number=current_block)
                 # Process block data for token updates 
-                await self.block_token_processor.process_block(
-                    current_block_data,
-                    block_header_json=header_json,
+                await self.block_token_processor.process_block_tokens(
+                    processed_block_result,
+                    block_number=current_block
                 )
                 self.block_token_processor.latest_processed_block = current_block
                 # Check if we're caught up after processing this range
