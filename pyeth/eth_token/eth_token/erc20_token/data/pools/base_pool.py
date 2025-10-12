@@ -12,7 +12,7 @@ from .pool_reserve_tracker import PoolReserveTracker
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
 from ..token_chain_data_fetcher import TokenChainDataFetcher
 from .pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_data.utils.pyreth_client import PyrethClient
+from eth_data.utils.pyreth_client import PyrethClient, pyreth
 from eth_token.utils.logger import get_logger
 
 
@@ -123,6 +123,8 @@ class BasePool(ABC):
         self.pool_chain_fetcher = pool_chain_fetcher or PoolChainDataFetcher()
         self.token_chain_fetcher = token_chain_fetcher or TokenChainDataFetcher()
         self.pyreth_client = PyrethClient.instance()
+        self.pool_buy_sell_simulator = self.pyreth_client.pool_buy_sell_simulator()
+        self.pool_buy_sell_config = pyreth.PoolBuySellParameters()
         
         # Scam detection (from reserve tracker)
         self.scam_label: Optional[str] = None

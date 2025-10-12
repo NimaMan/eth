@@ -34,15 +34,13 @@ Price Calculation:
 
 from typing import Optional, Tuple, Dict, List, Iterable, Any
 from dataclasses import dataclass, field
-import pyreth
-from .base_pool import BasePool
+from .base_pool import BasePool, logger
 from .pool_chain_data_fetcher import PoolChainDataFetcher
 from ..token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.type_converter import convert_scaled_amount
-from eth_data.chain_utils.common_addresses import (
-    ROUTER_ADDRESSES as KNOWN_ROUTERS,
-    canonicalize_dex_pool_type,
-)
+from eth_data.chain_utils.common_addresses import ROUTER_ADDRESSES, canonicalize_dex_pool_type
+
+
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
 
 
@@ -319,36 +317,30 @@ class UniswapV2Pool(BasePool):
             token_chain_fetcher=token_chain_fetcher,
             history_limit=history_limit,
         )
-            
+
         # LP Token tracking (V2 pools ARE ERC20 LP tokens)
         self.lp_decimals = 18  # V2 LP tokens always have 18 decimals
         self.lp_tracker = LPTokenTracker(
             lp_decimals=self.lp_decimals,
-            known_routers=KNOWN_ROUTERS,
+            known_routers=ROUTER_ADDRESSES,
             history_limit=self.history_limit,
         )
 
     def get_protocol(self) -> str:
         return UNISWAP_V2_PROTOCOL
 
-    def evaluate_trading_status(self, transaction: Dict) -> None:
-        if self.can_buy and self.can_sell:
-            return
-        
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = float(self.test_buy_amount_eth)
-        config.token_decimals = int(self.get_token_decimals())
-        config.block_number = int(transaction['block_number'])
-        block_header = transaction.get('block_header')
-        if block_header:
-            config.set_block_header_json(block_header)
+    def evaluate_trading_status(self, transaction: Dict) -> None:     
+        self.pool_buy_sell_config.test_amount_eth = float(self.test_buy_amount_eth)
+        self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
+        self.pool_buy_sell_config.block_number = int(transaction['block_number'])
+        if transaction.get('block_header'):
+            self.pool_buy_sell_config.set_block_header_json(transaction.get('block_header'))
 
         # The tranaction is already mined, so we dont need to include it as a prior tx 
-        simulator = self.pyreth_client.pool_buy_sell_simulator()
-        result = simulator.check_uniswap_v2_pool(
+        result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(
             self.token_address,
             self.pool_address,
-            config,
+            self.pool_buy_sell_config,
         )
 
         if result.can_buy and not self.can_buy:
@@ -357,12 +349,25 @@ class UniswapV2Pool(BasePool):
             self.can_buy_tx = transaction['hash']
             self.can_buy_timestamp = transaction.get('block_timestamp', 0)
 
+        # Update sell status and tax rates
         self.can_sell = bool(result.can_sell)
         self.buy_tax = result.buy_tax_percentage
         self.sell_tax = result.sell_tax_percentage
         self.tax_check_block = transaction['block_number']
         self.tax_check_tx = transaction['hash']
     
+        logger.info(
+            f"UniswapV2 Pool:"
+            f"token={self.token_address} "
+            f"pool={self.pool_address} "
+            f"block={transaction['block_number']} "
+            f"tx={transaction['hash']} "
+            f"can_buy={result.can_buy} "
+            f"can_sell={result.can_sell} "
+            f"buy_tax={result.buy_tax_percentage} "
+            f"sell_tax={result.sell_tax_percentage}"
+        )
+        
     def process_transaction(self, transaction: Dict):
         """Process V2 events from a transaction.        
         - univ2_syncs: Reserve updates

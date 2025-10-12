@@ -178,12 +178,7 @@ class UniswapV4Pool(BasePool):
         liquidity_delta = int(modify.get('liquidity_delta', 0))
         tick_lower = int(modify.get('tick_lower', 0))
         tick_upper = int(modify.get('tick_upper', 0))
-        self.add_internal_address(
-            modify.get('owner')
-            or modify.get('sender')
-            or modify.get('recipient')
-            or modify.get('account')
-        )
+        self._token_control_addresses.add(modify.get('owner') or modify.get('sender') or modify.get('recipient') or modify.get('account'))
 
         # Positive delta is a mint, negative is a burn
         if liquidity_delta > 0:

@@ -105,7 +105,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         if self._is_shutting_down:
             return
         try:
-            self.latest_processed_block = await self.process_block_token(
+            self.latest_processed_block = await self.process_block_tokens(
                 processed_block_result,
                 block_number=processed_block_result["block_number"],
             )

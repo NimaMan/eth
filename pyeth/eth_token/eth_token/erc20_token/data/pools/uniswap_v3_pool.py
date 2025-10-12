@@ -164,62 +164,45 @@ class UniswapV3Pool(BasePool):
         })
     
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        if self.can_buy and self.can_sell:
-            return
+        self.pool_buy_sell_config.test_amount_eth = float(self.test_buy_amount_eth)
+        self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
+        self.pool_buy_sell_config.block_number = int(transaction['block_number'])
+        if transaction.get('block_header'):
+            self.pool_buy_sell_config.set_block_header_json(transaction['block_header'])
 
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = float(self.test_buy_amount_eth)
-        config.token_decimals = int(self.get_token_decimals())
-        config.block_number = int(transaction['block_number'])
-        raw_header = transaction.get('block_header') or transaction.get('block_header')
-        if raw_header:
-            try:
-                config.set_block_header_json(raw_header)
-            except Exception as exc:
-                logger.warning(
-                    "Failed to attach block header for V3 simulation (pool=%s token=%s tx=%s): %s",
-                    self.pool_address,
-                    self.token_address,
-                    transaction.get('hash'),
-                    exc,
-                    exc_info=True,
-                )
-
-        simulator = self.pyreth_client.pool_buy_sell_simulator()
-        try:
-            result = simulator.check_uniswap_v3_pool(
+        result = self.pool_buy_sell_simulator.check_uniswap_v3_pool(
                 self.token_address,
                 self.pool_address,
                 int(self.fee_tier),
-                config,
+                self.pool_buy_sell_config,
             )
-        except Exception as exc:
-            logger.error(f"Uniswap V3 simulation failed (pool={self.pool_address} token={self.token_address} tx={transaction.get('hash')}): {exc}",
-                          exc_info=True)
-            return 
+        
+        if result.can_buy and not self.can_buy:
+            self.can_buy = True
+            self.can_buy_block = transaction['block_number']
+            self.can_buy_tx = transaction['hash']
+            self.can_buy_timestamp = transaction.get('block_timestamp', 0)
 
-        from_address = transaction.get('from_address')
-        if result.can_buy and result.can_sell and not self.can_buy:
-            if self._is_internal_actor(from_address):
-                logger.info(
-                    "Skipping trading enable for pool %s token %s due to internal actor %s (simulation tx=%s)",
-                    self.pool_address,
-                    self.token_address,
-                    from_address,
-                    transaction.get('hash'),
-                )
-            else:
-                self.mark_can_buy_from_event(transaction, event_type='simulation')
-
+        # Update sell status and tax rates
         self.can_sell = bool(result.can_sell)
         self.buy_tax = result.buy_tax_percentage
         self.sell_tax = result.sell_tax_percentage
         self.tax_check_block = transaction['block_number']
         self.tax_check_tx = transaction['hash']
-
-        is_tradeable = bool(result.can_buy and result.can_approve and result.can_sell)
-        if not is_tradeable:
-            logger.info(f"Uniswap V3 simulation indicates trading incomplete (pool={self.pool_address} token={self.token_address} tx={transaction.get('hash')} buy={result.can_buy} approve={result.can_approve} sell={result.can_sell} error={result.error_message})")
+    
+        logger.info(
+            f"UniswapV3 Pool:"
+            f"token={self.token_address} "
+            f"pool={self.pool_address} "
+            f"block={transaction['block_number']} "
+            f"tx={transaction.get('hash')} "
+            f"can_buy={result.can_buy} "
+            f"can_sell={result.can_sell} "
+            f"buy_tax={result.buy_tax_percentage} "
+            f"sell_tax={result.sell_tax_percentage} "
+            f"approve={result.can_approve} "
+            f"error={result.error_message}"
+        )
     
     def _process_mint(self, mint: dict, transaction: Dict):
         """Process a V3 mint (add liquidity) event."""
@@ -229,7 +212,7 @@ class UniswapV3Pool(BasePool):
         liquidity_delta = int(mint.get('amount', 0))
         tick_lower = int(mint.get('tick_lower', 0))
         tick_upper = int(mint.get('tick_upper', 0))
-        self.add_internal_address(mint.get('owner', mint.get('to_address')))
+        self._token_control_addresses.add(mint.get('owner', mint.get('to_address')))
 
         self._update_tick(tick_lower, liquidity_delta)
         self._update_tick(tick_upper, -liquidity_delta)
