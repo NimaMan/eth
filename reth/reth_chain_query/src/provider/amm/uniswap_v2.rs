@@ -19,12 +19,22 @@ impl RethQueryProvider {
     ) -> Result<(Address, Address)> {
         let token0_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block, header.cloned())
+            .simulate_view_function(
+                pair,
+                Bytes::from(SELECTOR_TOKEN0.to_vec()),
+                block,
+                header.cloned(),
+            )
             .await?;
 
         let token1_res = self
             .tx_simulator
-            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block, header.cloned())
+            .simulate_view_function(
+                pair,
+                Bytes::from(SELECTOR_TOKEN1.to_vec()),
+                block,
+                header.cloned(),
+            )
             .await?;
 
         if !token0_res.success || token0_res.output.len() < 32 {

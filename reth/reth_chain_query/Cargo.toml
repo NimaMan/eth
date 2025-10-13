@@ -85,6 +85,10 @@ name = "fetch_transaction_data_receipts_and_traces"
 path = "examples/transactions/fetch_transaction_data_receipts_and_traces.rs"
 
 [[example]]
+name = "fetch_transaction_by_number"
+path = "examples/transactions/fetch_transaction_by_number.rs"
+
+[[example]]
 name = "verify_receipts_rpc_equivalence"
 path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
 

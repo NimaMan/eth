@@ -7,8 +7,8 @@ use eyre::eyre;
 ///
 /// Run with: `cargo run --example token_inspection -- token=0x... block=12345`
 use reth_chain_query::{Result, RethQueryProvider};
-use reth_provider::HeaderProvider;
 use reth_primitives::SealedHeader;
+use reth_provider::HeaderProvider;
 use std::{env, str::FromStr};
 
 #[tokio::main]
@@ -88,7 +88,10 @@ async fn main() -> Result<()> {
 
     for (name, holder_addr) in notable_holders {
         let holder = Address::from_str(holder_addr)?;
-        match provider.get_token_balance(token_address, holder, block_override).await {
+        match provider
+            .get_token_balance(token_address, holder, block_override)
+            .await
+        {
             Ok(balance) => {
                 if balance > U256::ZERO {
                     let formatted = format_units(balance, metadata.decimals)?;

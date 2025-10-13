@@ -51,9 +51,15 @@ async fn main() -> eyre::Result<()> {
     println!("Wallet: {:?}", owner);
 
     // Addresses/constants
-    let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap();
-    let usdc: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse().unwrap();
-    let uni_v2_usdc_weth: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse().unwrap();
+    let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+        .parse()
+        .unwrap();
+    let usdc: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        .parse()
+        .unwrap();
+    let uni_v2_usdc_weth: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
+        .parse()
+        .unwrap();
     let sushi_v2_usdc_weth: Address = alloy_to_ethers_addr(compute_sushiswap_pool(
         ethers_to_alloy_addr(weth),
         ethers_to_alloy_addr(usdc),
@@ -81,7 +87,8 @@ async fn main() -> eyre::Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
     let env_gas_gwei: Option<u64> = env::var("GAS_PRICE_GWEI").ok().and_then(|v| v.parse().ok());
-    let computed_gas = U256::from(base_fee_wei) + U256::from(tip_gwei) * U256::from(1_000_000_000u64);
+    let computed_gas =
+        U256::from(base_fee_wei) + U256::from(tip_gwei) * U256::from(1_000_000_000u64);
     let gas_price = match env_gas_gwei {
         Some(g) => U256::from(g) * U256::from(1_000_000_000u64),
         None => computed_gas,
@@ -138,7 +145,10 @@ async fn main() -> eyre::Result<()> {
     approve_typed.set_nonce(U256::from(nonce));
     let signed_approve = sign_typed(&wallet, &approve_typed)?;
     let r2 = chain.step(&signed_approve)?;
-    println!("Approve success: {} | gas_used: {}", r2.success, r2.gas_used);
+    println!(
+        "Approve success: {} | gas_used: {}",
+        r2.success, r2.gas_used
+    );
 
     // Sell USDC -> ETH on Sushi V2
     nonce += 1;
@@ -174,7 +184,9 @@ fn unsigned_to_typed(
     let mut tx: ethers::types::transaction::eip2718::TypedTransaction =
         (ethers::types::TransactionRequest::new().from(from)).into();
     if let Some(to) = unsigned.to {
-        tx.set_to(ethers::types::NameOrAddress::Address(alloy_to_ethers_addr(to)));
+        tx.set_to(ethers::types::NameOrAddress::Address(alloy_to_ethers_addr(
+            to,
+        )));
     }
     if let Some(gas) = unsigned.gas {
         tx.set_gas(U256::from(gas));
