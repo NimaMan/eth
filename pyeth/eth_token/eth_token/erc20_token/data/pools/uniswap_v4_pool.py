@@ -30,7 +30,8 @@ Blockchain Interface:
 from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
 from dataclasses import dataclass
 from web3 import Web3
-from .base_pool import BasePool
+from .base_pool import BasePool, logger
+from eth_data.utils.pyreth_client import pyreth
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
 UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
@@ -196,6 +197,46 @@ class UniswapV4Pool(BasePool):
             self.current_liquidity = max(0, self.current_liquidity)
 
         self._update_virtual_reserves()
+
+    def evaluate_trading_status(self, transaction: Dict) -> None:
+        config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
+        config.token_decimals = int(self.get_token_decimals())
+        config.block_number = int(transaction['block_number'])
+        if transaction.get('block_header'):
+            config.set_block_header(transaction['block_header'])
+
+        result = self.pool_buy_sell_simulator.check_uniswap_v4_pool(
+            self.token_address,
+            self.POOL_MANAGER,
+            self.pool_id,
+            config,
+        )
+
+        if result.can_buy and not self.can_buy:
+            self.can_buy = True
+            self.can_buy_block = transaction['block_number']
+            self.can_buy_tx = transaction['hash']
+            self.can_buy_timestamp = transaction.get('block_timestamp', 0)
+
+        self.can_sell = bool(result.can_sell)
+        self.buy_tax = result.buy_tax_percentage
+        self.sell_tax = result.sell_tax_percentage
+        self.tax_check_block = transaction['block_number']
+        self.tax_check_tx = transaction['hash']
+
+        logger.info(
+            f"UniswapV4 Pool:"
+            f"tx={transaction['hash']} "
+            f"token={self.token_address} "
+            f"pool_id={self.pool_id} "
+            f"block={transaction['block_number']} "
+            f"can_buy={result.can_buy} "
+            f"can_sell={result.can_sell} "
+            f"buy_tax={result.buy_tax_percentage} "
+            f"sell_tax={result.sell_tax_percentage} "
+            f"approve={result.can_approve} "
+            f"error={result.error_message}"
+        )
 
     def _update_tick(self, tick_index: int, liquidity_delta: int):
         if tick_index not in self.ticks:

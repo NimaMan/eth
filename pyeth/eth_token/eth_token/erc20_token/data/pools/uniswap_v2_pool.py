@@ -34,6 +34,7 @@ Price Calculation:
 
 from typing import Optional, Tuple, Dict, List, Iterable, Any
 from dataclasses import dataclass, field
+import pyreth
 from .base_pool import BasePool, logger
 from .pool_chain_data_fetcher import PoolChainDataFetcher
 from ..token_chain_data_fetcher import TokenChainDataFetcher
@@ -329,18 +330,18 @@ class UniswapV2Pool(BasePool):
     def get_protocol(self) -> str:
         return UNISWAP_V2_PROTOCOL
 
-    def evaluate_trading_status(self, transaction: Dict) -> None:     
-        self.pool_buy_sell_config.test_amount_eth = float(self.test_buy_amount_eth)
-        self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
-        self.pool_buy_sell_config.block_number = int(transaction['block_number'])
+    def evaluate_trading_status(self, transaction: Dict) -> None:
+        config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
+        config.token_decimals = int(self.get_token_decimals())
+        config.block_number = int(transaction['block_number'])
         if transaction.get('block_header'):
-            self.pool_buy_sell_config.set_block_header(transaction.get('block_header'))
+            config.set_block_header(transaction['block_header'])
 
         # The tranaction is already mined, so we dont need to include it as a prior tx 
         result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(
             self.token_address,
             self.pool_address,
-            self.pool_buy_sell_config,
+            config,
         )
 
         if result.can_buy and not self.can_buy:
@@ -365,7 +366,9 @@ class UniswapV2Pool(BasePool):
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "
-            f"sell_tax={result.sell_tax_percentage}"
+            f"sell_tax={result.sell_tax_percentage} "
+            f"approve={result.can_approve} "
+            f"error={result.error_message}"
         )
         
     def process_transaction(self, transaction: Dict):

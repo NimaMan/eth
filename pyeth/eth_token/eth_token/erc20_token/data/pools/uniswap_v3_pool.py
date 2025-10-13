@@ -12,7 +12,6 @@ from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 import math
 import pyreth
-
 from .base_pool import BasePool, logger
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
@@ -164,17 +163,17 @@ class UniswapV3Pool(BasePool):
         })
     
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        self.pool_buy_sell_config.test_amount_eth = float(self.test_buy_amount_eth)
-        self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
-        self.pool_buy_sell_config.block_number = int(transaction['block_number'])
+        config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
+        config.token_decimals = int(self.get_token_decimals())
+        config.block_number = int(transaction['block_number'])
         if transaction.get('block_header'):
-            self.pool_buy_sell_config.set_block_header(transaction['block_header'])
+            config.set_block_header(transaction['block_header'])
 
         result = self.pool_buy_sell_simulator.check_uniswap_v3_pool(
                 self.token_address,
                 self.pool_address,
                 int(self.fee_tier),
-                self.pool_buy_sell_config,
+                config,
             )
         
         if result.can_buy and not self.can_buy:
