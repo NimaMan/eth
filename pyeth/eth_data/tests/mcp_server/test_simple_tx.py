@@ -18,7 +18,7 @@ async def test_tx():
         print("✓ Successfully serialized to JSON")
         print(f"Hash: {result.get('hash', 'N/A')}")
         print(f"Block: {result.get('block_number', 'N/A')}")
-        print(f"Type: {result.get('txn_type', 'N/A')}")
+        print(f"Type: {result.get('tx_type', 'N/A')}")
         print(f"ERC20 transfers: {len(result.get('erc20_transfers', []))}")
         print(f"Unique addresses: {len(result.get('unique_addresses', []))}")
         

@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 
 # Configure logging directly since we may not have logger utils
 logging.basicConfig(level=logging.INFO)
@@ -48,8 +48,8 @@ app = FastAPI(
 
 # Global Web3 connection
 w3: Optional[Web3] = None
-txn_processor: Optional[TransactionProcessor] = None
-txn_data_fetcher: Optional[TransactionDataFetcher] = None
+tx_processor: Optional[TransactionProcessor] = None
+tx_data_fetcher: Optional[TransactionDataFetcher] = None
 batch_processor: Optional[TransactionBatchProcessor] = None
 
 # Request/Response Models
@@ -81,7 +81,7 @@ class BatchValidationResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize Web3 connection and processors on startup"""
-    global w3, txn_processor, txn_data_fetcher, batch_processor
+    global w3, tx_processor, tx_data_fetcher, batch_processor
     
     try:
         # Connect to local Reth node
@@ -91,14 +91,14 @@ async def startup_event():
             raise Exception("Failed to connect to Ethereum node at http://127.0.0.1:8545")
         
         # Initialize processors
-        txn_processor = TransactionProcessor(
+        tx_processor = TransactionProcessor(
             w3=w3, 
-            calculate_state_changes=True,
+            calculate_address_balance_changes=True,
         )
-        txn_data_fetcher = TransactionDataFetcher(w3)
+        tx_data_fetcher = TransactionDataFetcher(w3)
         batch_processor = TransactionBatchProcessor(
             w3=w3,
-            calculate_state_changes=True,
+            calculate_address_balance_changes=True,
             logger=logger
         )
         
@@ -151,58 +151,58 @@ def convert_state_changes_for_rust(state_changes: Dict[str, Any]) -> Dict[str, A
     
     return converted
 
-def serialize_processed_transaction(ptxn: ProcessedTransaction) -> Dict[str, Any]:
+def serialize_processed_transaction(ptx: ProcessedTransaction) -> Dict[str, Any]:
     """Convert ProcessedTransaction to JSON-serializable dict"""
     try:
         # Custom serialization for dataclass with sets and complex types
         result = {
             # Core transaction data
-            "hash": ptxn.hash,
-            "block_number": ptxn.block_number,
-            "block_timestamp": ptxn.block_timestamp,
-            "txn_index": ptxn.txn_index,
-            "from_address": ptxn.from_address,
-            "to_address": ptxn.to_address,
-            "contract_address": ptxn.contract_address,
-            "value": ptxn.value,
-            "status": ptxn.status,
-            "nonce": ptxn.nonce,
-            "input": ptxn.input,
+            "hash": ptx.hash,
+            "block_number": ptx.block_number,
+            "block_timestamp": ptx.block_timestamp,
+            "tx_index": ptx.tx_index,
+            "from_address": ptx.from_address,
+            "to_address": ptx.to_address,
+            "contract_address": ptx.contract_address,
+            "value": ptx.value,
+            "status": ptx.status,
+            "nonce": ptx.nonce,
+            "input": ptx.input,
             
             # Classification
-            "txn_type": ptxn.txn_type,
-            "actions": ptxn.actions,
+            "tx_type": ptx.tx_type,
+            "actions": ptx.actions,
             
             # Financial data
             "fees": {
-                "gas_price": ptxn.fees.gas_price,
-                "gas_used": ptxn.fees.gas_used,
-                "txn_fee": ptxn.fees.txn_fee
-            } if ptxn.fees else None,
-            "bribe_amount": ptxn.bribe_amount,
+                "gas_price": ptx.fees.gas_price,
+                "gas_used": ptx.fees.gas_used,
+                "tx_fee": ptx.fees.tx_fee
+            } if ptx.fees else None,
+            "bribe_amount": ptx.bribe_amount,
             
             # Participants
-            "unique_addresses": list(ptxn.unique_addresses),
-            "erc20_contracts": list(ptxn.erc20_contracts),
+            "unique_addresses": list(ptx.unique_addresses),
+            "erc20_contracts": list(ptx.erc20_contracts),
             
             # Event counts (summary for validation)
             "event_counts": {
-                "erc20_transfers": len(ptxn.erc20_transfers),
-                "erc721_transfers": len(ptxn.erc721_transfers),
-                "erc1155_transfers": len(ptxn.erc1155_transfers),
-                "internal_transactions": len(ptxn.internal_transactions),
-                "uniswap_v2_swaps": len(ptxn.uniswap_v2_swaps),
-                "uniswap_v2_syncs": len(ptxn.uniswap_v2_syncs),
-                "uniswap_v3_swaps": len(ptxn.uniswap_v3_swaps),
-                "uniswap_v4_swaps": len(ptxn.uniswap_v4_swaps),
-                "approvals": len(ptxn.approvals),
-                "mints": len(ptxn.mints),
-                "burns": len(ptxn.burns),
-                "deposits": len(ptxn.deposits),
-                "withdraws": len(ptxn.withdraws),
-                "permit2_events": len(ptxn.permit2_events),
-                "trading_enabled_events": len(ptxn.trading_enabled_events),
-                "trading_disabled_events": len(ptxn.trading_disabled_events),
+                "erc20_transfers": len(ptx.erc20_transfers),
+                "erc721_transfers": len(ptx.erc721_transfers),
+                "erc1155_transfers": len(ptx.erc1155_transfers),
+                "internal_transactions": len(ptx.internal_transactions),
+                "uniswap_v2_swaps": len(ptx.uniswap_v2_swaps),
+                "uniswap_v2_syncs": len(ptx.uniswap_v2_syncs),
+                "uniswap_v3_swaps": len(ptx.uniswap_v3_swaps),
+                "uniswap_v4_swaps": len(ptx.uniswap_v4_swaps),
+                "approvals": len(ptx.approvals),
+                "mints": len(ptx.mints),
+                "burns": len(ptx.burns),
+                "deposits": len(ptx.deposits),
+                "withdraws": len(ptx.withdraws),
+                "permit2_events": len(ptx.permit2_events),
+                "trading_enabled_events": len(ptx.trading_enabled_events),
+                "trading_disabled_events": len(ptx.trading_disabled_events),
             },
             
             # Detailed events (for deep validation)
@@ -213,17 +213,17 @@ def serialize_processed_transaction(ptxn: ProcessedTransaction) -> Dict[str, Any
                     "to_address": transfer.to_address,
                     "amount": str(transfer.amount),  # Convert to string for Rust
                     "log_index": transfer.log_index
-                } for transfer in ptxn.erc20_transfers
+                } for transfer in ptx.erc20_transfers
             ],
             
             "internal_transactions": [
                 {
-                    "from_address": itxn.from_address,
-                    "to_address": itxn.to_address,
-                    "value": str(itxn.value),  # Convert to string for Rust
-                    "trace_type": getattr(itxn, 'trace_type', 'call'),
-                    "call_type": getattr(itxn, 'call_type', 'call')
-                } for itxn in ptxn.internal_transactions
+                    "from_address": itx.from_address,
+                    "to_address": itx.to_address,
+                    "value": str(itx.value),  # Convert to string for Rust
+                    "trace_type": getattr(itx, 'trace_type', 'call'),
+                    "call_type": getattr(itx, 'call_type', 'call')
+                } for itx in ptx.internal_transactions
             ],
             
             "uniswap_v2_swaps": [
@@ -236,7 +236,7 @@ def serialize_processed_transaction(ptxn: ProcessedTransaction) -> Dict[str, Any
                     "amount0Out": str(swap.amount0Out),  # Convert to string for Rust
                     "amount1Out": str(swap.amount1Out),  # Convert to string for Rust
                     "log_index": swap.log_index
-                } for swap in ptxn.uniswap_v2_swaps
+                } for swap in ptx.uniswap_v2_swaps
             ],
             
             "uniswap_v4_swaps": [
@@ -251,11 +251,11 @@ def serialize_processed_transaction(ptxn: ProcessedTransaction) -> Dict[str, Any
                     "tick": swap.tick,
                     "fee": swap.fee,
                     "log_index": swap.log_index
-                } for swap in ptxn.uniswap_v4_swaps
+                } for swap in ptx.uniswap_v4_swaps
             ],
             
             # State changes - convert numeric values to strings for Rust compatibility
-            "state_changes": convert_state_changes_for_rust(ptxn.state_changes),
+            "state_changes": convert_state_changes_for_rust(ptx.address_balance_changes),
         }
         
         return result
@@ -293,26 +293,26 @@ async def validate_transaction(tx_hash: str, request: ValidationRequest = None):
         include_trace = request.include_trace if request else True
         
         # Fetch transaction data
-        txn_data = txn_data_fetcher.get_transaction_data(
+        tx_data = tx_data_fetcher.get_transaction_data(
             tx_hash, 
             receipt=True, 
             trace=include_trace,
             state_diff=include_state_changes
         )
         
-        if not txn_data.get('transaction'):
+        if not tx_data.get('transaction'):
             raise HTTPException(status_code=404, detail=f"Transaction {tx_hash} not found")
         
         # Process transaction
-        processed_txn = await txn_processor.process_transaction_async(
-            txn_data['transaction'],
-            txn_data.get('receipt'),
-            txn_data.get('trace'),
+        processed_tx = await tx_processor.process_transaction_async(
+            tx_data['transaction'],
+            tx_data.get('receipt'),
+            tx_data.get('trace'),
             state_diff=include_state_changes
         )
         
         # Serialize result
-        result_dict = serialize_processed_transaction(processed_txn)
+        result_dict = serialize_processed_transaction(processed_tx)
         
         processing_time = (time.time() - start_time) * 1000
         logger.info(f"✅ Processed {tx_hash} in {processing_time:.1f}ms")
@@ -354,7 +354,7 @@ async def validate_batch(request: BatchValidationRequest):
         
         # Process transactions in parallel using the batch processor
         try:
-            processed_txns = await batch_processor.process_transactions_async(
+            processed_txs = await batch_processor.process_transactions_async(
                 request.tx_hashes,
                 include_trace=request.include_trace,
                 state_diff=request.include_state_changes
@@ -362,16 +362,16 @@ async def validate_batch(request: BatchValidationRequest):
             
             # Convert results
             for tx_hash in request.tx_hashes:
-                txn_start_time = time.time()
+                tx_start_time = time.time()
                 
-                if tx_hash in processed_txns:
+                if tx_hash in processed_txs:
                     try:
-                        result_dict = serialize_processed_transaction(processed_txns[tx_hash])
+                        result_dict = serialize_processed_transaction(processed_txs[tx_hash])
                         results.append(ValidationResponse(
                             success=True,
                             tx_hash=tx_hash,
                             processed_transaction=result_dict,
-                            processing_time_ms=(time.time() - txn_start_time) * 1000
+                            processing_time_ms=(time.time() - tx_start_time) * 1000
                         ))
                         successful_count += 1
                     except Exception as e:
@@ -379,7 +379,7 @@ async def validate_batch(request: BatchValidationRequest):
                             success=False,
                             tx_hash=tx_hash,
                             error=f"Serialization failed: {str(e)}",
-                            processing_time_ms=(time.time() - txn_start_time) * 1000
+                            processing_time_ms=(time.time() - tx_start_time) * 1000
                         ))
                         failed_count += 1
                 else:
@@ -387,7 +387,7 @@ async def validate_batch(request: BatchValidationRequest):
                         success=False,
                         tx_hash=tx_hash,
                         error="Transaction not found or processing failed",
-                        processing_time_ms=(time.time() - txn_start_time) * 1000
+                        processing_time_ms=(time.time() - tx_start_time) * 1000
                     ))
                     failed_count += 1
             
@@ -429,13 +429,13 @@ async def get_transaction_summary(tx_hash: str):
     """Get quick transaction summary for lightweight validation"""
     try:
         # Faster endpoint that only returns key metrics
-        txn_data = txn_data_fetcher.get_transaction_data(tx_hash, receipt=True, trace=False)
+        tx_data = tx_data_fetcher.get_transaction_data(tx_hash, receipt=True, trace=False)
         
-        if not txn_data.get('transaction'):
+        if not tx_data.get('transaction'):
             raise HTTPException(status_code=404, detail=f"Transaction {tx_hash} not found")
         
-        tx = txn_data['transaction']
-        receipt = txn_data['receipt']
+        tx = tx_data['transaction']
+        receipt = tx_data['receipt']
         
         return {
             "tx_hash": tx_hash,

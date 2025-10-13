@@ -30,11 +30,13 @@ def convert_to_int(value: Union[str, int, HexBytes]) -> int:
         return value
     raise ValueError(f"Cannot convert {type(value)} to int")
 
+
 def convert_to_decimal(value: Union[str, int, HexBytes]) -> Decimal:
     """Convert value to Decimal, handling wei conversions"""
     if isinstance(value, (str, HexBytes)):
         value = convert_to_int(value)
     return Decimal(value)
+
 
 def convert_to_hex_str(value: Union[str, bytes, HexBytes, int]) -> str:
     """Convert value to '0x' prefixed hex string"""
@@ -46,25 +48,38 @@ def convert_to_hex_str(value: Union[str, bytes, HexBytes, int]) -> str:
         return hex(value)
     raise ValueError(f"Cannot convert {type(value)} to hex string")
 
+
 def normalize_address(address: Union[str, bytes, HexBytes]) -> str:
     """Convert address to checksum format"""
     if isinstance(address, (bytes, HexBytes)):
         address = f"0x{address.hex()}"
     return Web3.to_checksum_address(address)
 
+
 def convert_log_index(value: Union[str, int, HexBytes]) -> int:
     """Convert log index to integer"""
     return convert_to_int(value)
+
 
 def convert_block_number(value: Union[str, int, HexBytes]) -> int:
     """Convert block number to integer"""
     return convert_to_int(value)
 
+
 def convert_transaction_index(value: Union[str, int, HexBytes]) -> int:
     """Convert transaction index to integer"""
     return convert_to_int(value)
 
+
 def convert_status(value: Union[str, int, HexBytes]) -> bool:
     """Convert transaction status to boolean"""
     status_int = convert_to_int(value)
-    return bool(status_int) 
+    return bool(status_int)
+
+
+def convert_scaled_amount(value: Union[str, int, HexBytes], decimals: int | None) -> float:
+    """Convert a raw token amount to a float scaled by decimals."""
+    amount_int = convert_to_int(value)
+    if decimals is None:
+        return float(amount_int)
+    return amount_int / (10 ** decimals)

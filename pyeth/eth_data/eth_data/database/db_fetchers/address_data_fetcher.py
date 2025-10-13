@@ -506,16 +506,16 @@ class AddressDataFetcher:
             t.is_scam,
             t.scam_label,
             a.address as creator_address,
-            txn.block_number as creation_block,
+            tx.block_number as creation_block,
             b.block_timestamp as creation_timestamp
         FROM 
             eth_db.tokens t
         LEFT JOIN 
             eth_db.addresses a ON t.creator_address_id = a.address_id
         LEFT JOIN 
-            eth_db.transactions txn ON t.creation_txn = txn.tx_hash
+            eth_db.transactions tx ON t.creation_tx = tx.tx_hash
         LEFT JOIN 
-            eth_db.blocks b ON txn.block_number = b.block_number
+            eth_db.blocks b ON tx.block_number = b.block_number
         WHERE 
             (:start_timestamp = 0 OR b.block_timestamp >= :start_timestamp)
         """

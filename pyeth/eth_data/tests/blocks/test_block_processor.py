@@ -2,6 +2,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
+from eth_data.blockchain.block_data_models import ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.utils.logger import get_logger
 
@@ -68,18 +69,18 @@ async def test_process_single_block(block_processor, web3_instance):
         block_data = await web3_instance.eth.get_block(test_block_number, full_transactions=True)
 
         # Process the block
-        processed_block = await block_processor.process_block(
+        processed_block_result = await block_processor.process_block(
             block_number=test_block_number,
             transactions=block_data['transactions']
         )
 
         # Verify the processed block
-        assert isinstance(processed_block, list), "Processed block should be a list of transactions"
-        assert len(processed_block) > 0, "Processed block should contain at least one transaction"
+        assert isinstance(processed_block_result, ProcessedBlockResult), "Processed block should be a ProcessedBlockResult"
+        assert len(processed_block_result.transactions) > 0, "Processed block should contain at least one transaction"
 
         # Log the results
         logger.info(f"Successfully processed block {test_block_number}")
-        logger.info(f"Number of transactions: {len(processed_block)}")
+        logger.info(f"Number of transactions: {len(processed_block_result.transactions)}")
 
     except Exception as e:
         logger.error(f"Error in test_process_single_block: {e}", exc_info=True)
@@ -107,10 +108,10 @@ async def test_batch_block_processing():
         
         # Check data completeness for each block
         for block_num, block_data in processed_blocks.items():
-            assert isinstance(block_data, list), f"Invalid data format for block {block_num}"
+            assert isinstance(block_data, ProcessedBlockResult), f"Invalid data format for block {block_num}"
             
             # Verify each transaction was analyzed
-            for tx_result in block_data:
+            for tx_result in block_data.transactions:
                 if isinstance(tx_result, Exception):
                     print(f"Error processing transaction: {tx_result}")
                     continue

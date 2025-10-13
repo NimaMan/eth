@@ -22,7 +22,7 @@ def real_transaction_data(w3):
     return tx_data
 
 @pytest.mark.asyncio
-async def test_batch_analyzer_with_real_transactions(w3, txn_batch_analyzer, real_transaction_data):
+async def test_batch_analyzer_with_real_transactions(w3, tx_batch_analyzer, real_transaction_data):
     """Test batch analyzer with real transaction data that previously failed"""
     
     for tx_hash, tx_data in real_transaction_data.items():
@@ -33,7 +33,7 @@ async def test_batch_analyzer_with_real_transactions(w3, txn_batch_analyzer, rea
                     'receipt': dict(tx_data['receipt'])
                 }
                 
-            result = await txn_batch_analyzer._process_single_transaction(
+            result = await tx_batch_analyzer._process_single_transaction(
                 transaction=tx_data['transaction'],
                 receipt=tx_data['receipt']
             )

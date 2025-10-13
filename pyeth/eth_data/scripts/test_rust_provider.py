@@ -5,7 +5,7 @@ Test script for Rust-based ProcessedTransactionProvider
 
 import sys
 import asyncio
-from eth_data.tx_provider.processed_transaction_provider import RustProcessedTransactionProvider
+from eth_data.tx_provider.rs_processed_transaction_provider import RustProcessedTransactionProvider
 
 def test_basic_functionality():
     """Test basic functionality of the Rust provider."""
@@ -27,7 +27,7 @@ def test_basic_functionality():
         print(f"  - From: {tx.from_address[:10]}...")
         print(f"  - To: {tx.to_address[:10] if tx.to_address else 'Contract Creation'}...")
         print(f"  - Value: {tx.value}")
-        print(f"  - Type: {tx.txn_type}")
+        print(f"  - Type: {tx.tx_type}")
         print(f"  - ERC20 Transfers: {len(tx.erc20_transfers)}")
         print(f"  - Internal Txs: {len(tx.internal_transactions)}")
     else:

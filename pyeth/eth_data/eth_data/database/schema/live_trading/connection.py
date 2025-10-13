@@ -12,7 +12,13 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 
-from .models import Base
+try:
+    # Prefer explicit module name used in this package
+    from .live_trading_models import Base
+except Exception:
+    # Backward-compat fallback if module name changes
+    from . import live_trading_models as _m  # type: ignore
+    Base = getattr(_m, 'Base')
 
 
 class LiveTradingDB:
@@ -29,9 +35,11 @@ class LiveTradingDB:
                              If not provided, uses LIVE_TRADING_DB_URL environment variable.
         """
         if connection_string is None:
-            connection_string = os.environ.get(
-                'LIVE_TRADING_DB_URL',
-                'postgresql://postgres:postgres@localhost:5432/live_trading_db'
+            # Prefer LIVE_TRADING_DB_URL, fall back to DATABASE_URL, then default
+            connection_string = (
+                os.environ.get('LIVE_TRADING_DB_URL')
+                or os.environ.get('DATABASE_URL')
+                or 'postgresql://postgres:postgres@localhost:5432/live_trading_db'
             )
         
         # Create engine with connection pooling disabled for async compatibility
@@ -117,6 +125,21 @@ def init_db(connection_string: Optional[str] = None) -> LiveTradingDB:
     global _db_instance
     _db_instance = LiveTradingDB(connection_string)
     return _db_instance
+
+
+def get_db_url() -> str:
+    """Return the DB URL used for live trading schema tools.
+
+    Order of precedence:
+    1) LIVE_TRADING_DB_URL
+    2) DATABASE_URL
+    3) local postgres default
+    """
+    return (
+        os.environ.get('LIVE_TRADING_DB_URL')
+        or os.environ.get('DATABASE_URL')
+        or 'postgresql://postgres:postgres@localhost:5432/live_trading_db'
+    )
 
 
 # Convenience functions

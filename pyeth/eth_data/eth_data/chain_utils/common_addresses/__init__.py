@@ -1,3 +1,5 @@
+from typing import Optional
+
 from web3 import Web3
 from .all_cex_addresses import *
 from .all_etf_addresses import *
@@ -5,6 +7,54 @@ from .stablecoin_addresses import *
 from .validators import *
 from .misc import *
 from .dex_pool_types import DEX_POOL_TYPES, DEX_POOL_TYPE_SET
+from ..pool_addresses import POOL_FACTORIES, ROUTERS
+
+# Backwards compatibility alias for downstream imports.
+ROUTER_ADDRESSES = set(ROUTERS.values())
+
+
+_DEX_POOL_TYPE_KEY_MAP = {
+    'UNISWAPV2': 'UNISWAP-V2',
+    'UNIV2': 'UNISWAP-V2',
+    'V2': 'UNISWAP-V2',
+    'UNISWAPV3': 'UNISWAP-V3',
+    'UNIV3': 'UNISWAP-V3',
+    'V3': 'UNISWAP-V3',
+    'UNISWAPV4': 'UNISWAP-V4',
+    'UNIV4': 'UNISWAP-V4',
+    'V4': 'UNISWAP-V4',
+    'SUSHISWAP': 'SUSHI-SWAP',
+    'CURVE': 'CURVE',
+    'BALANCER': 'BALANCER',
+}
+
+
+def _pool_type_key(name: str) -> str:
+    """Normalize a pool type string to a comparable key."""
+    return ''.join(ch for ch in name.upper() if ch.isalnum())
+
+
+def canonicalize_dex_pool_type(name: Optional[str]) -> Optional[str]:
+    """Return the canonical DEX pool type name defined in DEX_POOL_TYPES."""
+    if not isinstance(name, str):
+        return name
+
+    stripped = name.strip()
+    if not stripped:
+        return stripped
+
+    key = _pool_type_key(stripped)
+    canonical = _DEX_POOL_TYPE_KEY_MAP.get(key)
+    if canonical:
+        return canonical
+
+    normalized = stripped.upper().replace('_', '-').replace(' ', '-').replace('/', '-')
+    if normalized in DEX_POOL_TYPE_SET:
+        return normalized
+
+    # Retry with normalized key if not already covered
+    normalized_key = _pool_type_key(normalized)
+    return _DEX_POOL_TYPE_KEY_MAP.get(normalized_key, stripped)
 
 
 DENOM_ADDRESSES = {

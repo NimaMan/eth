@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from eth_data.database.schema.live_trading.tx_executor.tx_executor_models import Base, ExecutionWallet
+from eth_data.database.schema.live_trading.tx_executor.tx_executor_models import Base
 from eth_data.database.schema.live_trading.connection import get_db_url
 
 
@@ -40,25 +40,6 @@ def create_tx_executor_tables():
     Base.metadata.create_all(engine)
     print("✅ Tables created successfully")
     
-    # Create session
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    
-    # Add default execution wallet if none exists
-    wallet_count = session.query(ExecutionWallet).count()
-    if wallet_count == 0:
-        print("\n💰 Creating default execution wallet...")
-        default_wallet = ExecutionWallet(
-            wallet_address="0x0000000000000000000000000000000000000000",
-            wallet_name="Default Test Wallet",
-            is_active=False,
-            max_position_size_eth=0.1,
-            max_daily_loss_eth=1.0
-        )
-        session.add(default_wallet)
-        session.commit()
-        print("✅ Default wallet created (inactive)")
-    
     # Show table summary
     print("\n📊 Table Summary:")
     
@@ -68,22 +49,21 @@ def create_tx_executor_tables():
         'execution_errors'
     ]
     
-    for table in tables:
-        try:
-            result = session.execute(text(f"SELECT COUNT(*) FROM {table}"))
-            count = result.scalar()
-            print(f"  - {table}: {count} rows")
-        except Exception as e:
-            print(f"  - {table}: Not created (error: {str(e)})")
-    
-    session.close()
+    with engine.connect() as conn:
+        for table in tables:
+            try:
+                result = conn.execute(text(f"SELECT COUNT(*) FROM {table}"))
+                count = result.scalar_one()
+                print(f"  - {table}: {count} rows")
+            except Exception as e:
+                print(f"  - {table}: Not created (error: {str(e)})")
+        conn.commit()
     engine.dispose()
     
     print("\n✅ Transaction Executor initialization complete!")
     print("\n📝 Next steps:")
-    print("1. Update execution wallets with real addresses")
-    print("2. Configure ETH Kartal to use enhanced_trade_signals table")
-    print("3. Start signal processor to begin processing")
+    print("1. Insert rows into execution_wallets by mapping to wallets.id (FK)")
+    print("2. Start ETH Kartal signal processor to begin processing")
 
 
 def drop_tx_executor_tables():

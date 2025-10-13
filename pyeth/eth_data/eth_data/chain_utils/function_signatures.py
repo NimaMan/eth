@@ -126,7 +126,7 @@ FUNCTION_SIGNATURES = {
     # Critical Scam Functions - Max Transaction/Wallet Limits
     w3.keccak(text="setMaxTxAmount(uint256)").hex()[:8]: "Set Max Tx Amount",
     w3.keccak(text="setMaxWalletAmount(uint256)").hex()[:8]: "Set Max Wallet",
-    w3.keccak(text="updateMaxTxn(uint256)").hex()[:8]: "Update Max Txn",
+    w3.keccak(text="updateMaxtx(uint256)").hex()[:8]: "Update Max tx",
     w3.keccak(text="changeMaxWallet(uint256)").hex()[:8]: "Change Max Wallet",
     w3.keccak(text="removeLimits()").hex()[:8]: "Remove Limits",
 
@@ -177,7 +177,7 @@ FUNCTION_SIGNATURES = {
     '3f4ba83a': 'Unpause',
     'f9f92be4': 'Blacklist',
     '40c10f19': 'Mint',
-    '74010ece': 'Set Max Txn Amount',
+    '74010ece': 'Set Max tx Amount',
     'ea1644d5': 'Set Max Wallet Size',
     '715018a6': "Renounce Ownership",
     '8af416f6': "Lock Liquidity Tokens",

@@ -20,8 +20,8 @@ class TestAddressBalanceChangeCalculator:
             raise ConnectionError("Failed to connect to Ethereum node at http://127.0.0.1:8545")
         
         # Initialize components with Web3 instance
-        self.txn_data_fetcher = TransactionDataFetcher(self.w3)
-        self.txn_processor = TransactionProcessor(w3=self.w3, calculate_state_changes=True)
+        self.tx_data_fetcher = TransactionDataFetcher(self.w3)
+        self.tx_processor = TransactionProcessor(w3=self.w3, calculate_address_balance_changes=True)
         
         print(f"✅ Connected to Ethereum node, latest block: {self.w3.eth.block_number}")
     
@@ -38,22 +38,22 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Processing basic ETH transfer: {tx_hash}")
         
         # Fetch transaction data first
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
         
-        print(f"   Transaction loaded: {txn_data['transaction']['hash']}")
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   Transaction loaded: {tx_data['transaction']['hash']}")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction with the fetched data
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         # State changes are automatically calculated since calculate_state_changes=True
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         # Verify that both addresses have state changes
         assert len(state_changes) == 2, f"Expected 2 addresses with state changes, got {len(state_changes)}"
@@ -107,25 +107,25 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Processing KERMIT swap transaction: {kermit_tx_hash}")
         
         # Fetch transaction data first
-        txn_data = self.txn_data_fetcher.get_transaction_data(kermit_tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(kermit_tx_hash)
         
-        print(f"   Transaction loaded: {txn_data['transaction']['hash']}")
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   Transaction loaded: {tx_data['transaction']['hash']}")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction with the fetched data
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         print(f"   ERC20 transfers: {len(processed_tx.erc20_transfers)}")
         print(f"   Internal transactions: {len(processed_tx.internal_transactions)}")
         
         # State changes are automatically calculated since calculate_state_changes=True
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
@@ -201,17 +201,17 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Testing double-counting bug fix: {tx_hash}")
         
         # Fetch transaction data
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
         
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         print(f"   Internal transactions: {len(processed_tx.internal_transactions)}")
@@ -221,7 +221,7 @@ class TestAddressBalanceChangeCalculator:
             print(f"     {i}: {it.from_address} -> {it.to_address} = {it.value} ETH (depth {it.depth})")
         
         # Get state changes
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
@@ -316,17 +316,17 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Testing MEV bot transaction with token overflow: {tx_hash}")
         
         # Fetch transaction data
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
         
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         print(f"   ERC20 transfers: {len(processed_tx.erc20_transfers)}")
@@ -342,7 +342,7 @@ class TestAddressBalanceChangeCalculator:
             print(f"   ✅ Perfect double-counting test scenario!")
         
         # Get state changes
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
@@ -447,12 +447,12 @@ class TestAddressBalanceChangeCalculator:
         print(f"\n=== Testing Fee Recipient Transaction ===\nHash: {tx_hash}\n")
         
         # Fetch and process transaction
-        processed_tx = self.txn_data_fetcher.get_transaction_data(tx_hash)
-        state_changes = self.txn_processor.process_transaction(
+        processed_tx = self.tx_data_fetcher.get_transaction_data(tx_hash)
+        state_changes = self.tx_processor.process_transaction(
             processed_tx['transaction'], 
             processed_tx['receipt'], 
             processed_tx['trace']
-        ).state_changes
+        ).address_balance_changes
         
         print(f"From: {processed_tx['transaction']['from']}\nTo: {processed_tx['transaction']['to']}\nBribe amount: {processed_tx['transaction']['value'] / 1e18} ETH\nInternal transactions: {len(processed_tx['trace'])}")
         
@@ -480,13 +480,13 @@ class TestAddressBalanceChangeCalculator:
         tx_hash = '0x14be871cbec0ac093e3fbf1bf4814cb8527e32166ba5f3be1dd0b800d240d5b5'
         
         # Get Python state changes
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         # Expected from Etherscan:
         # MEV Bot sends 0.358933217245396992 WETH → should lose 0.359 ETH
@@ -553,17 +553,17 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Testing complex WETH swap with internal transactions: {tx_hash}")
         
         # Fetch transaction data
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
         
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         print(f"   ERC20 transfers: {len(processed_tx.erc20_transfers)}")
@@ -575,7 +575,7 @@ class TestAddressBalanceChangeCalculator:
             print(f"   {i}: {it.from_address} -> {it.to_address} = {it.value} ETH (depth {it.depth})")
         
         # Get state changes
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():
@@ -754,24 +754,24 @@ class TestAddressBalanceChangeCalculator:
         print(f"🧪 Testing complex Uniswap ETH→USDT swap with individual token tracking: {tx_hash}")
         
         # Fetch transaction data
-        txn_data = self.txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = self.tx_data_fetcher.get_transaction_data(tx_hash)
         
-        print(f"   From: {txn_data['transaction']['from']}")
-        print(f"   To: {txn_data['transaction']['to']}")
-        print(f"   Value: {self.w3.from_wei(txn_data['transaction']['value'], 'ether')} ETH")
+        print(f"   From: {tx_data['transaction']['from']}")
+        print(f"   To: {tx_data['transaction']['to']}")
+        print(f"   Value: {self.w3.from_wei(tx_data['transaction']['value'], 'ether')} ETH")
         
         # Process the transaction
-        processed_tx = self.txn_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data['trace']
+        processed_tx = self.tx_processor.process_transaction(
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data['trace']
         )
         
         print(f"   ERC20 transfers: {len(processed_tx.erc20_transfers)}")
         print(f"   Internal transactions: {len(processed_tx.internal_transactions)}")
         
         # Get state changes
-        state_changes = processed_tx.state_changes
+        state_changes = processed_tx.address_balance_changes
         
         print(f"\n📊 Python calculated state changes ({len(state_changes)} addresses):")
         for address, change in state_changes.items():

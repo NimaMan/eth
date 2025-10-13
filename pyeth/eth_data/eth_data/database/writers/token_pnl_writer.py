@@ -90,30 +90,28 @@ class TokenPnLWriter:
                 # Still ensure the token exists in the DB even if no activity
                 if hasattr(token, 'contract_address'): # Check if token object is valid enough
                      # DEBUG: Log token data fields
-                     # self.logger.debug(f"TokenPnLWriter (no activity) - Token {token.contract_address}: creation_txn={token.token_data.creation_txn}, trading_enabled_txn={token.token_data.trading_enabled_txn}")
+                     # self.logger.debug(f"TokenPnLWriter (no activity) - Token {token.contract_address}: creation_tx={token.token_data.creation_tx}, trading_enabled_tx={token.token_data.trading_enabled_tx}")
                      
                      token_db_data = {
                          "contract_address": token.contract_address,
                          "creator_address": token.token_data.creator_address,
                          "is_scam": token.token_data.is_scam,
                          "scam_label": token.token_data.scam_label,
-                         "creation_txn": token.token_data.creation_txn,
-                         "trading_enabled_txn": token.token_data.trading_enabled_txn
+                         "creation_tx": token.token_data.creation_tx
                      }
                      self._ensure_token_in_db(token_db_data)
                 return True # Return True as the operation wasn't an error, just no data
                 
             # Ensure token record exists in the database
             # DEBUG: Log token data fields
-            # self.logger.debug(f"TokenPnLWriter (with activity) - Token {token.contract_address}: creation_txn={token.token_data.creation_txn}, trading_enabled_txn={token.token_data.trading_enabled_txn}")
+            # self.logger.debug(f"TokenPnLWriter (with activity) - Token {token.contract_address}: creation_tx={token.token_data.creation_tx}, trading_enabled_tx={token.token_data.trading_enabled_tx}")
             
             token_db_data = {
                 "contract_address": token.contract_address,
                 "creator_address": token.token_data.creator_address,
                 "is_scam": token.token_data.is_scam,
                 "scam_label": token.token_data.scam_label,
-                "creation_txn": token.token_data.creation_txn,
-                "trading_enabled_txn": token.token_data.trading_enabled_txn
+                "creation_tx": token.token_data.creation_tx
             }
             self._ensure_token_in_db(token_db_data)
             
@@ -202,13 +200,15 @@ class TokenPnLWriter:
                     # Get address_id for this user
                     address_id = self._get_or_create_address_id(session, address)
                     
-                    # Check if trade record exists for this address_id and token
+                    # Check if trade record exists for this address_id, token, and currency
+                    # Currently only supporting ETH as currency
+                    currency = "ETH"
                     result = session.execute(
                         text("""
                         SELECT id FROM eth_db.trades 
-                        WHERE address_id = :addr_id AND token_address = :token_addr
+                        WHERE address_id = :addr_id AND token_address = :token_addr AND currency = :currency
                         """),
-                        {"addr_id": address_id, "token_addr": token_address}
+                        {"addr_id": address_id, "token_addr": token_address, "currency": currency}
                     ).fetchone()
                     
                     if result:
@@ -222,35 +222,30 @@ class TokenPnLWriter:
                             total_denom_spent = :total_denom_spent,
                             total_denom_received = :total_denom_received,
                             denom_received_spent_ratio = :denom_received_spent_ratio,
-                            bribe_amount = :bribe_amount,
                             realized_profit = :realized_profit,
                             unrealized_profit = :unrealized_profit,
                             num_buys = :num_buys,
                             num_sells = :num_sells,
-                            token_holdings_ratio = :token_holdings_ratio,
-                            token_sell_buy_ratio = :token_sell_buy_ratio,
-                            agg_denom_balance = :agg_denom_balance,
-                            agg_token_balance = :agg_token_balance,
-                            currency = :currency
+                            total_gas_spent = :total_gas_spent,
+                            token_balance = :token_balance,
+                            denom_balance = :denom_balance,
+                            last_updated = CURRENT_TIMESTAMP
                             WHERE id = :id
                             """),
                             {
                                 "id": trade_id,
-                                "entry_block": row['entry_block'],
-                                "latest_block": row['latest_block'],
-                                "total_denom_spent": row['total_denom_spent'],
-                                "total_denom_received": row['total_denom_received'],
-                                "denom_received_spent_ratio": row['denom_received_spent_ratio'],
-                                "bribe_amount": row['bribe_amount'],
-                                "realized_profit": row['realized_profit'],
-                                "unrealized_profit": row['unrealized_profit'],
-                                "num_buys": row['num_buys'],
-                                "num_sells": row['num_sells'],
-                                "token_holdings_ratio": row['token_holdings_ratio'],
-                                "token_sell_buy_ratio": row['token_sell_buy_ratio'],
-                                "agg_denom_balance": row['agg_denom_balance'],
-                                "agg_token_balance": row['agg_token_balance'],
-                                "currency": "ETH"  # We're currently only supporting ETH
+                                "entry_block": row.get('entry_block'),
+                                "latest_block": row.get('latest_block'),
+                                "total_denom_spent": row.get('total_denom_spent', 0),
+                                "total_denom_received": row.get('total_denom_received', 0),
+                                "denom_received_spent_ratio": row.get('denom_received_spent_ratio'),
+                                "realized_profit": row.get('realized_profit', 0),
+                                "unrealized_profit": row.get('unrealized_profit', 0),
+                                "num_buys": row.get('num_buys', 0),
+                                "num_sells": row.get('num_sells', 0),
+                                "total_gas_spent": row.get('tx_fee', 0),  # Map tx_fee to total_gas_spent
+                                "token_balance": row.get('agg_token_balance', 0),  # Map to new column name
+                                "denom_balance": row.get('agg_denom_balance', 0),  # Map to new column name
                             }
                         )
                         
@@ -259,35 +254,33 @@ class TokenPnLWriter:
                         result = session.execute(
                             text("""
                             INSERT INTO eth_db.trades
-                            (address_id, token_address, entry_block, latest_block, total_denom_spent, total_denom_received,
-                             denom_received_spent_ratio, bribe_amount, realized_profit, unrealized_profit,
-                             num_buys, num_sells, token_holdings_ratio, token_sell_buy_ratio,
-                             agg_denom_balance, agg_token_balance, currency)
+                            (address_id, token_address, currency, entry_block, latest_block, 
+                             total_denom_spent, total_denom_received, denom_received_spent_ratio, 
+                             realized_profit, unrealized_profit, num_buys, num_sells,
+                             total_gas_spent, token_balance, denom_balance)
                             VALUES
-                            (:address_id, :token_address, :entry_block, :latest_block, :total_denom_spent, :total_denom_received,
-                             :denom_received_spent_ratio, :bribe_amount, :realized_profit, :unrealized_profit,
-                             :num_buys, :num_sells, :token_holdings_ratio, :token_sell_buy_ratio,
-                             :agg_denom_balance, :agg_token_balance, :currency)
+                            (:address_id, :token_address, :currency, :entry_block, :latest_block,
+                             :total_denom_spent, :total_denom_received, :denom_received_spent_ratio,
+                             :realized_profit, :unrealized_profit, :num_buys, :num_sells,
+                             :total_gas_spent, :token_balance, :denom_balance)
                             RETURNING id
                             """),
                             {
                                 "address_id": address_id,
                                 "token_address": token_address,
-                                "entry_block": row['entry_block'],
-                                "latest_block": row['latest_block'],
-                                "total_denom_spent": row['total_denom_spent'],
-                                "total_denom_received": row['total_denom_received'],
-                                "denom_received_spent_ratio": row['denom_received_spent_ratio'],
-                                "bribe_amount": row['bribe_amount'],
-                                "realized_profit": row['realized_profit'],
-                                "unrealized_profit": row['unrealized_profit'],
-                                "num_buys": row['num_buys'],
-                                "num_sells": row['num_sells'],
-                                "token_holdings_ratio": row['token_holdings_ratio'],
-                                "token_sell_buy_ratio": row['token_sell_buy_ratio'],
-                                "agg_denom_balance": row['agg_denom_balance'],
-                                "agg_token_balance": row['agg_token_balance'],
-                                "currency": "ETH"  # We're currently only supporting ETH
+                                "currency": currency,  # Use the currency variable defined above
+                                "entry_block": row.get('entry_block'),
+                                "latest_block": row.get('latest_block'),
+                                "total_denom_spent": row.get('total_denom_spent', 0),
+                                "total_denom_received": row.get('total_denom_received', 0),
+                                "denom_received_spent_ratio": row.get('denom_received_spent_ratio'),
+                                "realized_profit": row.get('realized_profit', 0),
+                                "unrealized_profit": row.get('unrealized_profit', 0),
+                                "num_buys": row.get('num_buys', 0),
+                                "num_sells": row.get('num_sells', 0),
+                                "total_gas_spent": row.get('tx_fee', 0),  # Map tx_fee to total_gas_spent
+                                "token_balance": row.get('agg_token_balance', 0),  # Map to new column name
+                                "denom_balance": row.get('agg_denom_balance', 0),  # Map to new column name
                             }
                         )
                         

@@ -15,7 +15,7 @@ async def test_batch_processor_with_regular_processor_consistency():
     w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
     batch_processor = TransactionBatchProcessor(w3)
     regular_processor = TransactionProcessor(w3)
-    txn_data_fetcher = TransactionDataFetcher(w3)
+    tx_data_fetcher = TransactionDataFetcher(w3)
     block_number = 21061274  # Use a known test block
 
     # Get block data
@@ -32,13 +32,13 @@ async def test_batch_processor_with_regular_processor_consistency():
     regular_processor_results = []
     for tx in batch_processor_results:
         tx_hash = tx.hash
-        tx_data = txn_data_fetcher.get_transaction_data(tx_hash)
+        tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
         regular_processor_results.append(regular_processor.process_transaction(tx_data['transaction'], tx_data['receipt'], tx_data['trace']))
     
     for tp_tx, async_tx in zip(batch_processor_results, regular_processor_results):
         # Compare key fields
         assert tp_tx.hash == async_tx.hash, f"Hash mismatch for transaction {tp_tx.hash}"
-        assert tp_tx.txn_type == async_tx.txn_type, f"Type mismatch for transaction {tp_tx.hash}"
+        assert tp_tx.tx_type == async_tx.tx_type, f"Type mismatch for transaction {tp_tx.hash}"
         assert tp_tx.from_address == async_tx.from_address, f"From address mismatch for transaction {tp_tx.hash}"
         assert tp_tx.to_address == async_tx.to_address, f"To address mismatch for transaction {tp_tx.hash}"
         assert tp_tx.value == async_tx.value, f"Value mismatch for transaction {tp_tx.hash}"
@@ -48,7 +48,7 @@ async def test_batch_processor_with_regular_processor_consistency():
             f"ERC20 transfer count mismatch for transaction {tp_tx.hash}"
         assert len(tp_tx.internal_transactions) == len(async_tx.internal_transactions), \
             f"Internal transaction count mismatch for transaction {tp_tx.hash}"
-        assert tp_tx.fees.txn_fee == async_tx.fees.txn_fee, \
+        assert tp_tx.fees.tx_fee == async_tx.fees.tx_fee, \
             f"Fee mismatch for transaction {tp_tx.hash}"
 
     print(f"Successfully verified consistency between implementations for {len(batch_processor_results)} transactions")

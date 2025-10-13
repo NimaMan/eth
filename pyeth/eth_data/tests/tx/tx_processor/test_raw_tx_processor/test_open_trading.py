@@ -8,23 +8,23 @@ Objective: Verify correct parsing of trading enabled transactions including:
 """
 
 import asyncio
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction, TransactionFees, TradingEnabledEvent
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction, TransactionFees, TradingEnabledEvent
 
 
-def test_open_trading(txn_analyzer, txn_data_fetcher):
+def test_open_trading(tx_analyzer, tx_data_fetcher):
     """Test that both sync and async analysis match the expected trading enabled details"""
     
     expected_trading = ProcessedTransaction(
         hash="0x9fc6130629c69e689d6023ffb2cfbfcd7df18210e2ba97d527c9b93819c6ec5b",
         block_number=21423691,
-        txn_index=0,  # Position In Block: 0
+        tx_index=0,  # Position In Block: 0
         from_address="0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",
         to_address="0x90f29ccD18c9181A9243EfF8f7546eef4b64994c",
         contract_address=None,
         value=0.0,
         status=True,
         nonce=3,
-        txn_type="Trading Enabled",
+        tx_type="Trading Enabled",
         actions=[],
         eth_transfers=[],
         erc20_transfers=[],
@@ -53,7 +53,7 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=30289321785,
             gas_used=50611,
-            txn_fee=0.001532972864860635
+            tx_fee=0.001532972864860635
         ),
         unique_addresses={
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",
@@ -62,20 +62,20 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
         erc20_contracts={
             "0x90f29ccD18c9181A9243EfF8f7546eef4b64994c"  # The token contract
         },
-        state_changes={},
+        address_balance_changes={},
         latest_states={},
         bribe_amount=0.0,
         input="0xc9567bf9"
     )
 
-    txn_hash = "0x9fc6130629c69e689d6023ffb2cfbfcd7df18210e2ba97d527c9b93819c6ec5b"
-    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
+    tx_hash = "0x9fc6130629c69e689d6023ffb2cfbfcd7df18210e2ba97d527c9b93819c6ec5b"
+    tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.process_transaction(
-        txn_data['transaction'],
-        txn_data['receipt'],
-        txn_data['trace']
+    sync_result = tx_analyzer.process_transaction(
+        tx_data['transaction'],
+        tx_data['receipt'],
+        tx_data['trace']
     )
     
     assert sync_result == expected_trading 
@@ -83,10 +83,10 @@ def test_open_trading(txn_analyzer, txn_data_fetcher):
    
     # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.process_transaction_async(
-            txn_data['transaction'],
-            txn_data['receipt'],
-            txn_data['trace']
+        return await tx_analyzer.process_transaction_async(
+            tx_data['transaction'],
+            tx_data['receipt'],
+            tx_data['trace']
         )
     
     async_result = asyncio.run(run_async_analysis())

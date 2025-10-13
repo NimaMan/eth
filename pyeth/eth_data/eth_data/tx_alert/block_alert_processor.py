@@ -3,20 +3,20 @@ Block Alert Processor Module
 
 Objective:
 - Consume block data (list of transaction dictionaries) from RabbitMQ
-- Process transactions using TxnAlertProcessor
+- Process transactions using txAlertProcessor
 - Publish alerts back to RabbitMQ
 - Handle priorities and concurrent processing
 
 Flow:
 1. Consume blocks (containing a list of DetailedTransactions in a dict) from RabbitMQ blocks_exchange
-2. Process transactions concurrently using TxnAlertProcessor
+2. Process transactions concurrently using txAlertProcessor
 3. Publish generated alerts to alerts_exchange
 """
 import time 
 import asyncio
 from typing import List
-from eth_data.tx_alert.txn_alert_processor import TransactionAlertProcessor
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_alert.tx_alert_processor import TransactionAlertProcessor
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.utils.logger import get_logger
 
 
@@ -24,22 +24,22 @@ from eth_data.utils.logger import get_logger
 class BlockAlertProcessor:
     def __init__(self, logger=None):
         self.logger = logger or get_logger(name="alert_processor")
-        self.txn_alert_processor = TransactionAlertProcessor(logger=self.logger)
+        self.tx_alert_processor = TransactionAlertProcessor(logger=self.logger)
 
-    async def process_block_transactions(self, txn_list: List[ProcessedTransaction]):
+    async def process_block_transactions(self, tx_list: List[ProcessedTransaction]):
         """Process list of transaction dictionaries concurrently"""
         try:
             start_time = time.time()
-            block_number = txn_list[0].block_number if txn_list else None
+            block_number = tx_list[0].block_number if tx_list else None
             
             # Process transactions concurrently
-            txn_tasks = [
-                self.txn_alert_processor.process_transaction(txn)
-                for txn in txn_list
+            tx_tasks = [
+                self.tx_alert_processor.process_transaction(tx)
+                for tx in tx_list
             ]
             
             # Wait for all transaction processing to complete
-            alerts_nested = await asyncio.gather(*txn_tasks, return_exceptions=True)
+            alerts_nested = await asyncio.gather(*tx_tasks, return_exceptions=True)
             
             # Flatten and filter alerts
             valid_alerts = []

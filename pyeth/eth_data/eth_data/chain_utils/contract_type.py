@@ -53,7 +53,7 @@ def _looks_like_minimal_proxy(bytecode: bytes) -> bool:
     return False
 
 
-def get_erc20_contract_info(contract_address: str, w3: Web3 = None, block_identifier: Optional[Union[int, str]] = 'latest') -> Optional[dict]:
+def get_erc20_contract_info_rpc(contract_address: str, w3: Web3 = None, block_identifier: Optional[Union[int, str]] = 'latest') -> Optional[dict]:
     """
     Attempts to identify if a contract is an ERC-20 token and returns its information
     at a specific block identifier.
@@ -142,7 +142,7 @@ def get_erc20_contract_info(contract_address: str, w3: Web3 = None, block_identi
 
 
 def is_erc20_contract(contract_address: str, w3: Web3 = None, block_identifier: Optional[Union[int, str]] = 'latest') -> Optional[dict]:
-    return get_erc20_contract_info(contract_address, w3, block_identifier) is not None
+    return get_erc20_contract_info_rpc(contract_address, w3, block_identifier) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ def classify_contract(address: str, w3: Web3, block='latest') -> str:
 
     # existing ERC‑20 / 721 / 1155 probes follow …
     try:
-        if get_erc20_contract_info(checksum, w3, block):
+        if get_erc20_contract_info_rpc(checksum, w3, block):
             return "ERC20"
         if get_erc721_contract_info(checksum, w3, block):
             return "ERC721"

@@ -155,3 +155,23 @@ INIT → BUY_SUBMITTED → BUY_PENDING → BUY_CONFIRMED → SELL_SUBMITTED → 
 3. **Access Control**: Read-only for most services
 4. **Audit Trail**: Immutable execution history
 5. **Data Encryption**: Sensitive fields encrypted at rest
+
+## Environment
+
+- `LIVE_TRADING_DB_URL`: Primary DSN for Python tools in this folder.
+- `DATABASE_URL`: Fallback DSN (and the default for Rust sqlx examples).
+- `KARTAL_KILIT`: Hex private key for the Rust executor (ETH Kartal).
+- `ETH_RPC_URL`: HTTP RPC endpoint used by the executor.
+- `RETH_DB_PATH` (recommended): Local Reth DB path for low‑latency AMM quotes.
+
+The Python connection helpers now prefer `LIVE_TRADING_DB_URL`, then `DATABASE_URL`, then a local default.
+
+## Integration Notes (ETH Kartal)
+
+- Signals use `trade_signals` (schema in this folder). The executor reads rows with `status='PENDING'`, updates to `SUBMITTED` on send, and a separate confirmation process updates to `CONFIRMED` or `FAILED`.
+- The executor computes Uniswap V2 pool addresses from `(token, WETH)` via `reth_chain_query` and does not require storing `pool_address` here. Use `pool_id` (FK to `eth_db.pools`) for cross‑DB references when needed.
+- Minimal write set from the executor examples:
+  - `trade_signals.status`: PENDING → SUBMITTED on submit; later → CONFIRMED/FAILED.
+  - `executions`: inserts a row with `(signal_id, status='SUBMITTED', tx_hash, nonce, gas_price)`; confirmation logic enriches block fields and may update `status`.
+
+Status values are enforced by check constraints defined in `live_trading_models.py`.

@@ -35,7 +35,7 @@ class TokenDataFetcher:
             token_address: Token contract address
             
         Returns:
-            dict: Token metadata including creator, creation txn, scam status
+            dict: Token metadata including creator, creation tx, scam status
         """
         with self.Session() as session:
             query = text("""
@@ -44,8 +44,8 @@ class TokenDataFetcher:
                     a.address as creator_address,
                     t.is_scam,
                     t.scam_label,
-                    t.creation_txn,
-                    t.trading_enabled_txn
+                    t.creation_tx,
+                    t.trading_enabled_tx
                 FROM 
                     eth_db.tokens t
                 LEFT JOIN 
@@ -66,8 +66,8 @@ class TokenDataFetcher:
                     "creator_address": row[1],
                     "is_scam": row[2],
                     "scam_label": row[3],
-                    "creation_txn": row[4],
-                    "trading_enabled_txn": row[5]
+                    "creation_tx": row[4],
+                    "trading_enabled_tx": row[5]
                 }
             return None
     

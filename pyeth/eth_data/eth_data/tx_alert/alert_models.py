@@ -40,7 +40,7 @@ class UserInvolvedAlertData:
     transaction_hash: str
     from_address: str
     involved_addresses: Set[str]
-    txn_type: str
+    tx_type: str
     alert_type: str
     erc20_contracts: Set[str] = field(default_factory=tuple)
 

@@ -145,7 +145,7 @@ class AddressMetricsUpdater:
             session.execute(
                 text("""
                 INSERT INTO eth_db.addresses 
-                (address, is_contract, total_erc20_txn, total_erc20_trades)
+                (address, is_contract, total_erc20_tx, total_erc20_trades)
                 VALUES (:addr, FALSE, 0, 0)
                 """),
                 {"addr": address}

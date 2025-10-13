@@ -12,7 +12,7 @@ from eth_data.database.eth_db_conn import get_db_engine
 async def process_blocks_in_range(
     node_url: str,
     num_blocks: int = 1000000,
-    save_txn_to_db: bool = True,
+    index_address_txs: bool = True,
     start_block: int = None,
     end_block: int = None
 ):
@@ -22,7 +22,7 @@ async def process_blocks_in_range(
     Args:
         node_url: URL of the Ethereum node
         num_blocks: Number of blocks to process
-        save_txn_to_db: Whether to save transactions to the database
+        index_address_txs: Whether to persist address→tx participation data
         start_block: Starting block number (optional)
         end_block: Ending block number (optional)
     """
@@ -31,7 +31,7 @@ async def process_blocks_in_range(
     # Initialize processor with database saving enabled
     processor = BlockProcessor(
         node_url=node_url,
-        save_txn_to_db=save_txn_to_db,
+        index_address_txs=index_address_txs,
         logger=logger
     )
     
@@ -48,7 +48,7 @@ async def process_blocks_in_range(
         
         logger.info(f"Block range: {start_block} to {end_block}")        
         for block_number in tqdm(range(end_block, start_block - 1, -1)):    
-            result = await processor.process_block(block_number)
+            await processor.process_block(block_number)
         
     except Exception as e:
         logger.error(f"Error in process_blocks: {str(e)}")
@@ -137,7 +137,7 @@ async def process_blocks_batch(block_numbers: list[int]):
     logger = get_logger("db_tx_processor")
     block_processor = BlockProcessor(
         node_url="http://localhost:8545",
-        save_txn_to_db=True,
+        index_address_txs=True,
         logger=logger
     )
     for block_number in tqdm(block_numbers):
@@ -153,18 +153,18 @@ def update_tx_db_with_missing_blocks(start_date_str="2025-01-01"):
 def run_process_blocks_in_range(
     node_url="http://localhost:8545",
     num_blocks=1000000,
-    save_txn_to_db=True,
+    index_address_txs=True,
     start_block=None,
     end_block=None
 ):
     asyncio.run(process_blocks_in_range(
         node_url=node_url,
         num_blocks=num_blocks,
-        save_txn_to_db=save_txn_to_db,
+        index_address_txs=index_address_txs,
         start_block=start_block,
         end_block=end_block
     ))
 
 
 if __name__ == "__main__":
-    update_tx_db_with_missing_blocks(start_date_str="2024-11-15")
+    update_tx_db_with_missing_blocks(start_date_str="2025-10-8")

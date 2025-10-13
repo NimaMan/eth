@@ -14,6 +14,7 @@ scripts/
 │   └── service_manager.sh    # Master service manager
 ├── process_blocks_live.py    # Live block processor script
 ├── run_live_processor.sh     # Development runner
+├── simulate_historical_tx.py # Simulate a mined tx against prior block
 └── provide_tx_service/       # Transaction validation service
 ```
 
@@ -46,6 +47,28 @@ Run the processor directly without systemd:
 
 ### process_blocks_live.py
 Main Python script that runs the Live Block Processor. Monitors new blocks and processes transactions in real-time.
+
+### simulate_historical_tx.py
+Simulate a known mined transaction as if it were pending, using `debug_traceCall` against the prior block state, and compare with actual execution.
+
+- What it does:
+  - Loads a mined tx (edit `tx_hash` and `mined_block` in the script)
+  - Simulates it against `mined_block - 1`
+  - Compares gas usage and ETH transfer paths
+  - Prints a simple validation summary
+
+- Requirements:
+  - Node with debug API enabled (`debug_traceCall`). For Geth/Erigon, enable `debug` module.
+  - Endpoint configured at `http://127.0.0.1:8545` or adjust in the script.
+
+- Run:
+```
+python py/eth_data/scripts/simulate_historical_tx.py
+```
+
+- Notes:
+  - ETH transfers are compared as floats (ETH); a small tolerance is used.
+  - If you inspect state changes elsewhere in your pipeline, current balance-change outputs use `currency_net['ETH']` for ETH and `token_net` for unknown tokens (by contract address).
 
 ## Installation
 

@@ -9,8 +9,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any
 from sqlalchemy import (
-    Column, BigInteger, String, Numeric, Boolean, 
-    TIMESTAMP, JSON, ForeignKey, CheckConstraint, 
+    Column, BigInteger, String, Numeric, Boolean,
+    TIMESTAMP, JSON, ForeignKey, CheckConstraint,
     UniqueConstraint, Index, text
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -27,8 +27,10 @@ class TradingEnabledSignal(Base):
     __table_args__ = (
         UniqueConstraint('pool_address', 'detection_tx_hash', 
                         name='uq_pool_tx'),
-        CheckConstraint("pool_type IN ('V2', 'V3', 'V4')", 
-                       name='check_pool_type'),
+        CheckConstraint(
+            "pool_type IN ('UNISWAP-V2', 'UNISWAP-V3', 'UNISWAP-V4', 'SUSHI-SWAP', 'CURVE', 'BALANCER')",
+            name='check_pool_type'
+        ),
         Index('idx_signals_token_address', 'token_address'),
         Index('idx_signals_pool_address', 'pool_address'),
         Index('idx_signals_detection_timestamp', 'detection_timestamp', postgresql_using='btree'),
@@ -37,7 +39,7 @@ class TradingEnabledSignal(Base):
         Index('idx_signals_liquidity', 'denom_reserve_at_signal',
               postgresql_where=text('denom_reserve_at_signal > 0')),
         Index('idx_signals_token_pool_time', 'token_address', 'pool_address', 'detection_timestamp'),
-        {'schema': 'signals'}
+        {'schema': 'live_trading'}
     )
     
     # Primary key

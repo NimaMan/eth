@@ -4,7 +4,7 @@ from web3 import Web3
 from eth_data.tx_processor.tx_trace_processor import TransactionTraceProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.data_models.trace_models import InternalTransaction
-from eth_data.tx_processor.data_models.txn_models import (
+from eth_data.tx_processor.data_models.tx_models import (
     ProcessedTransaction, 
     TransactionFees,
     ERC20Transfer,
@@ -12,25 +12,25 @@ from eth_data.tx_processor.data_models.txn_models import (
 )
 
 
-def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
+def test_failed_contract_creation(tx_analyzer, tx_data_fetcher):
     """Test that both sync and async analysis match the expected failed contract creation details"""
     
     # First get the transaction data to get the actual input
-    txn_hash = "0x8304000190747e7f8ace1510304ada10d66ec24e05427dc8f994ddbea3b97d6c"
-    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
-    actual_input = txn_data['transaction']['input']
+    tx_hash = "0x8304000190747e7f8ace1510304ada10d66ec24e05427dc8f994ddbea3b97d6c"
+    tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
+    actual_input = tx_data['transaction']['input']
     
     expected_transaction = ProcessedTransaction(
         hash="0x8304000190747e7f8ace1510304ada10d66ec24e05427dc8f994ddbea3b97d6c",
         block_number=21430859,
-        txn_index=5,
+        tx_index=5,
         from_address="0x24a0A2E8943330b9e2C26BA3ccb954D9cF76c232",
         to_address="0xf508944ff0D5192B990B7Be13E12e474b8f3cA09",
         contract_address=None,
         value=0.0,
         status=False,
         nonce=1879,
-        txn_type="Contract Interaction",
+        tx_type="Contract Interaction",
         actions=[],
         eth_transfers=[],
         erc20_transfers=[],
@@ -124,7 +124,7 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=36532968599,
             gas_used=127110,
-            txn_fee=0.00464370563861889
+            tx_fee=0.00464370563861889
         ),
         unique_addresses={
             "0x24a0A2E8943330b9e2C26BA3ccb954D9cF76c232",
@@ -135,54 +135,54 @@ def test_failed_contract_creation(txn_analyzer, txn_data_fetcher):
             "0xCe9dcc28791a98EDfd4175a7d55da9f86C560199"
         },
         erc20_contracts=set(),
-        state_changes={},
+        address_balance_changes={},
         latest_states={},
         bribe_amount=0.0,
         input=actual_input  # Use the actual input from transaction
     )
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.process_transaction(
-        txn_data['transaction'],
-        txn_data['receipt'],
-        txn_data['trace']
+    sync_result = tx_analyzer.process_transaction(
+        tx_data['transaction'],
+        tx_data['receipt'],
+        tx_data['trace']
     )
     
     assert sync_result == expected_transaction
 
      # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.process_transaction_async(
-            txn_data['transaction'],
-            txn_data['receipt'],
-            txn_data['trace']
+        return await tx_analyzer.process_transaction_async(
+            tx_data['transaction'],
+            tx_data['receipt'],
+            tx_data['trace']
         )
     
     async_result = asyncio.run(run_async_analysis())
     assert async_result == expected_transaction 
 
 
-def test_transaction_bribe_amount(txn_analyzer, txn_data_fetcher):
+def test_transaction_bribe_amount(tx_analyzer, tx_data_fetcher):
     """Test analysis of a complex swap transaction with multiple internal transfers"""
     
-    txn_hash = "0xc8e4638975eae8e711b6bdc0f62119d8a9a29a9c7a09c32b62b10274b512d916"
+    tx_hash = "0xc8e4638975eae8e711b6bdc0f62119d8a9a29a9c7a09c32b62b10274b512d916"
     bribe_amount = 0.01
-    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
+    tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
     # Test synchronous analysis
-    sync_result = txn_analyzer.process_transaction(
-        txn_data['transaction'],
-        txn_data['receipt'],
-        txn_data['trace']
+    sync_result = tx_analyzer.process_transaction(
+        tx_data['transaction'],
+        tx_data['receipt'],
+        tx_data['trace']
     )    
     # Verify specific aspects of the swap
     assert sync_result.bribe_amount == bribe_amount
 
     # Test async analysis
     async def run_async_analysis():
-        return await txn_analyzer.process_transaction_async(
-            txn_data['transaction'],
-            txn_data['receipt'],
-            txn_data['trace']
+        return await tx_analyzer.process_transaction_async(
+            tx_data['transaction'],
+            tx_data['receipt'],
+            tx_data['trace']
         )
     
     async_result = asyncio.run(run_async_analysis())

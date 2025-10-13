@@ -20,15 +20,15 @@ def w3():
     return web3
 
 @pytest.fixture
-def txn_data_fetcher(w3):
+def tx_data_fetcher(w3):
     return TransactionDataFetcher(w3)
 
 @pytest.fixture
-def txn_analyzer(w3):
+def tx_analyzer(w3):
     return TransactionProcessor(w3)
 
 @pytest.fixture
-def txn_batch_analyzer(w3, txn_analyzer):
+def tx_batch_analyzer(w3, tx_analyzer):
     return TransactionBatchProcessor(w3=w3)
 
 @pytest.fixture(scope="function")

@@ -82,7 +82,7 @@ class TokenStatusWriter:
         Args:
             token_data: Dict containing token information
                 Required keys: contract_address, is_scam, scam_label
-                Optional keys: creator_address, creation_txn, trading_enabled_txn
+                Optional keys: creator_address, creation_tx, trading_enabled_tx
         
         Returns:
             bool: Success status
@@ -111,13 +111,13 @@ class TokenStatusWriter:
                     text("""
                     INSERT INTO eth_db.tokens 
                     (contract_address, creator_address_id, is_scam, scam_label, 
-                     creation_txn)
+                     creation_tx)
                     VALUES (:contract_address, :creator_address_id, :is_scam, :scam_label,
-                            :creation_txn)
+                            :creation_tx)
                     ON CONFLICT (contract_address) DO UPDATE SET
                         is_scam = EXCLUDED.is_scam,
                         scam_label = EXCLUDED.scam_label,
-                        creation_txn = COALESCE(EXCLUDED.creation_txn, tokens.creation_txn),
+                        creation_tx = COALESCE(EXCLUDED.creation_tx, tokens.creation_tx),
                         creator_address_id = COALESCE(EXCLUDED.creator_address_id, tokens.creator_address_id)
                     """),
                     {
@@ -125,7 +125,7 @@ class TokenStatusWriter:
                         "creator_address_id": creator_address_id,
                         "is_scam": token_data["is_scam"],
                         "scam_label": token_data["scam_label"],
-                        "creation_txn": token_data.get("creation_txn")
+                        "creation_tx": token_data.get("creation_tx")
                     }
                     )
                     session.commit()
@@ -133,7 +133,7 @@ class TokenStatusWriter:
                     
             except Exception as e:
                 # Check if it's a foreign key violation
-                if isinstance(e.__cause__, ForeignKeyViolation) and "creation_txn" in str(e):
+                if isinstance(e.__cause__, ForeignKeyViolation) and "creation_tx" in str(e):
                     if attempt < max_retries - 1:
                         # Don't log retry attempts - just retry silently
                         time.sleep(retry_delays[attempt])
@@ -249,7 +249,7 @@ class TokenStatusWriter:
             with self.Session() as session:
                 result = session.execute(
                     text("""
-                    SELECT contract_address, is_scam, scam_label, creation_txn, trading_enabled_txn
+                    SELECT contract_address, is_scam, scam_label, creation_tx, trading_enabled_tx
                     FROM eth_db.tokens 
                     WHERE contract_address = :contract_address
                     """),
@@ -261,8 +261,8 @@ class TokenStatusWriter:
                         "contract_address": result[0],
                         "is_scam": result[1],
                         "scam_label": result[2],
-                        "creation_txn": result[3],
-                        "trading_enabled_txn": result[4]
+                        "creation_tx": result[3],
+                        "trading_enabled_tx": result[4]
                     }
                 return None
                 
@@ -279,7 +279,7 @@ class TokenStatusWriter:
         Args:
             token_data: Dict containing token information
                 Required keys: contract_address, is_scam, scam_label
-                Optional keys: creator_address, creation_txn, trading_enabled_txn
+                Optional keys: creator_address, creation_tx, trading_enabled_tx
             pools_data: Dict mapping pool_address to pool information
                 Each pool dict should contain:
                 Required: pool_type, denom_address, denom_reserve, token_reserve
@@ -312,13 +312,13 @@ class TokenStatusWriter:
                         text("""
                         INSERT INTO eth_db.tokens 
                         (contract_address, creator_address_id, is_scam, scam_label, 
-                         creation_txn)
+                         creation_tx)
                         VALUES (:contract_address, :creator_address_id, :is_scam, :scam_label,
-                                :creation_txn)
+                                :creation_tx)
                         ON CONFLICT (contract_address) DO UPDATE SET
                             is_scam = EXCLUDED.is_scam,
                             scam_label = EXCLUDED.scam_label,
-                            creation_txn = COALESCE(EXCLUDED.creation_txn, tokens.creation_txn),
+                            creation_tx = COALESCE(EXCLUDED.creation_tx, tokens.creation_tx),
                             creator_address_id = COALESCE(EXCLUDED.creator_address_id, tokens.creator_address_id)
                         """),
                         {
@@ -326,7 +326,7 @@ class TokenStatusWriter:
                             "creator_address_id": creator_address_id,
                             "is_scam": token_data["is_scam"],
                             "scam_label": token_data["scam_label"],
-                            "creation_txn": token_data.get("creation_txn")
+                            "creation_tx": token_data.get("creation_tx")
                         }
                     )
                     
@@ -347,10 +347,10 @@ class TokenStatusWriter:
                                     INSERT INTO eth_db.pools 
                                     (pool_address, pool_id, pool_type, token_address, pair_token_address, fee_tier,
                                      is_scam, scam_label, scam_block, scam_tx_hash,
-                                     trading_enabled, trading_enabled_block, trading_enabled_txn)
+                                     trading_enabled_block, trading_enabled_tx)
                                     VALUES (:pool_address, :pool_id, :pool_type, :token_address, :pair_token_address, :fee_tier,
                                             :is_scam, :scam_label, :scam_block, :scam_tx_hash,
-                                            :trading_enabled, :trading_enabled_block, :trading_enabled_txn)
+                                            :trading_enabled_block, :trading_enabled_tx)
                                     ON CONFLICT (pool_address) DO UPDATE SET
                                         pool_type = EXCLUDED.pool_type,
                                         pair_token_address = EXCLUDED.pair_token_address,
@@ -359,9 +359,8 @@ class TokenStatusWriter:
                                         scam_label = COALESCE(EXCLUDED.scam_label, pools.scam_label),
                                         scam_block = COALESCE(EXCLUDED.scam_block, pools.scam_block),
                                         scam_tx_hash = COALESCE(EXCLUDED.scam_tx_hash, pools.scam_tx_hash),
-                                        trading_enabled = COALESCE(EXCLUDED.trading_enabled, pools.trading_enabled),
                                         trading_enabled_block = COALESCE(EXCLUDED.trading_enabled_block, pools.trading_enabled_block),
-                                        trading_enabled_txn = COALESCE(EXCLUDED.trading_enabled_txn, pools.trading_enabled_txn)
+                                        trading_enabled_tx = COALESCE(EXCLUDED.trading_enabled_tx, pools.trading_enabled_tx)
                                     """),
                                     {
                                         "pool_address": actual_pool_address,
@@ -374,9 +373,8 @@ class TokenStatusWriter:
                                         "scam_label": pool_info.get("scam_label"),
                                         "scam_block": pool_info.get("scam_block"),
                                         "scam_tx_hash": pool_info.get("scam_tx_hash"),
-                                        "trading_enabled": pool_info.get("trading_enabled", False),
                                         "trading_enabled_block": pool_info.get("trading_enabled_block"),
-                                        "trading_enabled_txn": pool_info.get("trading_enabled_txn")
+                                        "trading_enabled_tx": pool_info.get("trading_enabled_tx")
                                     }
                                 )
                             
@@ -387,10 +385,10 @@ class TokenStatusWriter:
                                     INSERT INTO eth_db.pools 
                                     (pool_address, pool_id, pool_type, token_address, pair_token_address, fee_tier,
                                      is_scam, scam_label, scam_block, scam_tx_hash,
-                                     trading_enabled, trading_enabled_block, trading_enabled_txn)
+                                     trading_enabled_block, trading_enabled_tx)
                                     VALUES (:pool_address, :pool_id, :pool_type, :token_address, :pair_token_address, :fee_tier,
                                             :is_scam, :scam_label, :scam_block, :scam_tx_hash,
-                                            :trading_enabled, :trading_enabled_block, :trading_enabled_txn)
+                                            :trading_enabled_block, :trading_enabled_tx)
                                     ON CONFLICT (pool_id) DO UPDATE SET
                                         pool_type = EXCLUDED.pool_type,
                                         pair_token_address = EXCLUDED.pair_token_address,
@@ -399,9 +397,8 @@ class TokenStatusWriter:
                                         scam_label = COALESCE(EXCLUDED.scam_label, pools.scam_label),
                                         scam_block = COALESCE(EXCLUDED.scam_block, pools.scam_block),
                                         scam_tx_hash = COALESCE(EXCLUDED.scam_tx_hash, pools.scam_tx_hash),
-                                        trading_enabled = COALESCE(EXCLUDED.trading_enabled, pools.trading_enabled),
                                         trading_enabled_block = COALESCE(EXCLUDED.trading_enabled_block, pools.trading_enabled_block),
-                                        trading_enabled_txn = COALESCE(EXCLUDED.trading_enabled_txn, pools.trading_enabled_txn)
+                                        trading_enabled_tx = COALESCE(EXCLUDED.trading_enabled_tx, pools.trading_enabled_tx)
                                     """),
                                     {
                                         "pool_address": actual_pool_address,
@@ -414,9 +411,8 @@ class TokenStatusWriter:
                                         "scam_label": pool_info.get("scam_label"),
                                         "scam_block": pool_info.get("scam_block"),
                                         "scam_tx_hash": pool_info.get("scam_tx_hash"),
-                                        "trading_enabled": pool_info.get("trading_enabled", False),
                                         "trading_enabled_block": pool_info.get("trading_enabled_block"),
-                                        "trading_enabled_txn": pool_info.get("trading_enabled_txn")
+                                        "trading_enabled_tx": pool_info.get("trading_enabled_tx")
                                     }
                                 )
                                 
@@ -430,7 +426,7 @@ class TokenStatusWriter:
                     
             except Exception as e:
                 # Check if it's a foreign key violation
-                if isinstance(e.__cause__, ForeignKeyViolation) and "creation_txn" in str(e):
+                if isinstance(e.__cause__, ForeignKeyViolation) and "creation_tx" in str(e):
                     if attempt < max_retries - 1:
                         # Don't log retry attempts - just retry silently
                         time.sleep(retry_delays[attempt])

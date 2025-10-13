@@ -40,11 +40,12 @@ async def test_block_encoding():
         processor = BlockProcessor()
         
         try:
-            processed_block = await processor.process_block(block_number)
-            print(f"\nProcessing block {block_number} with {len(processed_block)} transactions")
+            processed_block_result = await processor.process_block(block_number)
+            transactions = processed_block_result.transactions
+            print(f"\nProcessing block {block_number} with {len(transactions)} transactions")
             
             failed_txs = []
-            for idx, tx in enumerate(processed_block):
+            for idx, tx in enumerate(transactions):
                 try:
                     # Try to encode each transaction individually
                     encoded_tx = orjson.dumps(
@@ -89,7 +90,7 @@ async def test_block_encoding():
             # Try encoding the full block
             try:
                 encoded_custom = orjson.dumps(
-                    processed_block,
+                    transactions,
                     default=transaction_serializer,
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )

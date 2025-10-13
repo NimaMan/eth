@@ -5,7 +5,7 @@ import time
 from typing import List, Dict, Any
 
 from eth_data.blockchain.block_processor import BlockProcessor
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 
 # Configuration
 NODE_URL = "http://127.0.0.1:8545"  # Adjust if your node URL is different
@@ -14,8 +14,8 @@ NUM_BLOCKS_TO_PROCESS = 10         # Number of recent blocks to test with (incre
 @pytest_asyncio.fixture(scope="module")
 async def block_processor():
     """Provides an initialized BlockProcessor instance and closes it afterwards."""
-    # Set save_txn_to_db=False to avoid database side effects during testing
-    processor = BlockProcessor(node_url=NODE_URL, save_txn_to_db=False, calculate_state_changes=True)
+    # Disable address indexing to avoid database side effects during testing
+    processor = BlockProcessor(node_url=NODE_URL, index_address_txs=False, calculate_address_balance_changes=True)
     yield processor
     # Ensure cleanup
     print("\nClosing BlockProcessor resources...")
@@ -69,8 +69,8 @@ async def test_processor_performance_comparison(block_processor: BlockProcessor)
     for block_num in target_block_numbers:
         try:
             # Using process_block which fetches and processes one by one
-            processed_txs = await block_processor.process_block(block_num)
-            sequential_results[block_num] = processed_txs
+            processed_block_result = await block_processor.process_block(block_num)
+            sequential_results[block_num] = processed_block_result.transactions if processed_block_result else []
         except Exception as e:
             print(f"Error processing block {block_num} sequentially: {e}")
             sequential_results[block_num] = [] # Mark as empty on error
@@ -103,7 +103,8 @@ async def test_processor_performance_comparison(block_processor: BlockProcessor)
     mismatched_blocks = []
     for block_num in batch_keys:
         seq_txs = sequential_results.get(block_num, [])
-        batch_txs = batch_results_dict.get(block_num, [])
+        batch_result = batch_results_dict.get(block_num)
+        batch_txs = batch_result.transactions if batch_result else []
         
         if not compare_processed_txs(seq_txs, batch_txs):
             mismatched_blocks.append(block_num)

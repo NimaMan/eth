@@ -22,9 +22,7 @@ Schema Design Rationale & Data Flow:
     *   `realized_profit` and `unrealized_profit` track the PnL for this specific address-token pair.
 3.  **Address Profiling (`addresses` table):** Aggregates metrics across all trades and activities for a given address.
     *   Includes overall PnL (`total_profit`, `total_realized_profit`), volume (`total_volume`), scam exposure (`scam_ratio`), activity (`trade_frequency`, `first_seen`, `last_seen`), and total gas costs (`total_tx_fee`).
-    *   Network metrics (`degree_centrality`, `betweenness_centrality`, `num_related_addresses`) provide context within the address graph.
-4.  **Network Analysis (`related_addresses`):** Stores direct relationships observed between addresses (e.g., fund flows), linking back to the specific `trade` context where the relationship might be relevant.
-5.  **Token Metadata (`tokens`):** Stores token-specific information, including creator details and scam status, linking to creation transactions.
+4.  **Token Metadata (`tokens`):** Stores token-specific information, including creator details and scam status, linking to creation transactions.
 
 This design prioritizes aggregated metrics suitable for PnL analysis, scam detection heuristics, and address ranking, while retaining links to underlying transactions for drill-down analysis.
 
@@ -32,13 +30,12 @@ Tables Overview:
   1. addresses:                         Stores on-chain user (wallet/contract) data and aggregated metrics.
   2. tokens:                            Contains metadata for tokens tracked on Ethereum.
   3. trades:                            Aggregates interactions between an address and a token.
-  4. related_addresses:                 Captures associated network relationships between addresses.
-  5. tx_participants:                   Links transactions and participating addresses (many-to-many).
-  6. transactions:                      Represents minimal transaction records.
-  7. blocks:                            Stores block-level metadata.
+  4. tx_participants:                   Links transactions and participating addresses (many-to-many).
+  5. transactions:                      Represents minimal transaction records.
+  6. blocks:                            Stores block-level metadata.
 """
 
-from sqlalchemy import Column, Integer, Float, String, Boolean, JSON, ForeignKey, Index, CheckConstraint, Text, BigInteger, UniqueConstraint
+from sqlalchemy import Column, Integer, Float, String, Boolean, JSON, ForeignKey, Index, CheckConstraint, Text, BigInteger, UniqueConstraint, DateTime
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func 
@@ -124,7 +121,7 @@ class Address(Base):
     address = Column(String(42), nullable=False, index=True)
 
     is_contract = Column(Boolean, nullable=False, default=False)
-    total_erc20_txn = Column(Integer, default=0)
+    total_erc20_tx = Column(Integer, default=0)
     total_erc20_trades = Column(Integer, default=0)
 
     # Core Trading Metrics
@@ -179,13 +176,11 @@ class Token(Base):
     scam_label = Column(String(50))
 
     # Transaction references (assuming these remain hashes)
-    creation_txn = Column(String(66), ForeignKey('eth_db.transactions.tx_hash'), index=True)
-    trading_enabled_txn = Column(String(66), ForeignKey('eth_db.transactions.tx_hash'), index=True)
+    creation_tx = Column(String(66), ForeignKey('eth_db.transactions.tx_hash'), index=True)
 
     # Relationships
     creator = relationship("Address", back_populates="created_tokens", foreign_keys=[creator_address_id])
-    creation_transaction = relationship("Transaction", foreign_keys=[creation_txn])
-    trading_enabled_transaction = relationship("Transaction", foreign_keys=[trading_enabled_txn])
+    creation_transaction = relationship("Transaction", foreign_keys=[creation_tx])
     pools = relationship("Pool", back_populates="token")
 
 
@@ -232,10 +227,9 @@ class Pool(Base):
     scam_block = Column(Integer)
     scam_tx_hash = Column(String(66))
     
-    # Trading enabled fields
-    trading_enabled = Column(Boolean, default=False)
+    # Trading enabled fields (tx presence indicates enabled status)
     trading_enabled_block = Column(BigInteger)
-    trading_enabled_txn = Column(String(66))
+    trading_enabled_tx = Column(String(66))
     
     # Relationships
     token = relationship("Token", back_populates="pools")
@@ -244,16 +238,16 @@ class Pool(Base):
 # ---------------------------------------------------------------------------
 # Trade Model: Represents Aggregated Trades Between Addresses and Tokens
 # ---------------------------------------------------------------------------
-# This model aggregates trades between a specific address and a specific token.
-# It captures core transaction metrics, profit and loss metrics, behavioral signals,
-# and aggregated network metrics.
+# This model aggregates trades between a specific address and a specific token
+# in a specific currency. Each row represents all interactions between an address
+# and token when trading against a particular currency (ETH, USDC, USDT, etc.).
 class Trade(Base):
     __tablename__ = 'trades'
 
     id = Column(Integer, primary_key=True)
-    address_id = Column(BigInteger, ForeignKey('eth_db.addresses.address_id'), index=True)
-    token_address = Column(String(42), ForeignKey('eth_db.tokens.contract_address'), index=True)
-    currency = Column(String(10))
+    address_id = Column(BigInteger, ForeignKey('eth_db.addresses.address_id'), nullable=False, index=True)
+    token_address = Column(String(42), ForeignKey('eth_db.tokens.contract_address'), nullable=False, index=True)
+    currency = Column(String(10), nullable=False, default='ETH', index=True)
 
     # Core Transaction Metrics
     entry_block = Column(Integer)
@@ -261,8 +255,6 @@ class Trade(Base):
     total_denom_spent = Column(Float, default=0.0)
     total_denom_received = Column(Float, default=0.0)
     denom_received_spent_ratio = Column(Float)
-    bribe_amount = Column(Float, default=0.0)
-    tx_fee = Column(Float, default=0.0)
 
     # Profit and Loss Metrics
     realized_profit = Column(Float, default=0.0)
@@ -271,22 +263,27 @@ class Trade(Base):
     # Behavioral Signals
     num_buys = Column(Integer, default=0)
     num_sells = Column(Integer, default=0)
-    token_holdings_ratio = Column(Float)
-    token_sell_buy_ratio = Column(Float)
 
-    # Aggregated Network Metrics
-    agg_denom_balance = Column(Float, default=0.0)
-    agg_token_balance = Column(Float, default=0.0)
+    # Balance tracking
+    total_gas_spent = Column(Float, default=0.0)
+    token_balance = Column(Float, default=0.0)
+    denom_balance = Column(Float, default=0.0)
+
+    # Metadata
+    last_updated = Column(DateTime, server_default=func.now())
 
     # Relationships
     trader = relationship("Address", back_populates="initiated_trades", foreign_keys=[address_id])
     token = relationship("Token", backref="trades")
 
     __table_args__ = (
-        Index('idx_trade_profit', realized_profit.desc()),
-        Index('idx_trade_entry_block', entry_block.desc()),
-        Index('idx_trade_latest_block', latest_block.desc()),
-        Index('idx_trade_address_id', 'address_id'),
+        UniqueConstraint('address_id', 'token_address', 'currency', name='trades_address_token_currency_key'),
+        Index('idx_trades_address_id', 'address_id'),
+        Index('idx_trades_token_address', 'token_address'),
+        Index('idx_trades_currency', 'currency'),
+        Index('idx_trades_realized_profit', realized_profit.desc()),
+        Index('idx_trades_latest_block', latest_block.desc()),
+        Index('idx_trades_updated', last_updated.desc()),
         {'schema': 'eth_db'}
     )
 

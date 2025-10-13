@@ -22,33 +22,14 @@ and state changes.
 import sys
 import json
 import asyncio
-import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+from typing import Dict, Any
 import traceback
-
-# Add parent directories to path for imports - be more explicit about paths
-import os
-
-# Ensure we can import regardless of working directory
-script_dir = os.path.dirname(os.path.abspath(__file__))
-eth_data_parent_dir = os.path.dirname(script_dir)  # /home/nima/code/crypto/py/eth_data
-
-# Add the eth_data directory to path so we can do 'from eth_data.tx_provider import ...'
-sys.path.insert(0, eth_data_parent_dir)
-
-# Log paths for debugging
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stderr)])
-logger = logging.getLogger(__name__)
-logger.info(f"Script dir: {script_dir}")
-logger.info(f"ETH data parent dir: {eth_data_parent_dir}")
-logger.info(f"Python sys.path: {sys.path[:3]}")
-
-# Import from the eth_data package
-from eth_data.tx_provider.processed_transaction_provider import RustProcessedTransactionProvider
+from eth_data.tx_provider.rs_processed_transaction_provider import RustProcessedTransactionProvider
 from eth_data.database.db_fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
 from eth_data.utils.logger import get_logger
+
+
+logger = get_logger("eth_data_mcp_server", log_folder="eth_mcp_server", log_level="info")
 
 
 class EthDataMCPServer:
@@ -308,7 +289,7 @@ class EthDataMCPServer:
                 "from": tx_dict["from_address"],
                 "to": tx_dict["to_address"],
                 "value": str(tx_dict["value"]),
-                "type": tx_dict["txn_type"],
+                "type": tx_dict["tx_type"],
                 "direction": "out" if tx_dict["from_address"] == address else "in"
             }
             
@@ -349,7 +330,7 @@ class EthDataMCPServer:
         if not block_number:
             raise ValueError("block_number is required")
         
-        logger.info(f"Processing block: {block_number} (save_to_db: {save_to_db})")
+        logger.info(f"Processing block: {block_number} (index_address_txs: {save_to_db})")
         
         # Use Python block processor for full block processing
         from eth_data.blockchain.block_processor import BlockProcessor
@@ -357,17 +338,19 @@ class EthDataMCPServer:
         # Initialize block processor
         block_processor = BlockProcessor(
             logger=logger,
-            save_txn_to_db=save_to_db
+            index_address_txs=save_to_db
         )
         
         # Process the block
         try:
-            processed_txs = await block_processor.process_block(block_number)
+            processed_block_result = await block_processor.process_block(block_number)
             
-            if not processed_txs:
+            if not processed_block_result:
                 return {
                     "error": f"Block {block_number} not found or has no transactions"
                 }
+
+            processed_txs = processed_block_result.transactions
             
             # Format results
             results = {
@@ -394,7 +377,7 @@ class EthDataMCPServer:
                     "to": tx_dict["to_address"],
                     "value": str(tx_dict["value"]),
                     "gas_used": tx_dict["fees"]["gas_used"],
-                    "type": tx_dict["txn_type"],
+                    "type": tx_dict["tx_type"],
                     "status": "success" if tx_dict["status"] == 1 else "failed"
                 }
                 
@@ -609,12 +592,17 @@ class EthDataMCPServer:
         """Run the MCP server main loop."""
         logger.info("Starting ETH Data MCP Server")
         
+        # Check if stdin is connected
+        if sys.stdin.isatty():
+            logger.warning("No input stream detected (running in terminal). Waiting for stdin...")
+        
         # Main message loop - wait for initialize request from client
         while True:
             try:
-                # Read line from stdin
-                line = sys.stdin.readline()
+                # Read line from stdin - blocks until data available
+                line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
                 if not line:
+                    logger.info("EOF received, shutting down")
                     break
                 
                 line = line.strip()

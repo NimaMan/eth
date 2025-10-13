@@ -4,9 +4,8 @@ Live Trading Database Schema
 This package contains the database models for live cryptocurrency trading operations.
 """
 
-from .models import (
+from .live_trading_models import (
     Base,
-    Token,
     Wallet,
     LivePosition,
     TradeSignal,
@@ -19,7 +18,6 @@ from .models import (
 
 __all__ = [
     'Base',
-    'Token',
     'Wallet', 
     'LivePosition',
     'TradeSignal',

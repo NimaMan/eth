@@ -12,7 +12,7 @@ from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.blockchain.block_fetcher import BlockFetcher
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
-from eth_data.tx_processor.data_models.txn_models import ProcessedTransaction
+from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 
 
 class ProcessedTxProvider:
@@ -28,48 +28,48 @@ class ProcessedTxProvider:
         self.calculate_state_changes = calculate_state_changes
         
         # Initialize processors
-        self.tx_processor = TransactionProcessor(w3=self.w3, calculate_state_changes=calculate_state_changes, eth_state_change_threshold=eth_state_change_threshold)
+        self.tx_processor = TransactionProcessor(w3=self.w3, calculate_address_balance_changes=calculate_state_changes, eth_state_change_threshold=eth_state_change_threshold)
         self.block_processor = BlockProcessor(w3=self.w3, logger=self.logger)
         self.block_fetcher = BlockFetcher(node_url="http://127.0.0.1:8545")
         self.tx_data_fetcher = TransactionDataFetcher(w3=self.w3)
-        self.batch_processor = TransactionBatchProcessor(w3=self.w3, calculate_state_changes=calculate_state_changes, logger=self.logger)
+        self.batch_processor = TransactionBatchProcessor(w3=self.w3, calculate_address_balance_changes=calculate_state_changes, logger=self.logger)
 
     def get_processed_tx(self, tx_hash: str, include_trace: bool = True) -> ProcessedTransaction:
         """Get a single processed transaction."""
-        txn_data = self.tx_data_fetcher.get_transaction_data(
+        tx_data = self.tx_data_fetcher.get_transaction_data(
             tx_hash, 
             receipt=True, 
             trace=include_trace,
             state_diff=self.calculate_state_changes
         )
         
-        if not txn_data.get('transaction'):
+        if not tx_data.get('transaction'):
             raise ValueError(f"Transaction {tx_hash} not found")
             
         processed_tx = self.tx_processor.process_transaction(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data.get('trace'),
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data.get('trace'),
             block_timestamp=0
         )
         return processed_tx
     
     async def get_processed_tx_async(self, tx_hash: str, include_trace: bool = True) -> ProcessedTransaction:
         """Get a single processed transaction asynchronously."""
-        txn_data = self.tx_data_fetcher.get_transaction_data(
+        tx_data = self.tx_data_fetcher.get_transaction_data(
             tx_hash, 
             receipt=True, 
             trace=include_trace,
             state_diff=self.calculate_state_changes
         )
         
-        if not txn_data.get('transaction'):
+        if not tx_data.get('transaction'):
             raise ValueError(f"Transaction {tx_hash} not found")
             
         processed_tx = await self.tx_processor.process_transaction_async(
-            txn_data['transaction'], 
-            txn_data['receipt'], 
-            txn_data.get('trace'),
+            tx_data['transaction'], 
+            tx_data['receipt'], 
+            tx_data.get('trace'),
             state_diff=self.calculate_state_changes
         )
         return processed_tx

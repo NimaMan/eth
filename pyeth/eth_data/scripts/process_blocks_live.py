@@ -41,7 +41,7 @@ async def shutdown(signal=None):
     logger.info("Shutdown complete")
 
 
-async def main(save_txn_to_db: bool = True):
+async def main(index_address_txs: bool = True):
     """
     Main entry point for the Ethereum Alert System.
     
@@ -54,7 +54,7 @@ async def main(save_txn_to_db: bool = True):
     
     # Initialize components
     _processor = LiveBlockProcessor(
-        save_txn_to_db=save_txn_to_db,
+        index_address_txs=index_address_txs,
         rabbitmq_url="amqp://guest:guest@127.0.0.1/",
         logger=logger
     )
@@ -83,7 +83,7 @@ async def main(save_txn_to_db: bool = True):
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main(save_txn_to_db=True))
+        asyncio.run(main(index_address_txs=True))
     except KeyboardInterrupt:
         # This is a fallback - the signal handler should catch most interrupts
         logger.info("KeyboardInterrupt received. Exiting...")

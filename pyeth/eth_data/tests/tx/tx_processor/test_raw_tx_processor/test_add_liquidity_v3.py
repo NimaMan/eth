@@ -13,31 +13,31 @@ Objective: Verify correct parsing of Uniswap V3 add liquidity transaction includ
 import asyncio
 from eth_data.tx_processor.data_models.receipt_models import *
 from eth_data.tx_processor.data_models.trace_models import *
-from eth_data.tx_processor.data_models.txn_models import *
+from eth_data.tx_processor.data_models.tx_models import *
 from eth_data.data_models import *
 import pytest
 
 
-def test_add_liquidity_v3(txn_analyzer, txn_data_fetcher):
+def test_add_liquidity_v3(tx_analyzer, tx_data_fetcher):
     """Test that both sync and async analysis match the expected add liquidity V3 details"""
     
     expected_add_liquidity = ProcessedTransaction(
         hash='0xb6550ffbe2bbca45edf1ffcdea957a57b4f83a9ac15e1f5d3af3fd032cda1482',
         block_number=21479418,
         block_timestamp=1735128851,
-        txn_index=143,
+        tx_index=143,
         from_address='0x5eA17A4b7477b2bECe0214A40723a2A09b2099D2',
         to_address='0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
         contract_address=None,
         value=1.0,
         status=True,
         nonce=1626,
-        txn_type='Multicall',
+        tx_type='Multicall',
         actions=[],
         fees=TransactionFees(
             gas_price=4033803965,
             gas_used=5254070,
-            txn_fee=0.02119388839838755
+            tx_fee=0.02119388839838755
         ),
         bribe_amount=0.0,
         unique_addresses={
@@ -222,28 +222,28 @@ def test_add_liquidity_v3(txn_analyzer, txn_data_fetcher):
         uniswap_v4_swaps=[],
         permit2_events=[],
         other_events=[],
-        state_changes={},
+        address_balance_changes={},
         latest_states={},
         input='0xac9650d80000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000002c0000000000000000000000000000000000000000000000000000000000000008413ead562000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000dee6cdd28da9f51e3a8421395973894a884f3b2d000000000000000000000000000000000000000000000000000000000000271000000000000000000000000000000000000002812d16b6323bb1f1f8acfd9fc000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016488316456000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000dee6cdd28da9f51e3a8421395973894a884f3b2d0000000000000000000000000000000000000000000000000000000000002710ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff276600000000000000000000000000000000000000000000000000de0b6b3a7640000000000000000000000000000000000000000000000000570e254f40039f1c6e0000000000000000000000000000000000000000000000000dd7dd74c6d4c907000000000000000000000000000000000000000000000056d65c4d7ba5698a9c0000000000000000000000005ea17a4b7477b2bece0214a40723a2a09b2099d2000000000000000000000000000000000000000000000000000000000676bfdfa000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000412210e8a00000000000000000000000000000000000000000000000000000000'
     )
 
-    txn_hash = "0xb6550ffbe2bbca45edf1ffcdea957a57b4f83a9ac15e1f5d3af3fd032cda1482"
-    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
+    tx_hash = "0xb6550ffbe2bbca45edf1ffcdea957a57b4f83a9ac15e1f5d3af3fd032cda1482"
+    tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.process_transaction(
-        txn_data['transaction'],
-        txn_data['receipt'],
-        txn_data['trace']
+    sync_result = tx_analyzer.process_transaction(
+        tx_data['transaction'],
+        tx_data['receipt'],
+        tx_data['trace']
     )
     assert sync_result == expected_add_liquidity
     
     # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.process_transaction_async(
-            txn_data['transaction'],
-            txn_data['receipt'],
-            txn_data['trace']
+        return await tx_analyzer.process_transaction_async(
+            tx_data['transaction'],
+            tx_data['receipt'],
+            tx_data['trace']
         )
     
     async_result = asyncio.run(run_async_analysis())

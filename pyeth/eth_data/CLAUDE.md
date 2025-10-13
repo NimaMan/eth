@@ -58,7 +58,7 @@ eth_data/
 │   ├── tx_log_processor.py       # Event log decoding
 │   ├── tx_trace_processor.py     # Internal transaction extraction
 │   └── data_models/              # Data structures
-│       └── txn_models.py         # ProcessedTransaction model
+│       └── tx_models.py         # ProcessedTransaction model
 │
 ├── tx_providor/         # Transaction data providers
 │   ├── processed_transaction_provider.py  # Rust-based provider (91.5x faster)
@@ -231,7 +231,7 @@ Python packages (qw conda environment):
 ```python
 from eth_data.blockchain.block_processor import BlockProcessor
 
-processor = BlockProcessor(save_txn_to_db=True)
+processor = BlockProcessor(index_address_txs=True)
 await processor.process_block_range(start_block=20000000, end_block=20000100)
 ```
 
@@ -240,7 +240,7 @@ await processor.process_block_range(start_block=20000000, end_block=20000100)
 ```python
 from eth_data.blockchain.live_block_processor import LiveBlockProcessor
 
-processor = LiveBlockProcessor(save_txn_to_db=True)
+processor = LiveBlockProcessor(index_address_txs=True)
 await processor.run()  # Runs indefinitely
 ```
 
@@ -302,7 +302,7 @@ LOG_LEVEL=DEBUG python scripts/process_blocks_live.py
 
 1. **Package rename**: All imports changed from `eth_block_processor` to `eth_data`
 2. **Directory restructure**: `data/` → `database/`
-3. **Module rename**: `txn/` → `tx_processor/`
+3. **Module rename**: `tx/` → `tx_processor/`
 4. **Service rename**: `eth-block-processor` → `eth-live-block-processor`
 
 Use migration script:

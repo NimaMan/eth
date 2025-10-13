@@ -161,3 +161,6 @@ class ProcessedBlockResult:
 
     def __bool__(self) -> bool:
         return bool(self.transactions)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)

@@ -40,7 +40,7 @@ graph TD
     A -- "Publish Data" --> K
     B -- "Fetch Block Data" --> E
     B -- "Process Transactions" --> C
-    B -- "Save Txns (Optional)" --> L
+    B -- "Save txs (Optional)" --> L
     C -- "Batch Fetch Receipts/Traces" --> F
     C -- "Process Single Transaction" --> D
     D -- "Use Helpers" --> G
@@ -56,7 +56,7 @@ graph TD
 - **Responsibility**: The main entry point of the system.
 - Manages WebSocket connection to the Ethereum node for instant new block notifications.
 - Orchestrates the entire processing pipeline for each new block.
-- Manages the connection to RabbitMQ, publishing processed block data and transaction alerts to designated exchanges (`blocks_exchange`, `txn_alerts_exchange`).
+- Manages the connection to RabbitMQ, publishing processed block data and transaction alerts to designated exchanges (`blocks_exchange`, `tx_alerts_exchange`).
 - Implements robust reconnection logic with exponential backoff for both the Ethereum node and RabbitMQ, ensuring high availability.
 
 ### `BlockProcessor`
@@ -97,7 +97,7 @@ sequenceDiagram
 
     WS->>LBP: New Block Notification
     LBP->>BP: process_block(block_number)
-    BP->>TBP: process_block_transactions(txns)
+    BP->>TBP: process_block_transactions(txs)
     TBP->>TBP: Batch Fetch Receipts & Traces
     TBP-->>BP: List[ProcessedTransaction]
     BP-->>LBP: Processed Block Data
@@ -137,7 +137,7 @@ The system is configured via parameters passed to the `LiveBlockProcessor`, typi
 - `websocket_url`: The WebSocket URL of the Ethereum node.
 - `http_url`: The HTTP RPC URL of the Ethereum node.
 - `rabbitmq_url`: The connection URL for the RabbitMQ server.
-- `save_txn_to_db`: A boolean flag to enable/disable saving results to the database.
+- `index_address_txs`: A boolean flag to enable/disable writing address participation to the index database.
 
 ### Dependencies
 - **Core**: `web3.py`, `aio_pika` (for RabbitMQ), `orjson`.

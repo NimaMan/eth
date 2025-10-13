@@ -11,22 +11,22 @@ Objective: Verify correct parsing of LP token approval transactions including:
 import asyncio
 from eth_data.tx_processor.data_models.receipt_models import *
 from eth_data.tx_processor.data_models.trace_models import *
-from eth_data.tx_processor.data_models.txn_models import *
+from eth_data.tx_processor.data_models.tx_models import *
 
-def test_approve_lp(txn_analyzer, txn_data_fetcher):
+def test_approve_lp(tx_analyzer, tx_data_fetcher):
     """Test that both sync and async analysis match the expected approval details"""
     
     expected_approve = ProcessedTransaction(
         hash="0xc98c2b4ddc936ac6dba70bc7bacc9e37d406bcd24b2ecaf58a30f47521dbddf2",
         block_number=21423699,
-        txn_index=156,
+        tx_index=156,
         from_address="0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",
         to_address="0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2",
         contract_address=None,
         value=0.0,
         status=True,
         nonce=5,
-        txn_type="Approval",
+        tx_type="Approval",
         approvals=[
             ERC20Approval(
                 token_address="0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2",  # LP token
@@ -51,7 +51,7 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
         fees=TransactionFees(
             gas_price=33931291438,
             gas_used=46386,
-            txn_fee=0.001573936884643068
+            tx_fee=0.001573936884643068
         ),
         unique_addresses={
             "0x9e78124aDDDE586983BDD32303616A1Fb9B4F175",  # Token owner
@@ -61,30 +61,30 @@ def test_approve_lp(txn_analyzer, txn_data_fetcher):
         erc20_contracts={
             "0x0341Bc2f4Ee5ccc7558e0e2aD1c9C682c95512B2"   # LP token
         },
-        state_changes={},
+        address_balance_changes={},
         latest_states={},
         bribe_amount=0.0,
         input="0x095ea7b3000000000000000000000000e2fe530c047f2d85298b07d9333c05737f1435fbffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     )
 
-    txn_hash = "0xc98c2b4ddc936ac6dba70bc7bacc9e37d406bcd24b2ecaf58a30f47521dbddf2"
-    txn_data = txn_data_fetcher.get_transaction_data(txn_hash)
+    tx_hash = "0xc98c2b4ddc936ac6dba70bc7bacc9e37d406bcd24b2ecaf58a30f47521dbddf2"
+    tx_data = tx_data_fetcher.get_transaction_data(tx_hash)
     
     # Test synchronous analysis
-    sync_result = txn_analyzer.process_transaction(
-        txn_data['transaction'],
-        txn_data['receipt'],
-        txn_data['trace']
+    sync_result = tx_analyzer.process_transaction(
+        tx_data['transaction'],
+        tx_data['receipt'],
+        tx_data['trace']
     )
     
     assert sync_result == expected_approve
     
     # Test asynchronous analysis
     async def run_async_analysis():
-        return await txn_analyzer.process_transaction_async(
-            txn_data['transaction'],
-            txn_data['receipt'],
-            txn_data['trace']
+        return await tx_analyzer.process_transaction_async(
+            tx_data['transaction'],
+            tx_data['receipt'],
+            tx_data['trace']
         )
     
     async_result = asyncio.run(run_async_analysis())
