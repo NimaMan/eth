@@ -168,7 +168,7 @@ class UniswapV3Pool(BasePool):
         self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
         self.pool_buy_sell_config.block_number = int(transaction['block_number'])
         if transaction.get('block_header'):
-            self.pool_buy_sell_config.set_block_header_json(transaction['block_header'])
+            self.pool_buy_sell_config.set_block_header(transaction['block_header'])
 
         result = self.pool_buy_sell_simulator.check_uniswap_v3_pool(
                 self.token_address,
@@ -192,10 +192,10 @@ class UniswapV3Pool(BasePool):
     
         logger.info(
             f"UniswapV3 Pool:"
+            f"tx={transaction.get('hash')} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
             f"block={transaction['block_number']} "
-            f"tx={transaction.get('hash')} "
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "

@@ -334,7 +334,7 @@ class UniswapV2Pool(BasePool):
         self.pool_buy_sell_config.token_decimals = int(self.get_token_decimals())
         self.pool_buy_sell_config.block_number = int(transaction['block_number'])
         if transaction.get('block_header'):
-            self.pool_buy_sell_config.set_block_header_json(transaction.get('block_header'))
+            self.pool_buy_sell_config.set_block_header(transaction.get('block_header'))
 
         # The tranaction is already mined, so we dont need to include it as a prior tx 
         result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(
@@ -358,10 +358,10 @@ class UniswapV2Pool(BasePool):
     
         logger.info(
             f"UniswapV2 Pool:"
+            f"tx={transaction['hash']} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
             f"block={transaction['block_number']} "
-            f"tx={transaction['hash']} "
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "
