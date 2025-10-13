@@ -90,10 +90,7 @@ async fn main() -> Result<()> {
     // Remove nonce to let the simulator detect it
     request.nonce = None;
 
-    match simulator
-        .simulate_unsigned_transaction(request)
-        .await
-    {
+    match simulator.simulate_unsigned_transaction(request).await {
         Ok(result) => {
             println!("   ✅ Simulation succeeded with auto-detected nonce!");
             println!("   Gas used: {}", result.gas_used);

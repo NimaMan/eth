@@ -32,7 +32,9 @@ async fn main() -> Result<()> {
 
     // Simulate the call
     println!("\nSimulating WETH totalSupply() call...");
-    let result = simulator.simulate_unsigned_transaction_at_block(call, latest_block).await?;
+    let result = simulator
+        .simulate_unsigned_transaction_at_block(call, latest_block)
+        .await?;
 
     println!("Simulation result:");
     println!("  Success: {}", result.success);

@@ -66,18 +66,17 @@ impl TxSimulator {
 
         task::spawn_blocking(move || {
             // Determine the forked context (either reuse a supplied header or resolve one now).
-            let (mut forked_state, _resolved_block) = if let Some(header) =
-                options.block_header.clone()
-            {
-                let block_number = header.number;
-                (
-                    simulator.create_forked_state_with_header(block_number, header)?,
-                    block_number,
-                )
-            } else {
-                let block_number = options.at_block.unwrap_or(simulator.get_latest_block()?);
-                (simulator.create_forked_state(block_number)?, block_number)
-            };
+            let (mut forked_state, _resolved_block) =
+                if let Some(header) = options.block_header.clone() {
+                    let block_number = header.number;
+                    (
+                        simulator.create_forked_state_with_header(block_number, header)?,
+                        block_number,
+                    )
+                } else {
+                    let block_number = options.at_block.unwrap_or(simulator.get_latest_block()?);
+                    (simulator.create_forked_state(block_number)?, block_number)
+                };
 
             let mut results = Vec::new();
             let mut cumulative_gas_used = 0u64;
@@ -238,8 +237,7 @@ impl TxSimulator {
         let builder = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder();
-        let call_frame =
-            builder.geth_call_traces(CallConfig::default().with_log(), gas_used);
+        let call_frame = builder.geth_call_traces(CallConfig::default().with_log(), gas_used);
         let struct_logs = Some(
             builder
                 .geth_traces(

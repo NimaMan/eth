@@ -44,16 +44,27 @@ async fn main() -> Result<()> {
 
     println!("Trace-only success: {}", trace_only.success);
     println!("Trace-only gas used: {}", trace_only.gas_used);
-    println!("Trace-only call depth: {}", trace_only.call_trace.calls.len());
+    println!(
+        "Trace-only call depth: {}",
+        trace_only.call_trace.calls.len()
+    );
     println!(
         "Trace-only struct logs: {} (expect 0, steps disabled)",
-        trace_only.struct_logs.as_ref().map(|logs| logs.len()).unwrap_or(0)
+        trace_only
+            .struct_logs
+            .as_ref()
+            .map(|logs| logs.len())
+            .unwrap_or(0)
     );
     println!("Full trace success: {}", full_trace.success);
     println!("Full trace gas used: {}", full_trace.gas_used);
     println!(
         "Full trace struct logs: {} (per-opcode steps captured)",
-        full_trace.struct_logs.as_ref().map(|logs| logs.len()).unwrap_or(0)
+        full_trace
+            .struct_logs
+            .as_ref()
+            .map(|logs| logs.len())
+            .unwrap_or(0)
     );
 
     if let Some(reason) = &full_trace.revert_reason {
@@ -94,7 +105,11 @@ async fn main() -> Result<()> {
     println!("Logs generated: {}", result.call_trace.logs.len());
     println!(
         "Struct logs available: {}",
-        result.struct_logs.as_ref().map(|logs| logs.len()).unwrap_or(0)
+        result
+            .struct_logs
+            .as_ref()
+            .map(|logs| logs.len())
+            .unwrap_or(0)
     );
 
     // Show call trace structure (internal transaction extraction should be done by tx_processor)
@@ -151,7 +166,11 @@ async fn main() -> Result<()> {
     println!("Logs generated: {}", result.call_trace.logs.len());
     println!(
         "Struct logs captured: {}",
-        result.struct_logs.as_ref().map(|logs| logs.len()).unwrap_or(0)
+        result
+            .struct_logs
+            .as_ref()
+            .map(|logs| logs.len())
+            .unwrap_or(0)
     );
 
     if result.success {

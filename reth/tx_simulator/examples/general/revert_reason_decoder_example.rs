@@ -78,9 +78,7 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let result = simulator
-        .simulate_unsigned_transaction(swap_call)
-        .await?;
+    let result = simulator.simulate_unsigned_transaction(swap_call).await?;
     println!("Success: {}", result.success);
     println!("Gas used: {}", result.gas_used);
     println!("Revert reason: {:?}\n", result.revert_reason);

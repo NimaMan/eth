@@ -62,9 +62,9 @@ impl TxSimulator {
             let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
 
             let evm_env = simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
+                .evm_config
+                .evm_env(&block_header)
+                .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 
@@ -123,9 +123,9 @@ impl TxSimulator {
             let mut inspector = TracingInspector::new(call_config);
 
             let evm_env = simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
+                .evm_config
+                .evm_env(&block_header)
+                .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 
@@ -199,9 +199,9 @@ impl TxSimulator {
             let mut inspector = TracingInspector::new(call_config);
 
             let evm_env = simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
+                .evm_config
+                .evm_env(&block_header)
+                .expect("failed to build EVM env");
 
             let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
 

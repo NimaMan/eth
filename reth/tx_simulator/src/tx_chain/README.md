@@ -19,8 +19,7 @@ overlays for speed.
 
 | Helper | Returns | Description | Typical Usage |
 | --- | --- | --- | --- |
-| `TxSimulator::start_simulation_chain(at_block?)` | `UnsignedTxChainSimulation` | Interactive unsigned chain pinned to an optional block. | Build stateful scenarios step-by-step (buy → approve → sell). |
-| `TxSimulator::start_simulation_chain_with_header(header)` | `UnsignedTxChainSimulation` | Same as above but reuse a supplied header/state snapshot. | When the caller already has the canonical header cached. |
+| `TxSimulator::start_simulation_chain(at_block?, header?)` | `UnsignedTxChainSimulation` | Interactive unsigned chain pinned to an optional block or supplied header. | Build stateful scenarios step-by-step (buy → approve → sell). |
 | `UnsignedTxChainSimulation::step(unsigned)` | `SimulationResult` | Executes an unsigned tx, persists state, auto-manages nonces. | Iterative workflows where you inspect each result. |
 | `UnsignedTxChainSimulation::step_with_trace(unsigned)` | `FullSimulationResult` | Same as `step` but returns call tree + `struct_logs`. | Debugging multi-step flows or feeding tx_processor. |
 | `UnsignedTxChainSimulation::step_through(vec)` | `Vec<SimulationResult>` | Convenience wrapper to run a list sequentially via `step`. | Scripting small sequences while retaining per-step detail. |

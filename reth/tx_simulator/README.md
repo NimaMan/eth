@@ -233,8 +233,7 @@ Behavior:
 #### tx_chain::unsigned (Stateful Unsigned Chain)
 
 Entry point:
-- `TxSimulator::start_simulation_chain(&self, at_block: Option<u64>) -> eyre::Result<UnsignedTxChainSimulation>`
-- `TxSimulator::start_simulation_chain_with_header(&self, header: SealedHeader) -> eyre::Result<UnsignedTxChainSimulation>`
+- `TxSimulator::start_simulation_chain(&self, at_block: Option<u64>, block_header: Option<SealedHeader>) -> eyre::Result<UnsignedTxChainSimulation>`
 
 Methods:
 - `step(&mut self, unsigned: UnsignedTransaction) -> eyre::Result<SimulationResult>`

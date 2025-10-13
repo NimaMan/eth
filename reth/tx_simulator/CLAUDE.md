@@ -268,7 +268,7 @@ let result = simulator
 
 ```rust
 // Start a simulation chain
-let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
+let mut chain = simulator.start_simulation_chain(Some(block_number), None).await?;
 
 // Execute transactions step by step
 let buy_result = chain.step(buy_tx).await?;
@@ -486,7 +486,7 @@ println!("Bundle success: {}", result.sequence_success);
 
 ```rust
 // Start simulation chain
-let mut chain = simulator.start_simulation_chain(None).await?;
+let mut chain = simulator.start_simulation_chain(None, None).await?;
 
 // Execute buy transaction
 let buy_result = chain.step(buy_tx).await?;

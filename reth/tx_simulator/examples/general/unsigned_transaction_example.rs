@@ -35,7 +35,9 @@ async fn main() -> Result<()> {
     };
 
     // Method 1: Basic simulation at latest block
-    let result = simulator.simulate_unsigned_transaction(eth_call.clone()).await?;
+    let result = simulator
+        .simulate_unsigned_transaction(eth_call.clone())
+        .await?;
     println!("✅ Basic simulation result:");
     println!("   Success: {}", result.success);
     println!("   Gas used: {}", result.gas_used);
@@ -73,7 +75,9 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let result = simulator.simulate_unsigned_transaction(balance_call).await?;
+    let result = simulator
+        .simulate_unsigned_transaction(balance_call)
+        .await?;
     println!("✅ Contract call result:");
     println!("   Success: {}", result.success);
     println!("   Gas used: {}", result.gas_used);
@@ -92,7 +96,9 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
 
-    let result = simulator.simulate_unsigned_transaction(eip1559_call).await?;
+    let result = simulator
+        .simulate_unsigned_transaction(eip1559_call)
+        .await?;
     println!("✅ EIP-1559 simulation result:");
     println!("   Success: {}", result.success);
     println!("   Gas used: {}", result.gas_used);

@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
     println!("Simulating bundle...");
 
     let options = SequentialSimulationOptions {
-        at_block: None,        // Use latest block
+        at_block: None, // Use latest block
         block_header: None,
         stop_on_failure: true, // Bundle must execute atomically
         auto_increment_nonces: true,

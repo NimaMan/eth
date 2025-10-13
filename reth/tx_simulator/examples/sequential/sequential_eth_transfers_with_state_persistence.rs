@@ -175,10 +175,10 @@ async fn main() -> Result<()> {
     println!("  - Can stop on first failure or continue");
     println!("  - Perfect for MEV bundle simulation");
 
-fn wei_to_eth(value: &U256) -> f64 {
-    let wei: f64 = value.to::<u128>() as f64;
-    wei / 1e18
-}
+    fn wei_to_eth(value: &U256) -> f64 {
+        let wei: f64 = value.to::<u128>() as f64;
+        wei / 1e18
+    }
 
     Ok(())
 }

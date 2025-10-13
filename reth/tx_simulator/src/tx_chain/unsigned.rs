@@ -78,7 +78,7 @@ impl UnsignedTxChainSimulation {
     ///
     /// # Example
     /// ```rust
-    /// let mut chain = simulator.start_simulation_chain(None).await?;
+    /// let mut chain = simulator.start_simulation_chain(None, None).await?;
     /// let result = chain.step(buy_unsigned_tx).await?;
     /// // State now includes the effects of buy_unsigned_tx
     /// ```
@@ -297,7 +297,7 @@ impl UnsignedTxChainSimulation {
 }
 
 impl TxSimulator {
-    /// Start a new simulation chain at the specified block
+    /// Start a new simulation chain at the specified block or using a supplied header.
     ///
     /// Creates a stateful simulation environment where each transaction
     /// builds on the state changes from previous ones.
@@ -305,7 +305,7 @@ impl TxSimulator {
     /// # Example
     /// ```rust
     /// let simulator = TxSimulator::new("/path/to/db")?;
-    /// let mut chain = simulator.start_simulation_chain(None).await?;
+    /// let mut chain = simulator.start_simulation_chain(None, None).await?;
     ///
     /// // Execute transactions sequentially with state preservation
     /// let buy_result = chain.step(buy_tx).await?;
@@ -315,26 +315,20 @@ impl TxSimulator {
     pub async fn start_simulation_chain(
         &self,
         at_block: Option<u64>,
+        block_header: Option<SealedHeader>,
     ) -> Result<UnsignedTxChainSimulation> {
+        if let Some(header) = block_header {
+            let block_number = header.number;
+            let forked_state = self.create_forked_state_with_header(block_number, header)?;
+            return Ok(UnsignedTxChainSimulation::new(
+                Arc::new(self.clone()),
+                forked_state,
+                block_number,
+            ));
+        }
+
         let block_number = at_block.unwrap_or(self.get_latest_block()?);
-
-        // Use the existing create_forked_state method
         let forked_state = self.create_forked_state(block_number)?;
-
-        Ok(UnsignedTxChainSimulation::new(
-            Arc::new(self.clone()),
-            forked_state,
-            block_number,
-        ))
-    }
-
-    /// Start a new simulation chain using a supplied block header snapshot.
-    pub async fn start_simulation_chain_with_header(
-        &self,
-        block_header: SealedHeader,
-    ) -> Result<UnsignedTxChainSimulation> {
-        let block_number = block_header.number;
-        let forked_state = self.create_forked_state_with_header(block_number, block_header)?;
 
         Ok(UnsignedTxChainSimulation::new(
             Arc::new(self.clone()),

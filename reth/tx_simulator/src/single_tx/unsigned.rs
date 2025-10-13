@@ -84,8 +84,9 @@ impl TxSimulator {
         block_header: Option<SealedHeader>,
     ) -> Result<FullSimulationResult> {
         let block_number = block_number.unwrap_or(self.get_latest_block()?);
-        let (block_header, state) =
-            self.prepare_block_context(block_number, block_header).await?;
+        let (block_header, state) = self
+            .prepare_block_context(block_number, block_header)
+            .await?;
         self.execute_unsigned_transaction_with_trace(unsigned_tx, block_header, state)
             .await
     }
@@ -234,9 +235,10 @@ impl TxSimulator {
             base_fee,
             &mut db,
         )?;
-        let mut evm = simulator
-            .evm_config
-            .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
+        let mut evm =
+            simulator
+                .evm_config
+                .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
 
         let res = evm.transact(tx_env)?;
         db.commit(res.state);
@@ -280,9 +282,10 @@ impl TxSimulator {
         )?;
         let gas_limit = tx_env.gas_limit;
 
-        let mut evm = simulator
-            .evm_config
-            .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
+        let mut evm =
+            simulator
+                .evm_config
+                .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
         let res = evm.transact(tx_env)?;
         db.commit(res.state);
 
@@ -298,12 +301,18 @@ impl TxSimulator {
                 .or_else(|| Some("Transaction reverted without data".to_string()))
         };
 
-        let builder = inspector.with_transaction_gas_limit(gas_limit).into_geth_builder();
+        let builder = inspector
+            .with_transaction_gas_limit(gas_limit)
+            .into_geth_builder();
         let call_frame = builder.geth_call_traces(call_config, gas_used);
         let struct_logs = if inspector_config.record_steps {
             let return_value = raw_output.clone().unwrap_or_default();
             let trace_opts = GethDefaultTracingOptions::default();
-            Some(builder.geth_traces(gas_used, return_value, trace_opts).struct_logs)
+            Some(
+                builder
+                    .geth_traces(gas_used, return_value, trace_opts)
+                    .struct_logs,
+            )
         } else {
             None
         };
@@ -401,5 +410,4 @@ impl TxSimulator {
             authorization_list: Default::default(),
         })
     }
-
 }

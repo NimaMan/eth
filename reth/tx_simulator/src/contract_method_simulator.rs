@@ -15,7 +15,6 @@ use reth_primitives::SealedHeader;
 use reth_provider::StateProviderBox;
 use tokio::time::{sleep, Duration};
 
-
 impl TxSimulator {
     /// Simulate a read-only contract method call (view/pure function)
     ///
