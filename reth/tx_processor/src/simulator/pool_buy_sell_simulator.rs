@@ -70,7 +70,7 @@ pub async fn check_can_buy_sell_pool(
                 .base_fee_per_gas
                 .map(|fee| fee as u128);
             let chain = simulator
-                .start_simulation_chain_with_header(block_header)
+                .start_simulation_chain(None, Some(block_header))
                 .await?;
             (chain, base_fee)
         }
@@ -81,7 +81,7 @@ pub async fn check_can_buy_sell_pool(
                 .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
             let base_fee = header.base_fee_per_gas.map(|fee| fee as u128);
             let sealed = SealedHeader::seal_slow(header);
-            let chain = simulator.start_simulation_chain_with_header(sealed).await?;
+            let chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
             (chain, base_fee)
         }
     };
@@ -227,7 +227,7 @@ pub async fn check_can_buy_sell_pool(
             .header_by_number(sell_block)?
             .ok_or_else(|| eyre!("No header for block {}", sell_block))?;
         let sealed = SealedHeader::seal_slow(header);
-        chain = simulator.start_simulation_chain_with_header(sealed).await?;
+        chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
         let _ = chain.step_with_trace(buy_tx).await?;
         let _ = chain.step_with_trace(approve_tx).await?;
     }
@@ -267,6 +267,25 @@ pub async fn check_can_buy_sell_pool(
         extract_eth_received_from_processed_transaction(&sell_processed, config.buyer_address)
             .unwrap_or(U256::ZERO);
 
+    let mut failure_reason = None;
+    if !(can_buy && can_approve && can_sell) {
+        let failing_step = if !can_buy {
+            "BUY"
+        } else if !can_approve {
+            "APPROVE"
+        } else {
+            "SELL"
+        };
+
+        let mut message = format!("Trading failed at step: {}", failing_step);
+        if !can_sell {
+            if let Some(ref revert) = sell_sim_result.revert_reason {
+                message.push_str(&format!(" (sell revert: {revert})"));
+            }
+        }
+        failure_reason = Some(message);
+    }
+
     Ok(PoolBuySellSimulationResult {
         pool_type: config.pool_type,
         pool_address: config.pool_address,
@@ -292,20 +311,7 @@ pub async fn check_can_buy_sell_pool(
         sell_transaction: sell_processed,
         approve_transaction: approve_processed,
         prior_transaction: setup_tx_result,
-        failure_reason: if can_buy && can_approve && can_sell {
-            None
-        } else {
-            Some(format!(
-                "Trading failed at step: {}",
-                if !can_buy {
-                    "BUY"
-                } else if !can_approve {
-                    "APPROVE"
-                } else {
-                    "SELL"
-                }
-            ))
-        },
+        failure_reason,
         block_number,
     })
 }

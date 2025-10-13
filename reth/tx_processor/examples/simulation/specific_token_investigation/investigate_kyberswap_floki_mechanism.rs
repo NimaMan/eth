@@ -13,6 +13,7 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 use tx_processor::tx_processor::TxProcessor;
 use std::str::FromStr;
 use std::sync::Arc;
+use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 
@@ -22,7 +23,6 @@ const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const FLOKI_WETH_PAIR: &str = "0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0";
 
 // Routers
-const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
 const KYBERSWAP_ROUTER: &str = "0x6131b5fae19ea4f9d964eac0408e4408b66337b5";
 const KYBER_EXECUTOR: &str = "0x98F51b041E493FC4d72B8BD33218C1B3d7a3Ef8b"; // KyberSwap Executor
 
@@ -43,7 +43,9 @@ async fn main() -> Result<()> {
     println!("🎯 Goal: Understand how KyberSwap bypasses FLOKI pool transfer restriction\n");
     
     // Start simulation chain
-    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
+    let mut chain = simulator
+        .start_simulation_chain(Some(latest_block), None)
+        .await?;
     
     // Step 1: Buy FLOKI to have tokens to test with
     println!("[Step 1] Buying FLOKI with 0.1 ETH for testing...");
@@ -223,30 +225,20 @@ async fn check_address_whitelist(
 }
 
 fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTransaction {
-    // swapExactETHForTokens through Uniswap V2
-    let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5];
-    data.extend_from_slice(&U256::from(1).to_be_bytes::<32>());
-    data.extend_from_slice(&U256::from(128).to_be_bytes::<32>());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(buyer.as_slice());
-    data.extend_from_slice(&U256::from(9999999999u64).to_be_bytes::<32>());
-    data.extend_from_slice(&U256::from(2).to_be_bytes::<32>());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
-    
-    UnsignedTransaction {
-        from: Some(buyer),
-        to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
-        value: Some(eth_amount),
-        data: Some(Bytes::from(data)),
-        gas: Some(300_000),
-        gas_price: Some(20_000_000_000),
-        nonce: None,
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-    }
+    let route = AmmSwapRoute::UniswapV2 {
+        pool: Address::from_str(FLOKI_WETH_PAIR).unwrap(),
+    };
+    let mut tx = tx_builders::build_buy_swap(
+        &route,
+        buyer,
+        Address::from_str(FLOKI_ADDRESS).unwrap(),
+        eth_amount,
+        5000,
+        u64::MAX,
+    );
+    tx.gas_price = Some(20_000_000_000);
+    tx.gas = Some(tx.gas.unwrap_or(300_000));
+    tx
 }
 
 fn create_direct_transfer(from: Address, to: Address, amount: U256) -> UnsignedTransaction {

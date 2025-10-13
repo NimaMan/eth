@@ -8,14 +8,14 @@ use alloy_primitives::{Address, Bytes, I256, U256};
 /// 3. Whether both methods truly return identical values
 /// 4. Any potential discrepancies between the two approaches
 use eyre::Result;
+use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 use std::str::FromStr;
 use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
 const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E";
-const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+const FLOKI_WETH_POOL: &str = "0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,10 +30,12 @@ async fn main() -> Result<()> {
     println!("📦 Using block: {}", latest_block);
 
     // Create a simulation chain to persist state
-    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
+    let mut chain = simulator
+        .start_simulation_chain(Some(latest_block), None)
+        .await?;
 
-    // Test address (will be our "buyer")
-    let buyer = Address::from_str("0x1000000000000000000000000000000000000001")?;
+    // Test address (will be our "buyer") - funded address used across FLOKI tests
+    let buyer = Address::from_str("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689")?;
 
     // Note: Using existing on-chain balance; ensure buyer has sufficient ETH in state
 
@@ -46,64 +48,21 @@ async fn main() -> Result<()> {
     println!("\n=== PHASE 2: Execute Buy Transaction ===");
 
     // Create a buy transaction (swap ETH for FLOKI)
-    let router = Address::from_str(UNISWAP_V2_ROUTER)?;
     let floki_addr = Address::from_str(FLOKI_ADDRESS)?;
-    let weth_addr = Address::from_str(WETH_ADDRESS)?;
-
-    // swapExactETHForTokensSupportingFeeOnTransferTokens
-    let swap_selector = [0xb6, 0xf9, 0xde, 0x95]; // swapExactETHForTokensSupportingFeeOnTransferTokens selector
-
-    // Parameters for the swap
-    let amount_out_min = U256::ZERO; // Accept any amount
-    let deadline = U256::from(2000000000u64); // Far future timestamp
     let eth_to_spend = U256::from(1u64) * U256::from(10u64).pow(U256::from(17)); // 0.1 ETH
-
-    // Path: [WETH, FLOKI]
-    let path_data = {
-        let mut data = Vec::new();
-        data.extend_from_slice(&[0u8; 32 - 20]); // Padding for address
-        data.extend_from_slice(weth_addr.as_slice());
-        data.extend_from_slice(&[0u8; 32 - 20]); // Padding for address
-        data.extend_from_slice(floki_addr.as_slice());
-        data
+    let route = AmmSwapRoute::UniswapV2 {
+        pool: Address::from_str(FLOKI_WETH_POOL)?,
     };
-
-    // ABI encode the function call
-    let mut call_data = Vec::new();
-    call_data.extend_from_slice(&swap_selector);
-
-    // amountOutMin (uint256)
-    let amount_out_min_bytes = amount_out_min.to_be_bytes::<32>();
-    call_data.extend_from_slice(&amount_out_min_bytes);
-
-    // path offset (uint256) - points to start of path array
-    call_data.extend_from_slice(&[0u8; 31]);
-    call_data.push(0x80); // 128 bytes offset
-
-    // to address (address)
-    call_data.extend_from_slice(&[0u8; 12]);
-    call_data.extend_from_slice(buyer.as_slice());
-
-    // deadline (uint256)
-    let deadline_bytes = deadline.to_be_bytes::<32>();
-    call_data.extend_from_slice(&deadline_bytes);
-
-    // Path array: [length, weth_address, floki_address]
-    call_data.extend_from_slice(&[0u8; 31]);
-    call_data.push(0x02); // Array length = 2
-    call_data.extend_from_slice(&path_data);
-
-    let buy_tx = UnsignedTransaction {
-        from: Some(buyer),
-        to: Some(router),
-        value: Some(eth_to_spend),
-        data: Some(Bytes::from(call_data)),
-        gas: Some(300_000),
-        gas_price: None,
-        nonce: None,
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-    };
+    let mut buy_tx = tx_builders::build_buy_swap(
+        &route,
+        buyer,
+        floki_addr,
+        eth_to_spend,
+        5000, // 50% slippage tolerance
+        u64::MAX,
+    );
+    // Align gas usage with earlier manual configuration for readability.
+    buy_tx.gas = Some(buy_tx.gas.unwrap_or(300_000));
 
     // Execute the buy transaction
     let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
@@ -169,8 +128,7 @@ async fn main() -> Result<()> {
     // Check FLOKI balance using balanceOf()
     let actual_balance = check_floki_balance(&mut chain, buyer).await?;
     let net_balance_gained = actual_balance - initial_balance;
-    let net_balance_gained_signed =
-        I256::try_from(net_balance_gained).unwrap_or(I256::MAX);
+    let net_balance_gained_signed = I256::try_from(net_balance_gained).unwrap_or(I256::MAX);
     let balance_change_floki_abs = balance_change_floki.unsigned_abs();
 
     println!("\n💰 Balance Verification Results:");
@@ -180,7 +138,11 @@ async fn main() -> Result<()> {
     println!(
         "  ProcessedTransaction says: {} raw (sign: {:?})",
         balance_change_floki,
-        if balance_change_floki.is_negative() { "negative" } else { "positive" }
+        if balance_change_floki.is_negative() {
+            "negative"
+        } else {
+            "positive"
+        }
     );
 
     println!("\n🔍 Detailed Comparison:");
@@ -190,7 +152,11 @@ async fn main() -> Result<()> {
         println!(
             "     ProcessedTransaction:    {} (sign: {:?})",
             balance_change_floki_abs,
-            if balance_change_floki.is_negative() { "negative" } else { "positive" }
+            if balance_change_floki.is_negative() {
+                "negative"
+            } else {
+                "positive"
+            }
         );
     } else {
         println!("  ❌ DISCREPANCY DETECTED:");
@@ -198,7 +164,11 @@ async fn main() -> Result<()> {
         println!(
             "     ProcessedTransaction:    {} (sign: {:?})",
             balance_change_floki_abs,
-            if balance_change_floki.is_negative() { "negative" } else { "positive" }
+            if balance_change_floki.is_negative() {
+                "negative"
+            } else {
+                "positive"
+            }
         );
 
         let diff_signed = balance_change_floki - net_balance_gained_signed;

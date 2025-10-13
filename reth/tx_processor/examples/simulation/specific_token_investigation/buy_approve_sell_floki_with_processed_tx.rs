@@ -19,6 +19,7 @@ use alloy_primitives::{Address, Bytes, I256, U256};
 /// This example shows how to properly handle tokens that may have sell limitations.
 use eyre::Result;
 use hex;
+use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 use std::str::FromStr;
 use tx_processor::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, TaxCalculationResult,
@@ -197,7 +198,7 @@ async fn execute_floki_trading_workflow(
     let mut metrics = FlokiTradingMetrics::default();
 
     // Start a simulation chain for state preservation
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    let mut chain = simulator.start_simulation_chain(Some(block), None).await?;
     println!("📍 Chain initialized with state preservation");
 
     // Step 1: Buy FLOKI with 1 ETH
@@ -277,10 +278,7 @@ async fn execute_floki_trading_workflow(
     println!("    Expected decimals: {}", FLOKI_DECIMALS);
 
     println!("\n  💼 Balance Changes After Buy:");
-    println!(
-        "    ETH: {} (spent)",
-        format_signed_eth(eth_signed)
-    );
+    println!("    ETH: {} (spent)", format_signed_eth(eth_signed));
     println!(
         "    FLOKI: {} (received)",
         format_signed_floki(floki_signed)
@@ -964,7 +962,9 @@ fn log_balance_changes_for_floki(processed_tx: &ProcessedTransaction, buyer: Add
     }
 
     let floki_address = Address::from_str(FLOKI_ADDRESS).unwrap();
-    if let Some(floki_amount) = processed_tx.get_address_token_balance_change(&buyer, &floki_address) {
+    if let Some(floki_amount) =
+        processed_tx.get_address_token_balance_change(&buyer, &floki_address)
+    {
         if floki_amount != I256::ZERO {
             has_changes = true;
             println!("    FLOKI: {}", format_signed_floki(floki_amount));
@@ -1063,7 +1063,11 @@ fn format_signed_amount_with_decimals(amount: I256, decimals: u8) -> String {
         return "0".to_string();
     }
     let sign = if amount.is_negative() { "-" } else { "+" };
-    format!("{}{}", sign, format_amount_with_decimals(amount.unsigned_abs(), decimals))
+    format!(
+        "{}{}",
+        sign,
+        format_amount_with_decimals(amount.unsigned_abs(), decimals)
+    )
 }
 
 /// Format U256 with thousand separators
@@ -1163,47 +1167,20 @@ fn create_approve_transaction(
     }
 }
 
-/// Create a transaction to sell FLOKI for ETH using Uniswap V2
+/// Create a transaction to sell FLOKI for ETH using Uniswap V2 router helper
 fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> UnsignedTransaction {
-    // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
-    let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
-
-    // amountIn (amount of FLOKI to sell)
-    data.extend_from_slice(&floki_amount.to_be_bytes::<32>());
-
-    // amountOutMin (1 = accept any amount of ETH)
-    data.extend_from_slice(&U256::from(1).to_be_bytes::<32>());
-
-    // path offset
-    data.extend_from_slice(&U256::from(160).to_be_bytes::<32>());
-
-    // to address (seller)
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(seller.as_slice());
-
-    // deadline
-    data.extend_from_slice(&U256::from(9999999999u64).to_be_bytes::<32>());
-
-    // path array
-    data.extend_from_slice(&U256::from(2).to_be_bytes::<32>()); // length = 2
-
-    // FLOKI address
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
-
-    // WETH address
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
-
-    UnsignedTransaction {
-        from: Some(seller),
-        to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
-        value: Some(U256::ZERO),
-        data: Some(Bytes::from(data)),
-        gas: Some(500_000), // Higher gas limit since FLOKI might have complex logic
-        gas_price: Some(20_000_000_000),
-        nonce: None,
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-    }
+    let route = AmmSwapRoute::UniswapV2 {
+        pool: Address::from_str(FLOKI_WETH_POOL).unwrap(),
+    };
+    let mut tx = tx_builders::build_sell_swap(
+        &route,
+        seller,
+        Address::from_str(FLOKI_ADDRESS).unwrap(),
+        floki_amount,
+        5000, // 50% slippage tolerance, matching earlier manual value
+        u64::MAX,
+    );
+    // Align with previous manual call by forcing a legacy gas price for easier debugging output.
+    tx.gas_price = Some(20_000_000_000);
+    tx
 }

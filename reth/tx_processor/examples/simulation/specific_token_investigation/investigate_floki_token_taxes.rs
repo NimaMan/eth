@@ -62,7 +62,9 @@ async fn main() -> Result<()> {
     println!("  Expected Tax: Variable via tax handler\\n");
 
     // Start simulation chain
-    let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
+    let mut chain = simulator
+        .start_simulation_chain(Some(block_number), None)
+        .await?;
     let route = AmmSwapRoute::UniswapV2 { pool: floki_pool };
 
     // ===================
@@ -192,7 +194,7 @@ async fn main() -> Result<()> {
         // Try with next block
         println!("\\n🔄 Attempting sell in NEXT BLOCK (block delay)...");
         let next_block_chain = simulator
-            .start_simulation_chain(Some(block_number + 1))
+            .start_simulation_chain(Some(block_number + 1), None)
             .await?;
 
         // Re-apply buy and approve to establish state

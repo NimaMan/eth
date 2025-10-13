@@ -7,6 +7,7 @@
 /// 4. Add/Remove liquidity method
 use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::Result;
+use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 use std::str::FromStr;
 use tracing::{error, info};
 use tx_processor::tx_processor::TxProcessor;
@@ -14,7 +15,6 @@ use tx_simulator::{TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation};
 
 // Token addresses
 const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E";
-const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const UNISWAP_V2_ROUTER: &str = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
 const SUCCESSFUL_ROUTER: &str = "0xBEE3211ab312a8D065c4FeF0247448e17A8da000"; // Router that successfully sold FLOKI
 const FLOKI_WETH_PAIR: &str = "0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0";
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let router = Address::from_str(UNISWAP_V2_ROUTER)?;
 
     // Start simulation chain
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    let mut chain = simulator.start_simulation_chain(Some(block), None).await?;
     info!("📍 Chain initialized at block {}", block);
 
     // Get current nonce to avoid nonce errors
@@ -96,14 +96,10 @@ async fn main() -> Result<()> {
     info!("  ═══════════════════════════════════");
     info!("    Raw amount: {} wei", floki_received);
     info!("    Formatted: {}", format_floki_amount(floki_received));
-    info!(
-        "    ETH spent: {}",
-        format_eth_amount(eth_spent)
-    );
+    info!("    ETH spent: {}", format_eth_amount(eth_spent));
 
     let exchange_rate = if eth_spent > U256::ZERO {
-        let floki_per_eth = (floki_received * U256::from(10u64).pow(U256::from(18)))
-            / eth_spent;
+        let floki_per_eth = (floki_received * U256::from(10u64).pow(U256::from(18))) / eth_spent;
         floki_per_eth / U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))
     } else {
         U256::ZERO
@@ -157,9 +153,7 @@ async fn main() -> Result<()> {
     // EARLY EXIT FOR BALANCE VERIFICATION
     // ========================================
     info!("\n🎯 BALANCE VERIFICATION COMPLETE!");
-    info!("   Stopping here to see balance comparison results.");
-    info!("   This avoids nonce errors from later transfer tests.");
-    return Ok(());
+    info!("   Continuing with extended diagnostics for router restrictions...");
 
     // Step 2: Approve BOTH routers (standard and successful one)
     info!("\n[Step 2] Approving routers to spend FLOKI...");
@@ -641,29 +635,20 @@ async fn get_token_balance(
 // ===== Transaction Building Functions =====
 
 fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTransaction {
-    let mut data = vec![0x7f, 0xf3, 0x6a, 0xb5]; // swapExactETHForTokens
-    data.extend_from_slice(&U256::from(1).to_be_bytes::<32>());
-    data.extend_from_slice(&U256::from(128).to_be_bytes::<32>());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(buyer.as_slice());
-    data.extend_from_slice(&U256::from(9999999999u64).to_be_bytes::<32>());
-    data.extend_from_slice(&U256::from(2).to_be_bytes::<32>());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&WETH_ADDRESS[2..]).unwrap());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(&hex::decode(&FLOKI_ADDRESS[2..]).unwrap());
-
-    UnsignedTransaction {
-        from: Some(buyer),
-        to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
-        value: Some(eth_amount),
-        data: Some(Bytes::from(data)),
-        gas: Some(300_000),
-        gas_price: Some(20_000_000_000),
-        nonce: None,
-        max_fee_per_gas: None,
-        max_priority_fee_per_gas: None,
-    }
+    let route = AmmSwapRoute::UniswapV2 {
+        pool: Address::from_str(FLOKI_WETH_PAIR).unwrap(),
+    };
+    let mut tx = tx_builders::build_buy_swap(
+        &route,
+        buyer,
+        Address::from_str(FLOKI_ADDRESS).unwrap(),
+        eth_amount,
+        5000,
+        u64::MAX,
+    );
+    tx.gas_price = Some(20_000_000_000);
+    tx.gas = Some(tx.gas.unwrap_or(300_000));
+    tx
 }
 
 fn create_approve_transaction(

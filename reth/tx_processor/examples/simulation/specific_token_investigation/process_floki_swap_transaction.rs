@@ -154,15 +154,9 @@ async fn main() -> Result<()> {
             // ETH changes
             if let Some(eth_change) = changes.currency_net.get("ETH") {
                 if eth_change.is_negative() {
-                    println!(
-                        "    ETH: -{}",
-                        format_eth(eth_change.unsigned_abs())
-                    );
+                    println!("    ETH: -{}", format_eth(eth_change.unsigned_abs()));
                 } else if *eth_change > I256::ZERO {
-                    println!(
-                        "    ETH: +{}",
-                        format_eth(eth_change.unsigned_abs())
-                    );
+                    println!("    ETH: +{}", format_eth(eth_change.unsigned_abs()));
                 }
             }
 
@@ -170,15 +164,9 @@ async fn main() -> Result<()> {
             for (token_addr, amount) in &changes.token_net {
                 if token_addr.contains("cf0C122c6b73ff809C693DB761e7BaeBe62b6a2E") {
                     if amount.is_negative() {
-                        println!(
-                            "    FLOKI: -{}",
-                            format_floki(amount.unsigned_abs())
-                        );
+                        println!("    FLOKI: -{}", format_floki(amount.unsigned_abs()));
                     } else if *amount > I256::ZERO {
-                        println!(
-                            "    FLOKI: +{}",
-                            format_floki(amount.unsigned_abs())
-                        );
+                        println!("    FLOKI: +{}", format_floki(amount.unsigned_abs()));
                     }
                 }
             }
