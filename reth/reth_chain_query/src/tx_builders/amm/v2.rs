@@ -123,7 +123,7 @@ pub fn build_buy_swap_v2_with_min_out(
     }
 }
 
-/// Encode swapExactTokensForETH(amountIn, amountOutMin, path, to, deadline)
+/// Encode swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
 fn encode_swap_exact_tokens_for_eth(
     amount_in: U256,
     amount_out_min: U256,
@@ -131,8 +131,8 @@ fn encode_swap_exact_tokens_for_eth(
     to: Address,
     deadline: U256,
 ) -> Bytes {
-    // Selector: 0x18cbafe5
-    let mut data = vec![0x18, 0xcb, 0xaf, 0xe5];
+    // Selector: 0x791ac947
+    let mut data = vec![0x79, 0x1a, 0xc9, 0x47];
 
     // amountIn
     data.extend_from_slice(&amount_in.to_be_bytes::<32>());
