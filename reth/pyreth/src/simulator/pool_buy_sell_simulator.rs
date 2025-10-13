@@ -1,26 +1,24 @@
 use super::super::tx_processor::py_processed_transaction::PyProcessedTransaction;
+use crate::header_utils::parse_sealed_header_from_json;
 use alloy_primitives::Address;
 /// Python bindings for Pool Buy Sell Simulator
 ///
 /// Provides Python interface for pool trading viability analysis and simulation
 use pyo3::prelude::*;
+use reth_primitives::SealedHeader;
 use std::str::FromStr;
 use std::sync::Arc;
 use tx_processor::ProcessedTransaction as RustProcessedTransaction;
 use tx_processor::{
-    simulator::{
-        config::PoolViabilityConfig,
-        pool_buy_sell_simulator::check_can_buy_sell_pool,
-        types::{PoolType, PoolViabilityResult},
-    },
-    tx_processor::TxProcessor,
+    check_can_buy_sell_pool, tx_processor::TxProcessor, PoolBuySellParameters,
+    PoolBuySellSimulationResult, PoolType,
 };
 use tx_simulator::TxSimulator;
 
-/// Python wrapper for PoolViabilityResult
-#[pyclass(name = "PoolViabilityResult")]
+/// Python wrapper for PoolBuySellSimulationResult
+#[pyclass(name = "PoolBuySellSimulationResult")]
 #[derive(Clone)]
-pub struct PyPoolViabilityResult {
+pub struct PyPoolBuySellSimulationResult {
     #[pyo3(get)]
     pub can_buy: bool,
     #[pyo3(get)]
@@ -36,17 +34,31 @@ pub struct PyPoolViabilityResult {
     #[pyo3(get)]
     pub block_number: u64,
     #[pyo3(get)]
+    pub tokens_received_raw: String,
+    #[pyo3(get)]
+    pub eth_spent_raw: String,
+    #[pyo3(get)]
+    pub eth_received_raw: String,
+    #[pyo3(get)]
     pub error_message: Option<String>,
+    #[pyo3(get)]
+    pub buy_transaction: PyProcessedTransaction,
+    #[pyo3(get)]
+    pub approve_transaction: PyProcessedTransaction,
+    #[pyo3(get)]
+    pub sell_transaction: PyProcessedTransaction,
+    #[pyo3(get)]
+    pub prior_transaction: Option<PyProcessedTransaction>,
 }
 
-impl PyPoolViabilityResult {
-    fn from_rust_result(result: PoolViabilityResult) -> Self {
+impl PyPoolBuySellSimulationResult {
+    fn from_rust_result(result: PoolBuySellSimulationResult) -> Self {
         let pool_type_str = match result.pool_type {
-            PoolType::UniswapV2 => "UniswapV2".to_string(),
-            PoolType::SushiSwap => "SushiSwap".to_string(),
-            PoolType::UniswapV3 { fee_tier } => format!("UniswapV3({})", fee_tier),
-            PoolType::UniswapV4 => "UniswapV4".to_string(),
-            _ => "Unknown".to_string(),
+            PoolType::UniswapV2 => "UNISWAP-V2".to_string(),
+            PoolType::SushiSwap => "SUSHI-SWAP".to_string(),
+            PoolType::UniswapV3 { fee_tier } => format!("UNISWAP-V3({})", fee_tier),
+            PoolType::UniswapV4 => "UNISWAP-V4".to_string(),
+            _ => "UNKNOWN".to_string(),
         };
 
         Self {
@@ -57,15 +69,31 @@ impl PyPoolViabilityResult {
             sell_tax_percentage: result.sell_tax_percent,
             pool_type: pool_type_str,
             block_number: result.block_number,
+            tokens_received_raw: result.tokens_received.to_string(),
+            eth_spent_raw: result.eth_spent.to_string(),
+            eth_received_raw: result.eth_received.to_string(),
             error_message: result.failure_reason,
+            buy_transaction: PyProcessedTransaction::from_processed_transaction(
+                result.buy_transaction.clone(),
+            ),
+            approve_transaction: PyProcessedTransaction::from_processed_transaction(
+                result.approve_transaction.clone(),
+            ),
+            sell_transaction: PyProcessedTransaction::from_processed_transaction(
+                result.sell_transaction.clone(),
+            ),
+            prior_transaction: result
+                .prior_transaction
+                .as_ref()
+                .map(|tx| PyProcessedTransaction::from_processed_transaction(tx.clone())),
         }
     }
 }
 
-/// Python wrapper for PoolViabilityConfig
-#[pyclass(name = "PoolViabilityConfig")]
+/// Python wrapper for PoolBuySellParameters
+#[pyclass(name = "PoolBuySellParameters")]
 #[derive(Clone)]
-pub struct PyPoolViabilityConfig {
+pub struct PyPoolBuySellParameters {
     #[pyo3(get, set)]
     pub test_amount_eth: f64,
     #[pyo3(get, set)]
@@ -74,6 +102,10 @@ pub struct PyPoolViabilityConfig {
     pub gas_limit: u64,
     #[pyo3(get, set)]
     pub gas_price_gwei: u64,
+    #[pyo3(get, set)]
+    pub max_fee_per_gas_gwei: Option<f64>,
+    #[pyo3(get, set)]
+    pub max_priority_fee_gwei: Option<f64>,
     #[pyo3(get, set)]
     pub block_number: Option<u64>,
     #[pyo3(get, set)]
@@ -85,22 +117,26 @@ pub struct PyPoolViabilityConfig {
     // Optional prior transaction to execute before buy/approve/sell
     // Set via helper methods below
     pub(crate) prior_tx: Option<RustProcessedTransaction>,
+    pub(crate) block_header: Option<SealedHeader>,
 }
 
 #[pymethods]
-impl PyPoolViabilityConfig {
+impl PyPoolBuySellParameters {
     #[new]
     fn new() -> Self {
         Self {
             test_amount_eth: 0.01, // Default 0.01 ETH
             buyer_address: "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".to_string(),
             gas_limit: 300_000,
-            gas_price_gwei: 100,
+            gas_price_gwei: 0,
+            max_fee_per_gas_gwei: None,
+            max_priority_fee_gwei: None,
             block_number: None,
             slippage_tolerance: 0.5,
             block_delay: 0,
             token_decimals: 18,
             prior_tx: None,
+            block_header: None,
         }
     }
 
@@ -181,15 +217,23 @@ impl PyPoolViabilityConfig {
         self.prior_tx = Some(ptx);
         Ok(())
     }
+
+    fn set_block_header(&mut self, header_json: &str) -> PyResult<()> {
+        let sealed = parse_sealed_header_from_json(header_json).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid block header: {e}"))
+        })?;
+        self.block_header = Some(sealed);
+        Ok(())
+    }
 }
 
-impl PyPoolViabilityConfig {
+impl PyPoolBuySellParameters {
     fn to_rust_config(
         &self,
         token_address: Address,
         pool_address: Address,
         pool_type: PoolType,
-    ) -> PyResult<PoolViabilityConfig> {
+    ) -> PyResult<PoolBuySellParameters> {
         use alloy_primitives::U256;
 
         let test_amount = U256::from((self.test_amount_eth * 1e18) as u128);
@@ -201,7 +245,20 @@ impl PyPoolViabilityConfig {
                 ))
             })?;
 
-        Ok(PoolViabilityConfig {
+        let gas_price = if self.gas_price_gwei == 0 {
+            None
+        } else {
+            Some((self.gas_price_gwei as u128) * 1_000_000_000)
+        };
+
+        let max_fee = self
+            .max_fee_per_gas_gwei
+            .map(|value| ((value.max(0.0)) * 1e9).round() as u128);
+        let max_priority = self
+            .max_priority_fee_gwei
+            .map(|value| ((value.max(0.0)) * 1e9).round() as u128);
+
+        Ok(PoolBuySellParameters {
             token_address,
             pool_address,
             pool_type,
@@ -211,13 +268,16 @@ impl PyPoolViabilityConfig {
             block_number: self.block_number,
             slippage_tolerance: self.slippage_tolerance,
             gas_limit: self.gas_limit,
-            gas_price: (self.gas_price_gwei as u128) * 1_000_000_000,
+            gas_price,
+            max_fee_per_gas: max_fee,
+            max_priority_fee_per_gas: max_priority,
             weth_address: Address::from([
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
             block_delay: self.block_delay,
             token_decimals: self.token_decimals,
+            block_header: self.block_header.clone(),
         })
     }
 }
@@ -268,18 +328,18 @@ impl PyPoolBuySellSimulator {
     /// Args:
     ///     token_address: Token contract address as string
     ///     pool_address: Pool contract address as string  
-    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///     config: Optional PoolBuySellParameters (default config if None)
     ///
     /// Returns:
-    ///     PoolViabilityResult with trading analysis
+    ///     PoolBuySellSimulationResult with trading analysis
     #[pyo3(signature = (token_address, pool_address, config=None))]
     fn check_uniswap_v2_pool(
         &self,
         _py: Python,
         token_address: &str,
         pool_address: &str,
-        config: Option<&PyPoolViabilityConfig>,
-    ) -> PyResult<PyPoolViabilityResult> {
+        config: Option<&PyPoolBuySellParameters>,
+    ) -> PyResult<PyPoolBuySellSimulationResult> {
         self.check_pool_internal(token_address, pool_address, PoolType::UniswapV2, config)
     }
 
@@ -289,10 +349,10 @@ impl PyPoolBuySellSimulator {
     ///     token_address: Token contract address as string
     ///     pool_address: Pool contract address as string
     ///     fee_tier: Fee tier (500, 3000, or 10000 for 0.05%, 0.3%, 1%)
-    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///     config: Optional PoolBuySellParameters (default config if None)
     ///
     /// Returns:
-    ///     PoolViabilityResult with trading analysis
+    ///     PoolBuySellSimulationResult with trading analysis
     #[pyo3(signature = (token_address, pool_address, fee_tier, config=None))]
     fn check_uniswap_v3_pool(
         &self,
@@ -300,8 +360,8 @@ impl PyPoolBuySellSimulator {
         token_address: &str,
         pool_address: &str,
         fee_tier: u32,
-        config: Option<&PyPoolViabilityConfig>,
-    ) -> PyResult<PyPoolViabilityResult> {
+        config: Option<&PyPoolBuySellParameters>,
+    ) -> PyResult<PyPoolBuySellSimulationResult> {
         self.check_pool_internal(
             token_address,
             pool_address,
@@ -315,18 +375,18 @@ impl PyPoolBuySellSimulator {
     /// Args:
     ///     token_address: Token contract address as string
     ///     pool_address: Pool contract address as string  
-    ///     config: Optional PoolViabilityConfig (default config if None)
+    ///     config: Optional PoolBuySellParameters (default config if None)
     ///
     /// Returns:
-    ///     PoolViabilityResult with trading analysis
+    ///     PoolBuySellSimulationResult with trading analysis
     #[pyo3(signature = (token_address, pool_address, config=None))]
     fn check_sushiswap_pool(
         &self,
         _py: Python,
         token_address: &str,
         pool_address: &str,
-        config: Option<&PyPoolViabilityConfig>,
-    ) -> PyResult<PyPoolViabilityResult> {
+        config: Option<&PyPoolBuySellParameters>,
+    ) -> PyResult<PyPoolBuySellSimulationResult> {
         self.check_pool_internal(token_address, pool_address, PoolType::SushiSwap, config)
     }
 
@@ -341,8 +401,8 @@ impl PyPoolBuySellSimulator {
         token_address: &str,
         pool_manager_address: &str,
         _pool_id_hex: &str,
-        config: Option<&PyPoolViabilityConfig>,
-    ) -> PyResult<PyPoolViabilityResult> {
+        config: Option<&PyPoolBuySellParameters>,
+    ) -> PyResult<PyPoolBuySellSimulationResult> {
         // For now, route through generic handler with PoolType::UniswapV4 and pool_address=pool_manager
         self.check_pool_internal(
             token_address,
@@ -360,8 +420,8 @@ impl PyPoolBuySellSimulator {
         token_address: &str,
         pool_address: &str,
         pool_type: PoolType,
-        config: Option<&PyPoolViabilityConfig>,
-    ) -> PyResult<PyPoolViabilityResult> {
+        config: Option<&PyPoolBuySellParameters>,
+    ) -> PyResult<PyPoolBuySellSimulationResult> {
         let token_addr =
             Address::from_str(token_address.trim_start_matches("0x")).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -375,10 +435,10 @@ impl PyPoolBuySellSimulator {
         })?;
 
         // Use provided config or create default
-        let rust_config = if let Some(cfg) = config {
+        let mut rust_config = if let Some(cfg) = config {
             cfg.to_rust_config(token_addr, pool_addr, pool_type)?
         } else {
-            PyPoolViabilityConfig::new().to_rust_config(token_addr, pool_addr, pool_type)?
+            PyPoolBuySellParameters::new().to_rust_config(token_addr, pool_addr, pool_type)?
         };
 
         let simulator = self.simulator.clone();
@@ -396,12 +456,12 @@ impl PyPoolBuySellSimulator {
                 ))
             })?;
 
-        Ok(PyPoolViabilityResult::from_rust_result(result))
+        Ok(PyPoolBuySellSimulationResult::from_rust_result(result))
     }
 
     /// Get default configuration
-    fn default_config(&self) -> PyPoolViabilityConfig {
-        PyPoolViabilityConfig::new()
+    fn default_config(&self) -> PyPoolBuySellParameters {
+        PyPoolBuySellParameters::new()
     }
 
     /// Get simulator information
