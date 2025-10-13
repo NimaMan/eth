@@ -17,7 +17,7 @@ The tx_processor module is a high-performance Rust implementation that processes
 - Simple ETH transfers: No simulation needed
 - Failed transactions: No simulation needed
 
-**CRITICAL**: This module produces ProcessedTransaction structs that are **interchangeable** with the Python eth_data.txn module. Both implementations:
+**CRITICAL**: This module produces ProcessedTransaction structs that are **interchangeable** with the Python eth_data.tx module. Both implementations:
 - Process the same transaction data
 - Extract the same events and internal transactions  
 - Produce compatible output structures for upper-level analysis
@@ -90,7 +90,7 @@ The module accepts transaction data (hash, block info, logs, etc.) and:
 
 The ProcessedTransaction structures from both implementations contain the same fields:
 - Core transaction data (hash, block_number, timestamp, addresses, value, etc.)
-- Fee information (gas_price, gas_used, txn_fee)
+- Fee information (gas_price, gas_used, tx_fee)
 - Decoded events (ERC20/721/1155 transfers, Uniswap events, etc.)
 - Internal transactions extracted from execution
 - Transaction classification and actions

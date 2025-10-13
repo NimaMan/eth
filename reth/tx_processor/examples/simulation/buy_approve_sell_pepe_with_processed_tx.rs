@@ -146,7 +146,7 @@ async fn execute_pepe_trading_workflow_with_processed_tx(
     let mut metrics = PepeTradingMetrics::default();
 
     // Start a simulation chain for state preservation
-    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
+    let mut chain = simulator.start_simulation_chain(Some(block), None).await?;
     println!("📍 Chain initialized with state preservation");
 
     // Step 1: Buy PEPE with 1 ETH
@@ -377,7 +377,8 @@ fn log_balance_changes_for_pepe(processed_tx: &ProcessedTransaction, buyer: Addr
 
     // Log PEPE changes from token_net
     let pepe_address = Address::from_str(PEPE_ADDRESS).unwrap();
-    if let Some(pepe_amount) = processed_tx.get_address_token_balance_change(&buyer, &pepe_address) {
+    if let Some(pepe_amount) = processed_tx.get_address_token_balance_change(&buyer, &pepe_address)
+    {
         if pepe_amount != I256::ZERO {
             has_changes = true;
             let sign = if pepe_amount.is_negative() { "-" } else { "+" };

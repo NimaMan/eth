@@ -74,10 +74,10 @@ async fn run_token(
     let dec_tok = 6u8; // USDC/USDT
 
     // Helpers to scale reserves depending on token ordering in the pair
-    let (uni_r0_b0, uni_r1_b0, _) = rqp.uni_v2_get_reserves(uni, Some(b0)).await?; // token0, token1
-    let (sushi_r0_b0, sushi_r1_b0, _) = rqp.uni_v2_get_reserves(sushi, Some(b0)).await?;
-    let (uni_r0_b1, uni_r1_b1, _) = rqp.uni_v2_get_reserves(uni, Some(b1)).await?;
-    let (sushi_r0_b1, sushi_r1_b1, _) = rqp.uni_v2_get_reserves(sushi, Some(b1)).await?;
+    let (uni_r0_b0, uni_r1_b0, _) = rqp.uni_v2_get_reserves(uni, Some(b0), None).await?; // token0, token1
+    let (sushi_r0_b0, sushi_r1_b0, _) = rqp.uni_v2_get_reserves(sushi, Some(b0), None).await?;
+    let (uni_r0_b1, uni_r1_b1, _) = rqp.uni_v2_get_reserves(uni, Some(b1), None).await?;
+    let (sushi_r0_b1, sushi_r1_b1, _) = rqp.uni_v2_get_reserves(sushi, Some(b1), None).await?;
 
     // Determine token0/token1 roles via address ordering in V2 pairs
     let token0_is_token = token < weth; // V2 sorts by address

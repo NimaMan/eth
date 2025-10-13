@@ -1,7 +1,7 @@
 /// Clean TX Processor - Rust alternative to Python eth_block_processor
 ///
 /// This is a simplified, clean transaction processor that replaces the complex
-/// Python eth_block_processor.txn module with direct Reth database access.
+/// Python eth_block_processor.tx module with direct Reth database access.
 ///
 /// Key improvements over Python version:
 /// - 10-40x faster (direct DB vs RPC)

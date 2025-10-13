@@ -243,7 +243,7 @@ impl ProcessedTxProvider {
 
         let simulation_result = self
             .simulator
-            .simulate_unsigned_transaction_with_full_trace_using_header_and_state(
+            .simulate_unsigned_transaction_with_full_trace_on_state(
                 unsigned_tx.clone(),
                 block_header,
                 state,

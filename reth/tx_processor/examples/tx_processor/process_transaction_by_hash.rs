@@ -48,14 +48,14 @@ async fn main() -> Result<()> {
             );
             println!("  Value: {} wei", tx.value);
             println!("  Status: {}", tx.status);
-            println!("  Type: {}", tx.txn_type);
+            println!("  Type: {}", tx.tx_type);
             println!("  Input data length: {} bytes", tx.input.len());
 
             // Gas and Fees
             println!("\n⛽ Gas & Fees:");
             println!("  Gas Used: {}", tx.fees.gas_used);
             println!("  Gas Price: {} wei", tx.fees.gas_price);
-            println!("  Transaction Fee: {} wei", tx.fees.txn_fee);
+            println!("  Transaction Fee: {} wei", tx.fees.tx_fee);
 
             // ERC20 Transfers
             if !tx.erc20_transfers.is_empty() {
@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
                 tx.address_balance_changes.len()
             );
             println!("  ✅ Unique Addresses: {}", tx.unique_addresses.len());
-            println!("  ✅ Transaction Type: {}", tx.txn_type);
+            println!("  ✅ Transaction Type: {}", tx.tx_type);
         }
         Err(e) => {
             println!("❌ Error: {}", e);

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct TransactionFees {
     pub gas_price: U256, // Effective gas price paid
     pub gas_used: u64,
-    pub txn_fee: U256, // Total fee in wei
+    pub tx_fee: U256, // Total fee in wei
 
     // EIP-1559 fields
     pub protocol_type: String,          // "legacy", "eip1559", "eip2930"
@@ -15,11 +15,11 @@ pub struct TransactionFees {
 
 impl TransactionFees {
     pub fn new(gas_price: U256, gas_used: u64) -> Self {
-        let txn_fee = gas_price * U256::from(gas_used);
+        let tx_fee = gas_price * U256::from(gas_used);
         Self {
             gas_price,
             gas_used,
-            txn_fee,
+            tx_fee,
             protocol_type: "unknown".to_string(),
             max_fee_per_gas: None,
             max_priority_fee: None,
@@ -32,11 +32,11 @@ impl TransactionFees {
         max_fee_per_gas: U256,
         max_priority_fee: U256,
     ) -> Self {
-        let txn_fee = gas_price * U256::from(gas_used);
+        let tx_fee = gas_price * U256::from(gas_used);
         Self {
             gas_price,
             gas_used,
-            txn_fee,
+            tx_fee,
             protocol_type: "eip1559".to_string(),
             max_fee_per_gas: Some(max_fee_per_gas),
             max_priority_fee: Some(max_priority_fee),

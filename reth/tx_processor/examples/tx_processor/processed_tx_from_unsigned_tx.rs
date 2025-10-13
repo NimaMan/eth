@@ -61,7 +61,7 @@ async fn main() -> Result<()> {
 
             println!("📋 Basic Transaction Info:");
             println!("  Transaction hash: {}", processed_tx.hash);
-            println!("  Transaction type: {}", processed_tx.txn_type);
+            println!("  Transaction type: {}", processed_tx.tx_type);
             println!("  Status: {}", processed_tx.status);
             println!("  From: {}", processed_tx.from_address);
             println!(
@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
                 "  Gas price: {} gwei",
                 processed_tx.fees.gas_price / U256::from(1_000_000_000u64)
             );
-            println!("  Transaction fee: {} wei", processed_tx.fees.txn_fee);
+            println!("  Transaction fee: {} wei", processed_tx.fees.tx_fee);
 
             println!("\n🔄 Transfers & Events:");
             println!("  ERC20 transfers: {}", processed_tx.erc20_transfers.len());

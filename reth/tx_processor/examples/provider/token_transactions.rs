@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     for tx in transactions.iter().take(10) {
         println!(
             "- Block {} Tx {:?} type {}",
-            tx.block_number, tx.hash, tx.txn_type
+            tx.block_number, tx.hash, tx.tx_type
         );
     }
 

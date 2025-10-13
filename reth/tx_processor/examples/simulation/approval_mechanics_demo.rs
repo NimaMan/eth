@@ -48,13 +48,14 @@ async fn main() -> Result<()> {
 
     let options = SequentialSimulationOptions {
         at_block: Some(latest_block),
+        block_header: None,
         stop_on_failure: false, // Continue to see both results
         auto_increment_nonces: true,
         gas_limit_per_tx: Some(300000),
     };
 
     match simulator
-        .simulate_transaction_sequence(scenario1_transactions, options.clone())
+        .simulate_unsigned_tx_sequence(scenario1_transactions, options.clone())
         .await
     {
         Ok(result) => {
@@ -84,7 +85,7 @@ async fn main() -> Result<()> {
     ];
 
     match simulator
-        .simulate_transaction_sequence(scenario2_transactions, options.clone())
+        .simulate_unsigned_tx_sequence(scenario2_transactions, options.clone())
         .await
     {
         Ok(result) => {
@@ -111,7 +112,7 @@ async fn main() -> Result<()> {
     let scenario3_transactions = vec![create_swap_eth_for_usdc_transaction()];
 
     match simulator
-        .simulate_transaction_sequence(scenario3_transactions, options)
+        .simulate_unsigned_tx_sequence(scenario3_transactions, options)
         .await
     {
         Ok(result) => {

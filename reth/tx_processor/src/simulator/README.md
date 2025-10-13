@@ -18,7 +18,7 @@ How it fits together
    - Stateless calldata constructors for V2/V3 buy/sell/approve and helpers like `spender_for_route`
 2) Simulate at block b using tx_processor simulators
    - Single tx: `ProcessedTxProvider::process_transaction_from_unsigned_tx(unsigned, Some(b))`
-   - Multi‑tx chain: `TxSimulator::start_simulation_chain(Some(b))` → `step_with_trace()` for each tx (e.g., approve → sell)
+   - Multi‑tx chain: `TxSimulator::start_simulation_chain(Some(b), None)` → `step_with_trace()` for each tx (e.g., approve → sell)
 3) Get results as `ProcessedTransaction`
    - Includes decoded events, `address_balance_changes` (currency_net / token_net), `fees.gas_used`, status, logs
 4) Consumers (e.g., RL envs) update their own state and compute reward from the deltas
@@ -51,7 +51,7 @@ Data extraction (ProcessedTransaction)
 
 Where to look
 - Single‑shot orchestration: `src/processed_tx_provider/provider.rs`
-- Core simulation chain: `src/unsigned_tx_chain_simulator.rs` (via `TxSimulator::start_simulation_chain()`)
+- Core simulation chain: `src/unsigned_tx_chain_simulator.rs` (via `TxSimulator::start_simulation_chain(at_block, header)`)
 - Viability analyzer (buy→approve→sell): `src/simulator/{buy_swap_simulator.rs, sell_swap_simulator.rs, pool_buy_sell_simulator.rs, cross_venue_buy_approve_sell.rs}`
 
 Design split (by crate)

@@ -17,6 +17,7 @@ This document explains how a raw transaction (on‑chain or simulated) becomes a
 3. Build `ProcessedTransaction` via the `TxProcessor`:
    - Decode logs → rich, typed events (ERC20/721/1155, Uniswap V2/V3/V4, approvals, etc.).
    - Extract internal calls from call trace.
+   - Attach opcode-level `struct_logs` when the simulator ran in full-trace mode.
    - Compute address balance changes (currency_net, token_net).
    - Set fees, metadata, and basic classification.
 4. Use `ProcessedTransaction` for higher‑level logic (e.g., AMM tax calc, analytics).
@@ -161,10 +162,11 @@ This is downstream of the core processor; it consumes `ProcessedTransaction` wit
 
 Contains:
 
-- Metadata: `hash`, `block_number`, `timestamp`, `txn_index`, `from`, `to`, `value`, `status`, `fees`.
+- Metadata: `hash`, `block_number`, `timestamp`, `tx_index`, `from`, `to`, `value`, `status`, `fees`.
 - Decoded events: `erc20_transfers`, `approvals`, `uniswap_v2_swaps`, `uniswap_v3_swaps`, etc.
 - Internal calls: extracted call graph entries.
 - Address balance changes: `address_balance_changes` map with `currency_net`/`token_net`.
+- Raw tracing artefacts: optional `struct_logs` (opcode-level trace) when the simulator ran in full-trace mode.
 - Latest states (optional), raw input, and auxiliary arrays for additional protocols.
 
 ## AMM Integration & Builders
