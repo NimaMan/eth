@@ -63,7 +63,11 @@ pub fn get_pool_liquidity(
 ) -> PyResult<PyPoolLiquidityInfo> {
     let header_clone = header.clone();
     let info = runtime
-        .block_on(async move { provider.get_route_liquidity(&route, block, header_clone).await })
+        .block_on(async move {
+            provider
+                .get_route_liquidity(&route, block, header_clone)
+                .await
+        })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
     let PoolLiquidityInfo {
         protocol,

@@ -4,6 +4,6 @@ pub mod simulator;
 
 // Re-export primary types for convenient importing from crate::python::simulator
 pub use pool_buy_sell_simulator::{
-    PyPoolBuySellSimulator, PyPoolViabilityConfig, PyPoolViabilityResult,
+    PyPoolBuySellParameters, PyPoolBuySellSimulationResult, PyPoolBuySellSimulator,
 };
 pub use simulator::{PySimulationResult, PySimulator};

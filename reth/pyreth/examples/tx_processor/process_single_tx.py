@@ -28,7 +28,7 @@ def main():
         print(f"  From: {tx.from_address}")
         print(f"  To: {tx.to_address}")
         print(f"  Value: {tx.value} wei")
-        print(f"  Type: {tx.txn_type}")
+        print(f"  Type: {tx.tx_type}")
         print(f"  Status: {'Success' if tx.status == 'True' else 'Failed'}")
         
         # Display events
@@ -72,7 +72,7 @@ def main():
     
     try:
         tx_fast = processor.load_transaction_from_hash_db_only(tx_hash)
-        print(f"  Loaded transaction type: {tx_fast.txn_type}")
+        print(f"  Loaded transaction type: {tx_fast.tx_type}")
         print(f"  Events decoded: ERC20={len(tx_fast.erc20_transfers)}, ERC721={len(tx_fast.erc721_transfers)}")
         print(f"  Balance changes available: {bool(tx_fast.address_balance_changes)}")
     except Exception as e:

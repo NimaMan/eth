@@ -1,4 +1,4 @@
-use alloy_primitives::U256;
+use alloy_primitives::{I256, U256};
 /// Python wrapper for ProcessedTransaction (PyO3)
 ///
 /// Converts Rust ProcessedTransaction to Python-compatible format
@@ -8,7 +8,7 @@ use reth_chain_query::common_addresses::denom_tokens::ERC20_TOKEN_DECIMALS;
 use reth_chain_query::to_checksum_address;
 use serde_json::Value as JsonValue;
 use std::str::FromStr;
-use tx_processor::ProcessedTransaction;
+use tx_processor::{ProcessedBlockTransaction, ProcessedTransaction};
 
 /// Convert serde_json::Value to Python object
 fn json_to_python(py: Python, value: &JsonValue) -> PyResult<PyObject> {
@@ -91,7 +91,7 @@ pub struct PyProcessedTransaction {
     #[pyo3(get)]
     pub block_timestamp: u64,
     #[pyo3(get)]
-    pub txn_index: u64,
+    pub tx_index: u64,
     #[pyo3(get)]
     pub from_address: String,
     #[pyo3(get)]
@@ -105,13 +105,15 @@ pub struct PyProcessedTransaction {
     #[pyo3(get)]
     pub nonce: u64,
     #[pyo3(get)]
-    pub txn_type: String,
+    pub tx_type: String,
     #[pyo3(get)]
     pub actions: Vec<String>,
     #[pyo3(get)]
     pub input: String,
     #[pyo3(get)]
     pub bribe_amount: f64,
+    #[pyo3(get)]
+    pub tx_number: Option<u64>,
 
     // Store the original for internal use
     pub(crate) inner: ProcessedTransaction,
@@ -128,19 +130,27 @@ impl PyProcessedTransaction {
             hash: format!("0x{}", hex::encode(ptx.hash)),
             block_number: ptx.block_number,
             block_timestamp: ptx.block_timestamp,
-            txn_index: ptx.txn_index,
+            tx_index: ptx.tx_index,
             from_address: checksum_from,
             to_address: ptx.to_address.map(|a| to_checksum_address(&a)),
             contract_address: ptx.contract_address.map(|a| to_checksum_address(&a)),
             value: ptx.value.to_string(),
             status,
             nonce: ptx.nonce,
-            txn_type: ptx.txn_type.clone(),
+            tx_type: ptx.tx_type.clone(),
             actions: ptx.actions.clone(),
             input: format!("0x{}", hex::encode(&ptx.input)),
             bribe_amount: ptx.bribe_amount,
+            tx_number: None,
             inner: ptx,
         }
+    }
+
+    pub fn from_block_transaction(tx: ProcessedBlockTransaction) -> Self {
+        let processed = tx.processed;
+        let mut this = Self::from_processed_transaction(processed);
+        this.tx_number = Some(tx.metadata.tx_number);
+        this
     }
 
     /// Convenience: wrap a slice of Rust ProcessedTransaction into Python wrappers
@@ -176,7 +186,7 @@ impl PyProcessedTransaction {
         dict.set_item("hash", &self.hash)?;
         dict.set_item("block_number", self.block_number)?;
         dict.set_item("block_timestamp", self.block_timestamp)?;
-        dict.set_item("txn_index", self.txn_index)?;
+        dict.set_item("tx_index", self.tx_index)?;
         dict.set_item("from_address", &self.from_address)?;
         dict.set_item("to_address", &self.to_address)?;
         dict.set_item("contract_address", &self.contract_address)?;
@@ -184,14 +194,15 @@ impl PyProcessedTransaction {
         dict.set_item("status", &self.status)?;
         dict.set_item("nonce", self.nonce)?;
         dict.set_item("input", &self.input)?;
-        dict.set_item("txn_type", &self.txn_type)?;
+        dict.set_item("tx_type", &self.tx_type)?;
         dict.set_item("actions", &self.actions)?;
+        dict.set_item("tx_number", self.tx_number)?;
 
         // Fees
         let fees = PyDict::new(py);
         fees.set_item("gas_price", self.inner.fees.gas_price.to_string())?;
         fees.set_item("gas_used", self.inner.fees.gas_used)?;
-        fees.set_item("txn_fee", self.inner.fees.txn_fee.to_string())?;
+        fees.set_item("tx_fee", self.inner.fees.tx_fee.to_string())?;
         fees.set_item("protocol_type", &self.inner.fees.protocol_type)?;
         if let Some(v) = &self.inner.fees.max_fee_per_gas {
             fees.set_item("max_fee_per_gas", v.to_string())?;
@@ -401,7 +412,7 @@ impl PyProcessedTransaction {
     /// Convert to Python dataclass instance via ProcessedTransaction.from_dict()
     fn as_python_dataclass(&self, py: Python) -> PyResult<PyObject> {
         let dict = self.to_dict(py)?.into_py(py);
-        let module = py.import("eth_data.eth_data.tx_processor.data_models.txn_models")?;
+        let module = py.import("eth_data.eth_data.tx_processor.data_models.tx_models")?;
         let cls = module.getattr("ProcessedTransaction")?;
         let res = cls.call_method1("from_dict", (dict,))?;
         Ok(res.into())
@@ -941,20 +952,16 @@ impl PyProcessedTransaction {
             let currency_net_dict = PyDict::new(py);
             for (currency, amount) in &balance_change.currency_net {
                 if currency == "ETH" {
-                    // Convert wei to ETH and handle negative values (two's complement)
-                    let eth_amount = if *amount > (U256::MAX >> 1) {
-                        // This is a negative number in two's complement
-                        let positive_amount = U256::MAX - *amount + U256::from(1);
-                        let wei_str = positive_amount.to_string();
-                        let wei_value: f64 = wei_str.parse().unwrap_or(0.0);
-                        -(wei_value / 1e18)
+                    let magnitude = amount.unsigned_abs();
+                    let wei_str = magnitude.to_string();
+                    let wei_value: f64 = wei_str.parse().unwrap_or(0.0);
+                    let eth_amount = wei_value / 1e18;
+                    let signed = if amount.is_negative() {
+                        -eth_amount
                     } else {
-                        // Positive number
-                        let wei_str = amount.to_string();
-                        let wei_value: f64 = wei_str.parse().unwrap_or(0.0);
-                        wei_value / 1e18
+                        eth_amount
                     };
-                    currency_net_dict.set_item(currency, eth_amount)?;
+                    currency_net_dict.set_item(currency, signed)?;
                 } else {
                     // Other currencies - keep as string for now
                     currency_net_dict.set_item(currency, amount.to_string())?;
@@ -974,7 +981,7 @@ impl PyProcessedTransaction {
         let dict = PyDict::new(py);
         dict.set_item("gas_price", self.inner.fees.gas_price.to_string())?;
         dict.set_item("gas_used", self.inner.fees.gas_used)?;
-        dict.set_item("txn_fee", self.inner.fees.txn_fee.to_string())?;
+        dict.set_item("tx_fee", self.inner.fees.tx_fee.to_string())?;
         dict.set_item("protocol_type", &self.inner.fees.protocol_type)?;
         if let Some(max_fee) = self.inner.fees.max_fee_per_gas {
             dict.set_item("max_fee_per_gas", max_fee.to_string())?;
@@ -1044,10 +1051,10 @@ impl PyProcessedTransaction {
         };
 
         // Format fees
-        let fees_repr = format!("TransactionFees(gas_price={}, gas_used={}, txn_fee={}, protocol_type='{}', max_fee_per_gas={}, max_priority_fee={})",
+        let fees_repr = format!("TransactionFees(gas_price={}, gas_used={}, tx_fee={}, protocol_type='{}', max_fee_per_gas={}, max_priority_fee={})",
             self.inner.fees.gas_price,
             self.inner.fees.gas_used,
-            self.inner.fees.txn_fee.to_string().parse::<f64>().unwrap_or(0.0) / 1e18,
+            self.inner.fees.tx_fee.to_string().parse::<f64>().unwrap_or(0.0) / 1e18,
             self.inner.fees.protocol_type,
             self.inner.fees.max_fee_per_gas.map_or("None".to_string(), |v| v.to_string()),
             self.inner.fees.max_priority_fee.map_or("None".to_string(), |v| v.to_string())
@@ -1069,18 +1076,18 @@ impl PyProcessedTransaction {
         let address_balance_changes_repr = format!("{{{}}}", address_balance_changes.join(", "));
 
         format!(
-            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, txn_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, txn_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, approvals={}, mints={}, burns={}, deposits={}, withdraws={}, pair_events={}, owner_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, address_balance_changes={}, latest_states={}, input='{}')",
+            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, tx_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, tx_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, approvals={}, mints={}, burns={}, deposits={}, withdraws={}, pair_events={}, owner_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, address_balance_changes={}, latest_states={}, input='{}')",
             self.hash,
             self.block_number,
             self.block_timestamp,
-            self.txn_index,
+            self.tx_index,
             hex::encode(self.inner.from_address).to_uppercase(),
             self.to_address.as_ref().map_or("None".to_string(), |a| format!("'0x{}'", a.to_uppercase())),
             self.contract_address.as_ref().map_or("None".to_string(), |a| format!("'0x{}'", a.to_uppercase())),
             if self.value == "0" { "0.0".to_string() } else { format!("{:.18}", self.value.parse::<f64>().unwrap_or(0.0) / 1e18) },
             if self.status { "True" } else { "False" },
             self.nonce,
-            self.txn_type,
+            self.tx_type,
             self.actions,
             fees_repr,
             self.bribe_amount,
@@ -1122,7 +1129,7 @@ impl PyProcessedTransaction {
         )
     }
 }
-fn convert_currency_amount(py: Python, symbol: &str, amount: &U256) -> PyResult<PyObject> {
+fn convert_currency_amount(py: Python, symbol: &str, amount: &I256) -> PyResult<PyObject> {
     let decimals: i32 = if symbol == "ETH" {
         18
     } else {
@@ -1133,20 +1140,13 @@ fn convert_currency_amount(py: Python, symbol: &str, amount: &U256) -> PyResult<
             .into()
     };
 
-    let half = U256::from(1u128) << 255;
-    let (is_negative, magnitude) = if *amount >= half {
-        let abs = U256::MAX - *amount + U256::from(1u8);
-        (true, abs)
-    } else {
-        (false, *amount)
-    };
-
+    let magnitude = amount.unsigned_abs();
     let magnitude_str = magnitude.to_string();
     let int_type = py.get_type::<PyLong>();
     let py_int = int_type.call1((magnitude_str.as_str(), 10))?;
     let mut py_value = py_int.into_py(py);
 
-    if is_negative {
+    if amount.is_negative() {
         let neg = py_value.as_ref(py).call_method0("__neg__")?;
         py_value = neg.into_py(py);
     }

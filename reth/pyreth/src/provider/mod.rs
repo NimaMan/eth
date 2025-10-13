@@ -41,7 +41,7 @@ impl From<ProcessedBlock> for PyProcessedBlock {
         let transactions = block
             .transactions
             .into_iter()
-            .map(|tx| PyProcessedTransaction::from(tx.processed))
+            .map(PyProcessedTransaction::from_block_transaction)
             .collect();
 
         Self {

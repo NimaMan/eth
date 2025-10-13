@@ -100,7 +100,7 @@ def test_resimulation():
         print(f"Original transaction:")
         print(f"  Block: {original_tx.block_number}")
         print(f"  Status: {original_tx.status}")
-        print(f"  Type: {original_tx.txn_type}")
+        print(f"  Type: {original_tx.tx_type}")
         fees = original_tx.fees
         print(f"  Gas Used: {fees['gas_used']}")
         print(f"  ERC20 Transfers: {len(original_tx.erc20_transfers)}")
@@ -115,7 +115,7 @@ def test_resimulation():
         print(f"Re-simulated transaction:")
         print(f"  Block: {resimulated_tx.block_number}")
         print(f"  Status: {resimulated_tx.status}")
-        print(f"  Type: {resimulated_tx.txn_type}")
+        print(f"  Type: {resimulated_tx.tx_type}")
         resim_fees = resimulated_tx.fees
         print(f"  Gas Used: {resim_fees['gas_used']}")
         print(f"  ERC20 Transfers: {len(resimulated_tx.erc20_transfers)}")

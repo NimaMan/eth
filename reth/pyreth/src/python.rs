@@ -11,8 +11,9 @@ use crate::agents::envs::stablecoin_env::{
     PyChainSnapshot, PyPortfolioState, PyStablecoinAction, PyStablecoinEnv, PyStepOutput,
 };
 use crate::chain_query::{
-    PyAccount, PyBalanceChange, PyBalanceChanges, PyChainQuery, PyCompleteBalances,
-    PyPoolLiquidityInfo, PyPortfolio, PyTokenMetadata,
+    PyAccount, PyAddressTransactionRef, PyAddressTxIndexer, PyBalanceChange, PyBalanceChanges,
+    PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo, PyPortfolio, PyTokenMetadata,
+    PyTransactionData,
 };
 use crate::price_reader::{PyEthPriceClient, PyPriceData};
 use crate::provider::{
@@ -21,8 +22,8 @@ use crate::provider::{
 };
 use crate::pyreth_instance::{clear_singleton, is_singleton_initialized, PyRethInstance};
 use crate::simulator::{
-    PyPoolBuySellSimulator, PyPoolViabilityConfig, PyPoolViabilityResult, PySimulationResult,
-    PySimulator,
+    PyPoolBuySellParameters, PyPoolBuySellSimulationResult, PyPoolBuySellSimulator,
+    PySimulationResult, PySimulator,
 };
 use crate::tx_processor::py_processed_transaction::PyProcessedTransaction;
 use crate::tx_processor::py_tx_processor::PyTxProcessor;
@@ -51,6 +52,9 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyCompleteBalances>()?;
     m.add_class::<PyTokenMetadata>()?;
     m.add_class::<PyPoolLiquidityInfo>()?;
+    m.add_class::<PyAddressTxIndexer>()?;
+    m.add_class::<PyAddressTransactionRef>()?;
+    m.add_class::<PyTransactionData>()?;
 
     // Transaction processor classes
     m.add_class::<PyTxProcessor>()?;
@@ -58,8 +62,8 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 
     // Pool buy sell simulator classes
     m.add_class::<PyPoolBuySellSimulator>()?;
-    m.add_class::<PyPoolViabilityResult>()?;
-    m.add_class::<PyPoolViabilityConfig>()?;
+    m.add_class::<PyPoolBuySellSimulationResult>()?;
+    m.add_class::<PyPoolBuySellParameters>()?;
 
     // Price reader classes (core only - dex_reader, cex_reader, arbitrage disabled)
     m.add_class::<PyEthPriceClient>()?;

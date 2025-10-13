@@ -29,7 +29,7 @@ def analyze_token_with_tax(simulator, token_name: str, token_addr: str, pool_add
     
     try:
         # Create custom config with specific parameters
-        config = pyreth.PoolViabilityConfig()
+        config = pyreth.PoolBuySellParameters()
         config.test_amount_eth = 1.0  # Use 1 ETH for better tax detection
         config.token_decimals = decimals
         config.block_delay = 1  # Sell in next block to avoid MEV

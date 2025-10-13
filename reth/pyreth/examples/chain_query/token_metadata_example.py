@@ -19,7 +19,7 @@ def main():
     symbol = query.get_token_symbol(token)
     decimals = query.get_token_decimals(token)
     total_supply = query.get_token_total_supply(token)
-    meta = query.get_token_metadata(token)
+    meta = query.get_token_metadata(token, None)
 
     print(f"Name: {name}")
     print(f"Symbol: {symbol}")
@@ -30,4 +30,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

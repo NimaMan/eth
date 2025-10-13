@@ -20,7 +20,9 @@ use crate::header_utils::parse_sealed_header_from_json;
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
 use reth_chain_query::common_addresses::find_uniswap_v4_pools_for_pair;
-use reth_chain_query::provider::{AddressTransactionRef, BalanceDiff};
+use reth_chain_query::provider::{
+    AddressTransactionRef, BalanceDiff, TransactionData as RustTransactionData,
+};
 use reth_chain_query::reth_index::RethIndexDB;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
@@ -146,6 +148,56 @@ pub struct PyAddressTransactionRef {
     pub tx_index: u64,
 }
 
+#[pyclass(name = "TransactionData")]
+#[derive(Clone)]
+pub struct PyTransactionData {
+    #[pyo3(get)]
+    pub hash: String,
+    #[pyo3(get)]
+    pub block_number: u64,
+    #[pyo3(get)]
+    pub block_timestamp: u64,
+    #[pyo3(get)]
+    pub tx_index: u64,
+    #[pyo3(get)]
+    pub tx_number: u64,
+    #[pyo3(get)]
+    pub from_address: String,
+    #[pyo3(get)]
+    pub to_address: Option<String>,
+    #[pyo3(get)]
+    pub value: String,
+    #[pyo3(get)]
+    pub gas_price: String,
+    #[pyo3(get)]
+    pub gas_limit: u64,
+    #[pyo3(get)]
+    pub nonce: u64,
+    #[pyo3(get)]
+    pub transaction_type: u8,
+}
+
+impl From<RustTransactionData> for PyTransactionData {
+    fn from(data: RustTransactionData) -> Self {
+        Self {
+            hash: format!("0x{}", hex::encode(data.hash.as_slice())),
+            block_number: data.block_number,
+            block_timestamp: data.block_timestamp,
+            tx_index: data.tx_index,
+            tx_number: data.tx_number,
+            from_address: format!("0x{}", hex::encode(data.from.as_slice())),
+            to_address: data
+                .to
+                .map(|addr| format!("0x{}", hex::encode(addr.as_slice()))),
+            value: data.value.to_string(),
+            gas_price: data.gas_price.to_string(),
+            gas_limit: data.gas_limit,
+            nonce: data.nonce,
+            transaction_type: data.transaction_type,
+        }
+    }
+}
+
 impl From<AddressTransactionRef> for PyAddressTransactionRef {
     fn from(value: AddressTransactionRef) -> Self {
         Self {
@@ -169,8 +221,8 @@ pub struct PyChainQuery {
 }
 
 impl PyChainQuery {
-    fn parse_optional_header(block_header_json: Option<&str>) -> PyResult<Option<SealedHeader>> {
-        if let Some(json) = block_header_json {
+    fn parse_optional_header(block_header: Option<&str>) -> PyResult<Option<SealedHeader>> {
+        if let Some(json) = block_header {
             let sealed = parse_sealed_header_from_json(json).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Invalid block header: {e}"
@@ -285,6 +337,16 @@ impl PyChainQuery {
             .into_iter()
             .map(PyAddressTransactionRef::from)
             .collect())
+    }
+
+    /// Fetch complete transaction metadata by global sequential number (txumber).
+    fn transaction_by_number(&self, tx_number: u64) -> PyResult<PyTransactionData> {
+        let provider = self.provider.clone();
+        let tx = self
+            .runtime
+            .block_on(async move { provider.get_transaction_by_number(tx_number).await })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(PyTransactionData::from(tx))
     }
 
     /// Whether address index entries exist for the given block number.
@@ -599,14 +661,14 @@ impl PyChainQuery {
     }
 
     /// Get Uniswap V2 pool liquidity (reserves) at a block
-    #[pyo3(signature = (pool, block=None, block_header_json=None))]
+    #[pyo3(signature = (pool, block=None, block_header=None))]
     fn get_uniswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV2 { pool: pool_addr };
         super::amm::get_pool_liquidity(
@@ -619,14 +681,14 @@ impl PyChainQuery {
     }
 
     /// Get Sushiswap V2 pool liquidity (reserves) at a block
-    #[pyo3(signature = (pool, block=None, block_header_json=None))]
+    #[pyo3(signature = (pool, block=None, block_header=None))]
     fn get_sushiswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::SushiswapV2 { pool: pool_addr };
         super::amm::get_pool_liquidity(
@@ -639,15 +701,15 @@ impl PyChainQuery {
     }
 
     /// Get Uniswap V3 pool liquidity/tick at a block
-    #[pyo3(signature = (pool, fee_tier, block=None, block_header_json=None))]
+    #[pyo3(signature = (pool, fee_tier, block=None, block_header=None))]
     fn get_uniswap_v3_liquidity(
         &self,
         pool: &str,
         fee_tier: u32,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV3 {
             pool: pool_addr,
@@ -663,15 +725,15 @@ impl PyChainQuery {
     }
 
     /// Get Uniswap V4 pool liquidity/tick via PoolManager and PoolId
-    #[pyo3(signature = (pool_manager, pool_id_hex, block=None, block_header_json=None))]
+    #[pyo3(signature = (pool_manager, pool_id_hex, block=None, block_header=None))]
     fn get_uniswap_v4_liquidity(
         &self,
         pool_manager: &str,
         pool_id_hex: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let pm = super::utils::parse_address(pool_manager)?;
         let pid_clean = pool_id_hex.trim_start_matches("0x");
         let mut arr = [0u8; 32];
@@ -748,16 +810,16 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token decimals via on-chain query
-    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    #[pyo3(signature = (token, block=None, block_header=None))]
     fn get_token_decimals(
         &self,
         token: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<u8> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
             .block_on(async move {
                 match block_header {
@@ -773,16 +835,16 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token symbol via on-chain query
-    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    #[pyo3(signature = (token, block=None, block_header=None))]
     fn get_token_symbol(
         &self,
         token: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
             .block_on(async move {
                 match block_header {
@@ -798,16 +860,16 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token name via on-chain query
-    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    #[pyo3(signature = (token, block=None, block_header=None))]
     fn get_token_name(
         &self,
         token: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
             .block_on(async move {
                 match block_header {
@@ -823,16 +885,16 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 total supply as string (wei) via on-chain query
-    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    #[pyo3(signature = (token, block=None, block_header=None))]
     fn get_token_total_supply(
         &self,
         token: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let supply = self
             .runtime
             .block_on(async move {
@@ -854,16 +916,16 @@ impl PyChainQuery {
     }
 
     /// Get complete token metadata in a single call
-    #[pyo3(signature = (token, block=None, block_header_json=None))]
+    #[pyo3(signature = (token, block=None, block_header=None))]
     fn get_token_metadata(
         &self,
         token: &str,
         block: Option<u64>,
-        block_header_json: Option<&str>,
+        block_header: Option<&str>,
     ) -> PyResult<super::tokens::PyTokenMetadata> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header_json)?;
+        let block_header = Self::parse_optional_header(block_header)?;
         let meta = self
             .runtime
             .block_on(async move {

@@ -96,7 +96,7 @@ impl PySimulator {
         let result = self
             .runtime
             .block_on(async move {
-                let mut chain = simulator.start_simulation_chain(block_number).await?;
+                let mut chain = simulator.start_simulation_chain(block_number, None).await?;
                 chain.step(unsigned_tx).await
             })
             .map_err(|e| {

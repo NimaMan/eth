@@ -45,7 +45,7 @@ def main():
         for i, tx in enumerate(results):
             print(f"\n{i+1}. Hash: {tx.hash[:10]}...")
             print(f"   Block: {tx.block_number}")
-            print(f"   Type: {tx.txn_type}")
+            print(f"   Type: {tx.tx_type}")
             print(f"   From: {tx.from_address}")
             print(f"   To: {tx.to_address if tx.to_address else 'Contract Creation'}")
             print(f"   Status: {'Success' if tx.status == 'True' else 'Failed'}")

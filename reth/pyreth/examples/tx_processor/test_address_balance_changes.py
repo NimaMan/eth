@@ -33,7 +33,7 @@ def main():
     print(f"Processing with simulation: {tx_hash}")
     tx = processor.process_transaction_from_hash_with_simulation(tx_hash)
 
-    print(f"\nBlock: {tx.block_number}  Index: {tx.txn_index}")
+    print(f"\nBlock: {tx.block_number}  Index: {tx.tx_index}")
     print(f"From: {tx.from_address}  To: {tx.to_address}")
     print(f"Status: {'Success' if tx.status == 'True' else 'Failed'}")
 

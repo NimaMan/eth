@@ -42,7 +42,7 @@ def main():
     txp = reth.tx_processor()
 
     # Base config
-    cfg = pyreth.PoolViabilityConfig()
+    cfg = pyreth.PoolBuySellParameters()
     cfg.test_amount_eth = 0.01
     # USDC has 6 decimals
     if token.lower() == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48":

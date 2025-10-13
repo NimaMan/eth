@@ -30,7 +30,7 @@ def main():
         txp = reth.tx_processor()
         
         # Create config for 1 ETH
-        config = pyreth.PoolViabilityConfig()
+        config = pyreth.PoolBuySellParameters()
         config.test_amount_eth = TEST_AMOUNT_ETH
         config.token_decimals = 6  # USDC decimals
         config.buyer_address = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689"

@@ -128,7 +128,7 @@ def analyze_liquidity_removal():
         # Look for specific function calls
         print("\n\nTRANSACTION TYPE ANALYSIS:")
         print("-" * 40)
-        print(f"Transaction Type: {tx.txn_type}")
+        print(f"Transaction Type: {tx.tx_type}")
         if hasattr(tx, 'actions'):
             print(f"Actions: {tx.actions}")
         

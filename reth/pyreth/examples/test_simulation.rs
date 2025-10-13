@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Test 3: Create simulation chain
             println!("2. Testing simulation chain creation...");
-            match simulator.start_simulation_chain(None).await {
+            match simulator.start_simulation_chain(None, None).await {
                 Ok(_chain) => {
                     println!("   ✅ Simulation chain created successfully");
                 }

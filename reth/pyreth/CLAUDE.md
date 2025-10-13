@@ -184,7 +184,7 @@ reth = pyreth.PyReth()
 processor = reth.tx_processor()
 
 tx = processor.process_transaction("0x...")
-print(f"Type: {tx.txn_type}")
+print(f"Type: {tx.tx_type}")
 print(f"ERC20 transfers: {len(tx.erc20_transfers)}")
 ```
 

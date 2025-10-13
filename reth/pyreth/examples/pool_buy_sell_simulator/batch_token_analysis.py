@@ -61,7 +61,7 @@ def analyze_token(simulator, symbol: str, token: str, pool: str,
     
     try:
         # Create config with token decimals
-        config = pyreth.PoolViabilityConfig()
+        config = pyreth.PoolBuySellParameters()
         config.test_amount_eth = 0.01  # Small amount for testing
         config.token_decimals = decimals
         

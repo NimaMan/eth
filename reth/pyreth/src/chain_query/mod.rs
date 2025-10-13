@@ -1,4 +1,5 @@
 // Python chain_query module aggregator
+pub mod address_indexer;
 pub mod addresses;
 pub mod amm;
 pub mod chain_query;
@@ -6,8 +7,10 @@ pub mod tokens;
 pub mod utils;
 
 // Re-export primary types for convenient importing from crate::python::chain_query
+pub use address_indexer::PyAddressTxIndexer;
 pub use amm::PyPoolLiquidityInfo;
 pub use chain_query::{
-    PyAccount, PyBalanceChange, PyBalanceChanges, PyChainQuery, PyCompleteBalances, PyPortfolio,
+    PyAccount, PyAddressTransactionRef, PyBalanceChange, PyBalanceChanges, PyChainQuery,
+    PyCompleteBalances, PyPortfolio, PyTransactionData,
 };
 pub use tokens::PyTokenMetadata;

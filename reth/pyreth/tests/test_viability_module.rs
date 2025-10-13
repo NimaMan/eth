@@ -10,7 +10,7 @@
 mod tests {
     use alloy_primitives::{Address, U256};
     use pyreth::erc20_token_trading_viability::{
-        analyze_pool_viability, PoolType, PoolViabilityConfig,
+        analyze_pool_viability, PoolBuySellParameters, PoolType,
     };
     use pyreth::TxProcessor;
     use reth_chain_query::ChainQuery;
@@ -32,7 +32,7 @@ mod tests {
         let simulator = chain_query.get_simulator();
 
         // Create test config
-        let config = PoolViabilityConfig::new(
+        let config = PoolBuySellParameters::new(
             Address::ZERO, // Would be real token in actual test
             Address::ZERO, // Would be real pool in actual test
             PoolType::UniswapV2,
@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn test_config_builder() {
         // Test the configuration builder pattern
-        let config = PoolViabilityConfig::new(Address::ZERO, Address::ZERO, PoolType::UniswapV2)
+        let config = PoolBuySellParameters::new(Address::ZERO, Address::ZERO, PoolType::UniswapV2)
             .with_test_amount(U256::from(100))
             .with_buyer(Address::from([1u8; 20]))
             .with_block(12345678);

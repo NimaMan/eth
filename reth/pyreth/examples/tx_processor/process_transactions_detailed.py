@@ -28,7 +28,7 @@ def main():
     print("Success entries:")
     for entry in result["success"]:
         tx = entry["transaction"]
-        print(f"  idx={entry['index']} hash={entry['hash'][:10]}... block={tx.block_number} type={tx.txn_type}")
+        print(f"  idx={entry['index']} hash={entry['hash'][:10]}... block={tx.block_number} type={tx.tx_type}")
 
     print("\nFailed entries:")
     for entry in result["failed"]:

@@ -135,7 +135,7 @@ result = simulator.check_uniswap_v3_pool(
 
 ```python
 # Create custom configuration
-config = pyreth.PoolViabilityConfig()
+config = pyreth.PoolBuySellParameters()
 config.test_amount_eth = 0.1  # Test with 0.1 ETH
 config.buyer_address = "0x..."  # Custom buyer address
 config.gas_limit = 500000  # Higher gas limit
@@ -144,7 +144,7 @@ config.block_delay = 1  # Sell in next block
 config.token_decimals = 18  # Token decimals
 
 # Or create with specific amount
-config = pyreth.PoolViabilityConfig.with_buy_amount(0.05)
+config = pyreth.PoolBuySellParameters.with_buy_amount(0.05)
 ```
 
 ### Understanding Results

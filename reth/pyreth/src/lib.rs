@@ -5,6 +5,7 @@
 // Core Rust modules exposed to Python bindings
 pub mod agents;
 pub mod chain_query;
+pub mod header_utils;
 pub mod price_reader;
 pub mod provider;
 pub mod pyreth_instance;

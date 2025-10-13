@@ -61,7 +61,7 @@ def main():
         print("✅ Pool Buy Sell Simulator initialized")
         
         # Create custom config for 1 ETH
-        config = pyreth.PoolViabilityConfig()
+        config = pyreth.PoolBuySellParameters()
         config.test_amount_eth = TEST_AMOUNT_ETH
         config.token_decimals = 6  # USDC has 6 decimals
         config.slippage_tolerance = 0.5  # 0.5% slippage
@@ -96,7 +96,7 @@ def main():
         print(f"  Sell Tax: {result.sell_tax_percentage:.4f}%")
         print(f"  Total Tax: {result.buy_tax_percentage + result.sell_tax_percentage:.4f}%")
         
-        # Since we don't have direct access to token amounts in PyPoolViabilityResult,
+        # Since we don't have direct access to token amounts in PyPoolBuySellSimulationResult,
         # we'll calculate expected amounts
         print("\n📈 Trade Flow Analysis:")
         print(f"  Block Number: {result.block_number}")
