@@ -36,24 +36,24 @@ Strategy Event Flow:
 
 Required Methods:
 --------------
-1. analyze_token(token, position_state) -> Optional[TradeSignal]
+1. analyze_token(token, position) -> Optional[TradeSignal]
    - Main entry point for token updates
    - Routes to appropriate state handler
    - Returns trading signals
 
-2. handle_init_state(token, position_state) -> Optional[TradeSignal]
+2. handle_init_state(token, position) -> Optional[TradeSignal]
    - Evaluates initial buy conditions
    - Generates buy signals
 
-3. handle_buy_submitted_state(token, position_state) -> Optional[TradeSignal]
+3. handle_buy_submitted_state(token, position) -> Optional[TradeSignal]
    - Confirms buy transactions
    - Updates position entry data
 
-4. handle_buy_confirmed_state(token, position_state) -> Optional[TradeSignal]
+4. handle_buy_confirmed_state(token, position) -> Optional[TradeSignal]
    - Monitors active positions
    - Generates sell signals
 
-5. handle_sell_submitted_state(token, position_state) -> Optional[TradeSignal]
+5. handle_sell_submitted_state(token, position) -> Optional[TradeSignal]
    - Confirms sell transactions
    - Finalizes position exit
 """
@@ -68,27 +68,27 @@ from eth_portfolio_manager.core.token_position import TokenPosition
 
 class BaseStrategy(ABC):
    @abstractmethod
-   def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def analyze_token(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
       """Main entry point for token analysis and signal generation"""
       pass
 
    @abstractmethod
-   def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_init_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
       """Handle INIT state and evaluate buy conditions"""
       pass
 
    @abstractmethod
-   def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_buy_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
       """Handle BUY_SUBMITTED state and confirm entries"""
       pass
 
    @abstractmethod
-   def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_buy_confirmed_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
       """Handle BUY_CONFIRMED state and evaluate sell conditions"""
       pass
 
    @abstractmethod
-   def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+   def handle_sell_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
       """Handle SELL_SUBMITTED state and confirm exits"""
       pass
 

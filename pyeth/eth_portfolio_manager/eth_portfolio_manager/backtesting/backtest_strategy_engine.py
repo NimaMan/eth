@@ -135,7 +135,7 @@ class BacktestStrategyEngine:
             - Update position data based on trade signals
         """
         # Apply investment strategy
-        signal = self.investment_strategy.analyze_token(live_token=live_token, token_position=token_position)
+        signal = self.investment_strategy.analyze_token(token=live_token, position=token_position)
         # Update position based on signals
         if signal:
             token_position = self._update_position_from_signal(signal=signal, token_position=token_position, live_token=live_token)
@@ -249,8 +249,9 @@ class BacktestStrategyEngine:
             token_position.latest_snapshot.current_price_ratio = current_price_ratio
             token_position.latest_snapshot.realized_profit = token_position.latest_snapshot.current_value - token_position.static_data.purchase_value
             token_position.latest_snapshot.unrealized_profit = 0
-            token_position.latest_snapshot.token_age_blocks = live_token.token_trading_age_blocks
-            token_position.latest_snapshot.token_age_hours = live_token.token_trading_age_hours
+            age_blocks, age_hours = token_position.get_trading_ages(live_token)
+            token_position.latest_snapshot.token_age_blocks = age_blocks
+            token_position.latest_snapshot.token_age_hours = age_hours
 
         return token_position
 

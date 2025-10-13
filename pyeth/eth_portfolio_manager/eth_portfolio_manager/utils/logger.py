@@ -1,6 +1,6 @@
 '''
 Logger Module Documentation Objective:
-The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_block_processor` project. It aims to:
+The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_data` project. It aims to:
 
 1. Create a standardized logging format across all modules.
 2. Allow for easy integration of logging in any part of the project.

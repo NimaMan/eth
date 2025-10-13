@@ -124,6 +124,43 @@ from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositio
 class LiveTokenPositionManager:
     def __init__(self, investment_strategy: BaseStrategy):
         self.investment_strategy = investment_strategy()
+
+    def _compute_trading_ages(self, token: ERC20Token, position) -> (Optional[int], Optional[float]):
+        pool_manager = getattr(token.token_data, "pool_manager", None)
+        if not pool_manager:
+            return None, None
+
+        pool = None
+        pool_address = getattr(position, "pool_address", None)
+        if pool_address:
+            pool = pool_manager.get_pool(pool_address)
+
+        if pool is None:
+            pool_addresses = getattr(token.token_data, "pool_addresses", tuple())
+            for address in pool_addresses:
+                pool = pool_manager.get_pool(address)
+                if pool is not None:
+                    if hasattr(position, "pool_address"):
+                        position.pool_address = address
+                    break
+
+        if pool is None:
+            return None, None
+
+        current_block = getattr(token.token_data, "latest_block_number", None)
+        age_blocks = None
+        if current_block is not None:
+            try:
+                age_blocks = pool.trading_age_blocks(current_block)
+            except Exception:
+                age_blocks = None
+
+        try:
+            age_hours = pool.trading_age_hours()
+        except Exception:
+            age_hours = None
+
+        return age_blocks, age_hours
         
     async def process_token_updates(self, updated_token: ERC20Token, current_position: TokenPositionData) -> TokenPositionData:
         """Process token updates and manage positions
@@ -138,7 +175,7 @@ class LiveTokenPositionManager:
         # Apply investment strategy
         signal = self.investment_strategy.analyze_token(
             token=updated_token,
-            position_state=updated_position
+            position=updated_position
         )
         
         # Update position based on signals
@@ -203,8 +240,9 @@ class LiveTokenPositionManager:
         position.current_value = 0
         position.realized_profit = -position.purchase_value  # Full loss
         position.unrealized_profit = 0
-        position.token_age_blocks = token.token_creation_age_blocks
-        position.token_age_hours = token.token_creation_age_hours
+        age_blocks, age_hours = self._compute_trading_ages(token, position)
+        position.token_age_blocks = age_blocks
+        position.token_age_hours = age_hours
         position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.has_active_position = False
@@ -234,8 +272,9 @@ class LiveTokenPositionManager:
            - No value/profit updates
         """
         # Always update token metrics
-        position.token_age_blocks = token.token_trading_age_blocks
-        position.token_age_hours = token.token_trading_age_hours
+        age_blocks, age_hours = self._compute_trading_ages(token, position)
+        position.token_age_blocks = age_blocks
+        position.token_age_hours = age_hours
         position.block_number = token.token_data.latest_block_number
         position.last_updated_time = token.token_data.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio

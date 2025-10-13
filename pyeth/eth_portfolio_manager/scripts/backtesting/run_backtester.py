@@ -6,7 +6,7 @@ from web3 import Web3
 import asyncio
 from eth_portfolio_manager.backtesting.backtest_manager import BacktestExecutionEngine
 from eth_portfolio_manager.strategy import BuyAll, BuyScamStrategy, MarketTracker
-from eth_portfolio_manager.db.backtest_results_writer import BacktestResultsWriter
+from eth_data.database.writers.backtest_results_writer import BacktestResultsWriter
 from eth_portfolio_manager.utils.logger import get_logger
 
 

@@ -70,7 +70,7 @@ class MarketTracker(BaseStrategy):
             "position_size_eth": self.config.position_size_eth,
         }
     
-    def analyze_token(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def analyze_token(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """
         Analyze token and generate trading signals based on current position state
         
@@ -79,41 +79,41 @@ class MarketTracker(BaseStrategy):
         """
         
         # Handle each state explicitly
-        if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
-            return self.handle_init_state(live_token, token_position)
+        if position.latest_snapshot.position_state == TokenPositionState.INIT:
+            return self.handle_init_state(token, position)
         
-        elif token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
-            return self.handle_buy_submitted_state(live_token, token_position)
+        elif position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
+            return self.handle_buy_submitted_state(token, position)
         
         # No signals for other states - we just hold positions indefinitely
         return None
 
-    def handle_init_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_init_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
-        if live_token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
+        if token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
             return TradeSignal(
-                token_address=live_token.token_data.contract_address,
+                token_address=token.token_data.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,
                 quantity=self.config.position_size_eth,
                 strategy_name=self.strategy_name,
             )
         return None
 
-    def handle_buy_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
-            token_address=live_token.token_data.contract_address,
+            token_address=token.token_data.contract_address,
             decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
             strategy_name=self.strategy_name,
         )
 
-    def handle_buy_confirmed_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_buy_confirmed_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_CONFIRMED state: No action, just hold indefinitely"""
         # No sell signals - we're just tracking market performance
         return None
 
-    def handle_sell_submitted_state(self, live_token: ERC20Token, token_position: TokenPosition) -> Optional[TradeSignal]:
+    def handle_sell_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle SELL_SUBMITTED state: Not used in this strategy"""
         # This state should never be reached in this strategy
         return None 

@@ -184,8 +184,8 @@ class TokenPositionStaticData:
     exit_block: int
     entry_timestamp: int
     exit_timestamp: int
-    entry_txn_fee: float
-    exit_txn_fee: float
+    entry_tx_fee: float
+    exit_tx_fee: float
 ```
 
 ### TokenPositionDynamicSnapshot

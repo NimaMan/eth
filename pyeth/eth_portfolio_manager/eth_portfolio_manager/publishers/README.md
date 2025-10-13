@@ -1,197 +1,199 @@
-# Token Information Publishers
+# Token Tracking Publishers
 
 ## Overview
 
-The publishers module extracts and publishes critical token and pool information from the Python blockchain processor to the Rust mempool analyzer. This data enables real-time transaction impact assessment and scam detection.
+The publishers module provides real-time token and pool state information from the Python blockchain processor to external consumers, primarily the Rust mempool analyzer for scam detection. This system tracks live token updates and maintains a cache of healthy pools for efficient mempool transaction analysis.
 
 ## Architecture
 
 ```
-Token Updates (Python)  →  TokenInfoExtractor  →  TokenInfoPublisher  →  ZMQ  →  Rust Mempool Processor
+LiveBacktestEngine → TokenInfoExtractor → TokenTrackingCache → TokenInfoPublisher → ZeroMQ → Rust Mempool Processor
+      (blocks)         (extract pools)     (filter scams)       (publish)                    (scam detection)
 ```
+
+## Components
+
+### 1. **TokenInfoExtractor** (`token_info_extractor.py`)
+- Extracts pool and token data from blockchain updates
+- Converts raw token data into structured pool information
+- Tracks token creators and pool creation metadata
+
+### 2. **TokenTrackingCache** (`token_tracking_cache.py`)
+- Maintains cache of healthy (non-scam) pools
+- Automatically evicts pools when tokens are marked as scams
+- Filters out low-liquidity pools to reduce noise
+
+### 3. **TokenInfoPublisher** (`token_info_publisher.py`)
+- Publishes pool updates via ZeroMQ PUB/SUB (port 5557)
+- Provides REQ/REP interface for data queries (port 5558)
+- Handles block synchronization updates
+
+### 4. **TradeSignalPublisher** (`trade_signal_publisher.py`)
+- Publishes trading signals to eth_kartal execution engine
+- Tracks signal execution status and confirmations
 
 ## Published Data Schema
 
-### Core Token Information
+### Token/Pool Updates (PUB Socket - Port 5557)
 
-```python
+```json
 {
-    "token_address": "0x...",
-    "token_symbol": "SYMBOL",
-    "token_name": "Token Name",
-    "token_decimals": 18,
-    "total_supply": "1000000000000000000000000",
-    
-    # Contract Features
-    "buy_tax": 0.05,          # 5% buy tax
-    "sell_tax": 0.05,         # 5% sell tax
-    "max_tx_amount": "1000000000000000000",  # Max tokens per tx
-    "max_wallet_amount": "2000000000000000000",  # Max tokens per wallet
-    "trading_enabled": true,
-    
-    # Risk Flags
-    "is_honeypot": false,     # Can't sell after buying
-    "owner_can_pause": true,  # Owner can disable trading
-    "owner_can_change_tax": true,  # Owner can modify taxes
-    "liquidity_locked": false,
-    "contract_verified": true,
-    
-    # Activity Metrics
-    "holder_count": 150,
-    "unique_traders_24h": 89,
-    "volume_24h_eth": 125.5
+    "type": "token_updates",
+    "timestamp": 1703001234.567,
+    "data": {
+        "0x123...abc": {  // pool_address
+            "token_symbol": "PEPE",
+            "token_name": "Pepe Token",
+            "token_address": "0x456...",
+            "pool_address": "0x123...abc",
+            "pool_type": "V2",  // V2, V3, V4
+            "denom_currency": "WETH",  // WETH, USDC, USDT, etc.
+            "denom_address": "0xC02aa...",
+            "token_decimals": 18,
+            "denom_reserve": 5.5,  // ETH or denomination token amount
+            "token_reserve": 1000000.0,
+            "latest_block_number": 18750123,
+            "trading_enabled": true,
+            
+            // Creation metadata
+            "creator_address": "0x789...",
+            "creation_block": 18750000,
+            "creation_timestamp": 1703000000,
+            "creation_tx": "0xabc...",
+            
+            // Trading enable info
+            "trading_enabled_block": 18750010,
+            "trading_enabled_tx": "0xdef...",
+            
+            // Ownership info
+            "current_owner": "0x000...",
+            "ownership_renounced": true,
+            "renouncement_block": 18750020,
+            
+            // Supply info
+            "total_supply": 1000000000,
+            
+            // Scam detection info
+            "is_scam": false,
+            "scam_label": null,  // e.g. "rug_pull", "honeypot", etc.
+            
+            // Calculated fields
+            "pool_age_blocks": 123
+        }
+    }
 }
 ```
 
-### Pool Information (Per Pool)
+### REQ/REP Interface (Port 5558)
 
-```python
+#### Request Types:
+
+1. **Get Specific Pool**
+```json
 {
-    "pool_address": "0x...",
-    "pool_type": "V2",        # V2, V3, V4
-    "fee_tier": 3000,         # 0.3% for V2/V3
-    
-    # Liquidity State
-    "eth_reserve": 123.45,
-    "token_reserve": 1000000.0,
-    "k_value": 123450000.0,   # Constant product
-    "liquidity_usd": 250000.0,
-    
-    # Recent Activity
-    "last_trade_block": 19234567,
-    "last_trade_timestamp": 1234567890,
-    "trades_last_100_blocks": 45,
-    "unique_traders_100_blocks": 23,
-    
-    # Price & Impact
-    "current_price_eth": 0.00012345,
-    "price_change_24h": -0.15,  # -15%
-    "reserve_change_10_blocks": -5.2,  # ETH change
-    
-    # Concentration Metrics
-    "is_primary_pool": true,  # Has most volume
-    "pool_dominance": 0.85,   # 85% of total liquidity
+    "type": "get_pool",
+    "pool_address": "0x123..."
 }
 ```
 
-## Key Data Points for Mempool Analysis
-
-### 1. **Tax Impact Calculation**
-```python
-# When mempool sees: swap 1 ETH for TOKEN
-actual_tokens_received = swap_output * (1 - buy_tax)
-actual_eth_received = swap_output * (1 - sell_tax)
+2. **Get All Pools**
+```json
+{
+    "type": "get_all_pools"
+}
 ```
 
-### 2. **Transaction Validation**
-```python
-# Will transaction succeed?
-if not trading_enabled:
-    return "WILL_REVERT: Trading disabled"
-if amount > max_tx_amount:
-    return "WILL_REVERT: Exceeds max transaction"
-if recipient_balance + amount > max_wallet_amount:
-    return "WILL_REVERT: Exceeds max wallet"
+3. **Get Pool Statistics**
+```json
+{
+    "type": "get_pool_stats"
+}
 ```
 
-### 3. **Price Impact Assessment**
-```python
-# For large trades
-price_impact = calculate_price_impact(
-    eth_amount, 
-    eth_reserve, 
-    token_reserve,
-    fee_tier
-)
-if price_impact > 0.10:  # 10% impact
-    return "HIGH_IMPACT_TRADE"
+4. **Get Mempool Data** (includes creator tracking)
+```json
+{
+    "type": "get_mempool_data"
+}
 ```
 
-### 4. **Scam Detection Signals**
-```python
-# Red flags for Rust to evaluate
-if is_honeypot and operation == "BUY":
-    return "HONEYPOT_WARNING"
-if owner_can_change_tax and recent_owner_activity:
-    return "TAX_CHANGE_RISK"
-if not liquidity_locked and liquidity < 1.0:
-    return "RUG_PULL_RISK"
-```
+## Mempool Processor Integration
 
-## Data Extraction Sources
+The Rust mempool processor uses this data for real-time scam detection:
 
-### From Token Contract
-- **Taxes**: `buyTax()`, `sellTax()`, `_taxRate`, etc.
-- **Limits**: `_maxTxAmount`, `_maxWalletSize`
-- **State**: `tradingEnabled`, `swapEnabled`
-- **Ownership**: `owner()`, `renounceOwnership()` status
+### Critical Fields for Scam Detection:
+- **`denom_reserve`**: Current ETH/token reserves for drain detection
+- **`token_reserve`**: Token side of the pool
+- **`token_address`**: Identifies the token
+- **`block_number`**: For staleness checks
 
-### From Pool Contract
-- **Reserves**: `getReserves()`, `slot0()` for V3
-- **Activity**: Transaction logs filtered by pool address
-- **Liquidity**: `totalSupply()` of LP tokens
+### Scam Detection Logic:
+1. Simulates pending transaction impact on pool reserves
+2. Calculates drain percentage: `(old_reserve - new_reserve) / old_reserve`
+3. Triggers alerts when:
+   - Drain > 60% OR remaining < 0.3 ETH = Scam Alert
+   - Drain > 50% = Critical severity
+   - Drain > 20% = Liquidity warning
 
-### From Transaction History
-- **Trading Patterns**: Recent swaps, liquidity changes
-- **Holder Analysis**: Distribution, whale movements
-- **Owner Actions**: Tax changes, trading toggles
+## Filtering and Cache Management
 
-## Update Frequency
+### Pool Filtering Criteria:
+1. **Scam Tokens**: Automatically evicted when token marked as scam
+2. **Low Liquidity**: Pools below minimum threshold (configurable)
+3. **Stale Pools**: Optional cleanup for pools not updated recently
 
-- **Real-time Updates**: On every block with token/pool changes
-- **Batch Updates**: Full state sync every N blocks
-- **Critical Updates**: Immediate push for:
-  - Trading enabled/disabled
-  - Tax rate changes
-  - Large liquidity movements
-  - Owner privilege changes
+### Minimum Liquidity Thresholds:
+- **WETH pools**: 0.01 ETH minimum (default)
+- **Stablecoin pools**: Different thresholds may apply
+- **Other denominations**: Configurable per currency
 
-## Performance Considerations
+## Performance Characteristics
 
-1. **Message Size**: Target < 1KB per update
-2. **Update Rate**: ~100-500 tokens/sec during peak
-3. **Compression**: Optional zlib for batch updates
-4. **Caching**: Rust side maintains state between updates
+- **Update Frequency**: Every block with token changes (~12 seconds)
+- **Message Size**: ~500 bytes per pool update
+- **Latency**: Sub-millisecond from block processing to ZMQ publish
+- **Cache Size**: Typically 2000-3000 active pools
 
-## Future Enhancements
+## Configuration
 
-1. **MEV Metrics**: Sandwich attack frequency, arbitrage volume
-2. **Social Signals**: Holder growth rate, community metrics  
-3. **Cross-pool Arbitrage**: Price discrepancies between pools
-4. **Advanced Risk Scoring**: ML-based scam probability
+### Environment Variables:
+- `MIN_ETH_THRESHOLD`: Minimum ETH to keep pool in cache (default: 0.01)
+- `ZMQ_PUB_ENDPOINT`: Publisher endpoint (default: tcp://*:5557)
+- `ZMQ_REP_ENDPOINT`: Reply endpoint (default: tcp://*:5558)
 
 ## Integration Example
 
+### Python Side - Publishing Updates:
 ```python
-# Python side - Publishing updates
-token_info = {
-    'token_address': token_address,
-    'pools': {
-        pool_addr: {
-            'eth_reserve': 125.5,
-            'buy_tax': 0.05,
-            'trading_enabled': True,
-            # ... other fields
-        }
-    }
-}
-await publisher.update_token_info({token_address: token_info})
+# In LiveTokenTracker
+extractor = TokenInfoExtractor(logger, use_pool_cache=True)
+publisher = TokenInfoPublisher(min_eth_threshold=0.01)
 
-# Rust side - Receiving updates
+# Process block updates
+updated_pools = await extractor.update_token_info(updated_tokens, block_number)
+await publisher.update_token_info(updated_pools)
+```
+
+### Rust Side - Consuming Updates:
+```rust
+// Subscribe to updates
+let subscriber = ctx.socket(zmq::SUB)?;
+subscriber.connect("tcp://localhost:5557")?;
+
+// Process updates
 match msg_type {
     "token_updates" => {
-        for (token_addr, token_data) in updates {
-            // Update local cache
-            token_cache.update(token_addr, token_data);
-            
-            // Check pending transactions
-            for pending_tx in mempool.get_txs_for_token(token_addr) {
-                let impact = calculate_impact(pending_tx, token_data);
-                if impact.is_dangerous() {
-                    alert_system.notify(pending_tx, impact);
-                }
-            }
+        for (pool_addr, pool_data) in updates {
+            pool_cache.update(pool_addr, pool_data.denom_reserve);
+            // Check mempool transactions against new state
         }
     }
 }
 ```
+
+## Future Improvements
+
+1. **Denomination-aware Filtering**: Different thresholds for WETH vs stablecoins
+2. **Pool Quality Metrics**: Track pool age, volume, creator reputation
+3. **Compression**: Optional message compression for high-volume periods
+4. **Historical Tracking**: Pool reserve trends for better predictions

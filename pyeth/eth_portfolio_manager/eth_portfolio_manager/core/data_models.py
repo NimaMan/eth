@@ -36,8 +36,8 @@ class TokenPositionStaticData:
     pool_type: str
     creation_block: int
     creation_timestamp: int
-    trading_enabled_block: int
-    trading_enabled_timestamp: int
+    trading_enabled_block: Optional[int]
+    trading_enabled_timestamp: Optional[int]
     purchase_value: float
     entry_price_ratio: float  # relative price of the token at entry to its intial price 
     exit_price_ratio: float  # relative price of the token at exit to its intial price 
@@ -45,8 +45,8 @@ class TokenPositionStaticData:
     exit_block: int
     entry_timestamp: int
     exit_timestamp: int
-    entry_txn_fee: float
-    exit_txn_fee: float
+    entry_tx_fee: float
+    exit_tx_fee: float
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -82,4 +82,3 @@ class TokenPositionDynamicSnapshot:
         attr = asdict(self)
         attr['position_state'] = self.position_state.value
         return attr
-

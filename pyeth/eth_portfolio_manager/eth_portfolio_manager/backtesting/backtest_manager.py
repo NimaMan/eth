@@ -41,10 +41,11 @@ Implementation Notes:
 4. Tracks complete trading history
 """
 import asyncio
-import tqdm
 import time
 
-from eth_block_processor.blockchain.block_processor import BlockProcessor
+import tqdm
+
+from eth_data.blockchain.block_processor import BlockProcessor
 from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
 from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestStrategyEngine
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
@@ -72,11 +73,11 @@ class BacktestExecutionEngine:
             for current_block in tqdm.tqdm(range(self.config.start_block, self.config.end_block + 1)):
                 
                 # 1. Get block data
-                block_data = await self.block_processor.process_block(block_number=current_block)
+                block_result = await self.block_processor.process_block(block_number=current_block)
                 
                 start_token_process_time = time.time()
                 # 2. Process tokens in this block
-                await self.block_token_processor.process_block(block_data)
+                await self.block_token_processor.process_block_token(block_result)
                 token_updates = self.block_token_processor.updated_tokens
                 token_process_time = time.time() - start_token_process_time
                 # 3. Update positions for all strategies

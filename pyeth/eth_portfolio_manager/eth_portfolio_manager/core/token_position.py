@@ -110,8 +110,8 @@ class TokenPosition:
             pool_type=None,
             creation_block=live_token.token_data.creation_block,
             creation_timestamp=live_token.token_data.creation_timestamp,
-            trading_enabled_block=live_token.token_data.trading_enabled_block,
-            trading_enabled_timestamp=live_token.token_data.trading_enabled_timestamp,
+            trading_enabled_block=None,
+            trading_enabled_timestamp=None,
             purchase_value=0.0,  # Initially zero, updated on buy signal.
             entry_price_ratio=None, # Initially zero, updated on buy signal.
             exit_price_ratio=None, # Initially zero, updated on sell signal.
@@ -119,8 +119,8 @@ class TokenPosition:
             exit_block=0, # update when the first sell signal is received
             entry_timestamp=live_token.token_data.creation_timestamp, # update when the first buy signal is received
             exit_timestamp=0, # update when the first sell signal is received
-            entry_txn_fee=0.0, # update when the first buy signal is received
-            exit_txn_fee=0.0 # update when the first sell signal is received
+            entry_tx_fee=0.0, # update when the first buy signal is received
+            exit_tx_fee=0.0 # update when the first sell signal is received
         )
         return cls(static_data)
 
@@ -153,6 +153,52 @@ class TokenPosition:
         """
         self.add_snapshot(TokenPositionDynamicSnapshot())
 
+    def _resolve_target_pool(self, live_token: ERC20Token):
+        pool_manager = getattr(live_token.token_data, "pool_manager", None)
+        if not pool_manager:
+            return None
+
+        pool = None
+        if self.static_data.pool_address:
+            pool = pool_manager.get_pool(self.static_data.pool_address)
+
+        if pool is None:
+            pool_addresses = getattr(live_token.token_data, "pool_addresses", tuple())
+            for address in pool_addresses:
+                pool = pool_manager.get_pool(address)
+                if pool is not None:
+                    self.static_data.pool_address = address
+                    break
+
+        return pool
+
+    def _compute_trading_ages(self, live_token: ERC20Token, pool) -> Tuple[Optional[int], Optional[float]]:
+        if pool is None:
+            return None, None
+
+        current_block = getattr(live_token.token_data, "latest_block_number", None)
+        age_blocks = None
+        if current_block is not None:
+            try:
+                age_blocks = pool.trading_age_blocks(current_block)
+            except Exception:
+                age_blocks = None
+
+        try:
+            age_hours = pool.trading_age_hours()
+        except Exception:
+            age_hours = None
+
+        return age_blocks, age_hours
+
+    def get_target_pool(self, live_token: ERC20Token):
+        """Return the pool associated with this position, resolving lazily if needed."""
+        return self._resolve_target_pool(live_token)
+
+    def get_trading_ages(self, live_token: ERC20Token) -> Tuple[Optional[int], Optional[float]]:
+        pool = self._resolve_target_pool(live_token)
+        return self._compute_trading_ages(live_token, pool)
+
     @property   
     def latest_snapshot(self) -> Optional[TokenPositionDynamicSnapshot]:
         """
@@ -177,20 +223,24 @@ class TokenPosition:
             self.update_scammed_position(live_token)
             return
         
-        if live_token.token_data.trading_enabled_block:
-            self.static_data.trading_enabled_block = live_token.token_data.trading_enabled_block
-            self.static_data.trading_enabled_timestamp = live_token.token_data.trading_enabled_timestamp
-            
-            # Safely handle pool addresses and pool info using new API
-            pool_addresses = live_token.token_data.pool_addresses
-            if pool_addresses:
-                self.static_data.pool_address = pool_addresses[0]
-                
-                # Use get_pool_info_dict() for compatibility with new PoolManager
+        pool = self._resolve_target_pool(live_token)
+
+        if pool is not None:
+            trading_enabled_block = getattr(pool, "trading_enabled_block", None)
+            if trading_enabled_block:
+                self.static_data.trading_enabled_block = trading_enabled_block
+                self.static_data.trading_enabled_timestamp = getattr(pool, "can_buy_timestamp", None)
+
+            if not self.static_data.pool_type and hasattr(pool, "get_protocol"):
+                try:
+                    self.static_data.pool_type = pool.get_protocol()
+                except Exception:
+                    self.static_data.pool_type = None
+
+            if not self.static_data.currency:
                 pool_info_dict = live_token.token_data.get_pool_info_dict()
                 if self.static_data.pool_address in pool_info_dict:
                     pool_info = pool_info_dict[self.static_data.pool_address]
-                    self.static_data.pool_type = pool_info.get('pool_type')
                     self.static_data.currency = pool_info.get('denom_currency')
 
         current_price_ratio = 0
@@ -206,6 +256,8 @@ class TokenPosition:
                 current_value = self.static_data.purchase_value * x_value
                 unrealized_profit = current_value - self.static_data.purchase_value
         
+        age_blocks, age_hours = self._compute_trading_ages(live_token, pool)
+
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
             current_price_ratio=current_price_ratio,
@@ -215,8 +267,8 @@ class TokenPosition:
             realized_profit=self.latest_snapshot.realized_profit,
             unrealized_profit=unrealized_profit,
             quantity=self.latest_snapshot.quantity if self.latest_snapshot else 0,
-            token_age_blocks=live_token.token_trading_age_blocks,
-            token_age_hours=live_token.token_trading_age_hours,
+            token_age_blocks=age_blocks,
+            token_age_hours=age_hours,
             block_number=live_token.token_data.latest_block_number,
             timestamp=live_token.token_data.latest_block_timestamp,
             has_active_position=self.latest_snapshot.has_active_position if self.latest_snapshot else False,
@@ -237,6 +289,8 @@ class TokenPosition:
         """
         current_snapshot = self.latest_snapshot
         if current_snapshot:
+            age_blocks, age_hours = self.get_trading_ages(live_token)
+
             new_snapshot = TokenPositionDynamicSnapshot(
                 current_price_ratio=0,
                 roi=0,
@@ -244,8 +298,8 @@ class TokenPosition:
                 realized_profit=-self.static_data.purchase_value,
                 unrealized_profit=0,
                 quantity=current_snapshot.quantity,
-                token_age_blocks=live_token.token_trading_age_blocks,
-                token_age_hours=live_token.token_trading_age_hours,
+                token_age_blocks=age_blocks,
+                token_age_hours=age_hours,
                 block_number=live_token.token_data.latest_block_number,
                 timestamp=live_token.token_data.latest_block_timestamp,
                 has_active_position=True,

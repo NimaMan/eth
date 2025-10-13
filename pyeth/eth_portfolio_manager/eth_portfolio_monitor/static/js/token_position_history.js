@@ -301,10 +301,10 @@ function updateTokenStaticData(staticData) {
         staticData.purchase_value ? formatNumber(staticData.purchase_value, 2) : '-';
     // Entry fee
     document.getElementById('entry-fee').textContent = 
-        staticData.entry_txn_fee ? formatNumber(staticData.entry_txn_fee, 2) : '-';
+        staticData.entry_tx_fee ? formatNumber(staticData.entry_tx_fee, 2) : '-';
     // Exit fee
     document.getElementById('exit-fee').textContent = 
-        staticData.exit_txn_fee ? formatNumber(staticData.exit_txn_fee, 2) : '-';
+        staticData.exit_tx_fee ? formatNumber(staticData.exit_tx_fee, 2) : '-';
 }
 
 async function loadTokens(strategyId) {
@@ -550,9 +550,9 @@ function updateOverviewCards(staticData, history) {
     document.getElementById('purchase-value').textContent =
         staticData.purchase_value ? formatNumber(staticData.purchase_value, 2) : '-';
     document.getElementById('entry-fee').textContent =
-        staticData.entry_txn_fee ? formatNumber(staticData.entry_txn_fee, 2) : '-';
+        staticData.entry_tx_fee ? formatNumber(staticData.entry_tx_fee, 2) : '-';
     document.getElementById('exit-fee').textContent =
-        staticData.exit_txn_fee ? formatNumber(staticData.exit_txn_fee, 2) : '-';
+        staticData.exit_tx_fee ? formatNumber(staticData.exit_tx_fee, 2) : '-';
     
     // Latest Snapshot Card
     if (latest) {

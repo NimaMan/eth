@@ -103,7 +103,7 @@ The current placement prioritizes critical operations (strategy execution and po
      * Writes user trade PnL data via `_write_user_trade_pnl_data`
 
 3. **Critical Path - Token Database Insertion (`_ensure_token_in_db`):**
-   * **Transaction Verification:** Checks if required transactions (`creation_txn`, `trading_enabled_txn`) exist in the database first
+   * **Transaction Verification:** Checks if required transactions (`creation_tx`, `trading_enabled_tx`) exist in the database first
    * **Retry Mechanism:** Uses exponential backoff to retry up to 3 times if transactions aren't yet in the database
    * **Deduplication:** Handles potential `UniqueViolation` errors by resyncing the token cache from database
 

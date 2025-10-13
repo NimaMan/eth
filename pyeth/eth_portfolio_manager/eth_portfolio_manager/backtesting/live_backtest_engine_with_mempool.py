@@ -90,11 +90,11 @@ import asyncio
 from typing import Dict, List, Set, Tuple, Optional, Any
 from web3 import Web3
 
-from eth_block_processor.blockchain.mempool_processor import MempoolProcessor
+from eth_data.blockchain.mempool_processor import MempoolProcessor
 from eth_token.token_manager.live_block_token_processor import LiveBlockTokenProcessor
 from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
 from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestStrategyEngine
-from eth_portfolio_manager.db.live_token_position_results_writer import LiveResultsWriter
+from eth_data.database.writers.live_token_position_results_writer import LiveResultsWriter
 from eth_portfolio_manager.utils.logger import get_logger
 from datetime import datetime
 

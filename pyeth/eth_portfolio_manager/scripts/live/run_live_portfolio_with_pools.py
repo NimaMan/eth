@@ -47,8 +47,8 @@ class LivePortfolioServiceWithPools:
                  warmup_blocks=10000,
                  save_strategy_results=True,
                  add_pnl_to_db=True,
-                 zmq_pub_endpoint="tcp://*:5557",
-                 zmq_rep_endpoint="tcp://*:5558",
+                 zmq_pub_endpoint="tcp://127.0.0.1:5557",
+                 zmq_rep_endpoint="tcp://127.0.0.1:5558",
                  max_pools=2000,
                  min_eth_threshold=0.01):
         self.logger = logger
@@ -130,8 +130,8 @@ async def run_live_portfolio_with_pools(
     warmup_blocks=10000, 
     save_strategy_results=True,
     add_pnl_to_db=True,
-    zmq_pub_endpoint="tcp://*:5557",
-    zmq_rep_endpoint="tcp://*:5558",
+    zmq_pub_endpoint="tcp://127.0.0.1:5557",
+    zmq_rep_endpoint="tcp://127.0.0.1:5558",
     max_pools=2000,
     min_eth_threshold=0.01
 ):
@@ -185,8 +185,8 @@ if __name__ == "__main__":
     warmup_blocks = 1200
     save_strategy_results = False
     add_pnl_to_db = False
-    zmq_pub_endpoint = "tcp://*:5557"
-    zmq_rep_endpoint = "tcp://*:5558"
+    zmq_pub_endpoint = "tcp://127.0.0.1:5557"
+    zmq_rep_endpoint = "tcp://127.0.0.1:5558"
         
     max_pools = 2000  # Maximum number of pools to track
     min_eth_threshold = 0.01  # Minimum ETH reserve (0.01 ETH)
