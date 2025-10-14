@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 from pprint import pprint
 from typing import Any, Dict, Iterable, Optional, Tuple
-from eth_token.erc20_token.data.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 
 
 # Canonical mainnet pools keyed by quote token.

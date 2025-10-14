@@ -27,18 +27,17 @@ Blockchain Interface:
 - getPoolKey(poolId): Retrieve PoolKey from PoolId
 """
 
-from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
+from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 from web3 import Web3
 from .base_pool import BasePool, logger
 from eth_data.utils.pyreth_client import pyreth
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+
 
 UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
-
-if TYPE_CHECKING:
-    from .pool_chain_data_fetcher import PoolChainDataFetcher
-    from ..token_chain_data_fetcher import TokenChainDataFetcher
 
 
 @dataclass
@@ -225,11 +224,12 @@ class UniswapV4Pool(BasePool):
         self.tax_check_tx = transaction['hash']
 
         logger.info(
-            f"UniswapV4 Pool:"
-            f"tx={transaction['hash']} "
+            f"TradingStatus "
+            f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool_id={self.pool_id} "
-            f"block={transaction['block_number']} "
+            f"tx={transaction['hash']} "
+            f"UniswapV4 Pool "
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "

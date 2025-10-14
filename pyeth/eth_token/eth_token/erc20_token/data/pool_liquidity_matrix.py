@@ -23,9 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from .pools.base_pool import BasePool
-from .pools.uniswap_v2_pool import UniswapV2Pool
-from .pools.pool_manager import PoolManager
+from eth_token.erc20_token.pools.base_pool import BasePool
+from eth_token.erc20_token.pools.uniswap_v2_pool import UniswapV2Pool
+from eth_token.erc20_token.pools.pool_manager import PoolManager
 
 
 @dataclass

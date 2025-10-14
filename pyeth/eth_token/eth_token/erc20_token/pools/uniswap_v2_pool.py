@@ -36,8 +36,8 @@ from typing import Optional, Tuple, Dict, List, Iterable, Any
 from dataclasses import dataclass, field
 import pyreth
 from .base_pool import BasePool, logger
-from .pool_chain_data_fetcher import PoolChainDataFetcher
-from ..token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.type_converter import convert_scaled_amount
 from eth_data.chain_utils.common_addresses import ROUTER_ADDRESSES, canonicalize_dex_pool_type
 
@@ -77,6 +77,8 @@ class LPTokenTracker:
         self.lp_decimals = lp_decimals
         self.known_routers = set(known_routers or [])
         self.history_limit = history_limit
+        self._token_address: Optional[str] = None
+        self._pool_address: Optional[str] = None
 
         self._holders: Dict[str, LPHolderInfo] = {}
         self._total_supply: float = 0.0
@@ -175,6 +177,13 @@ class LPTokenTracker:
             'timestamp': approval.get('block_timestamp'),
         }
         self._append_event(self._approval_events, event)
+        logger.info(
+            "LPApproval "
+            f"block={approval.get('block_number')} "
+            f"token={self._token_address} "
+            f"pool={self._pool_address} "
+            f"tx={approval.get('tx_hash')} "
+        )
         return approval_info
 
     # ------------------------------------------------------------------
@@ -326,6 +335,8 @@ class UniswapV2Pool(BasePool):
             known_routers=ROUTER_ADDRESSES,
             history_limit=self.history_limit,
         )
+        self.lp_tracker._token_address = token_address
+        self.lp_tracker._pool_address = pool_address
 
     def get_protocol(self) -> str:
         return UNISWAP_V2_PROTOCOL
@@ -358,11 +369,12 @@ class UniswapV2Pool(BasePool):
         self.tax_check_tx = transaction['hash']
     
         logger.info(
-            f"UniswapV2 Pool:"
-            f"tx={transaction['hash']} "
+            f"TradingStatus: "
+            f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
-            f"block={transaction['block_number']} "
+            f"tx={transaction['hash']} "
+            f"UniswapV2 Pool "
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "

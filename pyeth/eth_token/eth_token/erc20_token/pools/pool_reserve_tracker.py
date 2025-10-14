@@ -6,11 +6,14 @@ Each pool instance maintains its own reserve tracker for monitoring liquidity
 and detecting potential scam patterns.
 """
 
-from typing import List, Optional, Tuple, Any, Dict
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
-from web3 import Web3
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
 from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
+from eth_token.utils.logger import get_logger
+
+
+logger = get_logger(name="PoolState", log_folder="pools")
 
 
 @dataclass
@@ -32,9 +35,19 @@ class PoolReserveTracker:
     scam detection based on liquidity thresholds.
     """
     
-    def __init__(self, pool_address: str, denom_address: str, history_limit: int = 100):
+    def __init__(
+        self,
+        pool_address: str,
+        denom_address: str,
+        *,
+        token_address: Optional[str] = None,
+        pool_type: Optional[str] = None,
+        history_limit: int = 100,
+    ):
         self.pool_address = pool_address
         self.denom_address = denom_address
+        self.token_address = token_address
+        self.pool_type = pool_type
         self.history_limit = history_limit
         self.reserve_history: List[ReserveSnapshot] = [] # Reserve history
         self.latest_snapshot: Optional[ReserveSnapshot] = None # Latest snapshot
@@ -100,6 +113,16 @@ class PoolReserveTracker:
             self.scam_label = f"Denom_removal ({unit}<{threshold})"
             self.scam_block = snapshot.block_number
             self.scam_tx_hash = snapshot.tx_hash
+            logger.info(
+                "PoolScam "
+                f"block={snapshot.block_number} "
+                f"token={self.token_address} "
+                f"pool={self.pool_address} "
+                f"tx={snapshot.tx_hash} "
+                f"pool_type={self.pool_type} "
+                f"label={self.scam_label} "
+                f"denom={self.denom_address} "
+            )
         else:
             # Pool recovered - clear scam status
             if self.is_scam:

@@ -117,9 +117,9 @@ from typing import Any, Dict, List, Set, Optional, Iterator, Union
 from enum import Enum
 from web3 import Web3
 from .token_chain_data_fetcher import TokenChainDataFetcher
-from eth_token.erc20_token.data.pools import PoolManager
-from eth_token.erc20_token.data.pools.pool_manager import UNISWAP_V2_PROTOCOL
-from eth_token.erc20_token.data.pools.base_pool import BasePool
+from eth_token.erc20_token.pools import PoolManager
+from eth_token.erc20_token.pools.pool_manager import UNISWAP_V2_PROTOCOL
+from eth_token.erc20_token.pools.base_pool import BasePool
 from .pool_liquidity_matrix import PoolLiquidityMatrix
 from eth_data.chain_utils.common_addresses import (
     DENOM_ADDRESSES,

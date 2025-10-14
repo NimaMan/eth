@@ -11,7 +11,7 @@ Provides an LRU-based caching mechanism for active token objects with the follow
 import time
 from dataclasses import dataclass
 from collections import OrderedDict
-from typing import Optional, Dict, List
+from typing import Dict, Set
 from threading import Lock
 from eth_token.erc20_token.erc20_token import ERC20Token
 
@@ -38,7 +38,8 @@ class LiveTokensCache:
         self._lock = Lock()
         self.logger = logger
         self.add_pnl_to_db = add_pnl_to_db
-        self.pool_to_token: Dict[str, str] = {}  # Pool address -> Token address mapping
+        self.pool_to_token: Dict[str, str] = {}
+        self._token_pool_addresses: Dict[str, Set[str]] = {}
         
         # Initialize token PnL writer if PnL writing is enabled
         if add_pnl_to_db:
@@ -67,6 +68,8 @@ class LiveTokensCache:
         """Clear the cache"""
         with self._lock:
             self.cache.clear()
+            self.pool_to_token.clear()
+            self._token_pool_addresses.clear()
             self.log("Cache cleared successfully")
     
     def get_cached_contract_addresses(self):
@@ -92,33 +95,42 @@ class LiveTokensCache:
                     if entry.token_status == 'Active':
                         active_tokens[addr] = entry.token
             return active_tokens
-    
-    def get_token_by_pool(self, pool_address: str) -> Optional[str]:
-        """Get token address that owns this pool.
-        
-        Args:
-            pool_address: The pool contract address
-            
-        Returns:
-            Token address if pool is known, None otherwise
-        """
-        return self.pool_to_token.get(pool_address)
 
-    def __getitem__(self, item: str):
+    def update_pool_mapping(self, token: ERC20Token) -> None:
+        # Pool manager might not be initialized yet
+        pool_manager = getattr(getattr(token, "token_data", None), "pool_manager", None)
+        if not pool_manager:
+            return
+
+        with self._lock:
+            current_addresses = set(pool_manager.get_all_pool_addresses())
+            previous_addresses = self._token_pool_addresses.get(token.contract_address, set())
+
+            # Remove pools no longer associated with this token
+            for pool_addr in previous_addresses - current_addresses:
+                self.pool_to_token.pop(pool_addr, None)
+
+            # Index / refresh current pools
+            for pool_addr in current_addresses:
+                self.pool_to_token[pool_addr] = token.contract_address
+
+            self._token_pool_addresses[token.contract_address] = current_addresses
+
+    def __getitem__(self, contract_address: str):
         """Get token from cache by token address OR pool address"""
         try:
             # First try direct lookup (it's a token address)
-            if item in self.cache:
-                return self.cache[item].token
-            
-            # Not found - check if it's a pool address
-            token_address = self.pool_to_token.get(item)
-            if token_address and token_address in self.cache:
-                return self.cache[token_address].token
-                
+            with self._lock:
+                if contract_address in self.cache:
+                    return self.cache[contract_address].token
+                else:
+                    # check if the contract_address is a pool address of a cached token
+                    if contract_address in self.pool_to_token:
+                        token_address = self.pool_to_token[contract_address]
+                        return self.cache[token_address].token
             return None
         except Exception as e:
-            self.log(f"{__name__}: Error getting item {item}: {str(e)}")
+            self.log(f"{__name__}: Error getting item {contract_address}: {str(e)}")
             raise e
 
     def __setitem__(self, key: str, value: 'ERC20Token'):
@@ -139,11 +151,6 @@ class LiveTokensCache:
                 )
                 self.cache.move_to_end(key)
                 
-                # Index pool addresses for this token
-                if value.token_data and value.token_data.pool_addresses:
-                    for pool_addr in value.token_data.pool_addresses:
-                        self.pool_to_token[pool_addr] = key
-                        
             except Exception as e:
                 self.log(f"{__name__}: Error adding token {key}: {str(e)}")
 
@@ -175,11 +182,8 @@ class LiveTokensCache:
                 self._write_token_pnl(key)
             
             # Clean up pool mappings before deleting token
-            if key in self.cache:
-                token_entry = self.cache[key]
-                if token_entry.token and token_entry.token.token_data and token_entry.token.token_data.pool_addresses:
-                    for pool_addr in token_entry.token.token_data.pool_addresses:
-                        self.pool_to_token.pop(pool_addr, None)
+            for pool_addr in self._token_pool_addresses.pop(key, set()):
+                self.pool_to_token.pop(pool_addr, None)
             
             # Delete from cache
             del self.cache[key]

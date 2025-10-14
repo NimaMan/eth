@@ -11,17 +11,16 @@ Objective:
 """
 
 import asyncio
-import orjson
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
-from typing import Dict, List, Set, Any, Optional
+from typing import Dict, Any, Optional
 from collections import OrderedDict
 from tqdm import tqdm
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
-from eth_token.utils.logger import get_logger
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.utils.logger import get_logger
 
 
 class BlockTokenProcessor:
@@ -155,6 +154,8 @@ class BlockTokenProcessor:
                 
         if update_tasks:
             await asyncio.gather(*update_tasks)
+            for token in self.updated_tokens.values():
+                self.live_tokens_cache.update_pool_mapping(token)
 
     @staticmethod
     def _ensure_tx_dict(tx: Any) -> Dict:

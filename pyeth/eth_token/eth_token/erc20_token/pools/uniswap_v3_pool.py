@@ -14,12 +14,11 @@ import math
 import pyreth
 from .base_pool import BasePool, logger
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+
 
 UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
-
-if TYPE_CHECKING:
-    from .pool_chain_data_fetcher import PoolChainDataFetcher
-    from ..token_chain_data_fetcher import TokenChainDataFetcher
 
 
 @dataclass
@@ -190,11 +189,12 @@ class UniswapV3Pool(BasePool):
         self.tax_check_tx = transaction['hash']
     
         logger.info(
-            f"UniswapV3 Pool:"
-            f"tx={transaction.get('hash')} "
+            f"TradingStatus "
+            f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
-            f"block={transaction['block_number']} "
+            f"tx={transaction.get('hash')} "
+            f"UniswapV3 Pool "            
             f"can_buy={result.can_buy} "
             f"can_sell={result.can_sell} "
             f"buy_tax={result.buy_tax_percentage} "

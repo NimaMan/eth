@@ -44,8 +44,7 @@ Historical (Warm-up) -> Live Transition:
 """
 
 import asyncio
-from typing import Dict, List
-from eth_token.subscribers.block_subscriber import BlockSubscriber
+from eth_token.token_manager.block_subscriber import BlockSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
 

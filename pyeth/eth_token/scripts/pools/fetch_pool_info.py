@@ -5,7 +5,7 @@ Requires: local Reth DB for PyReth, or will fall back to Web3 for pool discovery
 """
 
 from pprint import pprint
-from eth_token.erc20_token.data.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 
 
 def main():

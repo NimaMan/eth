@@ -46,12 +46,13 @@ from .base_pool import BasePool
 from .uniswap_v2_pool import UniswapV2Pool
 from .uniswap_v3_pool import UniswapV3Pool
 from .uniswap_v4_pool import UniswapV4Pool, PoolKey
-from .pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+
 from eth_data.chain_utils.common_addresses import (
     DENOM_ADDRESSES,
     canonicalize_dex_pool_type,
 )
-from ..token_chain_data_fetcher import TokenChainDataFetcher
 
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')

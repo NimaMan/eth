@@ -8,15 +8,11 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 from dataclasses import dataclass
 
-from .pool_reserve_tracker import PoolReserveTracker
+from .pool_reserve_tracker import PoolReserveTracker, logger
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
-from ..token_chain_data_fetcher import TokenChainDataFetcher
 from .pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_data.utils.pyreth_client import PyrethClient, pyreth
-from eth_token.utils.logger import get_logger
-
-
-logger = get_logger(name="TradingState", log_folder="pools")
+from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 
 
 @dataclass
@@ -135,6 +131,8 @@ class BasePool(ABC):
         self.reserve_tracker = PoolReserveTracker(
             pool_address=pool_address,
             denom_address=denom_address,
+            token_address=token_address,
+            pool_type=self.get_protocol(),
             history_limit=history_limit,
         )
         self._token_control_addresses: Set[str] = set()
@@ -147,9 +145,7 @@ class BasePool(ABC):
     @abstractmethod
     def process_transaction(self, transaction: Dict):
         """
-        Process a transaction and extract relevant events.
-        
-        Each pool type knows how to extract its specific events.
+        Process a transaction and extract relevant events. Each pool type knows how to extract its specific events.
         """
         pass
 
@@ -235,12 +231,7 @@ class BasePool(ABC):
             self.scam_tx_hash = None
     
     def mark_can_buy_from_event(self, transaction: Dict, event_type: str = 'swap'):
-        """Mark token as buyable when detected from a DEX event (typically first swap).
-
-        Args:
-            transaction: The processed transaction dict
-            event_type: Type of event that enabled buying (usually 'swap')
-        """
+        """Mark token as buyable when detected from a DEX event (typically first swap)."""
         if not self.can_buy:
             self.can_buy = True
             self.can_buy_block = transaction['block_number']
@@ -274,33 +265,19 @@ class BasePool(ABC):
     def is_scam(self) -> bool:
         return self.reserve_tracker.is_scam
     
-    def _ensure_token_decimals(self) -> int:
+    def get_token_decimals(self) -> int:
         if self._token_decimals is None:
             self._token_decimals = int(
                 self.token_chain_fetcher.get_token_decimals(self.token_address)
             )
         return self._token_decimals
 
-    def _ensure_denom_decimals(self) -> int:
+    def get_denom_decimals(self) -> int:
         if self._denom_decimals is None:
             self._denom_decimals = int(
                 self.token_chain_fetcher.get_token_decimals(self.denom_address)
             )
         return self._denom_decimals
-
-    def set_token_decimals(self, decimals: Optional[int]) -> None:
-        if decimals is not None:
-            self._token_decimals = int(decimals)
-
-    def set_denom_decimals(self, decimals: Optional[int]) -> None:
-        if decimals is not None:
-            self._denom_decimals = int(decimals)
-
-    def get_token_decimals(self) -> int:
-        return self._ensure_token_decimals()
-
-    def get_denom_decimals(self) -> int:
-        return self._ensure_denom_decimals()
         
     def get_denom_name(self) -> str:
         """Get denomination token name."""
