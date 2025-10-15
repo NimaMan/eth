@@ -347,8 +347,58 @@ class UniswapV2Pool(BasePool):
         config.block_number = int(transaction['block_number'])
         if transaction.get('block_header'):
             config.set_block_header(transaction['block_header'])
+        # Ensure the simulator replays the triggering tx so liquidity/reserve changes
+        # are reflected before executing the buy/sell probes.
+        prior_from = transaction.get('from_address') or transaction.get('from')
+        if prior_from:
+            prior_to = transaction.get('to_address') or transaction.get('to')
+            raw_value = transaction.get('value', 0)
+            if isinstance(raw_value, str):
+                if raw_value.startswith(('0x', '0X')):
+                    value_hex = raw_value
+                else:
+                    try:
+                        value_hex = hex(int(raw_value))
+                    except ValueError:
+                        value_hex = None
+            elif isinstance(raw_value, int):
+                value_hex = hex(raw_value)
+            else:
+                value_hex = None
 
-        # The tranaction is already mined, so we dont need to include it as a prior tx 
+            raw_input = transaction.get('input') or transaction.get('data')
+            if isinstance(raw_input, bytes):
+                input_hex = f"0x{raw_input.hex()}"
+            elif isinstance(raw_input, str):
+                input_hex = raw_input if raw_input.startswith(('0x', '0X')) else f"0x{raw_input}"
+            else:
+                input_hex = None
+
+            raw_nonce = transaction.get('nonce')
+            if isinstance(raw_nonce, str):
+                try:
+                    nonce = int(raw_nonce, 16) if raw_nonce.startswith(('0x', '0X')) else int(raw_nonce)
+                except ValueError:
+                    nonce = None
+            else:
+                nonce = raw_nonce
+
+            try:
+                config.set_prior_tx_from_unsigned(
+                    prior_from,
+                    prior_to,
+                    value_hex,
+                    input_hex,
+                    nonce,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to seed pool simulation with prior transaction %s: %s",
+                    transaction.get('hash'),
+                    exc,
+                )
+
+        # Run the simulator after applying the prior transaction state
         result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(
             self.token_address,
             self.pool_address,
