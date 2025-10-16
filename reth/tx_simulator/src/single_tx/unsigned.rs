@@ -5,9 +5,10 @@
 /// RPC. The "full trace" helpers enable step recording so `FullSimulationResult::struct_logs` is populated,
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
-    simulation_revert_decoder::decode_revert_data,
+    gas::{GasHeuristic, GasInputs, GasResolutionContext},
+    simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
-    types::{FullSimulationResult, SimulationResult},
+    types::{FullSimulationResult, RevertContext, SimulationResult},
 };
 use eyre::Result;
 use tokio::task;
@@ -17,7 +18,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
-use reth_provider::{HeaderProvider, StateProviderBox};
+use reth_provider::{HeaderProvider, StateProvider, StateProviderBox};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -223,6 +224,16 @@ impl TxSimulator {
     ) -> Result<SimulationResult> {
         let block_header = block_header.into_header();
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        let initial_context = if let Some(target) = unsigned_tx.to {
+            let has_code = db.db.account_code(&target)?.is_some();
+            Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            })
+        } else {
+            None
+        };
         let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
         let evm_env = simulator
             .evm_config
@@ -243,17 +254,17 @@ impl TxSimulator {
         let res = evm.transact(tx_env)?;
         db.commit(res.state);
 
+        let success = res.result.is_success();
+        let gas_used = res.result.gas_used();
+        let revert_data = res.result.output().cloned();
+        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
+        let revert_context = if success { None } else { initial_context };
+
         Ok(SimulationResult {
-            success: res.result.is_success(),
-            gas_used: res.result.gas_used(),
-            revert_reason: if res.result.is_success() {
-                None
-            } else {
-                res.result
-                    .output()
-                    .map(|bytes| decode_revert_data(&bytes))
-                    .or_else(|| Some("Transaction reverted without data".to_string()))
-            },
+            success,
+            gas_used,
+            revert_reason,
+            revert_context,
         })
     }
 
@@ -267,6 +278,16 @@ impl TxSimulator {
     ) -> Result<FullSimulationResult> {
         let block_header = block_header.into_header();
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        let initial_context = if let Some(target) = unsigned_tx.to {
+            let has_code = db.db.account_code(&target)?.is_some();
+            Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            })
+        } else {
+            None
+        };
 
         let mut inspector = TracingInspector::new(inspector_config);
         let evm_env = simulator
@@ -292,14 +313,8 @@ impl TxSimulator {
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
         let raw_output = res.result.output().cloned();
-        let revert_reason = if success {
-            None
-        } else {
-            raw_output
-                .as_ref()
-                .map(|bytes| decode_revert_data(bytes))
-                .or_else(|| Some("Transaction reverted without data".to_string()))
-        };
+        let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
+        let revert_context = if success { None } else { initial_context };
 
         let builder = inspector
             .with_transaction_gas_limit(gas_limit)
@@ -321,6 +336,7 @@ impl TxSimulator {
             success,
             gas_used,
             revert_reason,
+            revert_context,
             call_trace: call_frame,
             struct_logs,
         })
@@ -337,13 +353,6 @@ impl TxSimulator {
         use alloy_primitives::TxKind;
         use reth_revm::revm::context::TxEnv;
 
-        // Determine transaction type
-        let tx_type = if request.max_fee_per_gas.is_some() {
-            2 // EIP-1559
-        } else {
-            0 // Legacy
-        };
-
         // Get caller address
         let caller = request.from.unwrap_or_default();
 
@@ -359,40 +368,35 @@ impl TxSimulator {
         };
 
         let fee_defaults = &self.defaults.fee;
-
-        // Calculate fees with base fee awareness
-        let (gas_price, gas_priority_fee) = if tx_type == 2 {
-            // EIP-1559
-            let tip_divisor = fee_defaults.derived_tip_divisor.max(1);
-            let base = base_fee.unwrap_or(fee_defaults.pre_london_base_fee);
-            let derived_tip = (base / tip_divisor).max(fee_defaults.min_priority_fee);
-            let priority_fee = request.max_priority_fee_per_gas.unwrap_or(derived_tip);
-
-            // If max_fee_per_gas is provided, use it; otherwise calculate from base fee + tip + cushion
-            let max_fee = if let Some(max_fee) = request.max_fee_per_gas {
-                max_fee
-            } else {
-                let cushion_divisor = fee_defaults.priority_fee_cushion_divisor.max(1);
-                let cushion = (base / cushion_divisor).max(fee_defaults.priority_fee_min_cushion);
-                base.saturating_add(priority_fee).saturating_add(cushion)
-            };
-            (max_fee, Some(priority_fee))
-        } else {
-            // Legacy
-            let price = if let Some(price) = request.gas_price {
-                price
-            } else {
-                let base = base_fee.unwrap_or(fee_defaults.legacy_pre_london_base_fee);
-                base.saturating_mul(fee_defaults.legacy_gas_price_multiplier)
-            };
-            (price, None)
-        };
+        let gas_resolution = crate::gas::resolve_gas(
+            None,
+            &self.defaults.tx_gas,
+            GasInputs {
+                gas: request.gas,
+                gas_price: request.gas_price,
+                max_fee_per_gas: request.max_fee_per_gas,
+                max_priority_fee_per_gas: request.max_priority_fee_per_gas,
+            },
+            GasResolutionContext {
+                fee_defaults,
+                block_gas_limit,
+                base_fee,
+            },
+            GasHeuristic::DynamicTip {
+                tip_divisor: fee_defaults.derived_tip_divisor,
+                min_priority_fee: fee_defaults.min_priority_fee,
+                headroom_divisor: fee_defaults.priority_fee_cushion_divisor,
+                min_headroom: fee_defaults.priority_fee_min_cushion,
+            },
+        )?;
+        let gas_price = gas_resolution.gas_price;
+        let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
 
         // Create TxEnv - no signature needed!
         Ok(TxEnv {
-            tx_type,
+            tx_type: gas_resolution.tx_type.as_reth_tx_type(),
             caller: caller.into(),
-            gas_limit: request.gas.unwrap_or(block_gas_limit as u64),
+            gas_limit: gas_resolution.gas_limit,
             gas_price,
             gas_priority_fee,
             kind: if let Some(to) = request.to {

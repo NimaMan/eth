@@ -3,7 +3,7 @@
 /// This module contains methods for simulating fully signed transactions
 /// with valid signatures (v, r, s).
 use crate::{
-    simulation_revert_decoder::decode_revert_data,
+    simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     types::{FullSimulationResult, SimulationResult},
 };
@@ -79,14 +79,26 @@ impl TxSimulator {
 
             db.commit(res.state);
 
+            let success = res.result.is_success();
+            let gas_used = res.result.gas_used();
+            let revert_data = res.result.output().cloned();
+            let mut revert_reason = if success {
+                None
+            } else {
+                decode_revert_reason(revert_data.as_ref(), None)
+            };
+            if !success && revert_reason.is_none() {
+                revert_reason = Some(
+                    "Transaction reverted and the simulator could not decode a specific reason"
+                        .to_string(),
+                );
+            }
+
             Ok(SimulationResult {
-                success: res.result.is_success(),
-                gas_used: res.result.gas_used(),
-                revert_reason: if res.result.is_success() {
-                    None
-                } else {
-                    Some("Transaction reverted".to_string())
-                },
+                success,
+                gas_used,
+                revert_reason,
+                revert_context: None,
             })
         })
         .await
@@ -143,14 +155,17 @@ impl TxSimulator {
 
             let success = res.result.is_success();
             let gas_used = res.result.gas_used();
-            let revert_reason = if success {
+            let revert_data = res.result.output().cloned();
+            let mut revert_reason = if success {
                 None
             } else {
-                res.result
-                    .output()
-                    .map(|bytes| decode_revert_data(&bytes))
-                    .or_else(|| Some("Transaction reverted without data".to_string()))
+                decode_revert_reason(revert_data.as_ref(), None)
             };
+            if !success && revert_reason.is_none() {
+                revert_reason = Some(
+                    "Transaction reverted without returning data and no specific reason could be decoded".to_string(),
+                );
+            }
 
             // Extract call trace
             let call_frame = inspector
@@ -162,6 +177,7 @@ impl TxSimulator {
                 success,
                 gas_used,
                 revert_reason,
+                revert_context: None,
                 call_trace: call_frame,
                 struct_logs: None,
             })
@@ -219,11 +235,15 @@ impl TxSimulator {
 
             let success = res.result.is_success();
             let gas_used = res.result.gas_used();
-            let revert_reason = if success {
+            let revert_data = res.result.output().cloned();
+            let mut revert_reason = if success {
                 None
             } else {
-                Some("Transaction reverted".to_string())
+                decode_revert_reason(revert_data.as_ref(), None)
             };
+            if !success && revert_reason.is_none() {
+                revert_reason = Some("Transaction reverted".to_string());
+            }
 
             // Extract call trace
             let call_frame = inspector
@@ -235,6 +255,7 @@ impl TxSimulator {
                 success,
                 gas_used,
                 revert_reason,
+                revert_context: None,
                 call_trace: call_frame,
                 struct_logs: None,
             })

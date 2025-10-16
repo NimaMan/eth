@@ -101,8 +101,10 @@ async fn main() -> Result<()> {
     // Simulate the bundle
     println!("Simulating bundle...");
 
+    let reference_block = simulator.get_latest_block()?;
+
     let options = SequentialSimulationOptions {
-        at_block: None, // Use latest block
+        at_block: Some(reference_block),
         block_header: None,
         stop_on_failure: true, // Bundle must execute atomically
         auto_increment_nonces: true,
@@ -110,7 +112,7 @@ async fn main() -> Result<()> {
     };
 
     let result = simulator
-        .simulate_unsigned_tx_sequence(bundle, options)
+        .simulate_unsigned_tx_sequence(bundle.clone(), options)
         .await?;
 
     // Analyze results

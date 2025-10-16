@@ -9,3 +9,8 @@ pub mod view_call {
     /// Delay between retry attempts in milliseconds while waiting for the state provider.
     pub const STATE_RETRY_DELAY_MS: u64 = 25;
 }
+
+pub mod gas {
+    /// Minimum gas limit fallback applied when callers provide zero.
+    pub const MIN_GAS_LIMIT: u64 = 21_000;
+}

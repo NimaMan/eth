@@ -2,10 +2,19 @@
 ///
 /// This module contains all the public types used throughout the tx_simulator library.
 /// These types represent simulation results, internal transactions, and configuration options.
+use crate::gas::TxGasParameters;
 use alloy_primitives::{Address, Bytes, U256};
 pub use alloy_rpc_types_trace::geth::{CallFrame, StructLog};
 use reth_primitives::SealedHeader;
 use std::collections::HashMap;
+
+/// Additional context to help explain reverts when raw error data is missing.
+#[derive(Debug, Clone)]
+pub struct RevertContext {
+    pub target: Address,
+    pub has_code: bool,
+    pub calldata_len: usize,
+}
 
 /// Basic simulation result
 #[derive(Debug, Clone)]
@@ -13,6 +22,7 @@ pub struct SimulationResult {
     pub success: bool,
     pub gas_used: u64,
     pub revert_reason: Option<String>,
+    pub revert_context: Option<RevertContext>,
 }
 
 /// Full simulation result with call trace (mirrors reth `/debug/trace_*` responses)
@@ -21,6 +31,7 @@ pub struct FullSimulationResult {
     pub success: bool,
     pub gas_used: u64,
     pub revert_reason: Option<String>,
+    pub revert_context: Option<RevertContext>,
     /// Geth-style call frame produced by the call tracer (mirrors `/debug/trace_*`).
     pub call_trace: CallFrame,
     /// Optional per-opcode logs from geth's default tracer (`structLogs` in RPC responses).
@@ -35,6 +46,7 @@ pub struct SequentialTransactionResult {
     pub success: bool,
     pub gas_used: u64,
     pub revert_reason: Option<String>,
+    pub revert_context: Option<RevertContext>,
     /// Cumulative gas used up to this point in the sequence
     pub cumulative_gas_used: u64,
     /// Nonces after this transaction (for tracking state)
@@ -195,6 +207,7 @@ impl ViewCallOverrides {
 pub struct SimulationDefaults {
     pub fee: FeeDefaults,
     pub view_call: ViewCallDefaults,
+    pub tx_gas: TxGasParameters,
 }
 
 impl Default for SimulationDefaults {
@@ -202,6 +215,7 @@ impl Default for SimulationDefaults {
         Self {
             fee: FeeDefaults::default(),
             view_call: ViewCallDefaults::default(),
+            tx_gas: TxGasParameters::default(),
         }
     }
 }

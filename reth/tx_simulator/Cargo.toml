@@ -43,7 +43,6 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 [dev-dependencies]
 ethers = { version = "2.0.7", features = ["rustls"] }
 alloy-rlp = "0.3"
-reth-storage-api = { path = "../reth/crates/storage/storage-api" }
 secrecy = "0.8"
 tempfile = "3.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -95,7 +94,7 @@ path = "examples/sequential/auto_nonce_management_example.rs"
 
 [[example]]
 name = "mev_sandwich_bundle_example"
-path = "examples/sequential/mev_sandwich_bundle_example.rs"
+path = "examples/revert/mev_sandwich_bundle_example.rs"
 
 # Performance examples
 [[example]]
@@ -113,7 +112,11 @@ path = "examples/general/timeout_handling_example.rs"
 
 [[example]]
 name = "revert_reason_decoder_example"
-path = "examples/general/revert_reason_decoder_example.rs"
+path = "examples/revert/revert_reason_decoder_example.rs"
+
+[[example]]
+name = "uniswap_v2_swap_pre_liquidity"
+path = "examples/revert/uniswap_v2_swap_pre_liquidity.rs"
 
 # Block simulation examples
 [[example]]

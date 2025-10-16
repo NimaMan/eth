@@ -127,6 +127,7 @@ async fn main() -> Result<()> {
                 success: false,
                 gas_used: 0,
                 revert_reason: Some(e.to_string()),
+                revert_context: None,
             }
         });
     println!("❌ Failed transaction analysis:");
@@ -185,6 +186,7 @@ async fn main() -> Result<()> {
                 success: false,
                 gas_used: 0,
                 revert_reason: Some(e.to_string()),
+                revert_context: None,
             }
         });
     println!("   High nonce test:");

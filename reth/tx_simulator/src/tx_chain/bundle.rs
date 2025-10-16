@@ -12,10 +12,14 @@
 /// For interactive, step-by-step simulation where you need to inspect results
 /// between transactions, use SimulationChain instead.
 use crate::{
-    simulation_revert_decoder::decode_revert_data,
+    gas::{GasHeuristic, GasInputs, GasResolutionContext},
+    simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
-    types::{SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult},
+    types::{
+        RevertContext, SequentialSimulationOptions, SequentialSimulationResult,
+        SequentialTransactionResult,
+    },
 };
 use eyre::Result;
 use std::collections::HashMap;
@@ -201,6 +205,17 @@ impl TxSimulator {
         // Get base fee for gas price adjustment
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
+        let initial_context = if let Some(target) = transaction.to {
+            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: transaction.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            })
+        } else {
+            None
+        };
+
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(
             &transaction,
@@ -224,14 +239,8 @@ impl TxSimulator {
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
         let raw_output = res.result.output().cloned();
-        let revert_reason = if !success {
-            raw_output
-                .as_ref()
-                .map(|bytes| decode_revert_data(bytes))
-                .or_else(|| Some("Transaction reverted without data".to_string()))
-        } else {
-            None
-        };
+        let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
+        let revert_context = if success { None } else { initial_context };
 
         // Extract unsigned_tx trace and step logs
         let builder = inspector
@@ -254,6 +263,7 @@ impl TxSimulator {
             success,
             gas_used,
             revert_reason,
+            revert_context,
             call_trace: call_frame,
             struct_logs,
         })
@@ -283,6 +293,17 @@ impl TxSimulator {
         // Get base fee for gas price adjustment
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
+        let initial_context = if let Some(target) = transaction.to {
+            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: transaction.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            })
+        } else {
+            None
+        };
+
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(
             &transaction,
@@ -307,14 +328,9 @@ impl TxSimulator {
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_reason = if !success {
-            res.result
-                .output()
-                .map(|bytes| decode_revert_data(&bytes))
-                .or_else(|| Some("Transaction reverted without data".to_string()))
-        } else {
-            None
-        };
+        let revert_data = res.result.output().cloned();
+        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
+        let revert_context = if success { None } else { initial_context };
 
         // Update nonces
         let updated_nonces = forked_state.nonces.clone();
@@ -324,6 +340,7 @@ impl TxSimulator {
             success,
             gas_used,
             revert_reason,
+            revert_context,
             cumulative_gas_used: gas_used,
             updated_nonces,
         })
@@ -351,6 +368,17 @@ impl TxSimulator {
         // Get base fee for gas price adjustment
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
+        let initial_context = if let Some(target) = transaction.to {
+            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: transaction.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            })
+        } else {
+            None
+        };
+
         // Create transaction environment
         let tx_env = self.create_tx_env_from_unsigned_tx(
             &transaction,
@@ -373,14 +401,9 @@ impl TxSimulator {
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_reason = if !success {
-            res.result
-                .output()
-                .map(|bytes| decode_revert_data(&bytes))
-                .or_else(|| Some("Transaction reverted without data".to_string()))
-        } else {
-            None
-        };
+        let revert_data = res.result.output().cloned();
+        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
+        let revert_context = if success { None } else { initial_context };
 
         // Extract unsigned_tx trace (not used in this method)
         let _call_frame = inspector
@@ -393,6 +416,7 @@ impl TxSimulator {
             success,
             gas_used,
             revert_reason,
+            revert_context,
             cumulative_gas_used: 0, // Will be set by unsigned_txer
             updated_nonces: forked_state.nonces.clone(),
         })
@@ -426,13 +450,6 @@ impl TxSimulator {
         use alloy_primitives::TxKind;
         use reth_revm::revm::context::TxEnv;
 
-        // Determine transaction type
-        let tx_type = if request.max_fee_per_gas.is_some() {
-            2 // EIP-1559
-        } else {
-            0 // Legacy
-        };
-
         // Get caller address
         let caller = request.from.unwrap_or_default();
 
@@ -448,39 +465,33 @@ impl TxSimulator {
         };
 
         let fee_defaults = &self.defaults.fee;
-
-        // Calculate fees with base fee awareness
-        let (gas_price, gas_priority_fee) = if tx_type == 2 {
-            let priority_fee = request
-                .max_priority_fee_per_gas
-                .unwrap_or(fee_defaults.bundle_default_priority_fee);
-
-            // If max_fee_per_gas is provided, use it; otherwise calculate from base fee
-            let max_fee = if let Some(max_fee) = request.max_fee_per_gas {
-                max_fee
-            } else {
-                let base = base_fee.unwrap_or(fee_defaults.pre_london_base_fee);
-                base.saturating_mul(fee_defaults.bundle_max_fee_multiplier)
-                    .saturating_add(priority_fee)
-            };
-
-            (max_fee, Some(priority_fee))
-        } else {
-            // Legacy
-            let price = if let Some(price) = request.gas_price {
-                price
-            } else {
-                let base = base_fee.unwrap_or(fee_defaults.legacy_pre_london_base_fee);
-                base.saturating_mul(fee_defaults.legacy_gas_price_multiplier)
-            };
-            (price, None)
-        };
+        let gas_resolution = crate::gas::resolve_gas(
+            None,
+            &self.defaults.tx_gas,
+            GasInputs {
+                gas: request.gas,
+                gas_price: request.gas_price,
+                max_fee_per_gas: request.max_fee_per_gas,
+                max_priority_fee_per_gas: request.max_priority_fee_per_gas,
+            },
+            GasResolutionContext {
+                fee_defaults,
+                block_gas_limit,
+                base_fee,
+            },
+            GasHeuristic::Multiplier {
+                default_priority_fee: fee_defaults.bundle_default_priority_fee,
+                max_fee_multiplier: fee_defaults.bundle_max_fee_multiplier,
+            },
+        )?;
+        let gas_price = gas_resolution.gas_price;
+        let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
 
         // Create TxEnv - no signature needed!
         Ok(TxEnv {
-            tx_type,
+            tx_type: gas_resolution.tx_type.as_reth_tx_type(),
             caller: caller.into(),
-            gas_limit: request.gas.unwrap_or(block_gas_limit as u64),
+            gas_limit: gas_resolution.gas_limit,
             gas_price,
             gas_priority_fee,
             kind: if let Some(to) = request.to {

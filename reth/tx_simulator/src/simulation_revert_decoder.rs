@@ -4,6 +4,8 @@
 /// Handles standard Solidity reverts and common DeFi protocol errors.
 use alloy_primitives::Bytes;
 
+use crate::types::RevertContext;
+
 /// Decode revert data from EVM execution into a human-readable message
 pub fn decode_revert_data(revert_data: &Bytes) -> String {
     if revert_data.is_empty() {
@@ -13,6 +15,44 @@ pub fn decode_revert_data(revert_data: &Bytes) -> String {
     // Convert to hex string for processing
     let hex_str = format!("{:?}", revert_data);
     decode_revert_message(&hex_str)
+}
+
+/// Produce a revert reason string, using raw revert data when available and falling back to context.
+pub fn decode_revert_reason(
+    revert_data: Option<&Bytes>,
+    context: Option<&RevertContext>,
+) -> Option<String> {
+    let base = revert_data.map(|data| {
+        if data.is_empty() {
+            "Reverted without reason".to_string()
+        } else {
+            decode_revert_data(data)
+        }
+    });
+
+    if base.as_deref() != Some("Reverted without reason") {
+        return base;
+    }
+
+    if let Some(ctx) = context {
+        if !ctx.has_code {
+            return Some(format!(
+                "Target contract {} has no bytecode at the execution block",
+                ctx.target
+            ));
+        }
+        if ctx.calldata_len <= 4 {
+            return Some(
+                "Call data missing encoded arguments (only function selector provided)".to_string(),
+            );
+        }
+        return Some(format!(
+            "Contract {} reverted without returning data",
+            ctx.target
+        ));
+    }
+
+    base
 }
 
 /// Decode a revert message from hex string representation

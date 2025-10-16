@@ -5,6 +5,7 @@ use crate::single_tx::unsigned::UnsignedTransaction;
 /// committing state changes between steps. Useful for buy → approve → sell
 /// flows with real signatures.
 use crate::{
+    simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::bundle::ForkedState,
     types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},
@@ -68,14 +69,23 @@ impl SignedTxChainSimulation {
         // Fuse inspector for subsequent steps
         self.inspector = self.inspector.take().map(|insp| insp.fused());
 
+        let success = res.result.is_success();
+        let gas_used = res.result.gas_used();
+        let revert_data = res.result.output().cloned();
+        let mut revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(revert_data.as_ref(), None)
+        };
+        if !success && revert_reason.is_none() {
+            revert_reason = Some("Transaction reverted".to_string());
+        }
+
         Ok(SimulationResult {
-            success: res.result.is_success(),
-            gas_used: res.result.gas_used(),
-            revert_reason: if res.result.is_success() {
-                None
-            } else {
-                Some("Transaction reverted".to_string())
-            },
+            success,
+            gas_used,
+            revert_reason,
+            revert_context: None,
         })
     }
 
@@ -104,11 +114,15 @@ impl SignedTxChainSimulation {
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_reason = if success {
+        let revert_data = res.result.output().cloned();
+        let mut revert_reason = if success {
             None
         } else {
-            Some("Transaction reverted".to_string())
+            decode_revert_reason(revert_data.as_ref(), None)
         };
+        if !success && revert_reason.is_none() {
+            revert_reason = Some("Transaction reverted".to_string());
+        }
         let call_frame = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder()
@@ -121,6 +135,7 @@ impl SignedTxChainSimulation {
             success,
             gas_used,
             revert_reason,
+            revert_context: None,
             call_trace: call_frame,
             struct_logs: None,
         })

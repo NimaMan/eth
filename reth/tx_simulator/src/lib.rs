@@ -1,4 +1,5 @@
 pub mod config;
+pub mod gas;
 pub mod simulator;
 /// Transaction Simulator Library
 ///
@@ -49,6 +50,10 @@ pub mod block_simulation {
 }
 
 // Re-export main types
+pub use gas::{
+    GasHeuristic, GasInputs, GasResolutionContext, GasTxType, ResolvedGasParameters,
+    TxGasParameters,
+};
 pub use simulator::{RethTxSimulator, TxSimulator};
 pub use single_tx::signed::SignedTransaction;
 pub use single_tx::unsigned::UnsignedTransaction;
@@ -56,7 +61,7 @@ pub use tx_chain::signed::SignedTxChainSimulation;
 pub use tx_chain::unsigned::{ChainStateInfo, UnsignedTxChainSimulation};
 pub use tx_parallel::ParallelTxSimulationOptions;
 pub use types::{
-    CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult,
+    CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult, RevertContext,
     SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,
     SimulationDefaults, SimulationResult, ViewCallDefaults, ViewCallOverrides, ViewFunctionResult,
 };
