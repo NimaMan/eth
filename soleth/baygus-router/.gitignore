@@ -1,0 +1,15 @@
+# General ignorable artifacts
+.DS_Store
+.cursor/
+.cursorignore
+.vscode/
+
+# Build outputs
+**/out/
+**/artifacts/
+**/cache/
+
+# Foundry
+sol/unified-router/contracts/lib/
+sol/unified-router/contracts/out/
+sol/unified-router/contracts/cache/
