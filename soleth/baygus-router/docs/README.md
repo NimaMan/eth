@@ -33,7 +33,7 @@ See `code-audit.md` for the latest summary of implemented features and outstandi
 | v0.1    | Replay a production Uniswap v4 swap offline to understand PoolManager cash flows.                           | `python sol/baygus-router/tools/replay_moonstr_swap.py`                                                  |
 | v0.2    | Implement a minimal `BaygusRouter` (single pool, no hooks) handling lock → swap → settle for ERC20/WETH.    | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouter.t.sol`                     |
 | v0.3    | Introduce hook-aware adapters and safety rails (hook data propagation, sanity checks).                      | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouter.t.sol`                     |
-| v0.4    | Multi-hop routing & aggregated slippage with hook propagation between hops.                                 | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouterMultihop.t.sol` *(planned)* |
+| v0.4    | Multi-hop routing & aggregated slippage with hook propagation between hops.                                 | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouterMultihop.t.sol`             |
 | v0.5    | Rust simulator integration: Baygus agent drives router for buy/approve/sell simulations.                    | `cargo test -p baygus_simulation --test router_roundtrip` *(planned)*                                    |
 | v0.6    | Production hardening & multi-venue support (deploy scripts, audit, on-chain smoke tests).                   | `forge script scripts/DeployBaygusRouter.s.sol` *(planned)*                                              |
 
@@ -64,5 +64,16 @@ as needed.
 - **Outcome:** The test suite now covers hook callbacks (via `MockHookAdapter`) and slippage failure
   scenarios. Router exposes `SwapExactInputSingleParams` struct with hook adapter address and
   per-currency minimum deltas. Safety checks revert with a dedicated `SlippageCheckFailed` error.
-- **Follow-up:** v0.4 extends this foundation to multi-hop paths and aggregated slippage; see
-  `code-audit.md` for open questions.
+- **Follow-up:** see v0.4 audit for multi-hop considerations.
+
+### v0.4 – Multi-Hop Path Execution
+
+- **Objective:** Execute sequential Uniswap v4 hops within a single PoolManager lock, supporting
+  aggregated slippage checks and hook adapters on each hop.
+- **Command:** `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouterMultihop.t.sol`
+- **Outcome:** Router now routes TokenA → TokenB → TokenC flows (and analogous paths) while keeping
+  intermediate balances on the router, enforcing per-hop and final-output slippage. Test suite also
+  verifies failure when the final hop output misses the minimum. Multi-hop support is now ready for
+  integration with the Baygus Rust stack.
+- **Follow-up:** Integrate router with simulator (v0.5), design aggregated hook threat models, and
+  begin documenting gas optimization strategies.

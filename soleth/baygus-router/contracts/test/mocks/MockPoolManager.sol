@@ -7,7 +7,9 @@ import {MockERC20} from "./MockERC20.sol";
 
 contract MockPoolManager {
     address public router;
-    BalanceDelta public nextDelta;
+
+    BalanceDelta[] private _deltaQueue;
+    uint256 private _deltaCursor;
 
     struct SettleCall {
         address currency;
@@ -32,7 +34,13 @@ contract MockPoolManager {
     }
 
     function setNextDelta(int128 amount0, int128 amount1) external {
-        nextDelta = BalanceDelta({amount0: amount0, amount1: amount1});
+        delete _deltaQueue;
+        _deltaCursor = 0;
+        _deltaQueue.push(BalanceDelta({amount0: amount0, amount1: amount1}));
+    }
+
+    function queueDelta(int128 amount0, int128 amount1) external {
+        _deltaQueue.push(BalanceDelta({amount0: amount0, amount1: amount1}));
     }
 
     function lock(bytes calldata data) external returns (bytes memory) {
@@ -45,12 +53,17 @@ contract MockPoolManager {
         PoolKey calldata key,
         SwapParams calldata params,
         bytes calldata data
-    ) external view returns (BalanceDelta memory delta) {
+    ) external returns (BalanceDelta memory delta) {
         if (msg.sender != router) revert UnauthorizedCaller();
         key;
         params;
         data;
-        delta = nextDelta;
+        if (_deltaCursor < _deltaQueue.length) {
+            delta = _deltaQueue[_deltaCursor];
+            _deltaCursor++;
+        } else if (_deltaQueue.length != 0) {
+            delta = _deltaQueue[_deltaQueue.length - 1];
+        }
     }
 
     function settle(address currency, uint256 amount) external payable {

@@ -28,6 +28,30 @@ contract BaygusRouter is ILockCallback {
         int128 minAmount1;
     }
 
+    struct Hop {
+        PoolKey key;
+        SwapParams params;
+        bytes hookData;
+        address hookAdapter;
+        int128 minAmount0;
+        int128 minAmount1;
+    }
+
+    struct MultiHopParams {
+        Hop[] hops;
+        address recipient;
+        int128 finalMinAmount0;
+        int128 finalMinAmount1;
+    }
+
+    struct MultiHopContext {
+        address initiator;
+        address recipient;
+        int128 finalMinAmount0;
+        int128 finalMinAmount1;
+        Hop[] hops;
+    }
+
     struct SwapContext {
         address sender;
         address recipient;
@@ -39,6 +63,7 @@ contract BaygusRouter is ILockCallback {
         int128 minAmount1;
     }
 
+    error EmptyPath();
     error RouterReentrant();
     error InvalidRecipient();
     error MissingPoolManager();
@@ -63,8 +88,86 @@ contract BaygusRouter is ILockCallback {
         uint256 previousNative = _nativeBuffer;
         _nativeBuffer = msg.value;
 
+        bytes memory payload = abi.encode(uint8(0), abi.encode(request, msg.sender));
+        bytes memory response = IPoolManager(poolManager).lock(payload);
+        delta = abi.decode(response, (BalanceDelta));
+
+        if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
+        _nativeBuffer = previousNative;
+        _entered = false;
+
+        return delta;
+    }
+
+    function swapExactInputPath(
+        MultiHopParams calldata request
+    ) external payable returns (BalanceDelta memory finalDelta) {
+        if (request.hops.length == 0) revert EmptyPath();
+        if (_entered) revert RouterReentrant();
+        if (request.recipient == address(0)) revert InvalidRecipient();
+
+        _entered = true;
+        uint256 previousNative = _nativeBuffer;
+        _nativeBuffer = msg.value;
+
+        bytes memory payload = abi.encode(
+            uint8(1),
+            abi.encode(
+                msg.sender,
+                request.recipient,
+                request.finalMinAmount0,
+                request.finalMinAmount1,
+                request.hops
+            )
+        );
+
+        bytes memory response = IPoolManager(poolManager).lock(payload);
+        finalDelta = abi.decode(response, (BalanceDelta));
+
+        if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
+        _nativeBuffer = previousNative;
+        _entered = false;
+
+        return finalDelta;
+    }
+
+    function lockAcquired(bytes calldata data) external override returns (bytes memory) {
+        if (msg.sender != poolManager) revert UnauthorizedPoolManager();
+
+        (uint8 op, bytes memory payload) = abi.decode(data, (uint8, bytes));
+        if (op == 0) {
+            (SwapExactInputSingleParams memory request, address singleInitiator) = abi.decode(
+                payload,
+                (SwapExactInputSingleParams, address)
+            );
+            BalanceDelta memory delta = _executeSingle(request, singleInitiator);
+            return abi.encode(delta);
+        }
+
+        (
+            address initiator,
+            address recipient,
+            int128 finalMinAmount0,
+            int128 finalMinAmount1,
+            Hop[] memory hops
+        ) = abi.decode(payload, (address, address, int128, int128, Hop[]));
+
+        BalanceDelta memory finalDelta = _executeMultiHop(
+            initiator,
+            recipient,
+            finalMinAmount0,
+            finalMinAmount1,
+            hops
+        );
+        return abi.encode(finalDelta);
+    }
+
+    function _executeSingle(
+        SwapExactInputSingleParams memory request,
+        address initiator
+    ) internal returns (BalanceDelta memory delta) {
         SwapContext memory context = SwapContext({
-            sender: msg.sender,
+            sender: initiator,
             recipient: request.recipient,
             key: request.key,
             params: request.params,
@@ -75,33 +178,57 @@ contract BaygusRouter is ILockCallback {
         });
 
         _invokeBeforeSwap(context);
-
-        bytes memory response = IPoolManager(poolManager).lock(abi.encode(context));
-        delta = abi.decode(response, (BalanceDelta));
-
-        if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
-        _nativeBuffer = previousNative;
-        _entered = false;
-
+        delta = IPoolManager(poolManager).swap(context.key, context.params, context.hookData);
+        _handleSettlement(context, delta);
         _validateDelta(context, delta);
         _invokeAfterSwap(context, delta);
-
         return delta;
     }
 
-    function lockAcquired(bytes calldata data) external override returns (bytes memory) {
-        if (msg.sender != poolManager) revert UnauthorizedPoolManager();
+    function _executeMultiHop(
+        address initiator,
+        address finalRecipient,
+        int128 finalMinAmount0,
+        int128 finalMinAmount1,
+        Hop[] memory hops
+    ) internal returns (BalanceDelta memory finalDelta) {
+        address currentSender = initiator;
+        for (uint256 i = 0; i < hops.length; ++i) {
+            Hop memory hop = hops[i];
 
-        SwapContext memory context = abi.decode(data, (SwapContext));
-        BalanceDelta memory delta = IPoolManager(poolManager).swap(
-            context.key,
-            context.params,
-            context.hookData
-        );
+            SwapContext memory context = SwapContext({
+                sender: currentSender,
+                recipient: i + 1 == hops.length ? finalRecipient : address(this),
+                key: hop.key,
+                params: hop.params,
+                hookData: hop.hookData,
+                hookAdapter: hop.hookAdapter,
+                minAmount0: hop.minAmount0,
+                minAmount1: hop.minAmount1
+            });
 
-        _handleSettlement(context, delta);
+            _invokeBeforeSwap(context);
+            BalanceDelta memory delta = IPoolManager(poolManager).swap(
+                context.key,
+                context.params,
+                context.hookData
+            );
+            _handleSettlement(context, delta);
+            _validateDelta(context, delta);
+            _invokeAfterSwap(context, delta);
 
-        return abi.encode(delta);
+            currentSender = address(this);
+            finalDelta = delta;
+        }
+
+        if (finalMinAmount0 != 0 && finalDelta.amount0 < finalMinAmount0) {
+            revert SlippageCheckFailed(2, finalDelta.amount0, finalMinAmount0);
+        }
+        if (finalMinAmount1 != 0 && finalDelta.amount1 < finalMinAmount1) {
+            revert SlippageCheckFailed(3, finalDelta.amount1, finalMinAmount1);
+        }
+
+        return finalDelta;
     }
 
     function _handleSettlement(SwapContext memory context, BalanceDelta memory delta) internal {
@@ -126,7 +253,12 @@ contract BaygusRouter is ILockCallback {
             _nativeBuffer -= amount;
             IPoolManager(poolManager).settle{value: amount}(currency, amount);
         } else {
-            bool ok = IERC20(currency).transferFrom(payer, poolManager, amount);
+            bool ok;
+            if (payer == address(this)) {
+                ok = IERC20(currency).transfer(poolManager, amount);
+            } else {
+                ok = IERC20(currency).transferFrom(payer, poolManager, amount);
+            }
             if (!ok) revert ERC20TransferFailed();
             IPoolManager(poolManager).settle(currency, amount);
         }

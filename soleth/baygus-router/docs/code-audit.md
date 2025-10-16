@@ -1,4 +1,7 @@
-# Baygus Router Code Audit (2025-10-16)
+# Baygus Router Code Audit
+
+- **Version:** v0.4 (multi-hop routing)
+- **Last updated:** 2025-10-16
 
 ## Scope
 - Solidity sources under `contracts/src/`
@@ -6,8 +9,9 @@
 - Tooling + documentation within the Baygus Router repository
 
 ## Current Capabilities
-1. **Single-pool Uniswap v4 swaps**
+1. **Single and multi-hop Uniswap v4 swaps**
    - Executes `lock → swap → settle` for a provided `PoolKey`.
+   - Supports sequential hops with per-hop hooks and aggregated slippage checks.
    - Handles ETH/WETH and arbitrary ERC-20 currencies.
 2. **Hook adapter pipeline**
    - Optional external adapter invoked via `beforeSwap` / `afterSwap`.
@@ -23,21 +27,20 @@
 ## Known Gaps / Open Questions
 | Area | Status | Notes |
 |------|--------|-------|
-| Multi-hop routing | Missing | Router currently processes one pool per call. No aggregate slippage logic. |
+| Multi-hop routing | ✅ v0.4 | Sequential hops supported; follow-up gas profiling and hook threat model still needed. |
 | Rust integration | Missing | Rust simulators still call legacy components; adapter layer from Rust → router not implemented. |
 | Gas / reentrancy guards | Partial | Router is reentrancy-safe for single call, but adapter contracts are unconstrained. Needs threat model + guardrails. |
 | Token approval ergonomics | Barebones | Caller must pre-approve max amount. Consider permit / pull allowances for better UX. |
 | Production readiness | Not started | No deployment scripts, on-chain tests, audit, or runtime monitoring hooks. |
 
 ## Recommendations
-1. **v0.4** – Add multi-hop path execution and aggregated slippage controls. Extend tests to cover two-hop flows and hook data propagation between hops.
-2. **v0.5** – Integrate with the Rust simulator stack (Baygus agent) so buy/approve/sell simulations invoke this router directly. Acceptance should be a combined Rust + Foundry test.
-3. **v0.6** – Production hardening:
+1. **v0.5** – Integrate with the Rust simulator stack (Baygus agent) so buy/approve/sell simulations invoke this router directly. Acceptance should be a combined Rust + Foundry test.
+2. **v0.6** – Production hardening:
    - Expand fuzz/property tests.
    - Provide deployment scripts + config management.
    - Run static analysis (slither, mythril) & engage audit review.
    - Document on-chain monitoring / emergency procedures.
-4. **Documentation** – Maintain this audit document as milestones land; note resolved items and new findings.
+3. **Documentation** – Maintain this audit document as milestones land; note resolved items and new findings.
 
 ## Outstanding Questions
 - Do we require adapter-specific permissions or allow any address? (Current: unrestricted.)
