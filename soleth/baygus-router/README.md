@@ -4,10 +4,16 @@
 
 Create a reusable, well-audited router layer that the Baygus execution agent can use to route swaps
 across modern DEX architectures—even when the underlying protocol expects integrators to provide
-their own
-`lock → swap → settle` orchestration. We will start with **Uniswap v4**, where every production
-trade today routes through bespoke contracts, and gradually generalise the framework so it can
-support other venues (v2/v3 style factories, hook-heavy pools, hybrid AMMs, etc.).
+their own `lock → swap → settle` orchestration. We start with **Uniswap v4**, where every
+production trade today routes through bespoke contracts, and gradually generalise the framework so
+it can support other venues (v2/v3 style factories, hook-heavy pools, hybrid AMMs, etc.).
+
+**Primary objectives**
+
+1. Deliver deterministic, simulator-friendly routing for Baygus’ Rust tooling.
+2. Extend the router into a production-ready contract that can execute on mainnet safely.
+3. Keep the architecture adapter-driven so new venues/slippage policies can slot in without
+   rewriting the core.
 
 ## Initial Objectives
 
@@ -46,12 +52,12 @@ sol/
 
 Each subdirectory has its own README describing the expected contents. Start new work by dropping
 research artifacts into `references/`, fleshing out design ideas in `docs/`, and iterating on the
-router implementation inside `contracts/`. The milestone plan (v0.1 → v0.5) with acceptance tests
-is tracked in `docs/README.md`.
+router implementation inside `contracts/`. See `docs/README.md` for the milestone plan (v0.1 →
+v0.6) and `docs/code-audit.md` for the current feature audit and gaps.
 
 ## Immediate Next Steps
 
 - Catalogue behaviours of the router at `0x8911…c940` (permissions, settlement flow, hook data).
-- Draft an execution-state diagram in `docs/` that captures how we want the Baygus router to
-  abstract `PoolManager.lock` interactions.
-- Scaffold the Solidity project (Foundry/Hardhat files, license headers) inside `contracts/`.
+- Draft execution and state diagrams describing multi-hop routing & adapter lifecycle.
+- Extend the Foundry project to cover multi-hop scenarios and document integration points for the
+  Baygus Rust stack.
