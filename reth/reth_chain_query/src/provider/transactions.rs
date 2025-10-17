@@ -180,6 +180,20 @@ impl RethQueryProvider {
         Ok(receipt.logs)
     }
 
+    /// Get mempool arrival timestamp (milliseconds since epoch) if recorded
+    pub fn get_tx_arrival_ms(&self, tx_hash: B256) -> Result<Option<u64>> {
+        let provider = self.provider_factory.provider()?;
+        let Some(tx_id) = provider.transaction_id(tx_hash)? else {
+            return Ok(None);
+        };
+
+        let Some(db) = self.reth_index() else {
+            return Ok(None);
+        };
+
+        db.get_tx_arrival_ms(tx_id as u64)
+    }
+
     /// Build UnsignedTransaction from transaction hash for re-simulation
     /// Loads on-chain transaction and converts it to UnsignedTransaction format
     /// Used by tx_processor to re-simulate historical transactions for trace extraction
