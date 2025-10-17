@@ -1,8 +1,13 @@
 use crate::tx_processor::data_models::ProcessedTransaction;
 /// Type definitions for trading viability analysis
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use reth_primitives::SealedHeader;
 use serde::{Deserialize, Serialize};
+
+pub const DEFAULT_GAS_LIMIT_NO_PRIOR: u64 = 5_000_000;
+pub const DEFAULT_BUY_GAS_LIMIT: u64 = 450_000;
+pub const DEFAULT_APPROVE_GAS_LIMIT: u64 = 200_000;
+pub const DEFAULT_SELL_GAS_LIMIT: u64 = 450_000;
 
 /// Parameters controlling a pool buy/sell simulation run.
 #[derive(Debug, Clone)]
@@ -15,14 +20,32 @@ pub struct PoolBuySellParameters {
     pub prior_tx: Option<ProcessedTransaction>,
     pub block_number: Option<u64>,
     pub slippage_tolerance: f64,
-    pub gas_limit: u64,
     pub gas_price: Option<u128>,
     pub max_fee_per_gas: Option<u128>,
     pub max_priority_fee_per_gas: Option<u128>,
+    pub buy_gas_limit: u64,
+    pub approve_gas_limit: u64,
+    pub sell_gas_limit: u64,
+    pub prior_gas_limit: Option<u64>,
+    pub prior_max_fee_per_gas: Option<u128>,
+    pub prior_max_priority_fee_per_gas: Option<u128>,
     pub weth_address: Address,
     pub block_delay: u64,
     pub token_decimals: u8,
     pub block_header: Option<SealedHeader>,
+    pub uniswap_v4_config: Option<UniswapV4PoolConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UniswapV4PoolConfig {
+    pub pool_manager: Address,
+    pub pool_id: B256,
+    pub currency0: Address,
+    pub currency1: Address,
+    pub fee: u32,
+    pub tick_spacing: i32,
+    pub hooks: Address,
+    pub hook_data: Vec<u8>,
 }
 
 impl Default for PoolBuySellParameters {
@@ -33,23 +56,27 @@ impl Default for PoolBuySellParameters {
             pool_type: PoolType::UniswapV2,
             test_amount: U256::from(10_000_000_000_000_000u64),
             buyer_address: Address::from([
-                0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D,
-                0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
+                0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D, 0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
             ]),
             prior_tx: None,
             block_number: None,
-            slippage_tolerance: 0.5,
-            gas_limit: 300_000,
+            slippage_tolerance: 5.0,
             gas_price: None,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
+            buy_gas_limit: DEFAULT_BUY_GAS_LIMIT,
+            approve_gas_limit: DEFAULT_APPROVE_GAS_LIMIT,
+            sell_gas_limit: DEFAULT_SELL_GAS_LIMIT,
+            prior_gas_limit: None,
+            prior_max_fee_per_gas: None,
+            prior_max_priority_fee_per_gas: None,
             weth_address: Address::from([
-                0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
-                0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+                0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
             block_delay: 0,
-            token_decimals: 18,
+            token_decimals: 0,
             block_header: None,
+            uniswap_v4_config: None,
         }
     }
 }
@@ -108,8 +135,26 @@ impl PoolBuySellParameters {
         self.max_priority_fee_per_gas = Some(max_priority);
         self
     }
+
+    pub fn with_prior_gas_settings(
+        mut self,
+        gas_limit: Option<u64>,
+        max_fee: Option<u128>,
+        max_priority_fee: Option<u128>,
+    ) -> Self {
+        self.prior_gas_limit = gas_limit;
+        self.prior_max_fee_per_gas = max_fee;
+        self.prior_max_priority_fee_per_gas = max_priority_fee;
+        self
+    }
+
     pub fn with_block_header(mut self, block_header: SealedHeader) -> Self {
         self.block_header = Some(block_header);
+        self
+    }
+
+    pub fn with_uniswap_v4_config(mut self, config: UniswapV4PoolConfig) -> Self {
+        self.uniswap_v4_config = Some(config);
         self
     }
 }
@@ -118,14 +163,10 @@ impl PoolBuySellParameters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PoolType {
     UniswapV2,
-    UniswapV3 {
-        fee_tier: u32,
-    }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
+    UniswapV3 { fee_tier: u32 }, // 500, 3000, 10000 (0.05%, 0.3%, 1%)
     SushiSwap,
     Curve,
     Balancer,
-    /// Placeholder for Uniswap V4 (PoolManager + PoolId based)
-    /// Full swap support requires Router/Lock integration; not yet implemented
     UniswapV4,
 }
 
