@@ -5,9 +5,13 @@ use alloy_primitives::Address;
 ///
 /// Provides Python interface for pool trading viability analysis and simulation
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 use reth_primitives::SealedHeader;
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{convert::TryFrom, str::FromStr, sync::Arc};
+use tx_processor::simulator::types::{
+    DEFAULT_APPROVE_GAS_LIMIT, DEFAULT_BUY_GAS_LIMIT, DEFAULT_GAS_LIMIT_NO_PRIOR,
+    DEFAULT_SELL_GAS_LIMIT,
+};
 use tx_processor::ProcessedTransaction as RustProcessedTransaction;
 use tx_processor::{
     check_can_buy_sell_pool, tx_processor::TxProcessor, PoolBuySellParameters,
@@ -99,7 +103,11 @@ pub struct PyPoolBuySellParameters {
     #[pyo3(get, set)]
     pub buyer_address: String,
     #[pyo3(get, set)]
-    pub gas_limit: u64,
+    pub buy_gas_limit: u64,
+    #[pyo3(get, set)]
+    pub approve_gas_limit: u64,
+    #[pyo3(get, set)]
+    pub sell_gas_limit: u64,
     #[pyo3(get, set)]
     pub gas_price_gwei: u64,
     #[pyo3(get, set)]
@@ -112,8 +120,10 @@ pub struct PyPoolBuySellParameters {
     pub slippage_tolerance: f64,
     #[pyo3(get, set)]
     pub block_delay: u64,
-    #[pyo3(get, set)]
-    pub token_decimals: u8,
+    pub token_decimals: Option<u8>,
+    pub prior_gas_limit: Option<u64>,
+    pub prior_max_fee_per_gas_wei: Option<u128>,
+    pub prior_max_priority_fee_per_gas_wei: Option<u128>,
     // Optional prior transaction to execute before buy/approve/sell
     // Set via helper methods below
     pub(crate) prior_tx: Option<RustProcessedTransaction>,
@@ -127,14 +137,19 @@ impl PyPoolBuySellParameters {
         Self {
             test_amount_eth: 0.01, // Default 0.01 ETH
             buyer_address: "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".to_string(),
-            gas_limit: 300_000,
+            buy_gas_limit: DEFAULT_BUY_GAS_LIMIT,
+            approve_gas_limit: DEFAULT_APPROVE_GAS_LIMIT,
+            sell_gas_limit: DEFAULT_SELL_GAS_LIMIT,
             gas_price_gwei: 0,
             max_fee_per_gas_gwei: None,
             max_priority_fee_gwei: None,
             block_number: None,
-            slippage_tolerance: 0.5,
+            slippage_tolerance: 5.0,
             block_delay: 0,
-            token_decimals: 18,
+            token_decimals: None,
+            prior_gas_limit: None,
+            prior_max_fee_per_gas_wei: None,
+            prior_max_priority_fee_per_gas_wei: None,
             prior_tx: None,
             block_header: None,
         }
@@ -157,12 +172,22 @@ impl PyPoolBuySellParameters {
     /// Set a prior transaction from a processed transaction
     /// This transaction executes before buy/approve/sell.
     fn set_prior_tx_from_processed(&mut self, prior: &PyProcessedTransaction) {
-        self.prior_tx = Some(prior.to_processed_transaction());
+        let processed = prior.to_processed_transaction();
+        self.apply_prior_processed(processed);
     }
 
     /// Set a minimal prior transaction from unsigned parameters
     /// Useful for setup calls (e.g., enabling trading) before viability checks.
-    #[pyo3(signature = (from_address, to_address=None, value_hex=None, data_hex=None, nonce=None))]
+    #[pyo3(signature = (
+        from_address,
+        to_address=None,
+        value_hex=None,
+        data_hex=None,
+        nonce=None,
+        gas_limit=None,
+        max_fee_per_gas_wei=None,
+        max_priority_fee_per_gas_wei=None
+    ))]
     fn set_prior_tx_from_unsigned(
         &mut self,
         from_address: &str,
@@ -170,6 +195,9 @@ impl PyPoolBuySellParameters {
         value_hex: Option<&str>,
         data_hex: Option<&str>,
         nonce: Option<u64>,
+        gas_limit: Option<u64>,
+        max_fee_per_gas_wei: Option<u128>,
+        max_priority_fee_per_gas_wei: Option<u128>,
     ) -> PyResult<()> {
         use alloy_primitives::{Address, B256, U256};
         // Parse inputs
@@ -215,6 +243,40 @@ impl PyPoolBuySellParameters {
             input,
         );
         self.prior_tx = Some(ptx);
+        self.prior_gas_limit = gas_limit;
+        self.prior_max_fee_per_gas_wei = max_fee_per_gas_wei;
+        self.prior_max_priority_fee_per_gas_wei = max_priority_fee_per_gas_wei;
+        Ok(())
+    }
+
+    #[pyo3(signature = (prior_dict))]
+    fn set_prior_tx_from_dict(&mut self, prior_dict: &PyAny) -> PyResult<()> {
+        let py = prior_dict.py();
+        let json_mod = py.import("json")?;
+        let json_str: String = json_mod
+            .call_method1("dumps", (prior_dict,))
+            .and_then(|obj| obj.extract())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+
+        // Drop fields that aren't required for replay and often contain lossy float conversions
+        let mut sanitized: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Invalid processed transaction dict: {e}"
+            ))
+        })?;
+
+        if let Some(obj) = sanitized.as_object_mut() {
+            obj.remove("state_changes");
+            obj.remove("latest_states");
+        }
+
+        let processed: RustProcessedTransaction = serde_json::from_value(sanitized).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Invalid processed transaction dict: {e}"
+            ))
+        })?;
+
+        self.apply_prior_processed(processed);
         Ok(())
     }
 
@@ -225,9 +287,49 @@ impl PyPoolBuySellParameters {
         self.block_header = Some(sealed);
         Ok(())
     }
+
+    #[getter(token_decimals)]
+    fn get_token_decimals(&self) -> Option<u8> {
+        self.token_decimals
+    }
+
+    #[setter(token_decimals)]
+    fn set_token_decimals(&mut self, value: u8) {
+        self.token_decimals = Some(value);
+    }
 }
 
 impl PyPoolBuySellParameters {
+    fn apply_prior_processed(&mut self, processed: RustProcessedTransaction) {
+        use std::convert::TryInto;
+
+        let gas_used = processed.fees.gas_used;
+        if gas_used > 0 {
+            let scaled_limit = gas_used
+                .saturating_mul(2)
+                .min(DEFAULT_GAS_LIMIT_NO_PRIOR)
+                .max(gas_used);
+            self.prior_gas_limit = Some(scaled_limit);
+        }
+
+        self.prior_max_fee_per_gas_wei = processed
+            .fees
+            .max_fee_per_gas
+            .and_then(|value| u128::try_from(value).ok());
+        self.prior_max_priority_fee_per_gas_wei = processed
+            .fees
+            .max_priority_fee
+            .and_then(|value| u128::try_from(value).ok());
+
+        if self.prior_max_fee_per_gas_wei.is_none() {
+            if let Ok(price) = u128::try_from(processed.fees.gas_price) {
+                self.prior_max_fee_per_gas_wei = Some(price);
+            }
+        }
+
+        self.prior_tx = Some(processed);
+    }
+
     fn to_rust_config(
         &self,
         token_address: Address,
@@ -245,10 +347,34 @@ impl PyPoolBuySellParameters {
                 ))
             })?;
 
+        let token_decimals = self.token_decimals.ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "token_decimals must be provided before running the simulator",
+            )
+        })?;
+
         let gas_price = if self.gas_price_gwei == 0 {
             None
         } else {
             Some((self.gas_price_gwei as u128) * 1_000_000_000)
+        };
+
+        let buy_gas_limit = if self.buy_gas_limit == 0 {
+            DEFAULT_BUY_GAS_LIMIT
+        } else {
+            self.buy_gas_limit
+        };
+
+        let approve_gas_limit = if self.approve_gas_limit == 0 {
+            DEFAULT_APPROVE_GAS_LIMIT
+        } else {
+            self.approve_gas_limit
+        };
+
+        let sell_gas_limit = if self.sell_gas_limit == 0 {
+            DEFAULT_SELL_GAS_LIMIT
+        } else {
+            self.sell_gas_limit
         };
 
         let max_fee = self
@@ -267,17 +393,23 @@ impl PyPoolBuySellParameters {
             prior_tx: self.prior_tx.clone(),
             block_number: self.block_number,
             slippage_tolerance: self.slippage_tolerance,
-            gas_limit: self.gas_limit,
             gas_price,
             max_fee_per_gas: max_fee,
             max_priority_fee_per_gas: max_priority,
+            buy_gas_limit,
+            approve_gas_limit,
+            sell_gas_limit,
+            prior_gas_limit: self.prior_gas_limit,
+            prior_max_fee_per_gas: self.prior_max_fee_per_gas_wei,
+            prior_max_priority_fee_per_gas: self.prior_max_priority_fee_per_gas_wei,
             weth_address: Address::from([
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
             block_delay: self.block_delay,
-            token_decimals: self.token_decimals,
+            token_decimals,
             block_header: self.block_header.clone(),
+            uniswap_v4_config: None,
         })
     }
 }
@@ -434,12 +566,12 @@ impl PyPoolBuySellSimulator {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid pool address: {}", e))
         })?;
 
-        // Use provided config or create default
-        let mut rust_config = if let Some(cfg) = config {
-            cfg.to_rust_config(token_addr, pool_addr, pool_type)?
-        } else {
-            PyPoolBuySellParameters::new().to_rust_config(token_addr, pool_addr, pool_type)?
-        };
+        let cfg = config.ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "PoolBuySellParameters must be provided; token_decimals is required",
+            )
+        })?;
+        let rust_config = cfg.to_rust_config(token_addr, pool_addr, pool_type)?;
 
         let simulator = self.simulator.clone();
         let processor = self.processor.clone();
