@@ -79,8 +79,13 @@ async fn main() -> Result<()> {
                 for (i, internal) in tx.internal_transactions.iter().enumerate() {
                     println!("\n  Internal Tx #{}:", i + 1);
                     println!("    From: {}", internal.from_address);
-                    println!("    To: {}", internal.to_address);
+                    let to_display = internal
+                        .to_address
+                        .map(|addr| addr.to_string())
+                        .unwrap_or_else(|| "None".to_string());
+                    println!("    To: {}", to_display);
                     println!("    Value: {} wei", internal.value);
+                    println!("    Gas: {}", internal.gas);
                     println!("    Depth: {}", internal.depth);
                     println!("    Type: {}", internal.trace_type);
                     if let Some(call_type) = &internal.call_type {
@@ -117,9 +122,12 @@ async fn main() -> Result<()> {
             }
 
             // Other events
-            if !tx.approvals.is_empty() {
-                println!("\n✅ Approvals: {} found", tx.approvals.len());
-                for (i, approval) in tx.approvals.iter().enumerate() {
+            if !tx.erc20_approval_events.is_empty() {
+                println!(
+                    "\n✅ ERC20 Approvals: {} found",
+                    tx.erc20_approval_events.len()
+                );
+                for (i, approval) in tx.erc20_approval_events.iter().enumerate() {
                     println!(
                         "  Approval #{}: {} approves {} to spend {}",
                         i + 1,

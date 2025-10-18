@@ -41,7 +41,7 @@ impl TransactionClassifier {
     /// Classify a transaction based on its content and events
     pub fn classify(&self, tx: &ProcessedTransaction) -> TransactionType {
         // Failed transactions
-        if tx.status != "success" && tx.status != "1" {
+        if !tx.status {
             return TransactionType::Failed;
         }
 
@@ -112,16 +112,16 @@ impl TransactionClassifier {
             actions.push("dex_swap".to_string());
         }
 
-        if !tx.mints.is_empty() || !tx.uniswap_v3_mints.is_empty() {
+        if !tx.uniswap_v2_mints.is_empty() || !tx.uniswap_v3_mints.is_empty() {
             actions.push("liquidity_add".to_string());
         }
 
-        if !tx.burns.is_empty() || !tx.uniswap_v3_burns.is_empty() {
+        if !tx.uniswap_v2_burns.is_empty() || !tx.uniswap_v3_burns.is_empty() {
             actions.push("liquidity_remove".to_string());
         }
 
         // Approvals
-        if !tx.approvals.is_empty() {
+        if !tx.erc20_approval_events.is_empty() {
             actions.push("token_approval".to_string());
         }
 
@@ -130,7 +130,7 @@ impl TransactionClassifier {
             actions.push("contract_deployed".to_string());
         }
 
-        if !tx.owner_events.is_empty() {
+        if !tx.ownership_transferred_events.is_empty() {
             actions.push("ownership_change".to_string());
         }
 
@@ -163,17 +163,17 @@ impl TransactionClassifier {
     }
 
     fn is_add_liquidity(&self, tx: &ProcessedTransaction) -> bool {
-        !tx.mints.is_empty() ||
+        !tx.uniswap_v2_mints.is_empty() ||
         !tx.uniswap_v3_mints.is_empty() ||
-        !tx.deposits.is_empty() ||
+        !tx.deposit_events.is_empty() ||
         // Check for multiple token transfers to same contract
         self.has_multiple_tokens_to_same_address(tx)
     }
 
     fn is_remove_liquidity(&self, tx: &ProcessedTransaction) -> bool {
-        !tx.burns.is_empty()
+        !tx.uniswap_v2_burns.is_empty()
             || !tx.uniswap_v3_burns.is_empty()
-            || !tx.withdraws.is_empty()
+            || !tx.withdraw_events.is_empty()
             || !tx.uniswap_v3_decreases.is_empty()
     }
 
@@ -184,7 +184,7 @@ impl TransactionClassifier {
         }
 
         // Single token transfer
-        if tx.erc20_transfers.len() == 1 && tx.approvals.is_empty() {
+        if tx.erc20_transfers.len() == 1 && tx.erc20_approval_events.is_empty() {
             return true;
         }
 
@@ -197,7 +197,7 @@ impl TransactionClassifier {
     }
 
     fn is_approval(&self, tx: &ProcessedTransaction) -> bool {
-        !tx.approvals.is_empty() && tx.erc20_transfers.is_empty()
+        !tx.erc20_approval_events.is_empty() && tx.erc20_transfers.is_empty()
     }
 
     fn has_reciprocal_transfers(&self, tx: &ProcessedTransaction) -> bool {

@@ -1,4 +1,4 @@
-use super::data_models::events::*;
+use super::data_models::receipt_models::*;
 use alloy_primitives::{Address, Log as AlloyLog, B256, U256};
 use eyre::Result;
 use reth_chain_query::to_checksum_address;
@@ -294,7 +294,7 @@ impl LogDecoder {
         let to_address = Address::from_slice(&to_bytes[12..32]);
         let amount = U256::from_be_slice(&log.data.data);
 
-        Ok(Some(DecodedEvent::ERC20Transfer(ERC20Transfer {
+        Ok(Some(DecodedEvent::ERC20TransferEvent(ERC20TransferEvent {
             token_address: log.address,
             from_address,
             to_address,
@@ -324,7 +324,7 @@ impl LogDecoder {
         let spender = Address::from_slice(&spender_bytes[12..32]);
         let amount = U256::from_be_slice(&log.data.data);
 
-        Ok(Some(DecodedEvent::ERC20Approval(ERC20Approval {
+        Ok(Some(DecodedEvent::ERC20ApprovalEvent(ERC20ApprovalEvent {
             token_address: log.address,
             owner,
             spender,
@@ -379,7 +379,7 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1_out"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV2Swap(UniswapV2Swap {
+        Ok(Some(DecodedEvent::UniswapV2SwapEvent(UniswapV2SwapEvent {
             pair_address: log.address,
             sender,
             to,
@@ -414,7 +414,7 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for reserve1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV2Sync(UniswapV2Sync {
+        Ok(Some(DecodedEvent::UniswapV2SyncEvent(UniswapV2SyncEvent {
             pair_address: log.address,
             reserve0,
             reserve1,
@@ -454,7 +454,7 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::MintAction(MintAction {
+        Ok(Some(DecodedEvent::UniswapV2MintEvent(UniswapV2MintEvent {
             pair_address: log.address,
             sender,
             amount0,
@@ -484,7 +484,7 @@ impl LogDecoder {
         }
 
         let sender = Address::from_slice(&sender_bytes[12..32]);
-        // to address is indexed but not used in BurnAction
+        // to address is indexed but not used in UniswapV2BurnEvent
 
         // Extract amounts from data
         let amount0 = U256::from_be_slice(
@@ -504,7 +504,7 @@ impl LogDecoder {
         // This matches behavior where we track LP token burn amount
         let amount = amount0;
 
-        Ok(Some(DecodedEvent::BurnAction(BurnAction {
+        Ok(Some(DecodedEvent::UniswapV2BurnEvent(UniswapV2BurnEvent {
             pair_address: log.address,
             sender,
             amount,
@@ -540,12 +540,14 @@ impl LogDecoder {
             .ok_or_else(|| eyre::eyre!("Invalid data length for pair address"))?;
         let pair_address = Address::from_slice(&pair_bytes[12..32]);
 
-        Ok(Some(DecodedEvent::PairAction(PairAction {
-            pair_address,
-            token0,
-            token1,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::UniswapV2PairCreatedEvent(
+            UniswapV2PairCreatedEvent {
+                pair_address,
+                token0,
+                token1,
+                log_index,
+            },
+        )))
     }
 
     fn decode_uniswap_v3_swap(
@@ -612,7 +614,7 @@ impl LogDecoder {
             .map_err(|_| eyre::eyre!("Failed to convert tick bytes"))?;
         let tick = i32::from_be_bytes(tick_bytes);
 
-        Ok(Some(DecodedEvent::UniswapV3Swap(UniswapV3Swap {
+        Ok(Some(DecodedEvent::UniswapV3SwapEvent(UniswapV3SwapEvent {
             pool_address: log.address,
             sender,
             recipient,
@@ -647,13 +649,15 @@ impl LogDecoder {
         let to_address = Address::from_slice(&to_bytes[12..32]);
         let token_id = U256::from_be_slice(token_id_bytes);
 
-        Ok(Some(DecodedEvent::ERC721Transfer(ERC721Transfer {
-            token_address: log.address,
-            from_address,
-            to_address,
-            token_id,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::ERC721TransferEvent(
+            ERC721TransferEvent {
+                token_address: log.address,
+                from_address,
+                to_address,
+                token_id,
+                log_index,
+            },
+        )))
     }
 
     // ERC721 Approval decoder
@@ -678,13 +682,15 @@ impl LogDecoder {
         let approved = Address::from_slice(&approved_bytes[12..32]);
         let token_id = U256::from_be_slice(token_id_bytes);
 
-        Ok(Some(DecodedEvent::ERC721Approval(ERC721Approval {
-            token_address: log.address,
-            owner,
-            approved_address: approved,
-            token_id,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::ERC721ApprovalEvent(
+            ERC721ApprovalEvent {
+                token_address: log.address,
+                owner,
+                approved_address: approved,
+                token_id,
+                log_index,
+            },
+        )))
     }
 
     // ERC1155 TransferSingle decoder
@@ -722,15 +728,17 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount"))?,
         );
 
-        Ok(Some(DecodedEvent::ERC1155Transfer(ERC1155Transfer {
-            token_address: log.address,
-            operator,
-            from_address,
-            to_address,
-            token_ids: vec![token_id],
-            amounts: vec![amount],
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::ERC1155TransferEvent(
+            ERC1155TransferEvent {
+                token_address: log.address,
+                operator,
+                from_address,
+                to_address,
+                token_ids: vec![token_id],
+                amounts: vec![amount],
+                log_index,
+            },
+        )))
     }
 
     // Uniswap V3 Mint decoder
@@ -790,7 +798,7 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3Mint(UniswapV3Mint {
+        Ok(Some(DecodedEvent::UniswapV3MintEvent(UniswapV3MintEvent {
             pool_address: log.address,
             sender,
             owner,
@@ -853,7 +861,7 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3Burn(UniswapV3Burn {
+        Ok(Some(DecodedEvent::UniswapV3BurnEvent(UniswapV3BurnEvent {
             pool_address: log.address,
             owner,
             tick_lower,
@@ -909,8 +917,8 @@ impl LogDecoder {
             .ok_or_else(|| eyre::eyre!("Invalid data length for pool"))?;
         let pool = Address::from_slice(&pool_bytes[12..32]);
 
-        Ok(Some(DecodedEvent::UniswapV3PoolCreated(
-            UniswapV3PoolCreated {
+        Ok(Some(DecodedEvent::UniswapV3PoolCreatedEvent(
+            UniswapV3PoolCreatedEvent {
                 token0,
                 token1,
                 fee,
@@ -949,8 +957,8 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert tick bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3Initialize(
-            UniswapV3Initialize {
+        Ok(Some(DecodedEvent::UniswapV3InitializeEvent(
+            UniswapV3InitializeEvent {
                 pool_address: log.address,
                 sqrt_price_x96,
                 tick,
@@ -1029,17 +1037,19 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3Position(UniswapV3Position {
-            token_id,
-            liquidity,
-            amount0,
-            amount1,
-            pool_address: log.address,
-            owner: owner.unwrap_or(Address::ZERO),
-            tick_lower,
-            tick_upper,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::UniswapV3PositionEvent(
+            UniswapV3PositionEvent {
+                token_id,
+                liquidity,
+                amount0,
+                amount1,
+                pool_address: log.address,
+                owner: owner.unwrap_or(Address::ZERO),
+                tick_lower,
+                tick_upper,
+                log_index,
+            },
+        )))
     }
 
     // Uniswap V4 Swap decoder
@@ -1123,7 +1133,7 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert fee bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4Swap(UniswapV4Swap {
+        Ok(Some(DecodedEvent::UniswapV4SwapEvent(UniswapV4SwapEvent {
             pool_manager_address: log.address,
             event_id: id,
             sender,
@@ -1205,8 +1215,8 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert tick bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4Initialize(
-            UniswapV4Initialize {
+        Ok(Some(DecodedEvent::UniswapV4InitializeEvent(
+            UniswapV4InitializeEvent {
                 pool_manager_address: log.address,
                 event_id: id,
                 currency0,
@@ -1280,8 +1290,8 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for salt"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4ModifyLiquidity(
-            UniswapV4ModifyLiquidity {
+        Ok(Some(DecodedEvent::UniswapV4ModifyLiquidityEvent(
+            UniswapV4ModifyLiquidityEvent {
                 pool_manager_address: log.address,
                 event_id: id,
                 sender,
@@ -1335,14 +1345,16 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert amount1 bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4Donate(UniswapV4Donate {
-            pool_manager_address: log.address,
-            event_id: id,
-            sender,
-            amount0: U256::from(amount0 as u128),
-            amount1: U256::from(amount1 as u128),
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::UniswapV4DonateEvent(
+            UniswapV4DonateEvent {
+                pool_manager_address: log.address,
+                event_id: id,
+                sender,
+                amount0: U256::from(amount0 as u128),
+                amount1: U256::from(amount1 as u128),
+                log_index,
+            },
+        )))
     }
 
     // Uniswap V4 ProtocolFeeUpdated decoder
@@ -1368,8 +1380,8 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert protocol_fee bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4ProtocolFeeUpdated(
-            UniswapV4ProtocolFeeUpdated {
+        Ok(Some(DecodedEvent::UniswapV4FeeUpdatedEvent(
+            UniswapV4FeeUpdatedEvent {
                 pool_manager_address: log.address,
                 event_id: id,
                 protocol_fee,
@@ -1401,8 +1413,8 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert dynamic_lp_fee bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4DynamicLPFeeUpdated(
-            UniswapV4DynamicLPFeeUpdated {
+        Ok(Some(DecodedEvent::UniswapV4DynamicLPFeeUpdatedEvent(
+            UniswapV4DynamicLPFeeUpdatedEvent {
                 pool_manager_address: log.address,
                 event_id: id,
                 dynamic_lp_fee,
@@ -1428,8 +1440,8 @@ impl LogDecoder {
             .ok_or_else(|| eyre::eyre!("Invalid data length for protocol_fee_controller"))?;
         let protocol_fee_controller = Address::from_slice(&protocol_fee_controller_bytes[12..32]);
 
-        Ok(Some(DecodedEvent::UniswapV4ProtocolFeeControllerUpdated(
-            UniswapV4ProtocolFeeControllerUpdated {
+        Ok(Some(DecodedEvent::UniswapV4FeeControllerUpdatedEvent(
+            UniswapV4FeeControllerUpdatedEvent {
                 pool_manager_address: log.address,
                 protocol_fee_controller,
                 log_index,
@@ -1478,8 +1490,8 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert delta1 bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV4BalanceDelta(
-            UniswapV4BalanceDelta {
+        Ok(Some(DecodedEvent::UniswapV4BalanceDeltaEvent(
+            UniswapV4BalanceDeltaEvent {
                 pool_manager_address: log.address,
                 pool_id,
                 settler,
@@ -1522,8 +1534,8 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3IncreaseLiquidity(
-            UniswapV3IncreaseLiquidity {
+        Ok(Some(DecodedEvent::UniswapV3IncreaseLiquidityEvent(
+            UniswapV3IncreaseLiquidityEvent {
                 token_id,
                 liquidity,
                 amount0,
@@ -1566,8 +1578,8 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3DecreaseLiquidity(
-            UniswapV3DecreaseLiquidity {
+        Ok(Some(DecodedEvent::UniswapV3DecreaseLiquidityEvent(
+            UniswapV3DecreaseLiquidityEvent {
                 token_id,
                 liquidity,
                 amount0,
@@ -1610,14 +1622,16 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        Ok(Some(DecodedEvent::UniswapV3Collect(UniswapV3Collect {
-            token_id,
-            recipient,
-            amount0,
-            amount1,
-            pool_address: log.address,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::UniswapV3CollectEvent(
+            UniswapV3CollectEvent {
+                token_id,
+                recipient,
+                amount0,
+                amount1,
+                pool_address: log.address,
+                log_index,
+            },
+        )))
     }
 
     // Deposit decoder - handles both complex and simple deposit formats
@@ -1665,7 +1679,7 @@ impl LogDecoder {
             ))
             .unwrap_or(0);
 
-            Ok(Some(DecodedEvent::DepositAction(DepositAction {
+            Ok(Some(DecodedEvent::DepositEvent(DepositEvent {
                 id: Some(id),
                 token_address: Some(token_address),
                 withdrawal_address: Some(withdrawal_address),
@@ -1685,7 +1699,7 @@ impl LogDecoder {
             let sender = Address::from_slice(&sender_bytes[12..32]);
             let amount = U256::from_be_slice(&log.data.data);
 
-            Ok(Some(DecodedEvent::DepositAction(DepositAction {
+            Ok(Some(DecodedEvent::DepositEvent(DepositEvent {
                 id: None,
                 token_address: None,
                 withdrawal_address: None,
@@ -1715,9 +1729,9 @@ impl LogDecoder {
         let sender = Address::from_slice(&sender_bytes[12..32]);
         let amount = U256::from_be_slice(&log.data.data);
 
-        Ok(Some(DecodedEvent::WithdrawAction(WithdrawAction {
+        Ok(Some(DecodedEvent::WithdrawEvent(WithdrawEvent {
             pair_address: log.address,
-            sender,
+            sender: Some(sender),
             amount,
             log_index,
         })))
@@ -1743,12 +1757,14 @@ impl LogDecoder {
         let previous_owner = Address::from_slice(&previous_owner_bytes[12..32]);
         let new_owner = Address::from_slice(&new_owner_bytes[12..32]);
 
-        Ok(Some(DecodedEvent::OwnerEvent(OwnerEvent {
-            contract_address: log.address,
-            previous_owner,
-            new_owner,
-            log_index,
-        })))
+        Ok(Some(DecodedEvent::OwnershipTransferredEvent(
+            OwnershipTransferredEvent {
+                contract_address: log.address,
+                previous_owner,
+                new_owner,
+                log_index,
+            },
+        )))
     }
 
     // TradingEnabled decoder
@@ -1789,7 +1805,7 @@ impl LogDecoder {
         )))
     }
 
-    // Permit2 decoder
+    // Permit2Event decoder
     fn decode_permit2(&self, log: &AlloyLog, log_index: u64) -> Result<Option<DecodedEvent>> {
         if log.topics().len() != 4 || log.data.data.len() != 96 {
             return Ok(None);
@@ -1836,7 +1852,7 @@ impl LogDecoder {
                 .map_err(|_| eyre::eyre!("Failed to convert nonce bytes"))?,
         );
 
-        Ok(Some(DecodedEvent::Permit2(Permit2 {
+        Ok(Some(DecodedEvent::Permit2Event(Permit2Event {
             pool_manager_address: log.address,
             owner,
             token,
@@ -1882,37 +1898,37 @@ impl LogDecoder {
 /// Enum for decoded events
 #[derive(Debug, Clone)]
 pub enum DecodedEvent {
-    ERC20Transfer(ERC20Transfer),
-    ERC721Transfer(ERC721Transfer),
-    ERC1155Transfer(ERC1155Transfer),
-    ERC20Approval(ERC20Approval),
-    ERC721Approval(ERC721Approval),
-    UniswapV2Sync(UniswapV2Sync),
-    UniswapV2Swap(UniswapV2Swap),
-    MintAction(MintAction),
-    BurnAction(BurnAction),
-    PairAction(PairAction),
-    UniswapV3Swap(UniswapV3Swap),
-    UniswapV3Mint(UniswapV3Mint),
-    UniswapV3Burn(UniswapV3Burn),
-    UniswapV3PoolCreated(UniswapV3PoolCreated),
-    UniswapV3Initialize(UniswapV3Initialize),
-    UniswapV3Position(UniswapV3Position),
-    UniswapV3IncreaseLiquidity(UniswapV3IncreaseLiquidity),
-    UniswapV3DecreaseLiquidity(UniswapV3DecreaseLiquidity),
-    UniswapV3Collect(UniswapV3Collect),
-    UniswapV4Swap(UniswapV4Swap),
-    UniswapV4Initialize(UniswapV4Initialize),
-    UniswapV4ModifyLiquidity(UniswapV4ModifyLiquidity),
-    UniswapV4Donate(UniswapV4Donate),
-    UniswapV4ProtocolFeeUpdated(UniswapV4ProtocolFeeUpdated),
-    UniswapV4DynamicLPFeeUpdated(UniswapV4DynamicLPFeeUpdated),
-    UniswapV4ProtocolFeeControllerUpdated(UniswapV4ProtocolFeeControllerUpdated),
-    UniswapV4BalanceDelta(UniswapV4BalanceDelta),
-    DepositAction(DepositAction),
-    WithdrawAction(WithdrawAction),
-    OwnerEvent(OwnerEvent),
+    ERC20TransferEvent(ERC20TransferEvent),
+    ERC721TransferEvent(ERC721TransferEvent),
+    ERC1155TransferEvent(ERC1155TransferEvent),
+    ERC20ApprovalEvent(ERC20ApprovalEvent),
+    ERC721ApprovalEvent(ERC721ApprovalEvent),
+    UniswapV2SyncEvent(UniswapV2SyncEvent),
+    UniswapV2SwapEvent(UniswapV2SwapEvent),
+    UniswapV2MintEvent(UniswapV2MintEvent),
+    UniswapV2BurnEvent(UniswapV2BurnEvent),
+    UniswapV2PairCreatedEvent(UniswapV2PairCreatedEvent),
+    UniswapV3SwapEvent(UniswapV3SwapEvent),
+    UniswapV3MintEvent(UniswapV3MintEvent),
+    UniswapV3BurnEvent(UniswapV3BurnEvent),
+    UniswapV3PoolCreatedEvent(UniswapV3PoolCreatedEvent),
+    UniswapV3InitializeEvent(UniswapV3InitializeEvent),
+    UniswapV3PositionEvent(UniswapV3PositionEvent),
+    UniswapV3IncreaseLiquidityEvent(UniswapV3IncreaseLiquidityEvent),
+    UniswapV3DecreaseLiquidityEvent(UniswapV3DecreaseLiquidityEvent),
+    UniswapV3CollectEvent(UniswapV3CollectEvent),
+    UniswapV4SwapEvent(UniswapV4SwapEvent),
+    UniswapV4InitializeEvent(UniswapV4InitializeEvent),
+    UniswapV4ModifyLiquidityEvent(UniswapV4ModifyLiquidityEvent),
+    UniswapV4DonateEvent(UniswapV4DonateEvent),
+    UniswapV4FeeUpdatedEvent(UniswapV4FeeUpdatedEvent),
+    UniswapV4DynamicLPFeeUpdatedEvent(UniswapV4DynamicLPFeeUpdatedEvent),
+    UniswapV4FeeControllerUpdatedEvent(UniswapV4FeeControllerUpdatedEvent),
+    UniswapV4BalanceDeltaEvent(UniswapV4BalanceDeltaEvent),
+    DepositEvent(DepositEvent),
+    WithdrawEvent(WithdrawEvent),
+    OwnershipTransferredEvent(OwnershipTransferredEvent),
     TradingEnabledEvent(TradingEnabledEvent),
     TradingDisabledEvent(TradingDisabledEvent),
-    Permit2(Permit2),
+    Permit2Event(Permit2Event),
 }

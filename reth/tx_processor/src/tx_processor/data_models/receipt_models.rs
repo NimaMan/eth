@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct ERC20Transfer {
+pub struct ERC20TransferEvent {
     #[serde(
         serialize_with = "serialize_address_checksum",
         deserialize_with = "deserialize_address_checksum"
@@ -24,9 +24,9 @@ pub struct ERC20Transfer {
     pub log_index: u64,
 }
 
-impl fmt::Debug for ERC20Transfer {
+impl fmt::Debug for ERC20TransferEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ERC20Transfer")
+        f.debug_struct("ERC20TransferEvent")
             .field(
                 "token_address",
                 &reth_chain_query::to_checksum_address(&self.token_address),
@@ -45,7 +45,7 @@ impl fmt::Debug for ERC20Transfer {
     }
 }
 
-impl fmt::Display for ERC20Transfer {
+impl fmt::Display for ERC20TransferEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -58,7 +58,7 @@ impl fmt::Display for ERC20Transfer {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ERC721Transfer {
+pub struct ERC721TransferEvent {
     #[serde(
         serialize_with = "serialize_address_checksum",
         deserialize_with = "deserialize_address_checksum"
@@ -79,7 +79,7 @@ pub struct ERC721Transfer {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ERC1155Transfer {
+pub struct ERC1155TransferEvent {
     pub token_address: Address,
     pub operator: Address,
     pub from_address: Address,
@@ -90,7 +90,7 @@ pub struct ERC1155Transfer {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV2Sync {
+pub struct UniswapV2SyncEvent {
     pub pair_address: Address,
     pub reserve0: U256,
     pub reserve1: U256,
@@ -98,19 +98,23 @@ pub struct UniswapV2Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV2Swap {
+pub struct UniswapV2SwapEvent {
     pub pair_address: Address,
     pub sender: Address,
     pub to: Address,
+    #[serde(rename = "amount0In")]
     pub amount0_in: U256,
+    #[serde(rename = "amount1In")]
     pub amount1_in: U256,
+    #[serde(rename = "amount0Out")]
     pub amount0_out: U256,
+    #[serde(rename = "amount1Out")]
     pub amount1_out: U256,
     pub log_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ERC20Approval {
+pub struct ERC20ApprovalEvent {
     pub token_address: Address,
     pub owner: Address,
     pub spender: Address,
@@ -119,7 +123,7 @@ pub struct ERC20Approval {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ERC721Approval {
+pub struct ERC721ApprovalEvent {
     pub token_address: Address,
     pub owner: Address,
     pub approved_address: Address,
@@ -128,7 +132,7 @@ pub struct ERC721Approval {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PairAction {
+pub struct UniswapV2PairCreatedEvent {
     pub pair_address: Address,
     pub token0: Address,
     pub token1: Address,
@@ -136,7 +140,7 @@ pub struct PairAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DepositAction {
+pub struct DepositEvent {
     pub id: Option<u64>,
     pub token_address: Option<Address>,
     pub withdrawal_address: Option<Address>,
@@ -148,15 +152,15 @@ pub struct DepositAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WithdrawAction {
+pub struct WithdrawEvent {
     pub pair_address: Address,
-    pub sender: Address,
+    pub sender: Option<Address>,
     pub amount: U256,
     pub log_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MintAction {
+pub struct UniswapV2MintEvent {
     pub pair_address: Address,
     pub sender: Address,
     pub amount0: U256,
@@ -165,7 +169,7 @@ pub struct MintAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BurnAction {
+pub struct UniswapV2BurnEvent {
     pub pair_address: Address,
     pub sender: Address,
     pub amount: U256,
@@ -173,14 +177,14 @@ pub struct BurnAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SwapAction {
+pub struct DexSwapEvent {
     pub dex_name: String,
-    pub token_in: ERC20Transfer,
-    pub token_out: ERC20Transfer,
+    pub token_in: ERC20TransferEvent,
+    pub token_out: ERC20TransferEvent,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OwnerEvent {
+pub struct OwnershipTransferredEvent {
     pub contract_address: Address,
     pub previous_owner: Address,
     pub new_owner: Address,
@@ -203,7 +207,7 @@ pub struct TradingDisabledEvent {
 
 // Uniswap V3 Events
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3PoolCreated {
+pub struct UniswapV3PoolCreatedEvent {
     pub token0: Address,
     pub token1: Address,
     pub fee: u32,
@@ -213,7 +217,7 @@ pub struct UniswapV3PoolCreated {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Initialize {
+pub struct UniswapV3InitializeEvent {
     pub pool_address: Address,
     pub sqrt_price_x96: U256,
     pub tick: i32,
@@ -221,7 +225,7 @@ pub struct UniswapV3Initialize {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Mint {
+pub struct UniswapV3MintEvent {
     pub pool_address: Address,
     pub sender: Address,
     pub owner: Address,
@@ -234,7 +238,7 @@ pub struct UniswapV3Mint {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Position {
+pub struct UniswapV3PositionEvent {
     pub token_id: U256,
     pub liquidity: U256,
     pub amount0: U256,
@@ -247,7 +251,7 @@ pub struct UniswapV3Position {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Swap {
+pub struct UniswapV3SwapEvent {
     pub pool_address: Address,
     pub sender: Address,
     pub recipient: Address,
@@ -260,7 +264,7 @@ pub struct UniswapV3Swap {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Burn {
+pub struct UniswapV3BurnEvent {
     pub pool_address: Address,
     pub owner: Address,
     pub tick_lower: i32,
@@ -272,7 +276,7 @@ pub struct UniswapV3Burn {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3DecreaseLiquidity {
+pub struct UniswapV3DecreaseLiquidityEvent {
     pub token_id: U256,
     pub liquidity: U256,
     pub amount0: U256,
@@ -282,7 +286,7 @@ pub struct UniswapV3DecreaseLiquidity {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3IncreaseLiquidity {
+pub struct UniswapV3IncreaseLiquidityEvent {
     pub token_id: U256,
     pub liquidity: U256,
     pub amount0: U256,
@@ -292,7 +296,7 @@ pub struct UniswapV3IncreaseLiquidity {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV3Collect {
+pub struct UniswapV3CollectEvent {
     pub token_id: U256,
     pub recipient: Address,
     pub amount0: U256,
@@ -303,7 +307,7 @@ pub struct UniswapV3Collect {
 
 // Uniswap V4 Events
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4Initialize {
+pub struct UniswapV4InitializeEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub currency0: Address,
@@ -317,7 +321,7 @@ pub struct UniswapV4Initialize {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4ModifyLiquidity {
+pub struct UniswapV4ModifyLiquidityEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub sender: Address,
@@ -329,7 +333,7 @@ pub struct UniswapV4ModifyLiquidity {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Permit2 {
+pub struct Permit2Event {
     pub pool_manager_address: Address,
     pub owner: Address,
     pub token: Address,
@@ -341,7 +345,7 @@ pub struct Permit2 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4Swap {
+pub struct UniswapV4SwapEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub sender: Address,
@@ -355,7 +359,7 @@ pub struct UniswapV4Swap {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4Donate {
+pub struct UniswapV4DonateEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub sender: Address,
@@ -365,7 +369,7 @@ pub struct UniswapV4Donate {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4ProtocolFeeUpdated {
+pub struct UniswapV4FeeUpdatedEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub protocol_fee: u32,
@@ -373,7 +377,7 @@ pub struct UniswapV4ProtocolFeeUpdated {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4DynamicLPFeeUpdated {
+pub struct UniswapV4DynamicLPFeeUpdatedEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub dynamic_lp_fee: u32,
@@ -381,30 +385,18 @@ pub struct UniswapV4DynamicLPFeeUpdated {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4ProtocolFeeControllerUpdated {
+pub struct UniswapV4FeeControllerUpdatedEvent {
     pub pool_manager_address: Address,
     pub protocol_fee_controller: Address,
     pub log_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UniswapV4BalanceDelta {
+pub struct UniswapV4BalanceDeltaEvent {
     pub pool_manager_address: Address,
     pub pool_id: B256,
     pub settler: Address,
     pub delta0: i128,
     pub delta1: i128,
     pub log_index: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InternalTransaction {
-    pub from_address: Address,
-    pub to_address: Address,
-    pub value: U256,
-    pub gas_used: u64,
-    pub trace_type: String,
-    pub call_type: Option<String>,
-    pub depth: u32,
-    pub error: Option<String>,
 }

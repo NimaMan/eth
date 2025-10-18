@@ -1,7 +1,7 @@
 /// Transaction Processor - Rust equivalent of Python TransactionProcessor
 ///
 /// OBJECTIVE: Process simulation results into complete ProcessedTransaction objects
-/// with ALL decoded events (ERC20Transfer, MintAction, UniswapV2Sync, etc.)
+/// with ALL decoded events (ERC20TransferEvent, UniswapV2MintEvent, UniswapV2SyncEvent, etc.)
 ///
 /// This is the core transaction processing logic that:
 /// 1. Takes simulation results (logs, traces, balance changes)
@@ -12,13 +12,14 @@
 ///
 /// Key insight: Uses the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs
 /// instead of the broken manual filtering approach that was throwing away events.
-use super::data_models::{ProcessedTransaction, TransactionFees};
+use super::data_models::{InternalTransaction, ProcessedTransaction, TransactionFees};
 use super::{
     AddressBalanceChangeCalculator, DecodedEvent, LogDecoder, TransactionClassifier,
     TransactionTraceProcessor,
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
+use reth_chain_query::FEE_RECIPIENTS;
 use std::collections::{HashMap, HashSet};
 
 /// Core transaction processing logic equivalent to Python's TransactionProcessor
@@ -55,7 +56,7 @@ impl TxProcessor {
         input: Vec<u8>,
         gas_price: U256,
         gas_used: u64,
-        status: String,
+        status: bool,
         nonce: u64,
         logs: Vec<alloy_primitives::Log>,
         gas_limit: u64,
@@ -65,20 +66,20 @@ impl TxProcessor {
         let mut erc20_transfers = Vec::new();
         let mut erc721_transfers = Vec::new();
         let mut erc1155_transfers = Vec::new();
-        let mut approvals = Vec::new();
-        let mut erc721_approvals = Vec::new();
+        let mut erc20_approval_events = Vec::new();
+        let mut erc721_approval_events = Vec::new();
         let mut uniswap_v2_syncs = Vec::new();
         let mut uniswap_v2_swaps = Vec::new();
         let mut uniswap_v3_swaps = Vec::new();
         let mut uniswap_v3_mints = Vec::new();
         let mut uniswap_v3_burns = Vec::new();
         let mut uniswap_v3_positions = Vec::new();
-        let mut mints = Vec::new();
-        let mut burns = Vec::new();
-        let mut deposits = Vec::new();
-        let mut withdraws = Vec::new();
-        let mut pair_events = Vec::new();
-        let mut owner_events = Vec::new();
+        let mut uniswap_v2_mints = Vec::new();
+        let mut uniswap_v2_burns = Vec::new();
+        let mut deposit_events = Vec::new();
+        let mut withdraw_events = Vec::new();
+        let mut uniswap_v2_pair_created_events = Vec::new();
+        let mut ownership_transferred_events = Vec::new();
         let mut trading_enabled_events = Vec::new();
         let mut trading_disabled_events = Vec::new();
 
@@ -86,56 +87,56 @@ impl TxProcessor {
             if let Ok(Some(decoded_event)) = self.decoder.decode_log(log, log_index as u64) {
                 // Store ALL event types in their respective arrays
                 match decoded_event {
-                    DecodedEvent::ERC20Transfer(transfer) => {
+                    DecodedEvent::ERC20TransferEvent(transfer) => {
                         erc20_transfers.push(transfer);
                     }
-                    DecodedEvent::ERC721Transfer(transfer) => {
+                    DecodedEvent::ERC721TransferEvent(transfer) => {
                         erc721_transfers.push(transfer);
                     }
-                    DecodedEvent::ERC1155Transfer(transfer) => {
+                    DecodedEvent::ERC1155TransferEvent(transfer) => {
                         erc1155_transfers.push(transfer);
                     }
-                    DecodedEvent::ERC20Approval(approval) => {
-                        approvals.push(approval);
+                    DecodedEvent::ERC20ApprovalEvent(approval) => {
+                        erc20_approval_events.push(approval);
                     }
-                    DecodedEvent::ERC721Approval(approval) => {
-                        erc721_approvals.push(approval);
+                    DecodedEvent::ERC721ApprovalEvent(approval) => {
+                        erc721_approval_events.push(approval);
                     }
-                    DecodedEvent::UniswapV2Sync(sync) => {
+                    DecodedEvent::UniswapV2SyncEvent(sync) => {
                         uniswap_v2_syncs.push(sync);
                     }
-                    DecodedEvent::UniswapV2Swap(swap) => {
+                    DecodedEvent::UniswapV2SwapEvent(swap) => {
                         uniswap_v2_swaps.push(swap);
                     }
-                    DecodedEvent::UniswapV3Swap(swap) => {
+                    DecodedEvent::UniswapV3SwapEvent(swap) => {
                         uniswap_v3_swaps.push(swap);
                     }
-                    DecodedEvent::UniswapV3Mint(mint_v3) => {
+                    DecodedEvent::UniswapV3MintEvent(mint_v3) => {
                         uniswap_v3_mints.push(mint_v3);
                     }
-                    DecodedEvent::UniswapV3Burn(burn_v3) => {
+                    DecodedEvent::UniswapV3BurnEvent(burn_v3) => {
                         uniswap_v3_burns.push(burn_v3);
                     }
-                    DecodedEvent::UniswapV3Position(position) => {
+                    DecodedEvent::UniswapV3PositionEvent(position) => {
                         uniswap_v3_positions.push(position);
                     }
-                    DecodedEvent::MintAction(mint_action) => {
-                        mints.push(mint_action);
+                    DecodedEvent::UniswapV2MintEvent(mint_action) => {
+                        uniswap_v2_mints.push(mint_action);
                     }
-                    DecodedEvent::BurnAction(burn_action) => {
-                        burns.push(burn_action);
+                    DecodedEvent::UniswapV2BurnEvent(burn_action) => {
+                        uniswap_v2_burns.push(burn_action);
                     }
-                    DecodedEvent::DepositAction(deposit) => {
-                        deposits.push(deposit);
+                    DecodedEvent::DepositEvent(deposit) => {
+                        deposit_events.push(deposit);
                     }
-                    DecodedEvent::WithdrawAction(withdraw) => {
-                        withdraws.push(withdraw);
+                    DecodedEvent::WithdrawEvent(withdraw) => {
+                        withdraw_events.push(withdraw);
                     }
-                    DecodedEvent::PairAction(pair) => {
-                        pair_events.push(pair);
+                    DecodedEvent::UniswapV2PairCreatedEvent(pair) => {
+                        uniswap_v2_pair_created_events.push(pair);
                     }
-                    DecodedEvent::OwnerEvent(owner) => {
-                        owner_events.push(owner);
+                    DecodedEvent::OwnershipTransferredEvent(owner) => {
+                        ownership_transferred_events.push(owner);
                     }
                     DecodedEvent::TradingEnabledEvent(enabled) => {
                         trading_enabled_events.push(enabled);
@@ -180,20 +181,20 @@ impl TxProcessor {
         processed_tx.erc20_transfers = erc20_transfers;
         processed_tx.erc721_transfers = erc721_transfers;
         processed_tx.erc1155_transfers = erc1155_transfers;
-        processed_tx.approvals = approvals;
-        processed_tx.erc721_approvals = erc721_approvals;
+        processed_tx.erc20_approval_events = erc20_approval_events;
+        processed_tx.erc721_approval_events = erc721_approval_events;
         processed_tx.uniswap_v2_syncs = uniswap_v2_syncs;
         processed_tx.uniswap_v2_swaps = uniswap_v2_swaps;
         processed_tx.uniswap_v3_swaps = uniswap_v3_swaps;
         processed_tx.uniswap_v3_mints = uniswap_v3_mints;
         processed_tx.uniswap_v3_burns = uniswap_v3_burns;
         processed_tx.uniswap_v3_positions = uniswap_v3_positions;
-        processed_tx.mints = mints;
-        processed_tx.burns = burns;
-        processed_tx.deposits = deposits;
-        processed_tx.withdraws = withdraws;
-        processed_tx.pair_events = pair_events;
-        processed_tx.owner_events = owner_events;
+        processed_tx.uniswap_v2_mints = uniswap_v2_mints;
+        processed_tx.uniswap_v2_burns = uniswap_v2_burns;
+        processed_tx.deposit_events = deposit_events;
+        processed_tx.withdraw_events = withdraw_events;
+        processed_tx.uniswap_v2_pair_created_events = uniswap_v2_pair_created_events;
+        processed_tx.ownership_transferred_events = ownership_transferred_events;
         processed_tx.trading_enabled_events = trading_enabled_events;
         processed_tx.trading_disabled_events = trading_disabled_events;
 
@@ -201,7 +202,7 @@ impl TxProcessor {
         for transfer in &processed_tx.erc20_transfers {
             erc20_contracts.insert(transfer.token_address);
         }
-        for approval in &processed_tx.approvals {
+        for approval in &processed_tx.erc20_approval_events {
             erc20_contracts.insert(approval.token_address);
         }
         for event in &processed_tx.trading_enabled_events {
@@ -217,7 +218,7 @@ impl TxProcessor {
         for permit in &processed_tx.permit2_events {
             erc20_contracts.insert(permit.token);
         }
-        for deposit in &processed_tx.deposits {
+        for deposit in &processed_tx.deposit_events {
             if let Some(token) = deposit.token_address {
                 erc20_contracts.insert(token);
             }
@@ -240,6 +241,9 @@ impl TxProcessor {
         processed_tx.erc20_contracts = erc20_contracts;
 
         populate_unique_addresses(&mut processed_tx);
+
+        processed_tx.bribe_amount =
+            Self::calculate_bribe_amount(&processed_tx.internal_transactions);
 
         // STEP 5: Classify transaction type based on decoded events
         // TODO: Implement proper classification logic
@@ -274,11 +278,7 @@ impl TxProcessor {
             .unwrap_or_default();
         let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
         let gas_used = simulation_result.gas_used;
-        let status = if simulation_result.success {
-            "1".to_string()
-        } else {
-            "0".to_string()
-        };
+        let status = simulation_result.success;
         let nonce = unsigned_tx.nonce.unwrap_or(0);
         let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
 
@@ -302,7 +302,7 @@ impl TxProcessor {
         let mut erc20_transfers = Vec::new();
         for (log_index, log) in logs.iter().enumerate() {
             if let Ok(Some(decoded_event)) = self.decoder.decode_log(log, log_index as u64) {
-                if let DecodedEvent::ERC20Transfer(transfer) = decoded_event {
+                if let DecodedEvent::ERC20TransferEvent(transfer) = decoded_event {
                     erc20_transfers.push(transfer);
                 }
             }
@@ -343,6 +343,8 @@ impl TxProcessor {
         // Set the extracted internal transactions
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
+        processed_tx.bribe_amount =
+            Self::calculate_bribe_amount(&processed_tx.internal_transactions);
 
         Ok(processed_tx)
     }
@@ -361,6 +363,19 @@ impl TxProcessor {
         } else {
             "CONTRACT_INTERACTION".to_string()
         }
+    }
+
+    pub(crate) fn calculate_bribe_amount(internal_transactions: &[InternalTransaction]) -> U256 {
+        internal_transactions.iter().fold(U256::ZERO, |acc, tx| {
+            if tx
+                .to_address
+                .map_or(false, |addr| FEE_RECIPIENTS.contains(&addr))
+            {
+                acc.saturating_add(tx.value)
+            } else {
+                acc
+            }
+        })
     }
 }
 
@@ -411,13 +426,13 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(transfer.to_address);
     }
 
-    for approval in &tx.approvals {
+    for approval in &tx.erc20_approval_events {
         set.insert(approval.token_address);
         set.insert(approval.owner);
         set.insert(approval.spender);
     }
 
-    for approval in &tx.erc721_approvals {
+    for approval in &tx.erc721_approval_events {
         set.insert(approval.token_address);
         set.insert(approval.owner);
         set.insert(approval.approved_address);
@@ -505,13 +520,13 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(event.token_address);
     }
 
-    for event in &tx.pair_events {
+    for event in &tx.uniswap_v2_pair_created_events {
         set.insert(event.pair_address);
         set.insert(event.token0);
         set.insert(event.token1);
     }
 
-    for event in &tx.owner_events {
+    for event in &tx.ownership_transferred_events {
         set.insert(event.contract_address);
         set.insert(event.previous_owner);
         set.insert(event.new_owner);
@@ -521,31 +536,31 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(event.contract_address);
     }
 
-    for event in &tx.deposits {
+    for event in &tx.deposit_events {
         insert_if_some(&mut set, event.token_address);
         insert_if_some(&mut set, event.withdrawal_address);
         insert_if_some(&mut set, event.pair_address);
         insert_if_some(&mut set, event.sender);
     }
 
-    for event in &tx.withdraws {
+    for event in &tx.withdraw_events {
+        set.insert(event.pair_address);
+        insert_if_some(&mut set, event.sender);
+    }
+
+    for event in &tx.uniswap_v2_mints {
         set.insert(event.pair_address);
         set.insert(event.sender);
     }
 
-    for event in &tx.mints {
-        set.insert(event.pair_address);
-        set.insert(event.sender);
-    }
-
-    for event in &tx.burns {
+    for event in &tx.uniswap_v2_burns {
         set.insert(event.pair_address);
         set.insert(event.sender);
     }
 
     for internal in &tx.internal_transactions {
         set.insert(internal.from_address);
-        set.insert(internal.to_address);
+        insert_if_some(&mut set, internal.to_address);
     }
 
     for address in tx.address_balance_changes.keys() {

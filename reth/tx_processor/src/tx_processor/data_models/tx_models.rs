@@ -1,6 +1,7 @@
 use super::balance_changes::AddressBalanceChange;
-use super::events::*;
 use super::fees::TransactionFees;
+use super::receipt_models::*;
+use super::trace_models::InternalTransaction;
 use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ pub struct ProcessedTransaction {
     pub to_address: Option<Address>,
     pub contract_address: Option<Address>,
     pub value: U256,
-    pub status: String,
+    pub status: bool,
     pub nonce: u64,
 
     // Transaction classification
@@ -44,7 +45,7 @@ pub struct ProcessedTransaction {
 
     // Fee information
     pub fees: TransactionFees,
-    pub bribe_amount: f64,
+    pub bribe_amount: U256,
 
     // Addresses and contracts involved
     pub unique_addresses: HashSet<Address>,
@@ -54,36 +55,36 @@ pub struct ProcessedTransaction {
 
     // Transfer events
     pub eth_transfers: Vec<ETHTransfer>,
-    pub erc20_transfers: Vec<ERC20Transfer>,
-    pub erc721_transfers: Vec<ERC721Transfer>,
-    pub erc1155_transfers: Vec<ERC1155Transfer>,
+    pub erc20_transfers: Vec<ERC20TransferEvent>,
+    pub erc721_transfers: Vec<ERC721TransferEvent>,
+    pub erc1155_transfers: Vec<ERC1155TransferEvent>,
     pub internal_transactions: Vec<InternalTransaction>,
 
     // DEX events
-    pub uniswap_v2_syncs: Vec<UniswapV2Sync>,
-    pub uniswap_v2_swaps: Vec<UniswapV2Swap>,
-    pub uniswap_v3_pools: Vec<UniswapV3PoolCreated>,
-    pub uniswap_v3_initializations: Vec<UniswapV3Initialize>,
-    pub uniswap_v3_burns: Vec<UniswapV3Burn>,
-    pub uniswap_v3_mints: Vec<UniswapV3Mint>,
-    pub uniswap_v3_swaps: Vec<UniswapV3Swap>,
-    pub uniswap_v3_positions: Vec<UniswapV3Position>,
-    pub uniswap_v3_increases: Vec<UniswapV3IncreaseLiquidity>,
-    pub uniswap_v3_decreases: Vec<UniswapV3DecreaseLiquidity>,
-    pub uniswap_v4_initializes: Vec<UniswapV4Initialize>,
-    pub uniswap_v4_modifies: Vec<UniswapV4ModifyLiquidity>,
-    pub uniswap_v4_swaps: Vec<UniswapV4Swap>,
-    pub permit2_events: Vec<Permit2>,
+    pub uniswap_v2_syncs: Vec<UniswapV2SyncEvent>,
+    pub uniswap_v2_swaps: Vec<UniswapV2SwapEvent>,
+    pub uniswap_v3_pools: Vec<UniswapV3PoolCreatedEvent>,
+    pub uniswap_v3_initializations: Vec<UniswapV3InitializeEvent>,
+    pub uniswap_v3_burns: Vec<UniswapV3BurnEvent>,
+    pub uniswap_v3_mints: Vec<UniswapV3MintEvent>,
+    pub uniswap_v3_swaps: Vec<UniswapV3SwapEvent>,
+    pub uniswap_v3_positions: Vec<UniswapV3PositionEvent>,
+    pub uniswap_v3_increases: Vec<UniswapV3IncreaseLiquidityEvent>,
+    pub uniswap_v3_decreases: Vec<UniswapV3DecreaseLiquidityEvent>,
+    pub uniswap_v4_initializes: Vec<UniswapV4InitializeEvent>,
+    pub uniswap_v4_modifies: Vec<UniswapV4ModifyLiquidityEvent>,
+    pub uniswap_v4_swaps: Vec<UniswapV4SwapEvent>,
+    pub permit2_events: Vec<Permit2Event>,
 
     // Other events and actions
-    pub approvals: Vec<ERC20Approval>,
-    pub erc721_approvals: Vec<ERC721Approval>,
-    pub mints: Vec<MintAction>,
-    pub burns: Vec<BurnAction>,
-    pub deposits: Vec<DepositAction>,
-    pub withdraws: Vec<WithdrawAction>,
-    pub pair_events: Vec<PairAction>,
-    pub owner_events: Vec<OwnerEvent>,
+    pub erc20_approval_events: Vec<ERC20ApprovalEvent>,
+    pub erc721_approval_events: Vec<ERC721ApprovalEvent>,
+    pub uniswap_v2_mints: Vec<UniswapV2MintEvent>,
+    pub uniswap_v2_burns: Vec<UniswapV2BurnEvent>,
+    pub deposit_events: Vec<DepositEvent>,
+    pub withdraw_events: Vec<WithdrawEvent>,
+    pub uniswap_v2_pair_created_events: Vec<UniswapV2PairCreatedEvent>,
+    pub ownership_transferred_events: Vec<OwnershipTransferredEvent>,
     pub contract_creation_events: Vec<ContractCreationEvent>,
     pub trading_enabled_events: Vec<TradingEnabledEvent>,
     pub trading_disabled_events: Vec<TradingDisabledEvent>,
@@ -107,10 +108,10 @@ impl ProcessedTransaction {
             nonce, // tx_index
             from,
             to,
-            U256::ZERO,      // value
-            "0".to_string(), // status (failed)
+            U256::ZERO, // value
+            false,      // status (failed)
             nonce,
-            vec![], // input
+            Vec::new(), // input
         );
         tx.tx_type = "skipped".to_string();
         tx.actions = vec![reason.to_string()];
@@ -125,7 +126,7 @@ impl ProcessedTransaction {
         from_address: Address,
         to_address: Option<Address>,
         value: U256,
-        status: String,
+        status: bool,
         nonce: u64,
         input: Vec<u8>,
     ) -> Self {
@@ -143,7 +144,7 @@ impl ProcessedTransaction {
             tx_type: String::new(),
             actions: Vec::new(),
             fees: TransactionFees::default(),
-            bribe_amount: 0.0,
+            bribe_amount: U256::ZERO,
             unique_addresses: HashSet::new(),
             erc20_contracts: HashSet::new(),
             erc721_contracts: HashSet::new(),
@@ -167,14 +168,14 @@ impl ProcessedTransaction {
             uniswap_v4_modifies: Vec::new(),
             uniswap_v4_swaps: Vec::new(),
             permit2_events: Vec::new(),
-            approvals: Vec::new(),
-            erc721_approvals: Vec::new(),
-            mints: Vec::new(),
-            burns: Vec::new(),
-            deposits: Vec::new(),
-            withdraws: Vec::new(),
-            pair_events: Vec::new(),
-            owner_events: Vec::new(),
+            erc20_approval_events: Vec::new(),
+            erc721_approval_events: Vec::new(),
+            uniswap_v2_mints: Vec::new(),
+            uniswap_v2_burns: Vec::new(),
+            deposit_events: Vec::new(),
+            withdraw_events: Vec::new(),
+            uniswap_v2_pair_created_events: Vec::new(),
+            ownership_transferred_events: Vec::new(),
             contract_creation_events: Vec::new(),
             trading_enabled_events: Vec::new(),
             trading_disabled_events: Vec::new(),

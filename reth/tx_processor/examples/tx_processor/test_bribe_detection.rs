@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, I256, U256};
+use alloy_primitives::{B256, I256};
 use eyre::Result;
 use std::str::FromStr;
 /// Test that bribes to known fee recipients (validators/builders) are properly detected
@@ -44,31 +44,38 @@ async fn main() -> Result<()> {
             for internal in &tx.internal_transactions {
                 // Check if this is an ETH transfer (non-zero value)
                 if internal.value > alloy_primitives::U256::ZERO {
-                    // Check if recipient is a known fee recipient
-                    if reth_chain_query::FEE_RECIPIENTS.contains(&internal.to_address) {
-                        println!("✅ BRIBE DETECTED!");
-                        println!("  From: {}", internal.from_address);
-                        println!("  To: {} (known fee recipient)", internal.to_address);
-                        println!("  Value: {} wei", internal.value);
-                        println!("  Type: {}", internal.trace_type);
+                    if let Some(to_addr) = internal.to_address {
+                        // Check if recipient is a known fee recipient
+                        if reth_chain_query::FEE_RECIPIENTS.contains(&to_addr) {
+                            println!("✅ BRIBE DETECTED!");
+                            println!("  From: {}", internal.from_address);
+                            println!("  To: {} (known fee recipient)", to_addr);
+                            println!("  Value: {} wei", internal.value);
+                            println!("  Type: {}", internal.trace_type);
 
-                        // Get the name of the fee recipient if available
-                        if let Some(name) =
-                            reth_chain_query::common_addresses::validators::get_fee_recipient_name(
-                                internal.to_address,
-                            )
-                        {
-                            println!("  Recipient Name: {}", name);
+                            // Get the name of the fee recipient if available
+                            if let Some(name) =
+                                reth_chain_query::common_addresses::validators::get_fee_recipient_name(to_addr)
+                            {
+                                println!("  Recipient Name: {}", name);
+                            }
+                            println!();
+                            bribe_count += 1;
+                        } else if internal.depth == 0 {
+                            // Show significant ETH transfers even if not to fee recipients
+                            println!(
+                                "ETH Transfer (depth {}): {} → {}: {} wei",
+                                internal.depth,
+                                internal.from_address,
+                                to_addr,
+                                internal.value
+                            );
                         }
-                        println!();
-                        bribe_count += 1;
-                    } else if internal.value > U256::from(0) && internal.depth == 0 {
-                        // Show significant ETH transfers even if not to fee recipients
+                    } else if internal.depth == 0 {
                         println!(
-                            "ETH Transfer (depth {}): {} → {}: {} wei",
+                            "ETH Transfer (depth {}): {} → <contract creation>: {} wei",
                             internal.depth,
                             internal.from_address,
-                            internal.to_address,
                             internal.value
                         );
                     }

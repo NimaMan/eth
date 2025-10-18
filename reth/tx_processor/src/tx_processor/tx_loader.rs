@@ -86,7 +86,7 @@ impl TransactionLoader {
         Vec<u8>,                           // input
         U256,                              // gas_price
         u64,                               // gas_used
-        String,                            // status
+        bool,                              // status
         u64,                               // nonce
         Vec<AlloyLog>,                     // logs
         u64,                               // gas_limit
@@ -139,7 +139,7 @@ impl TransactionLoader {
         let gas_used = actual_gas_used;
 
         // Convert status
-        let status = if receipt.success { "1" } else { "0" }.to_string();
+        let status = receipt.success;
 
         // Convert logs to AlloyLog format
         let logs: Vec<AlloyLog> = receipt

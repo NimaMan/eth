@@ -19,7 +19,7 @@ use super::data_models::balance_changes::{AddressBalanceChange, TokenMovement, T
 /// - Returns token_net with contract addresses only (unknown tokens)
 /// - Returns currency_net with symbols only (tokens in DENOM_ADDRESSES)
 /// - No overlap between token_net and currency_net
-use super::data_models::events::InternalTransaction;
+use super::data_models::InternalTransaction;
 use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
 use lazy_static::lazy_static;
@@ -148,7 +148,7 @@ impl AddressBalanceChangeCalculator {
     /// This is the main entry point for tx_processor to calculate balance changes
     pub fn calculate_balance_changes_from_processed_data(
         &mut self,
-        erc20_transfers: &[super::data_models::events::ERC20Transfer],
+        erc20_transfers: &[super::data_models::ERC20TransferEvent],
         internal_transactions: &[InternalTransaction],
         block_number: u64,
         tx_index: u64,
@@ -160,20 +160,22 @@ impl AddressBalanceChangeCalculator {
         // Process internal transactions for ETH transfers
         for (i, internal_tx) in internal_transactions.iter().enumerate() {
             if internal_tx.value > U256::ZERO {
-                let transfer_id =
-                    TransferId::new(block_number, tx_index, format!("internal_{}", i));
+                if let Some(to_addr) = internal_tx.to_address {
+                    let transfer_id =
+                        TransferId::new(block_number, tx_index, format!("internal_{}", i));
 
-                // Keep internal ETH transfers in wei
-                let amount_wei = internal_tx.value;
-                self.track_movement(
-                    MovementType::Currency,
-                    internal_tx.from_address,
-                    internal_tx.to_address,
-                    amount_wei, // Keep in wei like Python
-                    transfer_id,
-                    None,
-                    Some("ETH".to_string()),
-                );
+                    // Keep internal ETH transfers in wei
+                    let amount_wei = internal_tx.value;
+                    self.track_movement(
+                        MovementType::Currency,
+                        internal_tx.from_address,
+                        to_addr,
+                        amount_wei, // Keep in wei like Python
+                        transfer_id,
+                        None,
+                        Some("ETH".to_string()),
+                    );
+                }
             }
         }
 

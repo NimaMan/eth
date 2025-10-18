@@ -10,7 +10,7 @@
 ///
 /// Just like Python's tx_trace_processor.py, this converts raw simulation traces
 /// into structured InternalTransaction objects.
-use super::data_models::events::InternalTransaction;
+use super::data_models::InternalTransaction;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use tx_simulator::CallFrame;
@@ -57,8 +57,9 @@ impl TransactionTraceProcessor {
         // Add this frame as internal transaction (including root at depth 0)
         internal_txs.push(InternalTransaction {
             from_address: frame.from,
-            to_address: frame.to.unwrap_or(Address::ZERO),
+            to_address: frame.to,
             value: frame.value.unwrap_or_default(),
+            gas: frame.gas.try_into().unwrap_or(u64::MAX),
             gas_used: frame.gas_used.try_into().unwrap_or(u64::MAX),
             trace_type: format!("{:?}", frame.typ),
             call_type: Some(format!("{:?}", frame.typ)),
@@ -95,6 +96,7 @@ impl TransactionTraceProcessor {
             from_address: sim_tx.from_address,
             to_address: sim_tx.to_address,
             value: sim_tx.value,
+            gas: sim_tx.gas,
             gas_used: sim_tx.gas_used,
             trace_type: sim_tx.trace_type.clone(),
             call_type: sim_tx.call_type.clone(),

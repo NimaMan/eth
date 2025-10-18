@@ -15,7 +15,16 @@ async fn main() -> Result<()> {
 
     // Initialize NEW ProcessedTxProvider (uses tx_simulator instead of reth_tx_simulator)
     println!("Initializing new ProcessedTxProvider with tx_simulator...");
-    let provider = ProcessedTxProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let default_path = "/home/nima/.local/share/reth/mainnet".to_string();
+    let datadir = std::env::var("RETH_DATADIR").unwrap_or(default_path);
+    if !std::path::Path::new(&datadir).exists() {
+        eprintln!(
+            "⚠️  RETH_DATADIR not found at `{}`. Skipping simulation run.",
+            datadir
+        );
+        return Ok(());
+    }
+    let provider = ProcessedTxProvider::new(&datadir)?;
     println!("✅ ProcessedTxProvider initialized successfully!\n");
 
     // Test basic functionality - get latest block using NEW simulator
@@ -91,19 +100,27 @@ async fn main() -> Result<()> {
                 "  ERC1155 transfers: {}",
                 processed_tx.erc1155_transfers.len()
             );
-            println!("  Approvals: {}", processed_tx.approvals.len());
-            println!("  Mints: {}", processed_tx.mints.len());
+            println!(
+                "  ERC20 approvals: {}",
+                processed_tx.erc20_approval_events.len()
+            );
+            println!(
+                "  Uniswap V2 mints: {}",
+                processed_tx.uniswap_v2_mints.len()
+            );
 
             println!(
                 "\n🔍 Internal Transactions: {}",
                 processed_tx.internal_transactions.len()
             );
             for (i, internal_tx) in processed_tx.internal_transactions.iter().enumerate() {
-                println!(
-                    "  [{}] {} -> {}",
-                    i, internal_tx.from_address, internal_tx.to_address
-                );
+                let to_display = internal_tx
+                    .to_address
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "None".to_string());
+                println!("  [{}] {} -> {}", i, internal_tx.from_address, to_display);
                 println!("      Value: {} wei", internal_tx.value);
+                println!("      Gas: {}", internal_tx.gas);
                 println!("      Type: {}", internal_tx.trace_type);
                 println!("      Depth: {}", internal_tx.depth);
             }
