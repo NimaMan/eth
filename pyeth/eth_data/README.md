@@ -126,7 +126,7 @@ The final output for each transaction is a rich dataclass containing dozens of f
 - Basic transaction info (hash, from, to, value, status, etc.).
 - A breakdown of transaction fees.
 - Classified transaction type and specific actions.
-- Decoded event logs, categorized into lists like `erc20_transfers`, `uniswap_v2_swaps`, `approvals`, etc.
+- Decoded event logs, categorized into lists like `erc20_transfers`, `uniswap_v2_swaps`, `erc20_approval_events`, `erc721_approval_events`, etc.
 - A list of `InternalTransaction` objects representing ETH transfers between contracts.
 - A comprehensive set of all unique addresses involved in the transaction.
 

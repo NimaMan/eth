@@ -2,7 +2,7 @@
 
 ## Objective
 
-Enable **multiple consumers to receive the same published block data** from RabbitMQ, where each consumer gets access to the latest block until a new one is published.
+Enable **multiple consumers to receive the same published block data** from RabbitMQ, where each consumer gets access to the latest block until a new one is published. Blocks are emitted in the same machine-scale schema that the transaction processor exposes; all numeric fields are normalised before they leave the publisher so downstream services (Python or Rust) can reconstruct full-precision values without guessing at formats.
 
 ## Problem Solved
 
@@ -24,7 +24,8 @@ queue = await self.channel.declare_queue("shared_queue_name", durable=True)
 1. **Publisher** (LiveBlockProcessor):
    - Uses FANOUT exchange to broadcast to all queues
    - No longer pre-creates consumer queues
-   - Simply publishes blocks to the exchange
+   - Converts canonical block payloads with `transaction_serializer` before handing them to `orjson`, stringifying any integer that exceeds the signed 64-bit bounds so the JSON transport stays lossless
+   - Publishes the normalised payload to the exchange
 
 2. **Consumers** (BlockSubscriber):
    - Each creates its own **exclusive, auto-delete queue** with unique name
@@ -144,6 +145,12 @@ LiveBlockProcessor → FANOUT Exchange → Multiple Exclusive Queues → Multipl
                                     ├─ Queue_2 (Consumer_2)  
                                     └─ Queue_3 (Consumer_3)
 ```
+
+The serializer invoked inside `LiveBlockProcessor.publish_block` mirrors the canonical
+`ProcessedTransaction` schema: dataclasses become dictionaries with checksum addresses,
+`HexBytes`/bytes turn into hex strings, and integers that do not fit into signed 64-bit
+JSON numbers are emitted as decimal strings. Consumers should parse these numeric strings
+back to integers on receipt so the machine-language contract is preserved end to end.
 
 ### Error Handling
 - Connection failures handled gracefully

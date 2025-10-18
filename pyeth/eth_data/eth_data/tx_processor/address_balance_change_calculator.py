@@ -248,10 +248,10 @@ class AddressBalanceChangeCalculator:
         # 0️⃣ Handle basic transaction value transfer (if any)
         # Skip if there's a depth-0 internal transaction that already captures this transfer
         has_depth_zero_internal = any(
-            it.depth == 0 and 
-            it.from_address == processed_tx.from_address and 
-            it.to_address == processed_tx.to_address and
-            abs(float(it.value) - float(processed_tx.value)) < 1e-18  # Use epsilon for float comparison
+            it.depth == 0
+            and it.from_address == processed_tx.from_address
+            and it.to_address == processed_tx.to_address
+            and it.value == processed_tx.value
             for it in processed_tx.internal_transactions
         )
         
@@ -262,8 +262,7 @@ class AddressBalanceChangeCalculator:
                 "currency", 
                 processed_tx.from_address, 
                 processed_tx.to_address, 
-                # Store ETH amounts in wei to keep units consistent with internal transfers
-                float(processed_tx.value) * 1e18,
+                processed_tx.value,
                 basic_transfer_id,
                 currency="ETH"
             )
@@ -294,14 +293,14 @@ class AddressBalanceChangeCalculator:
             else:
                 # Unknown tokens - track as regular tokens with raw amounts
                 self._track_movement(
-                    "token", tr.from_address, tr.to_address, float(tr.amount), tid, token_address=token_addr
+                    "token", tr.from_address, tr.to_address, tr.amount, tid, token_address=token_addr
                 )
 
         # 2️⃣ Internal ETH transfers
         for internal_index, it in enumerate(processed_tx.internal_transactions):
             tid = (bn, txi, f"internal_{internal_index}")  # Use sequential index for uniqueness
             self._track_movement(
-                "currency", it.from_address, it.to_address, float(it.value), tid, currency="ETH"
+                "currency", it.from_address, it.to_address, it.value, tid, currency="ETH"
             )
 
         try:

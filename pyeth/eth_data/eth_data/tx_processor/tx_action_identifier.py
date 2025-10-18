@@ -52,7 +52,7 @@ class TransactionActionIdentifier:
             actions.append("Swap")
 
         # Check for ownership changes
-        if parsed_logs.get('owner_events', []):
+        if parsed_logs.get('ownership_transferred_events', []):
             actions.append("Ownership Change")
     
         return tuple(set(actions))  # Remove duplicates
@@ -64,7 +64,7 @@ class TransactionActionIdentifier:
     def _is_add_liquidity_action_v2(self, parsed_logs: Dict[str, List[Any]]) -> bool:
         """Check for add liquidity pattern in logs"""
         has_sync = len(parsed_logs.get('uniswap_v2_syncs', [])) > 0
-        has_mint = len(parsed_logs.get('mints', [])) > 0
+        has_mint = len(parsed_logs.get('uniswap_v2_mints', [])) > 0
         return has_sync and has_mint
 
     def _is_add_liquidity_action_v3(self, parsed_logs: Dict[str, List[Any]]) -> bool:
@@ -136,8 +136,8 @@ class TransactionActionIdentifier:
         
         # Check for other events that would indicate this isn't a pure transfer
         has_swap = len(parsed_logs.get('uniswap_v2_swaps', [])) > 0
-        has_pair = len(parsed_logs.get('pair_events', [])) > 0
-        has_mint = len(parsed_logs.get('mints', [])) > 0
+        has_pair = len(parsed_logs.get('uniswap_v2_pair_created_events', [])) > 0
+        has_mint = len(parsed_logs.get('uniswap_v2_mints', [])) > 0
         has_burn = len(parsed_logs.get('burns', [])) > 0
         has_trading_events = (
             len(parsed_logs.get('trading_enabled_events', [])) > 0 or 

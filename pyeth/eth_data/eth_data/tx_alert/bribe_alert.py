@@ -4,7 +4,7 @@ from eth_data.chain_utils.common_addresses import fee_recipients
 from eth_data.tx_alert.base_alert_class import BaseAlert
 from eth_data.tx_alert.alert_models import BribeAlertData
 from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
-from eth_data.tx_alert.config import bribe_threshold
+from eth_data.tx_alert.config import BRIBE_THRESHOLD_WEI
 from eth_data.utils.logger import get_logger
 
 
@@ -14,12 +14,12 @@ logger = get_logger("bribe_alert", log_folder="alert")
 class BribeAlert(BaseAlert):
     def __init__(self):
         self.fee_recipients = set(fee_recipients.keys())
-        self.bribe_threshold = bribe_threshold
+        self.bribe_threshold = BRIBE_THRESHOLD_WEI
         
     def _is_alert(self, detailed_tx: ProcessedTransaction) -> bool:
         if detailed_tx.bribe_amount > self.bribe_threshold:
             return True, detailed_tx.bribe_amount
-        return False, 0.0
+        return False, 0
         
     async def process_tx(self, detailed_tx: ProcessedTransaction) -> List[BribeAlertData]:
         """Process a block to detect potential bribe events"""
@@ -30,7 +30,7 @@ class BribeAlert(BaseAlert):
             return [alert_data]
         return []
     
-    def create_alert(self, tx: ProcessedTransaction, bribe_value: float) -> BribeAlertData:
+    def create_alert(self, tx: ProcessedTransaction, bribe_value: int) -> BribeAlertData:
         """Create a bribe alert from transaction data"""
         return BribeAlertData(
             block_number=tx.block_number,
@@ -43,9 +43,9 @@ class BribeAlert(BaseAlert):
     
     def send_alert(self, alert_data: BribeAlertData) -> None:
         """Send/log the bribe alert"""
-        logger.info(f"Bribe-> tx: {alert_data.transaction_hash} "
-                    f"From: {alert_data.from_address} "
-                    f"Value: {alert_data.bribe_amount}"
-                    )
-
-
+        value_eth = alert_data.bribe_amount / 1e18
+        logger.info(
+            f"Bribe-> tx: {alert_data.transaction_hash} "
+            f"From: {alert_data.from_address} "
+            f"Value: {alert_data.bribe_amount} wei ({value_eth} ETH)"
+        )

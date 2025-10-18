@@ -114,11 +114,9 @@ Note: This system is designed for production use with emphasis on:
 
 import asyncio
 import dataclasses
-from decimal import Decimal
 import orjson
-from eth_typing import ChecksumAddress
 from hexbytes import HexBytes
-from web3 import AsyncWeb3
+from web3 import AsyncWeb3, Web3
 from web3.providers import WebSocketProvider
 import aio_pika
 
@@ -138,15 +136,15 @@ def transaction_serializer(obj):
         return obj.hex()
     if isinstance(obj, set):
         return list(obj)
-    if isinstance(obj, ChecksumAddress):
-        return str(obj)
+    if isinstance(obj, str) and Web3.is_checksum_address(obj):
+        return obj
     if isinstance(obj, dict):
         return {k: transaction_serializer(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [transaction_serializer(item) for item in obj]
-    if isinstance(obj, Decimal):    
-        return float(obj)
-    elif isinstance(obj, int) and (obj > 2**63 - 1 or obj < -(2**63)):
+    if type(obj).__name__ == "Decimal":
+        return str(obj)
+    if isinstance(obj, int) and (obj > 2**63 - 1 or obj < -(2**63)):
         return str(obj)
     return obj
 
@@ -268,9 +266,9 @@ class LiveBlockProcessor:
                     "block_header": processed_block.block_header,
                     "transactions": processed_block.transactions,
                 }
+                normalized_payload = transaction_serializer(payload)
                 block_data = orjson.dumps(
-                    payload,
-                    default=transaction_serializer,
+                    normalized_payload,
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )
             except Exception as e:
@@ -311,9 +309,9 @@ class LiveBlockProcessor:
             
             try:
                 # Try to serialize first to catch any serialization errors
+                normalized_alert = alert_serializer(alert_data)
                 serialized_data = orjson.dumps(
-                    alert_data,
-                    default=alert_serializer,
+                    normalized_alert,
                     option=orjson.OPT_SERIALIZE_NUMPY
                 )
             except Exception as e:

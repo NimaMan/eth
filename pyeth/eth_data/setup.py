@@ -33,6 +33,10 @@ setup(
 
 '''
 Change log 
+0.5.0:
+- Create a Canonical Processed Transaction model, interchangeable between python and rust
+- Integrate rust pyreth for getting any transaction and address related data
+
 0.4.0: 
 - Add uniswap v4 events
 

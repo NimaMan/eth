@@ -402,7 +402,7 @@ class EthDataMCPServer:
                     results["dex_swaps"].append({
                         "tx_hash": tx_dict["hash"],
                         "pool": swap["pair_address"],
-                        "type": "UniswapV2Swap"
+                        "type": "UniswapV2SwapEvent"
                     })
             
             results["total_value"] = str(results["total_value"])

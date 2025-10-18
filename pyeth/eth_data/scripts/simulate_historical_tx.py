@@ -120,13 +120,13 @@ async def simulate_historical_transaction():
             print(f"   Actual: {actual_eth_transfers}")
         
         # State changes comparison
-        print(f"\n📊 State Changes Analysis:")
-        if hasattr(actual_dtx, 'state_changes') and actual_dtx.address_balance_changes:
+        print(f"\n📊 Address Balance Changes Analysis:")
+        if actual_dtx.address_balance_changes:
             print(f"   Actual state changes: {len(actual_dtx.address_balance_changes)} addresses")
             for address, changes in actual_dtx.address_balance_changes.items():
                 print(f"     {address}: token_net={changes.get('token_net', 0)}, eth_net={changes.get('eth_net', 0)}")
         else:
-            print("   No state changes recorded in actual transaction")
+            print("   No address balance changes recorded in actual transaction")
             
     except Exception as e:
         print(f"   ❌ Simulation failed: {e}")

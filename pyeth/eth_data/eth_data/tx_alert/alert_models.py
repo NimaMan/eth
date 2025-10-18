@@ -17,8 +17,8 @@ class BribeAlertData:
     block_number: int
     transaction_hash: str
     from_address: str
-    value: float
-    bribe_amount: float
+    value: int
+    bribe_amount: int
     alert_type: str = "Bribe"
     erc20_contracts: Set[str] = field(default_factory=tuple)
 
@@ -43,4 +43,3 @@ class UserInvolvedAlertData:
     tx_type: str
     alert_type: str
     erc20_contracts: Set[str] = field(default_factory=tuple)
-

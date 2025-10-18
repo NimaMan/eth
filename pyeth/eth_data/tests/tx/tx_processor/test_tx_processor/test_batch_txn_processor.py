@@ -21,23 +21,21 @@ def real_transaction_data(w3):
         }
     return tx_data
 
-@pytest.mark.asyncio
-async def test_batch_analyzer_with_real_transactions(w3, tx_batch_analyzer, real_transaction_data):
+def test_batch_analyzer_with_real_transactions(tx_batch_analyzer, real_transaction_data):
     """Test batch analyzer with real transaction data that previously failed"""
     
-    for tx_hash, tx_data in real_transaction_data.items():
-        for data_type in ['raw', 'dict']:
-            if data_type == 'dict':
-                tx_data = {
-                    'transaction': dict(tx_data['transaction']),
-                    'receipt': dict(tx_data['receipt'])
-                }
-                
-            result = await tx_batch_analyzer._process_single_transaction(
-                transaction=tx_data['transaction'],
-                receipt=tx_data['receipt']
+    for tx_hash, payload in real_transaction_data.items():
+        # Run against both the original web3 objects and a plain dict clone
+        for use_copy in (False, True):
+            tx_payload = payload if not use_copy else {
+                'transaction': dict(payload['transaction']),
+                'receipt': dict(payload['receipt'])
+            }
+            result = asyncio.run(
+                tx_batch_analyzer._process_single_transaction(
+                    transaction=tx_payload['transaction'],
+                    receipt=tx_payload['receipt']
+                )
             )
-            
-            # Basic sanity checks
             assert result.hash == tx_hash
             

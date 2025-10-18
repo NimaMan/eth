@@ -109,25 +109,25 @@ async def startup_event():
         logger.error(f"❌ Failed to initialize service: {e}")
         raise
 
-def convert_state_changes_for_rust(state_changes: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert numeric values in state_changes to strings for Rust compatibility."""
-    if not state_changes:
+def convert_address_balance_changes_for_rust(changes: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert numeric values in address balance changes to strings for Rust compatibility."""
+    if not changes:
         return {}
-    
+
     converted = {}
-    for address, changes in state_changes.items():
+    for address, change in changes.items():
         converted[address] = {
-            "eth_net": str(changes.get("eth_net", 0)),
+            "eth_net": str(change.get("eth_net", 0)),
             "token_net": {},
             "movements": {}
         }
-        
+
         # Convert token_net values to strings
-        for token, amount in changes.get("token_net", {}).items():
+        for token, amount in change.get("token_net", {}).items():
             converted[address]["token_net"][token] = str(amount)
-        
+
         # Convert movements - deep copy with numeric conversion
-        movements = changes.get("movements", {})
+        movements = change.get("movements", {})
         if movements:
             converted[address]["movements"] = {
                 "tokens": {},
@@ -195,11 +195,12 @@ def serialize_processed_transaction(ptx: ProcessedTransaction) -> Dict[str, Any]
                 "uniswap_v2_syncs": len(ptx.uniswap_v2_syncs),
                 "uniswap_v3_swaps": len(ptx.uniswap_v3_swaps),
                 "uniswap_v4_swaps": len(ptx.uniswap_v4_swaps),
-                "approvals": len(ptx.approvals),
-                "mints": len(ptx.mints),
-                "burns": len(ptx.burns),
-                "deposits": len(ptx.deposits),
-                "withdraws": len(ptx.withdraws),
+                "erc20_approval_events": len(ptx.erc20_approval_events),
+                "erc721_approval_events": len(ptx.erc721_approval_events),
+                "uniswap_v2_mints": len(ptx.uniswap_v2_mints),
+                "uniswap_v2_burns": len(ptx.uniswap_v2_burns),
+                "deposit_events": len(ptx.deposit_events),
+                "withdraw_events": len(ptx.withdraw_events),
                 "permit2_events": len(ptx.permit2_events),
                 "trading_enabled_events": len(ptx.trading_enabled_events),
                 "trading_disabled_events": len(ptx.trading_disabled_events),
@@ -254,8 +255,8 @@ def serialize_processed_transaction(ptx: ProcessedTransaction) -> Dict[str, Any]
                 } for swap in ptx.uniswap_v4_swaps
             ],
             
-            # State changes - convert numeric values to strings for Rust compatibility
-            "state_changes": convert_state_changes_for_rust(ptx.address_balance_changes),
+            # Address balance changes - convert numeric values to strings for Rust compatibility
+            "address_balance_changes": convert_address_balance_changes_for_rust(ptx.address_balance_changes),
         }
         
         return result

@@ -25,7 +25,6 @@ import asyncio
 from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionBatchDataFetcher
-from eth_data.utils.logger import get_logger
 
 
 class TransactionBatchProcessor:

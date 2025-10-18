@@ -61,9 +61,9 @@ if [ $? -eq 0 ]; then
         echo "⚡ Internal Transactions: $INTERNAL_COUNT"
         echo "🦄 Uniswap V4 Swaps: $V4_SWAPS"
         
-        # Check for state changes
-        STATE_CHANGES=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); tx=data.get('processed_transaction', {}); print(len(tx.get('state_changes', {})))" 2>/dev/null)
-        echo "📊 Addresses with State Changes: $STATE_CHANGES"
+        # Check for address balance changes
+        ADDRESS_BALANCE_CHANGES=$(echo "$RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); tx=data.get('processed_transaction', {}); print(len(tx.get('address_balance_changes', {})))" 2>/dev/null)
+        echo "📊 Addresses with Balance Changes: $ADDRESS_BALANCE_CHANGES"
         
     else
         echo "❌ Processing Status: FAILED"

@@ -366,7 +366,7 @@ class PythonPyRethComparisonTester:
             
             # Compare state changes
             comparison = self.compare_state_changes(
-                python_result.state_changes, 
+                python_result.address_balance_changes, 
                 pyreth_result.address_balance_changes, 
                 tx_hash
             )

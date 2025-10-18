@@ -1,7 +1,7 @@
 # Minimal config to make imports work
 # Alerts are commented out in live_block_processor.py so these aren't actually used
 
-bribe_threshold = 0.1
+BRIBE_THRESHOLD_WEI = 10**17  # 0.1 ETH expressed in wei
 
 def get_grey_addresses():
     return set()

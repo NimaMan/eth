@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, is_dataclass
-import json
+import orjson
 from typing import List, Optional, Dict, Any, Set, Union, get_args, get_origin, get_type_hints
 from web3.types import ChecksumAddress
 from hexbytes import HexBytes
@@ -149,20 +149,22 @@ class ProcessedTransaction:
     erc721_transfers: List[ERC721TransferEvent] = field(default_factory=list)
     erc1155_transfers: List[ERC1155TransferEvent] = field(default_factory=list)
     internal_transactions: List[InternalTransaction] = field(default_factory=list)
-    uniswap_v2_syncs: List[UniswapV2SyncEvent] = field(default_factory=list)
-    uniswap_v2_swaps: List[UniswapV2SwapEvent] = field(default_factory=list)
-    erc20_approval_events: List[ERC20ApprovalEvent] = field(default_factory=list)
-    erc721_approval_events: List[ERC721ApprovalEvent] = field(default_factory=list)
-    uniswap_v2_mints: List[UniswapV2MintEvent] = field(default_factory=list)
-    uniswap_v2_burns: List[UniswapV2BurnEvent] = field(default_factory=list)
     deposit_events: List[DepositEvent] = field(default_factory=list)
     withdraw_events: List[WithdrawEvent] = field(default_factory=list)
-    uniswap_v2_pair_created_events: List[UniswapV2PairCreatedEvent] = field(default_factory=list)
     ownership_transferred_events: List[OwnershipTransferredEvent] = field(default_factory=list)
     contract_creation_events: List[ContractCreationEvent] = field(default_factory=list)
     trading_enabled_events: List[TradingEnabledEvent] = field(default_factory=list)
     trading_disabled_events: List[TradingDisabledEvent] = field(default_factory=list)
-
+    erc20_approval_events: List[ERC20ApprovalEvent] = field(default_factory=list)
+    erc721_approval_events: List[ERC721ApprovalEvent] = field(default_factory=list)
+    
+    # Uniswap V2 specific fields
+    uniswap_v2_syncs: List[UniswapV2SyncEvent] = field(default_factory=list)
+    uniswap_v2_swaps: List[UniswapV2SwapEvent] = field(default_factory=list)
+    uniswap_v2_mints: List[UniswapV2MintEvent] = field(default_factory=list)
+    uniswap_v2_burns: List[UniswapV2BurnEvent] = field(default_factory=list)
+    uniswap_v2_pair_created_events: List[UniswapV2PairCreatedEvent] = field(default_factory=list)
+    
     # Uniswap V3 specific fields
     uniswap_v3_pools: List[UniswapV3PoolCreatedEvent] = field(default_factory=list)
     uniswap_v3_initializations: List[UniswapV3InitializeEvent] = field(default_factory=list)
@@ -339,7 +341,7 @@ class ProcessedTransaction:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), separators=(",", ":"))
+        return orjson.dumps(self.to_dict()).decode()
 
     @property
     def value_eth(self) -> float:

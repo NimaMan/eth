@@ -2,6 +2,11 @@ from web3 import Web3
 from typing import List, Dict, Any, Optional, Tuple
 import asyncio
 import aiohttp
+import orjson
+
+
+def _orjson_dumps(data: Any) -> str:
+    return orjson.dumps(data).decode()
 
 
 class TransactionDataFetcher:
@@ -67,7 +72,7 @@ class TransactionBatchDataFetcher:
             "id": 2
         }
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=_orjson_dumps) as session:
             receipts_task = session.post(
                 self.endpoint_url,
                 json=receipts_request,
@@ -84,8 +89,8 @@ class TransactionBatchDataFetcher:
                 traces_task
             )
                 
-            receipts_data = await receipts_response.json()
-            traces_data = await traces_response.json()
+            receipts_data = await receipts_response.json(loads=orjson.loads)
+            traces_data = await traces_response.json(loads=orjson.loads)
 
             if not 'error' in receipts_data:
                 # Map results to transaction hashes
@@ -115,7 +120,7 @@ class TransactionBatchDataFetcher:
         trace_map = {}
         
         # Create all batch requests at once
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=_orjson_dumps) as session:
             # Prepare all batch requests - transactions, receipts, and traces
             tx_batch_requests = []
             receipt_batch_requests = []
@@ -169,7 +174,7 @@ class TransactionBatchDataFetcher:
             
             # Process transaction results
             if tx_response.status == 200:
-                tx_results = await tx_response.json()
+                tx_results = await tx_response.json(loads=orjson.loads)
                 for result in tx_results:
                     if 'result' in result and result['result']:
                         request_id = result['id']
@@ -178,7 +183,7 @@ class TransactionBatchDataFetcher:
             
             # Process receipt results
             if receipt_response.status == 200:
-                receipt_results = await receipt_response.json()
+                receipt_results = await receipt_response.json(loads=orjson.loads)
                 for result in receipt_results:
                     if 'result' in result and result['result']:
                         request_id = result['id']
@@ -187,7 +192,7 @@ class TransactionBatchDataFetcher:
             
             # Process trace results
             if trace_response.status == 200:
-                trace_results = await trace_response.json()
+                trace_results = await trace_response.json(loads=orjson.loads)
                 for result in trace_results:
                     if 'result' in result and result['result']:
                         request_id = result['id']

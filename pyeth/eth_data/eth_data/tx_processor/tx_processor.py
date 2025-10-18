@@ -62,7 +62,6 @@ The core `process_transaction` logic is synchronous, assuming the caller provide
 from web3 import Web3
 from typing import Any, Dict, List, Optional
 from eth_data.chain_utils.common_addresses import fee_recipients
-from eth_data.chain_utils.contract_type import get_erc20_contract_info_rpc
 from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction, TransactionFees
 from eth_data.tx_processor.tx_type_classifier import EthTransactionClassifier, EthProtocolTypeClassifier
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
@@ -72,8 +71,8 @@ from eth_data.tx_processor.address_balance_change_calculator import AddressBalan
 from eth_data.tx_processor.data_models.receipt_models import TradingEnabledEvent
 from eth_data.tx_processor.tx_action_identifier import TransactionActionIdentifier
 from eth_data.tx_processor.data_models.trace_models import InternalTransaction
-from eth_data.tx_processor.data_models.tx_models import ContractCreationEvent
-
+from eth_data.tx_processor.data_models.tx_models import ContractCreationEvent, ETHTransfer
+        
 
 class TransactionProcessor:
     def __init__(self, w3: Web3 = None, calculate_address_balance_changes: bool = False, eth_state_change_threshold: int = 0.005):
@@ -94,7 +93,7 @@ class TransactionProcessor:
             return int(value, 16) if value.startswith('0x') else int(value)
         raise TypeError(f"Unable to normalize value of type {type(value).__name__} to int")
 
-    def _maybe_checksum(self, address: Optional[str]) -> Optional[str]:
+    def _to_checksum_address(self, address: Optional[str]) -> Optional[str]:
         if not address:
             return None
         if isinstance(address, str) and self.w3.is_address(address):
@@ -115,15 +114,15 @@ class TransactionProcessor:
                                 unique_addresses, 
                                 erc20_contracts, 
                                 contract_address=None):       
-        from_checksum = self._maybe_checksum(from_address)
-        to_checksum = self._maybe_checksum(to_address)
+        from_checksum = self._to_checksum_address(from_address)
+        to_checksum = self._to_checksum_address(to_address)
         if from_checksum:
             unique_addresses.add(from_checksum)
         if to_checksum:
             unique_addresses.add(to_checksum)
         normalized_contracts = set()
         for address in erc20_contracts:
-            checksum = self._maybe_checksum(address)
+            checksum = self._to_checksum_address(address)
             if checksum:
                 unique_addresses.add(checksum)
                 normalized_contracts.add(checksum)
@@ -133,7 +132,7 @@ class TransactionProcessor:
             if internal_tx.to_address:
                 unique_addresses.add(internal_tx.to_address)
         if contract_address:
-            checksum_contract = self._maybe_checksum(contract_address)
+            checksum_contract = self._to_checksum_address(contract_address)
             if checksum_contract:
                 unique_addresses.add(checksum_contract)
         # remove None from unique_addresses if it exists
@@ -166,7 +165,7 @@ class TransactionProcessor:
     def _add_tx_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
         """Add synthetic events based on transaction type"""
         if tx_type == "Trading Enabled":
-            token_address = self._maybe_checksum(transaction.get('to'))
+            token_address = self._to_checksum_address(transaction.get('to'))
             logs['trading_enabled_events'].append(
                 TradingEnabledEvent(
                     token_address=token_address,
@@ -178,15 +177,13 @@ class TransactionProcessor:
                 logs['erc20_contracts'].add(token_address)
         elif tx_type == "Set Tax":
             # Add the contract address to erc20_contracts for Set Tax transactions
-            token_address = self._maybe_checksum(transaction.get('to'))
+            token_address = self._to_checksum_address(transaction.get('to'))
             if token_address:
                 logs['erc20_contracts'].add(token_address)
         elif tx_type == "Contract Creation":
-            contract_address = self._maybe_checksum(receipt.get('contractAddress'))
+            contract_address = self._to_checksum_address(receipt.get('contractAddress'))
             if contract_address:
-                #TODO: can use the helper TokenChainDataFetcher.get_token_metadata defined in py/eth_token/eth_token/erc20_token/data/token_chain_data_fetcher.py 
-                #contract_info = get_erc20_contract_info_rpc(contract_address, self.w3)
-                logs['contract_creation_events'].append(
+                 logs['contract_creation_events'].append(
                     ContractCreationEvent(
                         contract_address=contract_address,
                         contract_type=None,
@@ -234,7 +231,6 @@ class TransactionProcessor:
         Returns:
             List of ETHTransfer objects (empty or single item)
         """
-        from eth_data.tx_processor.data_models.tx_models import ETHTransfer
         
         eth_transfers = []
         
@@ -275,11 +271,11 @@ class TransactionProcessor:
         Analyzes a transaction and returns a DetailedTransaction object.
         """
         tx_hash = transaction['hash'] if isinstance(transaction['hash'], str) else transaction['hash'].hex()
-        from_address = self._maybe_checksum(transaction.get('from'))
-        to_address = self._maybe_checksum(transaction.get('to'))
+        from_address = self._to_checksum_address(transaction.get('from'))
+        to_address = self._to_checksum_address(transaction.get('to'))
         logs = self.log_processor.process_logs(receipt['logs'])
         fees = self._extract_transaction_fees(transaction, receipt)
-        contract_address = self._maybe_checksum(receipt.get('contractAddress'))
+        contract_address = self._to_checksum_address(receipt.get('contractAddress'))
         if block_timestamp == 0:
             block_timestamp = self._get_block_timestamp(receipt)
         
@@ -290,9 +286,9 @@ class TransactionProcessor:
                 receipt_contract_address=contract_address 
             )
         
-        unique_addresses = {self._maybe_checksum(addr) for addr in logs['unique_addresses']}
+        unique_addresses = {self._to_checksum_address(addr) for addr in logs['unique_addresses']}
         unique_addresses.discard(None)
-        erc20_contracts = {self._maybe_checksum(addr) for addr in logs['erc20_contracts']}
+        erc20_contracts = {self._to_checksum_address(addr) for addr in logs['erc20_contracts']}
         erc20_contracts.discard(None)
         erc20_contracts, unique_addresses = self.extend_unique_addresses(
             from_address, 
