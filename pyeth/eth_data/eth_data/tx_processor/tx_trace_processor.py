@@ -1,4 +1,3 @@
-import numpy as np
 from typing import Dict, Any, List
 from web3 import Web3
 from eth_data.tx_processor.data_models.trace_models import InternalTransaction
@@ -68,11 +67,12 @@ class TransactionTraceProcessor:
                         InternalTransaction(
                             from_address=from_address_checksum,
                             to_address=to_address_checksum, # Use the potentially resolved address
-                            value=float(value),  # Keep in wei for consistency
-                            depth=depth,
-                            type=trace['type'],
+                            value=value,
                             gas=int(trace.get('gas', 0), 16),
                             gas_used=int(trace.get('gasUsed', 0), 16),
+                            depth=depth,
+                            trace_type=trace['type'],
+                            call_type=trace.get('callType'),
                             error=error,
                         )
                     )

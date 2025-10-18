@@ -25,14 +25,14 @@ class TransactionTrace:
 @dataclass
 class InternalTransaction:
     from_address: ChecksumAddress
-    to_address: ChecksumAddress
-    value: int 
-    depth: int
-    type: str
+    to_address: Optional[ChecksumAddress]
+    value: int
     gas: int
     gas_used: int
+    depth: int
+    trace_type: str
+    call_type: Optional[str]
     error: Optional[str]
-    #input: str
     
 
 @dataclass
@@ -44,4 +44,3 @@ class TraceOperation:
     gas: int
     gas_used: int
     input: str
-    
