@@ -14,16 +14,49 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 import atexit
+from typing import Optional
 
 
 # Default log directory; can be customized as needed
 ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
 # Track all created log files
 _log_files = set()
+_SKIP_CLEANUP_FOLDERS = {"block_processor"}
 
 
-def get_logger(name="block_processor", log_folder="block_processor", base_log_dir=None, 
-               log_level=logging.INFO, max_bytes=50*1024*1024, backup_count=5, console_output=False):
+def _should_skip_cleanup(log_path: str) -> bool:
+    """
+    Skip deleting logs that belong to certain folders (e.g. long-running services).
+    """
+    try:
+        rel_path = os.path.relpath(log_path, ETH_LOG_DIR)
+    except ValueError:
+        # Path outside ETH_LOG_DIR – never skip
+        return False
+
+    first_component = rel_path.split(os.sep, 1)[0]
+    return first_component in _SKIP_CLEANUP_FOLDERS
+
+
+def register_skip_cleanup_folder(folder_name: str) -> None:
+    """
+    Allow external packages to retain logs in specific top-level folders.
+    """
+    if folder_name:
+        _SKIP_CLEANUP_FOLDERS.add(folder_name)
+
+
+def get_logger(
+    name="block_processor",
+    log_folder="block_processor",
+    base_log_dir=None,
+    log_level=logging.INFO,
+    max_bytes=50*1024*1024,
+    backup_count=5,
+    console_output=False,
+    formatter: Optional[logging.Formatter] = None,
+    timestamp_format: str = "%Y%m%d_%H%M%S",
+):
     """
     Initializes and returns a logger with the specified name and rotation capability.
     
@@ -35,6 +68,8 @@ def get_logger(name="block_processor", log_folder="block_processor", base_log_di
         max_bytes: Maximum size of each log file (default: 50MB)
         backup_count: Number of backup files to keep (default: 5)
         console_output: Whether to output logs to console (default: False)
+        formatter: Optional custom formatter for handlers
+        timestamp_format: Datetime format used when naming the log file
         
     Returns:
         logging.Logger: Configured logger instance.
@@ -57,10 +92,10 @@ def get_logger(name="block_processor", log_folder="block_processor", base_log_di
     logger.setLevel(log_level)
 
     # Simplified format without the logger name
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = formatter or logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
     # Add timestamp to the log file name
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime(timestamp_format)
     log_file_path = os.path.join(base_log_dir, f"{name}_{timestamp}.log")
     
     # Track the log file
@@ -92,6 +127,8 @@ def cleanup_empty_logs():
     # First clean up tracked files
     for log_file in _log_files:
         try:
+            if _should_skip_cleanup(log_file):
+                continue
             if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
                     line_count = sum(1 for _ in f)
@@ -107,6 +144,8 @@ def cleanup_empty_logs():
             for file in files:
                 if file.endswith('.log'):
                     log_file_path = os.path.join(root, file)
+                    if _should_skip_cleanup(log_file_path):
+                        continue
                     try:
                         with open(log_file_path, 'r') as f:
                             line_count = sum(1 for _ in f)

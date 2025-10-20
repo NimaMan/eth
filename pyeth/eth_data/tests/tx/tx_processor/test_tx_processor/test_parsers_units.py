@@ -7,6 +7,7 @@ from eth_data.tx_processor.data_models.receipt_models import (
     DepositEvent,
     ERC20ApprovalEvent,
     Permit2Event,
+    UniswapV2BurnEvent,
     UniswapV2MintEvent,
     UniswapV2PairCreatedEvent,
     UniswapV2SwapEvent,
@@ -121,6 +122,36 @@ def test_parse_uniswap_v2_pair_created_event(log_processor):
         token0="0x2551Bc3f26129019624F1fB09ebB880E94dBc22A",
         token1="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         log_index=273,
+    )
+
+
+def test_parse_uniswap_v2_burn_event_with_large_amount(log_processor):
+    amount0 = 999_999
+    amount1 = 94999999999999691779299851551
+    data_hex = (
+        "0x"
+        f"{amount0:064x}"
+        f"{amount1:064x}"
+    )
+    log = {
+        "address": "0x1245ff40ea936a57314d03a4c42f90584359b193",
+        "topics": [
+            HexBytes("0xdccd412f0b1252819cb1fd330b93224ca42612892bb3f4f789976e6d81936496"),
+            HexBytes("0x0000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488d"),
+            HexBytes("0x0000000000000000000000008da8701cc2f5fed4c9a6f24bce55a61e2fb6b05c"),
+        ],
+        "data": HexBytes(data_hex),
+        "logIndex": 41,
+    }
+
+    result = log_processor.parse_uniswap_v2_burn_event(log)
+
+    assert result == UniswapV2BurnEvent(
+        pair_address="0x1245Ff40eA936a57314D03a4c42F90584359b193",
+        sender="0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        amount0=amount0,
+        amount1=amount1,
+        log_index=41,
     )
 
 
