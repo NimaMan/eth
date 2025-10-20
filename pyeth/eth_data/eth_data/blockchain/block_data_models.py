@@ -106,9 +106,14 @@ class BlockHeader:
         if isinstance(value, int):
             return cls._ensure_even_hex_digits(hex(value))
         if isinstance(value, str):
-            if value.startswith(("0x", "0X")):
-                return cls._ensure_even_hex_digits(value)
-            return value
+            stripped = value.strip()
+            if not stripped:
+                return None
+            if stripped.startswith(("0x", "0X")):
+                return cls._ensure_even_hex_digits(stripped)
+            if stripped.isdecimal():
+                return cls._ensure_even_hex_digits(hex(int(stripped)))
+            return stripped
         return str(value)
 
     @staticmethod

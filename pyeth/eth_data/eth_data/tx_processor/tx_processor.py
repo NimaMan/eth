@@ -150,12 +150,18 @@ class TransactionProcessor:
         gas_used = self._normalize_int(receipt['gasUsed'])
         total_fee = effective_gas_price * gas_used
 
+        gas_limit_raw = transaction.get('gas')
+        if gas_limit_raw is None:
+            gas_limit_raw = transaction.get('gasLimit', 0)
+        gas_limit = self._normalize_int(gas_limit_raw)
+
         # Get gas fields - priority fee will be calculated later in ranking module
         gas_fields = self.protocol_classifier.get_gas_fields(transaction, receipt)
 
         return TransactionFees(
             gas_price=effective_gas_price,
             gas_used=gas_used,
+            gas_limit=gas_limit,
             tx_fee=total_fee,
             protocol_type=gas_fields.get('protocol_type', 'unknown'),
             max_fee_per_gas=gas_fields.get('max_fee_per_gas'),
@@ -184,14 +190,7 @@ class TransactionProcessor:
             contract_address = self._to_checksum_address(receipt.get('contractAddress'))
             if contract_address:
                  logs['contract_creation_events'].append(
-                    ContractCreationEvent(
-                        contract_address=contract_address,
-                        contract_type=None,
-                        symbol=None,
-                        decimals=None,
-                        name=None,
-                        total_supply=None,
-                    )
+                    ContractCreationEvent(contract_address=contract_address)
                 )
                 
     def _get_block_timestamp(self, receipt: Dict[str, Any]) -> int:

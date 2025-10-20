@@ -161,7 +161,8 @@ class UniswapV2MintEvent:
 class UniswapV2BurnEvent:
     pair_address: ChecksumAddress
     sender: ChecksumAddress
-    amount: int
+    amount0: int
+    amount1: int
     log_index: int
 
 

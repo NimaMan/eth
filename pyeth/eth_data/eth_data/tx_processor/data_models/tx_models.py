@@ -7,6 +7,7 @@ from web3 import Web3
 from eth_data.tx_processor.data_models.receipt_models import *
 from eth_data.tx_processor.data_models.trace_models import *
 
+
 def _ensure_int(value: Any, field: str) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -79,25 +80,24 @@ class ETHTransfer:
     def amount_eth(self) -> float:
         return self.amount / 1e18
 
+
 @dataclass
 class ContractCreationEvent:
     contract_address: ChecksumAddress
-    contract_type: str
-    symbol: Optional[str]
-    decimals: Optional[int]
-    name: Optional[str]
-    total_supply: Optional[int]
+
 
 @dataclass
 class TransactionFees:
     gas_price: int  # Effective gas price paid (wei)
     gas_used: int
+    gas_limit: int  # Gas limit supplied with the transaction
     tx_fee: int  # Total fee in wei (gas_price * gas_used)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "gas_price": self.gas_price,
             "gas_used": self.gas_used,
+            "gas_limit": self.gas_limit,
             "tx_fee": self.tx_fee,
             "protocol_type": self.protocol_type,
             "max_fee_per_gas": self.max_fee_per_gas,
@@ -115,11 +115,13 @@ class TransactionFees:
     def __post_init__(self) -> None:
         self.gas_price = _ensure_int(self.gas_price, "fees.gas_price")
         self.gas_used = _ensure_int(self.gas_used, "fees.gas_used")
+        self.gas_limit = _ensure_int(self.gas_limit, "fees.gas_limit")
         self.tx_fee = _ensure_int(self.tx_fee, "fees.tx_fee")
         if self.max_fee_per_gas is not None:
             self.max_fee_per_gas = _ensure_int(self.max_fee_per_gas, "fees.max_fee_per_gas")
         if self.max_priority_fee is not None:
             self.max_priority_fee = _ensure_int(self.max_priority_fee, "fees.max_priority_fee")
+
 
 @dataclass
 class ProcessedTransaction:
@@ -362,7 +364,7 @@ class ProcessedTransaction:
         elif fees_data:
             fees = cls._materialize_dataclass(TransactionFees, fees_data)
         else:
-            fees = TransactionFees(gas_price=0, gas_used=0, tx_fee=0)
+            fees = TransactionFees(gas_price=0, gas_used=0, gas_limit=0, tx_fee=0)
 
         address_balance_changes = tx_dict.get('address_balance_changes') or {}
 
@@ -552,7 +554,7 @@ class ProcessedTransaction:
         self.permit2_events = list(permit2_events or [])
 
         # Complex fields
-        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, tx_fee=0)
+        self.fees = fees or TransactionFees(gas_price=0, gas_used=0, gas_limit=0, tx_fee=0)
         self.unique_addresses = self._normalize_address_set("unique_addresses", unique_addresses)
         self.erc20_contracts = self._normalize_address_set("erc20_contracts", erc20_contracts)
         self.erc721_contracts = self._normalize_address_set("erc721_contracts", erc721_contracts)

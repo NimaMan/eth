@@ -127,7 +127,7 @@ from eth_data.utils.logger import get_logger
 
 
 def transaction_serializer(obj):
-    """Serializer that handles dataclasses and Decimal values"""
+    """Serializer that handles dataclasses values"""
     if isinstance(obj, BlockHeader):
         return obj.to_rpc_dict()
     if dataclasses.is_dataclass(obj):
@@ -142,8 +142,6 @@ def transaction_serializer(obj):
         return {k: transaction_serializer(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [transaction_serializer(item) for item in obj]
-    if type(obj).__name__ == "Decimal":
-        return str(obj)
     if isinstance(obj, int) and (obj > 2**63 - 1 or obj < -(2**63)):
         return str(obj)
     return obj

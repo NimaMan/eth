@@ -54,6 +54,8 @@ class TransactionLogProcessor:
             except Exception as e:
                 # TODO: log if you want to get the unparsed log
                 continue
+            if event is None:
+                continue  # Skip logs we could not classify into a concrete event
             if isinstance(event, ERC20TransferEvent):
                 result['erc20_transfers'].append(event)
                 result['unique_addresses'].add(event.from_address)
@@ -440,7 +442,8 @@ class TransactionLogProcessor:
         return UniswapV2BurnEvent(
             pair_address=self.w3.to_checksum_address(log['address']),
             sender=self.w3.to_checksum_address(topics[1][-40:]),
-            amount=self._process_integer(data),
+            amount0=self._process_integer(data[2:66]),
+            amount1=self._process_integer(data[66:130]),
             log_index=self._process_integer(log['logIndex'])
         )
     
