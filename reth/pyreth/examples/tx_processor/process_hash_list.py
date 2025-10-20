@@ -48,7 +48,7 @@ def main():
             print(f"   Type: {tx.tx_type}")
             print(f"   From: {tx.from_address}")
             print(f"   To: {tx.to_address if tx.to_address else 'Contract Creation'}")
-            print(f"   Status: {'Success' if tx.status == 'True' else 'Failed'}")
+            print(f"   Status: {'Success' if bool(tx.status) else 'Failed'}")
             
             # Count events
             event_counts = []

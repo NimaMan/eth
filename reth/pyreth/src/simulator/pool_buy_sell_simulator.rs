@@ -1,5 +1,8 @@
-use super::super::tx_processor::py_processed_transaction::PyProcessedTransaction;
 use crate::header_utils::parse_sealed_header_from_json;
+use crate::tx_processor::processed_tx_bridge::{
+    processed_transaction_from_py_dict, processed_transaction_from_py_object,
+};
+use crate::tx_processor::py_processed_transaction::PyProcessedTransaction;
 use alloy_primitives::Address;
 /// Python bindings for Pool Buy Sell Simulator
 ///
@@ -238,7 +241,7 @@ impl PyPoolBuySellParameters {
             from,
             to,
             value,
-            "1".to_string(),
+            true,
             nonce.unwrap_or(0),
             input,
         );
@@ -251,31 +254,16 @@ impl PyPoolBuySellParameters {
 
     #[pyo3(signature = (prior_dict))]
     fn set_prior_tx_from_dict(&mut self, prior_dict: &PyAny) -> PyResult<()> {
-        let py = prior_dict.py();
-        let json_mod = py.import("json")?;
-        let json_str: String = json_mod
-            .call_method1("dumps", (prior_dict,))
-            .and_then(|obj| obj.extract())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        let processed = processed_transaction_from_py_dict(prior_dict)?;
+        self.apply_prior_processed(processed);
+        Ok(())
+    }
 
-        // Drop fields that aren't required for replay and often contain lossy float conversions
-        let mut sanitized: serde_json::Value = serde_json::from_str(&json_str).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Invalid processed transaction dict: {e}"
-            ))
-        })?;
-
-        if let Some(obj) = sanitized.as_object_mut() {
-            obj.remove("state_changes");
-            obj.remove("latest_states");
-        }
-
-        let processed: RustProcessedTransaction = serde_json::from_value(sanitized).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Invalid processed transaction dict: {e}"
-            ))
-        })?;
-
+    /// Accept a prior transaction represented as either the Python ProcessedTransaction
+    /// dataclass, a PyProcessedTransaction, or a plain dictionary matching the schema.
+    #[pyo3(signature = (prior_tx))]
+    fn set_prior_processed_transaction(&mut self, prior_tx: &PyAny) -> PyResult<()> {
+        let processed = processed_transaction_from_py_object(prior_tx)?;
         self.apply_prior_processed(processed);
         Ok(())
     }
@@ -303,13 +291,13 @@ impl PyPoolBuySellParameters {
     fn apply_prior_processed(&mut self, processed: RustProcessedTransaction) {
         use std::convert::TryInto;
 
-        let gas_used = processed.fees.gas_used;
-        if gas_used > 0 {
-            let scaled_limit = gas_used
-                .saturating_mul(2)
-                .min(DEFAULT_GAS_LIMIT_NO_PRIOR)
-                .max(gas_used);
-            self.prior_gas_limit = Some(scaled_limit);
+        let gas_limit = if processed.fees.gas_limit > 0 {
+            processed.fees.gas_limit
+        } else {
+            processed.fees.gas_used
+        };
+        if gas_limit > 0 {
+            self.prior_gas_limit = Some(gas_limit);
         }
 
         self.prior_max_fee_per_gas_wei = processed

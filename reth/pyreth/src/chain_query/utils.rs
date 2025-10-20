@@ -1,4 +1,4 @@
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use pyo3::prelude::*;
 use std::str::FromStr;
 
@@ -15,5 +15,18 @@ pub fn parse_address(address: &str) -> PyResult<Address> {
             "Invalid address '{}': {}",
             address, e
         ))
+    })
+}
+
+/// Parse a transaction hash (with or without 0x prefix) into B256
+pub fn parse_hash(hash: &str) -> PyResult<B256> {
+    let cleaned = if hash.starts_with("0x") || hash.starts_with("0X") {
+        &hash[2..]
+    } else {
+        hash
+    };
+
+    B256::from_str(cleaned).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid hash '{}': {}", hash, e))
     })
 }

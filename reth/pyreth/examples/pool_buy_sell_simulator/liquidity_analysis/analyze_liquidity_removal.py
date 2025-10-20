@@ -38,7 +38,7 @@ def analyze_liquidity_removal():
         print(f"Block: {tx.block_number}")
         print(f"From: {tx.from_address}")
         print(f"To: {tx.to_address}")
-        print(f"Status: {'Success' if tx.status == '1' else 'Failed'}")
+        print(f"Status: {'Success' if bool(tx.status) else 'Failed'}")
         print()
         
         # Analyze ERC20 transfers

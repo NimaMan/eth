@@ -10,10 +10,6 @@ This example performs a complete trading simulation with 1 ETH:
 Shows detailed transaction flow and calculates net costs.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import pyreth
 
 
@@ -65,7 +61,9 @@ def main():
         config.test_amount_eth = TEST_AMOUNT_ETH
         config.token_decimals = 6  # USDC has 6 decimals
         config.slippage_tolerance = 0.5  # 0.5% slippage
-        config.gas_limit = 300000
+        config.buy_gas_limit = 300_000
+        config.approve_gas_limit = 150_000
+        config.sell_gas_limit = 300_000
         config.gas_price_gwei = 100
         config.buyer_address = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689"  # Test address
         

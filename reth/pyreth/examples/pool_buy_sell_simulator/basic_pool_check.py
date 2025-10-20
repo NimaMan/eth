@@ -9,10 +9,6 @@ This example uses USDC as it's a well-known, stable token that should
 always be tradeable without taxes.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
 import pyreth
 
 

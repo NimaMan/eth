@@ -14,14 +14,15 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+prices = ["eth_prices", "eth_price_leverage"]
 
 [dependencies]
 # Core dependencies
 tx_simulator = { path = "../tx_simulator" }
 tx_processor = { path = "../tx_processor" }
 reth_chain_query = { path = "../reth_chain_query" }
-eth_prices = { path = "../eth_prices" }
-eth_price_leverage = { path = "../eth_price_leverage" }
+eth_prices = { path = "../eth_prices", optional = true }
+eth_price_leverage = { path = "../eth_price_leverage", optional = true }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
 
 # Python bindings
@@ -38,6 +39,7 @@ alloy-primitives = "1.1.2"
 alloy-consensus = "1.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_path_to_error = "0.1"
 hex = "0.4"
 chrono = "0.4"
 hex-literal = "0.4"

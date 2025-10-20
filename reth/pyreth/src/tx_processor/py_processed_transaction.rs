@@ -7,7 +7,6 @@ use pyo3::types::{PyDict, PyFloat, PyList, PyLong, PySet};
 use reth_chain_query::common_addresses::denom_tokens::ERC20_TOKEN_DECIMALS;
 use reth_chain_query::to_checksum_address;
 use serde_json::Value as JsonValue;
-use std::str::FromStr;
 use tx_processor::{ProcessedBlockTransaction, ProcessedTransaction};
 
 /// Convert serde_json::Value to Python object
@@ -47,37 +46,10 @@ fn json_to_python(py: Python, value: &JsonValue) -> PyResult<PyObject> {
     }
 }
 
-fn normalize_status(status: &str) -> bool {
-    let trimmed = status.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    match trimmed.to_ascii_lowercase().as_str() {
-        "1" | "true" | "success" | "succeeded" | "ok" => return true,
-        "0" | "false" | "failed" | "reverted" | "error" => return false,
-        _ => {}
-    }
-
-    if let Ok(value) = U256::from_str(trimmed) {
-        return !value.is_zero();
-    }
-
-    if let Some(stripped) = trimmed.strip_prefix("0x") {
-        if let Ok(value) = U256::from_str(stripped) {
-            return !value.is_zero();
-        }
-    }
-
-    if let Ok(value) = trimmed.parse::<u128>() {
-        return value != 0;
-    }
-
-    if let Ok(value) = trimmed.parse::<bool>() {
-        return value;
-    }
-
-    true
+fn u256_to_py(py: Python, value: &U256) -> PyResult<PyObject> {
+    let decimal = value.to_string();
+    let int_type = py.get_type::<PyLong>();
+    Ok(int_type.call1((decimal,))?.into())
 }
 
 /// Python-compatible ProcessedTransaction
@@ -111,8 +83,6 @@ pub struct PyProcessedTransaction {
     #[pyo3(get)]
     pub input: String,
     #[pyo3(get)]
-    pub bribe_amount: f64,
-    #[pyo3(get)]
     pub tx_number: Option<u64>,
 
     // Store the original for internal use
@@ -124,8 +94,6 @@ impl PyProcessedTransaction {
     pub fn from_processed_transaction(ptx: ProcessedTransaction) -> Self {
         let checksum_from = to_checksum_address(&ptx.from_address);
 
-        let status = normalize_status(&ptx.status);
-
         Self {
             hash: format!("0x{}", hex::encode(ptx.hash)),
             block_number: ptx.block_number,
@@ -135,12 +103,11 @@ impl PyProcessedTransaction {
             to_address: ptx.to_address.map(|a| to_checksum_address(&a)),
             contract_address: ptx.contract_address.map(|a| to_checksum_address(&a)),
             value: ptx.value.to_string(),
-            status,
+            status: ptx.status,
             nonce: ptx.nonce,
             tx_type: ptx.tx_type.clone(),
             actions: ptx.actions.clone(),
             input: format!("0x{}", hex::encode(&ptx.input)),
-            bribe_amount: ptx.bribe_amount,
             tx_number: None,
             inner: ptx,
         }
@@ -190,7 +157,7 @@ impl PyProcessedTransaction {
         dict.set_item("from_address", &self.from_address)?;
         dict.set_item("to_address", &self.to_address)?;
         dict.set_item("contract_address", &self.contract_address)?;
-        dict.set_item("value", self.inner.value.to_string())?;
+        dict.set_item("value", u256_to_py(py, &self.inner.value)?)?;
         dict.set_item("status", &self.status)?;
         dict.set_item("nonce", self.nonce)?;
         dict.set_item("input", &self.input)?;
@@ -200,22 +167,23 @@ impl PyProcessedTransaction {
 
         // Fees
         let fees = PyDict::new(py);
-        fees.set_item("gas_price", self.inner.fees.gas_price.to_string())?;
+        fees.set_item("gas_price", u256_to_py(py, &self.inner.fees.gas_price)?)?;
         fees.set_item("gas_used", self.inner.fees.gas_used)?;
-        fees.set_item("tx_fee", self.inner.fees.tx_fee.to_string())?;
+        fees.set_item("gas_limit", self.inner.fees.gas_limit)?;
+        fees.set_item("tx_fee", u256_to_py(py, &self.inner.fees.tx_fee)?)?;
         fees.set_item("protocol_type", &self.inner.fees.protocol_type)?;
         if let Some(v) = &self.inner.fees.max_fee_per_gas {
-            fees.set_item("max_fee_per_gas", v.to_string())?;
+            fees.set_item("max_fee_per_gas", u256_to_py(py, v)?)?;
         } else {
             fees.set_item("max_fee_per_gas", py.None())?;
         }
         if let Some(v) = &self.inner.fees.max_priority_fee {
-            fees.set_item("max_priority_fee", v.to_string())?;
+            fees.set_item("max_priority_fee", u256_to_py(py, v)?)?;
         } else {
             fees.set_item("max_priority_fee", py.None())?;
         }
         dict.set_item("fees", fees)?;
-        dict.set_item("bribe_amount", self.bribe_amount)?;
+        dict.set_item("bribe_amount", u256_to_py(py, &self.inner.bribe_amount)?)?;
 
         // Sets to lists
         let uniq = PyList::empty(py);
@@ -283,17 +251,38 @@ impl PyProcessedTransaction {
             vec_to_pylist(py, &self.inner.uniswap_v2_swaps)?,
         )?;
 
-        dict.set_item("approvals", vec_to_pylist(py, &self.inner.approvals)?)?;
         dict.set_item(
-            "erc721_approvals",
-            vec_to_pylist(py, &self.inner.erc721_approvals)?,
+            "erc20_approval_events",
+            vec_to_pylist(py, &self.inner.erc20_approval_events)?,
         )?;
-        dict.set_item("mints", vec_to_pylist(py, &self.inner.mints)?)?;
-        dict.set_item("burns", vec_to_pylist(py, &self.inner.burns)?)?;
-        dict.set_item("deposits", vec_to_pylist(py, &self.inner.deposits)?)?;
-        dict.set_item("withdraws", vec_to_pylist(py, &self.inner.withdraws)?)?;
-        dict.set_item("pair_events", vec_to_pylist(py, &self.inner.pair_events)?)?;
-        dict.set_item("owner_events", vec_to_pylist(py, &self.inner.owner_events)?)?;
+        dict.set_item(
+            "erc721_approval_events",
+            vec_to_pylist(py, &self.inner.erc721_approval_events)?,
+        )?;
+        dict.set_item(
+            "uniswap_v2_mints",
+            vec_to_pylist(py, &self.inner.uniswap_v2_mints)?,
+        )?;
+        dict.set_item(
+            "uniswap_v2_burns",
+            vec_to_pylist(py, &self.inner.uniswap_v2_burns)?,
+        )?;
+        dict.set_item(
+            "deposit_events",
+            vec_to_pylist(py, &self.inner.deposit_events)?,
+        )?;
+        dict.set_item(
+            "withdraw_events",
+            vec_to_pylist(py, &self.inner.withdraw_events)?,
+        )?;
+        dict.set_item(
+            "uniswap_v2_pair_created_events",
+            vec_to_pylist(py, &self.inner.uniswap_v2_pair_created_events)?,
+        )?;
+        dict.set_item(
+            "ownership_transferred_events",
+            vec_to_pylist(py, &self.inner.ownership_transferred_events)?,
+        )?;
         dict.set_item(
             "contract_creation_events",
             vec_to_pylist(py, &self.inner.contract_creation_events)?,
@@ -365,7 +354,7 @@ impl PyProcessedTransaction {
         }
         dict.set_item("other_events", other)?;
 
-        // State changes: map address_balance_changes to state_changes (string keys)
+        // Address balance changes: expose map keyed by checksum addresses
         let sc = PyDict::new(py);
         for (addr, changes) in &self.inner.address_balance_changes {
             let addr_str = to_checksum_address(addr);
@@ -385,7 +374,7 @@ impl PyProcessedTransaction {
             entry.set_item("token_net", tnet)?;
             sc.set_item(addr_str, entry)?;
         }
-        dict.set_item("state_changes", sc)?;
+        dict.set_item("address_balance_changes", sc)?;
 
         // latest_states map
         let ls = PyDict::new(py);
@@ -397,6 +386,11 @@ impl PyProcessedTransaction {
         dict.set_item("latest_states", ls)?;
 
         Ok(dict.into())
+    }
+
+    #[getter]
+    fn bribe_amount(&self, py: Python) -> PyResult<PyObject> {
+        u256_to_py(py, &self.inner.bribe_amount)
     }
 
     /// Serialize to compact JSON using to_dict()
@@ -428,12 +422,20 @@ impl PyProcessedTransaction {
                 "from_address",
                 to_checksum_address(&internal_tx.from_address),
             )?;
-            dict.set_item("to_address", to_checksum_address(&internal_tx.to_address))?;
+            match internal_tx.to_address {
+                Some(addr) => dict.set_item("to_address", to_checksum_address(&addr))?,
+                None => dict.set_item("to_address", py.None())?,
+            }
             dict.set_item("value", internal_tx.value.to_string())?;
+            dict.set_item("gas", internal_tx.gas)?;
             dict.set_item("gas_used", internal_tx.gas_used)?;
             dict.set_item("trace_type", &internal_tx.trace_type)?;
             dict.set_item("call_type", &internal_tx.call_type)?;
             dict.set_item("depth", internal_tx.depth)?;
+            match &internal_tx.error {
+                Some(err) => dict.set_item("error", err)?,
+                None => dict.set_item("error", py.None())?,
+            }
             list.append(dict)?;
         }
 
@@ -552,10 +554,10 @@ impl PyProcessedTransaction {
             dict.set_item("pair_address", to_checksum_address(&swap.pair_address))?;
             dict.set_item("sender", to_checksum_address(&swap.sender))?;
             dict.set_item("to", to_checksum_address(&swap.to))?;
-            dict.set_item("amount0_in", swap.amount0_in.to_string())?;
-            dict.set_item("amount1_in", swap.amount1_in.to_string())?;
-            dict.set_item("amount0_out", swap.amount0_out.to_string())?;
-            dict.set_item("amount1_out", swap.amount1_out.to_string())?;
+            dict.set_item("amount0In", swap.amount0_in.to_string())?;
+            dict.set_item("amount1In", swap.amount1_in.to_string())?;
+            dict.set_item("amount0Out", swap.amount0_out.to_string())?;
+            dict.set_item("amount1Out", swap.amount1_out.to_string())?;
             dict.set_item("log_index", swap.log_index)?;
             list.append(dict)?;
         }
@@ -563,12 +565,12 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get approvals
+    /// Get ERC20 approvals
     #[getter]
-    fn approvals(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn erc20_approval_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for approval in &self.inner.approvals {
+        for approval in &self.inner.erc20_approval_events {
             let dict = PyDict::new(py);
             dict.set_item("owner", to_checksum_address(&approval.owner))?;
             dict.set_item("spender", to_checksum_address(&approval.spender))?;
@@ -584,12 +586,12 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get mints
+    /// Get Uniswap V2 mints
     #[getter]
-    fn mints(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn uniswap_v2_mints(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for mint in &self.inner.mints {
+        for mint in &self.inner.uniswap_v2_mints {
             let dict = PyDict::new(py);
             dict.set_item("pair_address", to_checksum_address(&mint.pair_address))?;
             dict.set_item("sender", to_checksum_address(&mint.sender))?;
@@ -602,16 +604,17 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get burns
+    /// Get Uniswap V2 burns
     #[getter]
-    fn burns(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn uniswap_v2_burns(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for burn in &self.inner.burns {
+        for burn in &self.inner.uniswap_v2_burns {
             let dict = PyDict::new(py);
             dict.set_item("pair_address", to_checksum_address(&burn.pair_address))?;
             dict.set_item("sender", to_checksum_address(&burn.sender))?;
-            dict.set_item("amount", burn.amount.to_string())?;
+            dict.set_item("amount0", burn.amount0.to_string())?;
+            dict.set_item("amount1", burn.amount1.to_string())?;
             dict.set_item("log_index", burn.log_index)?;
             list.append(dict)?;
         }
@@ -619,14 +622,14 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get deposits
+    /// Get deposit events
     #[getter]
-    fn deposits(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn deposit_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for deposit in &self.inner.deposits {
+        for deposit in &self.inner.deposit_events {
             let dict = PyDict::new(py);
-            // DepositAction has complex optional fields
+            // DepositEvent has complex optional fields
             if let Some(sender) = deposit.sender {
                 dict.set_item("sender", to_checksum_address(&sender))?;
             }
@@ -645,14 +648,16 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get withdraws
+    /// Get withdraw events
     #[getter]
-    fn withdraws(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn withdraw_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for withdraw in &self.inner.withdraws {
+        for withdraw in &self.inner.withdraw_events {
             let dict = PyDict::new(py);
-            dict.set_item("sender", to_checksum_address(&withdraw.sender))?;
+            if let Some(sender) = withdraw.sender {
+                dict.set_item("sender", to_checksum_address(&sender))?;
+            }
             dict.set_item("amount", withdraw.amount.to_string())?;
             dict.set_item("log_index", withdraw.log_index)?;
             list.append(dict)?;
@@ -685,12 +690,12 @@ impl PyProcessedTransaction {
         Ok(set.into())
     }
 
-    /// Get pair events
+    /// Get Uniswap V2 pair created events
     #[getter]
-    fn pair_events(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn uniswap_v2_pair_created_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for event in &self.inner.pair_events {
+        for event in &self.inner.uniswap_v2_pair_created_events {
             let dict = PyDict::new(py);
             dict.set_item("pair_address", to_checksum_address(&event.pair_address))?;
             dict.set_item("token0", to_checksum_address(&event.token0))?;
@@ -702,12 +707,12 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get owner events
+    /// Get ownership transferred events
     #[getter]
-    fn owner_events(&self, py: Python) -> PyResult<Py<PyList>> {
+    fn ownership_transferred_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
 
-        for event in &self.inner.owner_events {
+        for event in &self.inner.ownership_transferred_events {
             let dict = PyDict::new(py);
             dict.set_item(
                 "contract_address",
@@ -733,13 +738,6 @@ impl PyProcessedTransaction {
                 "contract_address",
                 to_checksum_address(&event.contract_address),
             )?;
-            dict.set_item("contract_type", &event.contract_type)?;
-            dict.set_item("symbol", &event.symbol)?;
-            dict.set_item("decimals", event.decimals)?;
-            dict.set_item("name", &event.name)?;
-            if let Some(supply) = &event.total_supply {
-                dict.set_item("total_supply", supply.to_string())?;
-            }
             list.append(dict)?;
         }
 
@@ -867,11 +865,11 @@ impl PyProcessedTransaction {
         Ok(list.into())
     }
 
-    /// Get Permit2 events
+    /// Get Permit2Event events
     #[getter]
     fn permit2_events(&self, py: Python) -> PyResult<Py<PyList>> {
         let list = PyList::empty(py);
-        // Implementation for Permit2 events if needed
+        // Implementation for Permit2Event events if needed
         Ok(list.into())
     }
 
@@ -1016,7 +1014,7 @@ impl PyProcessedTransaction {
 
         // Format ERC20 transfers - show all
         let erc20_transfers: Vec<String> = self.inner.erc20_transfers.iter()
-            .map(|t| format!("ERC20Transfer(token_address='0x{}', from_address='0x{}', to_address='0x{}', amount='{}', log_index={})",
+            .map(|t| format!("ERC20TransferEvent(token_address='0x{}', from_address='0x{}', to_address='0x{}', amount='{}', log_index={})",
                 hex::encode(t.token_address).to_uppercase(),
                 hex::encode(t.from_address).to_uppercase(),
                 hex::encode(t.to_address).to_uppercase(),
@@ -1027,15 +1025,44 @@ impl PyProcessedTransaction {
         let erc20_transfers_repr = format!("[{}]", erc20_transfers.join(", "));
 
         // Format internal transactions - show all
-        let internal_txs: Vec<String> = self.inner.internal_transactions.iter()
-            .map(|tx| format!("InternalTransaction(from_address='0x{}', to_address='0x{}', value={}, depth={}, type='{}', gas_used={}, error=None)",
-                hex::encode(tx.from_address).to_uppercase(),
-                hex::encode(tx.to_address).to_uppercase(),
-                if tx.value == U256::ZERO { "0.0".to_string() } else { format!("{:.18}", tx.value.to_string().parse::<f64>().unwrap_or(0.0) / 1e18) },
-                tx.depth,
-                tx.trace_type,
-                tx.gas_used
-            ))
+        let internal_txs: Vec<String> = self
+            .inner
+            .internal_transactions
+            .iter()
+            .map(|tx| {
+                let to_addr = tx
+                    .to_address
+                    .map(|addr| format!("'0x{}'", hex::encode(addr).to_uppercase()))
+                    .unwrap_or_else(|| "None".to_string());
+                let value_eth = if tx.value == U256::ZERO {
+                    "0.0".to_string()
+                } else {
+                    format!(
+                        "{:.18}",
+                        tx.value
+                            .to_string()
+                            .parse::<f64>()
+                            .unwrap_or(0.0)
+                            / 1e18
+                    )
+                };
+                let error_repr = tx
+                    .error
+                    .as_ref()
+                    .map(|e| format!("'{}'", e))
+                    .unwrap_or_else(|| "None".to_string());
+                format!(
+                    "InternalTransaction(from_address='0x{}', to_address={}, value={}, depth={}, type='{}', gas={}, gas_used={}, error={})",
+                    hex::encode(tx.from_address).to_uppercase(),
+                    to_addr,
+                    value_eth,
+                    tx.depth,
+                    tx.trace_type,
+                    tx.gas,
+                    tx.gas_used,
+                    error_repr
+                )
+            })
             .collect();
         let internal_repr = format!("[{}]", internal_txs.join(", "));
 
@@ -1076,7 +1103,7 @@ impl PyProcessedTransaction {
         let address_balance_changes_repr = format!("{{{}}}", address_balance_changes.join(", "));
 
         format!(
-            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, tx_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, tx_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, approvals={}, mints={}, burns={}, deposits={}, withdraws={}, pair_events={}, owner_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, address_balance_changes={}, latest_states={}, input='{}')",
+            "ProcessedTransaction(hash='{}', block_number={}, block_timestamp={}, tx_index={}, from_address='0x{}', to_address={}, contract_address={}, value={}, status={}, nonce={}, tx_type='{}', actions={:?}, fees={}, bribe_amount={}, unique_addresses={}, erc20_contracts={}, eth_transfers={}, erc20_transfers={}, erc721_transfers={}, erc1155_transfers={}, internal_transactions={}, uniswap_v2_syncs={}, uniswap_v2_swaps={}, erc20_approval_events={}, uniswap_v2_mints={}, uniswap_v2_burns={}, deposit_events={}, withdraw_events={}, uniswap_v2_pair_created_events={}, ownership_transferred_events={}, contract_creation_events={}, trading_enabled_events={}, trading_disabled_events={}, uniswap_v3_pools={}, uniswap_v3_initializations={}, uniswap_v3_burns={}, uniswap_v3_mints={}, uniswap_v3_swaps={}, uniswap_v3_positions={}, uniswap_v3_increases={}, uniswap_v3_decreases={}, uniswap_v4_initializes={}, uniswap_v4_modifies={}, uniswap_v4_swaps={}, permit2_events={}, other_events={}, address_balance_changes={}, latest_states={}, input='{}')",
             self.hash,
             self.block_number,
             self.block_timestamp,
@@ -1090,7 +1117,7 @@ impl PyProcessedTransaction {
             self.tx_type,
             self.actions,
             fees_repr,
-            self.bribe_amount,
+            self.inner.bribe_amount.to_string(),
             unique_addrs_str,
             erc20_contracts_str,
             format_list("eth_transfers", self.inner.eth_transfers.len()),
@@ -1100,13 +1127,22 @@ impl PyProcessedTransaction {
             internal_repr,
             format_list("uniswap_v2_syncs", self.inner.uniswap_v2_syncs.len()),
             format_list("uniswap_v2_swaps", self.inner.uniswap_v2_swaps.len()),
-            format_list("approvals", self.inner.approvals.len()),
-            format_list("mints", self.inner.mints.len()),
-            format_list("burns", self.inner.burns.len()),
-            format_list("deposits", self.inner.deposits.len()),
-            format_list("withdraws", self.inner.withdraws.len()),
-            format_list("pair_events", self.inner.pair_events.len()),
-            format_list("owner_events", self.inner.owner_events.len()),
+            format_list(
+                "erc20_approval_events",
+                self.inner.erc20_approval_events.len()
+            ),
+            format_list("uniswap_v2_mints", self.inner.uniswap_v2_mints.len()),
+            format_list("uniswap_v2_burns", self.inner.uniswap_v2_burns.len()),
+            format_list("deposit_events", self.inner.deposit_events.len()),
+            format_list("withdraw_events", self.inner.withdraw_events.len()),
+            format_list(
+                "uniswap_v2_pair_created_events",
+                self.inner.uniswap_v2_pair_created_events.len()
+            ),
+            format_list(
+                "ownership_transferred_events",
+                self.inner.ownership_transferred_events.len()
+            ),
             format_list("contract_creation_events", self.inner.contract_creation_events.len()),
             format_list("trading_enabled_events", self.inner.trading_enabled_events.len()),
             format_list("trading_disabled_events", self.inner.trading_disabled_events.len()),

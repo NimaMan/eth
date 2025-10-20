@@ -29,7 +29,7 @@ def main():
         print(f"  To: {tx.to_address}")
         print(f"  Value: {tx.value} wei")
         print(f"  Type: {tx.tx_type}")
-        print(f"  Status: {'Success' if tx.status == 'True' else 'Failed'}")
+        print(f"  Status: {'Success' if bool(tx.status) else 'Failed'}")
         
         # Display events
         if tx.erc20_transfers:

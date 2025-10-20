@@ -23,7 +23,7 @@ Data Model Contract
   - Amounts (U256): decimal strings (not float), e.g. "1000000000000000000"
   - Bytes/input: 0x‑prefixed hex string
   - Sets (unique_addresses, contract sets): Python set[str]; when serializing to dict/JSON, may become list[str]
-  - Nested events/structs: map field‑for‑field to Python dicts matching existing dataclasses (ERC20Transfer, InternalTransaction, UniswapV2Swap, etc.)
+  - Nested events/structs: map field‑for‑field to Python dicts matching existing dataclasses (ERC20TransferEvent, InternalTransaction, UniswapV2SwapEvent, etc.)
   - Address balance changes: exposed via ProcessedTransaction.address_balance_changes in Rust; Python can continue to compute derived metrics from there as needed
 
 Binding Surface (current and planned)
@@ -75,7 +75,7 @@ Examples (intended usage from Python)
 
 - Single tx from hash (DB‑only, no simulation):
   - ptx = TxProcessor().load_transaction_from_hash_db_only("0x...")
-  - py_dict = ptx.to_dict()  # events/fees present; state_changes will be empty
+- py_dict = ptx.to_dict()  # events/fees present; address_balance_changes will be empty
 
 - Simulate buy→approve→sell viability:
   - res = PoolBuySellSimulator().check_uniswap_v2_pool(token, pool)

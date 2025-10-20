@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Compare address balance changes between:
-  - Python eth_data (ProcessedTxProvider.state_changes)
+  - Python eth_data (ProcessedTxProvider.address_balance_changes)
   - PyReth tx_processor (address_balance_changes)
 
 Usage:
@@ -49,7 +49,7 @@ def main():
     w3 = Web3(Web3.HTTPProvider(args.rpc))
     py_provider = ProcessedTxProvider(w3=w3, calculate_state_changes=True)
     py_tx = py_provider.get_processed_tx(args.tx_hash)
-    py_changes: Dict[str, Any] = getattr(py_tx, "state_changes", {}) or {}
+    py_changes: Dict[str, Any] = getattr(py_tx, "address_balance_changes", {}) or {}
 
     # Normalize: currencies (ETH already in ETH units), tokens raw
     py_norm: Dict[str, Dict[str, Any]] = {}

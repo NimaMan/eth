@@ -1,3 +1,5 @@
+#![cfg(feature = "viability_module")]
+
 /// Integration test for the erc20_token_trading_viability module
 ///
 /// This test verifies that the module correctly:

@@ -35,7 +35,7 @@ def main():
 
     print(f"\nBlock: {tx.block_number}  Index: {tx.tx_index}")
     print(f"From: {tx.from_address}  To: {tx.to_address}")
-    print(f"Status: {'Success' if tx.status == 'True' else 'Failed'}")
+    print(f"Status: {'Success' if bool(tx.status) else 'Failed'}")
 
     changes = tx.address_balance_changes
     print(f"\nAddresses with changes: {len(changes)}")
@@ -63,4 +63,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

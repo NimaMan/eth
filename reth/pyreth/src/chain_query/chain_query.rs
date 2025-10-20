@@ -349,6 +349,34 @@ impl PyChainQuery {
         Ok(PyTransactionData::from(tx))
     }
 
+    /// Get mempool arrival timestamp (milliseconds since epoch) if recorded
+    fn get_tx_arrival_ms(&self, tx_hash: &str) -> PyResult<Option<u64>> {
+        let hash = super::utils::parse_hash(tx_hash)?;
+        self.provider
+            .get_tx_arrival_ms(hash)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Fetch transaction metadata by hash.
+    fn transaction_by_hash(&self, tx_hash: &str) -> PyResult<PyTransactionData> {
+        let hash = super::utils::parse_hash(tx_hash)?;
+        let provider = self.provider.clone();
+        let tx = self
+            .runtime
+            .block_on(async move { provider.get_transaction_by_hash(hash).await })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(PyTransactionData::from(tx))
+    }
+
+    /// Return `(first_tx_number, tx_count)` for the specified block.
+    fn block_tx_indices(&self, block_number: u64) -> PyResult<(u64, u64)> {
+        let indices = self
+            .provider
+            .get_block_tx_indices(block_number)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok((indices.first_tx_num, indices.tx_count))
+    }
+
     /// Whether address index entries exist for the given block number.
     fn block_has_indices(&self, block_number: u64) -> PyResult<bool> {
         Ok(self.provider.get_block_tx_indices(block_number).is_ok())

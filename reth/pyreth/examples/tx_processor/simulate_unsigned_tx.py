@@ -42,7 +42,7 @@ def main():
 
         print("Simulation done.")
         print(f"Block: {tx.block_number}")
-        print(f"Status: {'Success' if tx.status == 'True' else 'Failed'}")
+        print(f"Status: {'Success' if bool(tx.status) else 'Failed'}")
         print(f"ERC20 transfers: {len(tx.erc20_transfers)}")
 
         # Use convenience conversions
@@ -57,4 +57,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
