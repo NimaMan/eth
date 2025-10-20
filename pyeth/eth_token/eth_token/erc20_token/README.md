@@ -140,7 +140,7 @@ other_denom_transfers: Dict[str, List[Transfer]]
 
 # Approvals & ownership
 approvals: List[Approval]
-owner_events: List[OwnerEvent]
+owner_events: List[OwnershipTransferredEvent]
 approved_addresses: Set[str]
 address_tx_counter: Dict[str, int]
 bribe_amount_dict: Dict[str, float]  # Per-tx bribe accounting

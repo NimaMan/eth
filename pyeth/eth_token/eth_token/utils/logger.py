@@ -1,110 +1,41 @@
-'''
-Logger Module Documentation Objective:
-The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_data` project. It aims to:
+"""
+Package-specific logger helpers that delegate to the shared eth_data logger.
+"""
+from typing import Optional, Any
 
-1. Create a standardized logging format across all modules.
-2. Allow for easy integration of logging in any part of the project.
-3. Ensure that all logs are stored in a predefined location for easy access and analysis.
-4. Delete empty log files when the program exits.
+from eth_data.utils.logger import (
+    ETH_LOG_DIR,
+    cleanup_empty_logs,
+    get_logger as _base_get_logger,
+    register_skip_cleanup_folder,
+)
 
-'''
-import os
-from datetime import datetime
-import logging
-import atexit
-from logging.handlers import RotatingFileHandler
+# Preserve block_processor logs used by long-running services.
+register_skip_cleanup_folder("block_processor")
 
 
-# Default log directory; can be customized as needed
-ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
-
-# Track all created log files
-_log_files = set()
-
-def cleanup_empty_logs():
+def get_logger(
+    name: str = "baygus",
+    log_folder: Optional[str] = "baygus",
+    base_log_dir: Optional[str] = None,
+    console_output: bool = False,
+    **kwargs: Any,
+):
     """
-    Delete log files that are empty or contain fewer than two lines.
-    Scans both tracked files and the entire log directory structure.
+    Return a logger configured by the central eth_data implementation.
     """
-    # First clean up tracked files
-    for log_file in _log_files:
-        try:
-            if os.path.exists(log_file):
-                with open(log_file, 'r') as f:
-                    line_count = sum(1 for _ in f)
-                if line_count < 2:
-                    os.remove(log_file)
-                    print(f"Removed tracked empty log file: {log_file}")
-        except Exception as e:
-            print(f"Error cleaning up tracked log file {log_file}: {str(e)}")
-    
-    # Then scan the entire log directory to catch any untracked log files
-    try:
-        for root, _, files in os.walk(ETH_LOG_DIR):
-            for file in files:
-                if file.endswith('.log'):
-                    log_file_path = os.path.join(root, file)
-                    try:
-                        with open(log_file_path, 'r') as f:
-                            line_count = sum(1 for _ in f)
-                        if line_count < 2:
-                            os.remove(log_file_path)
-                            print(f"Removed untracked empty log file: {log_file_path}")
-                    except Exception as e:
-                        print(f"Error cleaning up untracked log file {log_file_path}: {str(e)}")
-    except Exception as e:
-        print(f"Error scanning log directory: {str(e)}")
-
-# Register cleanup function to run at exit
-atexit.register(cleanup_empty_logs)
+    return _base_get_logger(
+        name=name,
+        log_folder=log_folder,
+        base_log_dir=base_log_dir,
+        console_output=console_output,
+        **kwargs,
+    )
 
 
-def get_logger(name="baygus", log_folder="baygus", base_log_dir=None, console_output=False):
-    """
-    Initializes and returns a logger with the specified name.
-    
-    Args:
-        name (str): Name of the logger. Defaults to "eth_logger" if not provided.
-        log_folder (str): Subfolder name within the base log directory
-        base_log_dir (str): Override the base log directory. If None, uses ETH_LOG_DIR
-        console_output: Whether to output logs to console (default: False)
-        
-    Returns:
-        logging.Logger: Configured logger instance.
-    """
-    if base_log_dir is None:
-        if log_folder is None:
-            base_log_dir = os.path.join(ETH_LOG_DIR, name)
-        else:
-            base_log_dir = os.path.join(ETH_LOG_DIR, log_folder)
-        # Create the log directory if it doesn't exist
-        os.makedirs(base_log_dir, exist_ok=True)
-    
-    # Create a standardized logger name
-    logger = logging.getLogger(name)
-    
-    # Prevent adding multiple handlers to the same logger
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-        # Add timestamp to the log file name
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file_path = os.path.join(base_log_dir, f"{name}_{timestamp}.log")
-        
-        # Track the log file
-        _log_files.add(log_file_path)
-        
-        # Updated: Use RotatingFileHandler with maxBytes=50MB and backupCount=5
-        file_handler = RotatingFileHandler(log_file_path, maxBytes=50*1024*1024, backupCount=5)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    # Add console handler for immediate feedback only if requested
-    if console_output:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
-    return logger
+__all__ = [
+    "ETH_LOG_DIR",
+    "get_logger",
+    "cleanup_empty_logs",
+    "register_skip_cleanup_folder",
+]

@@ -131,7 +131,7 @@ class BlockTokenProcessor:
         try:
             await token.update_from_transaction_async(transaction)
         except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} for tx {transaction.get('hash')}: {e}") 
+            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} at tx {transaction.get('hash')}: {e}") 
 
     async def _handle_token_update_from_transaction(self, transaction: Dict):
         """Handle transaction involving existing tokens"""

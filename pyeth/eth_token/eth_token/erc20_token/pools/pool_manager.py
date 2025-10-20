@@ -173,8 +173,8 @@ class PoolManager:
     def _check_pool_creations(self, transaction: Dict):
         """Check for new pool creation events."""
         # V2 pair creation
-        if transaction.get('pair_events'):
-            for pair_event in transaction['pair_events']:
+        if transaction.get('uniswap_v2_pair_created_events'):
+            for pair_event in transaction['uniswap_v2_pair_created_events']:
                 self._handle_v2_creation(pair_event, transaction)
             
         # V3 pool creation
