@@ -3,6 +3,7 @@
 /// Decodes EVM revert data into human-readable error messages.
 /// Handles standard Solidity reverts and common DeFi protocol errors.
 use alloy_primitives::Bytes;
+use std::convert::TryFrom;
 
 use crate::types::RevertContext;
 
@@ -148,14 +149,28 @@ fn decode_error_string(data: &str) -> String {
     let length_hex = &data[64..128];
 
     // Parse string length
-    let length = match u64::from_str_radix(length_hex, 16) {
-        Ok(len) => len as usize,
+    let length_u64 = match u64::from_str_radix(length_hex, 16) {
+        Ok(len) => len,
         Err(_) => return format!("Failed to decode Error(string): invalid length"),
     };
 
+    let length = match usize::try_from(length_u64) {
+        Ok(len) => len,
+        Err(_) => {
+            return "Failed to decode Error(string): length exceeds platform capacity".to_string()
+        }
+    };
+
     // Extract string bytes (each byte is 2 hex chars)
-    let string_start = 128;
-    let string_end = string_start + (length * 2);
+    let string_start: usize = 128;
+    let string_hex_len = match length.checked_mul(2) {
+        Some(len) => len,
+        None => return "Failed to decode Error(string): length too large".to_string(),
+    };
+    let string_end = match string_start.checked_add(string_hex_len) {
+        Some(end) => end,
+        None => return "Failed to decode Error(string): length too large".to_string(),
+    };
 
     if data.len() < string_end {
         return format!("Failed to decode Error(string): string data truncated");
@@ -216,7 +231,7 @@ mod tests {
     #[test]
     fn test_decode_error_string() {
         // "Insufficient balance" error
-        let revert_data = "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001449496e73756666696369656e742062616c616e63650000000000000000000000";
+        let revert_data = "0x08c379a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000014496e73756666696369656e742062616c616e6365000000000000000000000000";
         let decoded = decode_revert_message(revert_data);
         assert_eq!(decoded, "Insufficient balance");
     }
