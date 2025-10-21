@@ -156,6 +156,11 @@ impl UnsignedTxChainSimulation {
         &self.results
     }
 
+    /// Check whether an address currently has bytecode in the forked state.
+    pub fn account_has_code(&mut self, address: Address) -> eyre::Result<bool> {
+        Ok(self.forked_state.db.db.account_code(&address)?.is_some())
+    }
+
     /// Reset the chain to its initial state
     ///
     /// This discards all executed transactions and returns the chain
