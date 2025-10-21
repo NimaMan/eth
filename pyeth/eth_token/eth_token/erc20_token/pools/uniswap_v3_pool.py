@@ -164,9 +164,10 @@ class UniswapV3Pool(BasePool):
     def evaluate_trading_status(self, transaction: Dict) -> None:
         config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
         config.token_decimals = int(self.get_token_decimals())
-        config.block_number = int(transaction['block_number'])
-        if transaction.get('block_header'):
-            config.set_block_header(transaction['block_header'])
+        config.block_number = int(transaction['block_number']) - 1
+        prior_transactions = self._latest_block_txs.values()
+        config.set_prior_transactions(prior_transactions)
+        #self._maybe_set_block_header(config, transaction)
 
         result = self.pool_buy_sell_simulator.check_uniswap_v3_pool(
                 self.token_address,
@@ -211,7 +212,7 @@ class UniswapV3Pool(BasePool):
         liquidity_delta = int(mint.get('amount', 0))
         tick_lower = int(mint.get('tick_lower', 0))
         tick_upper = int(mint.get('tick_upper', 0))
-        self._token_control_addresses.add(mint.get('owner', mint.get('to_address')))
+        self.register_token_control_addresses([mint.get('owner')] or [mint.get('to_address')])
 
         self._update_tick(tick_lower, liquidity_delta)
         self._update_tick(tick_upper, -liquidity_delta)

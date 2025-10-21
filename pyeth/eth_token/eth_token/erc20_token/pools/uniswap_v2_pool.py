@@ -344,59 +344,11 @@ class UniswapV2Pool(BasePool):
     def evaluate_trading_status(self, transaction: Dict) -> None:
         config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
         config.token_decimals = int(self.get_token_decimals())
-        config.block_number = int(transaction['block_number'])
-        if transaction.get('block_header'):
-            config.set_block_header(transaction['block_header'])
-        # Ensure the simulator replays the triggering tx so liquidity/reserve changes
-        # are reflected before executing the buy/sell probes.
-        prior_from = transaction.get('from_address') or transaction.get('from')
-        if prior_from:
-            prior_to = transaction.get('to_address') or transaction.get('to')
-            raw_value = transaction.get('value', 0)
-            if isinstance(raw_value, str):
-                if raw_value.startswith(('0x', '0X')):
-                    value_hex = raw_value
-                else:
-                    try:
-                        value_hex = hex(int(raw_value))
-                    except ValueError:
-                        value_hex = None
-            elif isinstance(raw_value, int):
-                value_hex = hex(raw_value)
-            else:
-                value_hex = None
-
-            raw_input = transaction.get('input') or transaction.get('data')
-            if isinstance(raw_input, bytes):
-                input_hex = f"0x{raw_input.hex()}"
-            elif isinstance(raw_input, str):
-                input_hex = raw_input if raw_input.startswith(('0x', '0X')) else f"0x{raw_input}"
-            else:
-                input_hex = None
-
-            raw_nonce = transaction.get('nonce')
-            if isinstance(raw_nonce, str):
-                try:
-                    nonce = int(raw_nonce, 16) if raw_nonce.startswith(('0x', '0X')) else int(raw_nonce)
-                except ValueError:
-                    nonce = None
-            else:
-                nonce = raw_nonce
-
-            try:
-                config.set_prior_tx_from_unsigned(
-                    prior_from,
-                    prior_to,
-                    value_hex,
-                    input_hex,
-                    nonce,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to seed pool simulation with prior transaction %s: %s",
-                    transaction.get('hash'),
-                    exc,
-                )
+        config.block_number = int(transaction['block_number']) - 1
+        prior_transactions = self._latest_block_txs.values()
+        config.set_prior_transactions(prior_transactions)
+        #if transaction.get('block_header'):
+        #    config.set_block_header(transaction['block_header'])
 
         # Run the simulator after applying the prior transaction state
         result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(
@@ -570,7 +522,9 @@ class UniswapV2Pool(BasePool):
     def _process_burn(self, burn: dict, transaction: Dict):
         """Process a V2 burn (remove liquidity) event."""
         from_address = burn.get('from_address', burn.get('sender'))
-        amount = float(burn.get('amount', 0))
+        amount0 = float(burn.get('amount0', burn.get('amount', 0)))
+        amount1 = float(burn.get('amount1', 0))
+        amount = amount0  # LP token amount removed approximated via amount0 component.
         
         # Check for significant liquidity removal
         if self.state.total_liquidity > 0:
@@ -587,7 +541,9 @@ class UniswapV2Pool(BasePool):
             'block': transaction['block_number'],
             'tx_hash': transaction['hash'],
             'from': from_address,
-            'amount': amount,
+            'amount0': amount0,
+            'amount1': amount1,
+            'amount': amount,  # legacy field for downstream compatibility
             'timestamp': transaction["block_timestamp"],
         })
 

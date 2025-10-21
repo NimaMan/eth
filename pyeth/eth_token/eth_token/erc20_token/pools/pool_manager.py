@@ -97,6 +97,7 @@ class PoolManager:
         # Cached decimals to avoid repeat lookups
         self._token_decimals: Optional[int] = None
         self._denom_decimals_cache: Dict[str, int] = {}
+        self._token_control_addresses: Set[str] = set()
 
     def _get_token_decimals(
         self,
@@ -162,13 +163,13 @@ class PoolManager:
         
         # Route events to existing pools
         for pool in self.pools.values():
+            pool.update_latest_block_transactions(transaction)
             pool.process_transaction(transaction)
             
         # Route V4 events to V4 pools
         for v4_pool in self.v4_pools.values():
-            v4_pool.process_transaction(transaction)
-            
-        # Trading enabled is now checked at individual pool level
+            v4_pool.update_latest_block_transactions(transaction)
+            v4_pool.process_transaction(transaction)            
             
     def _check_pool_creations(self, transaction: Dict):
         """Check for new pool creation events."""

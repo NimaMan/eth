@@ -136,6 +136,8 @@ class BasePool(ABC):
             history_limit=history_limit,
         )
         self._token_control_addresses: Set[str] = set()
+        self._latest_block_number: Optional[int] = None
+        self._latest_block_txs: List[Dict[str, Any]] = []
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -347,7 +349,17 @@ class BasePool(ABC):
         if not unique_addresses or not self._token_control_addresses:
             return False
         return bool(self._token_control_addresses.intersection(unique_addresses))
-    
+
+    def update_latest_block_transactions(self, transaction: Dict):
+        block_number = transaction.get('block_number')
+        # Reset if new block
+        if self._latest_block_number != block_number:
+            self._latest_block_number = block_number
+            self._latest_block_txs = {}
+        # Add transaction if not already present
+        if not transaction.get('hash') in self._latest_block_txs:
+            self._latest_block_txs[transaction.get('hash')] = transaction
+
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         return {
