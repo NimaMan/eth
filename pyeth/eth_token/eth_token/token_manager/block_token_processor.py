@@ -33,6 +33,7 @@ class BlockTokenProcessor:
         self.processed_blocks: Dict[int, bool] = OrderedDict()
         self.latest_processed_block = 0
         self.start_block = None  # Track the first block we process
+        self._recent_block_headers: "OrderedDict[int, Any]" = OrderedDict()
 
         # Introduce concurrency semaphore
         self.semaphore = asyncio.Semaphore(value=max_concurrency)
@@ -46,11 +47,14 @@ class BlockTokenProcessor:
         """Process a single block's transactions with concurrency limit."""
         block_tx_list = process_block_result.get('transactions')
         block_header = process_block_result.get('block_header')
+        previous_block_header = self._get_previous_block_header()
         self.updated_tokens.clear() # Clear the updated tokens cache
+        self._store_block_header(block_number, block_header)
         tasks = []
         for tx in block_tx_list:
             async def sem_task(tx_data=self._ensure_tx_dict(tx)):
-                tx_data['block_header'] = block_header
+                #tx_data['block_header'] = block_header
+                tx_data['previous_block_header'] = previous_block_header
                 async with self.semaphore:
                     return await self._process_transaction(tx_data, block_number)
 
@@ -61,6 +65,7 @@ class BlockTokenProcessor:
         if self.start_block is None:
             self.start_block = block_number
 
+        
         self.processed_blocks[block_number] = True # Mark the block as processed
         return block_number
 
@@ -168,6 +173,17 @@ class BlockTokenProcessor:
         if hasattr(tx, "__dict__"):
             return dict(vars(tx))
         raise TypeError(f"Unsupported transaction type: {type(tx)!r}")
+
+    def _store_block_header(self, block_number: int, block_header: Any) -> None:
+        self._recent_block_headers[block_number] = block_header
+        while len(self._recent_block_headers) > 2:
+            self._recent_block_headers.popitem(last=False)
+
+    def _get_previous_block_header(self) -> Optional[Any]:
+        if len(self._recent_block_headers) < 2:
+            return None
+        last_block_number = next(reversed(self._recent_block_headers))
+        return self._recent_block_headers[last_block_number]
 
 
 class HistoricalBlockTokenProcessor:

@@ -347,8 +347,8 @@ class UniswapV2Pool(BasePool):
         config.block_number = int(transaction['block_number']) - 1
         prior_transactions = self._latest_block_txs.values()
         config.set_prior_transactions(prior_transactions)
-        #if transaction.get('block_header'):
-        #    config.set_block_header(transaction['block_header'])
+        if transaction.get('previous_block_header'):
+            config.set_block_header(transaction['previous_block_header'])
 
         # Run the simulator after applying the prior transaction state
         result = self.pool_buy_sell_simulator.check_uniswap_v2_pool(

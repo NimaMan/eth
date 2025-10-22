@@ -208,7 +208,9 @@ class UniswapV4Pool(BasePool):
         config.block_number = int(transaction['block_number']) - 1
         prior_transactions = self._latest_block_txs.values()
         config.set_prior_transactions(prior_transactions)
-        #self._maybe_set_block_header(config, transaction)
+        if transaction.get('previous_block_header'):
+            # The block number is ignored when the header is set
+            config.set_block_header(transaction['previous_block_header'])
 
         result = self.pool_buy_sell_simulator.check_uniswap_v4_pool(
             self.token_address,
