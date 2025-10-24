@@ -53,7 +53,7 @@ class BlockTokenProcessor:
         tasks = []
         for tx in block_tx_list:
             async def sem_task(tx_data=self._ensure_tx_dict(tx)):
-                #tx_data['block_header'] = block_header
+                tx_data['block_header'] = block_header
                 tx_data['previous_block_header'] = previous_block_header
                 async with self.semaphore:
                     return await self._process_transaction(tx_data, block_number)

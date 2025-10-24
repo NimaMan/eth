@@ -232,7 +232,7 @@ class UniswapV4Pool(BasePool):
         self.tax_check_tx = transaction['hash']
 
         logger.info(
-            f"TradingStatus "
+            f"SimulationStatus "
             f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool_id={self.pool_id} "

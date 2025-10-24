@@ -371,7 +371,7 @@ class UniswapV2Pool(BasePool):
         self.tax_check_tx = transaction['hash']
     
         logger.info(
-            f"TradingStatus: "
+            f"SimulationStatus: "
             f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
