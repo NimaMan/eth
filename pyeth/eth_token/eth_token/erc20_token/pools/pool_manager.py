@@ -48,11 +48,7 @@ from .uniswap_v3_pool import UniswapV3Pool
 from .uniswap_v4_pool import UniswapV4Pool, PoolKey
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
-
-from eth_data.chain_utils.common_addresses import (
-    DENOM_ADDRESSES,
-    canonicalize_dex_pool_type,
-)
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, canonicalize_dex_pool_type
 
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
@@ -342,14 +338,19 @@ class PoolManager:
         protocol_name = pool.get_protocol()
         self.pools_by_protocol[protocol_name].append(pool.pool_address)
         self.pools_by_denom[pool.denom_address].append(pool.pool_address)
-        
+        if self._token_control_addresses:
+            pool.register_token_control_addresses(self._token_control_addresses)
+
     def _register_v4_pool(self, pool: UniswapV4Pool):
         """Register a V4 pool in the manager. V4 pools are tracked separately by PoolId."""
         self.v4_pools[pool.pool_id] = pool
         self.pools_by_protocol[UNISWAP_V4_PROTOCOL].append(pool.pool_id)
         self.pools_by_denom[pool.denom_address].append(pool.pool_id)
+        if self._token_control_addresses:
+            pool.register_token_control_addresses(self._token_control_addresses)
 
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
+        self._token_control_addresses.update(addresses)
         for pool in self.get_all_pools():
             pool.register_token_control_addresses(addresses)
     

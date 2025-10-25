@@ -135,9 +135,9 @@ class BasePool(ABC):
             pool_type=self.get_protocol(),
             history_limit=history_limit,
         )
-        self._token_control_addresses: Set[str] = set()
+        self.token_control_addresses: Set[str] = set()
         self._latest_block_number: Optional[int] = None
-        self._latest_block_txs: List[Dict[str, Any]] = []
+        self.latest_block_txs: List[Dict[str, Any]] = []
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -333,32 +333,32 @@ class BasePool(ABC):
     
     def check_and_update_trading_status(self, transaction: Dict) -> bool:
         """Check if trading is enabled on this pool and calculate taxes."""
-        if not (self.can_buy and self.can_sell):
-            self.evaluate_trading_status(transaction)
         if self._has_control_address(transaction):
             self.evaluate_trading_status(transaction)   
+        #TODO: check if we really need to evalaute other tx than the control ones
+        if not (self.can_buy and self.can_sell):
+            self.evaluate_trading_status(transaction)
         return self.trading_enabled                   
 
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
         for address in addresses:
-            if address:
-                self._token_control_addresses.add(address)
+            self.token_control_addresses.add(address)
 
     def _has_control_address(self, transaction: Dict)  -> bool:
         unique_addresses = set(transaction.get('unique_addresses') or [])
-        if not unique_addresses or not self._token_control_addresses:
+        if not unique_addresses or not self.token_control_addresses:
             return False
-        return bool(self._token_control_addresses.intersection(unique_addresses))
+        return bool(self.token_control_addresses.intersection(unique_addresses))
 
     def update_latest_block_transactions(self, transaction: Dict):
         block_number = transaction.get('block_number')
         # Reset if new block
         if self._latest_block_number != block_number:
             self._latest_block_number = block_number
-            self._latest_block_txs = {}
+            self.latest_block_txs = {}
         # Add transaction if not already present
-        if not transaction.get('hash') in self._latest_block_txs:
-            self._latest_block_txs[transaction.get('hash')] = transaction
+        if not transaction.get('hash') in self.latest_block_txs:
+            self.latest_block_txs[transaction.get('hash')] = transaction
 
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""

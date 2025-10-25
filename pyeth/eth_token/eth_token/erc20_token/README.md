@@ -110,7 +110,6 @@ The main facade that coordinates all subsystems:
 **Key Methods**:
 ```python
 update_from_transaction(transaction)  # Process new blockchain data
-update_from_transaction_async(transaction)  # Async variant
 ```
 
 **Key Properties**:

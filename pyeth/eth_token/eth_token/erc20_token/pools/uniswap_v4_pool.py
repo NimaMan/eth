@@ -206,7 +206,7 @@ class UniswapV4Pool(BasePool):
         config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
         config.token_decimals = int(self.get_token_decimals())
         config.block_number = int(transaction['block_number']) - 1
-        prior_transactions = self._latest_block_txs.values()
+        prior_transactions = self.latest_block_txs.values()
         config.set_prior_transactions(prior_transactions)
         if transaction.get('previous_block_header'):
             # The block number is ignored when the header is set

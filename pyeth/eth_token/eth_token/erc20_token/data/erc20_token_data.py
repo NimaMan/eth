@@ -113,7 +113,7 @@ of the LiveTokenData class for real-time token state management and analytics.
 """
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Set, Optional, Iterator, Union
+from typing import Any, Dict, List, Set, Optional, Iterator, Union, Iterable
 from enum import Enum
 from web3 import Web3
 from .token_chain_data_fetcher import TokenChainDataFetcher
@@ -181,8 +181,6 @@ class PoolCollection:
                 raise KeyError(f"No pool found for key '{key}'")
             return pool
 
-        raise TypeError(f"Pools can be indexed by int, slice, or address string, not {type(key)!r}")
-
     def __contains__(self, item: Union[str, 'BasePool']) -> bool:
         if isinstance(item, str):
             return self._manager.get_pool(self._normalize_key(item)) is not None
@@ -190,6 +188,10 @@ class PoolCollection:
             return item in self._all_pools()
         except Exception:
             return False
+        
+    def __repr__(self):
+        # Show list of pool addresses
+        return f"[{self.addresses()}]"
 
     def addresses(self) -> List[str]:
         """Return currently known pool identifiers (addresses + V4 ids)."""
@@ -236,6 +238,7 @@ class ERC20TokenData:
     owner_events: List[Dict] = field(default_factory=list)
     current_owner: Optional[str] = None
     all_owners: List[str] = field(default_factory=list)
+    token_control_addresses: Set[str] = field(default_factory=set)
     ownership_renounced: bool = False
     ownership_renounced_block: Optional[int] = None
     ownership_renounced_tx: Optional[str] = None
@@ -279,6 +282,8 @@ class ERC20TokenData:
         self._pools_view = PoolCollection(self.pool_manager)
         self._liquidity_matrix = PoolLiquidityMatrix(self.pool_manager)
         self._liquidity_matrix = PoolLiquidityMatrix(self.pool_manager)
+        if self.token_control_addresses:
+            self._register_token_control_addresses(self.token_control_addresses)
 
     def _append_with_limit(self, items: List[Any], entry: Any) -> None:
         items.append(entry)
@@ -345,6 +350,10 @@ class ERC20TokenData:
             return tuple(self.pool_manager.get_all_pool_addresses())
         return tuple()
     
+     def _register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
+        self.token_control_addresses.update(addresses)
+        self.pool_manager.register_token_control_addresses(self.token_control_addresses)
+
     def get_pool_info_dict(self) -> Dict[str, Dict]:
         return self.pool_manager.get_pool_info() if self.pool_manager else {}
     
@@ -456,7 +465,7 @@ class ERC20TokenData:
         self.creator_address = transaction['from_address']
         self.creator_nonce = transaction['nonce']
         self.current_owner = transaction['from_address'] # Set initial owner
-        self.pool_manager.register_token_control_addresses([self.creator_address, self.current_owner])
+        self._register_token_control_addresses([self.creator_address, self.current_owner])
         if self.total_supply is None:
             self.set_erc20_contract_info(transaction.get('block_header'))
 
@@ -649,7 +658,7 @@ class ERC20TokenData:
         for owner_event in transaction.get('owner_events', []):
             self._append_with_limit(self.all_owners, owner_event['new_owner'])
             self.current_owner = owner_event['new_owner']
-            self.pool_manager.register_token_control_addresses([self.current_owner])
+            self._register_token_control_addresses([self.current_owner])
             if owner_event['previous_owner'] == '0x0000000000000000000000000000000000000000':
                 self.ownership_renounced = True
                 self.ownership_renounced_block = block_number

@@ -38,18 +38,11 @@ class ERC20Token:
         self.token_health_predictor = TokenHealthPredictor()
 
     def update_from_transaction(self, transaction: Dict):
-            if not transaction["status"]:
-                return
-            self.token_data.update_from_transaction(transaction)
-            self.token_network.update_from_transaction(transaction)
-            self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
-
-    async def update_from_transaction_async(self, transaction: Dict):
-            if not transaction["status"]:
-                return
-            self.token_data.update_from_transaction(transaction)
-            self.token_network.update_from_transaction(transaction)
-            self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
+        if not transaction["status"]:
+            return
+        self.token_data.update_from_transaction(transaction)
+        self.token_network.update_from_transaction(transaction)
+        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
 
     @property
     def token_creation_age_blocks(self):
