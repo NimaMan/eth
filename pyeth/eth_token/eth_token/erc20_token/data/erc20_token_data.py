@@ -350,7 +350,7 @@ class ERC20TokenData:
             return tuple(self.pool_manager.get_all_pool_addresses())
         return tuple()
     
-     def _register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
+    def _register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
         self.token_control_addresses.update(addresses)
         self.pool_manager.register_token_control_addresses(self.token_control_addresses)
 
