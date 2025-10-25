@@ -183,7 +183,7 @@ class BlockSubscriber():
                             "Received block %s without block_header",
                             payload.get("block_number") if isinstance(payload, dict) else "unknown",
                         )
-                    await self.block_token_processor.process_block_tokens(
+                    self.block_token_processor.process_block_tokens(
                         block_transactions,
                         block_header=block_header,
                     )

@@ -1,16 +1,25 @@
 """
-BlockTokenProcessor: Core token processing functionality
+BlockTokenProcessor: Central coordinator for live ERC20 token state derived from processed blocks.
 
-Objective:
----------
-1. Provide core token processing functionality for both live and historical modes
-    - Process blocks and their transactions
-    - Create and update token instances of LiveERC20Token class
-    - Cache token states
-2. Process blocks and their transactions efficiently  with Concurrency Limit
+Responsibilities
+----------------
+1. Consume processed block payloads (transactions + header) from upstream block processors and walk
+   every transaction sequentially so token mutations match canonical on-chain order.
+2. Manage the ERC20 token lifecycle:
+   - Detect new ERC-20 deployments, hydrate metadata with `TokenChainDataFetcher`, and instantiate
+     `ERC20Token` objects seeded with their creation transaction.
+   - Persist new tokens plus their bookkeeping (pools, PnL wiring) inside `LiveTokensCache`.
+3. Apply ongoing token updates:
+   - For every transaction referencing tracked contracts, propagate changes through token data,
+     liquidity network, and health analyzers.
+   - Record which tokens changed during the block and refresh cache mappings after processing.
+4. Track block-processing context (start/latest block numbers, last two headers) so downstream
+   consumers can reason about continuity and previous-block metadata.
+5. Serve both historical catch-up (`HistoricalBlockTokenProcessor`) and live streaming
+   (`LiveBlockTokenProcessor`) flows through the same stateful engine, keeping shared token state in
+   sync while offering a simple synchronous mutation API callable from async workflows.
 """
 
-import asyncio
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional
@@ -24,7 +33,7 @@ from eth_token.utils.logger import get_logger
 
 
 class BlockTokenProcessor:
-    def __init__(self, logger=None, max_concurrency=20, add_pnl_to_db: bool = False):
+    def __init__(self, logger=None, add_pnl_to_db: bool = False):
         self.logger = logger or get_logger(name="token_manager")
         # Token tracking
         self.add_pnl_to_db = add_pnl_to_db
@@ -35,31 +44,25 @@ class BlockTokenProcessor:
         self.start_block = None  # Track the first block we process
         self._recent_block_headers: "OrderedDict[int, Any]" = OrderedDict()
 
-        # Introduce concurrency semaphore
-        self.semaphore = asyncio.Semaphore(value=max_concurrency)
         self.token_chain_fetcher = TokenChainDataFetcher()
 
-    async def process_block_tokens(
+    def process_block_tokens(
         self,
         process_block_result, 
         block_number
     ) -> int:
-        """Process a single block's transactions with concurrency limit."""
+        """Process a single block's transactions sequentially."""
         block_tx_list = process_block_result.get('transactions')
         block_header = process_block_result.get('block_header')
         previous_block_header = self._get_previous_block_header()
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._store_block_header(block_number, block_header)
-        tasks = []
         for tx in block_tx_list:
-            async def sem_task(tx_data=self._ensure_tx_dict(tx)):
-                tx_data['block_header'] = block_header
-                tx_data['previous_block_header'] = previous_block_header
-                async with self.semaphore:
-                    return await self._process_transaction(tx_data, block_number)
-
-            tasks.append(asyncio.create_task(sem_task()))
-        await asyncio.gather(*tasks)
+            tx_data = self._ensure_tx_dict(tx)
+            tx_data['block_header'] = block_header
+            tx_data['previous_block_header'] = previous_block_header
+            # Ensure transactions mutate token state in canonical block order
+            self._process_transaction(tx_data, block_number)
 
         # Set start_block on first block processed
         if self.start_block is None:
@@ -69,7 +72,7 @@ class BlockTokenProcessor:
         self.processed_blocks[block_number] = True # Mark the block as processed
         return block_number
 
-    async def _process_transaction(self, transaction: Dict, block_number: int):
+    def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
         transaction = self._ensure_tx_dict(transaction)
         try:
@@ -78,11 +81,11 @@ class BlockTokenProcessor:
                 transaction, block_number
             )
             if is_token_creation:
-                await self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
+                self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
                 return
                 
             # Handle regular transactions
-            await self._handle_token_update_from_transaction(transaction)
+            self._handle_token_update_from_transaction(transaction)
                 
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
@@ -105,7 +108,7 @@ class BlockTokenProcessor:
                 self.logger.error(f"{self.__class__.__name__} failed metadata lookup for {contract_address} in block {block_number}: {exc}")
             return False, None, None
 
-    async def _handle_token_creation(
+    def _handle_token_creation(
         self,
         transaction: Dict,
         block_number: int,
@@ -131,34 +134,31 @@ class BlockTokenProcessor:
             except Exception as e:
                 self.logger.error(f"{self.__class__.__name__} Failed to create token {contract_address} at tx {transaction.get('hash')}: {e}")
 
-    async def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
+    def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""
         try:
-            await token.update_from_transaction_async(transaction)
+            token.update_from_transaction(transaction)
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} at tx {transaction.get('hash')}: {e}") 
 
-    async def _handle_token_update_from_transaction(self, transaction: Dict):
+    def _handle_token_update_from_transaction(self, transaction: Dict):
         """Handle transaction involving existing tokens"""
         erc20_contracts = transaction.get('erc20_contracts', set())
         if not erc20_contracts:
             return
             
-        update_tasks = []
         for token_address in erc20_contracts:
             token = self.live_tokens_cache[token_address]
             if token:
-                update_tasks.append(
-                    self._update_token(
-                        token=token,
-                        transaction=transaction,
-                        token_address=token_address
-                    )
+                self._update_token(
+                    token=token,
+                    transaction=transaction,
+                    token_address=token_address
                 )
                 self.updated_tokens[token_address] = token
-                
-        if update_tasks:
-            await asyncio.gather(*update_tasks)
+        
+        # Update the pool and token mapping so that we know which pools belong to which tokens
+        if self.updated_tokens:
             for token in self.updated_tokens.values():
                 self.live_tokens_cache.update_pool_mapping(token)
 
@@ -231,7 +231,7 @@ class HistoricalBlockTokenProcessor:
                     # Use shared base processor for token processing
                     processed_block_result = await self.block_processor.process_block(block_number)
                     # Process block data for token updates
-                    await self.block_token_processor.process_block_tokens(
+                    self.block_token_processor.process_block_tokens(
                         processed_block_result,
                         block_number=block_number
                     )
@@ -249,7 +249,7 @@ class HistoricalBlockTokenProcessor:
             try:
                 processed_block_result = await self.block_processor.process_block(block_number=current_block)
                 # Process block data for token updates 
-                await self.block_token_processor.process_block_tokens(
+                self.block_token_processor.process_block_tokens(
                     processed_block_result,
                     block_number=current_block
                 )
