@@ -168,16 +168,13 @@ pub struct SimulationChain {
 // Key methods:
 pub async fn step(&mut self, call: UnsignedTransaction) -> Result<SimulationResult>
 pub async fn step_with_trace(&mut self, call: UnsignedTransaction) -> Result<FullSimulationResult>
-pub async fn step_through(&mut self, calls: Vec<UnsignedTransaction>) -> Result<Vec<SimulationResult>>
 pub fn current_state(&self) -> ChainStateInfo
-pub async fn reset(&mut self) -> Result<()>
 ```
 
 **Key Features:**
 - State persistence between `step()` calls
 - Automatic nonce tracking and increment
 - Ability to inspect state between transactions
-- Reset to initial state capability
 
 **Example:** `examples/sequential/buy_approve_then_sell.rs` - DeFi workflow with state inspection
 

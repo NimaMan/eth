@@ -240,9 +240,7 @@ Methods:
   - Auto-populates nonce when missing using `get_nonce_from_state`; on success increments tracked nonce.
   - Uses a fused `TracingInspector` internally for efficiency (even if not returning a trace).
 - `step_with_trace(&mut self, unsigned: UnsignedTransaction) -> eyre::Result<FullSimulationResult>`
-- `step_through(&mut self, vec: Vec<UnsignedTransaction>) -> eyre::Result<Vec<SimulationResult>>`
 - `current_state(&self) -> ChainStateInfo { block_number, transaction_count, total_gas_used, nonces }`
-- `reset(&mut self) -> eyre::Result<()>` (recreates fork at initial block, clears inspector and stats)
 
 Semantics:
 - Each step commits writes into the overlay DB, so subsequent steps see previous effects.

@@ -17,7 +17,8 @@ use crate::{
 use alloy_primitives::Address;
 use eyre::Result;
 use reth_primitives::SealedHeader;
-use reth_provider::StateProvider;
+use reth_revm::primitives::KECCAK_EMPTY;
+use reth_revm::Database;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,29 +46,18 @@ pub struct UnsignedTxChainSimulation {
     results: Vec<SimulationResult>,
     /// Total gas used
     total_gas_used: u64,
-    /// Initial block number
-    initial_block: u64,
-    /// Initial block header snapshot
-    initial_block_header: SealedHeader,
     /// Fused inspector that persists across transactions
     inspector: Option<TracingInspector>,
 }
 
 impl UnsignedTxChainSimulation {
     /// Create a new simulation chain
-    pub(crate) fn new(
-        simulator: Arc<TxSimulator>,
-        forked_state: ForkedState,
-        block_number: u64,
-    ) -> Self {
-        let initial_block_header = forked_state.block_header.clone();
+    pub(crate) fn new(simulator: Arc<TxSimulator>, forked_state: ForkedState) -> Self {
         Self {
             simulator,
             forked_state,
             results: Vec::new(),
             total_gas_used: 0,
-            initial_block: block_number,
-            initial_block_header,
             inspector: None,
         }
     }
@@ -85,60 +75,12 @@ impl UnsignedTxChainSimulation {
     /// // State now includes the effects of buy_unsigned_tx
     /// ```
     pub async fn step(&mut self, unsigned_tx: UnsignedTransaction) -> Result<SimulationResult> {
-        // Prepare the unsigned transaction with automatic nonce management
         let mut unsigned_tx = unsigned_tx;
-        if let Some(from) = unsigned_tx.from {
-            if unsigned_tx.nonce.is_none() {
-                // Get nonce from our tracked state, or query from database if not tracked yet
-                let nonce = if let Some(&tracked_nonce) = self.forked_state.nonces.get(&from) {
-                    tracked_nonce
-                } else {
-                    // Query the actual nonce from the forked state database
-                    let db_nonce = self
-                        .simulator
-                        .get_nonce_from_state(&mut self.forked_state, from)?;
-                    // Store it in our tracking
-                    self.forked_state.nonces.insert(from, db_nonce);
-                    db_nonce
-                };
-                unsigned_tx.nonce = Some(nonce);
-            }
-        }
+        self.populate_missing_nonce(&mut unsigned_tx)?;
 
-        // Execute with fused inspector
-        let result = self.execute_with_fused_inspector(unsigned_tx.clone(), false)?;
-
-        // Update tracking
-        if result.success {
-            self.total_gas_used += result.gas_used;
-
-            // Update nonce tracking
-            if let Some(from) = unsigned_tx.from {
-                let current = self.forked_state.nonces.entry(from).or_insert(0);
-                *current += 1;
-            }
-        }
-
-        self.results.push(result.clone());
+        let result = self.execute_with_fused_inspector(unsigned_tx.clone())?;
+        self.record_simulation_result(unsigned_tx.from, &result);
         Ok(result)
-    }
-
-    /// Execute multiple transactions sequentially
-    ///
-    /// Each transaction is executed on the state resulting from the previous one.
-    /// If any transaction fails, execution continues but the failure is recorded.
-    pub async fn step_through(
-        &mut self,
-        unsigned_txs: Vec<UnsignedTransaction>,
-    ) -> Result<Vec<SimulationResult>> {
-        let mut results = Vec::with_capacity(unsigned_txs.len());
-
-        for unsigned_tx in unsigned_txs {
-            let result = self.step(unsigned_tx).await?;
-            results.push(result);
-        }
-
-        Ok(results)
     }
 
     /// Get information about the current chain state
@@ -151,54 +93,60 @@ impl UnsignedTxChainSimulation {
         }
     }
 
-    /// Get all simulation results so far
-    pub fn results(&self) -> &[SimulationResult] {
-        &self.results
+    fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {
+        if let Some(from) = tx.from {
+            if tx.nonce.is_none() {
+                let nonce = if let Some(&tracked_nonce) = self.forked_state.nonces.get(&from) {
+                    tracked_nonce
+                } else {
+                    let db_nonce = self
+                        .simulator
+                        .get_nonce_from_state(&mut self.forked_state, from)?;
+                    self.forked_state.nonces.insert(from, db_nonce);
+                    db_nonce
+                };
+                tx.nonce = Some(nonce);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn record_simulation_result(&mut self, from: Option<Address>, result: &SimulationResult) {
+        if result.success {
+            self.total_gas_used += result.gas_used;
+
+            if let Some(from) = from {
+                let current = self.forked_state.nonces.entry(from).or_insert(0);
+                *current += 1;
+            }
+        }
+
+        self.results.push(result.clone());
     }
 
     /// Check whether an address currently has bytecode in the forked state.
     pub fn account_has_code(&mut self, address: Address) -> eyre::Result<bool> {
-        Ok(self.forked_state.db.db.account_code(&address)?.is_some())
-    }
-
-    /// Reset the chain to its initial state
-    ///
-    /// This discards all executed transactions and returns the chain
-    /// to the state it had when created.
-    pub async fn reset(&mut self) -> Result<()> {
-        // Create fresh forked state at initial block
-        self.forked_state = self.simulator.create_forked_state_with_header(
-            self.initial_block,
-            self.initial_block_header.clone(),
-        )?;
-        self.initial_block_header = self.forked_state.block_header.clone();
-        self.results.clear();
-        self.total_gas_used = 0;
-        self.inspector = None; // Reset inspector
-
-        Ok(())
+        let info = self.forked_state.db.basic(address)?;
+        Ok(info
+            .map(|acc| {
+                acc.code
+                    .as_ref()
+                    .map(|code| !code.is_empty())
+                    .unwrap_or_else(|| acc.code_hash != KECCAK_EMPTY)
+            })
+            .unwrap_or(false))
     }
 
     /// Internal method to execute transaction with fused inspector
     fn execute_with_fused_inspector(
         &mut self,
         unsigned_tx: UnsignedTransaction,
-        with_trace: bool,
     ) -> Result<SimulationResult> {
         use reth_evm::{ConfigureEvm, Evm};
         use reth_revm::DatabaseCommit;
 
         let block_header = self.forked_state.block_header.clone();
-
-        // Get or create inspector with fusing
-        let inspector = self.inspector.get_or_insert_with(|| {
-            let config = if with_trace {
-                TracingInspectorConfig::default_geth().set_record_logs(true)
-            } else {
-                TracingInspectorConfig::default_geth()
-            };
-            TracingInspector::new(config)
-        });
 
         // Setup EVM environment
         let evm_env = self
@@ -209,7 +157,7 @@ impl UnsignedTxChainSimulation {
         let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = if let Some(target) = unsigned_tx.to {
-            let has_code = self.forked_state.db.db.account_code(&target)?.is_some();
+            let has_code = self.account_has_code(target)?;
             Some(RevertContext {
                 target,
                 has_code,
@@ -228,12 +176,19 @@ impl UnsignedTxChainSimulation {
         )?;
 
         // Execute transaction with inspector
-        let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(
-            &mut self.forked_state.db,
-            evm_env,
-            inspector,
-        );
-        let res = evm.transact(tx_env)?;
+        let res = {
+            let inspector = self.inspector.get_or_insert_with(|| {
+                let config = TracingInspectorConfig::default_geth();
+                TracingInspector::new(config)
+            });
+
+            let mut evm = self.simulator.evm_config.evm_with_env_and_inspector(
+                &mut self.forked_state.db,
+                evm_env,
+                inspector,
+            );
+            evm.transact(tx_env)?
+        };
 
         // Commit state changes
         self.forked_state.db.commit(res.state);
@@ -269,23 +224,7 @@ impl UnsignedTxChainSimulation {
     ) -> Result<FullSimulationResult> {
         // Prepare the unsigned_tx with automatic nonce management
         let mut unsigned_tx = unsigned_tx;
-        if let Some(from) = unsigned_tx.from {
-            if unsigned_tx.nonce.is_none() {
-                // Get nonce from our tracked state, or query from database if not tracked yet
-                let nonce = if let Some(&tracked_nonce) = self.forked_state.nonces.get(&from) {
-                    tracked_nonce
-                } else {
-                    // Query the actual nonce from the forked state database
-                    let db_nonce = self
-                        .simulator
-                        .get_nonce_from_state(&mut self.forked_state, from)?;
-                    // Store it in our tracking
-                    self.forked_state.nonces.insert(from, db_nonce);
-                    db_nonce
-                };
-                unsigned_tx.nonce = Some(nonce);
-            }
-        }
+        self.populate_missing_nonce(&mut unsigned_tx)?;
 
         // Use simulate_on_fork_with_trace to get full details
         let block_number = self.forked_state.block_number;
@@ -295,24 +234,13 @@ impl UnsignedTxChainSimulation {
             block_number,
         )?;
 
-        // Update tracking
-        if result.success {
-            self.total_gas_used += result.gas_used;
-
-            // Update nonce tracking
-            if let Some(from) = unsigned_tx.from {
-                let current = self.forked_state.nonces.entry(from).or_insert(0);
-                *current += 1;
-            }
-        }
-
-        // Store basic result for results tracking
-        self.results.push(SimulationResult {
+        let summary = SimulationResult {
             success: result.success,
             gas_used: result.gas_used,
             revert_reason: result.revert_reason.clone(),
             revert_context: result.revert_context.clone(),
-        });
+        };
+        self.record_simulation_result(unsigned_tx.from, &summary);
 
         Ok(result)
     }
@@ -345,7 +273,6 @@ impl TxSimulator {
             return Ok(UnsignedTxChainSimulation::new(
                 Arc::new(self.clone()),
                 forked_state,
-                block_number,
             ));
         }
 
@@ -355,7 +282,6 @@ impl TxSimulator {
         Ok(UnsignedTxChainSimulation::new(
             Arc::new(self.clone()),
             forked_state,
-            block_number,
         ))
     }
 }

@@ -22,7 +22,6 @@ overlays for speed.
 | `TxSimulator::start_simulation_chain(at_block?, header?)` | `UnsignedTxChainSimulation` | Interactive unsigned chain pinned to an optional block or supplied header. | Build stateful scenarios step-by-step (buy → approve → sell). |
 | `UnsignedTxChainSimulation::step(unsigned)` | `SimulationResult` | Executes an unsigned tx, persists state, auto-manages nonces. | Iterative workflows where you inspect each result. |
 | `UnsignedTxChainSimulation::step_with_trace(unsigned)` | `FullSimulationResult` | Same as `step` but returns call tree + `struct_logs`. | Debugging multi-step flows or feeding tx_processor. |
-| `UnsignedTxChainSimulation::step_through(vec)` | `Vec<SimulationResult>` | Convenience wrapper to run a list sequentially via `step`. | Scripting small sequences while retaining per-step detail. |
 | `TxSimulator::start_signed_chain(at_block?)` | `SignedTxChainSimulation` | Interactive chain for signed transactions (recovers signer). | Replay signed bundles or replicate on-chain tx order. |
 | `SignedTxChainSimulation::step(tx)` | `SimulationResult` | Executes and commits a signed transaction. | Deterministic replays without tracing overhead. |
 | `SignedTxChainSimulation::step_with_trace(tx)` | `FullSimulationResult` | Signed analogue with geth-style call trace (no step logs). | When you need decoded internal calls for signed bundles. |
