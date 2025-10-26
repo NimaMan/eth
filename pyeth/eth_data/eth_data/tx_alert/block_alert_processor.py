@@ -20,10 +20,9 @@ from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.utils.logger import get_logger
 
 
-
 class BlockAlertProcessor:
     def __init__(self, logger=None):
-        self.logger = logger or get_logger(name="alert_processor")
+        self.logger = logger
         self.tx_alert_processor = TransactionAlertProcessor(logger=self.logger)
 
     async def process_block_transactions(self, tx_list: List[ProcessedTransaction]):

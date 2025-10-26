@@ -135,11 +135,11 @@ class ProcessedTransaction:
     value: int 
     status: bool
     nonce: int
-    
     tx_type: str
     actions: List[str]
     
     fees: TransactionFees
+    raw_tx_type: int
     bribe_amount: int = 0
     unique_addresses: Set[ChecksumAddress] = field(default_factory=set)
     erc20_contracts: Set[ChecksumAddress] = field(default_factory=set)
@@ -293,6 +293,7 @@ class ProcessedTransaction:
             "value": self.value,
             "status": self.status,
             "nonce": self.nonce,
+            "raw_tx_type": self.raw_tx_type,
             "tx_type": self.tx_type,
             "actions": self.actions,
             "fees": self.fees.to_dict() if isinstance(self.fees, TransactionFees) else self.fees,
@@ -386,6 +387,7 @@ class ProcessedTransaction:
             value=_ensure_int(value_raw, "value"),
             status=_ensure_status_bool(tx_dict.get('status', True)),
             nonce=_ensure_int(tx_dict.get('nonce', 0), "nonce"),
+            raw_tx_type=_ensure_int(tx_dict.get('raw_tx_type', 0), "raw_tx_type"),
             input=tx_dict.get('input', '0x'),
             tx_type=tx_dict.get('tx_type', 'unknown'),
             actions=list(tx_dict.get('actions') or []),
@@ -448,6 +450,7 @@ class ProcessedTransaction:
                  nonce: int,
                  input: str,
                  tx_type: str,
+                 raw_tx_type: Optional[int] = 0,
                  actions: Optional[List[str]] = None,
                  eth_transfers: Optional[List[ETHTransfer]] = None,
                  erc20_transfers: Optional[List[ERC20TransferEvent]] = None,
@@ -509,6 +512,7 @@ class ProcessedTransaction:
         self.nonce = _ensure_int(nonce, "nonce")
         self.input = _ensure_hex_str(input, "input")
         self.tx_type = tx_type
+        self.raw_tx_type = _ensure_int(raw_tx_type if raw_tx_type is not None else 0, "raw_tx_type")
 
         # Lists initialization with empty defaults
         self.actions = list(actions or [])

@@ -122,7 +122,7 @@ import aio_pika
 
 from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
-from eth_data.tx_alert.block_alert_processor import BlockAlertProcessor
+#from eth_data.tx_alert.block_alert_processor import BlockAlertProcessor
 from eth_data.utils.logger import get_logger
 
 
@@ -189,7 +189,7 @@ class LiveBlockProcessor:
             logger=self.logger,
             index_address_txs=self.index_address_txs
         )
-        self.block_alert_processor = BlockAlertProcessor()
+        #self.block_alert_processor = BlockAlertProcessor()
         # RabbitMQ connection and channel
         self.connection = None
         self.channel = None

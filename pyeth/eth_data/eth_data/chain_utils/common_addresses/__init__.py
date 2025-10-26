@@ -9,7 +9,8 @@ from .misc import *
 from .dex_pool_types import DEX_POOL_TYPES, DEX_POOL_TYPE_SET
 from ..pool_addresses import POOL_FACTORIES, ROUTERS
 
-# Backwards compatibility alias for downstream imports.
+
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 ROUTER_ADDRESSES = set(ROUTERS.values())
 
 

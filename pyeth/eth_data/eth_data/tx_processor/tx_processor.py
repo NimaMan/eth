@@ -302,6 +302,9 @@ class TransactionProcessor:
         self._add_tx_type_events(tx_type, logs, transaction, receipt)
         bribe_amount = self._get_bribe_amount(internal_transactions)
         actions = self.action_identifier.identify_transaction_actions(tx_type, logs)
+
+        raw_tx_type_value = transaction.get('type')
+        raw_tx_type = self._normalize_int(raw_tx_type_value) if raw_tx_type_value is not None else 0
         
         # Extract ETH transfers for simple transfers
         eth_transfers = self._extract_eth_transfers(
@@ -311,6 +314,7 @@ class TransactionProcessor:
         processed_tx = ProcessedTransaction(
             hash=tx_hash,
             tx_type=tx_type,
+            raw_tx_type=raw_tx_type,
             block_number=self._normalize_int(receipt['blockNumber']),
             block_timestamp=block_timestamp,
             tx_index=self._normalize_int(receipt['transactionIndex']),

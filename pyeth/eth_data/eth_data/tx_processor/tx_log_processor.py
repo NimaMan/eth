@@ -195,6 +195,7 @@ class TransactionLogProcessor:
                 result['unique_addresses'].add(event.settler)
             else:
                 result['other_events'].append(event)
+                result['unique_addresses'].add(event.get('address'))
         return result
 
     def classify_and_parse_log(self, log: Dict[str, Any]) -> Any:
@@ -232,7 +233,7 @@ class TransactionLogProcessor:
                 return self.parse_trading_enabled_event(log)
             elif topic == EVENT_TOPICS['TradingDisabled']:
                 return self.parse_trading_disabled_event(log)
-            # Uniswap V3
+            # Uniswap V3 events
             elif topic == EVENT_TOPICS['PoolCreatedV3']:
                 return self.parse_uniswap_v3_pool_created(log)
             elif topic == EVENT_TOPICS['InitializeV3']:
@@ -247,6 +248,7 @@ class TransactionLogProcessor:
                 return self.parse_uniswap_v3_increase_liquidity(log)
             elif topic == EVENT_TOPICS['DecreaseLiquidityV3']:
                 return self.parse_uniswap_v3_decrease_liquidity(log)
+            # Uniswap V4 events
             elif topic == EVENT_TOPICS['Permit2']:
                 return self.parse_permit2_event(log)
             elif topic == EVENT_TOPICS['InitializeV4']:
@@ -278,7 +280,6 @@ class TransactionLogProcessor:
             data = '0x' + data
         return data
 
-
     def _process_address(self, value: Union[str, bytes]) -> str:
         """Convert address to checksum format"""
         if isinstance(value, bytes):
@@ -301,13 +302,46 @@ class TransactionLogProcessor:
     def parse_other_event(self, log: Dict[str, Any]) -> Dict[str, Any]:
         data = self._ensure_hex_string(log['data'])
         topics = [self._ensure_hex_string(topic) for topic in log['topics']]
-        return {
+        event = {
             'address': self.w3.to_checksum_address(log['address']),
             'topics': topics,
             'data': data,
             'log_index': self._process_integer(log['logIndex']),
         }
-    
+        topic0 = topics[0] if topics else None
+        if topic0 and topic0 in EVENT_TOPICS.values():
+            event_type = [
+                name for name, signature in EVENT_TOPICS.items() if signature == topic0
+            ]
+            if event_type:
+                event['event_type'] = event_type[0]
+
+        candidate_addresses = set()
+
+        address = self.w3.to_checksum_address(log['address'])
+        candidate_addresses.add(address)
+
+        for topic in log['topics']:
+            if isinstance(topic, bytes):
+                topic_bytes = topic
+            else:
+                topic_bytes = bytes.fromhex(topic[2:] if topic.startswith('0x') else topic)
+            if len(topic_bytes) == 32 and topic_bytes[:12] == b'\x00' * 12:
+                candidate_address = self._process_address(topic_bytes[12:])
+                candidate_addresses.add(candidate_address)
+
+        data_bytes = bytes.fromhex(data[2:])
+        for idx in range(0, len(data_bytes), 32):
+            chunk = data_bytes[idx: idx + 32]
+            if len(chunk) == 32 and chunk[:12] == b'\x00' * 12:
+                candidate_address = self._process_address(chunk[12:])
+                candidate_addresses.add(candidate_address)
+
+        candidate_addresses.discard(address)
+        if candidate_addresses:
+            event['addresses'] = sorted(candidate_addresses)
+        return event
+
     def parse_transfer(self, log: Dict[str, Any]) -> ERC20TransferEvent:
         """Parse ERC20 Transfer event log Event signature: Transfer(address indexed from, address indexed to, uint256 value)
         Topic[0]: Event signature hash
