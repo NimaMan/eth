@@ -54,7 +54,7 @@ class BlockTokenProcessor:
         """Process a single block's transactions sequentially."""
         block_tx_list = process_block_result.get('transactions')
         block_header = process_block_result.get('block_header')
-        previous_block_header = self._get_previous_block_header()
+        previous_block_header = self._recent_block_headers.get(block_number - 1)
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._store_block_header(block_number, block_header)
         for tx in block_tx_list:
@@ -104,8 +104,6 @@ class BlockTokenProcessor:
             )
             return True, token_metadata, contract_address
         except Exception as exc:
-            if self.logger:
-                self.logger.error(f"{self.__class__.__name__} failed metadata lookup for {contract_address} in block {block_number}: {exc}")
             return False, None, None
 
     def _handle_token_creation(
@@ -178,12 +176,6 @@ class BlockTokenProcessor:
         self._recent_block_headers[block_number] = block_header
         while len(self._recent_block_headers) > 2:
             self._recent_block_headers.popitem(last=False)
-
-    def _get_previous_block_header(self) -> Optional[Any]:
-        if len(self._recent_block_headers) < 2:
-            return None
-        last_block_number = next(reversed(self._recent_block_headers))
-        return self._recent_block_headers[last_block_number]
 
 
 class HistoricalBlockTokenProcessor:

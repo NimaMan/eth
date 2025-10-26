@@ -191,7 +191,7 @@ class PoolCollection:
         
     def __repr__(self):
         # Show list of pool addresses
-        return f"[{self.addresses()}]"
+        return f"{self.addresses()}"
 
     def addresses(self) -> List[str]:
         """Return currently known pool identifiers (addresses + V4 ids)."""
@@ -490,7 +490,6 @@ class ERC20TokenData:
         self.total_supply = int(info.total_supply)
         self.token_status = TokenStatusEnum.CREATION
 
-    @property
     def _update_trading_enabled(self, transaction: Dict):
         """Update the trading enabled status"""
         self.trading_enabled = True

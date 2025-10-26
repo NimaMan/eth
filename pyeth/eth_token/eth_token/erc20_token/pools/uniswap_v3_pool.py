@@ -165,7 +165,7 @@ class UniswapV3Pool(BasePool):
         config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
         config.token_decimals = int(self.get_token_decimals())
         config.block_number = int(transaction['block_number']) - 1
-        prior_transactions = self.latest_block_txs.values()
+        prior_transactions = self.latest_block_control_address_txs.values()
         config.set_prior_transactions(prior_transactions)
         if transaction.get('previous_block_header'):
             config.set_block_header(transaction['previous_block_header'])
@@ -191,10 +191,11 @@ class UniswapV3Pool(BasePool):
         self.tax_check_tx = transaction['hash']
     
         logger.info(
-            f"SimulationStatus "
+            f"TradingStatus "
             f"block={transaction['block_number']} "
             f"token={self.token_address} "
             f"pool={self.pool_address} "
+            f"from={transaction['from_address']} "
             f"tx={transaction.get('hash')} "
             f"UniswapV3 Pool "            
             f"can_buy={result.can_buy} "
