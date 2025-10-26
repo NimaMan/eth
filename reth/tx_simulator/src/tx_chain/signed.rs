@@ -13,11 +13,18 @@ use crate::{
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, EvmEnvFor, TxEnvFor};
+use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{Recovered, SealedHeader, TransactionSigned};
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
+
+struct PreparedSignedExecution {
+    evm_env: EvmEnvFor<EthEvmConfig>,
+    tx_env: TxEnvFor<EthEvmConfig>,
+    gas_limit: u64,
+}
 
 /// Stateful signed-tx chain simulator
 pub struct SignedTxChainSimulation {
@@ -43,19 +50,10 @@ impl SignedTxChainSimulation {
 
     /// Execute a signed transaction and persist its state changes
     pub fn step(&mut self, tx: &TransactionSigned) -> Result<SimulationResult> {
-        let block_header = self.forked_state.block_header.clone();
+        let PreparedSignedExecution {
+            evm_env, tx_env, ..
+        } = self.prepare_signed_execution(tx)?;
 
-        let evm_env = self
-            .simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
-
-        // Recover sender and build tx env
-        let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
-        let tx_env = self.simulator.evm_config.tx_env(&recovered);
-
-        // Use fused inspector across steps
         let inspector = self
             .inspector
             .get_or_insert_with(|| TracingInspector::new(TracingInspectorConfig::default_geth()));
@@ -66,20 +64,11 @@ impl SignedTxChainSimulation {
         );
         let res = evm.transact(tx_env)?;
         self.forked_state.db.commit(res.state);
-        // Fuse inspector for subsequent steps
         self.inspector = self.inspector.take().map(|insp| insp.fused());
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_data = res.result.output().cloned();
-        let mut revert_reason = if success {
-            None
-        } else {
-            decode_revert_reason(revert_data.as_ref(), None)
-        };
-        if !success && revert_reason.is_none() {
-            revert_reason = Some("Transaction reverted".to_string());
-        }
+        let revert_reason = Self::revert_reason_from(success, res.result.output());
 
         Ok(SimulationResult {
             success,
@@ -91,16 +80,11 @@ impl SignedTxChainSimulation {
 
     /// Same as step() but returns full trace
     pub fn step_with_trace(&mut self, tx: &TransactionSigned) -> Result<FullSimulationResult> {
-        let block_header = self.forked_state.block_header.clone();
-
-        let evm_env = self
-            .simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
-        let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
-        let tx_env = self.simulator.evm_config.tx_env(&recovered);
-        let gas_limit = tx_env.gas_limit;
+        let PreparedSignedExecution {
+            evm_env,
+            tx_env,
+            gas_limit,
+        } = self.prepare_signed_execution(tx)?;
 
         let mut inspector =
             TracingInspector::new(TracingInspectorConfig::default_geth().set_record_logs(true));
@@ -114,15 +98,7 @@ impl SignedTxChainSimulation {
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
-        let revert_data = res.result.output().cloned();
-        let mut revert_reason = if success {
-            None
-        } else {
-            decode_revert_reason(revert_data.as_ref(), None)
-        };
-        if !success && revert_reason.is_none() {
-            revert_reason = Some("Transaction reverted".to_string());
-        }
+        let revert_reason = Self::revert_reason_from(success, res.result.output());
         let call_frame = inspector
             .with_transaction_gas_limit(gas_limit)
             .into_geth_builder()
@@ -216,6 +192,41 @@ impl SignedTxChainSimulation {
     pub fn nonce_of(&mut self, address: Address) -> Result<u64> {
         self.simulator
             .get_nonce_from_state(&mut self.forked_state, address)
+    }
+
+    fn prepare_signed_execution(
+        &mut self,
+        tx: &TransactionSigned,
+    ) -> Result<PreparedSignedExecution> {
+        let block_header = self.forked_state.block_header.clone();
+
+        let evm_env = self
+            .simulator
+            .evm_config
+            .evm_env(&block_header)
+            .expect("failed to build EVM env");
+
+        let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
+        let tx_env = self.simulator.evm_config.tx_env(&recovered);
+        let gas_limit = tx_env.gas_limit;
+
+        Ok(PreparedSignedExecution {
+            evm_env,
+            tx_env,
+            gas_limit,
+        })
+    }
+
+    fn revert_reason_from(success: bool, revert_data: Option<&Bytes>) -> Option<String> {
+        if success {
+            return None;
+        }
+
+        let mut reason = decode_revert_reason(revert_data, None);
+        if reason.is_none() {
+            reason = Some("Transaction reverted".to_string());
+        }
+        reason
     }
 }
 
