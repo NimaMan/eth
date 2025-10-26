@@ -182,6 +182,27 @@ The system employs two complementary discovery mechanisms:
 - Records block number, transaction hash (`trading_enabled_tx`), and timestamp of enablement
 - Maintains runtime-only sell status for honeypot detection
 
+### Trading Viability Simulation
+- `evaluate_trading_status` replays all creator-controlled transactions from the **current** block against the **previous** canonical block header. We do this because reth keeps the prior block fully indexed even when the latest block is still synchronizing.
+- The simulator seeds its EVM state with the previous block and replays `latest_block_txs` in canonical order before running the test buy/approve/sell sequence. Any transaction the real chain mined before the target (such as a funding transfer in block *N*) must therefore be present in this replay set.
+- If a funding transfer landed in block *N* but we only replay block *N*+1 transactions, the simulator will believe the account is unfunded and produce the “lack of funds … for max fee …” error. On-chain the same transaction succeeds, so this discrepancy signals that our replay omitted earlier state transitions.
+- Fix strategies:
+  - Extend `latest_block_txs` (or a companion buffer) to include control-address activity from the previous block whenever we simulate against `block_number - 1`.
+  - Detect the specific “lack of funds” failure, cross-check the account balance via `chain_query.get_account`, and either fetch/replay the missing funding transaction or temporarily top up the account in simulation with the known difference.
+  - Keep the error logged for observability, but treat it as non-fatal if on-chain execution already confirms the action, to avoid cascading pool viability failures.
+- Conceptually, viability failures fall into two categories: genuine honeypot behavior (buy or sell reverts) and replay gaps. Understanding which side a failure belongs to is critical for downstream consumers of `can_buy` / `can_sell`.
+
+### Simulation Triggers & Control Addresses
+- Every transaction that flows through a tracked pool ends with `BasePool.check_and_update_trading_status`. This gate decides whether we should simulate the buy/approve/sell sequence.
+- Before we have proof that trading works we run the simulator whenever a block contains a transaction from a control address or when we first observe swaps/mints that indicate trading may have gone live. Once we have recorded at least one successful buy *and* sell (`can_buy` and `can_sell` true), we do **not** keep simulating arbitrary user flows—unprivileged wallets cannot flip global buy/sell gates on Ethereum, so their activity cannot change viability.
+- Control addresses live in `token_control_addresses`. The set starts with the deployer and current owner (captured during creation), plus any addresses supplied by token metadata.
+- Owner change events keep the set fresh, and renounce/transfer events continue to be tracked so we can observe the same wallets should they act again.
+- Pool-specific code adds more actors: Uniswap V3 mints register their position owner/recipient, V4 liquidity modifications register owner/sender/recipient/account fields, and the `PoolManager` propagates any global token-level control list to every pool instance.
+- Transactions carry a `unique_addresses` set (from, to, event participants, internal call targets). `check_and_update_trading_status` simply intersects that set with `token_control_addresses`. A hit means the transaction came from someone who can toggle trading flags, mutate taxes, or drain liquidity, so we simulate immediately.
+- Ethereum enforcement-wise, only storage writes to the token contract can change trading gates (e.g., `tradingEnabled = false`, tax rate hikes, allow/deny lists). Those state writes require the caller to satisfy the contract’s access control (typically `onlyOwner` or an admin role). Ordinary wallets invoking `transfer` or swapping through a router execute code paths that read the flags but cannot modify them, so their activity is read-only with respect to buy/sell viability.
+- We therefore re-run simulations when we detect a transaction that *could* have mutated those toggles: (1) direct calls from known admins/control addresses, (2) events that explicitly signify parameter updates (`tax_events`, `trading_disabled_events`, `max_buy_limit_events`, etc.), or (3) liquidity actions initiated by the same privileged wallets (because they might pair a code change with a liquidity rug). Everything else is observed without retriggering the simulator.
+- The replay state is built from `latest_block_txs`, so when a control address fires multiple setup calls inside the same block, the simulator sees them all in order before testing the buy path.
+
 ## Protocol Differences
 
 ### Address vs PoolId Management
@@ -200,36 +221,3 @@ The system employs two complementary discovery mechanisms:
 - **Mint/Burn**: Liquidity changes (V2/V3 have separate events)
 - **ModifyLiquidity**: Combined mint/burn for V4
 - **Initialize**: Pool creation (V3/V4)
-
-## Usage Patterns
-
-### For Token Analysis
-```
-1. Initialize PoolManager for a token
-2. Process transactions through the manager
-3. Snapshot pool state via PoolLiquidityMatrix.snapshots()
-4. Access individual pools for detailed information and trading status
-```
-
-### For Price Discovery
-```
-1. PoolLiquidityMatrix.get_best_price(for_buy=...) for executable price
-2. Filter by specific denominations (WETH, stablecoins)
-3. Consider pool reserves and trading flags for confidence
-```
-
-### For Scam Detection
-```
-1. Analyze liquidity distribution across pools
-2. Check for concentrated ownership (V2 pools)
-3. Monitor abnormal reserve changes via PoolReserveTracker
-4. Correlate pool scam labels with token-level health predictors
-```
-
-### For LP Analysis (V2 Pools)
-```
-1. Get LP holder distribution via pool.get_lp_holders()
-2. Check ownership concentration via pool.get_lp_share(address)
-3. Monitor mint/burn events for liquidity changes
-4. Track LP token transfers for ownership shifts
-```

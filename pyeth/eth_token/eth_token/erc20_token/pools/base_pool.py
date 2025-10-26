@@ -8,11 +8,11 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 from dataclasses import dataclass
 
-from .pool_reserve_tracker import PoolReserveTracker, logger
-from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
-from .pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_data.utils.pyreth_client import PyrethClient, pyreth
+from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_data.utils.pyreth_client import PyrethClient, pyreth
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
 
 
 @dataclass
@@ -137,7 +137,7 @@ class BasePool(ABC):
         )
         self.token_control_addresses: Set[str] = set()
         self._latest_block_number: Optional[int] = None
-        self.latest_block_txs: List[Dict[str, Any]] = []
+        self.latest_block_control_address_txs: Dict[str, Dict[str, Any]] = {}
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -283,6 +283,9 @@ class BasePool(ABC):
         
     def get_denom_name(self) -> str:
         """Get denomination token name."""
+        if self.denom_address == ZERO_ADDRESS:
+            # V4 pools encode the native currency with the zero address. Treat it as ETH.
+            return "ETH"
         name = DENOM_ADDRESSES.get(self.denom_address)
         if name:
             return name
@@ -335,9 +338,6 @@ class BasePool(ABC):
         """Check if trading is enabled on this pool and calculate taxes."""
         if self._has_control_address(transaction):
             self.evaluate_trading_status(transaction)   
-        #TODO: check if we really need to evalaute other tx than the control ones
-        if not (self.can_buy and self.can_sell):
-            self.evaluate_trading_status(transaction)
         return self.trading_enabled                   
 
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
@@ -350,15 +350,16 @@ class BasePool(ABC):
             return False
         return bool(self.token_control_addresses.intersection(unique_addresses))
 
-    def update_latest_block_transactions(self, transaction: Dict):
+    def update_latest_block_control_address_transactions(self, transaction: Dict):
+        # Update latest block transactions involving control addresses
+        if not self._has_control_address(transaction):
+            return        
         block_number = transaction.get('block_number')
         # Reset if new block
         if self._latest_block_number != block_number:
             self._latest_block_number = block_number
-            self.latest_block_txs = {}
-        # Add transaction if not already present
-        if not transaction.get('hash') in self.latest_block_txs:
-            self.latest_block_txs[transaction.get('hash')] = transaction
+            self.latest_block_control_address_txs = {}
+        self.latest_block_control_address_txs[transaction.get('hash')] = transaction
 
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""

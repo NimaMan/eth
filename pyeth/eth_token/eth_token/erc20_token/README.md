@@ -4,6 +4,41 @@
 
 The ERC20 Token Live Tracking System is a comprehensive real-time blockchain analytics framework designed to monitor, analyze, and assess ERC20 tokens on Ethereum. It processes blockchain transactions to maintain token state, track liquidity pools across multiple DEX protocols, analyze trading networks, and detect potential scams through pattern recognition.
 
+## Token Control Model
+
+Ethereum enforces token behaviour through contract storage. Any change that toggles trading, rewrites tax parameters, freezes wallets, or drains liquidity must be executed by an address that satisfies the contract’s access control (e.g., `onlyOwner`, admin role, multisig). Ordinary traders invoking `transfer`/`swap` paths cannot mutate those variables—they merely read the flags that privileged callers set. The tracking system therefore keeps an explicit view of *who* can change token state and *which* transactions might have done so.
+
+### Control Address Sources
+- **Deployer & Initial Owner** – the account that deploys the token is often the first to hold admin privileges. Contracts typically assign `owner`, `governance`, or `admin` roles during construction so that address can configure taxes, launch trading, or renounce control later.
+- **Ownership Transfers** – many tokens expose a `transferOwnership` function (or multisig-controlled governance). When ownership changes, the new administrator inherits the ability to tweak contract state. Even if the previous owner renounces control, historical owners remain important for forensic tracking because they may still interact with the token or related pools.
+- **Preconfigured Administrators** – some projects hard-code additional controllers (marketing wallet, tax wallet, multisig) or allow an owner to delegate permissions (e.g., `setController`). Any address that can call privileged functions is part of the control set.
+- **Liquidity Operators** – beyond pure contract governance, addresses that own significant liquidity provisioning power can alter tradability. Wallets holding concentrated Uniswap positions, pool hooks, or LP tokens can withdraw reserves, add restrictive hooks, or otherwise reshape liquidity dynamics.
+
+### Broader Controller Discovery
+While ownership covers the majority of control surfaces, many modern tokens rely on richer role systems. Conceptually we treat the following categories as privileged and aim to harvest them programmatically:
+
+- **AccessControl Roles** – contracts based on OpenZeppelin-style role management emit `RoleGranted`/`RoleRevoked` events. Roles such as `DEFAULT_ADMIN_ROLE`, `PAUSER_ROLE`, `MINTER_ROLE`, or bespoke `CONTROLLER_ROLE` often govern trading switches and tax parameters. Watching those events lets us maintain an up-to-date roster of role holders.
+- **Custom Governance Events** – projects frequently emit explicit events when setting tax wallets, blacklist managers, fee recipients, anti-bot guards, etc. Cataloguing common event signatures (`TaxReceiverUpdated`, `BlacklistManagerChanged`, `RouterSet`, `TradingStatusUpdated`) gives another path to discover active controllers.
+- **Proxy & Multisig Admins** – upgradeable tokens introduce proxy admin contracts (e.g., TransparentUpgradeableProxy). The proxy admin or multisig addresses can redeploy logic, indirectly changing token behaviour. Following `AdminChanged`, `Upgraded`, or Gnosis Safe ownership events is essential to track those control surfaces.
+- **Router & Allowance Gatekeepers** – some tokens restrict trading to specific routers via allowlists. Contracts that manage these allowlists (or are given infinite allowance to move user funds) qualify as controllers because they can freeze or reroute volume.
+- **DEX-Specific Hooks** – Uniswap V4 hooks, limit-order managers, or external wrapper contracts can enforce arbitrary logic on swaps. Operators of those contracts belong alongside liquidity providers in the privileged set.
+
+In practice we can enrich the control-address registry by:
+1. Extending the Reth chain-query layer to stream relevant events (`OwnershipTransferred`, `RoleGranted`, custom governance events, proxy admin changes) and push their subjects into our controller set.
+2. Inspecting bytecode or decoded function selectors of admin transactions seen in the mempool/chain to flag new privileged addresses dynamically.
+3. Replaying simulator traces to observe who mutates storage slots tied to trading/tax flags, then caching those mutators as controllers.
+
+### Governance & Parameter Events
+- **Trading Toggles** – Honeypots and stealth launches often gate trading behind boolean flags (`tradingEnabled`, `swapEnabled`) or block lists. Only privileged callers can flip these switches, so each toggle event signals a change in the entire market’s ability to transact.
+- **Tax & Fee Adjustments** – Many contracts levy buy/sell taxes routed to marketing or development wallets. Adjusting these rates, setting maximum buy sizes, or updating whitelist/blacklist tables can radically change trade viability and is only accessible to administrators.
+- **Liquidity Management** – Large deposits or removals of liquidity performed by privileged wallets (or their routers) can trigger price shocks, slip protections, or leave pools illiquid. Recognising these moves as governance actions rather than organic trading is essential for correct viability analysis.
+- **Allowance & Router Control** – Setting all-allowances for routers or revoking them dictates which DEX paths remain usable. Administrative accounts often manage these approvals to guide or restrict flow.
+
+### Why It Matters
+- **Simulation Triggers** – Automated viability checks re-run whenever a privileged actor or governance event occurs. If an admin disables trading, raises taxes to 90%, or withdraws liquidity, the next simulation reflects the new ground truth before any downstream consumer assumes trading is safe.
+- **Scam & Risk Detection** – Sudden governance changes (tax spikes, blacklist additions, liquidity rugs) are strong scam indicators. Tracking the trusted set of controllers allows health modules to distinguish routine user trades from policy updates.
+- **Auditability & Incident Response** – When something goes wrong, analysts need to answer “who changed what and when?” Capturing privileged transactions provides a full history of policy changes, making it possible to attribute actions to specific wallets and reason about counterparty risk.
+
 ## System Architecture
 
 ```

@@ -48,7 +48,7 @@ from .uniswap_v3_pool import UniswapV3Pool
 from .uniswap_v4_pool import UniswapV4Pool, PoolKey
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
-from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, canonicalize_dex_pool_type
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS, canonicalize_dex_pool_type
 
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
@@ -94,6 +94,8 @@ class PoolManager:
         self._token_decimals: Optional[int] = None
         self._denom_decimals_cache: Dict[str, int] = {}
         self._token_control_addresses: Set[str] = set()
+        self._latest_control_block: Optional[int] = None
+        self._latest_block_control_address_txs: Dict[str, Dict[str, Any]] = {}
 
     def _get_token_decimals(
         self,
@@ -151,6 +153,7 @@ class PoolManager:
         First checks for new pool creation events, then checks swap events
         for pools we might have missed, then routes other events to existing pools.
         """
+        self._update_block_control_addrress_transactions(transaction)
         # Check for new pool creations
         self._check_pool_creations(transaction)
         
@@ -159,12 +162,12 @@ class PoolManager:
         
         # Route events to existing pools
         for pool in self.pools.values():
-            pool.update_latest_block_transactions(transaction)
+            pool.update_latest_block_control_address_transactions(transaction)
             pool.process_transaction(transaction)
             
         # Route V4 events to V4 pools
         for v4_pool in self.v4_pools.values():
-            v4_pool.update_latest_block_transactions(transaction)
+            v4_pool.update_latest_block_control_address_transactions(transaction)
             v4_pool.process_transaction(transaction)            
             
     def _check_pool_creations(self, transaction: Dict):
@@ -277,6 +280,8 @@ class PoolManager:
         
         V4 pools are identified by PoolId, not address.
         All V4 pools share the same PoolManager address.
+        The Uniswap V4 spec encodes the native ETH leg as the zero address, so we
+        treat that currency as a fixed 18-decimal asset and skip token metadata lookups.
         """
         
         # V4 events use event_id for pool identification
@@ -310,12 +315,25 @@ class PoolManager:
             hooks=hooks
         )
         
-        # Create V4 pool instance
-        decimal_kwargs = self._pool_decimal_kwargs(
-            denom_address,
-            block_number=transaction.get('block_number'),
-            block_header=transaction.get('block_header'),
-        )
+        # V4 encodes native ETH as the zero address. Avoid metadata lookups because
+        # the PyReth chain query treats the zero address as non-contract and will
+        # reject decimals/symbol calls. Treat it as an 18-decimal native currency.
+        denom_is_native = denom_address == ZERO_ADDRESS
+        if denom_is_native:
+            decimal_kwargs = {
+                'token_decimals': self._get_token_decimals(
+                    transaction.get('block_number'),
+                    transaction.get('block_header'),
+                ),
+                'denom_decimals': 18,
+                'history_limit': self.history_limit,
+            }
+        else:
+            decimal_kwargs = self._pool_decimal_kwargs(
+                denom_address,
+                block_number=transaction.get('block_number'),
+                block_header=transaction.get('block_header'),
+            )
         pool = UniswapV4Pool(
             pool_id=pool_id,
             pool_key=pool_key,
@@ -340,6 +358,7 @@ class PoolManager:
         self.pools_by_denom[pool.denom_address].append(pool.pool_address)
         if self._token_control_addresses:
             pool.register_token_control_addresses(self._token_control_addresses)
+        self._seed_pool_with_cached_control_transactions(pool)
 
     def _register_v4_pool(self, pool: UniswapV4Pool):
         """Register a V4 pool in the manager. V4 pools are tracked separately by PoolId."""
@@ -348,11 +367,7 @@ class PoolManager:
         self.pools_by_denom[pool.denom_address].append(pool.pool_id)
         if self._token_control_addresses:
             pool.register_token_control_addresses(self._token_control_addresses)
-
-    def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
-        self._token_control_addresses.update(addresses)
-        for pool in self.get_all_pools():
-            pool.register_token_control_addresses(addresses)
+        self._seed_pool_with_cached_control_transactions(pool)
     
     def add_pool(self, pool_address: str, protocol: str, denom_address: str, 
                  token1_is_denom: bool = True, **kwargs):
@@ -454,7 +469,48 @@ class PoolManager:
         
         self._register_v4_pool(pool)
         return pool
-        
+    
+    def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
+        self._token_control_addresses.update(addresses)
+        for pool in self.get_all_pools():
+            pool.register_token_control_addresses(addresses)
+        self.update_latest_block_control_address_transactions()
+
+    def update_latest_block_control_address_transactions(self) -> None:
+        if self._latest_block_control_address_txs:
+            filtered: Dict[str, Dict[str, Any]] = {}
+            for tx_hash, tx in self._latest_block_control_address_txs.items():
+                unique_addresses = set(tx.get('unique_addresses') or [])
+                if self._token_control_addresses.intersection(unique_addresses):
+                    filtered[tx_hash] = tx
+            self._latest_block_control_address_txs = filtered
+            if not filtered:
+                self._latest_control_block = None
+
+    def _update_block_control_addrress_transactions(self, transaction: Dict) -> None:
+        if not self._token_control_addresses:
+            return
+        unique_addresses = set(transaction.get('unique_addresses') or [])
+        if not unique_addresses:
+            return
+        if not self._token_control_addresses.intersection(unique_addresses):
+            return
+        block_number = transaction.get('block_number')
+        if self._latest_control_block != block_number:
+            self._latest_control_block = block_number
+            self._latest_block_control_address_txs = {}
+        tx_hash = transaction.get('hash')
+        if tx_hash and tx_hash not in self._latest_block_control_address_txs:
+            self._latest_block_control_address_txs[tx_hash] = transaction
+
+    def _seed_pool_with_cached_control_transactions(self, pool: BasePool) -> None:
+        if self._latest_control_block is None:
+            return
+        if not self._latest_block_control_address_txs:
+            return
+        pool._latest_block_number = self._latest_control_block
+        pool.latest_block_control_address_txs = dict(self._latest_block_control_address_txs)
+
     def get_pool(self, pool_address: str) -> Optional[BasePool]:
         """Get a specific pool by address or display address."""
         # Support V4 display address formats (POOL_MANAGER-prefix or PoolManager#id)
