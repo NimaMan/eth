@@ -15,7 +15,7 @@ use tokio::task;
 
 // Reth imports
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
+use alloy_rpc_types_trace::geth::{CallConfig, CallFrame, GethDefaultTracingOptions, StructLog};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
 use reth_provider::{HeaderProvider, StateProvider, StateProviderBox};
@@ -24,6 +24,41 @@ use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use serde::{Deserialize, Serialize};
+
+enum UnsignedTraceMode {
+    None,
+    Call { call_config: CallConfig },
+    Full { call_config: CallConfig },
+}
+
+struct UnsignedExecutionResult {
+    simulation: SimulationResult,
+    call_trace: Option<CallFrame>,
+    struct_logs: Option<Vec<StructLog>>,
+}
+
+impl UnsignedExecutionResult {
+    fn into_simulation(self) -> SimulationResult {
+        self.simulation
+    }
+
+    fn into_full(self) -> FullSimulationResult {
+        let UnsignedExecutionResult {
+            simulation,
+            call_trace,
+            struct_logs,
+        } = self;
+
+        FullSimulationResult {
+            success: simulation.success,
+            gas_used: simulation.gas_used,
+            revert_reason: simulation.revert_reason,
+            revert_context: simulation.revert_context,
+            call_trace: call_trace.unwrap_or_default(),
+            struct_logs,
+        }
+    }
+}
 
 /// Unsigned transaction for simulation (no signature required)
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -201,7 +236,7 @@ impl TxSimulator {
     ) -> Result<FullSimulationResult> {
         let simulator = self.clone();
         task::spawn_blocking(move || {
-            Self::run_unsigned_transaction_with_trace(
+            Self::run_unsigned_execution(
                 simulator,
                 unsigned_tx,
                 block_header,
@@ -209,8 +244,11 @@ impl TxSimulator {
                 TracingInspectorConfig::default_geth()
                     .set_record_logs(true)
                     .set_steps(true),
-                CallConfig::default().with_log(),
+                UnsignedTraceMode::Full {
+                    call_config: CallConfig::default().with_log(),
+                },
             )
+            .map(UnsignedExecutionResult::into_full)
         })
         .await
         .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
@@ -222,50 +260,15 @@ impl TxSimulator {
         block_header: SealedHeader,
         state: StateProviderBox,
     ) -> Result<SimulationResult> {
-        let block_header = block_header.into_header();
-        let mut db = CacheDB::new(StateProviderDatabase::new(state));
-        let initial_context = if let Some(target) = unsigned_tx.to {
-            let has_code = db.db.account_code(&target)?.is_some();
-            Some(RevertContext {
-                target,
-                has_code,
-                calldata_len: unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            })
-        } else {
-            None
-        };
-        let mut inspector = TracingInspector::new(TracingInspectorConfig::default_parity());
-        let evm_env = simulator
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
-        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
-        let tx_env = simulator.create_tx_env(
-            &unsigned_tx,
-            evm_env.block_env.gas_limit as u128,
-            base_fee,
-            &mut db,
-        )?;
-        let mut evm =
-            simulator
-                .evm_config
-                .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
-
-        let res = evm.transact(tx_env)?;
-        db.commit(res.state);
-
-        let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
-        let revert_data = res.result.output().cloned();
-        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
-        let revert_context = if success { None } else { initial_context };
-
-        Ok(SimulationResult {
-            success,
-            gas_used,
-            revert_reason,
-            revert_context,
-        })
+        Self::run_unsigned_execution(
+            simulator,
+            unsigned_tx,
+            block_header,
+            state,
+            TracingInspectorConfig::default_parity(),
+            UnsignedTraceMode::None,
+        )
+        .map(UnsignedExecutionResult::into_simulation)
     }
 
     fn run_unsigned_transaction_with_trace(
@@ -276,25 +279,35 @@ impl TxSimulator {
         inspector_config: TracingInspectorConfig,
         call_config: CallConfig,
     ) -> Result<FullSimulationResult> {
-        let block_header = block_header.into_header();
+        Self::run_unsigned_execution(
+            simulator,
+            unsigned_tx,
+            block_header,
+            state,
+            inspector_config,
+            UnsignedTraceMode::Call { call_config },
+        )
+        .map(UnsignedExecutionResult::into_full)
+    }
+
+    fn run_unsigned_execution(
+        simulator: TxSimulator,
+        unsigned_tx: UnsignedTransaction,
+        block_header: SealedHeader,
+        state: StateProviderBox,
+        inspector_config: TracingInspectorConfig,
+        trace_mode: UnsignedTraceMode,
+    ) -> Result<UnsignedExecutionResult> {
+        let header = block_header.into_header();
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
-        let initial_context = if let Some(target) = unsigned_tx.to {
-            let has_code = db.db.account_code(&target)?.is_some();
-            Some(RevertContext {
-                target,
-                has_code,
-                calldata_len: unsigned_tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            })
-        } else {
-            None
-        };
+        let initial_context = Self::unsigned_initial_context(&mut db, &unsigned_tx)?;
 
         let mut inspector = TracingInspector::new(inspector_config);
         let evm_env = simulator
             .evm_config
-            .evm_env(&block_header)
+            .evm_env(&header)
             .expect("failed to build EVM env");
-        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
+        let base_fee = header.base_fee_per_gas.map(|v| v as u128);
         let tx_env = simulator.create_tx_env(
             &unsigned_tx,
             evm_env.block_env.gas_limit as u128,
@@ -314,32 +327,61 @@ impl TxSimulator {
         let gas_used = res.result.gas_used();
         let raw_output = res.result.output().cloned();
         let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
-        let revert_context = if success { None } else { initial_context };
-
-        let builder = inspector
-            .with_transaction_gas_limit(gas_limit)
-            .into_geth_builder();
-        let call_frame = builder.geth_call_traces(call_config, gas_used);
-        let struct_logs = if inspector_config.record_steps {
-            let return_value = raw_output.clone().unwrap_or_default();
-            let trace_opts = GethDefaultTracingOptions::default();
-            Some(
-                builder
-                    .geth_traces(gas_used, return_value, trace_opts)
-                    .struct_logs,
-            )
-        } else {
+        let revert_context = if success {
             None
+        } else {
+            initial_context.clone()
         };
-
-        Ok(FullSimulationResult {
+        let simulation = SimulationResult {
             success,
             gas_used,
             revert_reason,
             revert_context,
-            call_trace: call_frame,
+        };
+
+        let (call_trace, struct_logs) = match trace_mode {
+            UnsignedTraceMode::None => (None, None),
+            UnsignedTraceMode::Call { call_config } => {
+                let builder = inspector
+                    .with_transaction_gas_limit(gas_limit)
+                    .into_geth_builder();
+                let call_frame = builder.geth_call_traces(call_config, gas_used);
+                (Some(call_frame), None)
+            }
+            UnsignedTraceMode::Full { call_config } => {
+                let builder = inspector
+                    .with_transaction_gas_limit(gas_limit)
+                    .into_geth_builder();
+                let call_frame = builder.geth_call_traces(call_config, gas_used);
+                let return_value = raw_output.clone().unwrap_or_default();
+                let struct_logs = builder
+                    .geth_traces(gas_used, return_value, GethDefaultTracingOptions::default())
+                    .struct_logs;
+                (Some(call_frame), Some(struct_logs))
+            }
+        };
+
+        Ok(UnsignedExecutionResult {
+            simulation,
+            call_trace,
             struct_logs,
         })
+    }
+
+    fn unsigned_initial_context(
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        tx: &UnsignedTransaction,
+    ) -> Result<Option<RevertContext>> {
+        if let Some(target) = tx.to {
+            let has_code = db.db.account_code(&target)?.is_some();
+            Ok(Some(RevertContext {
+                target,
+                has_code,
+                calldata_len: tx.data.as_ref().map(|d| d.len()).unwrap_or(0),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Helper to create transaction environment from UnsignedTransaction
