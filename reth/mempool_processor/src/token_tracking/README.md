@@ -161,7 +161,7 @@ cargo run --example token_pool_csv_logger
 ### Check Signal Detection
 ```bash
 # Monitor signal generation
-tail -f logs/mempool/signal_detector_*/signals/tax_signals.log
+tail -f mempool_processor/logs/signal_detector_*/signals/tax_signals.log
 ```
 
 ## Known Issues

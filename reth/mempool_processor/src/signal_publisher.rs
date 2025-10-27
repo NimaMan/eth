@@ -42,14 +42,18 @@ impl SignalPublisherConfig {
     /// Create config with timestamped log directory using provided base path
     pub fn with_timestamped_logs(base_dir: &str) -> Self {
         let timestamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S");
-        let log_dir = format!("{}/signal_publisher_{}", base_dir, timestamp);
-        Self::with_log_dir(&log_dir)
+        let log_dir = PathBuf::from(base_dir).join(format!("signal_publisher_{}", timestamp));
+        Self::with_log_dir(
+            log_dir
+                .to_str()
+                .expect("log directory should be valid unicode path"),
+        )
     }
 }
 
 impl Default for SignalPublisherConfig {
     fn default() -> Self {
-        Self::with_timestamped_logs("/home/nima/code/crypto/rust/mempool_processor/logs")
+        Self::with_timestamped_logs(crate::config::DEFAULT_LOG_DIR)
     }
 }
 

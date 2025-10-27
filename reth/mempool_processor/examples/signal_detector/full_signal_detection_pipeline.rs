@@ -5,6 +5,7 @@ use eyre::Result;
 use hex;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 /// Simulation Only Test
 ///
@@ -29,26 +30,27 @@ use mempool_processor::{
     token_tracking::{TokenTrackingCache, TokenTrackingSubscriber},
     tx_router::{SimulationPriority, TransactionCategory, TransactionRouter as TxRouter},
 };
-use std::collections::{HashMap, VecDeque};
+use reth_chain_query::to_checksum_address;
+use std::collections::VecDeque;
 // Import pool simulation types from tx_processor
 use std::str::FromStr;
 use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 // Import the correct types from simulation_manager
 use mempool_processor::simulator::simulation_manager::{
-    BuySellResult, SimulationRequest, SimulationResult, SimulationType,
+    SimulationResult, SimulationType, TxSimulationJob,
 };
 
 // ========== Simplified Simulation Manager (No Signal Detection) ==========
 
-// SimulationRequest, SimulationType are imported from simulation_manager
+// TxSimulationJob, SimulationType are imported from simulation_manager
 
-// SimulationResult and BuySellResult are imported from simulation_manager
+// SimulationResult is imported from simulation_manager
 
 /// Simple queue for simulation requests
 struct SimulationQueue {
-    high_priority: VecDeque<SimulationRequest>,
-    normal_priority: VecDeque<SimulationRequest>,
-    low_priority: VecDeque<SimulationRequest>,
+    high_priority: VecDeque<TxSimulationJob>,
+    normal_priority: VecDeque<TxSimulationJob>,
+    low_priority: VecDeque<TxSimulationJob>,
 }
 
 impl SimulationQueue {
@@ -60,7 +62,7 @@ impl SimulationQueue {
         }
     }
 
-    fn push(&mut self, request: SimulationRequest) {
+    fn push(&mut self, request: TxSimulationJob) {
         match request.priority {
             SimulationPriority::Critical | SimulationPriority::High => {
                 self.high_priority.push_back(request)
@@ -70,7 +72,7 @@ impl SimulationQueue {
         }
     }
 
-    fn pop(&mut self) -> Option<SimulationRequest> {
+    fn pop(&mut self) -> Option<TxSimulationJob> {
         self.high_priority
             .pop_front()
             .or_else(|| self.normal_priority.pop_front())
@@ -118,7 +120,7 @@ impl SimplifiedSimulationManager {
     }
 
     /// Submit a request for simulation
-    pub async fn submit(&self, request: SimulationRequest) -> Result<(), String> {
+    pub async fn submit(&self, request: TxSimulationJob) -> Result<(), String> {
         let mut queue = self.queue.lock().await;
         if queue.len() > 10000 {
             return Err("Queue is full".to_string());
@@ -133,7 +135,7 @@ impl SimplifiedSimulationManager {
         let mut handles = Vec::new();
 
         // Get up to max_concurrent requests from queue
-        let requests: Vec<SimulationRequest> = {
+        let requests: Vec<TxSimulationJob> = {
             let mut queue = self.queue.lock().await;
             let mut batch = Vec::new();
             for _ in 0..self.max_concurrent_simulations {
@@ -190,7 +192,7 @@ impl SimplifiedSimulationManager {
 
     /// Simulate a single request
     async fn simulate_request(
-        request: SimulationRequest,
+        request: TxSimulationJob,
         simulator: Arc<MempoolSimulator>,
         token_cache: Arc<TokenTrackingCache>,
     ) -> SimulationResult {
@@ -213,14 +215,14 @@ impl SimplifiedSimulationManager {
             TransactionCategory::ContractCreation {
                 contract_address, ..
             } => {
-                // For contract creation, the contract is the token
                 let token_addr = contract_address
                     .trim_start_matches("0x")
                     .parse::<Address>()
                     .ok();
-                // Get pool address from token's pools
-                let pool_addr = if let Some(addr) = token_addr {
-                    let pools = token_cache.get_pools_for_token(&addr).await;
+
+                let pool_addr = if let Some(addr) = token_addr.as_ref() {
+                    let token_key = to_checksum_address(addr);
+                    let pools = token_cache.get_pools_for_token(&token_key).await;
                     pools
                         .iter()
                         .max_by(|a, b| a.eth_reserve.partial_cmp(&b.eth_reserve).unwrap())
@@ -228,18 +230,18 @@ impl SimplifiedSimulationManager {
                 } else {
                     None
                 };
+
                 (token_addr, pool_addr)
             }
             TransactionCategory::CreatorTransaction { target_token, .. } => {
                 // Get token address
-                let token_addr = if let Some(token) = target_token {
-                    token.trim_start_matches("0x").parse::<Address>().ok()
-                } else {
-                    None
-                };
-                // Get pool address from token's pools
-                let pool_addr = if let Some(addr) = token_addr {
-                    let pools = token_cache.get_pools_for_token(&addr).await;
+                let token_addr = target_token
+                    .as_ref()
+                    .and_then(|token| token.trim_start_matches("0x").parse::<Address>().ok());
+
+                let pool_addr = if let Some(addr) = token_addr.as_ref() {
+                    let token_key = to_checksum_address(addr);
+                    let pools = token_cache.get_pools_for_token(&token_key).await;
                     pools
                         .iter()
                         .max_by(|a, b| a.eth_reserve.partial_cmp(&b.eth_reserve).unwrap())
@@ -255,19 +257,11 @@ impl SimplifiedSimulationManager {
         result.token_address = token_address;
         result.pool_address = pool_address;
 
-        // Convert transaction for simulation
-        let full_tx = mempool_processor::mempool_fetcher::FullTransaction {
-            hash: request.tx.hash.clone(),
-            tx_data: request.tx.data.clone(),
-            detection_time: std::time::Instant::now(),
-            latency_ns: request.tx.detection_ns,
-        };
-
         // Perform simulation based on type
         match request.simulation_type {
             SimulationType::TransactionOnly => {
                 // Only simulate the transaction
-                match simulator.simulate_mempool_tx(&full_tx).await {
+                match simulator.simulate_mempool_tx(&request.tx).await {
                     Ok(sim_result) => {
                         // State changes are in pool_viability_result if we had one
                         if let Some(reason) = sim_result.revert_reason {
@@ -282,11 +276,20 @@ impl SimplifiedSimulationManager {
             SimulationType::TransactionWithBuySell | SimulationType::BuySellOnly => {
                 // Need both token and pool addresses
                 if let (Some(token_addr), Some(pool_addr)) = (token_address, pool_address) {
+                    let token_decimals = {
+                        let token_key = to_checksum_address(&token_addr);
+                        token_cache
+                            .get_token(&token_key)
+                            .await
+                            .map(|token| token.decimals)
+                            .unwrap_or(18)
+                    };
+
                     // Create call request for the transaction
-                    let tx_call_request =
+                    let _tx_call_request =
                         if request.simulation_type == SimulationType::TransactionWithBuySell {
                             match mempool_processor::common::convert::ipc_to_call_request(
-                                &full_tx.tx_data,
+                                &request.tx.data,
                             ) {
                                 Ok(call) => Some(call),
                                 Err(e) => {
@@ -300,30 +303,17 @@ impl SimplifiedSimulationManager {
                         };
 
                     // Run pool buy/sell simulation
-                    let config = tx_processor::PoolBuySellParameters {
-                        token_address: token_addr,
-                        pool_address: pool_addr.to_string(),
-                        pool_type: PoolType::UniswapV2,
-                        test_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
-                        buyer_address: Address::from_str(
-                            "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689",
-                        )
-                        .unwrap(),
-                        block_number: None,
-                        gas_limit: 500_000,
-                        gas_price: Some(30_000_000_000),
-                        max_fee_per_gas: None,
-                        max_priority_fee_per_gas: None,
-                        prior_tx: tx_call_request,
-                        block_delay: 0,
-                        slippage_tolerance: 0.5,
-                        token_decimals: 18,
-                        weth_address: Address::from_str(
-                            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                        )
-                        .unwrap(),
-                        block_header: None,
-                    };
+                    let buyer_address =
+                        Address::from_str("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689").unwrap();
+                    let mut config =
+                        PoolBuySellParameters::new(token_addr, pool_addr, PoolType::UniswapV2)
+                            .with_token_decimals(token_decimals)
+                            .with_buyer(buyer_address)
+                            .with_test_amount(U256::from(10_000_000_000_000_000u64));
+                    config.gas_price = Some(30_000_000_000u128);
+                    config.buy_gas_limit = 500_000;
+                    config.approve_gas_limit = 200_000;
+                    config.sell_gas_limit = 500_000;
 
                     match simulator.simulate_pool_buy_sell(config).await {
                         Ok(sim_result) => {
@@ -397,12 +387,12 @@ async fn main() -> Result<()> {
         .init();
 
     // Create log directory
-    let log_dir = "/home/nima/code/crypto/logs/mempool/dev/simulation_only";
-    create_dir_all(log_dir)?;
+    let log_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("logs/dev/simulation_only");
+    create_dir_all(&log_dir)?;
 
     // Create log file
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let log_path = format!("{}/simulation_test_{}.log", log_dir, timestamp);
+    let log_path = log_dir.join(format!("simulation_test_{}.log", timestamp));
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -415,7 +405,7 @@ async fn main() -> Result<()> {
     writeln!(log_file, "======================================\n")?;
 
     info!("🚀 Starting Simulation Only Test");
-    info!("📝 Logging to: {}", log_path);
+    info!("📝 Logging to: {}", log_path.display());
     info!("🎯 Target: {} transactions", args.target_count);
     info!("⚠️  Signal detection is DISABLED for this test");
 
@@ -556,7 +546,7 @@ async fn main() -> Result<()> {
             }
 
             // 3. Create simulation request
-            let sim_request = SimulationRequest {
+            let sim_request = TxSimulationJob {
                 tx: tx.clone(),
                 category: category.clone(),
                 priority: match &category {
@@ -761,7 +751,7 @@ async fn main() -> Result<()> {
     writeln!(log_file, "{}", summary)?;
 
     info!("\n✅ Simulation test complete!");
-    info!("📄 Results saved to: {}", log_path);
+    info!("📄 Results saved to: {}", log_path.display());
     info!("🔍 This test ran WITHOUT signal detection");
     info!("   Use this log to debug simulation issues");
 

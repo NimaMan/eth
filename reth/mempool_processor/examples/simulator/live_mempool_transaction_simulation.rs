@@ -9,6 +9,7 @@ use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use mempool_processor::simulator::MempoolSimulator;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
@@ -43,11 +44,12 @@ async fn main() -> Result<()> {
     info!("✅ Mempool monitoring started\n");
 
     // Create log file
-    std::fs::create_dir_all("/home/nima/code/crypto/rust/mempool_processor/logs/simulation")?;
-    let log_path = format!(
-        "/home/nima/code/crypto/rust/mempool_processor/logs/simulation/live_simulation_{}.log",
+    let log_dir = PathBuf::from(mempool_processor::config::DEFAULT_LOG_DIR).join("simulation");
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join(format!(
+        "live_simulation_{}.log",
         Local::now().format("%Y%m%d_%H%M%S")
-    );
+    ));
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -177,7 +179,7 @@ async fn main() -> Result<()> {
         )?;
     }
 
-    println!("\n✅ Complete! Log saved to: {}", log_path);
+    println!("\n✅ Complete! Log saved to: {}", log_path.display());
     header_task.abort();
     Ok(())
 }

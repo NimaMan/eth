@@ -4,10 +4,13 @@
 /// Triggers signals when: can_buy && can_sell && taxes <= 25% && not already enabled
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
+use reth_chain_query::to_checksum_address;
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
@@ -43,6 +46,8 @@ pub struct TradingStatusDetector {
     log_file_path: Option<PathBuf>,
     /// Token tracking cache to check existing trading status
     token_cache: Option<Arc<TokenTrackingCache>>,
+    /// Tracks (token, pool) pairs we have already emitted signals for during this run
+    emitted_trading_pairs: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl TradingStatusDetector {
@@ -51,6 +56,7 @@ impl TradingStatusDetector {
             tax_threshold: 25.0, // 25% tax threshold
             log_file_path: None,
             token_cache: None,
+            emitted_trading_pairs: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -59,6 +65,7 @@ impl TradingStatusDetector {
             tax_threshold: 25.0,
             log_file_path: Some(log_path),
             token_cache: None,
+            emitted_trading_pairs: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -84,7 +91,7 @@ impl TradingStatusDetector {
 
         // Extract token/pool info from simulation result - MUST use the actual pool from simulation
         let token_address = if let Some(token_addr) = &sim_result.token_address {
-            format!("{:?}", token_addr)
+            to_checksum_address(token_addr)
         } else {
             // Fallback to transaction category if not in sim result
             match &sim_result.request.category {
@@ -101,7 +108,7 @@ impl TradingStatusDetector {
 
         // CRITICAL: Use pool address from simulation result, NOT from transaction category
         let pool_address = if let Some(pool_addr) = &sim_result.pool_address {
-            format!("{:?}", pool_addr)
+            to_checksum_address(pool_addr)
         } else {
             warn!(
                 "No pool address in simulation result for token {}",
@@ -116,6 +123,16 @@ impl TradingStatusDetector {
             .as_ref()
             .unwrap_or(&"Unknown".to_string())
             .clone();
+
+        let already_enabled_in_cache = self
+            .is_trading_already_enabled(&token_address, &pool_address)
+            .await;
+        if already_enabled_in_cache {
+            debug!(
+                "Pool {} for token {} already marked trading_enabled in cache",
+                pool_address, token_address
+            );
+        }
 
         // Get executor from transaction category
         let executor = match &sim_result.request.category {
@@ -208,16 +225,18 @@ impl TradingStatusDetector {
             }
         }
 
-        // Check if trading is already enabled for this pool
-        if self
-            .is_trading_already_enabled(&token_address, &pool_address)
-            .await
+        // Prevent duplicate TradingEnabled signals during this run
+        let pair_key = (token_address.clone(), pool_address.clone());
         {
-            debug!(
-                "Token {} pool {} - Trading already enabled, skipping signal",
-                token_address, pool_address
-            );
-            return None;
+            let mut emitted = self.emitted_trading_pairs.lock().await;
+            if emitted.contains(&pair_key) {
+                debug!(
+                    "Token {} pool {} - Trading enabled signal already emitted earlier",
+                    token_address, pool_address
+                );
+                return None;
+            }
+            emitted.insert(pair_key);
         }
 
         // All conditions met - generate trading enabled signal!
@@ -241,9 +260,10 @@ impl TradingStatusDetector {
             sell_tax,
             tx_hash: tx_hash.clone(),
             details: format!(
-                "Trading enabled: buy_tax={:.1}%, sell_tax={:.1}%",
+                "Trading enabled: buy_tax={:.1}%, sell_tax={:.1}%, cache_already_enabled={}",
                 buy_tax.unwrap_or(0.0),
-                sell_tax.unwrap_or(0.0)
+                sell_tax.unwrap_or(0.0),
+                already_enabled_in_cache
             ),
         })
     }

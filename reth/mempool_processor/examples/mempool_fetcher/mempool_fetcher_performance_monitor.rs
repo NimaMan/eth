@@ -3,6 +3,7 @@ use ethers::providers::{Http, Provider};
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 /// Mempool Fetcher Performance Monitor
 ///
@@ -18,7 +19,7 @@ use std::sync::Arc;
 ///
 /// Run with: cargo run --example mempool_fetcher_performance_monitor --release
 ///
-/// Logs to: /home/nima/code/crypto/rust/mempool_processor/logs/performance_YYYYMMDD_HHMMSS.csv
+/// Logs to: mempool_processor/logs/performance_YYYYMMDD_HHMMSS.csv
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -152,11 +153,11 @@ fn check_transaction_completeness(
 
 async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
-    let log_dir = "/home/nima/code/crypto/rust/mempool_processor/logs";
-    std::fs::create_dir_all(log_dir)?;
+    let log_dir = PathBuf::from(mempool_processor::config::DEFAULT_LOG_DIR);
+    std::fs::create_dir_all(&log_dir)?;
 
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let log_path = format!("{}/performance_{}.csv", log_dir, timestamp);
+    let log_path = log_dir.join(format!("performance_{}.csv", timestamp));
     let mut log_file = File::create(&log_path)?;
 
     // Write CSV header
@@ -166,7 +167,7 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     info!("Starting Mempool Fetcher Performance Monitor");
-    info!("Log file: {}", log_path);
+    info!("Log file: {}", log_path.display());
     info!("Objectives:");
     info!("1. Verify IMMEDIATE detection (<10μs target)");
     info!("2. Verify COMPLETE transaction data");

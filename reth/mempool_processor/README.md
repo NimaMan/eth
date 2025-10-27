@@ -37,6 +37,16 @@ High-performance Rust system for real-time Ethereum mempool monitoring, transact
 - [ ] Add metrics (tip-lag, overlay size, replay latency) to ensure the new path stays performant.
 - [ ] Provide fallbacks (retry with canonical MDBX) if the tip snapshot becomes unavailable.
 
+## ✅ Implementation Status & Known Gaps
+
+- **Live head snapshots in place**: `CanonicalHeadCache::spawn_head_listener` is wired into the service. Mempool simulations pull the latest `SealedHeader` from that subscription before falling back to MDBX, so gas/base-fee data now reflects the freshest canonical tip.
+- **Only the latest header is cached**: we currently overwrite the snapshot on every new head. If callers need `tip-1`, we must extend the cache (for example, keep a short deque) because the previous header is not retained yet.
+- **Contract-creation flow still stubbed**: `SimulationManager` warns and exits early for deployments. There is no deterministic address derivation, helper replay, or post-deploy per-pool viability check.
+- **State-change extraction missing**: `simulate_mempool_tx_with_state_changes` returns an empty map; integrating the richer `tx_processor` diffs is still a TODO.
+- **Signal payload tax fields rely solely on buy/sell probes**: we do not compute before/after deltas from state changes, so downstream consumers cannot see tax adjustments unless the probe succeeds.
+- **Pool metadata in token cache is partially hardcoded**: V2 pools are tagged with `"V2"` and `last_update_block = 0` because the provenance supplied by the Python publisher is not persisted yet.
+- **Pending sequence buffer only keeps unmined helpers**: creator transactions are tracked per `(creator, token)` while they remain in the mempool. A contract-creation tx is only retained if a trading-enablement helper lands in the same block; otherwise the Python token-tracking feed populates the token on the next block and the creation is dropped.
+
 ## 🎯 Core Concept: Transaction Flow & Signal Detection
 
 ### **The Journey of a Transaction**
@@ -553,39 +563,11 @@ export SIGNAL_ZMQ_ENDPOINT="tcp://127.0.0.1:5556"
 ./target/release/mempool_signal_detector \
   --ipc-path /tmp/reth.ipc \
   --reth-db-path /home/nima/.local/share/reth/mainnet \
-  --log-dir /home/nima/code/crypto/logs/mempool \
+  --log-dir mempool_processor/logs \
   --batch-size 100 \
   --sim-workers 10
 ```
 
-## 📊 Performance Monitoring
-
-### **Real-time Metrics**
-```bash
-# View timing reports (every 1000 transactions)
-tail -f /home/nima/code/crypto/logs/mempool/timing_reports_full_tx_*.log
-
-# Monitor scam detections
-tail -f /home/nima/code/crypto/logs/mempool/scam_alerts_full_tx_*.log
-
-# Watch market events
-tail -f /home/nima/code/crypto/logs/mempool/market_events_full_tx_*.log
-```
-
-### **Sample Timing Report**
-```
-[2025-07-02 17:19:57.424] ============================================================
-[2025-07-02 17:19:57.424] IPC Full: 2000 transactions, avg latency: 12μs, queue: 0/50000
-[2025-07-02 17:19:57.424] ⚡ TIMING REPORT (last 1101 transactions):
-[2025-07-02 17:19:57.424]    📡 IPC Detection:   avg=0.01ms  max=0.04ms
-[2025-07-02 17:19:57.424]    🔬 Simulation:      avg=6.55ms  max=864.83ms
-[2025-07-02 17:19:57.424]    🔍 Pool Check:      avg=0.00ms  max=0.02ms
-[2025-07-02 17:19:57.424]    🛡️  Scam Detection: avg=0.00ms  max=0.10ms
-[2025-07-02 17:19:57.424]    📊 Total Pipeline:  avg=6.63ms  max=864.93ms
-[2025-07-02 17:19:57.424]    🎯 Pools Affected:  0 (0.0%)
-[2025-07-02 17:19:57.424]    🚀 Throughput:      150.7 tx/sec
-[2025-07-02 17:19:57.424] ============================================================
-```
 
 ## 📡 Trading Signal Integration
 
@@ -706,117 +688,3 @@ src/
     ├── address.rs                                 # Address formatting
     └── types.rs                                   # Common data types
 ```
-
-## 🔧 Configuration Reference
-
-### **Detection Thresholds**
-```rust
-// Trading signals
-max_acceptable_buy_tax: 25%          // Trading enabled if ≤25%
-max_acceptable_sell_tax: 25%         // Trading enabled if ≤25%
-
-// Honeypot detection
-honeypot_sell_threshold: 50%         // Honeypot if sell tax >50%
-
-// Liquidity/scam detection  
-scam_drain_threshold: 60%            // Scam if >60% drained
-min_eth_threshold: 0.3 ETH           // Scam if <0.3 ETH remaining
-major_removal_threshold: 50%         // Major removal signal
-significant_removal_threshold: 20%   // Significant removal signal
-min_pool_eth: 0.05 ETH              // Minimum pool size to track
-
-// Cache limits (hardcoded - TODO: make configurable)
-max_pools: 100_000                   // Pool state cache
-max_creators: 50_000                 // Token creator cache
-```
-
-### **Performance Tuning**
-```rust
-// Ultra-fast client settings
-const BUFFER_SIZE: usize = 8192;           // Socket read buffer
-const QUEUE_CAPACITY: usize = 50_000;      // Transaction queue
-const TIMEOUT_MS: u64 = 100;               // Non-blocking timeout
-
-// Pool cache settings  
-const CACHE_TTL_BLOCKS: u64 = 5;           // Cache refresh interval
-const MAX_CACHED_POOLS: usize = 10_000;    // Memory limit
-```
-
-## 🛠️ Development
-
-### **Build & Test**
-```bash
-# Development build
-cargo build
-
-# Production build (optimized)
-cargo build --release
-
-# Run tests
-cargo test
-
-# Lint and check
-cargo clippy
-cargo check
-```
-
-### **Adding New Signal Types**
-1. Define event in `src/signal_engine/types.rs`
-2. Implement detection in `src/signal_engine/engine.rs`
-3. Add threshold to `SignalThresholds` struct
-4. Update publisher filtering if needed
-
-### **Performance Analysis**
-```bash
-# Run with detailed timing
-RUST_LOG=debug ./target/release/mempool_signal_detector
-
-# Profile memory usage
-valgrind --tool=massif ./target/release/mempool_signal_detector
-
-# Benchmark detection latency
-cargo run --example test_buy_sell_simulator
-```
-
-## 📈 Production Deployment
-
-### **System Requirements**
-- **CPU**: 2+ cores, <1% sustained usage
-- **RAM**: 64MB+ (27MB baseline + buffer)  
-- **Network**: <10ms RTT to Reth node
-- **Storage**: 1GB+ for logs and database
-
-### **Deployment Checklist**
-- [ ] Reth node running with IPC enabled at `/tmp/reth.ipc`
-- [ ] Reth database accessible at `/home/nima/.local/share/reth/mainnet`
-- [ ] Python token tracking service running on ports 5557-5558
-- [ ] Log directory `/home/nima/code/crypto/logs/mempool/` exists
-- [ ] ZMQ signal publisher port 5556 available
-- [ ] Sufficient disk space for logs (1GB+)
-
-### **Production Optimizations**
-- Use `--release` build for maximum performance
-- Enable `--enable-publisher` for trading integration
-- Monitor log files for performance degradation
-- Set up alerting on detection latency >10ms
-
-## 🔗 Integration
-
-### **External Systems**
-- **[eth_kartal](../eth_kartal)**: Transaction execution engine
-- **[revm_tx_simulator](../revm_tx_simulator)**: Alternative simulator
-- **[baygus](../../py/baygus)**: Web analytics dashboard
-
-### **Data Sources**
-- **Reth Node**: Primary mempool and RPC data
-- **Python Pool Service**: Real-time pool state via ZMQ
-- **PostgreSQL**: Persistent storage and audit trail
-
-### **Output Consumers**
-- **Trading Bots**: Real-time alerts via ZMQ
-- **Analytics Systems**: Log file processing
-- **Monitoring**: HTTP metrics endpoint
-
-## 📜 License
-
-Proprietary - Internal use only

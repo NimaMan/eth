@@ -293,7 +293,7 @@ The `BuySellSimulator` executes transactions against current blockchain state:
 
 ```rust
 // Input: Classified transaction batch
-let simulation_request = SimulationRequest {
+let simulation_request = TxSimulationJob {
     tx: MempoolTransaction { ... },
     category: TransactionCategory::CreatorTransaction { ... },
     priority: SimulationPriority::Critical,
@@ -307,7 +307,7 @@ let simulation_request = SimulationRequest {
 
 // Output: SimulationResult
 pub struct SimulationResult {
-    pub request: SimulationRequest,
+    pub request: TxSimulationJob,
     pub tx_simulation: Option<TxSimulationResult>,
     pub buy_sell_result: Option<BuySellResult>,
     pub simulation_time_ms: f64,
@@ -334,7 +334,7 @@ Signal detection is now integrated directly within the SimulationManager, using 
 
 ```rust
 // Inside SimulationManager::simulate_request()
-async fn simulate_request(&self, request: SimulationRequest) -> SimulationResult {
+async fn simulate_request(&self, request: TxSimulationJob) -> SimulationResult {
     // 1. Run simulation
     let result = self.execute_simulation(request).await;
     
@@ -583,7 +583,7 @@ OPTIONS:
     --ipc-path <PATH>           IPC socket path [env: IPC_PATH] [default: /tmp/reth.ipc]
     --reth-db-path <PATH>       Reth database path for simulations [env: RETH_DB_PATH] 
                                 [default: /home/nima/.local/share/reth/mainnet]
-    --log-dir <PATH>            Log directory base path [default: /home/nima/code/crypto/logs/mempool]
+    --log-dir <PATH>            Log directory base path [default: mempool_processor/logs]
     --batch-size <SIZE>         Batch size for transaction processing [default: 100]
     --sim-workers <COUNT>       Simulation worker threads [default: 10]
     -v, --verbose               Enable verbose logging
@@ -670,7 +670,7 @@ The service tracks detailed performance metrics:
 The service creates a timestamped run directory with the following structure:
 
 ```
-/home/nima/code/crypto/logs/mempool/signal_detector_YYYY-MM-DD_HH-MM-SS/
+mempool_processor/logs/signal_detector_YYYY-MM-DD_HH-MM-SS/
 ├── signal_detector.log          # Main service + lifecycle logs
 ├── simulation_results.log       # One line per simulation outcome (success/error)
 ├── function_detector/           # Function detector diagnostics

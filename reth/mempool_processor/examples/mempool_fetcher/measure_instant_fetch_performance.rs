@@ -3,6 +3,7 @@ use clap::Parser;
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 /// Measure Instant Fetch Performance with Adaptive Backoff
 ///
 /// IMPORTANT: How Transaction Fetching Works
@@ -59,19 +60,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create log file
     let timestamp = Local::now().format("%Y%m%d_%H%M%S");
     // Create log directory if it doesn't exist
-    std::fs::create_dir_all("/home/nima/code/crypto/rust/mempool_processor/logs")?;
-    let log_path = format!(
-        "/home/nima/code/crypto/rust/mempool_processor/logs/instant_fetch_{}tx_{}.csv",
-        args.tx_count, timestamp
-    );
+    let log_dir = PathBuf::from(mempool_processor::config::DEFAULT_LOG_DIR);
+    std::fs::create_dir_all(&log_dir)?;
+    let log_path = log_dir.join(format!("instant_fetch_{}tx_{}.csv", args.tx_count, timestamp));
     let mut log_file = File::create(&log_path)?;
     writeln!(log_file, "fetch_num,batch_size,fetch_time_us,queue_wait_us,tx_detection_ns_min,tx_detection_ns_max,tx_detection_ns_avg,tx_hashes")?;
 
     // Also create a separate file with just transaction hashes for easy Etherscan verification
-    let hash_log_path = format!(
-        "/home/nima/code/crypto/rust/mempool_processor/logs/tx_hashes_{}tx_{}.txt",
-        args.tx_count, timestamp
-    );
+    let hash_log_path = log_dir.join(format!("tx_hashes_{}tx_{}.txt", args.tx_count, timestamp));
     let mut hash_file = File::create(&hash_log_path)?;
     let start_timestamp = Local::now();
     writeln!(
@@ -325,8 +321,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "################################################################################"
     )?;
 
-    info!("\n📁 Log saved to: {}", log_path);
-    info!("📁 Transaction hashes saved to: {}", hash_log_path);
+    info!("\n📁 Log saved to: {}", log_path.display());
+    info!("📁 Transaction hashes saved to: {}", hash_log_path.display());
     info!("\n🔍 To verify on Etherscan, check: https://etherscan.io/tx/[HASH]");
 
     Ok(())

@@ -37,6 +37,7 @@ pub struct SimulationManager {
 - For CreatorTransaction, simulates EACH pool independently and sends a result per pool to SignalManager
 - For other categories, sends a single SimulationResult to SignalManager
 - Tracks simulation statistics
+- Consumes transaction classifications from `TransactionRouter` and token/pool ownership context from the Python tracking service so only brand-new deployers need additional probing.
 
 #### 2. MempoolSimulator
 Unified simulator that wraps a single shared `Arc<TxSimulator>` used across components to avoid DB write-locks. Provides:
@@ -89,7 +90,37 @@ For EACH pool (run independently / concurrently)
 Notes:
 - Each pool generates its own SimulationResult and downstream signals; one noisy pool does not block others.
 - If no pools are found for a creator, a single “no-pools” result is sent to SignalManager (for logging/consistency).
-- **Current limitation**: the creator transaction itself is not yet baked into the buy/approve/sell probe. The current test therefore reflects the state *before* the pending creator call executes. The follow-up work on `feature/apply-creator-tx-before-buysell` will capture the creator mempool tx and inject it as the `prior_tx` when running the pool buy/approve/sell chain so the probe reflects post-call state without a separate primary simulation.
+- The simulator replays the creator's pending transaction sequence (ordered by nonce) before the buy/approve/sell probe. Launch helpers such as `openTrading()` and router seeding calls are applied via `prior_txs` so the viability check reflects post-call state in a single pass.
+- Token ownership and pool membership come from the Python token-tracking service. The router therefore already knows about the vast majority of creator/token pairs; only first-time deployers are missing until the deployment is mined.
+- When a contract creation appears in the mempool, the manager performs a quick metadata probe (`reth_chain_query::get_token_metadata`) to confirm the bytecode exposes ERC-20 semantics. If the launch is legitimate, we retain the deploy tx only long enough to connect a same-block trading-enablement attempt; otherwise the Python feed will surface the token on the next block and we drop the creation from our pending buffer.
+
+#### Pending Sequence Buffer (unmined creator history)
+
+```
+new creator tx ---> SimulationQueue (priority = Critical/High)
+                    │
+                    ├─> submit() stores the request and (if simulated)
+                    │   captures the resulting ProcessedTransaction
+                    │   inside `prior_tx_history[creator, token]`
+                    │
+                    └─> when the next creator tx arrives, we:
+                         1. pull the existing deque (bounded to PRIOR_TX_HISTORY_LIMIT = 6)
+                         2. replay each ProcessedTransaction in nonce order
+                            on the sequential simulator chain
+                         3. execute the current transaction and, if needed,
+                            run pool viability checks.
+```
+
+*Current pruning policy*
+
+- The buffer is keyed by `(creator, target_token)` and only tracks transactions that are still in the mempool (unmined). Canonical-head updates will evict any entries whose hashes appear in the new block.
+- Entries are deduplicated by hash / nonce and inserted in-order so the deque always reflects the most recent nonce progression we have seen from that creator.
+- The deque is capped (`PRIOR_TX_HISTORY_LIMIT`) to avoid unbounded memory; oldest entries are dropped when the cap is reached.
+- SimulationQueue only decides execution order; it does **not** own the buffer. Even if a lower-priority job is evicted when the queue is full, any processed creator transaction remains in the pending buffer until one of the pruning rules above removes it.
+- A contract-creation transaction is retained only when it pairs with a follow-on trading-enablement helper in the same block. Otherwise the Python token-tracking service ingests the deployed token on the next block, so the buffer drops the creation artifact once the canonical head advances.
+- Planned enhancement: hook the canonical-head listener so that when a new block lands we can (a) rebuild the in-memory sequence from on-chain data if required and (b) reseed prior helper transactions for newly tracked tokens. This keeps the buffer aligned with the canonical state without waiting for limit-based eviction.
+
+Until the block-aware pruning is in place, operators should note that the sequence buffer only tracks the last few creator actions per token. If a creator floods the mempool with more than the configured limit before we see a block, older entries will be discarded; the subsequent replay will still succeed because we execute the current transaction against the canonical nonce, but early setup actions may need to be refetched from chain if they become relevant again.
 
 ### Other Categories
 
@@ -108,7 +139,7 @@ signal_manager.process_simulation_result(result)
 
 ### 1. Transaction Submission
 ```rust
-simulation_manager.submit(SimulationRequest {
+simulation_manager.submit(TxSimulationJob {
     tx: MempoolTransaction,
     category: TransactionCategory,
     priority: SimulationPriority,
@@ -129,6 +160,8 @@ High-level `simulate_request` flow:
 - Shared DB connection: MempoolSimulator wraps a single shared `Arc<TxSimulator>` so pool simulations and other paths reuse the same provider and avoid LMDB writer locks.
 - Nonce handling: `simulate_mempool_tx` retries on “nonce too high, expected N”. For historical transactions (or MEV sequences), prefer at‑block simulation to avoid nonce/basefee drift.
 - Historical state: When simulating at a transaction’s original block, a pruned node may report “state at block is pruned”. In that case, fall back to latest‑block behavior with best‑effort nonce handling.
+- Creator launches often execute *multiple* helper calls (contract creation → openTrading → router call) in the same block. When we only replay an individual helper, the sandbox misses the earlier state changes.  
+  The simulation manager maintains a short per-creator/token history of processed transactions and injects them as the `prior_txs` sequence for each pool probe. This keeps the queue bounded while ensuring launch helpers are faithfully reproduced.
 
 ### 3. SignalManager Processing
 
@@ -253,7 +286,7 @@ loop {
         }
         
         // Create simulation request
-        let request = SimulationRequest {
+        let request = TxSimulationJob {
             tx: tx.clone(),
             category: classification.category,
             priority: classification.priority,

@@ -121,19 +121,22 @@ impl PoolBuySellSimulator {
             test_amount: self.default_test_amount,
             buyer_address: self.default_buyer_address,
             block_number,
-            gas_limit: 500_000,
             gas_price: None,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
-            prior_tx: None,
+            buy_gas_limit: 500_000,
+            approve_gas_limit: 200_000,
+            sell_gas_limit: 500_000,
+            prior_txs: Vec::new(),
             block_delay: 0,
-            slippage_tolerance: 0.5,
+            slippage_tolerance: 5.0,
             weth_address: Address::from([
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
             token_decimals,
             block_header,
+            uniswap_v4_config: None,
         };
 
         self.simulate_with_config(config).await

@@ -135,6 +135,15 @@ impl TokenTrackingCache {
         result
     }
 
+    /// Take a snapshot of all pools currently cached.
+    pub async fn pools_snapshot(&self) -> Vec<(Address, Arc<Pool>)> {
+        let pools = self.pools.read().await;
+        pools
+            .iter()
+            .map(|(addr, pool)| (addr.clone(), Arc::clone(pool)))
+            .collect()
+    }
+
     /// Get all creator addresses (reference, no clone)
     pub async fn creator_addresses(&self) -> HashSet<Address> {
         let creators = self.active_creators.read().await;

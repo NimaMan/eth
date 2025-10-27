@@ -14,6 +14,7 @@ use alloy_primitives::Address;
 use mempool_processor::canonical_head_cache::CanonicalHeadCache;
 use mempool_processor::simulator::MempoolSimulator;
 use reth_primitives::SealedHeader;
+use reth_provider::HeaderProvider;
 use tx_simulator::TxSimulator;
 
 #[derive(Parser, Debug)]

@@ -254,7 +254,7 @@ impl LiquidityRemovalSimulator {
         };
 
         let is_scam = pool_address.is_some() && (drain_percentage > 60.0 || remaining_eth < 0.3);
-        let success = processed.status == "1";
+        let success = processed.status;
         let revert_reason = if success {
             None
         } else {

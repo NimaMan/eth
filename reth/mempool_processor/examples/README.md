@@ -13,13 +13,10 @@
 ## Simulator Examples
 - **database_lock_prevention_demo.rs** - Demonstrates MempoolSimulator prevents database locks during pool buy/sell simulations
 - **live_mempool_transaction_simulation.rs** - Live mempool transaction simulation using MempoolFetcherIPCClient and MempoolSimulator with automatic nonce retry
-- **token_tax_calculation_with_external_processor.rs** - Tax calculation using external tx_processor with known tokens (AITAI, 0xT, FLOKI)
 - **simulation_pipeline.rs** - Full signal detection pipeline: fetches transactions, simulates, detects signals (tax, trading, liquidity)
 
 ## Token Parameter Extraction Examples
-- **simulate_buy_sell_taxes.rs** - Calculates buy/sell taxes using transaction simulation
-- **analyze_token_with_detectors.rs** - Comprehensive token analysis using multiple detection methods
-- **get_token_info_via_rpc.rs** - Fetches token metadata via RPC calls
+Token parameter / tax analysis examples now live alongside the `tx_processor` crate (see `../tx_processor/examples/token_parameter_extraction`). The mempool processor focuses on the live signal-detection pipeline.
 
 ### reth_simulation/
 Examples for Direct Reth simulation (20-40x faster than RPC):

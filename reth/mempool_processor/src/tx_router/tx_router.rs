@@ -115,7 +115,7 @@ impl TransactionRouter {
             } else {
                 SimulationPriority::Low
             },
-            requires_simulation: false, // Skip simulation for contract creations
+            requires_simulation: true, // Track creations so we can stitch them into pending sequences
             requires_buy_sell_test: false, // Can't test until deployed
         }
     }

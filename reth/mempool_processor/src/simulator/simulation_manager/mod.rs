@@ -1,14 +1,23 @@
+mod block_pruner;
+mod pending_sequences;
+
+use self::block_pruner::spawn_block_pruner;
+use self::pending_sequences::{sequence_key_from_request, PendingSequences, SequenceKey};
+
 use super::{
     mempool_simulator::mempool_tx_to_unsigned_tx, LiquidityRemovalResult,
     LiquidityRemovalSimulator, MempoolSimulator, SimulationQueue,
 };
 use crate::mempool_fetcher::MempoolTransaction;
 use crate::signal_detector::{SignalManager, SignalManagerConfig};
+use crate::token_tracking::token_parameter_extraction::fetch_token_metadata;
 use crate::token_tracking::TokenTrackingCache;
 use crate::tx_router::{CreatorFunctionType, SimulationPriority, TransactionCategory};
 use alloy_primitives::{I256, U256};
 use ethers::types::H256;
 use eyre::Result as EyreResult;
+use reth_chain_query::provider::RethQueryProvider;
+use reth_chain_query::to_checksum_address;
 /// Simulation Manager
 ///
 /// Manages transaction simulations on a PER-POOL basis.
@@ -30,6 +39,7 @@ use eyre::Result as EyreResult;
 ///    - Send to signal manager
 ///    - Generate unique signal for (token, pool) pair
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, warn};
@@ -50,7 +60,7 @@ pub enum SimulationType {
 
 /// Request for simulation
 #[derive(Debug, Clone)]
-pub struct SimulationRequest {
+pub struct TxSimulationJob {
     pub tx: MempoolTransaction,
     pub category: TransactionCategory,
     pub priority: SimulationPriority,
@@ -61,7 +71,7 @@ pub struct SimulationRequest {
 /// Result of simulation
 #[derive(Debug, Clone)]
 pub struct SimulationResult {
-    pub request: SimulationRequest,
+    pub request: TxSimulationJob,
     pub error: Option<String>,
     pub simulation_time_ms: f64,
     // Addresses needed for compatibility
@@ -138,6 +148,9 @@ pub struct SimulationManager {
 
     // Statistics
     stats: Arc<Mutex<ManagerStats>>,
+
+    // Pending processed transactions keyed by creator/token.
+    pending_sequences: PendingSequences,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -168,6 +181,16 @@ impl SimulationManager {
             LiquidityRemovalSimulator::new(mempool_simulator.get_tx_simulator());
         liquidity_removal_simulator.set_token_cache(token_cache.clone());
 
+        let pending_sequences = PendingSequences::new();
+
+        let head_cache_for_task = mempool_simulator.head_cache();
+        let tx_simulator_for_task = mempool_simulator.get_tx_simulator();
+        let _ = spawn_block_pruner(
+            head_cache_for_task,
+            tx_simulator_for_task,
+            pending_sequences.clone(),
+        );
+
         Self {
             mempool_simulator,
             liquidity_removal_simulator: Arc::new(liquidity_removal_simulator),
@@ -176,11 +199,224 @@ impl SimulationManager {
             token_cache,
             max_concurrent_simulations: max_concurrent,
             stats: Arc::new(Mutex::new(ManagerStats::default())),
+            pending_sequences,
+        }
+    }
+
+    async fn handle_contract_creation(
+        &self,
+        request: &TxSimulationJob,
+        now: Instant,
+    ) -> SimulationResult {
+        let mut result = SimulationResult {
+            request: request.clone(),
+            pool_viability_result: None,
+            error: None,
+            simulation_time_ms: 0.0,
+            token_address: None,
+            pool_address: None,
+            pool_type: None,
+            debug_info: None,
+            liquidity_removal_result: None,
+        };
+
+        let processed = match self.build_processed_transaction(request, true).await {
+            Ok(tx) => tx,
+            Err(err) => {
+                result.error = Some(format!("Failed to process contract creation: {}", err));
+                return result;
+            }
+        };
+
+        let contract_address = processed.contract_address.or_else(|| {
+            processed
+                .contract_creation_events
+                .first()
+                .map(|evt| evt.contract_address)
+        });
+
+        let Some(contract_address) = contract_address else {
+            result.error = Some("Unable to determine deployed contract address".to_string());
+            return result;
+        };
+
+        result.token_address = Some(contract_address);
+
+        if let TransactionCategory::ContractCreation { deployer, .. } = &request.category {
+            let key = SequenceKey {
+                creator: deployer.clone(),
+                token: to_checksum_address(&contract_address),
+            };
+            // Record the processed creation so follow-up helpers can replay it.
+            self.record_pending_transaction(key, processed, now).await;
+        }
+
+        // Opportunistically fetch token metadata to confirm ERC20 semantics.
+        match RethQueryProvider::with_simulator(self.mempool_simulator.get_tx_simulator()) {
+            Ok(provider) => match fetch_token_metadata(&provider, contract_address, None).await {
+                Ok(metadata) => {
+                    result.debug_info = Some(format!(
+                        "Tracked new deployment {} (symbol: {}, decimals: {})",
+                        to_checksum_address(&contract_address),
+                        metadata.symbol,
+                        metadata.decimals
+                    ));
+                }
+                Err(err) => {
+                    result.debug_info = Some(format!(
+                        "Tracked new deployment but metadata lookup failed: {}",
+                        err
+                    ));
+                }
+            },
+            Err(err) => {
+                result.debug_info = Some(format!(
+                    "Tracked new deployment; failed to build query provider: {}",
+                    err
+                ));
+            }
+        }
+
+        info!(
+            "📦 Recorded contract creation for creator {}",
+            match &request.category {
+                TransactionCategory::ContractCreation { deployer, .. } => deployer,
+                _ => "unknown",
+            }
+        );
+
+        result
+    }
+
+    async fn handle_creator_transaction(
+        &self,
+        request: &TxSimulationJob,
+        now: Instant,
+    ) -> SimulationResult {
+        let mut aggregate_result = SimulationResult {
+            request: request.clone(),
+            pool_viability_result: None,
+            error: None,
+            simulation_time_ms: 0.0,
+            token_address: None,
+            pool_address: None,
+            pool_type: None,
+            debug_info: None,
+            liquidity_removal_result: None,
+        };
+
+        let processed = match self.build_processed_transaction(request, true).await {
+            Ok(tx) => tx,
+            Err(err) => {
+                aggregate_result.error =
+                    Some(format!("Failed to process creator transaction: {}", err));
+                return aggregate_result;
+            }
+        };
+
+        let replay_sequence =
+            if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
+                self.record_pending_transaction(key, processed.clone(), now)
+                    .await
+            } else {
+                vec![processed.clone()]
+            };
+
+        if let TransactionCategory::CreatorTransaction { function_type, .. } = &request.category {
+            if matches!(function_type, CreatorFunctionType::LiquidityRemoval) {
+                let removal_results = self.simulate_liquidity_removal(request).await;
+                if removal_results.is_empty() {
+                    aggregate_result.error = Some("No pools found for token".to_string());
+                    aggregate_result.debug_info =
+                        Some("Liquidity removal simulation produced no pools".to_string());
+                    return aggregate_result;
+                }
+
+                let mut last_success = None;
+                for (pool_idx, pool_specific_result) in removal_results.into_iter().enumerate() {
+                    info!(
+                        "📤 Dispatching liquidity removal result for TX {} (pool {})",
+                        pool_specific_result.request.tx.hash, pool_idx
+                    );
+                    let mut signal_manager = self.signal_manager.lock().await;
+                    let signals = signal_manager
+                        .process_simulation_result(&pool_specific_result)
+                        .await;
+                    info!(
+                        "  Signal manager emitted {} signals for pool {}",
+                        signals.len(),
+                        pool_idx
+                    );
+
+                    if pool_specific_result.error.is_none() {
+                        last_success = Some(pool_specific_result);
+                    } else if aggregate_result.error.is_none() {
+                        aggregate_result.error = pool_specific_result.error.clone();
+                    }
+                }
+
+                if let Some(success) = last_success {
+                    return success;
+                }
+
+                return aggregate_result;
+            }
+        }
+
+        let all_results = self
+            .simulate_tx_with_buy_sell_all_pools(request, &replay_sequence)
+            .await;
+
+        if all_results.is_empty() {
+            aggregate_result.error = Some("No pools found for token".to_string());
+            aggregate_result.debug_info =
+                Some("Token cache reported no pools; nothing to simulate".to_string());
+
+            info!(
+                "📤 Sending empty result to signal manager for TX {}",
+                aggregate_result.request.tx.hash
+            );
+            let mut signal_manager = self.signal_manager.lock().await;
+            let signals = signal_manager
+                .process_simulation_result(&aggregate_result)
+                .await;
+            info!("  Signal manager returned {} signals", signals.len());
+
+            return aggregate_result;
+        }
+
+        let mut last_success = None;
+        for (pool_idx, pool_specific_result) in all_results.into_iter().enumerate() {
+            info!(
+                "📤 Sending pool-specific result to signal manager for TX {} (pool {})",
+                pool_specific_result.request.tx.hash, pool_idx
+            );
+            let mut signal_manager = self.signal_manager.lock().await;
+            let signals = signal_manager
+                .process_simulation_result(&pool_specific_result)
+                .await;
+            info!(
+                "  Signal manager returned {} signals for pool {}",
+                signals.len(),
+                pool_idx
+            );
+
+            if pool_specific_result.error.is_none() {
+                last_success = Some(pool_specific_result);
+            } else if aggregate_result.error.is_none() {
+                aggregate_result.error = pool_specific_result.error.clone();
+            }
+        }
+
+        if let Some(success) = last_success {
+            success
+        } else {
+            aggregate_result
         }
     }
 
     /// Submit a simulation request
-    pub async fn submit(&self, request: SimulationRequest) -> Result<(), String> {
+    pub async fn submit(&self, request: TxSimulationJob) -> Result<(), String> {
         let mut queue = self.queue.lock().await;
         queue.push(request)?;
 
@@ -251,7 +487,7 @@ impl SimulationManager {
     }
 
     /// Simulate a single request
-    async fn simulate_request(&self, request: SimulationRequest) -> SimulationResult {
+    async fn simulate_request(&self, request: TxSimulationJob) -> SimulationResult {
         info!(
             "=== SIMULATION MANAGER: Starting simulation for TX {} ===",
             request.tx.hash
@@ -260,159 +496,31 @@ impl SimulationManager {
         info!("  Priority: {:?}", request.priority);
         info!("  Simulation Type: {:?}", request.simulation_type);
 
-        let start = std::time::Instant::now();
-        let mut result = SimulationResult {
-            request: request.clone(),
-            pool_viability_result: None,
-            error: None,
-            simulation_time_ms: 0.0,
-            token_address: None,
-            pool_address: None,
-            pool_type: None,
-            debug_info: None,
-            liquidity_removal_result: None,
+        let start = Instant::now();
+        let now = Instant::now();
+        self.prune_expired_sequences(now).await;
+
+        let mut result = match &request.category {
+            TransactionCategory::ContractCreation { .. } => {
+                self.handle_contract_creation(&request, now).await
+            }
+            TransactionCategory::CreatorTransaction { .. } => {
+                self.handle_creator_transaction(&request, now).await
+            }
+            _ => SimulationResult {
+                request: request.clone(),
+                pool_viability_result: None,
+                error: Some("Transaction type not supported for simulation".to_string()),
+                simulation_time_ms: 0.0,
+                token_address: None,
+                pool_address: None,
+                pool_type: None,
+                debug_info: None,
+                liquidity_removal_result: None,
+            },
         };
 
-        // For both ContractCreation and CreatorTransaction, we always do:
-        // 1. Simulate the transaction
-        // 2. Run buy/sell tests
-
-        match &request.category {
-            TransactionCategory::ContractCreation { .. } => {
-                // TODO: Handle contract creation properly
-                warn!(
-                    "Contract creation simulation not implemented yet for TX {}",
-                    request.tx.hash
-                );
-                result.error = Some("Contract creation simulation not implemented yet".to_string());
-            }
-            TransactionCategory::CreatorTransaction { function_type, .. } => {
-                // Check if this is a liquidity removal - handle specially
-                let all_results = if matches!(function_type, CreatorFunctionType::LiquidityRemoval)
-                {
-                    info!("💧 Detected liquidity removal transaction, using dedicated simulator");
-                    // Use dedicated liquidity removal simulator
-                    self.simulate_liquidity_removal(&request).await
-                } else {
-                    // CRITICAL: Run simulation for EACH pool independently
-                    // Each pool will generate its own signal
-                    self.simulate_tx_with_buy_sell_all_pools(&request).await
-                };
-
-                if all_results.is_empty() {
-                    // No pools to simulate
-                    result.error = Some("No pools found for token".to_string());
-                    result.debug_info = Some(format!("No pools available for simulation"));
-
-                    // Still send to signal manager even with no pools
-                    info!(
-                        "📤 Sending no-pools result to signal manager for TX {}",
-                        result.request.tx.hash
-                    );
-                    let mut signal_manager = self.signal_manager.lock().await;
-                    let signals = signal_manager.process_simulation_result(&result).await;
-                    info!("  Signal manager returned {} signals", signals.len());
-                } else {
-                    // CRITICAL: Process each pool's result INDEPENDENTLY
-                    // Each pool gets its own SimulationResult and signal
-                    for (pool_idx, pool_specific_result) in all_results.into_iter().enumerate() {
-                        // Debug logging for liquidity removal transactions
-                        if matches!(
-                            pool_specific_result.request.category,
-                            TransactionCategory::CreatorTransaction {
-                                function_type: CreatorFunctionType::LiquidityRemoval,
-                                ..
-                            }
-                        ) {
-                            if let Some(ref removal_result) =
-                                pool_specific_result.liquidity_removal_result
-                            {
-                                info!(
-                                    "  [DEBUG] LiquidityRemovalResult for TX {} (pool {}):",
-                                    pool_specific_result.request.tx.hash, pool_idx
-                                );
-                                info!(
-                                    "    success={} | pool_address={:?} | eth_removed={:.6} | drain%={:.2} | remaining_eth={:.6}",
-                                    removal_result.success,
-                                    removal_result.pool_address,
-                                    removal_result.eth_removed,
-                                    removal_result.drain_percentage,
-                                    removal_result.remaining_eth
-                                );
-                                if let Some(ref reason) = removal_result.revert_reason {
-                                    info!("    revert_reason={}", reason);
-                                }
-                                info!(
-                                    "    address_balance_changes_addrs={}",
-                                    removal_result.address_balance_changes.len()
-                                );
-                            } else {
-                                info!("  [DEBUG] Liquidity removal TX {} pool {} has NO removal result",
-                                    pool_specific_result.request.tx.hash,
-                                    pool_idx
-                                );
-                            }
-                        }
-
-                        // Send each pool's results to signal manager separately
-                        info!(
-                            "📤 Sending pool-specific result to signal manager for TX {} (pool {})",
-                            pool_specific_result.request.tx.hash, pool_idx
-                        );
-                        info!("  Pool address: {:?}", pool_specific_result.pool_address);
-                        info!(
-                            "  Result has error: {}, has buy_sell: {}",
-                            pool_specific_result.error.is_some(),
-                            pool_specific_result.pool_viability_result.is_some()
-                        );
-                        let mut signal_manager = self.signal_manager.lock().await;
-                        let signals = signal_manager
-                            .process_simulation_result(&pool_specific_result)
-                            .await;
-                        info!(
-                            "  Signal manager returned {} signals for pool {}",
-                            signals.len(),
-                            pool_idx
-                        );
-
-                        // Keep the last successful result as the overall result (for backward compatibility)
-                        if pool_specific_result.error.is_none() {
-                            result = pool_specific_result;
-                        }
-                    }
-                }
-            }
-            _ => {
-                // For other transaction types, we don't simulate
-                result.error = Some("Transaction type not supported for simulation".to_string());
-            }
-        }
-
         result.simulation_time_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-        // For non-CreatorTransaction types, send to signal manager
-        // (CreatorTransaction already sends per-pool signals above)
-        match &request.category {
-            TransactionCategory::CreatorTransaction { .. } => {
-                // Already handled per-pool above
-            }
-            _ => {
-                // Send results to signal manager for other transaction types
-                info!(
-                    "📤 Sending simulation result to signal manager for TX {}",
-                    result.request.tx.hash
-                );
-                info!(
-                    "  Result has error: {}, has buy_sell: {}",
-                    result.error.is_some(),
-                    result.buy_sell_result().is_some()
-                );
-                let mut signal_manager = self.signal_manager.lock().await;
-                let signals = signal_manager.process_simulation_result(&result).await;
-                info!("  Signal manager returned {} signals", signals.len());
-            }
-        }
-
         result
     }
 
@@ -423,9 +531,10 @@ impl SimulationManager {
     /// - Each pool's results are collected separately
     /// - Returns a Vec with one result per pool
     /// - Failed pools don't affect successful ones
-    async fn simulate_prior_transaction(
+    async fn build_processed_transaction(
         &self,
-        request: &SimulationRequest,
+        request: &TxSimulationJob,
+        retry_on_missing_header: bool,
     ) -> EyreResult<ProcessedTransaction> {
         let unsigned_tx = mempool_tx_to_unsigned_tx(&request.tx)?;
         let snapshot = self.mempool_simulator.head_cache().latest_snapshot().await;
@@ -435,78 +544,61 @@ impl SimulationManager {
         };
 
         self.liquidity_removal_simulator
-            .process_with_optional_retry(unsigned_tx, block_number, block_header, true)
+            .process_with_optional_retry(
+                unsigned_tx,
+                block_number,
+                block_header,
+                retry_on_missing_header,
+            )
             .await
+    }
+
+    async fn record_pending_transaction(
+        &self,
+        key: SequenceKey,
+        processed: ProcessedTransaction,
+        now: Instant,
+    ) -> Vec<ProcessedTransaction> {
+        self.pending_sequences
+            .record_transaction(key, processed, now)
+            .await
+    }
+
+    async fn prune_expired_sequences(&self, now: Instant) {
+        self.pending_sequences.prune_expired(now).await;
     }
 
     async fn simulate_tx_with_buy_sell_all_pools(
         &self,
-        request: &SimulationRequest,
+        request: &TxSimulationJob,
+        replay_sequence: &[ProcessedTransaction],
     ) -> Vec<SimulationResult> {
-        // Extract token address from category
         let token_address_str = match &request.category {
             TransactionCategory::CreatorTransaction {
                 target_token,
                 creator,
                 ..
-            } => {
-                match target_token {
-                    Some(token) => token.clone(),
-                    None => {
-                        // Try to get token from cache if not provided by router
-                        if let Some(token_info) =
-                            self.token_cache.get_token_for_creator(creator).await
-                        {
-                            token_info.address.clone()
-                        } else {
-                            return vec![SimulationResult {
-                                request: request.clone(),
-                                pool_viability_result: None,
-                                liquidity_removal_result: None,
-                                error: Some(format!(
-                                    "No token address found for creator {}",
-                                    creator
-                                )),
-                                token_address: None,
-                                pool_address: None,
-                                pool_type: None,
-                                debug_info: None,
-                                simulation_time_ms: 0.0,
-                            }];
-                        }
+            } => match target_token {
+                Some(token) => token.clone(),
+                None => {
+                    if let Some(token_info) = self.token_cache.get_token_for_creator(creator).await
+                    {
+                        token_info.address.clone()
+                    } else {
+                        return vec![SimulationResult {
+                            request: request.clone(),
+                            pool_viability_result: None,
+                            liquidity_removal_result: None,
+                            error: Some(format!("No token address found for creator {}", creator)),
+                            token_address: None,
+                            pool_address: None,
+                            pool_type: None,
+                            debug_info: None,
+                            simulation_time_ms: 0.0,
+                        }];
                     }
                 }
-            }
-            TransactionCategory::ContractCreation {
-                contract_address, ..
-            } => {
-                // For contract creation, the sequential simulator will:
-                // 1. Execute the contract creation transaction (deploying the contract)
-                // 2. The contract will then exist at its address
-                // 3. Then run buy/sell tests on the deployed contract
-
-                if contract_address == "pending" {
-                    // We need to calculate the deterministic address where the contract will be deployed
-                    // This is deterministic based on deployer + nonce
-                    // For now, let's skip the buy/sell test and just simulate the creation
-                    return vec![SimulationResult {
-                        request: request.clone(),
-                        pool_viability_result: None,
-                        liquidity_removal_result: None,
-                        error: Some(
-                            "Contract creation: address calculation not implemented yet"
-                                .to_string(),
-                        ),
-                        token_address: None,
-                        pool_address: None,
-                        pool_type: None,
-                        debug_info: None,
-                        simulation_time_ms: 0.0,
-                    }];
-                } else {
-                    contract_address.clone()
-                }
-            }
+            },
             _ => {
                 return vec![SimulationResult {
                     request: request.clone(),
@@ -584,6 +676,7 @@ impl SimulationManager {
 
         // Results vector to collect all pool simulations
         let mut results: Vec<SimulationResult> = Vec::new();
+        let test_buyer = self.mempool_simulator.get_buyer_address();
 
         // CRITICAL LOOP: Simulate each pool INDEPENDENTLY
         // Each iteration produces a separate result for signal generation
@@ -750,37 +843,33 @@ impl SimulationManager {
                 continue;
             };
 
-            let prior_tx = match self.simulate_prior_transaction(request).await {
-                Ok(tx) => Some(tx),
-                Err(err) => {
-                    warn!(
-                        "  [Pool {}] Failed to simulate creator transaction before buy/sell: {}",
-                        pool_idx, err
-                    );
-                    None
-                }
-            };
+            let prior_txs = replay_sequence.to_vec();
+
+            let leg_gas_limit: u64 = 500_000;
 
             let config: PoolBuySellParameters = PoolBuySellParameters {
                 token_address,
                 pool_address,
                 pool_type: pool_type_enum,
                 test_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
-                buyer_address: tx_call_request.from.unwrap_or_default(),
-                prior_tx,
+                buyer_address: test_buyer,
+                prior_txs,
                 block_number,
-                gas_limit: tx_call_request.gas.unwrap_or(500_000) as u64,
                 gas_price: tx_call_request.gas_price.map(|v| v as u128),
                 max_fee_per_gas: tx_call_request.max_fee_per_gas,
                 max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
+                buy_gas_limit: leg_gas_limit,
+                approve_gas_limit: 200_000,
+                sell_gas_limit: leg_gas_limit,
                 block_delay: 0,
-                slippage_tolerance: 0.5, // 0.5% default slippage
+                slippage_tolerance: 5.0, // 5% default slippage
                 weth_address: alloy_primitives::Address::from([
                     0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27,
                     0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
                 ]), // Mainnet WETH
                 token_decimals,
                 block_header: None,
+                uniswap_v4_config: None,
             };
 
             let simulation_result = match self
@@ -810,38 +899,33 @@ impl SimulationManager {
                             new_gas_price.map(|p| p / 1_000_000_000)
                         );
 
-                        // Retry with higher gas price
-                        let retry_prior_tx = match self.simulate_prior_transaction(request).await {
-                            Ok(tx) => Some(tx),
-                            Err(err) => {
-                                warn!(
-                                    "  [Pool {}] Retrying buy/sell without creator state (simulation failed): {}",
-                                    pool_idx, err
-                                );
-                                None
-                            }
-                        };
+                        // Retry with higher gas price using the same prior sequence
+                        let retry_prior_txs = replay_sequence.to_vec();
+                        let retry_leg_gas: u64 = 500_000;
 
                         let retry_config: PoolBuySellParameters = PoolBuySellParameters {
                             token_address,
                             pool_address,
                             pool_type: pool_type_enum,
                             test_amount: U256::from(10_000_000_000_000_000u64), // 0.01 ETH
-                            buyer_address: tx_call_request.from.unwrap_or_default(),
+                            buyer_address: test_buyer,
                             block_number,
-                            gas_limit: tx_call_request.gas.unwrap_or(500_000) as u64,
                             gas_price: new_gas_price.map(|v| v as u128),
                             max_fee_per_gas: new_max_fee,
                             max_priority_fee_per_gas: tx_call_request.max_priority_fee_per_gas,
-                            prior_tx: retry_prior_tx,
+                            buy_gas_limit: retry_leg_gas,
+                            approve_gas_limit: 200_000,
+                            sell_gas_limit: retry_leg_gas,
+                            prior_txs: retry_prior_txs,
                             block_delay: 0,
-                            slippage_tolerance: 0.5, // 0.5% default slippage
+                            slippage_tolerance: 5.0, // 5% default slippage
                             weth_address: alloy_primitives::Address::from([
                                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C,
                                 0x4F, 0x27, 0xeA, 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
                             ]), // Mainnet WETH
                             token_decimals,
                             block_header: None,
+                            uniswap_v4_config: None,
                         };
 
                         self.mempool_simulator
@@ -897,7 +981,7 @@ impl SimulationManager {
                         info!(
                             "  [DEBUG] Liquidity removal TX {} prior_tx present: {}",
                             request.tx.hash,
-                            result.prior_transaction.is_some()
+                            !result.prior_transactions.is_empty()
                         );
 
                         // Log state changes from buy transaction
@@ -975,10 +1059,7 @@ impl SimulationManager {
 
     /// Simulate liquidity removal transaction using dedicated simulator
     /// This handles MEV bot accounts with 0 balance by using state override
-    async fn simulate_liquidity_removal(
-        &self,
-        request: &SimulationRequest,
-    ) -> Vec<SimulationResult> {
+    async fn simulate_liquidity_removal(&self, request: &TxSimulationJob) -> Vec<SimulationResult> {
         info!(
             "💧 Starting liquidity removal simulation for TX {}",
             request.tx.hash
@@ -1149,5 +1230,65 @@ impl SimulationManager {
         };
 
         vec![result]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tx_router::{CreatorFunctionType, SimulationPriority, TransactionCategory};
+    use ethers::types::H256;
+    use serde_json::Value;
+    use std::time::Instant;
+
+    fn dummy_tx() -> MempoolTransaction {
+        MempoolTransaction {
+            hash: String::new(),
+            data: Value::Null,
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: vec![],
+            to: None,
+            input: vec![],
+            value: U256::ZERO,
+            gas_price: None,
+            functions: vec![],
+            function_category: None,
+        }
+    }
+
+    fn dummy_request(category: TransactionCategory) -> TxSimulationJob {
+        TxSimulationJob {
+            tx: dummy_tx(),
+            category,
+            priority: SimulationPriority::Normal,
+            simulation_type: SimulationType::BuySellOnly,
+            tx_hash: H256::zero(),
+        }
+    }
+
+    #[test]
+    fn prior_sequence_key_creator_includes_token() {
+        let category = TransactionCategory::CreatorTransaction {
+            creator: "0xCreator".to_string(),
+            target_address: "0xTarget".to_string(),
+            target_token: Some("0xToken".to_string()),
+            function_type: CreatorFunctionType::TradingControl,
+        };
+        let request = dummy_request(category);
+        let key = SimulationManager::prior_sequence_key_for_request(&request).unwrap();
+        assert_eq!(key.creator, "0xCreator");
+        assert_eq!(key.target_token, Some("0xToken".to_string()));
+    }
+
+    #[test]
+    fn prior_sequence_key_none_for_non_creator() {
+        let category = TransactionCategory::Regular {
+            is_transfer: false,
+            is_approval: false,
+        };
+        let request = dummy_request(category);
+        assert!(SimulationManager::prior_sequence_key_for_request(&request).is_none());
     }
 }

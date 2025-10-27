@@ -12,6 +12,8 @@ pub const DEFAULT_RETH_DATA_DIR: &str = "/home/nima/.local/share/reth/mainnet";
 pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/.local/share/reth/mainnet/reth.ipc";
 /// Default number of simulation worker threads.
 pub const DEFAULT_SIM_WORKERS: usize = 4;
+/// Default log directory within the repository.
+pub const DEFAULT_LOG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/logs");
 
 fn default_simulation_workers() -> usize {
     DEFAULT_SIM_WORKERS
@@ -280,7 +282,7 @@ impl Default for MempoolProcessorConfig {
             },
 
             logging: LoggingConfig {
-                log_dir: "/home/nima/code/crypto/rust/mempool_processor/logs".to_string(),
+                log_dir: DEFAULT_LOG_DIR.to_string(),
                 file_logging: true,
                 level: "info".to_string(),
                 metrics_interval: Duration::from_secs(60),

@@ -1,7 +1,7 @@
 /// Priority-based Simulation Queue
 ///
 /// Manages simulation requests with priority ordering
-use super::SimulationRequest;
+use super::TxSimulationJob;
 use crate::tx_router::SimulationPriority;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -10,7 +10,7 @@ use tracing::debug;
 /// Wrapper for priority ordering
 #[derive(Debug, Clone)]
 struct PrioritizedRequest {
-    request: SimulationRequest,
+    request: TxSimulationJob,
     enqueued_at: std::time::Instant,
 }
 
@@ -73,7 +73,7 @@ impl SimulationQueue {
     }
 
     /// Push a request to the queue
-    pub fn push(&mut self, request: SimulationRequest) -> Result<(), String> {
+    pub fn push(&mut self, request: TxSimulationJob) -> Result<(), String> {
         if self.queue.len() >= self.max_size {
             // Drop lowest priority items if queue is full
             if request.priority <= SimulationPriority::Normal {
@@ -97,7 +97,7 @@ impl SimulationQueue {
     }
 
     /// Pop a batch of requests
-    pub fn pop_batch(&mut self, max_batch: usize) -> Vec<SimulationRequest> {
+    pub fn pop_batch(&mut self, max_batch: usize) -> Vec<TxSimulationJob> {
         let mut batch = Vec::with_capacity(max_batch.min(self.queue.len()));
 
         while batch.len() < max_batch && !self.queue.is_empty() {

@@ -49,7 +49,7 @@ use mempool_processor::{
     mempool_fetcher::MempoolFetcherIPCClient,
     signal_detector::SignalManagerConfig,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
-    simulator::{MempoolSimulator, SimulationManager, SimulationRequest, SimulationType},
+    simulator::{MempoolSimulator, SimulationManager, SimulationType, TxSimulationJob},
     token_tracking::TokenTrackingSubscriber,
     tx_router::{TransactionCategory, TransactionRouter},
 };
@@ -76,10 +76,7 @@ struct Args {
     reth_db_path: String,
 
     /// Log directory base path
-    #[arg(
-        long,
-        default_value = "/home/nima/code/crypto/rust/mempool_processor/logs"
-    )]
+    #[arg(long, default_value = mempool_processor::config::DEFAULT_LOG_DIR)]
     log_dir: String,
 
     /// Batch size for transaction processing
@@ -394,7 +391,7 @@ async fn main() -> Result<()> {
     }
 
     // Initialize arrival recorder only after simulator (to reuse provider)
-    let index_dir = Path::new(&args.reth_db_path).join("reth_index");
+    let index_dir = Path::new(&cfg_reth_db_path).join("reth_index");
     std::fs::create_dir_all(&index_dir)?;
     let db = std::sync::Arc::new(reth_chain_query::reth_index::database::RethIndexDB::open(
         &index_dir,
@@ -412,6 +409,7 @@ async fn main() -> Result<()> {
     let cfg = ArrivalRecorderConfig {
         flush_interval: Duration::from_secs(5),
         batch_size: 1000,
+        max_entry_age: Duration::from_secs(2 * 24 * 60 * 60),
     };
     let arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
     info!(
@@ -548,7 +546,7 @@ async fn main() -> Result<()> {
             }
 
             // Create simulation request
-            let sim_request = SimulationRequest {
+            let sim_request = TxSimulationJob {
                 tx: tx.clone(),
                 category: classification.category.clone(),
                 priority: classification.priority,
@@ -662,7 +660,12 @@ async fn main() -> Result<()> {
 
         // Periodic reporting (only refresh cache stats now)
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
-            // Touch cache metrics to maintain interval cadence without emitting console logs.
+            if let Some(latest_block) = head_cache.latest_block_number().await {
+                info!("📡 Latest canonical block observed: {}", latest_block);
+            } else {
+                warn!("📡 Latest canonical block unavailable (head subscription not primed)");
+            }
+            // Touch cache metrics to maintain interval cadence alongside head tracking.
             let _ = token_cache.get_pool_count().await;
             let _ = token_cache.get_creator_count().await;
             last_report = Instant::now();

@@ -3,7 +3,6 @@ use crate::signal_publisher::SignalPublisher;
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::U256;
-use hex;
 use reth_chain_query::to_checksum_address;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -51,6 +50,7 @@ pub struct SignalManager {
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
     publisher: Option<Arc<Mutex<SignalPublisher>>>,
+    total_signals_emitted: u64,
 }
 
 impl SignalManager {
@@ -94,6 +94,7 @@ impl SignalManager {
             token_cache: None,
             signal_log_path,
             publisher: None,
+            total_signals_emitted: 0,
         }
     }
 
@@ -392,7 +393,7 @@ impl SignalManager {
                         // Create pool-specific tax signal
                         let pool_address = result
                             .pool_address
-                            .map(|addr| format!("0x{}", hex::encode(addr)))
+                            .map(|addr| to_checksum_address(&addr))
                             .unwrap_or_else(|| "unknown".to_string());
                         let pool_type =
                             result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
@@ -469,7 +470,7 @@ impl SignalManager {
                     // Each pool gets its own signal with unique pool_address
                     let pool_address = result
                         .pool_address
-                        .map(|addr| format!("0x{}", hex::encode(addr)))
+                        .map(|addr| to_checksum_address(&addr))
                         .unwrap_or_else(|| "unknown".to_string());
                     let pool_type = result.pool_type.clone().unwrap_or_else(|| "V2".to_string());
 
@@ -677,9 +678,14 @@ impl SignalManager {
                 signals.len(),
                 result.request.tx.hash
             );
+            self.total_signals_emitted += signals.len() as u64;
             self.log_activity(
                 "SIGNALS_SUMMARY",
-                &format!("Total signals detected: {}", signals.len()),
+                &format!(
+                    "Signals this TX: {} | Cumulative total: {}",
+                    signals.len(),
+                    self.total_signals_emitted
+                ),
             );
 
             // Publish all detected signals immediately

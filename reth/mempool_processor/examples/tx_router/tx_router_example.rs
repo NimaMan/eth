@@ -22,6 +22,7 @@ use mempool_processor::token_tracking::TokenTrackingSubscriber;
 use mempool_processor::tx_router::{SimulationPriority, TransactionCategory, TransactionRouter};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -37,11 +38,11 @@ async fn main() -> Result<()> {
     info!("🚀 Starting Transaction Router with Token Cache Example");
 
     // Create log directory and file
-    let log_dir = "/home/nima/code/crypto/rust/mempool_processor/logs/tx_router";
-    fs::create_dir_all(log_dir)?;
+    let log_dir = PathBuf::from(mempool_processor::config::DEFAULT_LOG_DIR).join("tx_router");
+    fs::create_dir_all(&log_dir)?;
 
     let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
-    let log_path = format!("{}/tx_router_token_cache_1k_{}.log", log_dir, timestamp);
+    let log_path = log_dir.join(format!("tx_router_token_cache_1k_{}.log", timestamp));
     let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -53,7 +54,7 @@ async fn main() -> Result<()> {
         timestamp
     )?;
     writeln!(log_file, "=========================================")?;
-    info!("📁 Logging to: {}", log_path);
+    info!("📁 Logging to: {}", log_path.display());
 
     // Initialize token tracker to get cache from Python publisher
     info!("📊 Initializing token tracker to receive pool/creator data...");
@@ -75,7 +76,7 @@ async fn main() -> Result<()> {
     let initial_creators = token_cache.get_creator_count().await;
 
     // Get some sample entries to verify cache is populated
-    let sample_pools = token_cache.get_pools_for_token_compat("").await; // Get sample pools
+    let sample_pools = token_cache.pools_snapshot().await; // Snapshot of cached pools
     let sample_creators = token_cache.creator_addresses().await;
 
     // Count unique tokens from pools
@@ -294,7 +295,7 @@ async fn main() -> Result<()> {
     let final_creators = token_cache.get_creator_count().await;
 
     // Count unique tokens from pools for final state
-    let final_sample_pools = token_cache.get_pools_for_token_compat("").await;
+    let final_sample_pools = token_cache.pools_snapshot().await;
     let final_tokens: usize = final_sample_pools
         .iter()
         .map(|(_, pool)| &pool.token_address)
@@ -470,7 +471,7 @@ async fn main() -> Result<()> {
             0.0
         }
     );
-    info!("\n📁 Full log written to: {}", log_path);
+    info!("\n📁 Full log written to: {}", log_path.display());
 
     Ok(())
 }
