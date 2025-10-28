@@ -35,11 +35,11 @@ Price Calculation:
 from typing import Optional, Tuple, Dict, List, Iterable, Any
 from dataclasses import dataclass, field
 import pyreth
-from .base_pool import BasePool, logger
+from eth_token.erc20_token.pools.base_pool import BasePool, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.type_converter import convert_scaled_amount
-from eth_data.chain_utils.common_addresses import ROUTER_ADDRESSES, canonicalize_dex_pool_type
+from eth_data.chain_utils.common_addresses import ROUTER_ADDRESSES,  ZERO_ADDRESS, canonicalize_dex_pool_type
 
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
@@ -64,7 +64,6 @@ class LPHolderInfo:
 class LPTokenTracker:
     """Tracks ERC20 LP balances, approvals, and related events."""
 
-    ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
     BALANCE_EPSILON = 1e-18
 
     def __init__(
@@ -89,9 +88,6 @@ class LPTokenTracker:
         self._burn_events: List[Dict[str, Any]] = []
         self._approval_events: List[Dict[str, Any]] = []
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
     def _append_event(self, collection: List[Dict[str, Any]], entry: Dict[str, Any]) -> None:
         collection.append(entry)
         if len(collection) > self.history_limit:
@@ -102,9 +98,6 @@ class LPTokenTracker:
             self._holders[address] = LPHolderInfo()
         return self._holders[address]
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
     def record_transfer(self, transfer: Dict[str, Any]) -> None:
         """
         Track an LP token transfer, updating balances and supply.
@@ -126,7 +119,7 @@ class LPTokenTracker:
         from_address = transfer['from_address']
         to_address = transfer['to_address']
 
-        if from_address != self.ZERO_ADDRESS:
+        if from_address != ZERO_ADDRESS:
             holder = self._get_or_create_holder(from_address)
             holder.balance -= amount
             if abs(holder.balance) < self.BALANCE_EPSILON and not holder.approvals:
@@ -136,7 +129,7 @@ class LPTokenTracker:
             # Keep the original shape for downstream consumers
             self._append_event(self._mint_events, dict(transfer))
 
-        if to_address != self.ZERO_ADDRESS:
+        if to_address != ZERO_ADDRESS:
             holder = self._get_or_create_holder(to_address)
             holder.balance += amount
         else:
@@ -186,9 +179,6 @@ class LPTokenTracker:
         )
         return approval_info
 
-    # ------------------------------------------------------------------
-    # Accessors
-    # ------------------------------------------------------------------
     @property
     def total_supply(self) -> float:
         return self._total_supply
@@ -266,9 +256,6 @@ class LPTokenTracker:
             if holder.approvals
         ]
 
-    # ------------------------------------------------------------------
-    # Event history accessors
-    # ------------------------------------------------------------------
     @property
     def transfers(self) -> List[Dict[str, Any]]:
         return self._transfers
@@ -329,9 +316,7 @@ class UniswapV2Pool(BasePool):
         )
 
         # LP Token tracking (V2 pools ARE ERC20 LP tokens)
-        self.lp_decimals = 18  # V2 LP tokens always have 18 decimals
         self.lp_tracker = LPTokenTracker(
-            lp_decimals=self.lp_decimals,
             known_routers=ROUTER_ADDRESSES,
             history_limit=self.history_limit,
         )
@@ -358,13 +343,13 @@ class UniswapV2Pool(BasePool):
         )
 
         if result.can_buy and not self.can_buy:
-            self.can_buy = True
+            self.state.can_buy = self.can_buy = True
             self.can_buy_block = transaction['block_number']
             self.can_buy_tx = transaction['hash']
             self.can_buy_timestamp = transaction.get('block_timestamp', 0)
 
         # Update sell status and tax rates
-        self.can_sell = bool(result.can_sell)
+        self.state.can_sell = self.can_sell = bool(result.can_sell)
         self.buy_tax = result.buy_tax_percentage
         self.sell_tax = result.sell_tax_percentage
         self.tax_check_block = transaction['block_number']
@@ -506,9 +491,7 @@ class UniswapV2Pool(BasePool):
     def _process_mint(self, mint: dict, transaction: Dict):
         """Process a V2 mint (add liquidity) event."""
         to = mint.get('to_address', mint.get('to'))
-        amount = float(mint.get('amount', 0))
-        
-        self.state.total_liquidity += amount
+        amount = float(mint.get('amount', 0))        
         self.state.total_mints += 1
         
         # Store mint event
@@ -526,15 +509,6 @@ class UniswapV2Pool(BasePool):
         amount0 = float(burn.get('amount0', burn.get('amount', 0)))
         amount1 = float(burn.get('amount1', 0))
         amount = amount0  # LP token amount removed approximated via amount0 component.
-        
-        # Check for significant liquidity removal
-        if self.state.total_liquidity > 0:
-            removal_pct = amount / self.state.total_liquidity * 100
-            if removal_pct > 50:
-                # Significant liquidity removal detected
-                pass
-                
-        self.state.total_liquidity = max(0, self.state.total_liquidity - amount)
         self.state.total_burns += 1
         
         # Store burn event

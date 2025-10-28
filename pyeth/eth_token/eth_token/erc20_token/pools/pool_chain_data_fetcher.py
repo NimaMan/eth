@@ -13,9 +13,9 @@ Goals:
 """
 
 from typing import Optional, Dict, Any
-from eth_utils import to_checksum_address
+from eth_utils import to_checksum_address, keccak
+
 from eth_data.utils.pyreth_client import PyrethClient
-from eth_utils import keccak
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
 

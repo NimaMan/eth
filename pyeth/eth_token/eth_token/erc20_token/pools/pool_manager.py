@@ -653,6 +653,12 @@ class PoolManager:
                 'price': pool.get_price(),
                 'price_ratio': pool.reserve_tracker.get_price_ratio_to_initial(),
                 'scam_tx': pool.scam_tx_hash,
+                'lifecycle': pool.lifecycle.value,
+                'control_addresses': sorted(
+                    addr for addr in pool.token_control_addresses if addr
+                ),
+                'can_buy': pool.state.can_buy,
+                'can_sell': pool.state.can_sell,
                 'trading_enabled': pool.trading_enabled,
                 'trading_enabled_block': pool.trading_enabled_block,
                 'buy_tax': pool.buy_tax,
@@ -692,6 +698,12 @@ class PoolManager:
                 'price_ratio': pool.reserve_tracker.get_price_ratio_to_initial(),
                 'scam_tx': pool.scam_tx_hash,
                 'pool_id': pool_id,  # Extra field for V4
+                'lifecycle': pool.lifecycle.value,
+                'control_addresses': sorted(
+                    addr for addr in pool.token_control_addresses if addr
+                ),
+                'can_buy': pool.state.can_buy,
+                'can_sell': pool.state.can_sell,
                 'trading_enabled': pool.trading_enabled,
                 'trading_enabled_block': pool.trading_enabled_block,
                 'buy_tax': pool.buy_tax,

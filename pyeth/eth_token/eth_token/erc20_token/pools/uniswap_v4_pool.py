@@ -220,12 +220,12 @@ class UniswapV4Pool(BasePool):
         )
 
         if result.can_buy and not self.can_buy:
-            self.can_buy = True
+            self.state.can_buy = self.can_buy = True
             self.can_buy_block = transaction['block_number']
             self.can_buy_tx = transaction['hash']
             self.can_buy_timestamp = transaction.get('block_timestamp', 0)
 
-        self.can_sell = bool(result.can_sell)
+        self.state.can_sell = self.can_sell = bool(result.can_sell)
         self.buy_tax = result.buy_tax_percentage
         self.sell_tax = result.sell_tax_percentage
         self.tax_check_block = transaction['block_number']

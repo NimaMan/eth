@@ -7,12 +7,24 @@ Each pool instance tracks its own events and updates its state accordingly.
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 from dataclasses import dataclass
+from enum import Enum
 
-from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker
+from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.pyreth_client import PyrethClient, pyreth
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
+from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
+
+
+class PoolLifecycle(str, Enum):
+    """Lifecycle stages shared across Python, Rust, and analytics."""
+
+    DISCOVERED = "DISCOVERED"   # Pool observed on-chain (deployment), zero liquidity
+    LIQUIDITY_DEPOSITED = "LIQUIDITY_DEPOSITED"  # Liquidity deposited (non-zero reserves)
+    ACTIVE = "ACTIVE"           # Buy/sell viability confirmed
+    SCAM = "SCAM"               # Rug detected (Python flag or reserve tracker)
+    EVICTED = "EVICTED"         # Removed from active tracking
 
 
 @dataclass
@@ -25,6 +37,9 @@ class PoolState:
     price1: float = 0.0  # token0 per token1
     last_update_block: int = 0
     last_sync_block: int = 0
+    lifecycle: PoolLifecycle = PoolLifecycle.DISCOVERED
+    can_buy: bool = False
+    can_sell: bool = False
     
     # Cumulative volumes
     volume0_in: float = 0.0
@@ -72,6 +87,8 @@ class BasePool(ABC):
         self.pool_address = pool_address
         self.token_address = token_address
         self.denom_address = denom_address
+        self.denom_threshold = get_threshold_for_token(self.denom_address)
+        
         self.token1_is_denom = token1_is_denom
         self.history_limit = history_limit
             
@@ -194,7 +211,6 @@ class BasePool(ABC):
         self.state.reserve0 = reserve0
         self.state.reserve1 = reserve1
         self.state.last_update_block = block_number
-        
         # Calculate prices
         if reserve0 > 0:
             self.state.price0 = reserve1 / reserve0
@@ -213,6 +229,11 @@ class BasePool(ABC):
         # Update reserve tracker
         denom_reserve = self.get_denom_reserve()
         token_reserve = self.get_token_reserve()
+        if denom_reserve >= self.denom_threshold:
+            self.state.total_liquidity = denom_reserve
+        else:
+            self.state.total_liquidity = 0.0
+
         self.reserve_tracker.update_reserves(
             denom_reserve=denom_reserve,
             token_reserve=token_reserve,
@@ -227,19 +248,27 @@ class BasePool(ABC):
             self.scam_label = self.reserve_tracker.scam_label
             self.scam_block = self.reserve_tracker.scam_block
             self.scam_tx_hash = self.reserve_tracker.scam_tx_hash
+            self.state.lifecycle = PoolLifecycle.SCAM
         else:
             self.scam_label = None
             self.scam_block = None
             self.scam_tx_hash = None
-    
+            if (
+                denom_reserve >= self.denom_threshold
+                and self.state.lifecycle == PoolLifecycle.DISCOVERED
+            ):
+                self.state.lifecycle = PoolLifecycle.LIQUIDITY_DEPOSITED
+
     def mark_can_buy_from_event(self, transaction: Dict, event_type: str = 'swap'):
         """Mark token as buyable when detected from a DEX event (typically first swap)."""
         if not self.can_buy:
             self.can_buy = True
+            self.state.can_buy = True
             self.can_buy_block = transaction['block_number']
             self.can_buy_tx = transaction['hash']
             # Persist when the first buy was observed on-chain
             self.can_buy_timestamp = transaction['block_timestamp']
+            self.state.lifecycle = PoolLifecycle.ACTIVE
             
     def evaluate_trading_status(self, transaction: Dict) -> None:
         """Pool-specific hook implemented by subclasses to enable trading."""
@@ -266,7 +295,11 @@ class BasePool(ABC):
     @property
     def is_scam(self) -> bool:
         return self.reserve_tracker.is_scam
-    
+
+    @property
+    def lifecycle(self) -> PoolLifecycle:
+        return self.state.lifecycle
+
     def get_token_decimals(self) -> int:
         if self._token_decimals is None:
             self._token_decimals = int(
