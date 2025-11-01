@@ -1,7 +1,6 @@
-//! Canonical DEX pool type identifiers shared with Python utilities.
+//! Canonical DEX pool type identifiers shared across Rust/Python components.
 
 /// Canonical DEX pool type identifiers.
-///
 /// These must stay in sync with `eth_data.chain_utils.common_addresses.dex_pool_types`.
 pub const DEX_POOL_TYPES: &[&str] = &[
     "UNISWAP-V2",

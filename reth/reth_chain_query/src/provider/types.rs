@@ -22,6 +22,8 @@ pub struct TransactionMetadata {
     pub gas_limit: u64,
     pub nonce: u64,
     pub transaction_type: u8,
+    pub max_fee_per_gas: Option<U256>,
+    pub max_priority_fee_per_gas: Option<U256>,
 }
 
 // Alias for backwards compatibility during migration

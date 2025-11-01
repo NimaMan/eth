@@ -1,7 +1,7 @@
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::Result;
 
-use crate::common_addresses::dex_pools::BALANCER_VAULT;
+use crate::dex::BALANCER_VAULT;
 use crate::provider::RethQueryProvider;
 
 /// Function selectors

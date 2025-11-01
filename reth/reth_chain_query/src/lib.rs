@@ -22,6 +22,7 @@ pub mod query_engine;
 
 // Utility modules
 pub mod common_addresses;
+pub mod dex;
 pub mod postgres_db;
 pub mod time_utils;
 pub mod tx_builders;
@@ -54,6 +55,11 @@ pub use query_engine::ChainQuery;
 // Re-export time utilities
 pub use time_utils::{
     BlockTimeConverter, BlockTimestamp, PeriodBoundary, PeriodType, TimePeriod, TimestampCache,
+};
+
+// Re-export DEX helpers
+pub use dex::{
+    balancer::*, curve::*, pool_types::*, sushiswap::*, uniswap_v2::*, uniswap_v3::*, uniswap_v4::*,
 };
 
 // Re-export common addresses

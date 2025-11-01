@@ -52,12 +52,6 @@ lru = "0.12"
 jsonrpsee = { version = "0.24", features = ["http-client"] }
 alloy-rpc-types-trace = "1.0"
 
-# Quickstart examples
-[[example]]
-name = "setup"
-path = "examples/quickstart/setup.rs"
-
-
 # Address State examples
 [[example]]
 name = "balances"

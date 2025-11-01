@@ -217,6 +217,24 @@ pub const STABLECOINS: &[StablecoinInfo] = &[
         unit: "US Dollar",
     },
     StablecoinInfo {
+        address: address!("59D9356E565AB3A36DD77763FC0D87FEAF85508C"),
+        symbol: "USDM",
+        decimals: 18,
+        unit: "US Dollar",
+    },
+    StablecoinInfo {
+        address: address!("20B3B07E9C0E37815E2892AB09496559F57C3603"),
+        symbol: "USDV",
+        decimals: 18,
+        unit: "US Dollar",
+    },
+    StablecoinInfo {
+        address: address!("96F6EF951840721ADBF46AC996B59E0235CB985C"),
+        symbol: "USDY",
+        decimals: 18,
+        unit: "US Dollar",
+    },
+    StablecoinInfo {
         address: address!("68749665FF8D2d112Fa859AA293F07A622782F38"),
         symbol: "XAUt",
         decimals: 6,

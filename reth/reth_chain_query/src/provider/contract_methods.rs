@@ -102,11 +102,31 @@ impl RethQueryProvider {
             .simulate_contract_view_call(token, data, block, block_header)
             .await?;
 
-        if result.success && result.output.len() >= 32 {
-            Ok(result.output[31])
-        } else {
-            Ok(18) // Default to 18 decimals if call fails
+        if !result.success {
+            tracing::warn!(
+                target: "reth_chain_query::contract_methods",
+                token = %token,
+                block = ?block,
+                "decimals() call reverted"
+            );
+            return Err(eyre!("Failed to get token decimals for {token:?}"));
         }
+
+        if result.output.len() < 32 {
+            tracing::warn!(
+                target: "reth_chain_query::contract_methods",
+                token = %token,
+                block = ?block,
+                returned_bytes = result.output.len(),
+                "decimals() call returned insufficient data"
+            );
+            return Err(eyre!(
+                "Token decimals call for {token:?} returned {} bytes (expected >= 32)",
+                result.output.len()
+            ));
+        }
+
+        Ok(result.output[31])
     }
 
     /// Get ERC20 symbol via symbol() view function

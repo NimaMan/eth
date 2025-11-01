@@ -27,10 +27,30 @@ fn weth_address() -> Address {
     ])
 }
 
+fn encode_dynamic_address_array(path: &[Address]) -> Vec<u8> {
+    assert!(
+        path.len() >= 2,
+        "swap path must contain at least input and output tokens"
+    );
+    let mut encoded = Vec::with_capacity(32 + path.len() * 32);
+
+    let mut length_word = [0u8; 32];
+    let len_u32: u32 = path.len().try_into().expect("path length exceeds u32");
+    length_word[28..32].copy_from_slice(&len_u32.to_be_bytes());
+    encoded.extend_from_slice(&length_word);
+
+    for address in path {
+        encoded.extend_from_slice(&[0u8; 12]);
+        encoded.extend_from_slice(address.as_slice());
+    }
+
+    encoded
+}
+
 /// Encode swapExactETHForTokens(amountOutMin, path, to, deadline)
 fn encode_swap_exact_eth_for_tokens(
     amount_out_min: U256,
-    path: &[Address; 2],
+    path: &[Address],
     to: Address,
     deadline: U256,
 ) -> Bytes {
@@ -51,33 +71,32 @@ fn encode_swap_exact_eth_for_tokens(
     // deadline
     data.extend_from_slice(&deadline.to_be_bytes::<32>());
 
-    // path array header
-    data.extend_from_slice(&[0u8; 28]);
-    data.extend_from_slice(&[0, 0, 0, 0x02]); // length = 2
-
-    // path[0]
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[0].as_slice());
-    // path[1]
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[1].as_slice());
+    // path dynamic array
+    data.extend_from_slice(&encode_dynamic_address_array(path));
 
     Bytes::from(data)
 }
 
 /// Build a Uniswap/Sushiswap V2 buy swap (ETH -> token) via router.
-pub fn build_buy_swap_v2(
+fn default_buy_path(token_out: Address) -> [Address; 2] {
+    [weth_address(), token_out]
+}
+
+fn default_sell_path(token_in: Address) -> [Address; 2] {
+    [token_in, weth_address()]
+}
+
+pub fn build_buy_swap_v2_with_path(
     router: Router,
     buyer: Address,
-    token_out: Address,
     amount_in_eth: U256,
-    _slippage_bps: u32,
+    path: &[Address],
     deadline: u64,
 ) -> UnsignedTransaction {
     let calldata = encode_swap_exact_eth_for_tokens(
-        U256::ZERO,                   // accept-any for testing; compute minOut if needed
-        &[weth_address(), token_out], // WETH -> token
-        buyer,                        // recipient
+        U256::ZERO, // accept-any for testing; compute minOut if needed
+        path,
+        buyer, // recipient
         U256::from(deadline),
     );
 
@@ -94,6 +113,18 @@ pub fn build_buy_swap_v2(
     }
 }
 
+pub fn build_buy_swap_v2(
+    router: Router,
+    buyer: Address,
+    token_out: Address,
+    amount_in_eth: U256,
+    _slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let path = default_buy_path(token_out);
+    build_buy_swap_v2_with_path(router, buyer, amount_in_eth, &path, deadline)
+}
+
 /// Build a Uniswap/Sushiswap V2 buy swap with explicit amountOutMin.
 pub fn build_buy_swap_v2_with_min_out(
     router: Router,
@@ -103,12 +134,27 @@ pub fn build_buy_swap_v2_with_min_out(
     amount_out_min: U256,
     deadline: u64,
 ) -> UnsignedTransaction {
-    let calldata = encode_swap_exact_eth_for_tokens(
-        amount_out_min,
-        &[weth_address(), token_out],
+    let path = default_buy_path(token_out);
+    build_buy_swap_v2_with_min_out_path(
+        router,
         buyer,
-        U256::from(deadline),
-    );
+        amount_in_eth,
+        &path,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_buy_swap_v2_with_min_out_path(
+    router: Router,
+    buyer: Address,
+    amount_in_eth: U256,
+    path: &[Address],
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata =
+        encode_swap_exact_eth_for_tokens(amount_out_min, path, buyer, U256::from(deadline));
 
     UnsignedTransaction {
         from: Some(buyer),
@@ -127,7 +173,7 @@ pub fn build_buy_swap_v2_with_min_out(
 fn encode_swap_exact_tokens_for_eth(
     amount_in: U256,
     amount_out_min: U256,
-    path: &[Address; 2],
+    path: &[Address],
     to: Address,
     deadline: U256,
 ) -> Bytes {
@@ -151,16 +197,8 @@ fn encode_swap_exact_tokens_for_eth(
     // deadline
     data.extend_from_slice(&deadline.to_be_bytes::<32>());
 
-    // path array header
-    data.extend_from_slice(&[0u8; 28]);
-    data.extend_from_slice(&[0, 0, 0, 0x02]);
-
-    // path[0] = token_in
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[0].as_slice());
-    // path[1] = WETH
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[1].as_slice());
+    // path dynamic array
+    data.extend_from_slice(&encode_dynamic_address_array(path));
 
     Bytes::from(data)
 }
@@ -169,7 +207,7 @@ fn encode_swap_exact_tokens_for_eth(
 fn encode_swap_exact_tokens_for_tokens(
     amount_in: U256,
     amount_out_min: U256,
-    path: &[Address; 2],
+    path: &[Address],
     to: Address,
     deadline: U256,
 ) -> Bytes {
@@ -193,16 +231,8 @@ fn encode_swap_exact_tokens_for_tokens(
     // deadline
     data.extend_from_slice(&deadline.to_be_bytes::<32>());
 
-    // path array header
-    data.extend_from_slice(&[0u8; 28]);
-    data.extend_from_slice(&[0, 0, 0, 0x02]);
-
-    // path[0] = token_in
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[0].as_slice());
-    // path[1] = token_out
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(path[1].as_slice());
+    // path dynamic array
+    data.extend_from_slice(&encode_dynamic_address_array(path));
 
     Bytes::from(data)
 }
@@ -248,10 +278,41 @@ pub fn build_sell_swap_v2(
     _slippage_bps: u32,
     deadline: u64,
 ) -> UnsignedTransaction {
+    let path = default_sell_path(token_in);
+    build_sell_swap_v2_with_path(router, seller, amount_in_tokens, &path, deadline)
+}
+
+/// Build a Uniswap/Sushiswap V2 sell swap with explicit amountOutMin.
+pub fn build_sell_swap_v2_with_min_out(
+    router: Router,
+    seller: Address,
+    token_in: Address,
+    amount_in_tokens: U256,
+    amount_out_min: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let path = default_sell_path(token_in);
+    build_sell_swap_v2_with_min_out_path(
+        router,
+        seller,
+        amount_in_tokens,
+        &path,
+        amount_out_min,
+        deadline,
+    )
+}
+
+pub fn build_sell_swap_v2_with_path(
+    router: Router,
+    seller: Address,
+    amount_in_tokens: U256,
+    path: &[Address],
+    deadline: u64,
+) -> UnsignedTransaction {
     let calldata = encode_swap_exact_tokens_for_eth(
         amount_in_tokens,
-        U256::ZERO,                  // accept-any for testing
-        &[token_in, weth_address()], // token -> WETH
+        U256::ZERO, // accept-any for testing
+        path,
         seller,
         U256::from(deadline),
     );
@@ -269,19 +330,18 @@ pub fn build_sell_swap_v2(
     }
 }
 
-/// Build a Uniswap/Sushiswap V2 sell swap with explicit amountOutMin.
-pub fn build_sell_swap_v2_with_min_out(
+pub fn build_sell_swap_v2_with_min_out_path(
     router: Router,
     seller: Address,
-    token_in: Address,
     amount_in_tokens: U256,
+    path: &[Address],
     amount_out_min: U256,
     deadline: u64,
 ) -> UnsignedTransaction {
     let calldata = encode_swap_exact_tokens_for_eth(
         amount_in_tokens,
         amount_out_min,
-        &[token_in, weth_address()],
+        path,
         seller,
         U256::from(deadline),
     );

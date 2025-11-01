@@ -1,13 +1,15 @@
-//! Canonical token sets used across Uniswap pool simulations.
+//! Canonical token sets used across DEX simulations.
 //!
 //! This module centralises token metadata (address, decimals, default
-//! denomination and, for V3, fee tier) so that higher level crates can
-//! build scenario-specific expectations without duplicating addresses.
+//! denomination and, where relevant, additional pool configuration) so that
+//! higher level crates can build scenario-specific expectations without
+//! duplicating addresses or fee tier metadata.
 
-use alloy_primitives::Address;
+use alloy_primitives::{address, Address, B256, U256};
 use once_cell::sync::Lazy;
 
 use crate::common_addresses::denom_tokens::{get_token_decimals, token_address};
+use crate::dex::BALANCER_VAULT;
 
 /// Minimal metadata required to describe a Uniswap V2 token/denom pair.
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +30,73 @@ pub struct UniswapV3TokenInfo {
     pub decimals: u8,
 }
 
+/// Minimal metadata required to describe a SushiSwap token/denom pair.
+#[derive(Debug, Clone, Copy)]
+pub struct SushiSwapTokenInfo {
+    pub symbol: &'static str,
+    pub token_address: Address,
+    pub denom_address: Address,
+    pub decimals: u8,
+}
+
+/// Minimal metadata required to describe a Uniswap V4 pool.
+#[derive(Debug, Clone, Copy)]
+pub struct UniswapV4PoolInfo {
+    pub symbol: &'static str,
+    pub token_address: Address,
+    pub denom_address: Address,
+    pub pool_manager: Address,
+    pub pool_id: B256,
+    pub fee: u32,
+    pub tick_spacing: i32,
+    pub hooks: Address,
+    pub token_decimals: u8,
+    pub denom_decimals: u8,
+}
+
+/// Token metadata for a Curve pool constituent.
+#[derive(Debug, Clone)]
+pub struct CurvePoolTokenInfo {
+    pub symbol: &'static str,
+    pub token_address: Address,
+    pub decimals: u8,
+    pub index: usize,
+}
+
+/// Minimal metadata required to describe a Curve pool that we commonly use.
+#[derive(Debug, Clone)]
+pub struct CurvePoolInfo {
+    pub name: &'static str,
+    pub pool_address: Address,
+    pub lp_token_address: Option<Address>,
+    pub base_token_index: usize,
+    pub quote_token_index: usize,
+    pub tokens: Vec<CurvePoolTokenInfo>,
+}
+
+/// Token metadata for a Balancer pool constituent.
+#[derive(Debug, Clone)]
+pub struct BalancerTokenInfo {
+    pub symbol: &'static str,
+    pub token_address: Address,
+    pub decimals: u8,
+    pub index: usize,
+    pub weight: Option<U256>,
+}
+
+/// Minimal metadata required to describe a Balancer pool.
+#[derive(Debug, Clone)]
+pub struct BalancerPoolInfo {
+    pub name: &'static str,
+    pub pool_id: B256,
+    pub pool_address: Address,
+    pub vault_address: Address,
+    pub swap_fee_bps: u32,
+    pub tokens: Vec<BalancerTokenInfo>,
+}
+
+const ETH_ADDRESS: Address = address!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
+
 fn resolve_token(symbol: &str) -> Address {
     token_address(symbol).unwrap_or_else(|| panic!("Token address for {} not configured", symbol))
 }
@@ -40,55 +109,63 @@ fn resolve_decimals(symbol: &str) -> u8 {
 static UNISWAP_V2_TOKEN_SET: Lazy<Vec<UniswapV2TokenInfo>> = Lazy::new(|| {
     let weth = resolve_token("WETH");
     let entries: &[(&str, &str)] = &[
-        // Stablecoins / blue chips
+        // Stablecoins
         ("USDC", "WETH"),
         ("USDT", "WETH"),
         ("DAI", "WETH"),
-        // Wrapped assets
+        ("LUSD", "WETH"),
+        ("FRAX", "WETH"),
+        ("FEI", "WETH"),
+        ("MIM", "WETH"),
+        // Wrapped assets / LSDs
         ("WBTC", "WETH"),
         ("stETH", "WETH"),
+        ("cbETH", "WETH"),
+        ("rETH", "WETH"),
         // DeFi blue chips
         ("UNI", "WETH"),
         ("LINK", "WETH"),
         ("AAVE", "WETH"),
         ("MKR", "WETH"),
         ("CRV", "WETH"),
+        ("SNX", "WETH"),
+        ("COMP", "WETH"),
+        ("YFI", "WETH"),
+        ("SUSHI", "WETH"),
+        ("BAL", "WETH"),
+        ("1INCH", "WETH"),
+        ("ENS", "WETH"),
+        ("FXS", "WETH"),
+        ("LDO", "WETH"),
         // Layer 2 / staking tokens
         ("MATIC", "WETH"),
-        ("LDO", "WETH"),
+        // Growth / infra tokens
+        ("GRT", "WETH"),
+        ("GNO", "WETH"),
+        ("FET", "WETH"),
+        ("RNDR", "WETH"),
+        ("LRC", "WETH"),
+        // Gaming / metaverse
+        ("MANA", "WETH"),
+        ("SAND", "WETH"),
+        ("ENJ", "WETH"),
+        ("AXS", "WETH"),
+        ("GALA", "WETH"),
+        ("APE", "WETH"),
         // Meme / higher risk tokens
         ("PEPE", "WETH"),
         ("SHIB", "WETH"),
         ("DOGE", "WETH"),
         ("FLOKI", "WETH"),
-        // Exchange / utility
-        ("FTT", "WETH"),
-        ("GRT", "WETH"),
-        ("BAT", "WETH"),
-        // Algo stables
-        ("FRAX", "WETH"),
-        ("MIM", "WETH"),
-        // Gaming / metaverse
-        ("AXS", "WETH"),
-        ("SAND", "WETH"),
-        ("MANA", "WETH"),
-        ("ENJ", "WETH"),
-        ("GALA", "WETH"),
-        // AI / infra
-        ("FET", "WETH"),
-        ("RNDR", "WETH"),
-        ("GNO", "WETH"),
-        ("LRC", "WETH"),
-        // Newer DeFi
-        ("ENS", "WETH"),
-        // Additional meme/tax tokens
         ("BONE", "WETH"),
         ("ELON", "WETH"),
         ("AKITA", "WETH"),
-        // Privacy / tax tokens
-        ("TORN", "WETH"),
         ("BABYDOGE", "WETH"),
         ("KISHU", "WETH"),
+        ("TORN", "WETH"),
+        ("FTT", "WETH"),
+        ("BLUR", "WETH"),
+        ("BAT", "WETH"),
     ];
 
     entries
@@ -118,6 +195,10 @@ static UNISWAP_V3_TOKEN_SET: Lazy<Vec<UniswapV3TokenInfo>> = Lazy::new(|| {
         ("WBTC", "WETH", 500),
         ("DAI", "WETH", 500),
         ("USDT", "WETH", 500),
+        ("LUSD", "WETH", 500),
+        ("stETH", "WETH", 500),
+        ("cbETH", "WETH", 500),
+        ("rETH", "WETH", 500),
         // 0.30% fee tier
         ("UNI", "WETH", 3000),
         ("LINK", "WETH", 3000),
@@ -129,14 +210,35 @@ static UNISWAP_V3_TOKEN_SET: Lazy<Vec<UniswapV3TokenInfo>> = Lazy::new(|| {
         ("SNX", "WETH", 3000),
         ("ENS", "WETH", 3000),
         ("FXS", "WETH", 3000),
+        ("BAL", "WETH", 3000),
+        ("SUSHI", "WETH", 3000),
+        ("COMP", "WETH", 3000),
+        ("YFI", "WETH", 3000),
+        ("1INCH", "WETH", 3000),
         ("APE", "WETH", 3000),
         ("RPL", "WETH", 3000),
         ("ARB", "WETH", 3000),
         ("BLUR", "WETH", 3000),
+        ("BAT", "WETH", 3000),
+        ("GRT", "WETH", 3000),
+        ("GNO", "WETH", 3000),
+        ("RNDR", "WETH", 3000),
+        ("FET", "WETH", 3000),
+        ("MANA", "WETH", 3000),
+        ("SAND", "WETH", 3000),
+        ("ENJ", "WETH", 3000),
+        ("AXS", "WETH", 3000),
+        ("GALA", "WETH", 3000),
         // 1.00% fee tier
         ("PEPE", "WETH", 10_000),
         ("SHIB", "WETH", 10_000),
+        ("DOGE", "WETH", 10_000),
         ("FLOKI", "WETH", 10_000),
+        ("BONE", "WETH", 10_000),
+        ("ELON", "WETH", 10_000),
+        ("AKITA", "WETH", 10_000),
+        ("BABYDOGE", "WETH", 10_000),
+        ("KISHU", "WETH", 10_000),
     ];
 
     entries
@@ -159,12 +261,165 @@ static UNISWAP_V3_TOKEN_SET: Lazy<Vec<UniswapV3TokenInfo>> = Lazy::new(|| {
         .collect()
 });
 
-/// Returns the canonical Uniswap V2 token set metadata.
+static SUSHISWAP_TOKEN_SET: Lazy<Vec<SushiSwapTokenInfo>> = Lazy::new(|| {
+    let weth = resolve_token("WETH");
+    let entries: &[(&str, &str)] = &[
+        ("USDC", "WETH"),
+        ("USDT", "WETH"),
+        ("DAI", "WETH"),
+        ("WBTC", "WETH"),
+        ("MATIC", "WETH"),
+        ("SUSHI", "WETH"),
+        ("BAL", "WETH"),
+    ];
+
+    entries
+        .iter()
+        .map(|(symbol, denom)| {
+            let token = resolve_token(symbol);
+            let denom_addr = if *denom == "WETH" {
+                weth
+            } else {
+                resolve_token(denom)
+            };
+            SushiSwapTokenInfo {
+                symbol,
+                token_address: token,
+                denom_address: denom_addr,
+                decimals: resolve_decimals(symbol),
+            }
+        })
+        .collect()
+});
+
+static UNISWAP_V4_POOL_SET: Lazy<Vec<UniswapV4PoolInfo>> = Lazy::new(|| {
+    let weth = resolve_token("WETH");
+    let usdc = resolve_token("USDC");
+    let token_decimals = resolve_decimals("USDC");
+    let denom_decimals = resolve_decimals("WETH");
+    vec![UniswapV4PoolInfo {
+        symbol: "USDC",
+        token_address: usdc,
+        denom_address: weth,
+        pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
+        pool_id: B256::from_slice(&hex_literal::hex!(
+            "6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa"
+        )),
+        fee: 100,
+        tick_spacing: 1,
+        hooks: address!("36FABF0DaCD49E94dDb3A21999F199068a9Fe8a8"),
+        token_decimals,
+        denom_decimals,
+    }]
+});
+
+static CURVE_POOL_SET: Lazy<Vec<CurvePoolInfo>> = Lazy::new(|| {
+    vec![
+        CurvePoolInfo {
+            name: "3pool",
+            pool_address: address!("DC24316b9AE028F1497c275EB9192a3Ea0f67022"),
+            lp_token_address: Some(address!("6c3f90f043a72fa612cbac8115ee7e52bde6e490")),
+            base_token_index: 0,
+            quote_token_index: 1,
+            tokens: vec![
+                CurvePoolTokenInfo {
+                    symbol: "DAI",
+                    token_address: resolve_token("DAI"),
+                    decimals: resolve_decimals("DAI"),
+                    index: 0,
+                },
+                CurvePoolTokenInfo {
+                    symbol: "USDC",
+                    token_address: resolve_token("USDC"),
+                    decimals: resolve_decimals("USDC"),
+                    index: 1,
+                },
+                CurvePoolTokenInfo {
+                    symbol: "USDT",
+                    token_address: resolve_token("USDT"),
+                    decimals: resolve_decimals("USDT"),
+                    index: 2,
+                },
+            ],
+        },
+        CurvePoolInfo {
+            name: "stETH-ETH",
+            pool_address: address!("DC24316b9AE028F1497c275EB9192a3Ea0f67022"),
+            lp_token_address: Some(address!("06325440D014e39736583c165C2963BA99fAf14E")),
+            base_token_index: 0,
+            quote_token_index: 1,
+            tokens: vec![
+                CurvePoolTokenInfo {
+                    symbol: "stETH",
+                    token_address: resolve_token("stETH"),
+                    decimals: resolve_decimals("stETH"),
+                    index: 0,
+                },
+                CurvePoolTokenInfo {
+                    symbol: "ETH",
+                    token_address: ETH_ADDRESS,
+                    decimals: 18,
+                    index: 1,
+                },
+            ],
+        },
+    ]
+});
+
+static BALANCER_POOL_SET: Lazy<Vec<BalancerPoolInfo>> = Lazy::new(|| {
+    vec![BalancerPoolInfo {
+        name: "BAL-WETH 80/20",
+        pool_id: B256::from_slice(&hex_literal::hex!(
+            "c7c7d2a7711576a8a93a3521d02e249e48f5fdfcbe6aa1a59e41d2d4c4b1f6a1"
+        )),
+        pool_address: address!("ba100000625a3754423978a60c9317c58a424e3d"),
+        vault_address: BALANCER_VAULT,
+        swap_fee_bps: 30,
+        tokens: vec![
+            BalancerTokenInfo {
+                symbol: "BAL",
+                token_address: resolve_token("BAL"),
+                decimals: resolve_decimals("BAL"),
+                index: 0,
+                weight: Some(U256::from(80u8)),
+            },
+            BalancerTokenInfo {
+                symbol: "WETH",
+                token_address: resolve_token("WETH"),
+                decimals: resolve_decimals("WETH"),
+                index: 1,
+                weight: Some(U256::from(20u8)),
+            },
+        ],
+    }]
+});
+
+/// Return the canonical Uniswap V2 token set metadata.
 pub fn uniswap_v2_tokens() -> &'static [UniswapV2TokenInfo] {
     UNISWAP_V2_TOKEN_SET.as_slice()
 }
 
-/// Returns the canonical Uniswap V3 token set metadata.
+/// Return the canonical Uniswap V3 token set metadata.
 pub fn uniswap_v3_tokens() -> &'static [UniswapV3TokenInfo] {
     UNISWAP_V3_TOKEN_SET.as_slice()
+}
+
+/// Return the canonical SushiSwap token set metadata.
+pub fn sushiswap_tokens() -> &'static [SushiSwapTokenInfo] {
+    SUSHISWAP_TOKEN_SET.as_slice()
+}
+
+/// Return the canonical Uniswap V4 pool metadata.
+pub fn uniswap_v4_pools() -> &'static [UniswapV4PoolInfo] {
+    UNISWAP_V4_POOL_SET.as_slice()
+}
+
+/// Return the canonical Curve pool metadata.
+pub fn curve_pools() -> &'static [CurvePoolInfo] {
+    CURVE_POOL_SET.as_slice()
+}
+
+/// Return the canonical Balancer pool metadata.
+pub fn balancer_pools() -> &'static [BalancerPoolInfo] {
+    BALANCER_POOL_SET.as_slice()
 }

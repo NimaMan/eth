@@ -1,5 +1,5 @@
-use alloy_consensus::transaction::SignerRecoverable;
-use alloy_consensus::Transaction;
+use alloy_consensus::transaction::{SignerRecoverable, TxType};
+use alloy_consensus::Transaction as _;
 /// Block-level transaction operations
 ///
 /// Efficiently loads all transactions in a block with:
@@ -11,12 +11,12 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::Result;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use reth_primitives::{Recovered, TransactionSignedEcRecovered};
+use reth_primitives::{transaction, Recovered, TransactionSignedEcRecovered};
 use reth_provider::{
     BlockBodyIndicesProvider, BlockNumReader, BlockReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
-use std::time::Instant;
+use std::{cmp, time::Instant};
 use tx_simulator::block_simulation::BlockTracer;
 
 use super::types::{Block, BlockHeader, RawBlockData, TransactionMetadata};
@@ -216,6 +216,7 @@ impl RethQueryProvider {
         let txs = provider.transactions_by_tx_range(tx_range.clone())?;
 
         // Build transaction metadata for each transaction
+        let base_fee_per_gas = header.base_fee_per_gas.unwrap_or_default() as u128;
         let mut transactions = Vec::new();
         for (idx, tx) in txs.into_iter().enumerate() {
             let from = tx
@@ -223,6 +224,25 @@ impl RethQueryProvider {
                 .map_err(|_| eyre::eyre!("Failed to recover signer"))?;
 
             let tx_num = indices.first_tx_num + idx as u64;
+            let tx_type = tx.tx_type();
+            let max_fee_value = tx.max_fee_per_gas();
+            let max_priority_value = tx.max_priority_fee_per_gas();
+            let gas_price = match tx_type {
+                TxType::Legacy | TxType::Eip2930 => U256::from(max_fee_value),
+                _ => {
+                    let max_priority = max_priority_value.unwrap_or(0);
+                    let effective_priority =
+                        cmp::min(max_priority, max_fee_value.saturating_sub(base_fee_per_gas));
+                    U256::from(base_fee_per_gas + effective_priority)
+                }
+            };
+            let (max_fee_per_gas, max_priority_fee_per_gas) = match tx_type {
+                TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => (
+                    Some(U256::from(max_fee_value)),
+                    max_priority_value.map(U256::from),
+                ),
+                _ => (None, None),
+            };
 
             transactions.push(TransactionMetadata {
                 hash: *tx.hash(),
@@ -234,10 +254,12 @@ impl RethQueryProvider {
                 to: tx.to(),
                 value: tx.value(),
                 input: Bytes::from(tx.input().to_vec()),
-                gas_price: U256::from(tx.max_fee_per_gas()),
+                gas_price,
                 gas_limit: tx.gas_limit(),
                 nonce: tx.nonce(),
-                transaction_type: tx.tx_type() as u8,
+                transaction_type: tx_type as u8,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
             });
         }
 

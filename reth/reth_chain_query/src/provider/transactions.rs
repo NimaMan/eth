@@ -1,5 +1,5 @@
-use alloy_consensus::transaction::{SignerRecoverable, TransactionMeta};
-use alloy_consensus::Transaction;
+use alloy_consensus::transaction::{SignerRecoverable, TransactionMeta, TxType};
+use alloy_consensus::Transaction as _;
 /// Transaction data access methods
 ///
 /// This module provides all transaction-related queries that tx_processor needs:
@@ -22,6 +22,19 @@ use super::{
 };
 
 impl RethQueryProvider {
+    fn extract_dynamic_fee_fields(
+        tx: &reth_primitives::TransactionSigned,
+    ) -> (Option<U256>, Option<U256>) {
+        let tx_type = tx.tx_type();
+        let max_fee = tx.max_fee_per_gas();
+        let max_priority = tx.max_priority_fee_per_gas();
+        match tx_type {
+            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => {
+                (Some(U256::from(max_fee)), max_priority.map(U256::from))
+            }
+            _ => (None, None),
+        }
+    }
     // === Private Helper Methods ===
 
     /// Private helper to get raw transaction by number
@@ -69,6 +82,8 @@ impl RethQueryProvider {
             .recover_signer()
             .map_err(|_| eyre::eyre!("Failed to recover signer for {}", tx_hash))?;
 
+        let (max_fee_per_gas, max_priority_fee_per_gas) = Self::extract_dynamic_fee_fields(&tx);
+
         Ok(TransactionData {
             hash: tx_hash,
             block_number,
@@ -83,6 +98,8 @@ impl RethQueryProvider {
             gas_limit: tx.gas_limit(),
             nonce: tx.nonce(),
             transaction_type: tx.tx_type() as u8,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
         })
     }
 
@@ -112,6 +129,8 @@ impl RethQueryProvider {
             .recover_signer()
             .map_err(|_| eyre::eyre!("Failed to recover signer"))?;
 
+        let (max_fee_per_gas, max_priority_fee_per_gas) = Self::extract_dynamic_fee_fields(&tx);
+
         Ok(TransactionData {
             hash: *tx_hash,
             block_number,
@@ -126,6 +145,8 @@ impl RethQueryProvider {
             gas_limit: tx.gas_limit(),
             nonce: tx.nonce(),
             transaction_type: tx.tx_type() as u8,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
         })
     }
 

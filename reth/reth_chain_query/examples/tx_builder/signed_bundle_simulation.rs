@@ -13,7 +13,7 @@ use alloy_rlp::Decodable;
 use ethers::prelude::*;
 use ethers::types::Bytes as EthersBytes;
 use ethers::utils::parse_units;
-use reth_chain_query::common_addresses::dex_pools::compute_sushiswap_pool;
+use reth_chain_query::dex::compute_sushiswap_pool;
 use reth_chain_query::tx_builders::{
     amm_swap_route::AmmSwapRoute, build_approve_for_route, build_buy_swap_with_min_out,
     build_sell_swap_with_min_out,

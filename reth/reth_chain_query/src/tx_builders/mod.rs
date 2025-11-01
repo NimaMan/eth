@@ -97,14 +97,16 @@ pub fn build_buy_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
-        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::uniswap_v3::build_buy_swap_v3_with_min_out(
-            buyer,
-            token_out,
-            amount_in_eth,
-            fee_tier,
-            amount_out_min,
-            deadline,
-        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => {
+            amm::uniswap_v3::build_buy_swap_v3_with_min_out(
+                buyer,
+                token_out,
+                amount_in_eth,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         _ => amm::uniswap_v2::build_buy_swap_v2_with_min_out(
             amm::uniswap_v2::Router::UniswapV2,
             buyer,
@@ -124,22 +126,18 @@ pub fn build_approve_for_route(
     amount: U256,
 ) -> UnsignedTransaction {
     match *route {
-        AmmSwapRoute::UniswapV2 { .. } => {
-            amm::uniswap_v2::build_approve_v2(
-                amm::uniswap_v2::Router::UniswapV2,
-                owner,
-                token,
-                amount,
-            )
-        }
-        AmmSwapRoute::SushiswapV2 { .. } => {
-            amm::uniswap_v2::build_approve_v2(
-                amm::uniswap_v2::Router::SushiswapV2,
-                owner,
-                token,
-                amount,
-            )
-        }
+        AmmSwapRoute::UniswapV2 { .. } => amm::uniswap_v2::build_approve_v2(
+            amm::uniswap_v2::Router::UniswapV2,
+            owner,
+            token,
+            amount,
+        ),
+        AmmSwapRoute::SushiswapV2 { .. } => amm::uniswap_v2::build_approve_v2(
+            amm::uniswap_v2::Router::SushiswapV2,
+            owner,
+            token,
+            amount,
+        ),
         AmmSwapRoute::UniswapV3 { .. } => amm::uniswap_v3::build_approve_v3(owner, token, amount),
         // Default to V2 router if unknown (can refine when Balancer/Curve supported)
         _ => amm::uniswap_v2::build_approve_v2(
@@ -222,14 +220,16 @@ pub fn build_sell_swap_with_min_out(
             amount_out_min,
             deadline,
         ),
-        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::uniswap_v3::build_sell_swap_v3_with_min_out(
-            seller,
-            token_in,
-            amount_in_tokens,
-            fee_tier,
-            amount_out_min,
-            deadline,
-        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => {
+            amm::uniswap_v3::build_sell_swap_v3_with_min_out(
+                seller,
+                token_in,
+                amount_in_tokens,
+                fee_tier,
+                amount_out_min,
+                deadline,
+            )
+        }
         _ => amm::uniswap_v2::build_sell_swap_v2_with_min_out(
             amm::uniswap_v2::Router::UniswapV2,
             seller,
@@ -302,24 +302,28 @@ pub fn build_token_to_token_swap_with_min_out(
     deadline: u64,
 ) -> UnsignedTransaction {
     match *route {
-        AmmSwapRoute::UniswapV2 { .. } => amm::uniswap_v2::build_token_to_token_swap_v2_with_min_out(
-            amm::uniswap_v2::Router::UniswapV2,
-            trader,
-            token_in,
-            token_out,
-            amount_in,
-            amount_out_min,
-            deadline,
-        ),
-        AmmSwapRoute::SushiswapV2 { .. } => amm::uniswap_v2::build_token_to_token_swap_v2_with_min_out(
-            amm::uniswap_v2::Router::SushiswapV2,
-            trader,
-            token_in,
-            token_out,
-            amount_in,
-            amount_out_min,
-            deadline,
-        ),
+        AmmSwapRoute::UniswapV2 { .. } => {
+            amm::uniswap_v2::build_token_to_token_swap_v2_with_min_out(
+                amm::uniswap_v2::Router::UniswapV2,
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                amount_out_min,
+                deadline,
+            )
+        }
+        AmmSwapRoute::SushiswapV2 { .. } => {
+            amm::uniswap_v2::build_token_to_token_swap_v2_with_min_out(
+                amm::uniswap_v2::Router::SushiswapV2,
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                amount_out_min,
+                deadline,
+            )
+        }
         AmmSwapRoute::UniswapV3 { fee_tier, .. } => {
             amm::uniswap_v3::build_token_to_token_swap_v3_with_min_out(
                 trader,
@@ -391,15 +395,17 @@ pub fn build_sell_with_permit(
     deadline: u64,
 ) -> UnsignedTransaction {
     match *route {
-        AmmSwapRoute::UniswapV3 { fee_tier, .. } => amm::uniswap_v3::build_sell_with_self_permit_v3(
-            seller,
-            token_in,
-            amount_in_tokens,
-            fee_tier,
-            permit,
-            slippage_bps,
-            deadline,
-        ),
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => {
+            amm::uniswap_v3::build_sell_with_self_permit_v3(
+                seller,
+                token_in,
+                amount_in_tokens,
+                fee_tier,
+                permit,
+                slippage_bps,
+                deadline,
+            )
+        }
         _ => build_sell_swap(
             route,
             seller,
