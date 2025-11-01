@@ -119,8 +119,8 @@ name = "can_buy_sell_common_tokens_uniswap_v2"
 path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v2.rs"
 
 [[example]]
-name = "can_buy_sell_common_tokens_uni_v3"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v3.rs"
+name = "can_buy_sell_common_tokens_uniswap_v3"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v3.rs"
 
 [[example]]
 name = "can_buy_sell_uniswap_v4"

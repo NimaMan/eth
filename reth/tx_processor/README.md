@@ -130,7 +130,7 @@ let buy = tx_builders::build_buy_swap(&route, buyer, token_out, U256::from(1e18 
 ## Examples
 
 - `examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v2.rs`
-- `examples/pool_analysis/can_buy_sell_common_tokens_uni_v3.rs`
+- `examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v3.rs`
 - `examples/pool_analysis/erc20_pool_tax_demo.rs`
 - `examples/simulation/approval_mechanics_demo.rs`
 - `examples/simulation/specific_token_investigation/*`
@@ -139,7 +139,7 @@ Run an example:
 
 ```bash
 cargo run --example can_buy_sell_common_tokens_uniswap_v2 -p tx_processor
-cargo run --example can_buy_sell_common_tokens_uni_v3 -p tx_processor
+cargo run --example can_buy_sell_common_tokens_uniswap_v3 -p tx_processor
 ```
 
 ## Requirements

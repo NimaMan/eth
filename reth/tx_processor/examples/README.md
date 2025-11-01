@@ -93,7 +93,7 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Validates WETH, USDC, USDT, DAI trading on V2
 
-#### `can_buy_sell_common_tokens_uni_v3.rs`
+#### `can_buy_sell_common_tokens_uniswap_v3.rs`
 **Purpose:** Test token viability on Uniswap V3  
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Tests concentrated liquidity pools and fee tiers
