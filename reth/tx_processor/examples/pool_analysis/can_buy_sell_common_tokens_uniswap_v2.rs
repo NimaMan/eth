@@ -35,7 +35,8 @@ pub enum ExpectedBehavior {
     MayFail,      // Known problematic tokens
 }
 
-mod token_sets;
+#[path = "token_sets/uniswap_v2.rs"]
+mod uniswap_v2_tokens;
 
 /// Result of testing a single token
 #[derive(Debug)]
@@ -69,7 +70,7 @@ async fn main() -> Result<()> {
     println!("Latest block: {}\n", latest_block);
 
     // Get token configurations
-    let token_configs = token_sets::uniswap_v2::token_configs();
+    let token_configs = uniswap_v2_tokens::token_configs();
     let total_tokens = token_configs.len();
     let mut all_results = Vec::new();
 
