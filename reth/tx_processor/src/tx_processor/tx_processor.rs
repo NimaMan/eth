@@ -20,7 +20,9 @@ use super::{
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
 use reth_chain_query::FEE_RECIPIENTS;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 
 /// Core transaction processing logic equivalent to Python's TransactionProcessor
 pub struct TxProcessor {
@@ -58,6 +60,9 @@ impl TxProcessor {
         gas_used: u64,
         status: bool,
         nonce: u64,
+        raw_tx_type: u8,
+        max_fee_per_gas: Option<U256>,
+        max_priority_fee_per_gas: Option<U256>,
         logs: Vec<alloy_primitives::Log>,
         gas_limit: u64,
         address_balance_changes: Option<HashMap<Address, super::data_models::AddressBalanceChange>>,
@@ -70,96 +75,161 @@ impl TxProcessor {
         let mut erc721_approval_events = Vec::new();
         let mut uniswap_v2_syncs = Vec::new();
         let mut uniswap_v2_swaps = Vec::new();
+        let mut uniswap_v3_pools = Vec::new();
+        let mut uniswap_v3_initializations = Vec::new();
         let mut uniswap_v3_swaps = Vec::new();
         let mut uniswap_v3_mints = Vec::new();
         let mut uniswap_v3_burns = Vec::new();
         let mut uniswap_v3_positions = Vec::new();
+        let mut uniswap_v3_increases = Vec::new();
+        let mut uniswap_v3_decreases = Vec::new();
         let mut uniswap_v2_mints = Vec::new();
         let mut uniswap_v2_burns = Vec::new();
+        let mut uniswap_v4_initializes = Vec::new();
+        let mut uniswap_v4_modifies = Vec::new();
+        let mut uniswap_v4_swaps = Vec::new();
+        let mut permit2_events = Vec::new();
         let mut deposit_events = Vec::new();
         let mut withdraw_events = Vec::new();
         let mut uniswap_v2_pair_created_events = Vec::new();
         let mut ownership_transferred_events = Vec::new();
         let mut trading_enabled_events = Vec::new();
         let mut trading_disabled_events = Vec::new();
+        let mut other_events = Vec::new();
 
         for (log_index, log) in logs.iter().enumerate() {
-            if let Ok(Some(decoded_event)) = self.decoder.decode_log(log, log_index as u64) {
-                // Store ALL event types in their respective arrays
-                match decoded_event {
-                    DecodedEvent::ERC20TransferEvent(transfer) => {
-                        erc20_transfers.push(transfer);
+            let candidate_addresses = extract_candidate_addresses_from_log(log);
+            match self.decoder.decode_log(log, log_index as u64) {
+                Ok(Some(decoded_event)) => match decoded_event {
+                    DecodedEvent::ERC20TransferEvent(event) => erc20_transfers.push(event),
+                    DecodedEvent::ERC721TransferEvent(event) => erc721_transfers.push(event),
+                    DecodedEvent::ERC1155TransferEvent(event) => erc1155_transfers.push(event),
+                    DecodedEvent::ERC20ApprovalEvent(event) => erc20_approval_events.push(event),
+                    DecodedEvent::ERC721ApprovalEvent(event) => erc721_approval_events.push(event),
+                    DecodedEvent::UniswapV2SyncEvent(event) => uniswap_v2_syncs.push(event),
+                    DecodedEvent::UniswapV2SwapEvent(event) => uniswap_v2_swaps.push(event),
+                    DecodedEvent::UniswapV3PoolCreatedEvent(event) => uniswap_v3_pools.push(event),
+                    DecodedEvent::UniswapV3InitializeEvent(event) => {
+                        uniswap_v3_initializations.push(event)
                     }
-                    DecodedEvent::ERC721TransferEvent(transfer) => {
-                        erc721_transfers.push(transfer);
+                    DecodedEvent::UniswapV3SwapEvent(event) => uniswap_v3_swaps.push(event),
+                    DecodedEvent::UniswapV3MintEvent(event) => uniswap_v3_mints.push(event),
+                    DecodedEvent::UniswapV3BurnEvent(event) => uniswap_v3_burns.push(event),
+                    DecodedEvent::UniswapV3PositionEvent(event) => uniswap_v3_positions.push(event),
+                    DecodedEvent::UniswapV3IncreaseLiquidityEvent(event) => {
+                        uniswap_v3_increases.push(event)
                     }
-                    DecodedEvent::ERC1155TransferEvent(transfer) => {
-                        erc1155_transfers.push(transfer);
+                    DecodedEvent::UniswapV3DecreaseLiquidityEvent(event) => {
+                        uniswap_v3_decreases.push(event)
                     }
-                    DecodedEvent::ERC20ApprovalEvent(approval) => {
-                        erc20_approval_events.push(approval);
+                    DecodedEvent::UniswapV2MintEvent(event) => uniswap_v2_mints.push(event),
+                    DecodedEvent::UniswapV2BurnEvent(event) => uniswap_v2_burns.push(event),
+                    DecodedEvent::DepositEvent(event) => deposit_events.push(event),
+                    DecodedEvent::WithdrawEvent(event) => withdraw_events.push(event),
+                    DecodedEvent::UniswapV2PairCreatedEvent(event) => {
+                        uniswap_v2_pair_created_events.push(event)
                     }
-                    DecodedEvent::ERC721ApprovalEvent(approval) => {
-                        erc721_approval_events.push(approval);
+                    DecodedEvent::OwnershipTransferredEvent(event) => {
+                        ownership_transferred_events.push(event)
                     }
-                    DecodedEvent::UniswapV2SyncEvent(sync) => {
-                        uniswap_v2_syncs.push(sync);
+                    DecodedEvent::TradingEnabledEvent(event) => trading_enabled_events.push(event),
+                    DecodedEvent::TradingDisabledEvent(event) => {
+                        trading_disabled_events.push(event)
                     }
-                    DecodedEvent::UniswapV2SwapEvent(swap) => {
-                        uniswap_v2_swaps.push(swap);
+                    DecodedEvent::UniswapV4InitializeEvent(event) => {
+                        uniswap_v4_initializes.push(event)
                     }
-                    DecodedEvent::UniswapV3SwapEvent(swap) => {
-                        uniswap_v3_swaps.push(swap);
+                    DecodedEvent::UniswapV4ModifyLiquidityEvent(event) => {
+                        uniswap_v4_modifies.push(event)
                     }
-                    DecodedEvent::UniswapV3MintEvent(mint_v3) => {
-                        uniswap_v3_mints.push(mint_v3);
+                    DecodedEvent::UniswapV4SwapEvent(event) => uniswap_v4_swaps.push(event),
+                    DecodedEvent::Permit2Event(event) => permit2_events.push(event),
+                    DecodedEvent::UniswapV3CollectEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV3CollectEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::UniswapV3BurnEvent(burn_v3) => {
-                        uniswap_v3_burns.push(burn_v3);
+                    DecodedEvent::UniswapV4DonateEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV4DonateEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::UniswapV3PositionEvent(position) => {
-                        uniswap_v3_positions.push(position);
+                    DecodedEvent::UniswapV4FeeUpdatedEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV4FeeUpdatedEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::UniswapV2MintEvent(mint_action) => {
-                        uniswap_v2_mints.push(mint_action);
+                    DecodedEvent::UniswapV4DynamicLPFeeUpdatedEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV4DynamicLPFeeUpdatedEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::UniswapV2BurnEvent(burn_action) => {
-                        uniswap_v2_burns.push(burn_action);
+                    DecodedEvent::UniswapV4FeeControllerUpdatedEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV4FeeControllerUpdatedEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::DepositEvent(deposit) => {
-                        deposit_events.push(deposit);
+                    DecodedEvent::UniswapV4BalanceDeltaEvent(_) => {
+                        other_events.push(build_unknown_event_record(
+                            log,
+                            log_index as u64,
+                            Some("UniswapV4BalanceDeltaEvent"),
+                            &candidate_addresses,
+                        ));
                     }
-                    DecodedEvent::WithdrawEvent(withdraw) => {
-                        withdraw_events.push(withdraw);
-                    }
-                    DecodedEvent::UniswapV2PairCreatedEvent(pair) => {
-                        uniswap_v2_pair_created_events.push(pair);
-                    }
-                    DecodedEvent::OwnershipTransferredEvent(owner) => {
-                        ownership_transferred_events.push(owner);
-                    }
-                    DecodedEvent::TradingEnabledEvent(enabled) => {
-                        trading_enabled_events.push(enabled);
-                    }
-                    DecodedEvent::TradingDisabledEvent(disabled) => {
-                        trading_disabled_events.push(disabled);
-                    }
-                    // TODO: Add all other event types (V3/V4 events, etc.)
-                    _ => {
-                        // For now, ignore unhandled events
-                    }
+                },
+                Ok(None) => {
+                    other_events.push(build_unknown_event_record(
+                        log,
+                        log_index as u64,
+                        None,
+                        &candidate_addresses,
+                    ));
+                }
+                Err(_) => {
+                    other_events.push(build_unknown_event_record(
+                        log,
+                        log_index as u64,
+                        Some("UNDECODED"),
+                        &candidate_addresses,
+                    ));
                 }
             }
         }
 
         // STEP 2: Create transaction fees
+        let protocol_type = match raw_tx_type {
+            0 => "legacy",
+            1 => "eip2930",
+            2 => "eip1559",
+            3 => "eip4844",
+            4 => "eip7702",
+            _ => "unknown",
+        }
+        .to_string();
         let fees = TransactionFees {
             gas_price,
             gas_used,
+            gas_limit,
             tx_fee: gas_price * U256::from(gas_used),
-            max_fee_per_gas: None,  // Not available from simulation
-            max_priority_fee: None, // Not available from simulation
-            protocol_type: "simulation".to_string(),
+            protocol_type,
+            max_fee_per_gas: max_fee_per_gas.clone(),
+            max_priority_fee: max_priority_fee_per_gas.clone(),
         };
 
         // STEP 3: Create ProcessedTransaction with all extracted data
@@ -173,6 +243,7 @@ impl TxProcessor {
             value,
             status,
             nonce,
+            raw_tx_type,
             input,
         );
 
@@ -185,18 +256,27 @@ impl TxProcessor {
         processed_tx.erc721_approval_events = erc721_approval_events;
         processed_tx.uniswap_v2_syncs = uniswap_v2_syncs;
         processed_tx.uniswap_v2_swaps = uniswap_v2_swaps;
+        processed_tx.uniswap_v3_pools = uniswap_v3_pools;
+        processed_tx.uniswap_v3_initializations = uniswap_v3_initializations;
         processed_tx.uniswap_v3_swaps = uniswap_v3_swaps;
         processed_tx.uniswap_v3_mints = uniswap_v3_mints;
         processed_tx.uniswap_v3_burns = uniswap_v3_burns;
         processed_tx.uniswap_v3_positions = uniswap_v3_positions;
+        processed_tx.uniswap_v3_increases = uniswap_v3_increases;
+        processed_tx.uniswap_v3_decreases = uniswap_v3_decreases;
         processed_tx.uniswap_v2_mints = uniswap_v2_mints;
         processed_tx.uniswap_v2_burns = uniswap_v2_burns;
+        processed_tx.uniswap_v4_initializes = uniswap_v4_initializes;
+        processed_tx.uniswap_v4_modifies = uniswap_v4_modifies;
+        processed_tx.uniswap_v4_swaps = uniswap_v4_swaps;
+        processed_tx.permit2_events = permit2_events;
         processed_tx.deposit_events = deposit_events;
         processed_tx.withdraw_events = withdraw_events;
         processed_tx.uniswap_v2_pair_created_events = uniswap_v2_pair_created_events;
         processed_tx.ownership_transferred_events = ownership_transferred_events;
         processed_tx.trading_enabled_events = trading_enabled_events;
         processed_tx.trading_disabled_events = trading_disabled_events;
+        processed_tx.other_events = other_events;
 
         let mut erc20_contracts = HashSet::new();
         for transfer in &processed_tx.erc20_transfers {
@@ -223,14 +303,8 @@ impl TxProcessor {
                 erc20_contracts.insert(token);
             }
         }
-        for creation in &processed_tx.contract_creation_events {
-            if creation.contract_type.eq_ignore_ascii_case("erc-20") {
-                erc20_contracts.insert(creation.contract_address);
-            }
-        }
-
         // Align with Python processor: exclude canonical WETH from the ERC20 contract set.
-        let weth = alloy_primitives::address!("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+        let weth = alloy_primitives::address!("0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2");
         erc20_contracts.remove(&weth);
 
         // Set address balance changes if provided
@@ -276,11 +350,26 @@ impl TxProcessor {
             .as_ref()
             .map(|d| d.to_vec())
             .unwrap_or_default();
-        let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
+        let max_fee_per_gas = unsigned_tx.max_fee_per_gas.map(|fee| U256::from(fee));
+        let max_priority_fee_per_gas = unsigned_tx
+            .max_priority_fee_per_gas
+            .map(|fee| U256::from(fee));
+        let gas_price = match (unsigned_tx.gas_price, unsigned_tx.max_fee_per_gas) {
+            (Some(price), _) => U256::from(price),
+            (None, Some(max_fee)) => U256::from(max_fee),
+            (None, None) => U256::from(20_000_000_000u128),
+        };
         let gas_used = simulation_result.gas_used;
         let status = simulation_result.success;
         let nonce = unsigned_tx.nonce.unwrap_or(0);
         let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
+        let raw_tx_type = if unsigned_tx.max_fee_per_gas.is_some()
+            || unsigned_tx.max_priority_fee_per_gas.is_some()
+        {
+            2
+        } else {
+            0
+        };
 
         // Use current timestamp for simulation
         let block_timestamp = std::time::SystemTime::now()
@@ -334,6 +423,9 @@ impl TxProcessor {
                 gas_used,
                 status,
                 nonce,
+                raw_tx_type,
+                max_fee_per_gas.clone(),
+                max_priority_fee_per_gas.clone(),
                 logs,
                 gas_limit,
                 address_balance_changes,
@@ -571,5 +663,91 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(*address);
     }
 
+    for event in &tx.other_events {
+        if let Some(addr_str) = event.get("address").and_then(|value| value.as_str()) {
+            if let Ok(addr) = Address::from_str(addr_str) {
+                set.insert(addr);
+            }
+        }
+
+        if let Some(addresses_value) = event.get("addresses") {
+            if let Some(array) = addresses_value.as_array() {
+                for addr_value in array {
+                    if let Some(addr_str) = addr_value.as_str() {
+                        if let Ok(addr) = Address::from_str(addr_str) {
+                            set.insert(addr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     tx.unique_addresses = set;
+}
+
+fn extract_candidate_addresses_from_log(log: &alloy_primitives::Log) -> HashSet<Address> {
+    let mut addresses = HashSet::new();
+    if log.address != Address::ZERO {
+        addresses.insert(log.address);
+    }
+
+    for topic in log.topics() {
+        let bytes: &[u8] = topic.as_ref();
+        if bytes.len() == 32 && bytes[..12].iter().all(|b| *b == 0) {
+            let candidate = Address::from_slice(&bytes[12..]);
+            if candidate != Address::ZERO {
+                addresses.insert(candidate);
+            }
+        }
+    }
+
+    let data_bytes = log.data.data.as_ref();
+    for chunk in data_bytes.chunks(32) {
+        if chunk.len() == 32 && chunk[..12].iter().all(|b| *b == 0) {
+            let candidate = Address::from_slice(&chunk[12..]);
+            if candidate != Address::ZERO {
+                addresses.insert(candidate);
+            }
+        }
+    }
+
+    addresses
+}
+
+fn build_unknown_event_record(
+    log: &alloy_primitives::Log,
+    log_index: u64,
+    event_type: Option<&str>,
+    candidate_addresses: &HashSet<Address>,
+) -> HashMap<String, serde_json::Value> {
+    let mut record = HashMap::new();
+    record.insert("address".to_string(), json!(format!("{:#x}", log.address)));
+    record.insert("log_index".to_string(), json!(log_index));
+    if let Some(topic0) = log.topics().first() {
+        record.insert(
+            "event_signature".to_string(),
+            json!(format!("{:#x}", topic0)),
+        );
+    }
+    let topics: Vec<String> = log.topics().iter().map(|t| format!("{:#x}", t)).collect();
+    record.insert("topics".to_string(), json!(topics));
+    record.insert(
+        "data".to_string(),
+        json!(format!("0x{}", hex::encode(log.data.data.as_ref()))),
+    );
+    if let Some(label) = event_type {
+        record.insert("event_type".to_string(), json!(label));
+    }
+    if !candidate_addresses.is_empty() {
+        let mut addr_list: Vec<String> = candidate_addresses
+            .iter()
+            .copied()
+            .filter(|addr| *addr != Address::ZERO)
+            .map(|addr| format!("{:#x}", addr))
+            .collect();
+        addr_list.sort();
+        record.insert("addresses".to_string(), json!(addr_list));
+    }
+    record
 }

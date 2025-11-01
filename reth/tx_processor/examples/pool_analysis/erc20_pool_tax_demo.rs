@@ -39,10 +39,15 @@ async fn main() -> Result<()> {
         0xb9, 0xca, 0x9f, 0x21, 0x36, 0x67, 0xff, 0xd2, 0x21, 0xf0, 0x78, 0xec, 0xf3, 0xa7, 0x2d,
         0xaf, 0xe0, 0x4d, 0x45, 0xab,
     ]); // RFI/WETH Uniswap V2 pool: 0xb9ca9f213667ffd221f078ecf3a72dafe04d45ab
+    let denom_address = Address::from([
+        0xC0, 0x2a, 0xaa, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xd9,
+        0x08, 0x3C, 0x75, 0x6C, 0xc2,
+    ]); // WETH
 
     // Create configuration with block delay and specific block number
     let config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
         .with_test_amount(alloy_primitives::U256::from(1_000_000_000_000_000_000u128)) // 1 ETH for better testing
+        .with_denom_address(denom_address)
         .with_block_delay(1) // Prefer next block when available; capped to latest
         .with_token_decimals(9); // RFI has 9 decimals
 
@@ -109,14 +114,14 @@ async fn main() -> Result<()> {
         println!();
 
         println!("Trade Details:");
-        println!("  ETH Spent: {} wei", result.eth_spent);
+        println!("  ETH Spent: {} wei", result.denom_spent);
         println!("  Tokens Received: {}", result.tokens_received);
-        println!("  ETH Received: {} wei", result.eth_received);
+        println!("  ETH Received: {} wei", result.denom_received);
 
-        let net_loss = result.eth_spent.saturating_sub(result.eth_received);
-        let loss_percent = if result.eth_spent > alloy_primitives::U256::ZERO {
+        let net_loss = result.denom_spent.saturating_sub(result.denom_received);
+        let loss_percent = if result.denom_spent > alloy_primitives::U256::ZERO {
             (net_loss.to_string().parse::<f64>().unwrap_or(0.0)
-                / result.eth_spent.to_string().parse::<f64>().unwrap_or(1.0))
+                / result.denom_spent.to_string().parse::<f64>().unwrap_or(1.0))
                 * 100.0
         } else {
             0.0
@@ -134,7 +139,7 @@ async fn main() -> Result<()> {
     println!(
         "  Buy TX: {} ({})",
         result.buy_transaction.hash,
-        if result.buy_transaction.status == "1" {
+        if result.buy_transaction.status {
             "Success"
         } else {
             "Failed"
@@ -143,7 +148,7 @@ async fn main() -> Result<()> {
     println!(
         "  Approve TX: {} ({})",
         result.approve_transaction.hash,
-        if result.approve_transaction.status == "1" {
+        if result.approve_transaction.status {
             "Success"
         } else {
             "Failed"
@@ -152,23 +157,23 @@ async fn main() -> Result<()> {
     println!(
         "  Sell TX: {} ({})",
         result.sell_transaction.hash,
-        if result.sell_transaction.status == "1" {
+        if result.sell_transaction.status {
             "Success"
         } else {
             "Failed"
         }
     );
 
-    if let Some(prior_tx) = &result.prior_transaction {
-        println!(
-            "  Prior TX: {} ({})",
-            prior_tx.hash,
-            if prior_tx.status == "1" {
-                "Success"
-            } else {
-                "Failed"
-            }
-        );
+    if !result.prior_transactions.is_empty() {
+        println!("  Prior transactions:");
+        for (idx, prior_tx) in result.prior_transactions.iter().enumerate() {
+            println!(
+                "    [{}] {} ({})",
+                idx,
+                prior_tx.hash,
+                if prior_tx.status { "Success" } else { "Failed" }
+            );
+        }
     }
 
     Ok(())

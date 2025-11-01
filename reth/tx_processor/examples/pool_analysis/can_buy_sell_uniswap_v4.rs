@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
             0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D,
             0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
         ]),
-        prior_tx: None,
+        prior_txs: Vec::new(),
         block_number: Some(latest_block),
         slippage_tolerance: 5.0,
         gas_price: None,
@@ -56,10 +56,8 @@ async fn main() -> Result<()> {
         buy_gas_limit: 800_000,
         approve_gas_limit: 250_000,
         sell_gas_limit: 800_000,
-        prior_gas_limit: None,
-        prior_max_fee_per_gas: None,
-        prior_max_priority_fee_per_gas: None,
         weth_address: weth,
+        denom_address: Some(weth),
         block_delay: 0,
         token_decimals: 6,
         block_header: None,
@@ -74,13 +72,26 @@ async fn main() -> Result<()> {
             println!("buy_tax: {:.4}%", res.buy_tax_percent);
             println!("sell_tax: {:.4}%", res.sell_tax_percent);
             println!("tokens received: {}", res.tokens_received);
-            println!("eth received: {}", res.eth_received);
+            println!("eth received: {}", res.denom_received);
             if let Some(reason) = res.failure_reason {
                 println!("failure_reason: {reason}");
+            }
+            if res.is_tradeable
+                && res.tokens_received > U256::ZERO
+                && res.denom_received > U256::ZERO
+            {
+                println!("✅ Baygus router swap path succeeded end-to-end.");
+            } else {
+                eprintln!(
+                    "❌ Baygus router pipeline incomplete (tradeable={}, tokens={}, eth={}).",
+                    res.is_tradeable, res.tokens_received, res.denom_received
+                );
+                std::process::exit(1);
             }
         }
         Err(err) => {
             eprintln!("Simulation failed: {err:?}");
+            std::process::exit(1);
         }
     }
 

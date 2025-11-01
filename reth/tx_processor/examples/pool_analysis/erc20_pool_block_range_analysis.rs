@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
     // Configure token to analyze - using moo token as example
     let token_address: Address = "0xDF6010eF80142D379eA0324ac100Dd3Cf50901b2".parse()?; // moo token
     let pool_address: Address = "0xFc099D07b32D52D61d2f5Dd6De2614d26474eCf7".parse()?; // moo/WETH V2 pool
+    let denom_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?; // WETH
 
     // Define block range to analyze
     // Analyzing blocks around the liquidity addition at 23196199
@@ -67,6 +68,8 @@ async fn main() -> Result<()> {
         // Configure for this specific block with block delay
         let config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
             .with_test_amount(U256::from(100_000_000_000_000_000u64)) // 0.1 ETH
+            .with_denom_address(denom_address)
+            .with_token_decimals(18)
             .with_block(block_number)
             .with_block_delay(1); // Sell in next block for consistency
 
@@ -92,15 +95,18 @@ async fn main() -> Result<()> {
                 } else {
                     "-".to_string()
                 };
-                let eth_received = if result.is_tradeable {
-                    format!("{:.6} ETH", result.eth_received.to::<u128>() as f64 / 1e18)
+                let denom_received = if result.is_tradeable {
+                    format!(
+                        "{:.6} ETH",
+                        result.denom_received.to::<u128>() as f64 / 1e18
+                    )
                 } else {
                     "-".to_string()
                 };
 
                 println!(
                     "{:<10} {:<12} {:<10} {:<10} {:<20} {:<20}",
-                    block_number, status, buy_tax, sell_tax, tokens, eth_received
+                    block_number, status, buy_tax, sell_tax, tokens, denom_received
                 );
 
                 // Log failure details for non-tradeable tokens
@@ -110,17 +116,17 @@ async fn main() -> Result<()> {
                     }
 
                     // Log individual transaction statuses for debugging
-                    let buy_status = if result.buy_transaction.status == "1" {
+                    let buy_status = if result.buy_transaction.status {
                         "✅"
                     } else {
                         "❌"
                     };
-                    let approve_status = if result.approve_transaction.status == "1" {
+                    let approve_status = if result.approve_transaction.status {
                         "✅"
                     } else {
                         "❌"
                     };
-                    let sell_status = if result.sell_transaction.status == "1" {
+                    let sell_status = if result.sell_transaction.status {
                         "✅"
                     } else {
                         "❌"

@@ -115,6 +115,9 @@ impl ProcessedTxProvider {
             nonce,
             logs,
             gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            raw_tx_type,
         ) = transaction_loader.load_transaction_data(tx_hash).await?;
 
         // Build ProcessedTransaction from raw DB data without simulation
@@ -133,6 +136,9 @@ impl ProcessedTxProvider {
                 gas_used,
                 status,
                 nonce,
+                raw_tx_type,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
                 logs,
                 gas_limit,
                 None, // No balance changes without simulation
@@ -294,6 +300,9 @@ impl ProcessedTxProvider {
             _nonce,
             _logs,
             _gas_limit,
+            _max_fee_per_gas,
+            _max_priority_fee_per_gas,
+            _raw_tx_type,
         ) = transaction_loader.load_transaction_data(tx_hash).await?;
 
         // Simulate at block_number - 1 (the block BEFORE the transaction was included)
@@ -385,11 +394,6 @@ impl ProcessedTxProvider {
             .unwrap_or_default();
         let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
         let gas_used = simulation_result.gas_used;
-        let status = if simulation_result.success {
-            "1".to_string()
-        } else {
-            "0".to_string()
-        };
         let nonce = unsigned_tx.nonce.unwrap_or(0);
         let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
 

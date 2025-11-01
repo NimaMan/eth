@@ -1,10 +1,12 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 /// UniswapV3 Token Trading Viability Analysis
 ///
 /// Tests multiple popular tokens on UniswapV3 pools with different fee tiers
 /// to verify buy→approve→sell sequences work correctly with concentrated liquidity.
-use eyre::Result;
-use reth_chain_query::common_addresses::dex_pools::compute_uniswap_v3_pool;
+use eyre::{eyre, Result};
+use reth_chain_query::common_addresses::dex_pools::{
+    compute_uniswap_v3_pool, UNISWAP_V3_FACTORY,
+};
 use std::sync::Arc;
 use tx_processor::simulator::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
@@ -57,6 +59,7 @@ async fn test_token(
         },
     )
     .with_test_amount(U256::from(10_000_000_000_000_000u64)) // 0.01 ETH
+    .with_denom_address(token.denom_address)
     .with_token_decimals(token.decimals)
     .with_block(block_number);
 
@@ -177,6 +180,14 @@ async fn main() -> Result<()> {
         let pool_address =
             compute_uniswap_v3_pool(token.token_address, token.denom_address, token.fee_tier);
 
+        if let Err(err) =
+            ensure_v3_pool_exists(simulator.clone(), token, pool_address, latest_block).await
+        {
+            println!("❌ {}", err);
+            results.push((token.clone(), pool_address, Err(err)));
+            continue;
+        }
+
         let result = test_token(
             simulator.clone(),
             tx_processor.clone(),
@@ -283,4 +294,69 @@ async fn main() -> Result<()> {
     println!("\n🎉 Uniswap V3 multi-token analysis complete!");
 
     Ok(())
+}
+
+async fn ensure_v3_pool_exists(
+    simulator: Arc<TxSimulator>,
+    token: &TokenConfig,
+    pool_address: Address,
+    block_number: u64,
+) -> Result<()> {
+    if pool_address.is_zero() {
+        return Err(eyre!(
+            "No Uniswap V3 pool found for {} at fee tier {}",
+            token.symbol,
+            token.get_fee_tier_string()
+        ));
+    }
+
+    let view_data =
+        encode_get_pool_call(token.token_address, token.denom_address, token.fee_tier);
+    let response = simulator
+        .simulate_view_function(UNISWAP_V3_FACTORY, view_data, Some(block_number), None)
+        .await?;
+
+    if !response.success || response.output.len() < 32 {
+        return Err(eyre!(
+            "No Uniswap V3 pool found for {} at fee tier {} (factory returned zero address)",
+            token.symbol,
+            token.get_fee_tier_string()
+        ));
+    }
+
+    let mut buf = [0u8; 20];
+    buf.copy_from_slice(&response.output[12..32]);
+    let resolved = Address::from(buf);
+
+    if resolved.is_zero() {
+        return Err(eyre!(
+            "No Uniswap V3 pool found for {} at fee tier {} (factory returned zero address)",
+            token.symbol,
+            token.get_fee_tier_string()
+        ));
+    }
+
+    if resolved != pool_address {
+        return Err(eyre!(
+            "Computed pool address {} does not match factory getPool result {} for {} at fee tier {}",
+            pool_address,
+            resolved,
+            token.symbol,
+            token.get_fee_tier_string()
+        ));
+    }
+
+    Ok(())
+}
+
+fn encode_get_pool_call(token_a: Address, token_b: Address, fee: u32) -> Bytes {
+    let mut data = vec![0x16, 0x98, 0xee, 0x82];
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_a.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_b.as_slice());
+    data.extend_from_slice(&[0u8; 29]);
+    let fee_bytes = fee.to_be_bytes();
+    data.extend_from_slice(&fee_bytes[1..]);
+    Bytes::from(data)
 }

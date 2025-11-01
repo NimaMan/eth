@@ -31,10 +31,13 @@ async fn main() -> Result<()> {
     // For demo, we'll proceed without a prior tx
     let token_address: Address = "0x6982508145454Ce325dDbE47a25d4ec3d2311933".parse()?;
     let pool_address: Address = "0xA43fe16908251ee70EF74718545e4FE6C5cCEc9f".parse()?;
+    let denom_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?; // WETH
 
     // Configure with prior transaction and block delay
     let mut config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
         .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 ETH
+        .with_denom_address(denom_address)
+        .with_token_decimals(18)
         .with_block_delay(1); // Sell in next block
 
     // If you had the prior tx:
@@ -62,7 +65,7 @@ async fn main() -> Result<()> {
                 println!("  Buy Tax: {:.2}%", result.buy_tax_percent);
                 println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
                 println!("  Tokens Received: {}", result.tokens_received);
-                println!("  ETH Recovered: {} wei", result.eth_received);
+                println!("  ETH Recovered: {} wei", result.denom_received);
                 println!("  Block Delay Used: 1 (sell in next block)");
             }
         }

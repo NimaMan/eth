@@ -42,7 +42,7 @@ fn report_block(block: &tx_processor::ProcessedBlock) {
     let failed = block
         .transactions
         .iter()
-        .filter(|tx| tx.processed.status != "1")
+        .filter(|tx| !tx.processed.status)
         .count();
 
     println!(

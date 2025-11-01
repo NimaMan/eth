@@ -30,14 +30,7 @@ async fn main() -> Result<()> {
             println!("  Block: {}", tx.block_number);
             println!("  From: {}", tx.from_address);
             println!("  To: {:?}", tx.to_address);
-            println!(
-                "  Status: {}",
-                if tx.status == "1" {
-                    "Success"
-                } else {
-                    "Failed"
-                }
-            );
+            println!("  Status: {}", if tx.status { "Success" } else { "Failed" });
 
             // Check for liquidity removal indicators
             println!("\nLiquidity removal indicators:");

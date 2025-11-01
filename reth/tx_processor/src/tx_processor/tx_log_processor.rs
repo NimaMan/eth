@@ -500,14 +500,11 @@ impl LogDecoder {
                 .ok_or_else(|| eyre::eyre!("Invalid data length for amount1"))?,
         );
 
-        // For now, use amount0 as the main amount (or we could sum them)
-        // This matches behavior where we track LP token burn amount
-        let amount = amount0;
-
         Ok(Some(DecodedEvent::UniswapV2BurnEvent(UniswapV2BurnEvent {
             pair_address: log.address,
             sender,
-            amount,
+            amount0,
+            amount1,
             log_index,
         })))
     }

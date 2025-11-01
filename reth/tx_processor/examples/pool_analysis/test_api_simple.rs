@@ -22,7 +22,8 @@ async fn main() -> Result<()> {
     // Test USDC
     let usdc_token: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?;
     let usdc_pool: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse()?; // USDC/WETH V2
-    
+    let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?; // WETH
+
     println!("Testing USDC pool...");
     println!("Token: {}", usdc_token);
     println!("Pool: {}", usdc_pool);
@@ -34,6 +35,7 @@ async fn main() -> Result<()> {
         PoolType::UniswapV2,
     )
     .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 ETH
+    .with_denom_address(weth)
     .with_token_decimals(6)  // USDC has 6 decimals
     .with_block_delay(1);     // Sell in next block
     
@@ -59,18 +61,18 @@ async fn main() -> Result<()> {
                 println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
                 
                 println!("\n📊 Trade Details:");
-                println!("  ETH Spent: {} wei", result.eth_spent);
+                println!("  ETH Spent: {} wei", result.denom_spent);
                 println!("  USDC Received: {} (raw with 6 decimals)", result.tokens_received);
                 
                 // Convert to human readable
                 let usdc_amount = result.tokens_received / U256::from(10u64.pow(6));
                 println!("  USDC Received: {} USDC", usdc_amount);
                 
-                println!("  ETH Recovered: {} wei", result.eth_received);
+                println!("  ETH Recovered: {} wei", result.denom_received);
                 
-                let loss = result.eth_spent.saturating_sub(result.eth_received);
-                let loss_percent = if result.eth_spent > U256::ZERO {
-                    (loss.to::<u128>() as f64 / result.eth_spent.to::<u128>() as f64) * 100.0
+                let loss = result.denom_spent.saturating_sub(result.denom_received);
+                let loss_percent = if result.denom_spent > U256::ZERO {
+                    (loss.to::<u128>() as f64 / result.denom_spent.to::<u128>() as f64) * 100.0
                 } else {
                     0.0
                 };

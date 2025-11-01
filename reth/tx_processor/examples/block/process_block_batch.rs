@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
         let failed = block
             .transactions
             .iter()
-            .filter(|tx| tx.processed.status != "1")
+            .filter(|tx| !tx.processed.status)
             .count();
         println!(
             "Block {} -> txs: {}, failed: {}, duration: {:.3?}",

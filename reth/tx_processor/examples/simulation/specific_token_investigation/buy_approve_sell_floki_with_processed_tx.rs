@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ETH spent on buy: {}",
-        format_eth_amount(floki_metrics.eth_spent_wei)
+        format_eth_amount(floki_metrics.denom_spent_wei)
     );
 
     println!("\n💸 Sell Results:");
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
         );
         println!(
             "  ETH received: {}",
-            format_eth_amount(floki_metrics.eth_received_wei)
+            format_eth_amount(floki_metrics.denom_received_wei)
         );
     } else {
         println!("  ❌ Sell transaction FAILED!");
@@ -115,13 +115,13 @@ async fn main() -> Result<()> {
 
     // Calculate slippage only if sell succeeded
     if floki_metrics.sell_succeeded
-        && floki_metrics.eth_spent_wei > U256::ZERO
-        && floki_metrics.eth_received_wei > U256::ZERO
+        && floki_metrics.denom_spent_wei > U256::ZERO
+        && floki_metrics.denom_received_wei > U256::ZERO
     {
-        let eth_spent_f64 = wei_to_eth_approx(floki_metrics.eth_spent_wei);
-        let eth_received_f64 = wei_to_eth_approx(floki_metrics.eth_received_wei);
-        let net_eth = eth_received_f64 - eth_spent_f64;
-        let slippage_pct = ((eth_spent_f64 - eth_received_f64) / eth_spent_f64) * 100.0;
+        let denom_spent_f64 = wei_to_eth_approx(floki_metrics.denom_spent_wei);
+        let denom_received_f64 = wei_to_eth_approx(floki_metrics.denom_received_wei);
+        let net_eth = denom_received_f64 - denom_spent_f64;
+        let slippage_pct = ((denom_spent_f64 - denom_received_f64) / denom_spent_f64) * 100.0;
 
         println!("\n📈 Trading Analysis:");
         println!("  Net ETH: {:+.6} ETH", net_eth);
@@ -173,8 +173,8 @@ struct FlokiTradingMetrics {
     tokens_received_wei: U256, // FLOKI received from buy (in smallest units)
     tokens_sold_wei: U256,     // FLOKI sold (in smallest units)
     tokens_attempted_to_sell: U256, // FLOKI we tried to sell
-    eth_spent_wei: U256,       // ETH spent to buy FLOKI (in wei)
-    eth_received_wei: U256,    // ETH received from selling FLOKI (in wei)
+    denom_spent_wei: U256,     // ETH spent to buy FLOKI (in wei)
+    denom_received_wei: U256,  // ETH received from selling FLOKI (in wei)
     total_gas: u64,
     buy_gas: u64,
     approve_gas: u64,
@@ -270,7 +270,7 @@ async fn execute_floki_trading_workflow(
         }
     }
     metrics.tokens_received_wei = floki_signed.unsigned_abs();
-    metrics.eth_spent_wei = eth_signed.unsigned_abs();
+    metrics.denom_spent_wei = eth_signed.unsigned_abs();
 
     // Debug: Show raw amounts
     println!("\n  🔍 Debug - Raw amounts:");
@@ -868,10 +868,10 @@ async fn execute_floki_trading_workflow(
 
     if sell_result.success {
         // Extract exact amounts from balance changes (U256 precision)
-        let (floki_sold_signed, eth_received_signed) =
+        let (floki_sold_signed, denom_received_signed) =
             extract_sell_amounts_from_balance_changes(&sell_processed, buyer);
         metrics.tokens_sold_wei = floki_sold_signed.unsigned_abs();
-        metrics.eth_received_wei = eth_received_signed.unsigned_abs();
+        metrics.denom_received_wei = denom_received_signed.unsigned_abs();
 
         println!("\n    💼 Balance Changes:");
         println!(
@@ -880,7 +880,7 @@ async fn execute_floki_trading_workflow(
         );
         println!(
             "      ETH: {} (received)",
-            format_signed_eth(eth_received_signed)
+            format_signed_eth(denom_received_signed)
         );
 
         metrics.total_transfer_events += sell_processed.erc20_transfers.len();

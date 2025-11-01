@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ETH spent on buy: {}",
-        format_eth_amount(pepe_metrics.eth_spent_wei)
+        format_eth_amount(pepe_metrics.denom_spent_wei)
     );
 
     println!("\n💸 Sell Results:");
@@ -88,16 +88,16 @@ async fn main() -> Result<()> {
     );
     println!(
         "  ETH received: {}",
-        format_eth_amount(pepe_metrics.eth_received_wei)
+        format_eth_amount(pepe_metrics.denom_received_wei)
     );
 
     // Calculate slippage with U256 arithmetic
-    if pepe_metrics.eth_spent_wei > U256::ZERO && pepe_metrics.eth_received_wei > U256::ZERO {
+    if pepe_metrics.denom_spent_wei > U256::ZERO && pepe_metrics.denom_received_wei > U256::ZERO {
         // For display, we can use approximate calculations
-        let eth_spent_f64 = wei_to_eth_approx(pepe_metrics.eth_spent_wei);
-        let eth_received_f64 = wei_to_eth_approx(pepe_metrics.eth_received_wei);
-        let net_eth = eth_received_f64 - eth_spent_f64;
-        let slippage_pct = ((eth_spent_f64 - eth_received_f64) / eth_spent_f64) * 100.0;
+        let denom_spent_f64 = wei_to_eth_approx(pepe_metrics.denom_spent_wei);
+        let denom_received_f64 = wei_to_eth_approx(pepe_metrics.denom_received_wei);
+        let net_eth = denom_received_f64 - denom_spent_f64;
+        let slippage_pct = ((denom_spent_f64 - denom_received_f64) / denom_spent_f64) * 100.0;
 
         println!("\n📈 Trading Analysis:");
         println!("  Net ETH: {:+.6} ETH", net_eth);
@@ -123,8 +123,8 @@ async fn main() -> Result<()> {
 struct PepeTradingMetrics {
     tokens_received_wei: U256, // PEPE received from buy (in wei)
     tokens_sold_wei: U256,     // PEPE sold (in wei)
-    eth_spent_wei: U256,       // ETH spent to buy PEPE (in wei)
-    eth_received_wei: U256,    // ETH received from selling PEPE (in wei)
+    denom_spent_wei: U256,     // ETH spent to buy PEPE (in wei)
+    denom_received_wei: U256,  // ETH received from selling PEPE (in wei)
     total_gas: u64,
     buy_gas: u64,
     approve_gas: u64,
@@ -179,15 +179,15 @@ async fn execute_pepe_trading_workflow_with_processed_tx(
     metrics.total_gas += buy_result.gas_used;
 
     // Extract exact amounts from balance changes (U256 precision)
-    let (pepe_received, eth_spent) =
+    let (pepe_received, denom_spent) =
         extract_buy_amounts_from_balance_changes(&buy_processed, buyer);
     metrics.tokens_received_wei = pepe_received;
-    metrics.eth_spent_wei = eth_spent;
+    metrics.denom_spent_wei = denom_spent;
 
     println!("\n  💼 Balance Changes After Buy:");
     println!(
         "    ETH: -{} (spent)",
-        format_eth_amount(metrics.eth_spent_wei)
+        format_eth_amount(metrics.denom_spent_wei)
     );
     println!(
         "    PEPE: +{} (received)",
@@ -283,10 +283,10 @@ async fn execute_pepe_trading_workflow_with_processed_tx(
     metrics.total_gas += sell_result.gas_used;
 
     // Extract exact amounts from balance changes (U256 precision)
-    let (pepe_sold, eth_received) =
+    let (pepe_sold, denom_received) =
         extract_sell_amounts_from_balance_changes(&sell_processed, buyer);
     metrics.tokens_sold_wei = pepe_sold;
-    metrics.eth_received_wei = eth_received;
+    metrics.denom_received_wei = denom_received;
 
     println!("\n  💼 Balance Changes After Sell:");
     println!(
@@ -295,7 +295,7 @@ async fn execute_pepe_trading_workflow_with_processed_tx(
     );
     println!(
         "    ETH: +{} (received)",
-        format_eth_amount(metrics.eth_received_wei)
+        format_eth_amount(metrics.denom_received_wei)
     );
 
     // Count transfer events

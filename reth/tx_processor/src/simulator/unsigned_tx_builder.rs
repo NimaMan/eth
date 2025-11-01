@@ -12,6 +12,7 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tx_loader::TransactionLoader;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
+use std::convert::TryInto;
 use tx_simulator::UnsignedTransaction;
 
 /// Builds UnsignedTransaction objects from transaction data
@@ -31,26 +32,21 @@ impl UnsignedTxBuilder {
     /// using the fields already present in a ProcessedTransaction.
     ///
     /// Notes:
-    /// - Gas limit is not stored in ProcessedTransaction, so we derive a conservative
-    ///   limit from gas_used (x2, min 21000). You may override as needed.
+    /// - Gas limit is read from ProcessedTransaction.fees; callers may override as needed.
     /// - EIP-1559 fees are respected if present (max_fee_per_gas / max_priority_fee).
     pub fn build_unsigned_from_processed_tx(ptx: &ProcessedTransaction) -> UnsignedTransaction {
-        // Derive gas limit heuristically from gas_used
-        let used = ptx.fees.gas_used;
-        let gas_limit = used.saturating_mul(2).max(21_000);
+        // Expect processed payloads to carry the original gas limit
+        let gas_limit = ptx.fees.gas_limit;
+        assert!(gas_limit > 0, "ProcessedTransaction missing gas_limit");
 
         // Prefer EIP-1559 fields when available
-        let (gas_price, max_fee, max_priority) = if let Some(mf) = ptx.fees.max_fee_per_gas {
-            let mp = ptx.fees.max_priority_fee;
-            (
-                None,
-                Some(mf.try_into().unwrap_or(0u128)),
-                mp.map(|v| v.try_into().unwrap_or(0u128)),
-            )
-        } else {
-            // Legacy gas price from effective gas_price
-            let gp_u128 = ptx.fees.gas_price.as_limbs()[0] as u128;
-            (Some(gp_u128), None, None)
+        let gas_price_u128 = ptx.fees.gas_price.try_into().ok();
+        let max_fee_u128 = ptx.fees.max_fee_per_gas.and_then(|v| v.try_into().ok());
+        let max_priority_u128 = ptx.fees.max_priority_fee.and_then(|v| v.try_into().ok());
+        let (gas_price, max_fee, max_priority) = match ptx.raw_tx_type {
+            0 | 1 => (gas_price_u128, None, None),
+            2 | 3 | 4 => (None, max_fee_u128, max_priority_u128),
+            _ => (gas_price_u128, max_fee_u128, max_priority_u128),
         };
 
         UnsignedTransaction {
@@ -66,7 +62,7 @@ impl UnsignedTxBuilder {
             gas_price,
             max_fee_per_gas: max_fee,
             max_priority_fee_per_gas: max_priority,
-            nonce: Some(ptx.nonce),
+            nonce: None,
         }
     }
 
@@ -94,12 +90,24 @@ impl UnsignedTxBuilder {
             nonce,
             _logs,
             gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            raw_tx_type,
         ) = self
             .transaction_loader
             .load_transaction_data(tx_hash)
             .await?;
 
         // Convert to UnsignedTransaction
+        let gas_price_u128 = gas_price.try_into().ok();
+        let max_fee_u128 = max_fee_per_gas.and_then(|v| v.try_into().ok());
+        let max_priority_u128 = max_priority_fee_per_gas.and_then(|v| v.try_into().ok());
+        let (final_gas_price, final_max_fee, final_max_priority) = match raw_tx_type {
+            0 | 1 => (gas_price_u128, None, None),
+            2 | 3 | 4 => (None, max_fee_u128, max_priority_u128),
+            _ => (gas_price_u128, max_fee_u128, max_priority_u128),
+        };
+
         let unsigned_tx = UnsignedTransaction {
             from: Some(from),
             to,
@@ -110,9 +118,9 @@ impl UnsignedTxBuilder {
                 Some(Bytes::from(input))
             },
             gas: Some(gas_limit),
-            gas_price: Some(gas_price.as_limbs()[0] as u128), // Convert U256 to u128
-            max_fee_per_gas: None, // EIP-1559 fields not available from old transactions
-            max_priority_fee_per_gas: None,
+            gas_price: final_gas_price,
+            max_fee_per_gas: final_max_fee,
+            max_priority_fee_per_gas: final_max_priority,
             nonce: Some(nonce), // Include nonce for proper simulation
         };
 

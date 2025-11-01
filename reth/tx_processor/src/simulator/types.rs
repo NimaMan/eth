@@ -17,7 +17,7 @@ pub struct PoolBuySellParameters {
     pub pool_type: PoolType,
     pub test_amount: U256,
     pub buyer_address: Address,
-    pub prior_tx: Option<ProcessedTransaction>,
+    pub prior_txs: Vec<ProcessedTransaction>,
     pub block_number: Option<u64>,
     pub slippage_tolerance: f64,
     pub gas_price: Option<u128>,
@@ -26,10 +26,8 @@ pub struct PoolBuySellParameters {
     pub buy_gas_limit: u64,
     pub approve_gas_limit: u64,
     pub sell_gas_limit: u64,
-    pub prior_gas_limit: Option<u64>,
-    pub prior_max_fee_per_gas: Option<u128>,
-    pub prior_max_priority_fee_per_gas: Option<u128>,
     pub weth_address: Address,
+    pub denom_address: Option<Address>,
     pub block_delay: u64,
     pub token_decimals: u8,
     pub block_header: Option<SealedHeader>,
@@ -56,9 +54,10 @@ impl Default for PoolBuySellParameters {
             pool_type: PoolType::UniswapV2,
             test_amount: U256::from(10_000_000_000_000_000u64),
             buyer_address: Address::from([
-                0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D, 0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
+                0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D,
+                0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
             ]),
-            prior_tx: None,
+            prior_txs: Vec::new(),
             block_number: None,
             slippage_tolerance: 5.0,
             gas_price: None,
@@ -67,12 +66,11 @@ impl Default for PoolBuySellParameters {
             buy_gas_limit: DEFAULT_BUY_GAS_LIMIT,
             approve_gas_limit: DEFAULT_APPROVE_GAS_LIMIT,
             sell_gas_limit: DEFAULT_SELL_GAS_LIMIT,
-            prior_gas_limit: None,
-            prior_max_fee_per_gas: None,
-            prior_max_priority_fee_per_gas: None,
             weth_address: Address::from([
-                0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA, 0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+                0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+                0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
+            denom_address: None,
             block_delay: 0,
             token_decimals: 0,
             block_header: None,
@@ -102,7 +100,20 @@ impl PoolBuySellParameters {
     }
 
     pub fn with_prior_tx(mut self, tx: ProcessedTransaction) -> Self {
-        self.prior_tx = Some(tx);
+        self.prior_txs = vec![tx];
+        self
+    }
+
+    pub fn with_prior_transactions<I>(mut self, txs: I) -> Self
+    where
+        I: IntoIterator<Item = ProcessedTransaction>,
+    {
+        self.prior_txs = txs.into_iter().collect();
+        self
+    }
+
+    pub fn with_denom_address(mut self, denom: Address) -> Self {
+        self.denom_address = Some(denom);
         self
     }
 
@@ -133,18 +144,6 @@ impl PoolBuySellParameters {
 
     pub fn with_max_priority_fee_per_gas(mut self, max_priority: u128) -> Self {
         self.max_priority_fee_per_gas = Some(max_priority);
-        self
-    }
-
-    pub fn with_prior_gas_settings(
-        mut self,
-        gas_limit: Option<u64>,
-        max_fee: Option<u128>,
-        max_priority_fee: Option<u128>,
-    ) -> Self {
-        self.prior_gas_limit = gas_limit;
-        self.prior_max_fee_per_gas = max_fee;
-        self.prior_max_priority_fee_per_gas = max_priority_fee;
         self
     }
 
@@ -183,12 +182,12 @@ pub struct PoolBuySellSimulationResult {
     pub buy_tax_percent: f64,
     pub sell_tax_percent: f64,
     pub tokens_received: U256,
-    pub eth_spent: U256,
-    pub eth_received: U256,
+    pub denom_spent: U256,
+    pub denom_received: U256,
     pub buy_transaction: ProcessedTransaction,
     pub sell_transaction: ProcessedTransaction,
     pub approve_transaction: ProcessedTransaction,
-    pub prior_transaction: Option<ProcessedTransaction>,
+    pub prior_transactions: Vec<ProcessedTransaction>,
     pub failure_reason: Option<String>,
     pub block_number: u64,
 }
@@ -200,8 +199,8 @@ pub struct TradingSequenceResult {
     pub token_approve_result: ProcessedTransaction,
     pub token_sell_result: ProcessedTransaction,
     pub tokens_bought_amount: U256,
-    pub eth_spent_on_tokens: U256,
-    pub eth_received_from_selling_tokens: U256,
+    pub denom_spent_on_tokens: U256,
+    pub denom_received_from_selling_tokens: U256,
     pub buy_tax_percentage: f64,
     pub sell_tax_percentage: f64,
     pub can_buy: bool,
@@ -221,8 +220,8 @@ pub struct OptionalSetupBuyApproveSellResult {
     pub token_approve_result: ProcessedTransaction,
     pub token_sell_result: ProcessedTransaction,
     pub tokens_bought_amount: U256,
-    pub eth_spent_on_tokens: f64,
-    pub eth_received_from_selling_tokens: f64,
+    pub denom_spent_on_tokens: f64,
+    pub denom_received_from_selling_tokens: f64,
     pub buy_tax_percentage: f64,
     pub sell_tax_percentage: f64,
     pub can_buy: bool,
@@ -243,14 +242,14 @@ impl TradingSequenceResult {
             token_approve_result: self.token_approve_result.clone(),
             token_sell_result: self.token_sell_result.clone(),
             tokens_bought_amount: self.tokens_bought_amount,
-            eth_spent_on_tokens: self
-                .eth_spent_on_tokens
+            denom_spent_on_tokens: self
+                .denom_spent_on_tokens
                 .to_string()
                 .parse::<f64>()
                 .unwrap_or(0.0)
                 / 1e18,
-            eth_received_from_selling_tokens: self
-                .eth_received_from_selling_tokens
+            denom_received_from_selling_tokens: self
+                .denom_received_from_selling_tokens
                 .to_string()
                 .parse::<f64>()
                 .unwrap_or(0.0)

@@ -18,11 +18,6 @@ pub struct ETHTransfer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractCreationEvent {
     pub contract_address: Address,
-    pub contract_type: String,
-    pub symbol: Option<String>,
-    pub decimals: Option<u8>,
-    pub name: Option<String>,
-    pub total_supply: Option<U256>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +33,10 @@ pub struct ProcessedTransaction {
     pub value: U256,
     pub status: bool,
     pub nonce: u64,
+
+    /// Raw Ethereum transaction type (0 = legacy, 1 = access list, 2 = EIP-1559, etc.)
+    #[serde(default)]
+    pub raw_tx_type: u8,
 
     // Transaction classification
     pub tx_type: String,
@@ -111,6 +110,7 @@ impl ProcessedTransaction {
             U256::ZERO, // value
             false,      // status (failed)
             nonce,
+            0,
             Vec::new(), // input
         );
         tx.tx_type = "skipped".to_string();
@@ -128,6 +128,7 @@ impl ProcessedTransaction {
         value: U256,
         status: bool,
         nonce: u64,
+        raw_tx_type: u8,
         input: Vec<u8>,
     ) -> Self {
         Self {
@@ -141,6 +142,7 @@ impl ProcessedTransaction {
             value,
             status,
             nonce,
+            raw_tx_type,
             tx_type: String::new(),
             actions: Vec::new(),
             fees: TransactionFees::default(),

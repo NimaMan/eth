@@ -43,6 +43,22 @@ Typical flows
   - Build a single unsigned tx (e.g., Uniswap V3 `selfPermit + exactInputSingle` inside `multicall(bytes[])`)
   - Simulate exactly like any other unsigned tx; the permit signature (v,r,s) lives in calldata
 
+End-to-end trading viability (Python → Rust → Python)
+1. Python pool trackers (e.g., `py/eth_token/.../uniswap_v2_pool.py`) observe a control transaction and call `evaluate_trading_status`.
+2. They build a `pyreth.PoolBuySellParameters`:
+   - Inject the target token/pool, the paired denomination (USDC/WETH/…), the historical block (usually `tx.block_number - 1`), prior control transactions, and the token decimals.
+   - Optionally attach a sealed header so the simulator runs against the exact parent block state.
+3. The PyO3 bridge (`rust/pyreth/src/simulator/pool_buy_sell_simulator.rs`) converts that struct into a Rust `PoolBuySellParameters`, enforcing that the denom address and token decimals are provided, and forwards it to `check_can_buy_sell_pool`.
+4. `check_can_buy_sell_pool` (this crate) chooses the route, constructs the swap sequence, and executes it on a forked state:
+   - Currently V2/V3 routes build `swapExactETHForTokens` for the buy leg (with a WETH→denom→token path when a denom token is specified), first replay any required prior transactions, then run `approve` and `swapExactTokensForETHSupportingFeeOnTransferTokens` for the sell.
+   - Each step produces a `ProcessedTransaction`; failures return a `PoolBuySellSimulationResult` with `failure_reason`.
+5. The result is surfaced back to Python as `PoolBuySellSimulationResult`, and the pool state updates `can_buy/can_sell`, taxes, and logging.
+
+Limitations & TODOs
+- The buy leg still assumes the agent funds the trade with ETH; reproducing on-chain `swapExactTokensForTokens` flows will require building/simulating the same calldata (USDC → token) and prefunding the buyer with the denomination balance.
+- Taxes are inferred from the simulated round trip; if the token’s behaviour depends on caller balance or fee configuration that we do not populate (e.g., reflection tokens), results may diverge from live trades.
+- Router gas parameters are fixed in config; callers should tune them when replaying high base-fee blocks to avoid `GasPriceLessThanBasefee`.
+
 Data extraction (ProcessedTransaction)
 - `address_balance_changes` by address:
   - `currency_net["USDC"|"USDT"|"DAI"|"ETH"]` for known tokens/ETH

@@ -172,6 +172,7 @@ async fn test_single_token(
         let pool_config =
             PoolBuySellParameters::new(token_address, pool_address, config.pool_type.clone())
                 .with_test_amount(U256::from(1_000_000_000_000_000_000u64)) // 1.0 ETH for testing
+                .with_denom_address(config.denom_address)
                 .with_token_decimals(config.decimals)
                 .with_block(buy_block)
                 .with_block_delay(*block_delay);

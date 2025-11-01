@@ -3,6 +3,8 @@ use reth_chain_query::utils::checksum::{deserialize_address_checksum, serialize_
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use super::serde_helpers::{deserialize_i128_from_any, deserialize_u128_from_any};
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ERC20TransferEvent {
     #[serde(
@@ -172,7 +174,8 @@ pub struct UniswapV2MintEvent {
 pub struct UniswapV2BurnEvent {
     pub pair_address: Address,
     pub sender: Address,
-    pub amount: U256,
+    pub amount0: U256,
+    pub amount1: U256,
     pub log_index: u64,
 }
 
@@ -255,9 +258,12 @@ pub struct UniswapV3SwapEvent {
     pub pool_address: Address,
     pub sender: Address,
     pub recipient: Address,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub amount0: i128,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub amount1: i128,
     pub sqrt_price_x96: U256,
+    #[serde(deserialize_with = "deserialize_u128_from_any")]
     pub liquidity: u128,
     pub tick: i32,
     pub log_index: u64,
@@ -327,6 +333,7 @@ pub struct UniswapV4ModifyLiquidityEvent {
     pub sender: Address,
     pub tick_lower: i32,
     pub tick_upper: i32,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub liquidity_delta: i128,
     pub salt: B256,
     pub log_index: u64,
@@ -349,9 +356,12 @@ pub struct UniswapV4SwapEvent {
     pub pool_manager_address: Address,
     pub event_id: B256,
     pub sender: Address,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub amount0: i128,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub amount1: i128,
     pub sqrt_price_x96: U256,
+    #[serde(deserialize_with = "deserialize_u128_from_any")]
     pub liquidity: u128,
     pub tick: i32,
     pub fee: u32,
@@ -396,7 +406,9 @@ pub struct UniswapV4BalanceDeltaEvent {
     pub pool_manager_address: Address,
     pub pool_id: B256,
     pub settler: Address,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub delta0: i128,
+    #[serde(deserialize_with = "deserialize_i128_from_any")]
     pub delta1: i128,
     pub log_index: u64,
 }

@@ -65,18 +65,13 @@ async fn main() -> Result<()> {
                             // Show significant ETH transfers even if not to fee recipients
                             println!(
                                 "ETH Transfer (depth {}): {} → {}: {} wei",
-                                internal.depth,
-                                internal.from_address,
-                                to_addr,
-                                internal.value
+                                internal.depth, internal.from_address, to_addr, internal.value
                             );
                         }
                     } else if internal.depth == 0 {
                         println!(
                             "ETH Transfer (depth {}): {} → <contract creation>: {} wei",
-                            internal.depth,
-                            internal.from_address,
-                            internal.value
+                            internal.depth, internal.from_address, internal.value
                         );
                     }
                 }

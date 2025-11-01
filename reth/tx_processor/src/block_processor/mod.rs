@@ -151,7 +151,7 @@ impl BlockProcessor {
         trace: Option<&TransactionTrace>,
     ) -> Result<ProcessedTransaction> {
         let logs = conversion::convert_logs(&receipt.logs);
-        let status = if receipt.status { "1" } else { "0" }.to_string();
+        let status = receipt.status;
 
         let mut processed_tx = self
             .tx_processor
@@ -168,6 +168,9 @@ impl BlockProcessor {
                 receipt.gas_used,
                 status,
                 metadata.nonce,
+                metadata.transaction_type,
+                metadata.max_fee_per_gas.clone(),
+                metadata.max_priority_fee_per_gas.clone(),
                 logs,
                 metadata.gas_limit,
                 None,
@@ -183,6 +186,8 @@ impl BlockProcessor {
             .unwrap_or_default();
 
         processed_tx.internal_transactions = internal_transactions;
+        processed_tx.bribe_amount =
+            TxProcessor::calculate_bribe_amount(&processed_tx.internal_transactions);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
         let balance_changes = balance_calculator.calculate_balance_changes_from_processed_data(
@@ -198,23 +203,9 @@ impl BlockProcessor {
             processed_tx.contract_address = Some(contract_address);
 
             if receipt.status {
-                if let Ok(meta) = self
-                    .provider
-                    .get_token_metadata(contract_address, None, None)
-                    .await
-                {
-                    processed_tx
-                        .contract_creation_events
-                        .push(ContractCreationEvent {
-                            contract_address,
-                            contract_type: "ERC-20".to_string(),
-                            symbol: Some(meta.symbol.clone()),
-                            decimals: Some(meta.decimals),
-                            name: Some(meta.name.clone()),
-                            total_supply: Some(meta.total_supply),
-                        });
-                    processed_tx.erc20_contracts.insert(contract_address);
-                }
+                processed_tx
+                    .contract_creation_events
+                    .push(ContractCreationEvent { contract_address });
             }
         }
 

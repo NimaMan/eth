@@ -17,7 +17,7 @@ pub struct BuySwapResult {
     pub token_address: Address,
     pub pool_address: Address,
     pub pool_type: PoolType,
-    pub eth_spent: U256,
+    pub denom_spent: U256,
     pub tokens_received: U256,
     pub buy_transaction: ProcessedTransaction,
     pub block_number: u64,
@@ -88,14 +88,14 @@ pub async fn simulate_buy_swap(
     // Extract tokens received by buyer
     let tokens_received = extract_tokens_received(&processed, buyer_address, token_address);
 
-    let success = processed.status == "1";
+    let success = processed.status;
     Ok(BuySwapResult {
         success,
         buyer_address,
         token_address,
         pool_address,
         pool_type,
-        eth_spent: eth_amount,
+        denom_spent: eth_amount,
         tokens_received,
         buy_transaction: processed,
         block_number: block,

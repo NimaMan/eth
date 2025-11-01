@@ -82,13 +82,13 @@ async fn main() -> Result<()> {
         .unwrap_or(I256::ZERO);
     let floki_received = floki_received_signed.unsigned_abs();
 
-    let eth_spent_signed = buy_processed
+    let denom_spent_signed = buy_processed
         .address_balance_changes
         .get(&buyer)
         .and_then(|changes| changes.currency_net.get("ETH"))
         .copied()
         .unwrap_or(I256::ZERO);
-    let eth_spent = eth_spent_signed.unsigned_abs();
+    let denom_spent = denom_spent_signed.unsigned_abs();
 
     info!("✅ Successfully bought FLOKI");
     info!("  Gas used: {}", buy_result.gas_used);
@@ -96,10 +96,10 @@ async fn main() -> Result<()> {
     info!("  ═══════════════════════════════════");
     info!("    Raw amount: {} wei", floki_received);
     info!("    Formatted: {}", format_floki_amount(floki_received));
-    info!("    ETH spent: {}", format_eth_amount(eth_spent));
+    info!("    ETH spent: {}", format_eth_amount(denom_spent));
 
-    let exchange_rate = if eth_spent > U256::ZERO {
-        let floki_per_eth = (floki_received * U256::from(10u64).pow(U256::from(18))) / eth_spent;
+    let exchange_rate = if denom_spent > U256::ZERO {
+        let floki_per_eth = (floki_received * U256::from(10u64).pow(U256::from(18))) / denom_spent;
         floki_per_eth / U256::from(10u64).pow(U256::from(FLOKI_DECIMALS))
     } else {
         U256::ZERO

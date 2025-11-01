@@ -8,16 +8,16 @@ use reth_provider::{
     TransactionsProvider,
 };
 // use reth_primitives::TransactionSignedEcRecovered; // not used directly here
+use alloy_consensus::Transaction as _;
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
-    EthereumTxEnvelope, Transaction, TxEip4844,
+    transaction::{SignerRecoverable, TransactionMeta, TxType},
+    EthereumTxEnvelope, TxEip4844, Typed2718,
 };
 use alloy_primitives::{Log as AlloyLog, TxKind, B256, U256};
 use eyre::Result;
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
-use std::path::Path;
-use std::sync::Arc;
+use std::{cmp, path::Path, sync::Arc};
 use tracing::info;
 
 /// Transaction Loader that fetches from Reth database
@@ -90,6 +90,9 @@ impl TransactionLoader {
         u64,                               // nonce
         Vec<AlloyLog>,                     // logs
         u64,                               // gas_limit
+        Option<U256>,                      // max_fee_per_gas
+        Option<U256>,                      // max_priority_fee_per_gas
+        u8,                                // raw transaction type
     )> {
         // Get provider
         let provider = self.provider_factory.provider()?;
@@ -125,8 +128,20 @@ impl TransactionLoader {
         let value = tx.value();
         let input = tx.input().to_vec();
         let nonce = tx.nonce();
+        let base_fee_per_gas = block.base_fee_per_gas.unwrap_or_default() as u128;
         let gas_limit = tx.gas_limit();
-        let gas_price = U256::from(tx.max_fee_per_gas());
+        let tx_type = tx.tx_type();
+        let max_fee_value = tx.max_fee_per_gas();
+        let max_priority_value = tx.max_priority_fee_per_gas();
+        let gas_price = match tx_type {
+            TxType::Legacy | TxType::Eip2930 => U256::from(max_fee_value),
+            _ => {
+                let max_priority = max_priority_value.unwrap_or(0);
+                let effective_priority =
+                    cmp::min(max_priority, max_fee_value.saturating_sub(base_fee_per_gas));
+                U256::from(base_fee_per_gas + effective_priority)
+            }
+        };
         // Calculate actual gas used for this transaction
         let actual_gas_used = if meta.index == 0 {
             receipt.cumulative_gas_used
@@ -137,6 +152,15 @@ impl TransactionLoader {
             receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used
         };
         let gas_used = actual_gas_used;
+
+        let raw_tx_type = tx.ty();
+        let (max_fee_per_gas_opt, max_priority_fee_per_gas_opt) = match tx_type {
+            TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => (
+                Some(U256::from(max_fee_value)),
+                max_priority_value.map(U256::from),
+            ),
+            _ => (None, None),
+        };
 
         // Convert status
         let status = receipt.success;
@@ -165,6 +189,9 @@ impl TransactionLoader {
             nonce,
             logs,
             gas_limit,
+            max_fee_per_gas_opt,
+            max_priority_fee_per_gas_opt,
+            raw_tx_type,
         ))
     }
 }

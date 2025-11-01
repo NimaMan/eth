@@ -16,7 +16,7 @@ pub struct SellSwapResult {
     pub pool_address: Address,
     pub pool_type: PoolType,
     pub tokens_sold: U256,
-    pub eth_received: U256,
+    pub denom_received: U256,
     pub sell_transaction: ProcessedTransaction,
     pub block_number: u64,
     pub failure_reason: Option<String>,
@@ -78,8 +78,8 @@ pub async fn simulate_sell_swap(
         .await?;
 
     // Extract ETH received by seller
-    let eth_received = extract_eth_received(&processed, seller_address);
-    let success = processed.status == "1";
+    let denom_received = extract_denom_received(&processed, seller_address);
+    let success = processed.status;
 
     Ok(SellSwapResult {
         success,
@@ -88,7 +88,7 @@ pub async fn simulate_sell_swap(
         pool_address,
         pool_type,
         tokens_sold: tokens_to_sell,
-        eth_received,
+        denom_received,
         sell_transaction: processed,
         block_number: block,
         failure_reason: if success {
@@ -99,7 +99,7 @@ pub async fn simulate_sell_swap(
     })
 }
 
-fn extract_eth_received(processed_tx: &ProcessedTransaction, recipient_address: Address) -> U256 {
+fn extract_denom_received(processed_tx: &ProcessedTransaction, recipient_address: Address) -> U256 {
     if let Some(balance_changes) = processed_tx.address_balance_changes.get(&recipient_address) {
         if let Some(&amount) = balance_changes.currency_net.get("ETH") {
             if amount > I256::ZERO {

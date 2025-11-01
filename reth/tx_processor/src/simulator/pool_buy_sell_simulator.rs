@@ -1,10 +1,14 @@
 use crate::tx_processor::TxProcessor;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::{eyre, Result};
 use reth_primitives::{Header as _, SealedHeader};
 use reth_provider::{AccountReader, HeaderProvider};
-use std::{convert::TryFrom, sync::Arc};
+use std::convert::TryInto;
+use std::sync::Arc;
+use tx_simulator::types::CallFrame;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
+
+use super::unsigned_tx_builder::UnsignedTxBuilder;
 
 use super::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 use crate::tx_processor::tax_calculator::{
@@ -12,21 +16,63 @@ use crate::tx_processor::tax_calculator::{
 };
 
 use crate::tx_processor::data_models::ProcessedTransaction;
+use reth_chain_query::tx_builders::amm::uniswap_v2::{
+    build_buy_swap_v2_with_path, build_sell_swap_v2_with_path, Router as UniswapV2Router,
+};
 use reth_chain_query::tx_builders::amm::{
-    build_router_deploy_tx as build_v4_router_deploy_tx,
-    build_swap_exact_input_single_tx as build_v4_swap_tx,
+    build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
+    build_baygus_single_hop_exact_input_call,
     build_token_approval_tx as build_v4_token_approval_tx,
     build_weth_deposit_tx as build_v4_weth_deposit_tx,
-    compute_contract_address as compute_v4_contract_address, UniswapV4PoolKey as BuilderV4PoolKey,
+    build_weth_withdraw_tx as build_v4_weth_withdraw_tx,
+    compute_contract_address as compute_v4_contract_address,
+    infer_orientation_from_input as infer_v4_orientation_from_input,
+    infer_orientation_from_output as infer_v4_orientation_from_output,
+    UniswapV4BaygusSingleHopRequest as BuilderV4SingleHopRequest,
+    UniswapV4PoolKey as BuilderV4PoolKey,
+};
+use reth_chain_query::common_addresses::dex_pools::{
+    SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
 };
 
+const WETH_DECIMALS: u8 = 18;
 pub async fn check_can_buy_sell_pool(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,
 ) -> Result<PoolBuySellSimulationResult> {
+    let latest_available_block = simulator.get_latest_block()?;
+
+    if let Some(explicit_block) = config.block_number {
+        if latest_available_block < explicit_block {
+            return Err(eyre!(
+                "State for block {} not yet available (latest persisted block {})",
+                explicit_block,
+                latest_available_block
+            ));
+        }
+    }
+
     if config.token_decimals == 0 {
         return Err(eyre!("token_decimals must be provided (non-zero)"));
+    }
+
+    if config.pool_address.is_zero() {
+        return Err(eyre!(
+            "Pool address must be non-zero for {:?} pools",
+            config.pool_type
+        ));
+    }
+
+    if matches!(
+        config.pool_type,
+        PoolType::UniswapV2 | PoolType::SushiSwap | PoolType::UniswapV3 { .. }
+    ) && config.denom_address.is_none()
+    {
+        return Err(eyre!(
+            "denom_address must be provided via PoolBuySellParameters::with_denom_address() for {:?} pools",
+            config.pool_type
+        ));
     }
 
     if matches!(config.pool_type, PoolType::UniswapV4) {
@@ -35,8 +81,10 @@ pub async fn check_can_buy_sell_pool(
 
     let block_number = match config.block_number {
         Some(b) => b,
-        None => simulator.get_latest_block()?,
+        None => latest_available_block,
     };
+
+    validate_pool_registration(simulator.clone(), &config, block_number).await?;
 
     let route = match config.pool_type {
         PoolType::UniswapV2 => {
@@ -60,7 +108,7 @@ pub async fn check_can_buy_sell_pool(
             return Ok(create_failed_result(
                 config,
                 block_number,
-                None,
+                Vec::new(),
                 None,
                 None,
                 None,
@@ -100,93 +148,159 @@ pub async fn check_can_buy_sell_pool(
             (chain, base_fee)
         }
     };
-    let mut setup_tx_result = None;
+    let mut prior_tx_results: Vec<ProcessedTransaction> =
+        Vec::with_capacity(config.prior_txs.len());
 
-    if let Some(prior_tx) = &config.prior_tx {
-        let prior_gas_limit = config.prior_gas_limit.unwrap_or(config.buy_gas_limit);
-        let prior_max_fee = config.prior_max_fee_per_gas.or_else(|| {
-            prior_tx
-                .fees
-                .max_fee_per_gas
-                .and_then(|v| u128::try_from(v).ok())
-        });
-        let prior_max_priority = config.prior_max_priority_fee_per_gas.or_else(|| {
-            prior_tx
-                .fees
-                .max_priority_fee
-                .and_then(|v| u128::try_from(v).ok())
-        });
+    for (idx, prior_tx) in config.prior_txs.iter().enumerate() {
+        let mut setup_call = UnsignedTxBuilder::build_unsigned_from_processed_tx(prior_tx);
+        if setup_call.gas.is_none() {
+            setup_call.gas = if prior_tx.fees.gas_limit > 0 {
+                Some(prior_tx.fees.gas_limit)
+            } else if prior_tx.fees.gas_used > 0 {
+                Some(prior_tx.fees.gas_used)
+            } else {
+                None
+            };
+        }
+        override_prior_gas_price_with_header(base_fee, prior_tx, &mut setup_call);
 
-        let prior_gas_price = if prior_max_fee.is_none() {
-            u128::try_from(prior_tx.fees.gas_price).ok()
-        } else {
-            None
-        };
-
-        let mut setup_call = UnsignedTransaction {
-            from: Some(prior_tx.from_address),
-            to: prior_tx.to_address,
-            value: Some(prior_tx.value),
-            data: Some(prior_tx.input.clone().into()),
-            gas: Some(prior_gas_limit),
-            gas_price: prior_gas_price,
-            max_fee_per_gas: prior_max_fee,
-            max_priority_fee_per_gas: prior_max_priority,
-            nonce: None,
-        };
         let has_explicit_fee = setup_call.gas_price.is_some()
             || setup_call.max_fee_per_gas.is_some()
             || setup_call.max_priority_fee_per_gas.is_some();
         if !has_explicit_fee {
             apply_fee_policy(&mut setup_call, &config, base_fee);
-        } else if setup_call.gas.is_none() {
-            setup_call.gas = Some(prior_gas_limit);
         }
-        let setup_sim_result = chain.step_with_trace(setup_call.clone()).await?;
+
+        let prior_hash = format!("{:#x}", prior_tx.hash);
+        let prior_nonce = prior_tx.nonce;
+        let setup_sim_result = chain
+            .step_with_trace(setup_call.clone())
+            .await
+            .map_err(|err| {
+                let context = format!(
+                    "while replaying prior tx {prior_hash} (index {idx}, nonce {prior_nonce}) with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                    setup_call.gas,
+                    setup_call.gas_price,
+                    setup_call.max_fee_per_gas,
+                    setup_call.max_priority_fee_per_gas
+                );
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "prior_replay",
+                    %context,
+                    block = block_number,
+                    error = %err
+                );
+                eyre!("{}: {}", context, err)
+            })?;
         let setup_processed = tx_processor
             .process_transaction_from_simulation_result(
                 &setup_call,
                 &setup_sim_result,
                 block_number,
-                0,
+                idx as u64,
             )
             .await?;
-        setup_tx_result = Some(setup_processed);
-        if !setup_sim_result.success {
+        let succeeded = setup_sim_result.success;
+        prior_tx_results.push(setup_processed);
+        if !succeeded {
+            let revert_reason = setup_sim_result
+                .revert_reason
+                .clone()
+                .unwrap_or_else(|| "Unknown revert".to_string());
+            let failure_message = format!(
+                "Prior transaction {} (nonce {}) failed: {}",
+                prior_hash, prior_nonce, revert_reason
+            );
             return Ok(create_failed_result(
                 config,
                 block_number,
-                setup_tx_result,
+                prior_tx_results,
                 None,
                 None,
                 None,
-                format!(
-                    "Setup transaction failed: {:?}",
-                    setup_sim_result.revert_reason
-                ),
+                failure_message,
                 false,
                 false,
                 false,
             ));
         }
     }
+    let prior_step_count = prior_tx_results.len() as u64;
 
     // BUY
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
-    let mut buy_tx = reth_chain_query::tx_builders::build_buy_swap(
-        &route,
-        config.buyer_address,
-        config.token_address,
-        config.test_amount,
-        slippage_bps,
-        deadline,
-    );
+    let make_buy_path = |cfg: &PoolBuySellParameters| -> Vec<Address> {
+        let mut path = Vec::with_capacity(if cfg.denom_address.is_some() { 3 } else { 2 });
+        path.push(cfg.weth_address);
+        if let Some(denom) = cfg.denom_address {
+            if denom != cfg.weth_address && denom != cfg.token_address {
+                path.push(denom);
+            }
+        }
+        path.push(cfg.token_address);
+        path
+    };
+    let mut buy_tx = match config.pool_type {
+        PoolType::UniswapV2 => {
+            let path = make_buy_path(&config);
+            build_buy_swap_v2_with_path(
+                UniswapV2Router::UniswapV2,
+                config.buyer_address,
+                config.test_amount,
+                &path,
+                deadline,
+            )
+        }
+        PoolType::SushiSwap => {
+            let path = make_buy_path(&config);
+            build_buy_swap_v2_with_path(
+                UniswapV2Router::SushiswapV2,
+                config.buyer_address,
+                config.test_amount,
+                &path,
+                deadline,
+            )
+        }
+        _ => reth_chain_query::tx_builders::build_buy_swap(
+            &route,
+            config.buyer_address,
+            config.token_address,
+            config.test_amount,
+            slippage_bps,
+            deadline,
+        ),
+    };
     buy_tx.gas = Some(config.buy_gas_limit);
     apply_fee_policy(&mut buy_tx, &config, base_fee);
-    let buy_sim_result = chain.step_with_trace(buy_tx.clone()).await?;
+    let buy_sim_result = chain
+        .step_with_trace(buy_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing simulated buy with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                buy_tx.gas,
+                buy_tx.gas_price,
+                buy_tx.max_fee_per_gas,
+                buy_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "buy",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let buy_processed = tx_processor
-        .process_transaction_from_simulation_result(&buy_tx, &buy_sim_result, block_number, 1)
+        .process_transaction_from_simulation_result(
+            &buy_tx,
+            &buy_sim_result,
+            block_number,
+            prior_step_count,
+        )
         .await?;
     let can_buy = buy_sim_result.success;
     let tokens_received = if can_buy {
@@ -200,14 +314,23 @@ pub async fn check_can_buy_sell_pool(
         U256::ZERO
     };
     if !can_buy {
+        let failure_message = enrich_failure_reason_with_trace(
+            &simulator,
+            &buy_tx,
+            block_number,
+            "Buy transaction failed",
+            buy_sim_result.revert_reason.as_deref(),
+        )
+        .await;
+
         return Ok(create_failed_result(
             config,
             block_number,
-            setup_tx_result,
+            prior_tx_results,
             Some(buy_processed),
             None,
             None,
-            format!("Buy transaction failed: {:?}", buy_sim_result.revert_reason),
+            failure_message,
             false,
             false,
             false,
@@ -223,13 +346,32 @@ pub async fn check_can_buy_sell_pool(
     );
     approve_tx.gas = Some(config.approve_gas_limit);
     apply_fee_policy(&mut approve_tx, &config, base_fee);
-    let approve_sim_result = chain.step_with_trace(approve_tx.clone()).await?;
+    let approve_sim_result = chain
+        .step_with_trace(approve_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing simulated approve with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                approve_tx.gas,
+                approve_tx.gas_price,
+                approve_tx.max_fee_per_gas,
+                approve_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "approve",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let approve_processed = tx_processor
         .process_transaction_from_simulation_result(
             &approve_tx,
             &approve_sim_result,
             block_number,
-            2,
+            prior_step_count + 1,
         )
         .await?;
     let can_approve = approve_sim_result.success;
@@ -237,13 +379,13 @@ pub async fn check_can_buy_sell_pool(
         return Ok(create_failed_result(
             config,
             block_number,
-            setup_tx_result,
+            prior_tx_results,
             Some(buy_processed),
             Some(approve_processed),
             None,
-            format!(
-                "Approve transaction failed: {:?}",
-                approve_sim_result.revert_reason
+            format_failure_with_revert(
+                "Approve transaction failed",
+                approve_sim_result.revert_reason.as_deref(),
             ),
             true,
             false,
@@ -266,17 +408,70 @@ pub async fn check_can_buy_sell_pool(
             .ok_or_else(|| eyre!("No header for block {}", sell_block))?;
         let sealed = SealedHeader::seal_slow(header);
         chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
-        let _ = chain.step_with_trace(buy_tx).await?;
-        let _ = chain.step_with_trace(approve_tx).await?;
+        chain.step_with_trace(buy_tx).await.map_err(|err| {
+            let context = "while reapplying simulated buy before delayed sell".to_string();
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "reapply_buy",
+                %context,
+                block = sell_block,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
+        chain.step_with_trace(approve_tx).await.map_err(|err| {
+            let context = "while reapplying simulated approve before delayed sell".to_string();
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "reapply_approve",
+                %context,
+                block = sell_block,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     }
-    let mut sell_tx = reth_chain_query::tx_builders::build_sell_swap(
-        &route,
-        config.buyer_address,
-        config.token_address,
-        tokens_received,
-        slippage_bps,
-        deadline,
-    );
+    let make_sell_path = |cfg: &PoolBuySellParameters| -> Vec<Address> {
+        let mut path = Vec::with_capacity(if cfg.denom_address.is_some() { 3 } else { 2 });
+        path.push(cfg.token_address);
+        if let Some(denom) = cfg.denom_address {
+            if denom != cfg.weth_address && denom != cfg.token_address {
+                path.push(denom);
+            }
+        }
+        path.push(cfg.weth_address);
+        path
+    };
+    let mut sell_tx = match config.pool_type {
+        PoolType::UniswapV2 => {
+            let path = make_sell_path(&config);
+            build_sell_swap_v2_with_path(
+                UniswapV2Router::UniswapV2,
+                config.buyer_address,
+                tokens_received,
+                &path,
+                deadline,
+            )
+        }
+        PoolType::SushiSwap => {
+            let path = make_sell_path(&config);
+            build_sell_swap_v2_with_path(
+                UniswapV2Router::SushiswapV2,
+                config.buyer_address,
+                tokens_received,
+                &path,
+                deadline,
+            )
+        }
+        _ => reth_chain_query::tx_builders::build_sell_swap(
+            &route,
+            config.buyer_address,
+            config.token_address,
+            tokens_received,
+            slippage_bps,
+            deadline,
+        ),
+    };
     sell_tx.gas = Some(config.sell_gas_limit);
     apply_fee_policy(&mut sell_tx, &config, base_fee);
     let sell_block = if config.block_delay > 0 {
@@ -284,9 +479,33 @@ pub async fn check_can_buy_sell_pool(
     } else {
         block_number
     };
-    let sell_sim_result = chain.step_with_trace(sell_tx.clone()).await?;
+    let sell_sim_result = chain
+        .step_with_trace(sell_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing simulated sell with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                sell_tx.gas,
+                sell_tx.gas_price,
+                sell_tx.max_fee_per_gas,
+                sell_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "sell",
+                %context,
+                block = sell_block,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let sell_processed = tx_processor
-        .process_transaction_from_simulation_result(&sell_tx, &sell_sim_result, sell_block, 3)
+        .process_transaction_from_simulation_result(
+            &sell_tx,
+            &sell_sim_result,
+            sell_block,
+            prior_step_count + 2,
+        )
         .await?;
     let can_sell = sell_sim_result.success;
 
@@ -302,28 +521,38 @@ pub async fn check_can_buy_sell_pool(
         config.pool_address,
         config.buyer_address,
     );
-    let eth_received_u256 =
-        extract_eth_received_from_processed_transaction(&sell_processed, config.buyer_address)
+    let denom_received_u256 =
+        extract_denom_received_from_processed_transaction(&sell_processed, config.buyer_address)
             .unwrap_or(U256::ZERO);
 
-    let mut failure_reason = None;
-    if !(can_buy && can_approve && can_sell) {
-        let failing_step = if !can_buy {
-            "BUY"
-        } else if !can_approve {
-            "APPROVE"
-        } else {
-            "SELL"
-        };
-
-        let mut message = format!("Trading failed at step: {}", failing_step);
+    let failure_reason = if !(can_buy && can_approve && can_sell) {
         if !can_sell {
-            if let Some(ref revert) = sell_sim_result.revert_reason {
-                message.push_str(&format!(" (sell revert: {revert})"));
-            }
+            Some(
+                enrich_failure_reason_with_trace(
+                    &simulator,
+                    &sell_tx,
+                    sell_block,
+                    "Simulation failed at step SELL",
+                    sell_sim_result.revert_reason.as_deref(),
+                )
+                .await,
+            )
+        } else if !can_approve {
+            let prefix = "Simulation failed at step APPROVE";
+            Some(format_failure_with_revert(
+                prefix,
+                approve_sim_result.revert_reason.as_deref(),
+            ))
+        } else {
+            let prefix = "Simulation failed at step BUY";
+            Some(format_failure_with_revert(
+                prefix,
+                buy_sim_result.revert_reason.as_deref(),
+            ))
         }
-        failure_reason = Some(message);
-    }
+    } else {
+        None
+    };
 
     Ok(PoolBuySellSimulationResult {
         pool_type: config.pool_type,
@@ -344,15 +573,152 @@ pub async fn check_can_buy_sell_pool(
             -1.0
         },
         tokens_received,
-        eth_spent: config.test_amount,
-        eth_received: eth_received_u256,
+        denom_spent: config.test_amount,
+        denom_received: denom_received_u256,
         buy_transaction: buy_processed,
         sell_transaction: sell_processed,
         approve_transaction: approve_processed,
-        prior_transaction: setup_tx_result,
+        prior_transactions: prior_tx_results,
         failure_reason,
         block_number,
     })
+}
+
+async fn validate_pool_registration(
+    simulator: Arc<TxSimulator>,
+    config: &PoolBuySellParameters,
+    block_number: u64,
+) -> Result<()> {
+    match config.pool_type {
+        PoolType::UniswapV2 | PoolType::SushiSwap => {
+            let denom = config
+                .denom_address
+                .ok_or_else(|| eyre!("denom_address missing for {:?} pool", config.pool_type))?;
+            let factory = match config.pool_type {
+                PoolType::UniswapV2 => UNISWAP_V2_FACTORY,
+                PoolType::SushiSwap => SUSHISWAP_FACTORY,
+                _ => unreachable!(),
+            };
+            let call_data = encode_get_pair_call(config.token_address, denom);
+            let response = simulator
+                .simulate_view_function(factory, call_data, Some(block_number), None)
+                .await?;
+
+            if !response.success {
+                return Err(eyre!(
+                    "{:?} factory getPair call reverted while checking token {} with denom {}",
+                    config.pool_type,
+                    config.token_address,
+                    denom
+                ));
+            }
+
+            let resolved = decode_factory_response_address(
+                &response.output,
+                "Uniswap V2/SushiSwap getPair returned empty response",
+            )?;
+
+            if resolved.is_zero() {
+                return Err(eyre!(
+                    "No {:?} pool found for token {} with denom {}",
+                    config.pool_type,
+                    config.token_address,
+                    denom
+                ));
+            }
+
+            if resolved != config.pool_address {
+                return Err(eyre!(
+                    "{:?} factory reports pool {} but configuration provided {} for token {} / denom {}",
+                    config.pool_type,
+                    resolved,
+                    config.pool_address,
+                    config.token_address,
+                    denom
+                ));
+            }
+        }
+        PoolType::UniswapV3 { fee_tier } => {
+            let denom = config
+                .denom_address
+                .ok_or_else(|| eyre!("denom_address missing for Uniswap V3 pool checks"))?;
+
+            let call_data = encode_get_pool_call(config.token_address, denom, fee_tier);
+            let response = simulator
+                .simulate_view_function(UNISWAP_V3_FACTORY, call_data, Some(block_number), None)
+                .await?;
+
+            if !response.success {
+                return Err(eyre!(
+                    "Uniswap V3 factory getPool call reverted while checking token {} with denom {} at fee tier {}",
+                    config.token_address,
+                    denom,
+                    fee_tier
+                ));
+            }
+
+            let resolved = decode_factory_response_address(
+                &response.output,
+                "Uniswap V3 getPool returned empty response",
+            )?;
+
+            if resolved.is_zero() {
+                return Err(eyre!(
+                    "No Uniswap V3 pool found for token {} with denom {} at fee tier {}",
+                    config.token_address,
+                    denom,
+                    fee_tier
+                ));
+            }
+
+            if resolved != config.pool_address {
+                return Err(eyre!(
+                    "Uniswap V3 factory reports pool {} but configuration provided {} for token {} / denom {} at fee tier {}",
+                    resolved,
+                    config.pool_address,
+                    config.token_address,
+                    denom,
+                    fee_tier
+                ));
+            }
+        }
+        PoolType::UniswapV4 => {}
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn encode_get_pair_call(token_a: Address, token_b: Address) -> Bytes {
+    let mut data = Vec::with_capacity(4 + 64);
+    data.extend_from_slice(&[0xe6, 0xa4, 0x39, 0x05]);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_a.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_b.as_slice());
+    Bytes::from(data)
+}
+
+fn encode_get_pool_call(token_a: Address, token_b: Address, fee: u32) -> Bytes {
+    let mut data = Vec::with_capacity(4 + 96);
+    data.extend_from_slice(&[0x16, 0x98, 0xee, 0x82]);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_a.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_b.as_slice());
+    data.extend_from_slice(&[0u8; 29]);
+    let fee_bytes = fee.to_be_bytes();
+    data.extend_from_slice(&fee_bytes[1..]);
+    Bytes::from(data)
+}
+
+fn decode_factory_response_address(output: &Bytes, empty_message: &'static str) -> Result<Address> {
+    if output.len() < 32 {
+        return Err(eyre!("{}", empty_message));
+    }
+    let mut buf = [0u8; 20];
+    buf.copy_from_slice(&output[12..32]);
+    Ok(Address::from(buf))
 }
 
 fn extract_tokens_received_from_processed_transaction(
@@ -382,7 +748,7 @@ fn extract_tokens_received_from_processed_transaction(
     U256::ZERO
 }
 
-fn extract_eth_received_from_processed_transaction(
+fn extract_denom_received_from_processed_transaction(
     processed_tx: &ProcessedTransaction,
     recipient_address: Address,
 ) -> Option<U256> {
@@ -401,16 +767,13 @@ fn apply_fee_policy(
     config: &PoolBuySellParameters,
     base_fee: Option<u128>,
 ) {
-    let effective_base = base_fee.or(config.gas_price).unwrap_or(20_000_000_000); // 20 gwei fallback pre-London
-    let default_tip = std::cmp::max(effective_base / 10, 1_000_000_000); // 10% of base, min 1 gwei
-
     if tx.gas.is_none() {
         tx.gas = Some(config.buy_gas_limit);
     }
 
     if let Some(price) = tx.gas_price {
-        if price == 0 && config.gas_price.is_some() {
-            tx.gas_price = config.gas_price;
+        if price == 0 {
+            tx.gas_price = config.gas_price.or(base_fee);
         }
         return;
     }
@@ -419,41 +782,207 @@ fn apply_fee_policy(
         let priority_fee = tx
             .max_priority_fee_per_gas
             .or(config.max_priority_fee_per_gas)
-            .unwrap_or(default_tip);
-
-        let min_required = effective_base.saturating_add(priority_fee);
-        if max_fee < min_required {
-            max_fee = min_required;
+            .unwrap_or(0);
+        if let Some(base_for_min) = base_fee.or(config.gas_price) {
+            let min_required = base_for_min.saturating_add(priority_fee);
+            if max_fee < min_required {
+                max_fee = min_required;
+            }
         }
-
         tx.max_priority_fee_per_gas = Some(priority_fee);
         tx.max_fee_per_gas = Some(max_fee);
         tx.gas_price = None;
         return;
     }
 
-    let priority_fee = tx
-        .max_priority_fee_per_gas
-        .or(config.max_priority_fee_per_gas)
-        .unwrap_or(default_tip);
-
-    let mut max_fee = tx
-        .max_fee_per_gas
-        .or(config.max_fee_per_gas)
-        .unwrap_or_else(|| {
-            effective_base
-                .saturating_mul(2)
-                .saturating_add(priority_fee)
-        });
-
-    let min_required = effective_base.saturating_add(priority_fee);
-    if max_fee < min_required {
-        max_fee = min_required;
+    if let Some(price) = config.gas_price {
+        tx.gas_price = Some(price);
+        tx.max_fee_per_gas = None;
+        tx.max_priority_fee_per_gas = None;
+        return;
     }
 
-    tx.gas_price = None;
-    tx.max_priority_fee_per_gas = Some(priority_fee);
-    tx.max_fee_per_gas = Some(max_fee);
+    if let Some(base_for_min) = base_fee {
+        let priority_fee = tx
+            .max_priority_fee_per_gas
+            .or(config.max_priority_fee_per_gas)
+            .unwrap_or(0);
+
+        let mut max_fee = config
+            .max_fee_per_gas
+            .unwrap_or(base_for_min.saturating_add(priority_fee));
+        let min_required = base_for_min.saturating_add(priority_fee);
+        if max_fee < min_required {
+            max_fee = min_required;
+        }
+
+        tx.gas_price = None;
+        tx.max_priority_fee_per_gas = Some(priority_fee);
+        tx.max_fee_per_gas = Some(max_fee);
+    }
+}
+
+fn format_failure_with_revert(prefix: &str, revert: Option<&str>) -> String {
+    let reason = revert.map(|s| s.trim()).filter(|s| !s.is_empty());
+    match reason {
+        Some(reason) => format!("{prefix} (revert: {reason})"),
+        None => format!("{prefix} (revert reason unknown)"),
+    }
+}
+
+async fn enrich_failure_reason_with_trace(
+    simulator: &Arc<TxSimulator>,
+    tx: &UnsignedTransaction,
+    block_number: u64,
+    base_message: &str,
+    revert_reason: Option<&str>,
+) -> String {
+    let mut reason_opt = revert_reason.map(str::to_string);
+    let needs_trace = reason_opt
+        .as_deref()
+        .map(|s| {
+            let trimmed = s.trim();
+            trimmed.is_empty()
+                || trimmed.contains("without returning data")
+                || trimmed.contains("UniswapV2:")
+                || trimmed.eq_ignore_ascii_case("execution reverted")
+        })
+        .unwrap_or(true);
+
+    if needs_trace {
+        match simulator
+            .simulate_unsigned_transaction_with_full_trace_at_block(tx.clone(), block_number)
+            .await
+        {
+            Ok(full) => {
+                if let Some(reason) = full.revert_reason.as_ref() {
+                    if !reason.is_empty() {
+                        reason_opt = Some(reason.clone());
+                    }
+                }
+
+                if reason_opt.is_none() {
+                    if let Some(reason) = extract_reason_from_call_trace(&full.call_trace) {
+                        reason_opt = Some(reason);
+                    }
+                }
+
+                if reason_opt.is_none() {
+                    if let Some(ctx) = full.revert_context.as_ref() {
+                        reason_opt = Some(format!(
+                            "execution reverted at {} (calldata {} bytes)",
+                            ctx.target, ctx.calldata_len
+                        ));
+                    }
+                }
+            }
+            Err(err) => {
+                let base = format_failure_with_revert(base_message, revert_reason);
+                return format!("{base} (trace failed: {err})");
+            }
+        }
+    }
+
+    format_failure_with_revert(base_message, reason_opt.as_deref())
+}
+
+fn extract_reason_from_call_trace(frame: &CallFrame) -> Option<String> {
+    if let Some(output) = &frame.output {
+        if let Some(reason) = decode_revert_output(output.as_ref()) {
+            if !reason.is_empty() {
+                return Some(reason);
+            }
+        }
+    }
+
+    let mut fallback: Option<String> = None;
+    if let Some(error) = &frame.error {
+        let trimmed = error.trim();
+        if !trimmed.is_empty() && trimmed != "execution reverted" {
+            if trimmed.contains("UniswapV2:") || trimmed.eq_ignore_ascii_case("execution reverted")
+            {
+                fallback = Some(trimmed.to_string());
+            } else {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    for child in &frame.calls {
+        if let Some(reason) = extract_reason_from_call_trace(child) {
+            return Some(reason);
+        }
+    }
+
+    fallback.or_else(|| {
+        frame.error.as_ref().and_then(|err| {
+            let trimmed = err.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    })
+}
+
+fn decode_revert_output(data: &[u8]) -> Option<String> {
+    if data.len() < 4 {
+        return None;
+    }
+
+    let selector = &data[..4];
+    if selector == [0x08, 0xc3, 0x79, 0xa0] {
+        if data.len() < 68 {
+            return None;
+        }
+        let len_bytes: [u8; 8] = data[60..68].try_into().ok()?;
+        let str_len = u64::from_be_bytes(len_bytes) as usize;
+        let start = 68;
+        if data.len() < start + str_len {
+            return None;
+        }
+        let string_bytes = &data[start..start + str_len];
+        return Some(String::from_utf8_lossy(string_bytes).to_string());
+    }
+
+    if selector == [0x4e, 0x48, 0x7b, 0x71] {
+        if data.len() < 36 {
+            return Some("panic (no code)".to_string());
+        }
+        let code_bytes: [u8; 8] = data[28..36].try_into().ok()?;
+        let code = u64::from_be_bytes(code_bytes);
+        let description = match code {
+            0x01 => "panic: assertion failed",
+            0x11 => "panic: arithmetic overflow/underflow",
+            0x12 => "panic: division by zero",
+            0x21 => "panic: invalid enum value",
+            0x31 => "panic: storage byte array out-of-bounds",
+            0x32 => "panic: array out-of-bounds",
+            0x41 => "panic: memory overflow",
+            0x51 => "panic: pop from empty array",
+            other => return Some(format!("panic code 0x{other:x}")),
+        };
+        return Some(description.to_string());
+    }
+
+    None
+}
+
+fn override_prior_gas_price_with_header(
+    base_fee: Option<u128>,
+    prior_tx: &ProcessedTransaction,
+    unsigned_tx: &mut UnsignedTransaction,
+) {
+    if !matches!(prior_tx.raw_tx_type, 0 | 1) {
+        return;
+    }
+    if let Some(base_fee) = base_fee {
+        unsigned_tx.gas_price = Some(base_fee);
+        // legacy transactions should not have EIP-1559 fields
+        unsigned_tx.max_fee_per_gas = None;
+        unsigned_tx.max_priority_fee_per_gas = None;
+    }
 }
 
 async fn check_can_buy_sell_uniswap_v4(
@@ -511,46 +1040,170 @@ async fn check_can_buy_sell_uniswap_v4(
         hooks: v4_cfg.hooks,
     };
 
-    let (buy_zero_for_one, buy_input_currency, _buy_output_currency) =
-        determine_swap_direction(&pool_key, config.token_address)?;
+    let buy_orientation = infer_v4_orientation_from_output(&pool_key, config.token_address)?;
 
-    if buy_input_currency != Address::ZERO && buy_input_currency != config.weth_address {
+    if buy_orientation.input_currency != Address::ZERO
+        && buy_orientation.input_currency != config.weth_address
+    {
         return Err(eyre!(
             "Uniswap V4 helper currently supports pools where the input currency is WETH or native ETH"
         ));
     }
 
-    let mut deploy_tx = build_v4_router_deploy_tx(
-        config.buyer_address,
-        v4_cfg.pool_manager,
-        config.weth_address,
-    );
-    apply_fee_policy(&mut deploy_tx, &config, base_fee);
-    let deploy_result = chain.step_with_trace(deploy_tx.clone()).await?;
-    let deploy_processed = tx_processor
-        .process_transaction_from_simulation_result(&deploy_tx, &deploy_result, block_number, 0)
-        .await?;
-    if !deploy_result.success {
-        return Ok(create_failed_result(
-            config,
-            block_number,
-            Some(deploy_processed),
-            None,
-            None,
-            None,
-            format!(
-                "Router deployment failed: {:?}",
-                deploy_result.revert_reason
-            ),
-            false,
-            false,
-            false,
-        ));
-    }
-    let mut setup_tx_result: Option<ProcessedTransaction> = Some(deploy_processed);
     let router_address = compute_v4_contract_address(config.buyer_address, deployer_nonce);
+    let mut prior_tx_results: Vec<ProcessedTransaction> =
+        Vec::with_capacity(config.prior_txs.len() + 4);
 
-    if buy_input_currency == config.weth_address {
+    for (idx, prior_tx) in config.prior_txs.iter().enumerate() {
+        let prior_tx_gas_limit = if prior_tx.fees.gas_limit > 0 {
+            Some(prior_tx.fees.gas_limit)
+        } else if prior_tx.fees.gas_used > 0 {
+            Some(prior_tx.fees.gas_used)
+        } else {
+            None
+        };
+
+        let prior_max_fee = prior_tx
+            .fees
+            .max_fee_per_gas
+            .and_then(|v| u128::try_from(v).ok())
+            .or(config.max_fee_per_gas);
+        let prior_max_priority = prior_tx
+            .fees
+            .max_priority_fee
+            .and_then(|v| u128::try_from(v).ok())
+            .or(config.max_priority_fee_per_gas);
+
+        let prior_gas_price = if prior_max_fee.is_none() {
+            u128::try_from(prior_tx.fees.gas_price).ok()
+        } else {
+            None
+        };
+
+        let mut setup_call = UnsignedTransaction {
+            from: Some(prior_tx.from_address),
+            to: prior_tx.to_address,
+            value: Some(prior_tx.value),
+            data: Some(prior_tx.input.clone().into()),
+            gas: prior_tx_gas_limit,
+            gas_price: prior_gas_price,
+            max_fee_per_gas: prior_max_fee,
+            max_priority_fee_per_gas: prior_max_priority,
+            nonce: None,
+        };
+        override_prior_gas_price_with_header(base_fee, prior_tx, &mut setup_call);
+        let has_explicit_fee = setup_call.gas_price.is_some()
+            || setup_call.max_fee_per_gas.is_some()
+            || setup_call.max_priority_fee_per_gas.is_some();
+        if !has_explicit_fee {
+            apply_fee_policy(&mut setup_call, &config, base_fee);
+        } else if setup_call.gas.is_none() && prior_tx_gas_limit.is_some() {
+            setup_call.gas = prior_tx_gas_limit;
+        }
+
+        let prior_hash = format!("{:#x}", prior_tx.hash);
+        let prior_nonce = prior_tx.nonce;
+        let setup_result = chain.step_with_trace(setup_call.clone()).await.map_err(|err| {
+            let context = format!(
+                "while replaying prior tx {prior_hash} (index {idx}, nonce {prior_nonce}) with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                setup_call.gas,
+                setup_call.gas_price,
+                setup_call.max_fee_per_gas,
+                setup_call.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "v4_prior_replay",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            eyre!("{}: {}", context, err)
+        })?;
+        let processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &setup_call,
+                &setup_result,
+                block_number,
+                idx as u64,
+            )
+            .await?;
+        prior_tx_results.push(processed);
+    }
+    let router_exists_on_chain = provider
+        .basic_account(&router_address)?
+        .map(|acc| acc.has_bytecode())
+        .unwrap_or(false);
+    let router_exists_in_chain = chain.account_has_code(router_address)?;
+
+    if !router_exists_on_chain && !router_exists_in_chain {
+        let mut deploy_tx =
+            build_baygus_router_deploy_tx(config.buyer_address, v4_cfg.pool_manager);
+        apply_fee_policy(&mut deploy_tx, &config, base_fee);
+        let deploy_result = chain
+            .step_with_trace(deploy_tx.clone())
+            .await
+            .map_err(|err| {
+                let context = format!(
+                    "while deploying temporary router with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                    deploy_tx.gas,
+                    deploy_tx.gas_price,
+                    deploy_tx.max_fee_per_gas,
+                    deploy_tx.max_priority_fee_per_gas
+                );
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "v4_deploy",
+                    %context,
+                    block = block_number,
+                    error = %err
+                );
+                err.wrap_err(context)
+            })?;
+        let deploy_processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &deploy_tx,
+                &deploy_result,
+                block_number,
+                prior_tx_results.len() as u64,
+            )
+            .await?;
+        prior_tx_results.push(deploy_processed.clone());
+        if !deploy_result.success {
+            return Ok(create_failed_result(
+                config,
+                block_number,
+                prior_tx_results,
+                None,
+                None,
+                None,
+                format_failure_with_revert(
+                    "Baygus router deployment failed",
+                    deploy_result.revert_reason.as_deref(),
+                ),
+                false,
+                false,
+                false,
+            ));
+        }
+        if !chain.account_has_code(router_address)? {
+            return Ok(create_failed_result(
+                config,
+                block_number,
+                prior_tx_results,
+                None,
+                None,
+                None,
+                "Baygus router deployment succeeded but bytecode not visible in simulation state"
+                    .to_string(),
+                false,
+                false,
+                false,
+            ));
+        }
+    }
+
+    if buy_orientation.input_currency == config.weth_address {
         let mut deposit_tx = build_v4_weth_deposit_tx(
             config.buyer_address,
             config.weth_address,
@@ -558,58 +1211,170 @@ async fn check_can_buy_sell_uniswap_v4(
         );
         deposit_tx.gas = Some(config.buy_gas_limit);
         apply_fee_policy(&mut deposit_tx, &config, base_fee);
-        let deposit_result = chain.step_with_trace(deposit_tx.clone()).await?;
+        let deposit_result = chain
+            .step_with_trace(deposit_tx.clone())
+            .await
+            .map_err(|err| {
+                let context = format!(
+                    "while simulating WETH deposit with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                    deposit_tx.gas,
+                    deposit_tx.gas_price,
+                    deposit_tx.max_fee_per_gas,
+                    deposit_tx.max_priority_fee_per_gas
+                );
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "v4_deposit",
+                    %context,
+                    block = block_number,
+                    error = %err
+                );
+                err.wrap_err(context)
+            })?;
         let deposit_processed = tx_processor
             .process_transaction_from_simulation_result(
                 &deposit_tx,
                 &deposit_result,
                 block_number,
-                0,
+                prior_tx_results.len() as u64,
             )
             .await?;
+        prior_tx_results.push(deposit_processed.clone());
         if !deposit_result.success {
             return Ok(create_failed_result(
                 config,
                 block_number,
-                Some(deposit_processed),
+                prior_tx_results,
                 None,
                 None,
                 None,
-                format!("WETH deposit failed: {:?}", deposit_result.revert_reason),
+                format_failure_with_revert(
+                    "WETH deposit failed",
+                    deposit_result.revert_reason.as_deref(),
+                ),
                 false,
                 false,
                 false,
             ));
         }
-        setup_tx_result = Some(deposit_processed);
+
+        let mut weth_approve_tx = build_v4_token_approval_tx(
+            config.buyer_address,
+            config.weth_address,
+            router_address,
+            config.test_amount,
+        );
+        weth_approve_tx.gas = Some(config.approve_gas_limit);
+        apply_fee_policy(&mut weth_approve_tx, &config, base_fee);
+        let weth_approve_result = chain
+            .step_with_trace(weth_approve_tx.clone())
+            .await
+            .map_err(|err| {
+                let context = format!(
+                    "while simulating WETH approval with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                    weth_approve_tx.gas,
+                    weth_approve_tx.gas_price,
+                    weth_approve_tx.max_fee_per_gas,
+                    weth_approve_tx.max_priority_fee_per_gas
+                );
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "v4_weth_approve",
+                    %context,
+                    block = block_number,
+                    error = %err
+                );
+                err.wrap_err(context)
+            })?;
+        let weth_approve_processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &weth_approve_tx,
+                &weth_approve_result,
+                block_number,
+                prior_tx_results.len() as u64,
+            )
+            .await?;
+        prior_tx_results.push(weth_approve_processed.clone());
+        if !weth_approve_result.success {
+            return Ok(create_failed_result(
+                config,
+                block_number,
+                prior_tx_results,
+                None,
+                None,
+                None,
+                format_failure_with_revert(
+                    "WETH approval for Baygus router failed",
+                    weth_approve_result.revert_reason.as_deref(),
+                ),
+                false,
+                false,
+                false,
+            ));
+        }
     }
 
-    let mut buy_tx = build_v4_swap_tx(
+    let buy_request = BuilderV4SingleHopRequest {
+        pool_key: pool_key.clone(),
+        token_in: buy_orientation.input_currency,
+        token_out: buy_orientation.output_currency,
+        amount_in: config.test_amount,
+        recipient: config.buyer_address,
+        min_output: None,
+        hook_adapter: Address::ZERO,
+        hook_data: v4_cfg.hook_data.clone(),
+        sqrt_price_limit_x96: None,
+    };
+    let buy_call = build_baygus_single_hop_exact_input_call(&buy_request)?;
+    let mut buy_tx = build_baygus_router_multihop_tx(
         router_address,
         config.buyer_address,
-        &pool_key,
-        buy_zero_for_one,
-        config.test_amount,
-        U256::ZERO,
-        config.buyer_address,
-        false,
-        &v4_cfg.hook_data,
+        &buy_call.params,
+        buy_call.eth_value,
     )?;
     buy_tx.gas = Some(config.buy_gas_limit);
     apply_fee_policy(&mut buy_tx, &config, base_fee);
-    let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
+    let prior_step_count = prior_tx_results.len() as u64;
+    let buy_result = chain
+        .step_with_trace(buy_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing Uniswap V4 buy via Baygus router with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                buy_tx.gas,
+                buy_tx.gas_price,
+                buy_tx.max_fee_per_gas,
+                buy_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "v4_buy",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let buy_processed = tx_processor
-        .process_transaction_from_simulation_result(&buy_tx, &buy_result, block_number, 1)
+        .process_transaction_from_simulation_result(
+            &buy_tx,
+            &buy_result,
+            block_number,
+            prior_step_count,
+        )
         .await?;
     if !buy_result.success {
         return Ok(create_failed_result(
             config,
             block_number,
-            setup_tx_result,
+            prior_tx_results,
             Some(buy_processed),
             None,
             None,
-            format!("Buy transaction failed: {:?}", buy_result.revert_reason),
+            format_failure_with_revert(
+                "Baygus router buy transaction failed",
+                buy_result.revert_reason.as_deref(),
+            ),
             false,
             false,
             false,
@@ -631,21 +1396,45 @@ async fn check_can_buy_sell_uniswap_v4(
     );
     approve_tx.gas = Some(config.approve_gas_limit);
     apply_fee_policy(&mut approve_tx, &config, base_fee);
-    let approve_result = chain.step_with_trace(approve_tx.clone()).await?;
+    let approve_result = chain
+        .step_with_trace(approve_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing Uniswap V4 token approval with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                approve_tx.gas,
+                approve_tx.gas_price,
+                approve_tx.max_fee_per_gas,
+                approve_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "v4_approve",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let approve_processed = tx_processor
-        .process_transaction_from_simulation_result(&approve_tx, &approve_result, block_number, 2)
+        .process_transaction_from_simulation_result(
+            &approve_tx,
+            &approve_result,
+            block_number,
+            prior_step_count + 1,
+        )
         .await?;
     if !approve_result.success {
         return Ok(create_failed_result(
             config,
             block_number,
-            setup_tx_result,
+            prior_tx_results,
             Some(buy_processed),
             Some(approve_processed),
             None,
-            format!(
-                "Approve transaction failed: {:?}",
-                approve_result.revert_reason
+            format_failure_with_revert(
+                "Token approval for Baygus router failed",
+                approve_result.revert_reason.as_deref(),
             ),
             true,
             false,
@@ -653,42 +1442,143 @@ async fn check_can_buy_sell_uniswap_v4(
         ));
     }
 
-    let sell_zero_for_one = !buy_zero_for_one;
-    let (_, sell_output_currency) = determine_swap_currencies(&pool_key, sell_zero_for_one);
-    let unwrap_native =
-        sell_output_currency == config.weth_address || sell_output_currency == Address::ZERO;
+    let sell_orientation = infer_v4_orientation_from_input(&pool_key, config.token_address)?;
+    let sell_request = BuilderV4SingleHopRequest {
+        pool_key: pool_key.clone(),
+        token_in: config.token_address,
+        token_out: sell_orientation.output_currency,
+        amount_in: tokens_received,
+        recipient: config.buyer_address,
+        min_output: None,
+        hook_adapter: Address::ZERO,
+        hook_data: v4_cfg.hook_data.clone(),
+        sqrt_price_limit_x96: None,
+    };
+    let sell_call = build_baygus_single_hop_exact_input_call(&sell_request)?;
 
-    let mut sell_tx = build_v4_swap_tx(
+    let mut sell_tx = build_baygus_router_multihop_tx(
         router_address,
         config.buyer_address,
-        &pool_key,
-        sell_zero_for_one,
-        tokens_received,
-        U256::ZERO,
-        config.buyer_address,
-        unwrap_native,
-        &v4_cfg.hook_data,
+        &sell_call.params,
+        sell_call.eth_value,
     )?;
     sell_tx.gas = Some(config.sell_gas_limit);
     apply_fee_policy(&mut sell_tx, &config, base_fee);
-    let sell_result = chain.step_with_trace(sell_tx.clone()).await?;
+    let sell_result = chain
+        .step_with_trace(sell_tx.clone())
+        .await
+        .map_err(|err| {
+            let context = format!(
+                "while executing Uniswap V4 sell via Baygus router with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                sell_tx.gas,
+                sell_tx.gas_price,
+                sell_tx.max_fee_per_gas,
+                sell_tx.max_priority_fee_per_gas
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "v4_sell",
+                %context,
+                block = block_number,
+                error = %err
+            );
+            err.wrap_err(context)
+        })?;
     let sell_processed = tx_processor
-        .process_transaction_from_simulation_result(&sell_tx, &sell_result, block_number, 3)
+        .process_transaction_from_simulation_result(
+            &sell_tx,
+            &sell_result,
+            block_number,
+            prior_step_count + 2,
+        )
         .await?;
     if !sell_result.success {
         return Ok(create_failed_result(
             config,
             block_number,
-            setup_tx_result,
+            prior_tx_results,
             Some(buy_processed),
             Some(approve_processed),
             Some(sell_processed),
-            format!("Sell transaction failed: {:?}", sell_result.revert_reason),
+            format_failure_with_revert(
+                "Baygus router sell transaction failed",
+                sell_result.revert_reason.as_deref(),
+            ),
             true,
             true,
             false,
         ));
     }
+
+    let mut unwrap_tx_processed: Option<ProcessedTransaction> = None;
+    if sell_call.orientation.output_currency == config.weth_address {
+        let wdenom_received = extract_tokens_received_from_processed_transaction(
+            &sell_processed,
+            config.buyer_address,
+            config.weth_address,
+            WETH_DECIMALS,
+        );
+        if wdenom_received > U256::ZERO {
+            let mut withdraw_tx = build_v4_weth_withdraw_tx(
+                config.buyer_address,
+                config.weth_address,
+                wdenom_received,
+            );
+            withdraw_tx.gas = Some(config.sell_gas_limit);
+            apply_fee_policy(&mut withdraw_tx, &config, base_fee);
+            let withdraw_result = chain
+                .step_with_trace(withdraw_tx.clone())
+                .await
+                .map_err(|err| {
+                    let context = format!(
+                        "while executing WETH unwrap with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                        withdraw_tx.gas,
+                        withdraw_tx.gas_price,
+                        withdraw_tx.max_fee_per_gas,
+                        withdraw_tx.max_priority_fee_per_gas
+                    );
+                    tracing::warn!(
+                        target: "pool_buy_sell_sim",
+                        step = "v4_unwrap",
+                        %context,
+                        block = block_number,
+                        error = %err
+                    );
+                    err.wrap_err(context)
+                })?;
+            let withdraw_processed = tx_processor
+                .process_transaction_from_simulation_result(
+                    &withdraw_tx,
+                    &withdraw_result,
+                    block_number,
+                    prior_step_count + 3,
+                )
+                .await?;
+            prior_tx_results.push(withdraw_processed.clone());
+            if !withdraw_result.success {
+                return Ok(create_failed_result(
+                    config,
+                    block_number,
+                    prior_tx_results,
+                    Some(buy_processed),
+                    Some(approve_processed),
+                    Some(withdraw_processed),
+                    format_failure_with_revert(
+                        "WETH unwrap transaction failed",
+                        withdraw_result.revert_reason.as_deref(),
+                    ),
+                    true,
+                    true,
+                    false,
+                ));
+            }
+            unwrap_tx_processed = Some(withdraw_processed);
+        }
+    }
+
+    let final_sell_processed = unwrap_tx_processed
+        .clone()
+        .unwrap_or_else(|| sell_processed.clone());
 
     let buy_tax = calculate_buy_tax_from_processed_transaction(
         &buy_processed,
@@ -702,9 +1592,12 @@ async fn check_can_buy_sell_uniswap_v4(
         config.buyer_address,
     );
 
-    let eth_received_u256 =
-        extract_eth_received_from_processed_transaction(&sell_processed, config.buyer_address)
-            .unwrap_or(U256::ZERO);
+    let eth_transfer_source = unwrap_tx_processed.as_ref().unwrap_or(&sell_processed);
+    let denom_received_u256 = extract_denom_received_from_processed_transaction(
+        eth_transfer_source,
+        config.buyer_address,
+    )
+    .unwrap_or(U256::ZERO);
 
     Ok(PoolBuySellSimulationResult {
         pool_type: PoolType::UniswapV4,
@@ -717,45 +1610,21 @@ async fn check_can_buy_sell_uniswap_v4(
         buy_tax_percent: buy_tax.as_percentage().unwrap_or(0.0),
         sell_tax_percent: sell_tax.as_percentage().unwrap_or(0.0),
         tokens_received,
-        eth_spent: config.test_amount,
-        eth_received: eth_received_u256,
+        denom_spent: config.test_amount,
+        denom_received: denom_received_u256,
         buy_transaction: buy_processed,
-        sell_transaction: sell_processed,
+        sell_transaction: final_sell_processed,
         approve_transaction: approve_processed,
-        prior_transaction: setup_tx_result,
+        prior_transactions: prior_tx_results,
         failure_reason: None,
         block_number,
     })
 }
 
-fn determine_swap_direction(
-    key: &BuilderV4PoolKey,
-    token_address: Address,
-) -> Result<(bool, Address, Address)> {
-    if token_address == key.currency1 {
-        Ok((true, key.currency0, key.currency1))
-    } else if token_address == key.currency0 {
-        Ok((false, key.currency1, key.currency0))
-    } else {
-        Err(eyre!(
-            "Token address {:x} is not part of the supplied Uniswap V4 pool key",
-            token_address
-        ))
-    }
-}
-
-fn determine_swap_currencies(key: &BuilderV4PoolKey, zero_for_one: bool) -> (Address, Address) {
-    if zero_for_one {
-        (key.currency0, key.currency1)
-    } else {
-        (key.currency1, key.currency0)
-    }
-}
-
 fn create_failed_result(
     config: PoolBuySellParameters,
     block_number: u64,
-    setup_tx: Option<ProcessedTransaction>,
+    prior_txs: Vec<ProcessedTransaction>,
     buy_tx: Option<ProcessedTransaction>,
     approve_tx: Option<ProcessedTransaction>,
     sell_tx: Option<ProcessedTransaction>,
@@ -773,12 +1642,13 @@ fn create_failed_result(
         to_address: None,
         contract_address: None,
         value: U256::ZERO,
-        status: "0".to_string(),
+        status: false,
         nonce: 0,
+        raw_tx_type: 0,
         tx_type: "UNKNOWN".to_string(),
         actions: vec![],
         fees: Default::default(),
-        bribe_amount: 0.0,
+        bribe_amount: U256::ZERO,
         unique_addresses: Default::default(),
         erc20_contracts: Default::default(),
         erc721_contracts: Default::default(),
@@ -802,14 +1672,14 @@ fn create_failed_result(
         uniswap_v4_modifies: vec![],
         uniswap_v4_swaps: vec![],
         permit2_events: vec![],
-        approvals: vec![],
-        erc721_approvals: vec![],
-        mints: vec![],
-        burns: vec![],
-        deposits: vec![],
-        withdraws: vec![],
-        pair_events: vec![],
-        owner_events: vec![],
+        erc20_approval_events: vec![],
+        erc721_approval_events: vec![],
+        uniswap_v2_mints: vec![],
+        uniswap_v2_burns: vec![],
+        deposit_events: vec![],
+        withdraw_events: vec![],
+        uniswap_v2_pair_created_events: vec![],
+        ownership_transferred_events: vec![],
         contract_creation_events: vec![],
         trading_enabled_events: vec![],
         trading_disabled_events: vec![],
@@ -830,12 +1700,12 @@ fn create_failed_result(
         buy_tax_percent: 0.0,
         sell_tax_percent: 0.0,
         tokens_received: U256::ZERO,
-        eth_spent: config.test_amount,
-        eth_received: U256::ZERO,
+        denom_spent: config.test_amount,
+        denom_received: U256::ZERO,
         buy_transaction: buy_tx.unwrap_or_else(|| dummy_tx.clone()),
         sell_transaction: sell_tx.unwrap_or_else(|| dummy_tx.clone()),
         approve_transaction: approve_tx.unwrap_or_else(|| dummy_tx.clone()),
-        prior_transaction: setup_tx,
+        prior_transactions: prior_txs,
         failure_reason: Some(failure_reason),
         block_number,
     }
