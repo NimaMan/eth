@@ -122,6 +122,50 @@ pub static DENOM_ADDRESSES: Lazy<HashMap<Address, &'static str>> = Lazy::new(|| 
     m.insert(address!("70e8dE73cE538DA2bEEd35d14187F6959a8ecA96"), "XSGD");
     m.insert(address!("C08e7E23C235073C6807C2eFe7021304cB7C2815"), "XUSD");
     m.insert(address!("c56c2b7e71B54d38Aab6d52E94a04Cbfa8F604fA"), "ZUSD");
+    // Extended token set used across pool simulations
+    m.insert(address!("0D8775F648430679A709E98d2b0Cb6250d2887EF"), "BAT");
+    m.insert(address!("5283D291DBCF85356A21bA090E6db59121208b44"), "BLUR");
+    m.insert(address!("9813037ee2218799597d83D4a5B6F3b6778218d9"), "BONE");
+    m.insert(address!("4206931337dc273a630d328dA6441786BfaD668f"), "DOGE");
+    m.insert(address!("761D38e5ddf6ccf6Cf7c55759d5210750B5D60F3"), "ELON");
+    m.insert(address!("F629cBd94d3791C9250152BD8dfBDF380E2a3B9c"), "ENJ");
+    m.insert(address!("C18360217D8F7Ab5e7c516566761Ea12Ce7F9D72"), "ENS");
+    m.insert(address!("aea46A60368A7bD060eec7DF8CBa43b7EF41Ad85"), "FET");
+    m.insert(
+        address!("cf0C122c6b73ff809C693DB761e7BaeBe62b6a2E"),
+        "FLOKI",
+    );
+    m.insert(address!("50D1c9771902476076eCFc8B2A83Ad6b9355a4c9"), "FTT");
+    m.insert(address!("d1d2Eb1B1e90B638588728b4130137D262C87cae"), "GALA");
+    m.insert(address!("6810e776880C02933D47DB1b9fc05908e5386b96"), "GNO");
+    m.insert(address!("c944E90C64B2c07662A292be6244BDf05Cda44a7"), "GRT");
+    m.insert(
+        address!("A2b4C0Af19cC16a6CfAcCe81F192B024d625817D"),
+        "KISHU",
+    );
+    m.insert(address!("5A98FcBEA516Cf06857215779Fd812CA3beF1B32"), "LDO");
+    m.insert(address!("BBbbCA6A901c926F240b89EacB641d8Aec7AEafD"), "LRC");
+    m.insert(address!("0F5D2fB29fb7d3CFeE444a200298f468908cC942"), "MANA");
+    m.insert(address!("99D8a9C45b2ecA8864373A26D1459e3Dff1e17F3"), "MIM");
+    m.insert(address!("3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0"), "FXS");
+    m.insert(address!("4d224452801ACEd8B2F0aebE155379bb5D594381"), "APE");
+    m.insert(address!("6De037ef9aD2725EB40118Bb1702EBb27e4Aeb24"), "RNDR");
+    m.insert(address!("D33526068D116cE69F19A9ee46F0bd304F21A51f"), "RPL");
+    m.insert(
+        address!("42981d0bfbAf196529376EE702F2a9Eb9092fcB5"),
+        "SAFEMOON",
+    );
+    m.insert(address!("3845badAde8e6dFF049820680d1F14bD3903a5d0"), "SAND");
+    m.insert(address!("77777FeDdddFfC19Ff86DB637967013e6C6A116C"), "TORN");
+    m.insert(
+        address!("3301Ee63Fb29F863f2333Bd4466acb46CD8323E6"),
+        "AKITA",
+    );
+    m.insert(address!("BB0E17EF65F82Ab018d8EDd776e8DD940327B28b"), "AXS");
+    m.insert(
+        address!("AC57De9C1A09FeC648E93EB98875B212DB0d460B"),
+        "BABYDOGE",
+    );
     m
 });
 
@@ -197,8 +241,50 @@ pub static ERC20_TOKEN_DECIMALS: Lazy<HashMap<&'static str, u8>> = Lazy::new(|| 
     m.insert("OP", 18);
     m.insert("SHIB", 18);
     m.insert("PEPE", 18);
+    m.insert("BAT", 18);
+    m.insert("BLUR", 18);
+    m.insert("BONE", 18);
+    m.insert("DOGE", 8);
+    m.insert("ELON", 18);
+    m.insert("ENJ", 18);
+    m.insert("ENS", 18);
+    m.insert("FET", 18);
+    m.insert("FLOKI", 9);
+    m.insert("FTT", 18);
+    m.insert("GALA", 8);
+    m.insert("GNO", 18);
+    m.insert("GRT", 18);
+    m.insert("KISHU", 9);
+    m.insert("LDO", 18);
+    m.insert("LRC", 18);
+    m.insert("MANA", 18);
+    m.insert("MIM", 18);
+    m.insert("FXS", 18);
+    m.insert("APE", 18);
+    m.insert("RNDR", 18);
+    m.insert("RPL", 18);
+    m.insert("SAFEMOON", 9);
+    m.insert("SAND", 18);
+    m.insert("TORN", 18);
+    m.insert("AKITA", 18);
+    m.insert("AXS", 18);
+    m.insert("BABYDOGE", 9);
     m
 });
+
+/// SYMBOL_TO_ADDRESS - quick lookup for token addresses by symbol
+pub static SYMBOL_TO_ADDRESS: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    for (address, symbol) in DENOM_ADDRESSES.iter() {
+        m.insert(*symbol, *address);
+    }
+    m
+});
+
+/// Retrieve token address by symbol (case-sensitive)
+pub fn token_address(symbol: &str) -> Option<Address> {
+    SYMBOL_TO_ADDRESS.get(symbol).copied()
+}
 
 /// Common addresses by name (routers, factories, etc.)
 pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
