@@ -165,14 +165,6 @@ pub fn token_configs() -> Vec<TokenConfig> {
             expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
-        TokenConfig {
-            symbol: "DOGE",
-            token_address: must_address("DOGE"),
-            denom_address: weth,
-            fee_tier: 3000,
-            expected_behavior: ExpectedBehavior::ShouldWork,
-            decimals: 8,
-        },
         // ===================== ADDITIONAL TOKENS =====================
         TokenConfig {
             symbol: "RPL",
@@ -186,16 +178,8 @@ pub fn token_configs() -> Vec<TokenConfig> {
             symbol: "ARB",
             token_address: must_address("ARB"),
             denom_address: weth,
-            fee_tier: 500,
-            expected_behavior: ExpectedBehavior::ShouldWork,
-            decimals: 18,
-        },
-        TokenConfig {
-            symbol: "OP",
-            token_address: must_address("OP"),
-            denom_address: weth,
             fee_tier: 3000,
-            expected_behavior: ExpectedBehavior::MightFail("Bridge token"),
+            expected_behavior: ExpectedBehavior::ShouldWork,
             decimals: 18,
         },
         TokenConfig {
