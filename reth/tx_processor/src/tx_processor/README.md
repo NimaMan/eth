@@ -208,7 +208,7 @@ See `tx_processor/examples` for end‑to‑end demos:
 
 - Process by hash: `process_transaction_by_hash`
 - Unsigned → processed: `processed_tx_from_unsigned_tx`
-- AMM viability + taxes: `can_buy_sell_common_tokens_uni_v2`, `can_buy_sell_common_tokens_uni_v3`, `erc20_pool_tax_demo`
+- AMM viability + taxes: `can_buy_sell_common_tokens_uniswap_v2`, `can_buy_sell_common_tokens_uni_v3`, `erc20_pool_tax_demo`
 - Approval mechanics: `approval_mechanics_demo`
 
 ---

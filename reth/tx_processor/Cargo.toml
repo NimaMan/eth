@@ -115,8 +115,8 @@ name = "erc20_pool_block_range_analysis"
 path = "examples/pool_analysis/erc20_pool_block_range_analysis.rs"
 
 [[example]]
-name = "can_buy_sell_common_tokens_uni_v2"
-path = "examples/pool_analysis/can_buy_sell_common_tokens_uni_v2.rs"
+name = "can_buy_sell_common_tokens_uniswap_v2"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v2.rs"
 
 [[example]]
 name = "can_buy_sell_common_tokens_uni_v3"

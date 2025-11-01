@@ -88,7 +88,7 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Historical pool analysis with volume and liquidity tracking
 
-#### `can_buy_sell_common_tokens_uni_v2.rs`
+#### `can_buy_sell_common_tokens_uniswap_v2.rs`
 **Purpose:** Test token viability on Uniswap V2  
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Validates WETH, USDC, USDT, DAI trading on V2
@@ -97,6 +97,24 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Purpose:** Test token viability on Uniswap V3  
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Tests concentrated liquidity pools and fee tiers
+
+### Upcoming Success Criteria Example (v0.5 integration)
+
+#### `can_buy_sell_uniswap_v4.rs`
+**Purpose:** Acceptance example for Baygus Router wiring (buy → approve → sell routed through Solidity).  
+**Status Goal:** ✅ Passes once v0.5 objective is complete.  
+**Success Definition:**  
+- Build Uniswap v4 calldata via the Baygus Router builder in `reth_chain_query`.  
+- Deploy (or reuse) the Baygus Router bytecode inside the simulator environment.  
+- Execute buy/approve/sell through the router and persist standard tax/trace outputs.  
+- Report success in the CLI output without manual patching.  
+**How to run (when ready):**
+```bash
+cargo run --example can_buy_sell_uniswap_v4 --package tx_processor -- \
+  --reth-datadir /home/nima/.local/share/reth/mainnet \
+  --pool-manager 0x000000000004444C5DC75cB358380d2E3de08a90 \
+  --pool-id 0x6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa
+```
 
 ## Resolution Required
 
