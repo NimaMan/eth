@@ -4,9 +4,7 @@ use alloy_primitives::{Address, Bytes, U256};
 /// Tests multiple popular tokens on UniswapV3 pools with different fee tiers
 /// to verify buy→approve→sell sequences work correctly with concentrated liquidity.
 use eyre::{eyre, Result};
-use reth_chain_query::common_addresses::dex_pools::{
-    compute_uniswap_v3_pool, UNISWAP_V3_FACTORY,
-};
+use reth_chain_query::dex::{compute_uniswap_v3_pool, UNISWAP_V3_FACTORY};
 use std::sync::Arc;
 use tx_processor::simulator::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
@@ -60,6 +58,7 @@ async fn test_token(
     )
     .with_test_amount(U256::from(10_000_000_000_000_000u64)) // 0.01 ETH
     .with_denom_address(token.denom_address)
+    .with_denom_decimals(18)
     .with_token_decimals(token.decimals)
     .with_block(block_number);
 
@@ -310,8 +309,7 @@ async fn ensure_v3_pool_exists(
         ));
     }
 
-    let view_data =
-        encode_get_pool_call(token.token_address, token.denom_address, token.fee_tier);
+    let view_data = encode_get_pool_call(token.token_address, token.denom_address, token.fee_tier);
     let response = simulator
         .simulate_view_function(UNISWAP_V3_FACTORY, view_data, Some(block_number), None)
         .await?;

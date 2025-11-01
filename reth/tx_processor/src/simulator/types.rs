@@ -27,7 +27,8 @@ pub struct PoolBuySellParameters {
     pub approve_gas_limit: u64,
     pub sell_gas_limit: u64,
     pub weth_address: Address,
-    pub denom_address: Option<Address>,
+    pub denom_address: Address,
+    pub denom_decimals: u8,
     pub block_delay: u64,
     pub token_decimals: u8,
     pub block_header: Option<SealedHeader>,
@@ -52,7 +53,7 @@ impl Default for PoolBuySellParameters {
             token_address: Address::ZERO,
             pool_address: Address::ZERO,
             pool_type: PoolType::UniswapV2,
-            test_amount: U256::from(10_000_000_000_000_000u64),
+            test_amount: U256::ZERO,
             buyer_address: Address::from([
                 0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D,
                 0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
@@ -70,7 +71,8 @@ impl Default for PoolBuySellParameters {
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
-            denom_address: None,
+            denom_address: Address::ZERO,
+            denom_decimals: 0,
             block_delay: 0,
             token_decimals: 0,
             block_header: None,
@@ -113,7 +115,12 @@ impl PoolBuySellParameters {
     }
 
     pub fn with_denom_address(mut self, denom: Address) -> Self {
-        self.denom_address = Some(denom);
+        self.denom_address = denom;
+        self
+    }
+
+    pub fn with_denom_decimals(mut self, decimals: u8) -> Self {
+        self.denom_decimals = decimals;
         self
     }
 

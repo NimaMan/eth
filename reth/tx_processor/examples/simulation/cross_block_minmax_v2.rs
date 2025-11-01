@@ -12,9 +12,8 @@ use alloy_primitives::{Address, U256};
 /// - Token decimals are assumed: WETH=18, USDC=6, USDT=6.
 ///
 use eyre::Result;
-use reth_chain_query::common_addresses::{
-    compute_sushiswap_pool, compute_uniswap_v2_pool, get_address_by_name,
-};
+use reth_chain_query::common_addresses::get_address_by_name;
+use reth_chain_query::dex::{compute_sushiswap_pool, compute_uniswap_v2_pool};
 use reth_chain_query::provider::RethQueryProvider;
 use std::sync::Arc;
 

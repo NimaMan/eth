@@ -47,13 +47,13 @@ async fn main() -> Result<()> {
     println!("    - Block 23196199: Liquidity addition (1 ETH + 89B moo tokens)");
     println!("    - Block 23196488: Successful swap (0.1 ETH -> 575M moo tokens)");
     println!("  Step: Every {} blocks", block_step);
-    println!("  Test Amount: 0.1 ETH");
+    println!("  Test Amount: 0.1 WETH");
     println!();
 
     println!("Starting block range analysis...\n");
     println!(
         "{:<10} {:<12} {:<10} {:<10} {:<20} {:<20}",
-        "Block", "Tradeable", "Buy Tax", "Sell Tax", "Tokens Received", "ETH Received"
+        "Block", "Tradeable", "Buy Tax", "Sell Tax", "Tokens Received", "WETH Received"
     );
     println!("{}", "=".repeat(92));
 
@@ -69,6 +69,7 @@ async fn main() -> Result<()> {
         let config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
             .with_test_amount(U256::from(100_000_000_000_000_000u64)) // 0.1 ETH
             .with_denom_address(denom_address)
+            .with_denom_decimals(18)
             .with_token_decimals(18)
             .with_block(block_number)
             .with_block_delay(1); // Sell in next block for consistency
@@ -97,7 +98,7 @@ async fn main() -> Result<()> {
                 };
                 let denom_received = if result.is_tradeable {
                     format!(
-                        "{:.6} ETH",
+                        "{:.6} WETH",
                         result.denom_received.to::<u128>() as f64 / 1e18
                     )
                 } else {

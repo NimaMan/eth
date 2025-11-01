@@ -48,6 +48,7 @@ async fn main() -> Result<()> {
     let config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
         .with_test_amount(alloy_primitives::U256::from(1_000_000_000_000_000_000u128)) // 1 ETH for better testing
         .with_denom_address(denom_address)
+        .with_denom_decimals(18)
         .with_block_delay(1) // Prefer next block when available; capped to latest
         .with_token_decimals(9); // RFI has 9 decimals
 
@@ -56,7 +57,7 @@ async fn main() -> Result<()> {
     println!("  Token: RFI (Reflect Finance) - {:?}", token_address);
     println!("  Pool: RFI/WETH Uniswap V2 - {:?}", pool_address);
     println!("  Type: {:?}", config.pool_type);
-    println!("  Test Amount: {} wei (1 ETH)", config.test_amount);
+    println!("  Test Amount: {} wei (1 WETH)", config.test_amount);
     println!("  Token Decimals: 9");
     println!("  Expected Tax: 1% on all transactions (buy and sell)");
     println!();
@@ -114,9 +115,9 @@ async fn main() -> Result<()> {
         println!();
 
         println!("Trade Details:");
-        println!("  ETH Spent: {} wei", result.denom_spent);
+        println!("  WETH Spent: {} wei", result.denom_spent);
         println!("  Tokens Received: {}", result.tokens_received);
-        println!("  ETH Received: {} wei", result.denom_received);
+        println!("  WETH Received: {} wei", result.denom_received);
 
         let net_loss = result.denom_spent.saturating_sub(result.denom_received);
         let loss_percent = if result.denom_spent > alloy_primitives::U256::ZERO {

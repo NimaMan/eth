@@ -7,9 +7,8 @@ use alloy_primitives::{Address, U256};
 /// - Sells token on Sushi V2 (Token->ETH)
 /// - Reports tokens_out, ETH_back, gas per leg, gas cost, and net PnL (ETH & USD)
 use eyre::Result;
-use reth_chain_query::common_addresses::{
-    compute_sushiswap_pool, compute_uniswap_v3_pool, get_address_by_name,
-};
+use reth_chain_query::common_addresses::get_address_by_name;
+use reth_chain_query::dex::{compute_sushiswap_pool, compute_uniswap_v3_pool};
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use std::env;
 use std::str::FromStr;
@@ -223,7 +222,7 @@ async fn scan_token(
     size_eth: f64,
     threshold_usd: f64,
 ) -> Result<()> {
-    use reth_chain_query::common_addresses::{
+    use reth_chain_query::dex::{
         compute_sushiswap_pool, compute_uniswap_v2_pool, compute_uniswap_v3_pool,
     };
     use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;

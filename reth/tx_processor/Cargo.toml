@@ -123,8 +123,8 @@ name = "can_buy_sell_common_tokens_uniswap_v3"
 path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v3.rs"
 
 [[example]]
-name = "can_buy_sell_uniswap_v4"
-path = "examples/pool_analysis/can_buy_sell_uniswap_v4.rs"
+name = "can_buy_sell_common_tokens_uniswap_v4"
+path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v4.rs"
 
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)

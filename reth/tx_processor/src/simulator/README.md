@@ -70,6 +70,24 @@ Where to look
 - Core simulation chain: `src/unsigned_tx_chain_simulator.rs` (via `TxSimulator::start_simulation_chain(at_block, header)`)
 - Viability analyzer (buy→approve→sell): `src/simulator/{buy_swap_simulator.rs, sell_swap_simulator.rs, pool_buy_sell_simulator.rs, cross_venue_buy_approve_sell.rs}`
 
+Observations from the 2025-10-28 Live Run
+- Source: `logs/pools/PoolState_20251028_203459.log` (captured before the pool validation fixes).
+- Dominant failure (≈80 % — 1 676 hits): `Buy transaction failed (revert: Contract 0x7a250… reverted without returning data)` on Uniswap V2 paths. These were router fallbacks caused by computing a pool address while the local Reth state had not yet indexed the pair (or the pair had already been drained). With the post‑fix factory check, the same cases now surface as `No Uniswap V2 pool found…` instead of reaching the router.
+- Secondary buy failures:
+  * 43× `UniswapV2: TRANSFER_FAILED` — fee-on-transfer / blacklisted tokens (e.g., 0x3D72A7dA… at block 23669052) that reject the router as sender.
+  * 38× `UniswapV2Library: INSUFFICIENT_LIQUIDITY` — pools detected but reserves were zeroed immediately after a rug (`Denom_removal` alerts corroborate these blocks).
+  * 14× `Contract 0xE592… reverted without returning data` — identical symptom on Uniswap V3 when `getPool` returned the zero address. The new guard in `check_can_buy_sell_pool` now blocks these at the factory lookup as well.
+- Sell leg regressions:
+  * 56× `Simulation failed at step SELL (TransferHelper: TRANSFER_FROM_FAILED)` — buy succeeded, but tokens enforce post-buy lockups (example: 0x1dfdB02d… at block 23668386). These should remain flagged as non-tradeable even after the refactor.
+  * 3× `Simulation failed at step SELL (UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT)` — taxed sells where the post-buy balance was entirely burned.
+- Prior-transaction replays:
+  * 114× `TransferHelper: TRANSFER_FROM_FAILED`, 35× `ERC20: transfer amount exceeds allowance`, plus various custom errors when we attempted to replay a user’s “enable trading” or approval tx without mirroring their original allowances. Actions pulled into `PoolBuySellParameters.prior_txs` must either include all prerequisite approvals or be skipped (otherwise the simulator starts from a clean account and the replay fails deterministically).
+- Live-state caveat: even though we now fetch sealed headers from the RPC node for the block we are replaying, the local Reth datadir must be caught up to the same height. When the DB was still indexing 236722xx, brand-new pools produced the router reverts above. If we observe the same pattern again:
+  1. Call `simulate_view_function(UNISWAP_V2_FACTORY, getPair(token, denom), block)` to verify the pool address exists at the target block before building swap calldata.
+  2. Query `getReserves()` on the resolved pool to rule out rugs (zero liquidity) versus missing state.
+  3. For sell reverts, inspect `erc20.allowance(buyer, router)` at the replayed block to confirm whether an enable transaction is required.
+- Historical regression: FL0KI (token `0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E`) previously hit the 0x7a250… router revert in this log. After enforcing denom addresses and validating pairs, the current simulator reports the pool as missing instead of queuing a failing swap, which is the expected behaviour.
+
 Design split (by crate)
 - reth_chain_query: tx builders (unsigned txs), provider (read‑only chain data)
 - tx_processor (this crate): simulators + `ProcessedTransaction`

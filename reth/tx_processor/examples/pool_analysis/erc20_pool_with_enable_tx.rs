@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
     let mut config = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2)
         .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 ETH
         .with_denom_address(denom_address)
+        .with_denom_decimals(18)
         .with_token_decimals(18)
         .with_block_delay(1); // Sell in next block
 
@@ -65,7 +66,7 @@ async fn main() -> Result<()> {
                 println!("  Buy Tax: {:.2}%", result.buy_tax_percent);
                 println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
                 println!("  Tokens Received: {}", result.tokens_received);
-                println!("  ETH Recovered: {} wei", result.denom_received);
+                println!("  WETH Recovered: {} wei", result.denom_received);
                 println!("  Block Delay Used: 1 (sell in next block)");
             }
         }

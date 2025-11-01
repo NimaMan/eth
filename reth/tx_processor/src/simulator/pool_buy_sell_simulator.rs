@@ -1,6 +1,6 @@
 use crate::tx_processor::TxProcessor;
-use alloy_primitives::{Address, Bytes, I256, U256};
-use eyre::{eyre, Result};
+use alloy_primitives::{Address, I256, U256};
+use eyre::{eyre, Result, WrapErr};
 use reth_primitives::{Header as _, SealedHeader};
 use reth_provider::{AccountReader, HeaderProvider};
 use std::convert::TryInto;
@@ -11,13 +11,22 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 use super::unsigned_tx_builder::UnsignedTxBuilder;
 
 use super::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
 
 use crate::tx_processor::data_models::ProcessedTransaction;
+use reth_chain_query::dex::{
+    fetch_uniswap_v2_pair_address, fetch_uniswap_v3_pool_address, SUSHISWAP_FACTORY,
+    UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
+};
+use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::amm::uniswap_v2::{
-    build_buy_swap_v2_with_path, build_sell_swap_v2_with_path, Router as UniswapV2Router,
+    build_approve_v2, build_token_to_token_swap_v2, Router as UniswapV2Router,
+};
+use reth_chain_query::tx_builders::amm::uniswap_v3::{
+    build_approve_v3, build_token_to_token_swap_v3,
 };
 use reth_chain_query::tx_builders::amm::{
     build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
@@ -30,9 +39,6 @@ use reth_chain_query::tx_builders::amm::{
     infer_orientation_from_output as infer_v4_orientation_from_output,
     UniswapV4BaygusSingleHopRequest as BuilderV4SingleHopRequest,
     UniswapV4PoolKey as BuilderV4PoolKey,
-};
-use reth_chain_query::common_addresses::dex_pools::{
-    SUSHISWAP_FACTORY, UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
 };
 
 const WETH_DECIMALS: u8 = 18;
@@ -67,11 +73,17 @@ pub async fn check_can_buy_sell_pool(
     if matches!(
         config.pool_type,
         PoolType::UniswapV2 | PoolType::SushiSwap | PoolType::UniswapV3 { .. }
-    ) && config.denom_address.is_none()
+    ) && config.denom_address.is_zero()
     {
         return Err(eyre!(
             "denom_address must be provided via PoolBuySellParameters::with_denom_address() for {:?} pools",
             config.pool_type
+        ));
+    }
+
+    if config.denom_decimals == 0 {
+        return Err(eyre!(
+            "denom_decimals must be provided via PoolBuySellParameters::with_denom_decimals()"
         ));
     }
 
@@ -226,51 +238,119 @@ pub async fn check_can_buy_sell_pool(
             ));
         }
     }
+
+    let mut denom_approve_tx_for_delay: Option<UnsignedTransaction> = None;
+    if let Some(mut denom_approve_tx) = match config.pool_type {
+        PoolType::UniswapV2 => Some(build_approve_v2(
+            UniswapV2Router::UniswapV2,
+            config.buyer_address,
+            config.denom_address,
+            config.test_amount,
+        )),
+        PoolType::SushiSwap => Some(build_approve_v2(
+            UniswapV2Router::SushiswapV2,
+            config.buyer_address,
+            config.denom_address,
+            config.test_amount,
+        )),
+        PoolType::UniswapV3 { .. } => Some(build_approve_v3(
+            config.buyer_address,
+            config.denom_address,
+            config.test_amount,
+        )),
+        _ => None,
+    } {
+        denom_approve_tx.gas = Some(config.approve_gas_limit);
+        apply_fee_policy(&mut denom_approve_tx, &config, base_fee);
+        let denom_approve_sim = chain
+            .step_with_trace(denom_approve_tx.clone())
+            .await
+            .map_err(|err| {
+                let context = format!(
+                    "while executing denom approve with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                    denom_approve_tx.gas,
+                    denom_approve_tx.gas_price,
+                    denom_approve_tx.max_fee_per_gas,
+                    denom_approve_tx.max_priority_fee_per_gas
+                );
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "denom_approve",
+                    %context,
+                    block = block_number,
+                    error = %err
+                );
+                err.wrap_err(context)
+            })?;
+        let denom_approve_processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &denom_approve_tx,
+                &denom_approve_sim,
+                block_number,
+                prior_tx_results.len() as u64,
+            )
+            .await?;
+        prior_tx_results.push(denom_approve_processed);
+        if !denom_approve_sim.success {
+            let failure_message = format_failure_with_revert(
+                "Denomination token approval failed",
+                denom_approve_sim.revert_reason.as_deref(),
+            );
+            return Ok(create_failed_result(
+                config,
+                block_number,
+                prior_tx_results,
+                None,
+                None,
+                None,
+                failure_message,
+                false,
+                false,
+                false,
+            ));
+        }
+        denom_approve_tx_for_delay = Some(denom_approve_tx);
+    }
+
     let prior_step_count = prior_tx_results.len() as u64;
 
     // BUY
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
-    let make_buy_path = |cfg: &PoolBuySellParameters| -> Vec<Address> {
-        let mut path = Vec::with_capacity(if cfg.denom_address.is_some() { 3 } else { 2 });
-        path.push(cfg.weth_address);
-        if let Some(denom) = cfg.denom_address {
-            if denom != cfg.weth_address && denom != cfg.token_address {
-                path.push(denom);
-            }
-        }
-        path.push(cfg.token_address);
-        path
-    };
     let mut buy_tx = match config.pool_type {
-        PoolType::UniswapV2 => {
-            let path = make_buy_path(&config);
-            build_buy_swap_v2_with_path(
-                UniswapV2Router::UniswapV2,
-                config.buyer_address,
-                config.test_amount,
-                &path,
-                deadline,
-            )
-        }
-        PoolType::SushiSwap => {
-            let path = make_buy_path(&config);
-            build_buy_swap_v2_with_path(
-                UniswapV2Router::SushiswapV2,
-                config.buyer_address,
-                config.test_amount,
-                &path,
-                deadline,
-            )
-        }
-        _ => reth_chain_query::tx_builders::build_buy_swap(
-            &route,
+        PoolType::UniswapV2 => build_token_to_token_swap_v2(
+            UniswapV2Router::UniswapV2,
             config.buyer_address,
+            config.denom_address,
             config.token_address,
             config.test_amount,
             slippage_bps,
             deadline,
         ),
+        PoolType::SushiSwap => build_token_to_token_swap_v2(
+            UniswapV2Router::SushiswapV2,
+            config.buyer_address,
+            config.denom_address,
+            config.token_address,
+            config.test_amount,
+            slippage_bps,
+            deadline,
+        ),
+        PoolType::UniswapV3 { fee_tier } => build_token_to_token_swap_v3(
+            config.buyer_address,
+            config.denom_address,
+            config.token_address,
+            config.test_amount,
+            fee_tier,
+            slippage_bps,
+            deadline,
+        ),
+        other => {
+            return Err(eyre::eyre!(
+                "Pool type {:?} not yet implemented for denomination token swaps",
+                other
+            ));
+        }
     };
     buy_tx.gas = Some(config.buy_gas_limit);
     apply_fee_policy(&mut buy_tx, &config, base_fee);
@@ -310,6 +390,17 @@ pub async fn check_can_buy_sell_pool(
             config.token_address,
             config.token_decimals,
         )
+    } else {
+        U256::ZERO
+    };
+    let denom_spent_u256 = if can_buy {
+        let delta =
+            extract_token_balance_delta(&buy_processed, config.buyer_address, config.denom_address);
+        if delta < I256::ZERO {
+            delta.unsigned_abs()
+        } else {
+            U256::ZERO
+        }
     } else {
         U256::ZERO
     };
@@ -408,6 +499,19 @@ pub async fn check_can_buy_sell_pool(
             .ok_or_else(|| eyre!("No header for block {}", sell_block))?;
         let sealed = SealedHeader::seal_slow(header);
         chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
+        if let Some(denom_tx) = denom_approve_tx_for_delay.clone() {
+            chain.step_with_trace(denom_tx).await.map_err(|err| {
+                let context = "while reapplying denom approve before delayed sell".to_string();
+                tracing::warn!(
+                    target: "pool_buy_sell_sim",
+                    step = "reapply_denom_approve",
+                    %context,
+                    block = sell_block,
+                    error = %err
+                );
+                err.wrap_err(context)
+            })?;
+        }
         chain.step_with_trace(buy_tx).await.map_err(|err| {
             let context = "while reapplying simulated buy before delayed sell".to_string();
             tracing::warn!(
@@ -431,46 +535,40 @@ pub async fn check_can_buy_sell_pool(
             err.wrap_err(context)
         })?;
     }
-    let make_sell_path = |cfg: &PoolBuySellParameters| -> Vec<Address> {
-        let mut path = Vec::with_capacity(if cfg.denom_address.is_some() { 3 } else { 2 });
-        path.push(cfg.token_address);
-        if let Some(denom) = cfg.denom_address {
-            if denom != cfg.weth_address && denom != cfg.token_address {
-                path.push(denom);
-            }
-        }
-        path.push(cfg.weth_address);
-        path
-    };
     let mut sell_tx = match config.pool_type {
-        PoolType::UniswapV2 => {
-            let path = make_sell_path(&config);
-            build_sell_swap_v2_with_path(
-                UniswapV2Router::UniswapV2,
-                config.buyer_address,
-                tokens_received,
-                &path,
-                deadline,
-            )
-        }
-        PoolType::SushiSwap => {
-            let path = make_sell_path(&config);
-            build_sell_swap_v2_with_path(
-                UniswapV2Router::SushiswapV2,
-                config.buyer_address,
-                tokens_received,
-                &path,
-                deadline,
-            )
-        }
-        _ => reth_chain_query::tx_builders::build_sell_swap(
-            &route,
+        PoolType::UniswapV2 => build_token_to_token_swap_v2(
+            UniswapV2Router::UniswapV2,
             config.buyer_address,
             config.token_address,
+            config.denom_address,
             tokens_received,
             slippage_bps,
             deadline,
         ),
+        PoolType::SushiSwap => build_token_to_token_swap_v2(
+            UniswapV2Router::SushiswapV2,
+            config.buyer_address,
+            config.token_address,
+            config.denom_address,
+            tokens_received,
+            slippage_bps,
+            deadline,
+        ),
+        PoolType::UniswapV3 { fee_tier } => build_token_to_token_swap_v3(
+            config.buyer_address,
+            config.token_address,
+            config.denom_address,
+            tokens_received,
+            fee_tier,
+            slippage_bps,
+            deadline,
+        ),
+        other => {
+            return Err(eyre::eyre!(
+                "Pool type {:?} not yet implemented for denomination token swaps",
+                other
+            ));
+        }
     };
     sell_tx.gas = Some(config.sell_gas_limit);
     apply_fee_policy(&mut sell_tx, &config, base_fee);
@@ -521,9 +619,12 @@ pub async fn check_can_buy_sell_pool(
         config.pool_address,
         config.buyer_address,
     );
-    let denom_received_u256 =
-        extract_denom_received_from_processed_transaction(&sell_processed, config.buyer_address)
-            .unwrap_or(U256::ZERO);
+    let denom_received_u256 = extract_denom_received_from_processed_transaction(
+        &sell_processed,
+        config.buyer_address,
+        config.denom_address,
+    )
+    .unwrap_or(U256::ZERO);
 
     let failure_reason = if !(can_buy && can_approve && can_sell) {
         if !can_sell {
@@ -573,7 +674,7 @@ pub async fn check_can_buy_sell_pool(
             -1.0
         },
         tokens_received,
-        denom_spent: config.test_amount,
+        denom_spent: denom_spent_u256,
         denom_received: denom_received_u256,
         buy_transaction: buy_processed,
         sell_transaction: sell_processed,
@@ -591,94 +692,96 @@ async fn validate_pool_registration(
 ) -> Result<()> {
     match config.pool_type {
         PoolType::UniswapV2 | PoolType::SushiSwap => {
-            let denom = config
-                .denom_address
-                .ok_or_else(|| eyre!("denom_address missing for {:?} pool", config.pool_type))?;
+            let denom = config.denom_address;
+            if denom.is_zero() {
+                return Err(eyre!(
+                    "denom_address missing for {:?} pool",
+                    config.pool_type
+                ));
+            }
             let factory = match config.pool_type {
                 PoolType::UniswapV2 => UNISWAP_V2_FACTORY,
                 PoolType::SushiSwap => SUSHISWAP_FACTORY,
                 _ => unreachable!(),
             };
-            let call_data = encode_get_pair_call(config.token_address, denom);
-            let response = simulator
-                .simulate_view_function(factory, call_data, Some(block_number), None)
-                .await?;
-
-            if !response.success {
-                return Err(eyre!(
-                    "{:?} factory getPair call reverted while checking token {} with denom {}",
-                    config.pool_type,
-                    config.token_address,
-                    denom
-                ));
-            }
-
-            let resolved = decode_factory_response_address(
-                &response.output,
-                "Uniswap V2/SushiSwap getPair returned empty response",
-            )?;
+            let resolved = fetch_uniswap_v2_pair_address(
+                simulator.as_ref(),
+                factory,
+                config.token_address,
+                denom,
+                Some(block_number),
+            )
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "{:?} factory getPair check failed at block {}",
+                    config.pool_type, block_number
+                )
+            })?;
 
             if resolved.is_zero() {
                 return Err(eyre!(
-                    "No {:?} pool found for token {} with denom {}",
+                    "No {:?} pool found for token {} with denom {} at block {}",
                     config.pool_type,
                     config.token_address,
-                    denom
+                    denom,
+                    block_number
                 ));
             }
 
             if resolved != config.pool_address {
                 return Err(eyre!(
-                    "{:?} factory reports pool {} but configuration provided {} for token {} / denom {}",
+                    "{:?} factory reports pool {} but configuration provided {} for token {} / denom {} at block {}",
                     config.pool_type,
                     resolved,
                     config.pool_address,
                     config.token_address,
-                    denom
+                    denom,
+                    block_number
                 ));
             }
         }
         PoolType::UniswapV3 { fee_tier } => {
-            let denom = config
-                .denom_address
-                .ok_or_else(|| eyre!("denom_address missing for Uniswap V3 pool checks"))?;
-
-            let call_data = encode_get_pool_call(config.token_address, denom, fee_tier);
-            let response = simulator
-                .simulate_view_function(UNISWAP_V3_FACTORY, call_data, Some(block_number), None)
-                .await?;
-
-            if !response.success {
-                return Err(eyre!(
-                    "Uniswap V3 factory getPool call reverted while checking token {} with denom {} at fee tier {}",
-                    config.token_address,
-                    denom,
-                    fee_tier
-                ));
+            let denom = config.denom_address;
+            if denom.is_zero() {
+                return Err(eyre!("denom_address missing for Uniswap V3 pool checks"));
             }
 
-            let resolved = decode_factory_response_address(
-                &response.output,
-                "Uniswap V3 getPool returned empty response",
-            )?;
+            let resolved = fetch_uniswap_v3_pool_address(
+                simulator.as_ref(),
+                UNISWAP_V3_FACTORY,
+                config.token_address,
+                denom,
+                fee_tier,
+                Some(block_number),
+            )
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "Uniswap V3 factory getPool check failed at block {}",
+                    block_number
+                )
+            })?;
 
             if resolved.is_zero() {
                 return Err(eyre!(
-                    "No Uniswap V3 pool found for token {} with denom {} at fee tier {}",
+                    "No Uniswap V3 pool found for token {} with denom {} at fee tier {} and block {}",
                     config.token_address,
                     denom,
-                    fee_tier
+                    fee_tier,
+                    block_number
                 ));
             }
 
             if resolved != config.pool_address {
                 return Err(eyre!(
-                    "Uniswap V3 factory reports pool {} but configuration provided {} for token {} / denom {} at fee tier {}",
+                    "Uniswap V3 factory reports pool {} but configuration provided {} for token {} / denom {} at fee tier {} and block {}",
                     resolved,
                     config.pool_address,
                     config.token_address,
                     denom,
-                    fee_tier
+                    fee_tier,
+                    block_number
                 ));
             }
         }
@@ -689,36 +792,23 @@ async fn validate_pool_registration(
     Ok(())
 }
 
-fn encode_get_pair_call(token_a: Address, token_b: Address) -> Bytes {
-    let mut data = Vec::with_capacity(4 + 64);
-    data.extend_from_slice(&[0xe6, 0xa4, 0x39, 0x05]);
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(token_a.as_slice());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(token_b.as_slice());
-    Bytes::from(data)
-}
-
-fn encode_get_pool_call(token_a: Address, token_b: Address, fee: u32) -> Bytes {
-    let mut data = Vec::with_capacity(4 + 96);
-    data.extend_from_slice(&[0x16, 0x98, 0xee, 0x82]);
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(token_a.as_slice());
-    data.extend_from_slice(&[0u8; 12]);
-    data.extend_from_slice(token_b.as_slice());
-    data.extend_from_slice(&[0u8; 29]);
-    let fee_bytes = fee.to_be_bytes();
-    data.extend_from_slice(&fee_bytes[1..]);
-    Bytes::from(data)
-}
-
-fn decode_factory_response_address(output: &Bytes, empty_message: &'static str) -> Result<Address> {
-    if output.len() < 32 {
-        return Err(eyre!("{}", empty_message));
+fn extract_token_balance_delta(
+    processed_tx: &ProcessedTransaction,
+    account: Address,
+    token_address: Address,
+) -> I256 {
+    if let Some(balance_changes) = processed_tx.address_balance_changes.get(&account) {
+        if let Some(symbol) = get_token_symbol(&token_address) {
+            if let Some(&amount) = balance_changes.currency_net.get(symbol) {
+                return amount;
+            }
+        }
+        let token_key = to_checksum_address(&token_address);
+        if let Some(&amount) = balance_changes.token_net.get(&token_key) {
+            return amount;
+        }
     }
-    let mut buf = [0u8; 20];
-    buf.copy_from_slice(&output[12..32]);
-    Ok(Address::from(buf))
+    I256::ZERO
 }
 
 fn extract_tokens_received_from_processed_transaction(
@@ -727,39 +817,25 @@ fn extract_tokens_received_from_processed_transaction(
     token_address: Address,
     _token_decimals: u8,
 ) -> U256 {
-    use crate::tx_processor::address_balance_change_calculator::get_token_symbol;
-    use reth_chain_query::to_checksum_address;
-    if let Some(balance_changes) = processed_tx.address_balance_changes.get(&recipient_address) {
-        if let Some(symbol) = get_token_symbol(&token_address) {
-            if let Some(&amount) = balance_changes.currency_net.get(symbol) {
-                if amount > I256::ZERO {
-                    return amount.unsigned_abs();
-                }
-            }
-        } else {
-            let token_key = to_checksum_address(&token_address);
-            if let Some(&amount) = balance_changes.token_net.get(&token_key) {
-                if amount > I256::ZERO {
-                    return amount.unsigned_abs();
-                }
-            }
-        }
+    let delta = extract_token_balance_delta(processed_tx, recipient_address, token_address);
+    if delta > I256::ZERO {
+        delta.unsigned_abs()
+    } else {
+        U256::ZERO
     }
-    U256::ZERO
 }
 
 fn extract_denom_received_from_processed_transaction(
     processed_tx: &ProcessedTransaction,
     recipient_address: Address,
+    denom_address: Address,
 ) -> Option<U256> {
-    if let Some(balance_changes) = processed_tx.address_balance_changes.get(&recipient_address) {
-        if let Some(&eth_amount) = balance_changes.currency_net.get("ETH") {
-            if eth_amount > I256::ZERO {
-                return Some(eth_amount.unsigned_abs());
-            }
-        }
+    let delta = extract_token_balance_delta(processed_tx, recipient_address, denom_address);
+    if delta > I256::ZERO {
+        Some(delta.unsigned_abs())
+    } else {
+        None
     }
-    None
 }
 
 fn apply_fee_policy(
@@ -1596,6 +1672,7 @@ async fn check_can_buy_sell_uniswap_v4(
     let denom_received_u256 = extract_denom_received_from_processed_transaction(
         eth_transfer_source,
         config.buyer_address,
+        config.denom_address,
     )
     .unwrap_or(U256::ZERO);
 

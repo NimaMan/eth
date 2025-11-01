@@ -6,9 +6,9 @@ This directory contains examples for analyzing ERC20 token trading viability on 
 
 All examples use the `OptionalSetupBuyApproveSellTokenSimulator` to execute a sequence of transactions:
 1. **Optional Setup**: Enable trading (if needed)
-2. **Buy**: Purchase tokens with ETH
-3. **Approve**: Allow router to spend tokens
-4. **Sell**: Sell tokens back for ETH
+2. **Buy**: Purchase the target token using the configured denomination token
+3. **Approve**: Allow the router to spend the target token
+4. **Sell**: Swap the target token back into the denomination token
 
 The simulator maintains blockchain state across all transactions, so each transaction sees the state changes from previous ones.
 
@@ -50,6 +50,13 @@ The simulator maintains blockchain state across all transactions, so each transa
 - **Pool**: Supports both V2 and V3
 - **Status**: ✅ Works for V2 pools
 - **Features**: Detailed logging, tax calculation, gas tracking
+
+
+#### `usdc_to_dai_uniswap_v3.rs`
+- **Purpose**: End-to-end USDC → DAI viability check on Uniswap V3 (0.05% fee tier)
+- **Denom / Token**: USDC (6 decimals) → DAI (18 decimals)
+- **Status**: ✅ Works - exercises the denomination-token pipeline
+- **Result**: Buys DAI with 10 USDC and sells back within the same snapshot
 
 #### `erc20_pool_moo_token.rs`
 - **Purpose**: Test moo token from specific real transaction

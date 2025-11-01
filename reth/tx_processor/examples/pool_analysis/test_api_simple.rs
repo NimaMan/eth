@@ -34,13 +34,14 @@ async fn main() -> Result<()> {
         usdc_pool,
         PoolType::UniswapV2,
     )
-    .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 ETH
+    .with_test_amount(U256::from(1_000_000_000_000_000_000u128)) // 1 WETH
     .with_denom_address(weth)
+    .with_denom_decimals(18)
     .with_token_decimals(6)  // USDC has 6 decimals
     .with_block_delay(1);     // Sell in next block
     
     println!("\nRunning simulation with:");
-    println!("  Test amount: 1 ETH");
+    println!("  Test amount: 1 WETH");
     println!("  Block delay: 1 (sell in next block)");
     println!("  Token decimals: 6\n");
     
@@ -61,14 +62,14 @@ async fn main() -> Result<()> {
                 println!("  Sell Tax: {:.2}%", result.sell_tax_percent);
                 
                 println!("\n📊 Trade Details:");
-                println!("  ETH Spent: {} wei", result.denom_spent);
+                println!("  WETH Spent: {} wei", result.denom_spent);
                 println!("  USDC Received: {} (raw with 6 decimals)", result.tokens_received);
                 
                 // Convert to human readable
                 let usdc_amount = result.tokens_received / U256::from(10u64.pow(6));
                 println!("  USDC Received: {} USDC", usdc_amount);
                 
-                println!("  ETH Recovered: {} wei", result.denom_received);
+                println!("  WETH Recovered: {} wei", result.denom_received);
                 
                 let loss = result.denom_spent.saturating_sub(result.denom_received);
                 let loss_percent = if result.denom_spent > U256::ZERO {
