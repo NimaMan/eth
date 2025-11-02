@@ -12,6 +12,8 @@ Shows detailed transaction flow and calculates net costs.
 
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
 
 def format_usdc_amount(amount: int) -> str:
     """Format USDC amount (6 decimals) to readable string"""
@@ -57,9 +59,10 @@ def main():
         print("✅ Pool Buy Sell Simulator initialized")
         
         # Create custom config for 1 ETH
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = TEST_AMOUNT_ETH
-        config.token_decimals = 6  # USDC has 6 decimals
+        config = pyreth.PoolBuySellParameters(6, WETH_DECIMALS)
+        config.denom_amount = TEST_AMOUNT_ETH
+        config.denom_address = WETH_ADDRESS
+        config.block_number = None
         config.slippage_tolerance = 0.5  # 0.5% slippage
         config.buy_gas_limit = 300_000
         config.approve_gas_limit = 150_000

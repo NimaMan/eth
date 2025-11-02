@@ -13,6 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
+USDC_DECIMALS = 6
+TEST_AMOUNT_ETH = 1.0
+
 
 def test_v3_pool(simulator, token: str, pool: str, fee_tier: int, tier_name: str):
     """Test a V3 pool with specific fee tier"""
@@ -22,17 +27,25 @@ def test_v3_pool(simulator, token: str, pool: str, fee_tier: int, tier_name: str
     print(f"Fee Tier: {fee_tier} ({fee_tier/10000:.2f}%)")
     
     try:
+        config = pyreth.PoolBuySellParameters.with_denom_amount(
+            TEST_AMOUNT_ETH, USDC_DECIMALS, WETH_DECIMALS
+        )
+        config.denom_address = WETH_ADDRESS
         # Check the V3 pool
         result = simulator.check_uniswap_v3_pool(
             token_address=token,
             pool_address=pool,
-            fee_tier=fee_tier
+            fee_tier=fee_tier,
+            config=config,
         )
-        
+
         print(f"\nResults:")
         print(f"  Can Buy:     {'✅' if result.can_buy else '❌'}")
         print(f"  Can Approve: {'✅' if result.can_approve else '❌'}")
         print(f"  Can Sell:    {'✅' if result.can_sell else '❌'}")
+        print(f"  Tokens Out:  {result.tokens_received_raw}")
+        print(f"  Denom Spent: {result.denom_spent_raw}")
+        print(f"  Denom Recv : {result.denom_received_raw}")
         
         if result.can_buy and result.can_sell:
             print(f"\nCost Analysis:")
