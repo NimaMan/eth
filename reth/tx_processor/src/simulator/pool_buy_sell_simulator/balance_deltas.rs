@@ -15,6 +15,11 @@ pub(super) fn extract_token_balance_delta(
             if let Some(&amount) = balance_changes.currency_net.get(symbol) {
                 return amount;
             }
+            if symbol == "WETH" {
+                if let Some(&amount) = balance_changes.currency_net.get("ETH") {
+                    return amount;
+                }
+            }
         }
         let token_key = to_checksum_address(&token_address);
         if let Some(&amount) = balance_changes.token_net.get(&token_key) {

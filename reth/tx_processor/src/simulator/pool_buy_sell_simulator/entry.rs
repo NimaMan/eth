@@ -27,7 +27,8 @@ use reth_chain_query::dex::{
     UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
 };
 use reth_chain_query::tx_builders::amm::uniswap_v2::{
-    build_approve_v2, build_token_to_token_swap_v2, Router as UniswapV2Router,
+    build_approve_v2, build_token_to_token_swap_supporting_fee_v2,
+    build_token_to_token_swap_v2, Router as UniswapV2Router,
 };
 use reth_chain_query::tx_builders::amm::uniswap_v3::{
     build_approve_v3, build_token_to_token_swap_v3,
@@ -558,22 +559,20 @@ pub async fn check_can_buy_sell_pool(
         })?;
     }
     let mut sell_tx = match config.pool_type {
-        PoolType::UniswapV2 => build_token_to_token_swap_v2(
+        PoolType::UniswapV2 => build_token_to_token_swap_supporting_fee_v2(
             UniswapV2Router::UniswapV2,
             config.buyer_address,
             config.token_address,
             config.denom_address,
             tokens_received,
-            slippage_bps,
             deadline,
         ),
-        PoolType::SushiSwap => build_token_to_token_swap_v2(
+        PoolType::SushiSwap => build_token_to_token_swap_supporting_fee_v2(
             UniswapV2Router::SushiswapV2,
             config.buyer_address,
             config.token_address,
             config.denom_address,
             tokens_received,
-            slippage_bps,
             deadline,
         ),
         PoolType::UniswapV3 { fee_tier } => build_token_to_token_swap_v3(
