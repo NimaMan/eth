@@ -27,29 +27,7 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Analyzes transactions for MEV bribes and validator payments
 
-### 2. Simulation Examples (`simulation/`) - 4 examples
-
-#### `buy_approve_sell_with_processed_tx.rs`
-**Purpose:** Complete token trading workflow (Buy → Approve → Sell)  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Uses SimulationChain for state preservation, generates ProcessedTransaction for each step, compares USDC vs USDT trading
-
-#### `approval_mechanics_demo.rs`
-**Purpose:** Demonstrate ERC20 approval mechanics  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Shows sequential transaction dependencies and approval requirements
-
-#### `buy_approve_sell_pepe_with_processed_tx.rs`
-**Purpose:** PEPE token trading simulation  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Tests meme token mechanics with special transfer logic
-
-#### `batch_simulation_demo.rs` (in simulation/batch/)
-**Purpose:** High-performance parallel transaction simulation  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Concurrent processing with configurable parallelism and timeout handling
-
-### 3. Pool Analysis (`pool_analysis/`) - 6 examples
+### 2. Pool Analysis (`pool_analysis/`) - 6 examples
 
 #### `erc20_pool_tax_demo.rs`
 **Purpose:** Analyze tokens with transfer taxes  

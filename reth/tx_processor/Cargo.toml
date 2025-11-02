@@ -26,34 +26,6 @@ path = "examples/tx_processor/test_bribe_detection.rs"
 
 # Simulation examples
 [[example]]
-name = "buy_approve_sell_usdc_usdt_workflow"
-path = "examples/simulation/buy_approve_sell_usdc_usdt_workflow.rs"
-
-[[example]]
-name = "approval_mechanics_demo"
-path = "examples/simulation/approval_mechanics_demo.rs"
-
-[[example]]
-name = "buy_approve_sell_pepe_with_processed_tx"
-path = "examples/simulation/buy_approve_sell_pepe_with_processed_tx.rs"
-
-[[example]]
-name = "parallel_vs_sequential_simulation_benchmark"
-path = "examples/simulation/batch/parallel_vs_sequential_simulation_benchmark.rs"
-
-[[example]]
-name = "cross_venue_usd_arb"
-path = "examples/simulation/cross_venue_usd_arb.rs"
-
-[[example]]
-name = "cross_venue_usd_series"
-path = "examples/simulation/cross_venue_usd_series.rs"
-
-[[example]]
-name = "cross_block_minmax_v2"
-path = "examples/simulation/cross_block_minmax_v2.rs"
-
-[[example]]
 name = "process_block"
 path = "examples/block/process_block.rs"
 
