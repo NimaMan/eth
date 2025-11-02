@@ -110,6 +110,7 @@ pub fn build_buy_swap_v2_with_path(
         value: Some(amount_in_eth),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -166,6 +167,7 @@ pub fn build_buy_swap_v2_with_min_out_path(
         value: Some(amount_in_eth),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -237,6 +239,40 @@ fn encode_swap_exact_tokens_for_tokens(
     Bytes::from(data)
 }
 
+/// Encode swapExactTokensForTokensSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, to, deadline)
+fn encode_swap_exact_tokens_for_tokens_supporting_fee(
+    amount_in: U256,
+    amount_out_min: U256,
+    path: &[Address],
+    to: Address,
+    deadline: U256,
+) -> Bytes {
+    // Selector: 0x5c11d795
+    let mut data = vec![0x5c, 0x11, 0xd7, 0x95];
+
+    // amountIn
+    data.extend_from_slice(&amount_in.to_be_bytes::<32>());
+
+    // amountOutMin
+    data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+
+    // path offset -> 0xa0
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&[0, 0, 0, 0xa0]);
+
+    // to address
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(to.as_slice());
+
+    // deadline
+    data.extend_from_slice(&deadline.to_be_bytes::<32>());
+
+    // path dynamic array
+    data.extend_from_slice(&encode_dynamic_address_array(path));
+
+    Bytes::from(data)
+}
+
 /// ERC20 approve(selector 0x095ea7b3)
 fn encode_approve(spender: Address, amount: U256) -> Bytes {
     let mut data = vec![0x09, 0x5e, 0xa7, 0xb3];
@@ -266,6 +302,7 @@ pub fn build_approve_v2(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -327,6 +364,7 @@ pub fn build_sell_swap_v2_with_path(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -356,6 +394,7 @@ pub fn build_sell_swap_v2_with_min_out_path(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -387,6 +426,38 @@ pub fn build_token_to_token_swap_v2(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
+    }
+}
+
+/// Build a Uniswap/Sushiswap V2 token -> token swap that tolerates fee-on-transfer tokens.
+pub fn build_token_to_token_swap_supporting_fee_v2(
+    router: Router,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    let calldata = encode_swap_exact_tokens_for_tokens_supporting_fee(
+        amount_in,
+        U256::ZERO,
+        &[token_in, token_out],
+        trader,
+        U256::from(deadline),
+    );
+
+    UnsignedTransaction {
+        from: Some(trader),
+        to: Some(router_address(router)),
+        gas: Some(500_000),
+        gas_price: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(calldata),
+        nonce: None,
+        ..Default::default()
     }
 }
 
@@ -418,5 +489,6 @@ pub fn build_token_to_token_swap_v2_with_min_out(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
