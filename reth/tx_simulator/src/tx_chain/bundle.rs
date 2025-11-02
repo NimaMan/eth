@@ -171,8 +171,9 @@ impl TxSimulator {
         block_number: u64,
         block_header: SealedHeader,
     ) -> Result<ForkedState> {
-        let state_block = block_number.saturating_sub(1);
-        let state = self.provider_factory.history_by_block_number(state_block)?;
+        let state = self
+            .provider_factory
+            .history_by_block_number(block_number)?;
         let db = CacheDB::new(StateProviderDatabase::new(state));
 
         Ok(ForkedState {
