@@ -1,3 +1,13 @@
+use alloy_consensus::Transaction as _;
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta, TxType},
+    EthereumTxEnvelope, TxEip4844, Typed2718,
+};
+use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
+use alloy_primitives::{Log as AlloyLog, TxKind, B256, U256};
+use eyre::Result;
+use reth_chainspec::ChainSpecBuilder;
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
 /// Transaction Loader - Fetches transaction data from Reth DB
@@ -7,16 +17,6 @@ use reth_provider::{
     providers::StaticFileProvider, BlockReader, ProviderFactory, ReceiptProvider,
     TransactionsProvider,
 };
-// use reth_primitives::TransactionSignedEcRecovered; // not used directly here
-use alloy_consensus::Transaction as _;
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxType},
-    EthereumTxEnvelope, TxEip4844, Typed2718,
-};
-use alloy_primitives::{Log as AlloyLog, TxKind, B256, U256};
-use eyre::Result;
-use reth_chainspec::ChainSpecBuilder;
-use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
 use std::{cmp, path::Path, sync::Arc};
 use tracing::info;
 
@@ -92,6 +92,10 @@ impl TransactionLoader {
         u64,                               // gas_limit
         Option<U256>,                      // max_fee_per_gas
         Option<U256>,                      // max_priority_fee_per_gas
+        Vec<AccessListItem>,               // access list
+        Vec<B256>,                         // blob versioned hashes
+        Option<U256>,                      // max_fee_per_blob_gas
+        Vec<SignedAuthorization>,          // signed authorizations
         u8,                                // raw transaction type
     )> {
         // Get provider
@@ -174,6 +178,20 @@ impl TransactionLoader {
             })
             .collect();
 
+        let access_list = tx
+            .access_list()
+            .map(|list| list.to_vec())
+            .unwrap_or_default();
+        let blob_versioned_hashes = tx
+            .blob_versioned_hashes()
+            .map(|hashes| hashes.to_vec())
+            .unwrap_or_default();
+        let max_fee_per_blob_gas = tx.max_fee_per_blob_gas().map(U256::from);
+        let signed_authorizations = tx
+            .authorization_list()
+            .map(|auth| auth.to_vec())
+            .unwrap_or_default();
+
         Ok((
             tx_hash,
             meta.block_number,
@@ -191,6 +209,10 @@ impl TransactionLoader {
             gas_limit,
             max_fee_per_gas_opt,
             max_priority_fee_per_gas_opt,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
             raw_tx_type,
         ))
     }

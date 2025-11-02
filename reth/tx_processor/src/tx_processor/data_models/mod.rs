@@ -10,4 +10,4 @@ pub use fees::TransactionFees;
 pub use receipt_models::*;
 pub use serde_helpers::{deserialize_i128_from_any, deserialize_u128_from_any};
 pub use trace_models::InternalTransaction;
-pub use tx_models::{ContractCreationEvent, ProcessedTransaction};
+pub use tx_models::{ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction};

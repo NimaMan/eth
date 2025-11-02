@@ -1,4 +1,4 @@
-use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::data_models::{ProcessedAccessListItem, ProcessedTransaction};
 /// Unsigned Transaction Builder - Converts transaction data to UnsignedTransaction for simulation
 ///
 /// OBJECTIVE: Build UnsignedTransaction objects from transaction data loaded from Reth database
@@ -10,6 +10,7 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 ///
 /// Flow: TX Hash → Load from DB → Build UnsignedTransaction → Ready for simulation
 use crate::tx_processor::tx_loader::TransactionLoader;
+use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
 use std::convert::TryInto;
@@ -48,6 +49,17 @@ impl UnsignedTxBuilder {
             2 | 3 | 4 => (None, max_fee_u128, max_priority_u128),
             _ => (gas_price_u128, max_fee_u128, max_priority_u128),
         };
+        let access_list: Vec<AccessListItem> = ptx
+            .access_list
+            .iter()
+            .map(|item| AccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys.clone(),
+            })
+            .collect();
+        let max_fee_per_blob_gas = ptx
+            .max_fee_per_blob_gas
+            .and_then(|v| u128::try_from(v).ok());
 
         UnsignedTransaction {
             from: Some(ptx.from_address),
@@ -63,6 +75,10 @@ impl UnsignedTxBuilder {
             max_fee_per_gas: max_fee,
             max_priority_fee_per_gas: max_priority,
             nonce: None,
+            access_list,
+            blob_versioned_hashes: ptx.blob_versioned_hashes.clone(),
+            max_fee_per_blob_gas,
+            signed_authorizations: ptx.signed_authorizations.clone(),
         }
     }
 
@@ -92,6 +108,10 @@ impl UnsignedTxBuilder {
             gas_limit,
             max_fee_per_gas,
             max_priority_fee_per_gas,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
             raw_tx_type,
         ) = self
             .transaction_loader
@@ -107,6 +127,14 @@ impl UnsignedTxBuilder {
             2 | 3 | 4 => (None, max_fee_u128, max_priority_u128),
             _ => (gas_price_u128, max_fee_u128, max_priority_u128),
         };
+        let access_list: Vec<AccessListItem> = access_list
+            .into_iter()
+            .map(|item| AccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys,
+            })
+            .collect();
+        let max_fee_per_blob_gas = max_fee_per_blob_gas.and_then(|v| u128::try_from(v).ok());
 
         let unsigned_tx = UnsignedTransaction {
             from: Some(from),
@@ -122,6 +150,10 @@ impl UnsignedTxBuilder {
             max_fee_per_gas: final_max_fee,
             max_priority_fee_per_gas: final_max_priority,
             nonce: Some(nonce), // Include nonce for proper simulation
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
         };
 
         Ok(unsigned_tx)
@@ -154,6 +186,10 @@ impl UnsignedTxBuilder {
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: Some(nonce),
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
         }
     }
 }

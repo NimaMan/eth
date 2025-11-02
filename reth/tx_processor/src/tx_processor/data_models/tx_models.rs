@@ -2,6 +2,7 @@ use super::balance_changes::AddressBalanceChange;
 use super::fees::TransactionFees;
 use super::receipt_models::*;
 use super::trace_models::InternalTransaction;
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, I256, U256};
 use reth_chain_query::to_checksum_address;
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,12 @@ pub struct ETHTransfer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractCreationEvent {
     pub contract_address: Address,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedAccessListItem {
+    pub address: Address,
+    pub storage_keys: Vec<B256>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +81,11 @@ pub struct ProcessedTransaction {
     pub uniswap_v4_modifies: Vec<UniswapV4ModifyLiquidityEvent>,
     pub uniswap_v4_swaps: Vec<UniswapV4SwapEvent>,
     pub permit2_events: Vec<Permit2Event>,
+    pub access_list: Vec<ProcessedAccessListItem>,
+    pub blob_versioned_hashes: Vec<B256>,
+    pub max_fee_per_blob_gas: Option<U256>,
+    pub blob_gas_used: Option<u64>,
+    pub signed_authorizations: Vec<SignedAuthorization>,
 
     // Other events and actions
     pub erc20_approval_events: Vec<ERC20ApprovalEvent>,
@@ -170,6 +182,11 @@ impl ProcessedTransaction {
             uniswap_v4_modifies: Vec::new(),
             uniswap_v4_swaps: Vec::new(),
             permit2_events: Vec::new(),
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            blob_gas_used: None,
+            signed_authorizations: Vec::new(),
             erc20_approval_events: Vec::new(),
             erc721_approval_events: Vec::new(),
             uniswap_v2_mints: Vec::new(),

@@ -30,7 +30,7 @@ impl PoolTestCase {
     fn pool_label(&self) -> String {
         format!(
             "{} / {} (fee: {} bps, tick spacing: {})",
-            self.info.symbol, "WETH", self.info.fee, self.info.tick_spacing
+            self.info.symbol, self.info.denom_symbol, self.info.fee, self.info.tick_spacing
         )
     }
 
@@ -55,7 +55,7 @@ impl PoolTestCase {
         .with_denom_address(self.info.denom_address)
         .with_denom_decimals(self.info.denom_decimals)
         .with_token_decimals(self.info.token_decimals)
-        .with_block(block_number)
+        .with_block(self.info.block_hint.unwrap_or(block_number))
         .with_uniswap_v4_config(v4_config)
     }
 }
@@ -175,6 +175,49 @@ async fn main() -> Result<()> {
                 println!(
                     "    ✅ tradeable={}, buy={}, approve={}, sell={}, buy_tax={:.2}%, sell_tax={:.2}%",
                     res.is_tradeable, res.can_buy, res.can_approve, res.can_sell, res.buy_tax_percent, res.sell_tax_percent
+                );
+                if let Some(reason) = &res.failure_reason {
+                    println!("    ⚠️ failure_reason: {reason}");
+                }
+                println!(
+                    "    ℹ️ buy_tx.to={:?}, approve_tx.to={:?}, sell_tx.to={:?}",
+                    res.buy_transaction.to_address,
+                    res.approve_transaction.to_address,
+                    res.sell_transaction.to_address
+                );
+                println!(
+                    "    ℹ️ prior_tx_count={}, prior_targets={:?}",
+                    res.prior_transactions.len(),
+                    res.prior_transactions
+                        .iter()
+                        .map(|tx| tx.to_address)
+                        .collect::<Vec<_>>()
+                );
+                println!(
+                    "    ℹ️ prior_statuses={:?}",
+                    res.prior_transactions
+                        .iter()
+                        .map(|tx| tx.status)
+                        .collect::<Vec<_>>()
+                );
+                println!(
+                    "    ℹ️ prior_contracts={:?}",
+                    res.prior_transactions
+                        .iter()
+                        .map(|tx| tx.contract_address)
+                        .collect::<Vec<_>>()
+                );
+                println!(
+                    "    ℹ️ buy_struct_logs_present={}",
+                    res.buy_transaction.struct_logs.is_some()
+                );
+                println!(
+                    "    ℹ️ buy_internal_calls={:?}",
+                    res.buy_transaction
+                        .internal_transactions
+                        .iter()
+                        .map(|it| (it.from_address, it.to_address, it.error.clone()))
+                        .collect::<Vec<_>>()
                 );
             }
             Err(err) => {

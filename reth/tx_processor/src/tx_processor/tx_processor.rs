@@ -12,11 +12,14 @@
 ///
 /// Key insight: Uses the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs
 /// instead of the broken manual filtering approach that was throwing away events.
-use super::data_models::{InternalTransaction, ProcessedTransaction, TransactionFees};
+use super::data_models::{
+    InternalTransaction, ProcessedAccessListItem, ProcessedTransaction, TransactionFees,
+};
 use super::{
     AddressBalanceChangeCalculator, DecodedEvent, LogDecoder, TransactionClassifier,
     TransactionTraceProcessor,
 };
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
 use reth_chain_query::FEE_RECIPIENTS;
@@ -65,6 +68,11 @@ impl TxProcessor {
         max_priority_fee_per_gas: Option<U256>,
         logs: Vec<alloy_primitives::Log>,
         gas_limit: u64,
+        access_list: Vec<super::data_models::ProcessedAccessListItem>,
+        blob_versioned_hashes: Vec<B256>,
+        max_fee_per_blob_gas: Option<U256>,
+        blob_gas_used: Option<u64>,
+        signed_authorizations: Vec<SignedAuthorization>,
         address_balance_changes: Option<HashMap<Address, super::data_models::AddressBalanceChange>>,
     ) -> Result<ProcessedTransaction> {
         // STEP 1: Decode ALL event logs using LogDecoder (just like Python's log_processor.process_logs)
@@ -277,6 +285,11 @@ impl TxProcessor {
         processed_tx.trading_enabled_events = trading_enabled_events;
         processed_tx.trading_disabled_events = trading_disabled_events;
         processed_tx.other_events = other_events;
+        processed_tx.access_list = access_list;
+        processed_tx.blob_versioned_hashes = blob_versioned_hashes;
+        processed_tx.max_fee_per_blob_gas = max_fee_per_blob_gas;
+        processed_tx.blob_gas_used = blob_gas_used;
+        processed_tx.signed_authorizations = signed_authorizations;
 
         let mut erc20_contracts = HashSet::new();
         for transfer in &processed_tx.erc20_transfers {
@@ -408,6 +421,18 @@ impl TxProcessor {
             )?,
         );
 
+        let access_list: Vec<ProcessedAccessListItem> = unsigned_tx
+            .access_list
+            .iter()
+            .map(|item| ProcessedAccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys.clone(),
+            })
+            .collect();
+        let blob_versioned_hashes = unsigned_tx.blob_versioned_hashes.clone();
+        let max_fee_per_blob_gas_u256 = unsigned_tx.max_fee_per_blob_gas.map(U256::from);
+        let signed_authorizations = unsigned_tx.signed_authorizations.clone();
+
         // Use the existing method to process everything
         let mut processed_tx = self
             .process_transaction_from_raw_data(
@@ -428,6 +453,11 @@ impl TxProcessor {
                 max_priority_fee_per_gas.clone(),
                 logs,
                 gas_limit,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas_u256,
+                None,
+                signed_authorizations,
                 address_balance_changes,
             )
             .await?;

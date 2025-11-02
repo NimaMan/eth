@@ -1,7 +1,9 @@
 mod conversion;
 pub mod types;
 
-use crate::tx_processor::data_models::{ContractCreationEvent, ProcessedTransaction};
+use crate::tx_processor::data_models::{
+    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
+};
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
 use alloy_primitives::{keccak256, Address};
 use eyre::Result;
@@ -153,6 +155,18 @@ impl BlockProcessor {
         let logs = conversion::convert_logs(&receipt.logs);
         let status = receipt.status;
 
+        let access_list: Vec<ProcessedAccessListItem> = metadata
+            .access_list
+            .iter()
+            .map(|item| ProcessedAccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys.clone(),
+            })
+            .collect();
+        let blob_versioned_hashes = metadata.blob_versioned_hashes.clone();
+        let max_fee_per_blob_gas = metadata.max_fee_per_blob_gas.clone();
+        let signed_authorizations = metadata.signed_authorizations.clone();
+
         let mut processed_tx = self
             .tx_processor
             .process_transaction_from_raw_data(
@@ -173,6 +187,11 @@ impl BlockProcessor {
                 metadata.max_priority_fee_per_gas.clone(),
                 logs,
                 metadata.gas_limit,
+                access_list,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                None,
+                signed_authorizations,
                 None,
             )
             .await?;

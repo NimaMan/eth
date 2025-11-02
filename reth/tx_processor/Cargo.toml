@@ -96,6 +96,10 @@ path = "examples/provider/process_block.rs"
 name = "provider_token_transactions"
 path = "examples/provider/token_transactions.rs"
 
+[[example]]
+name = "fetch_processed_tx"
+path = "examples/provider/fetch_processed_tx.rs"
+
 
 # Pool analysis examples
 [[example]]
@@ -126,6 +130,10 @@ path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v3.rs"
 name = "can_buy_sell_common_tokens_uniswap_v4"
 path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v4.rs"
 
+[[example]]
+name = "usdc_to_dai_uniswap_v3"
+path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
+
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
@@ -139,6 +147,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
 hex-literal = "0.4"
 alloy-primitives = "1.1.2"
+alloy-eips = "1.0.38"
 rlp = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
