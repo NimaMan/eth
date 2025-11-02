@@ -49,24 +49,7 @@ This directory contains the actual examples that exist in the tx_processor modul
 **Status:** ❌ Fails - dependency issues  
 **Original Function:** Concurrent processing with configurable parallelism and timeout handling
 
-### 3. Token-Specific Investigations (`simulation/specific_token_investigation/`) - 3 examples
-
-#### `buy_approve_sell_floki_with_processed_tx.rs`
-**Purpose:** FLOKI token trading with detailed analysis  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Handles reflection tokens, analyzes token tax mechanics
-
-#### `buy_approve_sell_floki_alternative_methods.rs`
-**Purpose:** Alternative FLOKI trading approaches  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Tests different swap methods and gas efficiency
-
-#### `process_floki_swap_transaction.rs`
-**Purpose:** Process actual FLOKI swap transactions  
-**Status:** ❌ Fails - dependency issues  
-**Original Function:** Analyzes real mainnet FLOKI swaps and extracts transfer taxes
-
-### 4. Pool Analysis (`pool_analysis/`) - 6 examples
+### 3. Pool Analysis (`pool_analysis/`) - 6 examples
 
 #### `erc20_pool_tax_demo.rs`
 **Purpose:** Analyze tokens with transfer taxes  

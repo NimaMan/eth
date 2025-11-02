@@ -17,10 +17,6 @@ name = "process_transaction_by_hash"
 path = "examples/tx_processor/process_transaction_by_hash.rs"
 
 [[example]]
-name = "buy_approve_sell_floki_with_processed_tx"
-path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_with_processed_tx.rs"
-
-[[example]]
 name = "processed_tx_from_unsigned_tx"
 path = "examples/tx_processor/processed_tx_from_unsigned_tx.rs"
 
@@ -56,29 +52,6 @@ path = "examples/simulation/cross_venue_usd_series.rs"
 [[example]]
 name = "cross_block_minmax_v2"
 path = "examples/simulation/cross_block_minmax_v2.rs"
-
-# Token-specific investigations
-# (buy_approve_sell_floki_with_processed_tx already defined above)
-
-[[example]]
-name = "buy_approve_sell_floki_alternative_methods"
-path = "examples/simulation/specific_token_investigation/buy_approve_sell_floki_alternative_methods.rs"
-
-[[example]]
-name = "process_floki_swap_transaction"
-path = "examples/simulation/specific_token_investigation/process_floki_swap_transaction.rs"
-
-[[example]]
-name = "audit_balance_verification"
-path = "examples/simulation/specific_token_investigation/audit_balance_verification.rs"
-
-[[example]]
-name = "investigate_rfi_token_taxes"
-path = "examples/simulation/specific_token_investigation/investigate_rfi_token_taxes.rs"
-
-[[example]]
-name = "investigate_floki_token_taxes"
-path = "examples/simulation/specific_token_investigation/investigate_floki_token_taxes.rs"
 
 [[example]]
 name = "process_block"
