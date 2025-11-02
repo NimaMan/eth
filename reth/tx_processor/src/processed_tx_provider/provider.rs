@@ -12,14 +12,23 @@ use super::core::initialization::create_provider_factory;
 /// - Direct Reth database access via TransactionLoader
 use crate::block_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock};
 use crate::simulator::UnsignedTxBuilder;
-use crate::tx_processor::data_models::ProcessedTransaction;
+use crate::tx_processor::data_models::{
+    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
+};
 use crate::tx_processor::tx_loader::TransactionLoader;
-use crate::tx_processor::{LogDecoder, TransactionClassifier, TxProcessor};
-use alloy_primitives::{Address, B256, U256};
-use eyre::Result;
+use crate::tx_processor::{
+    AddressBalanceChangeCalculator, LogDecoder, TransactionClassifier, TransactionTraceProcessor,
+    TxProcessor,
+};
+use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
+use eyre::{Result, WrapErr};
 use reth_chain_query::ChainQuery;
 use reth_primitives::SealedHeader;
+use reth_provider::TransactionsProvider;
+use rlp::RlpStream;
 use std::sync::Arc;
+use tx_simulator::block_simulation::BlockTracer;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 /// Processed Transaction Provider with two entry points: from CallData or from TX Hash
@@ -38,6 +47,14 @@ pub struct ProcessedTxProvider {
     unsigned_tx_builder: Option<UnsignedTxBuilder>,
     tx_processor: TxProcessor,
     block_processor: BlockProcessor,
+}
+
+fn derive_create_address(from: Address, nonce: u64) -> Address {
+    let mut stream = RlpStream::new_list(2);
+    stream.append(&from.as_slice());
+    stream.append(&nonce);
+    let hash = keccak256(stream.out());
+    Address::from_slice(&hash[12..])
 }
 
 impl ProcessedTxProvider {
@@ -117,10 +134,21 @@ impl ProcessedTxProvider {
             gas_limit,
             max_fee_per_gas,
             max_priority_fee_per_gas,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
             raw_tx_type,
         ) = transaction_loader.load_transaction_data(tx_hash).await?;
 
         // Build ProcessedTransaction from raw DB data without simulation
+        let access_list_items: Vec<ProcessedAccessListItem> = access_list
+            .into_iter()
+            .map(|item| ProcessedAccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys,
+            })
+            .collect();
         let processed_tx = self
             .tx_processor
             .process_transaction_from_raw_data(
@@ -141,6 +169,11 @@ impl ProcessedTxProvider {
                 max_priority_fee_per_gas,
                 logs,
                 gas_limit,
+                access_list_items,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                None,
+                signed_authorizations,
                 None, // No balance changes without simulation
             )
             .await?;
@@ -268,73 +301,157 @@ impl ProcessedTxProvider {
         Ok(processed_tx)
     }
 
-    /// MAIN ENTRY POINT 2: Process transaction by hash  
+    /// MAIN ENTRY POINT 2: Process transaction by hash.
     ///
-    /// Flow: TX Hash → Load from DB → Build UnsignedTransaction → Simulate → tx_processing → ProcessedTransaction
-    /// Use this when you have a transaction hash and want to process the actual transaction
+    /// Flow: TX Hash → Load from DB → Partially replay block up to target → tx_processing → ProcessedTransaction
+    /// Use this when you have a transaction hash and want to process the actual transaction from chain data.
     pub async fn process_transaction_by_hash(&self, tx_hash: B256) -> Result<ProcessedTransaction> {
-        // Ensure we have an unsigned tx builder
-        let unsigned_tx_builder = self.unsigned_tx_builder.as_ref().ok_or_else(|| {
-            eyre::eyre!("TransactionLoader not available for loading transaction by hash")
+        let provider = self.provider_factory.provider()?;
+        let (_, meta) = provider
+            .transaction_by_hash_with_meta(tx_hash)?
+            .ok_or_else(|| eyre::eyre!("Transaction {:?} not found", tx_hash))?;
+        let block_number = meta.block_number;
+        let block_hash = meta.block_hash;
+        drop(provider);
+
+        self.process_transaction_by_hash_with_partial_block_replay(tx_hash, block_hash)
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to replay transaction {:?} in block {} ({:?})",
+                    tx_hash, block_number, block_hash
+                )
+            })
+    }
+
+    /// Replay the block up to (and including) the target transaction instead of
+    /// simulating the entire block. This pulls raw metadata from the DB and then
+    /// uses the block tracer to stop once the target tx index is reached.
+    async fn process_transaction_by_hash_with_partial_block_replay(
+        &self,
+        tx_hash: B256,
+        block_hash: B256,
+    ) -> Result<ProcessedTransaction> {
+        let transaction_loader = self.transaction_loader.as_ref().ok_or_else(|| {
+            eyre::eyre!("TransactionLoader not available for targeted processing")
         })?;
 
-        // Build UnsignedTransaction from transaction hash (loads from DB)
-        let mut unsigned_tx = unsigned_tx_builder
-            .build_unsigned_transaction_from_tx_hash(tx_hash)
-            .await?;
-
-        // Load block number from transaction data
-        let transaction_loader = self.transaction_loader.as_ref().unwrap();
         let (
-            _tx_hash_loaded,
+            _loaded_hash,
             block_number,
-            _timestamp,
+            block_timestamp,
             tx_index,
-            _from,
-            _to,
-            _value,
-            _input,
-            _gas_price,
-            _gas_used,
-            _status,
-            _nonce,
-            _logs,
-            _gas_limit,
-            _max_fee_per_gas,
-            _max_priority_fee_per_gas,
-            _raw_tx_type,
+            from,
+            to,
+            value,
+            input,
+            gas_price,
+            gas_used,
+            status,
+            nonce,
+            logs,
+            gas_limit,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
+            raw_tx_type,
         ) = transaction_loader.load_transaction_data(tx_hash).await?;
 
-        // Simulate at block_number - 1 (the block BEFORE the transaction was included)
-        // This ensures we have the correct state before the transaction executed
-        let simulation_block = block_number.saturating_sub(1);
+        let access_list_items: Vec<ProcessedAccessListItem> = access_list
+            .into_iter()
+            .map(|item| ProcessedAccessListItem {
+                address: item.address,
+                storage_keys: item.storage_keys,
+            })
+            .collect();
 
-        // Get the account's actual nonce at the simulation block
-        // This prevents "nonce too high" errors when there are gaps in transaction processing
-        if let Some(from_address) = unsigned_tx.from {
-            let state_provider = self.simulator.get_chain_state_at_block(simulation_block)?;
-            let account_nonce = state_provider.account_nonce(&from_address)?.unwrap_or(0);
-            unsigned_tx.nonce = Some(account_nonce);
-        }
-
-        // Simulate the transaction with full trace
-        let simulation_result = self
-            .simulator
-            .simulate_unsigned_transaction_with_full_trace_at_block(
-                unsigned_tx.clone(),
-                simulation_block,
+        let mut processed_tx = self
+            .tx_processor
+            .process_transaction_from_raw_data(
+                tx_hash,
+                block_number,
+                block_timestamp,
+                tx_index,
+                from,
+                to,
+                value,
+                input,
+                gas_price,
+                gas_used,
+                status,
+                nonce,
+                raw_tx_type,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                logs,
+                gas_limit,
+                access_list_items,
+                blob_versioned_hashes,
+                max_fee_per_blob_gas,
+                None,
+                signed_authorizations,
+                None,
             )
             .await?;
 
-        // Convert simulation result to ProcessedTransaction
-        let processed_tx = self
-            .build_processed_transaction_from_simulation(
-                &unsigned_tx,
-                &simulation_result,
+        let tracer = BlockTracer::new(&self.simulator);
+        let trace_result = tracer
+            .trace_transaction_in_block_by_hash(
+                block_hash,
+                tx_hash,
+                GethDebugTracingOptions::default(),
+            )
+            .await?;
+
+        let call_frame = match trace_result {
+            TraceResult::Success {
+                result: GethTrace::CallTracer(frame),
+                ..
+            } => frame,
+            TraceResult::Success { result, .. } => {
+                return Err(eyre::eyre!(
+                    "Unsupported tracer result for {:?}: {:?}",
+                    tx_hash,
+                    result
+                ))
+            }
+            TraceResult::Error { error, .. } => {
+                return Err(eyre::eyre!(
+                    "Tracing transaction {:?} failed: {}",
+                    tx_hash,
+                    error
+                ))
+            }
+        };
+
+        let trace_processor = TransactionTraceProcessor::new();
+        processed_tx.internal_transactions =
+            trace_processor.extract_internal_transactions_from_call_trace(&call_frame);
+        processed_tx.bribe_amount =
+            TxProcessor::calculate_bribe_amount(&processed_tx.internal_transactions);
+
+        let mut balance_calculator = AddressBalanceChangeCalculator::new();
+        processed_tx.address_balance_changes = balance_calculator
+            .calculate_balance_changes_from_processed_data(
+                &processed_tx.erc20_transfers,
+                &processed_tx.internal_transactions,
                 block_number,
                 tx_index,
-            )
-            .await?;
+            )?;
+
+        if processed_tx.to_address.is_none() {
+            let contract_address = derive_create_address(from, nonce);
+            processed_tx.contract_address = Some(contract_address);
+
+            if status {
+                processed_tx
+                    .contract_creation_events
+                    .push(ContractCreationEvent { contract_address });
+            }
+        }
 
         Ok(processed_tx)
     }
