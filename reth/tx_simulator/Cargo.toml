@@ -16,6 +16,7 @@ alloy-rlp = "0.3"
 alloy-rpc-types-trace = "1.0.27"
 alloy-rpc-types-eth = "1.0.27"
 alloy-consensus = "1.0.27"
+alloy-eips = "1.0.27"
 hex = "0.4"
 
 # Reth dependencies - using GitHub references
@@ -47,6 +48,7 @@ secrecy = "0.8"
 tempfile = "3.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = "0.4"
+reth_chain_query = { path = "../reth_chain_query" }
 
 # Examples
 

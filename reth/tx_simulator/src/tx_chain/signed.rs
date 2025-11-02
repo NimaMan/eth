@@ -138,6 +138,10 @@ impl SignedTxChainSimulation {
             value: Some(U256::ZERO),
             data: Some(data.clone()),
             nonce: None,
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
         };
 
         // Reuse internal forked-state simulator with trace to capture output

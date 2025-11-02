@@ -21,6 +21,9 @@ use crate::{
         SequentialTransactionResult,
     },
 };
+use alloy_consensus::transaction::Either;
+use alloy_eips::eip2930::AccessList;
+use alloy_eips::eip7702::{RecoveredAuthorization, SignedAuthorization};
 use eyre::Result;
 use std::collections::HashMap;
 use tokio::task;
@@ -168,9 +171,8 @@ impl TxSimulator {
         block_number: u64,
         block_header: SealedHeader,
     ) -> Result<ForkedState> {
-        let state = self
-            .provider_factory
-            .history_by_block_number(block_number)?;
+        let state_block = block_number.saturating_sub(1);
+        let state = self.provider_factory.history_by_block_number(state_block)?;
         let db = CacheDB::new(StateProviderDatabase::new(state));
 
         Ok(ForkedState {
@@ -486,6 +488,17 @@ impl TxSimulator {
         )?;
         let gas_price = gas_resolution.gas_price;
         let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
+        let access_list = AccessList::from(request.access_list.clone());
+        let blob_hashes = request.blob_versioned_hashes.clone();
+        let authorization_list: Vec<Either<SignedAuthorization, RecoveredAuthorization>> = request
+            .signed_authorizations
+            .iter()
+            .cloned()
+            .map(Either::Left)
+            .collect();
+        let max_fee_per_blob_gas = request
+            .max_fee_per_blob_gas
+            .unwrap_or(fee_defaults.max_fee_per_blob_gas);
 
         // Create TxEnv - no signature needed!
         Ok(TxEnv {
@@ -503,10 +516,10 @@ impl TxSimulator {
             data: request.data.clone().unwrap_or_default(),
             nonce,
             chain_id: fee_defaults.chain_id,
-            access_list: Default::default(),
-            blob_hashes: Default::default(),
-            max_fee_per_blob_gas: fee_defaults.max_fee_per_blob_gas,
-            authorization_list: Default::default(),
+            access_list,
+            blob_hashes,
+            max_fee_per_blob_gas,
+            authorization_list,
         })
     }
 }

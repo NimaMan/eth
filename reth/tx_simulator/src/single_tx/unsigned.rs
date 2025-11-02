@@ -13,8 +13,13 @@ use crate::{
 use eyre::Result;
 use tokio::task;
 
+use alloy_consensus::transaction::Either;
+use alloy_eips::{
+    eip2930::{AccessList, AccessListItem},
+    eip7702::{RecoveredAuthorization, SignedAuthorization},
+};
 // Reth imports
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame, GethDefaultTracingOptions, StructLog};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
@@ -72,6 +77,10 @@ pub struct UnsignedTransaction {
     pub value: Option<U256>,
     pub data: Option<Bytes>,
     pub nonce: Option<u64>,
+    pub access_list: Vec<AccessListItem>,
+    pub blob_versioned_hashes: Vec<B256>,
+    pub max_fee_per_blob_gas: Option<u128>,
+    pub signed_authorizations: Vec<SignedAuthorization>,
 }
 
 impl TxSimulator {
@@ -435,6 +444,18 @@ impl TxSimulator {
         let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
 
         // Create TxEnv - no signature needed!
+        let access_list = AccessList::from(request.access_list.clone());
+        let blob_hashes = request.blob_versioned_hashes.clone();
+        let authorization_list: Vec<Either<SignedAuthorization, RecoveredAuthorization>> = request
+            .signed_authorizations
+            .iter()
+            .cloned()
+            .map(Either::Left)
+            .collect();
+        let max_fee_per_blob_gas = request
+            .max_fee_per_blob_gas
+            .unwrap_or(fee_defaults.max_fee_per_blob_gas);
+
         Ok(TxEnv {
             tx_type: gas_resolution.tx_type.as_reth_tx_type(),
             caller: caller.into(),
@@ -450,10 +471,10 @@ impl TxSimulator {
             data: request.data.clone().unwrap_or_default(),
             nonce,
             chain_id: fee_defaults.chain_id,
-            access_list: Default::default(),
-            blob_hashes: Default::default(),
-            max_fee_per_blob_gas: fee_defaults.max_fee_per_blob_gas,
-            authorization_list: Default::default(),
+            access_list,
+            blob_hashes,
+            max_fee_per_blob_gas,
+            authorization_list,
         })
     }
 }

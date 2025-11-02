@@ -49,6 +49,10 @@ impl TxSimulator {
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
             nonce: None,
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
         };
 
         // Get block number

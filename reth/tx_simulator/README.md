@@ -38,6 +38,14 @@ Reth MDBX ──► Provider ──► Header(N)
 
 ## Capabilities (Overview)
 
+| TxSimulator API | Intended RPC parity | Return payload |
+| --------------- | ------------------- | -------------- |
+| `simulate_unsigned_transaction` | `eth_call` / `debug_traceCall` (no tracer) | `SimulationResult` (success, gas, revert message) |
+| `simulate_unsigned_transaction_with_trace` | `debug_traceTransaction` with `tracer=callTracer` | `FullSimulationResult.call_trace` (Geth call hierarchy) |
+| `simulate_unsigned_transaction_with_full_trace` | `debug_traceTransaction` with `tracer=callTracer` + `structLogs` enabled | `FullSimulationResult.call_trace` + `FullSimulationResult.struct_logs` |
+| Chain helpers (`TxSimulator::start_simulation_chain`, `UnsignedTxChainSimulation::step_with_trace`) | `debug_traceBlockByNumber` style incremental replay | CallFrame traces per step, persisted forked state |
+| Batch helpers (`simulate_unsigned_tx_sequence`) | Bundle trace / mev-geth style batch replay | CallFrame traces + cumulative gas for each step |
+
 - Unsigned simulation: debug_traceCall-equivalent at any block
 - Signed simulation: execute real signatures (mempool/RPC artifacts)
 - Stateful chains: interactive step() / step_with_trace() with nonce tracking
@@ -45,6 +53,10 @@ Reth MDBX ──► Provider ──► Header(N)
 - Parallel evaluation: concurrent unsigned calls at a chosen block with timeouts
 - Block tracing: trace every tx in a block with geth-compatible frames
 - Revert decoding: human-readable error strings when available
+
+> ℹ️ **Parity/OpenEthereum trace format**  
+> The simulator currently returns Geth-style traces (CallFrame trees and optional `structLogs`).  
+> Parity’s `trace_transaction` / `trace_block` RPCs emit a list of **actions**—one entry per EVM transition (e.g. `CALL`, `CREATE`, `CALLCODE`, `DELEGATECALL`, `STATICCALL`, `SELFDESTRUCT`) with companion `action` / `result` / `stateDiff` / `vmTrace` fields. We do not encode that list today. Building it would require an additional adapter that walks the existing inspector output and shapes it into the Parity schema (action kind, `from`, `to`, `value`, `gas`, `input`, and result metadata). Contributions welcome if you need that format.
 
 ## Modules (Responsibility Map)
 
@@ -84,9 +96,12 @@ Reth MDBX ──► Provider ──► Header(N)
 - Trace format: Exported via geth builders; structure is intended to be identical to `debug_*` RPC traces.
 - Validation example: See `examples/block/verify_block_trace_rpc_equivalence.rs` which compares our traces to `debug_traceBlockByNumber` from an RPC endpoint.
 
-## License
+#### Where live replay diverges today
 
-MIT OR Apache-2.0
+- Reth’s pending-block builder (`pending_block::build_block`) wires a `StateProviderDatabase` into `State::builder().with_bundle_update()` and executes **every** candidate with `builder.execute_transaction`. The resulting `BundleState` is kept hot, so same-block helpers (factory createPair, router approvals, liquidity adds) see all prior writes before the block is sealed.
+- Our consumers only replay the subset of helpers that were already simulated. When upstream routing marks a creator call as `requires_simulation = false`, no `ProcessedTransaction` ever lands in the `prior_txs` chain. The next helper is executed against an incomplete fork and can throw `TransferHelper::TRANSFER_FROM_FAILED` even though the chain accepted the sequence.
+- Historical replays do not suffer because the missing writes are present in the canonical MDBX snapshot. The divergence only appears in live mode when we depend on pending-sequence staging to mirror Reth’s bundle behaviour.
+- Fix direction: make the simulator hydrate the missing helpers (either by force-simulating deterministic approvals/creates or by fetching them from canonical state) before probing pools, so our sequential chain matches the state that Reth’s `BundleState` exposes.
 
 ---
 
@@ -352,14 +367,3 @@ Downstream crates (e.g., `tx_processor`, `reth_chain_query`) may rely on:
 - advanced: timeout handling; revert reason decoder
 - block: trace transactions; verify RPC equivalence
 - signed chain: `buy_approve_sell_signed_chain_uniswap_v2` (signed end-to-end)
-
-Run any example:
-```
-cargo run --example <name>
-```
-
-### Operational Notes
-
-- Safe to run alongside a live Reth node; read-only MDBX access.
-- For freshest state, ensure DB is fully synced and canonicalized to the desired block.
-- For heavy workloads, prefer parallel unsigned evaluation and selectively re-simulate with traces.

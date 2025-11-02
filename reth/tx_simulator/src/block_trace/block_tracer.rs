@@ -9,9 +9,9 @@ use alloy_rpc_types_trace::geth::{
 /// RPC method, but with direct database access for massive performance improvements.
 use eyre::Result;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::TransactionSigned;
+use reth_primitives::{SealedHeader, TransactionSigned};
 use reth_primitives_traits::SignerRecoverable;
-use reth_provider::{BlockHashReader, BlockReader, HeaderProvider};
+use reth_provider::{BlockHashReader, BlockReader, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -61,6 +61,36 @@ impl<'a> BlockTracer<'a> {
             .await?
     }
 
+    /// Trace a single transaction within a block (replaying all prior transactions)
+    pub async fn trace_transaction_in_block_by_hash(
+        &self,
+        block_hash: B256,
+        target_tx_hash: B256,
+        opts: GethDebugTracingOptions,
+    ) -> Result<TraceResult> {
+        let simulator = self.simulator.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::trace_transaction_in_block_sync(&simulator, block_hash, target_tx_hash, opts)
+        })
+        .await?
+    }
+
+    /// Trace a transaction by hash (automatically resolving its block)
+    pub async fn trace_transaction_by_hash(
+        &self,
+        tx_hash: B256,
+        opts: Option<GethDebugTracingOptions>,
+    ) -> Result<TraceResult> {
+        let opts = opts.unwrap_or_default();
+        let provider = self.simulator.provider_factory.provider()?;
+        let (_, meta) = provider
+            .transaction_by_hash_with_meta(tx_hash)?
+            .ok_or_else(|| eyre::eyre!("Transaction {:?} not found", tx_hash))?;
+        let block_hash = meta.block_hash;
+        self.trace_transaction_in_block_by_hash(block_hash, tx_hash, opts)
+            .await
+    }
+
     /// Synchronous block tracing implementation
     fn trace_block_sync(
         simulator: &TxSimulator,
@@ -78,9 +108,8 @@ impl<'a> BlockTracer<'a> {
         let transactions = block.body.transactions.clone();
 
         // Get block header for environment setup
-        let header = &block.header;
-        let parent_hash = header.parent_hash;
-        let block_number = header.number;
+        let parent_hash = block.header.parent_hash;
+        let sealed_header = SealedHeader::new_unhashed(block.header.clone());
 
         // Create state at parent block (we need the state before this block was executed)
         // We use history_by_block_hash to get the state at the parent block
@@ -106,7 +135,7 @@ impl<'a> BlockTracer<'a> {
                 tx,
                 sender,
                 &mut db,
-                block_number,
+                &sealed_header,
                 &opts,
                 Some(tx_hash),
                 index,
@@ -118,13 +147,72 @@ impl<'a> BlockTracer<'a> {
         Ok(results)
     }
 
+    /// Synchronously trace a single transaction by replaying the block up to it.
+    fn trace_transaction_in_block_sync(
+        simulator: &TxSimulator,
+        block_hash: B256,
+        target_tx_hash: B256,
+        opts: GethDebugTracingOptions,
+    ) -> Result<TraceResult> {
+        let provider = simulator.provider_factory.provider()?;
+
+        // Fetch the block and clone transactions
+        let block = provider
+            .block_by_hash(block_hash)?
+            .ok_or_else(|| eyre::eyre!("Block {:?} not found", block_hash))?;
+        let transactions = block.body.transactions.clone();
+
+        let parent_hash = block.header.parent_hash;
+        let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+
+        // Seed state at the parent block
+        let state_at_parent = simulator
+            .provider_factory
+            .history_by_block_hash(parent_hash)?;
+        let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
+
+        for (index, tx) in transactions.iter().enumerate() {
+            let tx_hash = *tx.tx_hash();
+            let sender = tx
+                .recover_signer()
+                .map_err(|e| eyre::eyre!("Failed to recover signer for tx {:?}: {}", tx_hash, e))?;
+
+            if tx_hash == target_tx_hash {
+                return Self::trace_single_transaction(
+                    simulator,
+                    tx,
+                    sender,
+                    &mut db,
+                    &sealed_header,
+                    &opts,
+                    Some(tx_hash),
+                    index,
+                );
+            } else {
+                Self::apply_transaction_without_trace(
+                    simulator,
+                    tx,
+                    sender,
+                    &mut db,
+                    &sealed_header,
+                )?;
+            }
+        }
+
+        Err(eyre::eyre!(
+            "Transaction {:?} not found in block {:?}",
+            target_tx_hash,
+            block_hash
+        ))
+    }
+
     /// Trace a single transaction within a block context
     fn trace_single_transaction(
         simulator: &TxSimulator,
         tx: &TransactionSigned,
         sender: Address,
         db: &mut CacheDB<StateProviderDatabase<Box<dyn reth_provider::StateProvider>>>,
-        block_number: u64,
+        block_header: &SealedHeader,
         opts: &GethDebugTracingOptions,
         tx_hash: Option<B256>,
         _tx_index: usize,
@@ -134,16 +222,10 @@ impl<'a> BlockTracer<'a> {
         // Create recovered transaction
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
 
-        // Get block environment
-        let provider = simulator.provider_factory.provider()?;
-        let block_header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("Header not found for block {}", block_number))?;
-
         // Setup EVM environment
         let evm_env = simulator
             .evm_config
-            .evm_env(&block_header)
+            .evm_env(block_header)
             .expect("failed to build EVM env");
 
         // Create transaction environment from recovered transaction
@@ -207,6 +289,30 @@ impl<'a> BlockTracer<'a> {
         };
 
         Ok(trace_result)
+    }
+
+    /// Execute a transaction solely to advance state (no trace collection)
+    fn apply_transaction_without_trace(
+        simulator: &TxSimulator,
+        tx: &TransactionSigned,
+        sender: Address,
+        db: &mut CacheDB<StateProviderDatabase<Box<dyn reth_provider::StateProvider>>>,
+        block_header: &SealedHeader,
+    ) -> Result<()> {
+        use reth_primitives::Recovered;
+
+        let recovered = Recovered::new_unchecked(tx.clone(), sender);
+        let evm_env = simulator
+            .evm_config
+            .evm_env(block_header)
+            .expect("failed to build EVM env");
+        let tx_env = simulator.evm_config.tx_env(&recovered);
+
+        let mut evm = simulator.evm_config.evm_with_env(&mut *db, evm_env);
+        let res = evm.transact(tx_env)?;
+        db.commit(res.state);
+
+        Ok(())
     }
 
     /// Create an inspector based on the tracing options
