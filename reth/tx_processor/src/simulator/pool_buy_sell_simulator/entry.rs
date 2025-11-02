@@ -27,8 +27,8 @@ use reth_chain_query::dex::{
     UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
 };
 use reth_chain_query::tx_builders::amm::uniswap_v2::{
-    build_approve_v2, build_token_to_token_swap_supporting_fee_v2,
-    build_token_to_token_swap_v2, Router as UniswapV2Router,
+    build_approve_v2, build_token_to_token_swap_supporting_fee_v2, build_token_to_token_swap_v2,
+    Router as UniswapV2Router,
 };
 use reth_chain_query::tx_builders::amm::uniswap_v3::{
     build_approve_v3, build_token_to_token_swap_v3,
@@ -250,6 +250,7 @@ pub async fn check_can_buy_sell_pool(
     }
 
     if let Some(failure) = prepare_buyer_account(
+        simulator.clone(),
         &mut chain,
         &config,
         base_fee,

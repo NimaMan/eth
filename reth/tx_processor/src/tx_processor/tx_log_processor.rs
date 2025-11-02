@@ -2,7 +2,7 @@ use super::data_models::receipt_models::*;
 use alloy_primitives::{Address, Log as AlloyLog, B256, U256};
 use eyre::Result;
 use reth_chain_query::to_checksum_address;
-use tx_simulator::CallFrame;
+use tx_simulator::types::CallFrame;
 
 /// Event signatures for common token standards and DEX protocols
 pub struct EventSignatures {

@@ -13,7 +13,7 @@
 use super::data_models::InternalTransaction;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use tx_simulator::CallFrame;
+use tx_simulator::types::CallFrame;
 
 /// Processes transaction traces to extract internal transactions
 pub struct TransactionTraceProcessor;
