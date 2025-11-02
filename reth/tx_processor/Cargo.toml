@@ -45,6 +45,10 @@ path = "examples/provider/token_transactions.rs"
 name = "fetch_processed_tx"
 path = "examples/provider/fetch_processed_tx.rs"
 
+[[example]]
+name = "buy_swap_uniswap_v4"
+path = "examples/simulation/buy_swap_uniswap_v4.rs"
+
 
 # Pool analysis examples
 [[example]]
