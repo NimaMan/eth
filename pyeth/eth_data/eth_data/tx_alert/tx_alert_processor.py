@@ -9,7 +9,7 @@ from eth_data.utils.logger import get_logger
 
 class TransactionAlertProcessor:
     def __init__(self, logger=None):
-        self.logger = logger or get_logger(name="alert_processor")
+        self.logger = logger
         # Initialize all alert processors
         self.alert_processors = {}
 

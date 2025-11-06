@@ -14,6 +14,7 @@ STABLECOIN_UNIT_BY_NAME = {
     "EURT":  "Euro",                  # Tether Euro token (Tether docs)  [oai_citation:7‡CoinMarketCap](https://coinmarketcap.com/currencies/eur-coinvertible/?utm_source=chatgpt.com)
     "GYEN":  "Japanese Yen",          # GMO Trust’s GYEN peg  [oai_citation:8‡stablecoin.z.com](https://stablecoin.z.com/gyen/?utm_source=chatgpt.com)
     "JPYC":  "Japanese Yen",          # JPYC pegged to JPY (jpyc.jp)  [oai_citation:9‡stablecoin.z.com](https://stablecoin.z.com/gyen/?utm_source=chatgpt.com)
+    "JPYCv2":"Japanese Yen",          # JPYC v2 2024 contract  [oai_citation:27‡CoinGecko API](https://api.coingecko.com/api/v3/coins/jpy-coin)
     "IDRT":  "Indonesian Rupiah",     # Rupiah Token IDRT  [oai_citation:10‡rupiahtoken.com](https://rupiahtoken.com/?utm_source=chatgpt.com)
     "XIDR":  "Indonesian Rupiah",     # StraitsX IDR token info (straitsx)  [oai_citation:11‡rupiahtoken.com](https://rupiahtoken.com/?utm_source=chatgpt.com)
     "XSGD":  "Singapore Dollar",      # StraitsX XSGD peg  [oai_citation:12‡CoinMarketCap](https://coinmarketcap.com/currencies/xsgd/?utm_source=chatgpt.com)
@@ -38,11 +39,14 @@ STABLECOIN_UNIT_BY_NAME = {
     "USDC": "US Dollar",              # Circle reserves description  [oai_citation:18‡Getting Started | Synthetix Docs](https://docs.synthetix.io/exchange/perps-v3-base/multi-collateral-margin/collateral-types?utm_source=chatgpt.com)
     "USD0": "US Dollar",              # Usual USD0 peg (CoinMarketCap)  [oai_citation:19‡CoinMarketCap](https://coinmarketcap.com/currencies/usual-usd/?utm_source=chatgpt.com)
     "USD1": "US Dollar",
+    "USDM": "US Dollar",              # Mountain Protocol USD mainnet contract  [oai_citation:24‡CoinGecko API](https://api.coingecko.com/api/v3/coins/mountain-protocol-usdm)
     "USDP": "US Dollar",              # Pax Dollar docs  [oai_citation:20‡docs.paxos.com](https://docs.paxos.com/stablecoin?utm_source=chatgpt.com)
     "USDS": "US Dollar",
     "USDT": "US Dollar",
     "USDD": "US Dollar",
     "USDE": "US Dollar",              # Ethena synthetic USD  [oai_citation:21‡Ethena](https://ethena.fi/?utm_source=chatgpt.com)
+    "USDV": "US Dollar",              # Verified USD Ethereum contract  [oai_citation:25‡CoinGecko API](https://api.coingecko.com/api/v3/coins/usdv-2)
+    "USDY": "US Dollar",              # Ondo US Dollar Yield contract  [oai_citation:26‡CoinGecko API](https://api.coingecko.com/api/v3/coins/ondo-us-dollar-yield)
     "XUSD": "US Dollar",              # StraitsX USD token  [oai_citation:22‡straitsx.com](https://www.straitsx.com/xusd?utm_source=chatgpt.com)
     "ZUSD": "US Dollar",              # ZUSD peg (CoinMarketCap)  [oai_citation:23‡CoinMarketCap](https://coinmarketcap.com/currencies/zusd/?utm_source=chatgpt.com)
 }
@@ -65,7 +69,8 @@ STABLECOINS_ADDRESS_BY_NAME = {
     "GUSD": "0x056FD409E1d7A124BD7017459dFEa2F387B6d5Cd",
     "GYEN": "0xC08512927D12348F6620a698105e1BAac6EcD911",
     "IDRT": "0x998FFE1E43fAcffb941dc337dD0468d52BA5B48A",
-    "JPYC": "0x2370f9d504C7A6E775bf6E14B3F12846b594cD53",
+    "JPYC": "0x2370F9d504C7A6E775bf6E14B3F12846b594cD53",
+    "JPYCv2": "0x431d5dff03120afa4bdf332c61a6e1766ef37bdb",
     "LUSD": "0x5f98805A4E8be255a32880FDeC7F6728C6568bA0",
     "MKUSD": "0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28",
     "OUSD": "0x2A8e1E676Ec238d8A992307B495b45B3fEAa5e86",
@@ -77,11 +82,14 @@ STABLECOINS_ADDRESS_BY_NAME = {
     "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "USD0": "0x73a15fed60bf67631dc6cd7bc5b6e8da8190acf5",
     "USD1": "0xC824Bf014539F6bdE6b81ABAaca0D626C2AC5985",
+    "USDM": "0x59D9356E565AB3A36DD77763FC0D87FEAF85508C",
     "USDP": "0x8E870D67F660D95D5be530380D0eC0bd388289E1",
     "USDS": "0xA4BDB11dC0a2beC88d24A3AA1e6bb17201112EBE",
     "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
     "USDD": "0x0C10BF8FCB7BF5412187A595aB97A3609160B5C6",
     "USDE": "0x4C9EDD5852cD905F086c759e8383E09BFF1E68B3",
+    "USDV": "0x20B3B07E9C0E37815E2892AB09496559F57C3603",
+    "USDY": "0x96F6EF951840721ADBF46AC996B59E0235CB985C",
     "XAUt": "0x68749665FF8D2d112Fa859AA293F07A622782F38",
     "XIDR": "0xebF2096E01455108bAdCbAF86cE30b6e5A72aa52",
     "XSGD": "0x70e8dE73cE538DA2bEEd35d14187F6959a8ecA96",

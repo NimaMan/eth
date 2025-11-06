@@ -1,7 +1,7 @@
 """Canonical DEX pool type identifiers used across the codebase."""
 
 # Canonical pool type identifiers. These align with Rust constants in
-# `reth_chain_query::common_addresses::pool_types`.
+# `reth_chain_query::dex::pool_types`.
 DEX_POOL_TYPES = (
     "UNISWAP-V2",
     "UNISWAP-V3",

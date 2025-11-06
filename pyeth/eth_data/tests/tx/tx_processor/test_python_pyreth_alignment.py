@@ -125,6 +125,5 @@ def test_python_and_pyreth_processed_transaction_parity(
     assert python_tx.erc20_contracts == pyreth_tx.erc20_contracts
 
     # Ensure the simulator config accepts both Python and PyReth processed transactions directly.
-    config = pyreth.PoolBuySellParameters.with_buy_amount(0.01)
-    config.set_prior_processed_transaction(python_tx)
-    config.set_prior_tx_from_processed(pyreth_raw)
+    config = pyreth.PoolBuySellParameters.with_denom_amount(0.01, 18, 18)
+    config.set_prior_transactions([python_tx, pyreth_raw])
