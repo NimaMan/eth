@@ -87,7 +87,7 @@ class BasePool(ABC):
         self.pool_address = pool_address
         self.token_address = token_address
         self.denom_address = denom_address
-        self.denom_threshold = get_threshold_for_token(self.denom_address)
+        self.denom_threshold = get_threshold_for_token(self.denom_address).get("threshold")
         
         self.token1_is_denom = token1_is_denom
         self.history_limit = history_limit
@@ -124,9 +124,7 @@ class BasePool(ABC):
         
         # Token decimals (cached)
         self._token_decimals: Optional[int] = int(token_decimals)
-        self._denom_decimals: Optional[int] = (
-            int(denom_decimals) if denom_decimals is not None else None
-        )
+        self._denom_decimals: Optional[int] = denom_decimals
 
         # Simulation settings
         # Per-pool override for test buy amount used in viability checks
@@ -137,8 +135,12 @@ class BasePool(ABC):
         self.token_chain_fetcher = token_chain_fetcher or TokenChainDataFetcher()
         self.pyreth_client = PyrethClient.instance()
         self.pool_buy_sell_simulator = self.pyreth_client.pool_buy_sell_simulator()
-        self.pool_buy_sell_config = pyreth.PoolBuySellParameters()
-        
+        self.pool_buy_sell_config = pyreth.PoolBuySellParameters(
+            int(token_decimals),
+            denom_decimals,
+        )
+        self.pool_buy_sell_config.denom_address = denom_address
+       
         # Scam detection (from reserve tracker)
         self.scam_label: Optional[str] = None
         self.scam_block: Optional[int] = None        
@@ -370,7 +372,8 @@ class BasePool(ABC):
     def check_and_update_trading_status(self, transaction: Dict) -> bool:
         """Check if trading is enabled on this pool and calculate taxes."""
         if self._has_control_address(transaction):
-            self.evaluate_trading_status(transaction)   
+            if not self.is_scam: # We dont need to evaluate trading after we have marked a token as scam.
+                self.evaluate_trading_status(transaction)
         return self.trading_enabled                   
 
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:

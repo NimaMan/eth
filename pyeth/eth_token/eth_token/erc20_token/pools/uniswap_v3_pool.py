@@ -162,8 +162,13 @@ class UniswapV3Pool(BasePool):
         })
     
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
-        config.token_decimals = int(self.get_token_decimals())
+        config = pyreth.PoolBuySellParameters.with_denom_amount(
+            float(self.test_buy_amount_eth),
+            int(self.get_token_decimals()),
+            int(self.get_denom_decimals()),
+        )
+        denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
+        config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
         prior_transactions = self.latest_block_control_address_txs.values()
         config.set_prior_transactions(prior_transactions)

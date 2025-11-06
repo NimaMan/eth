@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from web3 import Web3
 from .base_pool import BasePool, logger
 from eth_data.utils.pyreth_client import pyreth
-from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+from eth_data.chain_utils.common_addresses import ZERO_ADDRESS, canonicalize_dex_pool_type
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 
@@ -103,6 +103,7 @@ class UniswapV4Pool(BasePool):
         pool_chain_fetcher: Optional['PoolChainDataFetcher'] = None,
         token_chain_fetcher: Optional['TokenChainDataFetcher'] = None,
         history_limit: int = 100,
+        denom_is_native: bool = False,
     ):
         super().__init__(
             pool_address=self.POOL_MANAGER,
@@ -118,6 +119,7 @@ class UniswapV4Pool(BasePool):
         
         self.pool_id = pool_id
         self.pool_key = pool_key
+        self.denom_is_native = denom_is_native
         
         # Display address for compatibility (PoolManager#poolId format)
         self.display_address = f"{self.POOL_MANAGER}-{pool_id}"
@@ -130,6 +132,11 @@ class UniswapV4Pool(BasePool):
     
     def get_protocol(self) -> str:
         return UNISWAP_V4_PROTOCOL
+
+    def get_denom_name(self) -> str:
+        if self.denom_is_native:
+            return "ETH"
+        return super().get_denom_name()
     
     def process_transaction(self, transaction: Dict):
         # V4 uses ModifyLiquidity for both mints and burns
@@ -203,8 +210,13 @@ class UniswapV4Pool(BasePool):
         self._update_virtual_reserves()
 
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        config = pyreth.PoolBuySellParameters.with_buy_amount(float(self.test_buy_amount_eth))
-        config.token_decimals = int(self.get_token_decimals())
+        config = pyreth.PoolBuySellParameters.with_denom_amount(
+            float(self.test_buy_amount_eth),
+            int(self.get_token_decimals()),
+            int(self.get_denom_decimals()),
+        )
+        denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
+        config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
         prior_transactions = self.latest_block_control_address_txs.values()
         config.set_prior_transactions(prior_transactions)
@@ -301,6 +313,8 @@ class UniswapV4Pool(BasePool):
         token_addr = Web3.to_checksum_address(self.token_address)
         denom_addr = Web3.to_checksum_address(self.denom_address)
 
+        if currency0 == Web3.to_checksum_address(ZERO_ADDRESS):
+            return 18
         if currency0 == token_addr:
             return self.get_token_decimals()
         if currency0 == denom_addr:
@@ -312,6 +326,8 @@ class UniswapV4Pool(BasePool):
         token_addr = Web3.to_checksum_address(self.token_address)
         denom_addr = Web3.to_checksum_address(self.denom_address)
 
+        if currency1 == Web3.to_checksum_address(ZERO_ADDRESS):
+            return 18
         if currency1 == token_addr:
             return self.get_token_decimals()
         if currency1 == denom_addr:
