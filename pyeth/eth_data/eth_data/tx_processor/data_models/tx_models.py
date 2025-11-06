@@ -124,6 +124,25 @@ class TransactionFees:
 
 
 @dataclass
+class AccessListEntry:
+    address: ChecksumAddress
+    storage_keys: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.address = _coerce_checksum_address(self.address)
+        sanitized: List[str] = []
+        for key in self.storage_keys:
+            sanitized.append(_ensure_hex_str(key, "access_list.storage_keys"))
+        self.storage_keys = sanitized
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "address": self.address,
+            "storage_keys": list(self.storage_keys),
+        }
+
+
+@dataclass
 class ProcessedTransaction:
     hash: str
     block_number: int
@@ -187,6 +206,11 @@ class ProcessedTransaction:
     uniswap_v4_protocol_fee_controller_updates: List[UniswapV4FeeControllerUpdatedEvent] = field(default_factory=list)
     uniswap_v4_balance_deltas: List[UniswapV4BalanceDeltaEvent] = field(default_factory=list)
     permit2_events: List[Permit2Event] = field(default_factory=list)
+    access_list: List[AccessListEntry] = field(default_factory=list)
+    blob_versioned_hashes: List[str] = field(default_factory=list)
+    max_fee_per_blob_gas: Optional[int] = None
+    blob_gas_used: Optional[int] = None
+    signed_authorizations: List[Dict[str, Any]] = field(default_factory=list)
 
     other_events: List[Dict[str, Any]] = field(default_factory=list)
     address_balance_changes: Dict[str, Any] = field(default_factory=dict)
@@ -337,6 +361,11 @@ class ProcessedTransaction:
             "uniswap_v4_protocol_fee_controller_updates": self._list_to_dicts(self.uniswap_v4_protocol_fee_controller_updates),
             "uniswap_v4_balance_deltas": self._list_to_dicts(self.uniswap_v4_balance_deltas),
             "permit2_events": self._list_to_dicts(self.permit2_events),
+            "access_list": self._list_to_dicts(self.access_list),
+            "blob_versioned_hashes": list(self.blob_versioned_hashes),
+            "max_fee_per_blob_gas": self.max_fee_per_blob_gas,
+            "blob_gas_used": self.blob_gas_used,
+            "signed_authorizations": self._list_to_dicts(self.signed_authorizations),
             "other_events": self.other_events,
             "address_balance_changes": self.address_balance_changes,
             "latest_states": self.latest_states,
@@ -375,6 +404,18 @@ class ProcessedTransaction:
         bribe_raw = tx_dict.get('bribe_amount', 0)
         if bribe_raw is None:
             bribe_raw = 0
+
+        blob_hashes_raw = tx_dict.get('blob_versioned_hashes') or []
+        blob_versioned_hashes = [
+            _ensure_hex_str(item, "blob_versioned_hashes") for item in blob_hashes_raw
+        ]
+        max_fee_per_blob_gas = tx_dict.get('max_fee_per_blob_gas')
+        if max_fee_per_blob_gas is not None:
+            max_fee_per_blob_gas = _ensure_int(max_fee_per_blob_gas, "max_fee_per_blob_gas")
+        blob_gas_used = tx_dict.get('blob_gas_used')
+        if blob_gas_used is not None:
+            blob_gas_used = _ensure_int(blob_gas_used, "blob_gas_used")
+        signed_authorizations = list(tx_dict.get('signed_authorizations') or [])
 
         return cls(
             hash=tx_dict['hash'],
@@ -426,6 +467,11 @@ class ProcessedTransaction:
             uniswap_v4_protocol_fee_controller_updates=cls._coerce_sequence("uniswap_v4_protocol_fee_controller_updates", tx_dict.get('uniswap_v4_protocol_fee_controller_updates'), UniswapV4FeeControllerUpdatedEvent),
             uniswap_v4_balance_deltas=cls._coerce_sequence("uniswap_v4_balance_deltas", tx_dict.get('uniswap_v4_balance_deltas'), UniswapV4BalanceDeltaEvent),
             permit2_events=cls._coerce_sequence("permit2_events", tx_dict.get('permit2_events'), Permit2Event),
+            access_list=cls._coerce_sequence("access_list", tx_dict.get('access_list'), AccessListEntry),
+            blob_versioned_hashes=blob_versioned_hashes,
+            max_fee_per_blob_gas=max_fee_per_blob_gas,
+            blob_gas_used=blob_gas_used,
+            signed_authorizations=signed_authorizations,
             other_events=list(tx_dict.get('other_events') or []),
             fees=fees,
             unique_addresses=cls._normalize_address_set("unique_addresses", tx_dict.get('unique_addresses')),
@@ -496,6 +542,11 @@ class ProcessedTransaction:
                  address_balance_changes: Optional[Dict[str, Any]] = None,
                  latest_states: Optional[Dict[str, Any]] = None,
                  bribe_amount: int = 0,
+                 access_list: Optional[List[AccessListEntry]] = None,
+                 blob_versioned_hashes: Optional[List[str]] = None,
+                 max_fee_per_blob_gas: Optional[int] = None,
+                 blob_gas_used: Optional[int] = None,
+                 signed_authorizations: Optional[List[Dict[str, Any]]] = None,
                  ):
         """Initialize DetailedTransaction with type conversion handling"""
         
@@ -556,6 +607,29 @@ class ProcessedTransaction:
         self.uniswap_v4_protocol_fee_controller_updates = list(uniswap_v4_protocol_fee_controller_updates or [])
         self.uniswap_v4_balance_deltas = list(uniswap_v4_balance_deltas or [])
         self.permit2_events = list(permit2_events or [])
+        self.access_list = []
+        for entry in access_list or []:
+            if isinstance(entry, AccessListEntry):
+                self.access_list.append(entry)
+            elif isinstance(entry, dict):
+                self.access_list.append(AccessListEntry(**entry))
+            else:
+                raise TypeError("access_list entries must be AccessListEntry or dict")
+        self.blob_versioned_hashes = [
+            _ensure_hex_str(item, "blob_versioned_hashes") for item in (blob_versioned_hashes or [])
+        ]
+        self.max_fee_per_blob_gas = (
+            _ensure_int(max_fee_per_blob_gas, "max_fee_per_blob_gas") if max_fee_per_blob_gas is not None else None
+        )
+        self.blob_gas_used = (
+            _ensure_int(blob_gas_used, "blob_gas_used") if blob_gas_used is not None else None
+        )
+        self.signed_authorizations = []
+        for auth in signed_authorizations or []:
+            if isinstance(auth, dict):
+                self.signed_authorizations.append(dict(auth))
+            else:
+                self.signed_authorizations.append(auth)
 
         # Complex fields
         self.fees = fees or TransactionFees(gas_price=0, gas_used=0, gas_limit=0, tx_fee=0)
@@ -621,6 +695,11 @@ class ProcessedTransaction:
             self.uniswap_v4_protocol_fee_controller_updates == other.uniswap_v4_protocol_fee_controller_updates and
             self.uniswap_v4_balance_deltas == other.uniswap_v4_balance_deltas and
             self.permit2_events == other.permit2_events and
+            self.access_list == other.access_list and
+            self.blob_versioned_hashes == other.blob_versioned_hashes and
+            self.max_fee_per_blob_gas == other.max_fee_per_blob_gas and
+            self.blob_gas_used == other.blob_gas_used and
+            self.signed_authorizations == other.signed_authorizations and
             self.other_events == other.other_events and
             self.fees == other.fees and
             self.address_balance_changes == other.address_balance_changes and
