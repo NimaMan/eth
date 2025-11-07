@@ -65,7 +65,7 @@ Reth MDBX ──► Provider ──► Header(N)
 - `single_tx::signed`: Signed single-tx execution and tracing
 - `tx_chain::unsigned`: Stateful unsigned chain (step, trace, nonces)
 - `tx_chain::signed`: Stateful signed chain (step, trace, nonces)
-- `tx_chain::bundle`: Batch execution helpers (unsigned tx sequences, fork utilities)
+- `tx_chain::sequential`: Batch execution helpers (unsigned tx sequences, fork utilities)
 - `parallel_tx_simulator.rs`: Parallel unsigned evaluation with concurrency/timeout controls
 - `block_simulation/`: Block-wide tracing utilities
 - `simulation_revert_decoder.rs`: Revert data -> message decoding
@@ -280,7 +280,7 @@ Semantics:
 - Recovers signer to build an accurate `TxEnv` (chain ID as per header/spec).
 - Uses a (reused) inspector for consistent traces; commits writes between steps.
 
-#### tx_chain::bundle (Batch Unsigned Sequences)
+#### tx_chain::sequential (Batch Unsigned Sequences)
 
 Entry point:
 - `TxSimulator::simulate_unsigned_tx_sequence(&self, txs: Vec<UnsignedTransaction>, options: SequentialSimulationOptions) -> eyre::Result<SequentialSimulationResult>`

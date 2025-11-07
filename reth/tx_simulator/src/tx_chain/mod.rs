@@ -1,5 +1,4 @@
 // Sequential transaction simulation (stateful chains and bundles)
 pub mod unsigned;
 pub mod signed;
-pub mod bundle;
-
+pub mod sequential;

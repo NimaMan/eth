@@ -11,7 +11,7 @@ use crate::{
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
-    tx_chain::bundle::ForkedState,
+    tx_chain::sequential::ForkedState,
     types::{FullSimulationResult, RevertContext, SimulationResult},
 };
 use alloy_primitives::Address;

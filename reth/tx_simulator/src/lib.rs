@@ -18,7 +18,7 @@ pub mod single_tx {
     pub mod unsigned;
 }
 pub mod tx_chain {
-    pub mod bundle;
+    pub mod sequential;
     pub mod signed;
     pub mod unsigned;
 }

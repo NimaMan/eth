@@ -5,7 +5,7 @@
 /// All transactions must be provided upfront and are executed in order.
 ///
 /// Use this for:
-/// - MEV bundle simulation (known transaction sequences)
+/// - MEV tx sequence simulation (known transaction sequences)
 /// - Protocol testing with predetermined steps
 /// - Batch validation of transaction sequences
 ///
@@ -36,6 +36,7 @@ use reth_primitives::SealedHeader;
 use reth_provider::{HeaderProvider, StateProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
+use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
@@ -209,7 +210,7 @@ impl TxSimulator {
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = if let Some(target) = transaction.to {
-            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            let has_code = fork_state_has_code(forked_state, target)?;
             Some(RevertContext {
                 target,
                 has_code,
@@ -297,7 +298,7 @@ impl TxSimulator {
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = if let Some(target) = transaction.to {
-            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            let has_code = fork_state_has_code(forked_state, target)?;
             Some(RevertContext {
                 target,
                 has_code,
@@ -372,7 +373,7 @@ impl TxSimulator {
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = if let Some(target) = transaction.to {
-            let has_code = forked_state.db.db.account_code(&target)?.is_some();
+            let has_code = fork_state_has_code(forked_state, target)?;
             Some(RevertContext {
                 target,
                 has_code,
@@ -523,4 +524,19 @@ impl TxSimulator {
             authorization_list,
         })
     }
+}
+
+fn fork_state_has_code(
+    forked_state: &mut ForkedState,
+    address: Address,
+) -> eyre::Result<bool> {
+    let info = forked_state.db.basic(address)?;
+    Ok(info
+        .map(|acc| {
+            acc.code
+                .as_ref()
+                .map(|code| !code.is_empty())
+                .unwrap_or_else(|| acc.code_hash != KECCAK_EMPTY)
+        })
+        .unwrap_or(false))
 }

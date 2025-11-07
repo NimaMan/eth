@@ -30,7 +30,7 @@ Key Building Blocks Here
   - Persists state and nonces; fuses inspector between steps for performance and parity.
 - Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
   - Recovers signer, persists state; fuses inspector between steps.
-- Batch sequence (bundle): rust/tx_simulator/src/tx_chain/bundle.rs:1
+- Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork, reuses a single inspector across the bundle, and fuses between txs.
 - Trace decoding helpers: rust/tx_simulator/src/simulation_revert_decoder.rs:1
 

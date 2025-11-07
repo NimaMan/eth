@@ -7,7 +7,7 @@ use crate::single_tx::unsigned::UnsignedTransaction;
 use crate::{
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
-    tx_chain::bundle::ForkedState,
+    tx_chain::sequential::ForkedState,
     types::{FullSimulationResult, SimulationResult, ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_consensus::transaction::SignerRecoverable;
