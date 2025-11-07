@@ -66,7 +66,7 @@ Reth MDBX ──► Provider ──► Header(N)
 - `tx_chain::unsigned`: Stateful unsigned chain (step, trace, nonces)
 - `tx_chain::signed`: Stateful signed chain (step, trace, nonces)
 - `tx_chain::sequential`: Batch execution helpers (unsigned tx sequences, fork utilities)
-- `parallel_tx_simulator.rs`: Parallel unsigned evaluation with concurrency/timeout controls
+- `single_tx::parallel`: Parallel unsigned/signed evaluation with concurrency/timeout controls
 - `block_simulation/`: Block-wide tracing utilities
 - `simulation_revert_decoder.rs`: Revert data -> message decoding
 - `contract_method_simulator.rs`: Lightweight ABI-less encoders for common reads
@@ -293,7 +293,7 @@ Semantics:
 - Returns per-transaction results plus aggregate counters; respects `stop_on_failure`.
 - `simulate_on_fork_with_trace` now populates `struct_logs` when full tracing is requested.
 
-#### parallel_tx_simulator.rs
+#### single_tx::parallel (Parallel Simulation)
 
 Entry point:
 - `simulate_unsigned_tx_list_parallel(&self, requests: Vec<(String, UnsignedTransaction)>, options: ParallelTxSimulationOptions) -> eyre::Result<ParallelUnsignedResult>`

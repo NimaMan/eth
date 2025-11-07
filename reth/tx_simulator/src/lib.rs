@@ -16,6 +16,7 @@ pub mod types;
 pub mod single_tx {
     pub mod signed;
     pub mod unsigned;
+    pub mod parallel;
 }
 pub mod tx_chain {
     pub mod sequential;
@@ -25,7 +26,6 @@ pub mod tx_chain {
 pub mod block_trace;
 pub mod contract_method_simulator;
 pub mod simulation_revert_decoder;
-pub mod tx_parallel; // Block tracing
 
 // Back-compat module paths for external crates relying on previous layout
 pub mod unsigned_tx_simulator {
@@ -42,7 +42,7 @@ pub mod signed_tx_chain_simulator {
 }
 
 pub mod parallel_tx_simulator {
-    pub use crate::tx_parallel::*;
+    pub use crate::single_tx::parallel::*;
 }
 pub mod block_simulation {
     pub use crate::block_trace::block_tracer::*;
@@ -59,7 +59,7 @@ pub use single_tx::signed::SignedTransaction;
 pub use single_tx::unsigned::UnsignedTransaction;
 pub use tx_chain::signed::SignedTxChainSimulation;
 pub use tx_chain::unsigned::{ChainStateInfo, UnsignedTxChainSimulation};
-pub use tx_parallel::ParallelTxSimulationOptions;
+pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use types::{
     CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult, RevertContext,
     SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,

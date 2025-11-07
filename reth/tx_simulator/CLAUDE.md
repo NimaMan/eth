@@ -29,7 +29,7 @@ tx_simulator/
 │   ├── unsigned_simulation.rs          # Unsigned call aliases
 │   ├── call_simulator.rs               # UnsignedTransaction handling and simulation
 │   ├── batch_sequence_simulation.rs    # Sequential transaction processing (state preservation)
-│   ├── parallel_tx_simulation.rs       # Independent parallel processing
+│   ├── single_tx/parallel.rs           # Independent parallel processing
 │   ├── simulation_chain.rs             # Stateful step-by-step simulation
 │   └── view_function_simulator.rs      # View/pure function execution
 └── examples/
@@ -178,7 +178,7 @@ pub fn current_state(&self) -> ChainStateInfo
 
 **Example:** `examples/sequential/buy_approve_then_sell.rs` - DeFi workflow with state inspection
 
-#### Parallel Processing (`parallel_tx_simulation.rs`)
+#### Parallel Processing (`single_tx/parallel.rs`)
 
 Independent parallel processing of multiple transactions (no state sharing):
 
@@ -408,7 +408,7 @@ let other_component = OtherComponent::with_provider_factory(provider_factory);
 - Signed transaction simulation → `signed_simulation.rs`
 - Unsigned transaction simulation → `call_simulator.rs`
 - Sequential transaction processing → `batch_sequence_simulation.rs`
-- Parallel processing → `parallel_tx_simulation.rs`
+- Parallel processing → `single_tx/parallel.rs`
 - Raw CallFrame generation → Built into simulation methods
 - View function calls → `view_function_simulator.rs`
 
