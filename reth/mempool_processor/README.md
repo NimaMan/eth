@@ -4,6 +4,29 @@
 
 High-performance Rust system for real-time Ethereum mempool monitoring, transaction simulation, and automated signal detection. The system detects trading opportunities by analyzing mempool transactions, simulating their effects, and determining token tradability and tax rates.
 
+## System Objective
+
+Our end-to-end objective is straightforward:
+
+> *Fuse the freshest canonical token/pool context (produced by the Python data
+> pipeline) with in-flight mempool intelligence so we can buy the moment trading
+> is enabled and exit the moment someone tries to scam us.*
+
+To achieve that we:
+
+1. **Continuously ingest canonical data** – the Python `eth_data` services watch
+   newly mined blocks, derive token + pool metadata, and push those snapshots
+   into the shared `TokenTrackingCache`.
+2. **Continuously watch mempool deltas** – this Rust crate consumes the Reth
+   mempool feed, classifies creator actions, simulates their effects on each
+   tracked pool, and emits semantic signals.
+3. **Act on convergence** – trading components listen to the signals
+   (`TradingEnabled`, `HighTax`, `LiquidityRemoval`). When a signal lines up with
+   the strategy we immediately execute the corresponding buy or sell.
+
+Everything else in this repository (function detection, simulators, caches) is
+in service of that control loop.
+
 ## 🚧 Next Steps (Live Scam Response)
 
 ### 1. Tip-State Mirror (block feed ➜ in-memory cache)
