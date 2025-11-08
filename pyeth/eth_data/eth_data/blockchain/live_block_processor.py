@@ -211,6 +211,10 @@ class LiveBlockProcessor:
         self.index_queue: Optional[asyncio.Queue] = None
         self.publish_task: Optional[asyncio.Task] = None
         self.index_task: Optional[asyncio.Task] = None
+        self.pipeline_logger = get_logger(
+            name="live_block_processor.pipeline",
+            console_output=False,
+        )
 
     async def start_workers(self):
         """Initialize background tasks that handle publishing and optional indexing."""
@@ -267,8 +271,8 @@ class LiveBlockProcessor:
                         item.block_number,
                     )
                 else:
-                    self.logger.debug(
-                        "Published block %s (queue_wait=%.2fs publish_time=%.2fs)",
+                    self.pipeline_logger.info(
+                        "Published block=%s queue_wait=%.2fs publish_time=%.2fs",
                         item.block_number,
                         queue_wait,
                         end - start,
@@ -300,8 +304,8 @@ class LiveBlockProcessor:
             try:
                 queue_wait = asyncio.get_running_loop().time() - item.enqueued_at
                 writer.write_transactions_address_tx(item.processed_block.transactions)
-                self.logger.debug(
-                    "Indexed block %s (queue_wait=%.2fs)",
+                self.pipeline_logger.info(
+                    "Indexed block=%s queue_wait=%.2fs",
                     item.block_number,
                     queue_wait,
                 )
@@ -323,8 +327,8 @@ class LiveBlockProcessor:
             await self.index_queue.put(work_item)
             index_qsize = self.index_queue.qsize()
 
-        self.logger.debug(
-            "Queued block %s for downstream processing (publish_q=%s index_q=%s)",
+        self.pipeline_logger.info(
+            "Queued block=%s publish_q=%s index_q=%s",
             work_item.block_number,
             publish_qsize,
             index_qsize,
