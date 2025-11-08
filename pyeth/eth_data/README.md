@@ -139,6 +139,15 @@ The system is configured via parameters passed to the `LiveBlockProcessor`, typi
 - `rabbitmq_url`: The connection URL for the RabbitMQ server.
 - `index_address_txs`: A boolean flag to enable/disable writing address participation to the index database.
 
+#### Observed Latency (Nov 2025)
+
+Running `scripts/monitor_block_arrival.py` against the current stack shows:
+
+- **Head arrival lag** averages ~2 s (chain timestamp → WebSocket arrival). This is the baseline delay to expect in processor logs even when the node is healthy.
+- **RabbitMQ publish delay** averages ~20 s (arrival → message on `blocks_exchange`), with observed spikes up to ~40 s. The cause is architectural: `monitor_new_blocks` serially awaits `publish_block` and the optional address-index writer, so any slowdown in those calls blocks new head handling and messages arrive in bursts.
+
+Tracked action item: decouple publishing/indexing from the head-ingestion coroutine or otherwise instrument/optimize `publish_block` so blocks reach RabbitMQ within a few seconds. Until then, downstream consumers should tolerate occasional 20–40 s publish latency.
+
 ### Dependencies
 - **Core**: `web3.py`, `aio_pika` (for RabbitMQ), `orjson`.
 - **`baygus`**: This module has a dependency on the `baygus` project for database writing (`TransactionWriter`) and stablecoin analysis. This means it is designed to work as part of a larger analytics ecosystem and is not fully standalone.

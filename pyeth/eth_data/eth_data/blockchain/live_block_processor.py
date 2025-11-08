@@ -119,6 +119,7 @@ from hexbytes import HexBytes
 from web3 import AsyncWeb3, Web3
 from web3.providers import WebSocketProvider
 import aio_pika
+from typing import Optional
 
 from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
@@ -166,6 +167,12 @@ def alert_serializer(alert_data):
         return str(alert_data)
 
 
+@dataclasses.dataclass(slots=True)
+class BlockWorkItem:
+    block_number: int
+    processed_block: ProcessedBlockResult
+
+
 class LiveBlockProcessor:
     
     def __init__(
@@ -196,6 +203,105 @@ class LiveBlockProcessor:
         self.blocks_exchange = None
         self.alerts_exchange = None
         self.reconnect_delay = 1  
+
+        # Downstream pipeline state
+        self._queue_maxsize = 128
+        self.publish_queue: Optional[asyncio.Queue] = None
+        self.index_queue: Optional[asyncio.Queue] = None
+        self.publish_task: Optional[asyncio.Task] = None
+        self.index_task: Optional[asyncio.Task] = None
+
+    async def start_workers(self):
+        """Initialize background tasks that handle publishing and optional indexing."""
+        if self.publish_queue is None:
+            self.publish_queue = asyncio.Queue(maxsize=self._queue_maxsize)
+        if self.publish_task is None or self.publish_task.done():
+            self.publish_task = asyncio.create_task(
+                self._publish_worker(), name="block_publish_worker"
+            )
+
+        if self.index_address_txs and self.block_processor.transaction_writer:
+            if self.index_queue is None:
+                self.index_queue = asyncio.Queue(maxsize=self._queue_maxsize)
+            if self.index_task is None or self.index_task.done():
+                self.index_task = asyncio.create_task(
+                    self._index_worker(), name="block_index_worker"
+                )
+
+    async def stop_workers(self):
+        """Gracefully stop background workers."""
+        await self._stop_worker(self.publish_queue, self.publish_task)
+        await self._stop_worker(self.index_queue, self.index_task)
+        self.publish_queue = None
+        self.index_queue = None
+        self.publish_task = None
+        self.index_task = None
+
+    async def _stop_worker(
+        self,
+        queue: Optional[asyncio.Queue],
+        task: Optional[asyncio.Task],
+    ):
+        if queue is None or task is None:
+            return
+        await queue.put(None)
+        await task
+
+    async def _publish_worker(self):
+        """Publish processed blocks without blocking head ingestion."""
+        assert self.publish_queue is not None
+        while True:
+            item = await self.publish_queue.get()
+            if item is None:
+                self.publish_queue.task_done()
+                break
+            try:
+                success = await self.publish_block(item.block_number, item.processed_block)
+                if not success:
+                    self.logger.warning(
+                        "Failed to publish block %s, will continue with next items",
+                        item.block_number,
+                    )
+            except Exception as exc:
+                self.logger.error("Publish worker error for block %s: %s", item.block_number, exc)
+            finally:
+                self.publish_queue.task_done()
+
+    async def _index_worker(self):
+        """Write address-index data asynchronously when enabled."""
+        assert self.index_queue is not None
+        writer = self.block_processor.transaction_writer
+        if writer is None:
+            # Drain queue to avoid blocking even if writer is unexpectedly missing.
+            while True:
+                item = await self.index_queue.get()
+                if item is None:
+                    self.index_queue.task_done()
+                    break
+                self.index_queue.task_done()
+            return
+
+        while True:
+            item = await self.index_queue.get()
+            if item is None:
+                self.index_queue.task_done()
+                break
+            try:
+                writer.write_transactions_address_tx(item.processed_block.transactions)
+            except Exception as exc:
+                self.logger.error(
+                    "Index worker error for block %s: %s", item.block_number, exc
+                )
+            finally:
+                self.index_queue.task_done()
+
+    async def _dispatch_work_item(self, work_item: BlockWorkItem):
+        if self.publish_queue is None:
+            raise RuntimeError("Publish queue not initialized. Did you call start_workers()?")
+        await self.publish_queue.put(work_item)
+
+        if self.index_queue is not None:
+            await self.index_queue.put(work_item)
 
     async def setup_rabbitmq(self, max_retries=3):
         """Initialize RabbitMQ connection and channel with retries."""
@@ -366,20 +472,16 @@ class LiveBlockProcessor:
                         processed_block_result = await self.block_processor.process_block(block_number=block_number)
                         
                         if processed_block_result:
-                            # Continue with alerts even if block publish fails
-                            publish_success = await self.publish_block(block_number, processed_block_result)
-                            if not publish_success:
-                                self.logger.warning(f"Failed to publish block {block_number}, continuing with next block")
-                              
+                            work_item = BlockWorkItem(
+                                block_number=block_number,
+                                processed_block=processed_block_result,
+                            )
+                            await self._dispatch_work_item(work_item)
+
                             #alerts = await self.block_alert_processor.process_block_transactions(processed_block)
                             #if alerts and len(alerts) > 0:
                             #     await self.publish_alert(alerts)
                             
-                            if self.index_address_txs:
-                                self.block_processor.transaction_writer.write_transactions_address_tx(
-                                    processed_block_result.transactions
-                                )
-                                #self.block_processor.stablecoin_analyzer.process_block_transactions(block_number, processed_block)
                     except Exception as e:
                         self.logger.error(f"{__name__} Error processing live block {block_number}: {e}", exc_info=True)
                         continue  # Continue with next block regardless of error
@@ -398,6 +500,8 @@ class LiveBlockProcessor:
     async def cleanup(self):
         """Cleanup WebSocket and RabbitMQ connections."""
         try:
+            await self.stop_workers()
+
             if hasattr(self, 'w3'):
                 await self.w3.provider.disconnect()
             
@@ -414,6 +518,7 @@ class LiveBlockProcessor:
 
     async def run(self):
         """Main entry point to run the LiveBlockProcessor."""
+        await self.start_workers()
         try:
             await self.monitor_new_blocks()
         except KeyboardInterrupt:
