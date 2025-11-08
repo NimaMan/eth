@@ -171,6 +171,7 @@ def alert_serializer(alert_data):
 class BlockWorkItem:
     block_number: int
     processed_block: ProcessedBlockResult
+    enqueued_at: float
 
 
 class LiveBlockProcessor:
@@ -256,11 +257,21 @@ class LiveBlockProcessor:
                 self.publish_queue.task_done()
                 break
             try:
+                start = asyncio.get_running_loop().time()
+                queue_wait = start - item.enqueued_at
                 success = await self.publish_block(item.block_number, item.processed_block)
+                end = asyncio.get_running_loop().time()
                 if not success:
                     self.logger.warning(
                         "Failed to publish block %s, will continue with next items",
                         item.block_number,
+                    )
+                else:
+                    self.logger.debug(
+                        "Published block %s (queue_wait=%.2fs publish_time=%.2fs)",
+                        item.block_number,
+                        queue_wait,
+                        end - start,
                     )
             except Exception as exc:
                 self.logger.error("Publish worker error for block %s: %s", item.block_number, exc)
@@ -287,7 +298,13 @@ class LiveBlockProcessor:
                 self.index_queue.task_done()
                 break
             try:
+                queue_wait = asyncio.get_running_loop().time() - item.enqueued_at
                 writer.write_transactions_address_tx(item.processed_block.transactions)
+                self.logger.debug(
+                    "Indexed block %s (queue_wait=%.2fs)",
+                    item.block_number,
+                    queue_wait,
+                )
             except Exception as exc:
                 self.logger.error(
                     "Index worker error for block %s: %s", item.block_number, exc
@@ -299,9 +316,19 @@ class LiveBlockProcessor:
         if self.publish_queue is None:
             raise RuntimeError("Publish queue not initialized. Did you call start_workers()?")
         await self.publish_queue.put(work_item)
+        publish_qsize = self.publish_queue.qsize()
 
+        index_qsize = None
         if self.index_queue is not None:
             await self.index_queue.put(work_item)
+            index_qsize = self.index_queue.qsize()
+
+        self.logger.debug(
+            "Queued block %s for downstream processing (publish_q=%s index_q=%s)",
+            work_item.block_number,
+            publish_qsize,
+            index_qsize,
+        )
 
     async def setup_rabbitmq(self, max_retries=3):
         """Initialize RabbitMQ connection and channel with retries."""
@@ -475,6 +502,7 @@ class LiveBlockProcessor:
                             work_item = BlockWorkItem(
                                 block_number=block_number,
                                 processed_block=processed_block_result,
+                                enqueued_at=asyncio.get_running_loop().time(),
                             )
                             await self._dispatch_work_item(work_item)
 
