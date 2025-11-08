@@ -1,0 +1,127 @@
+use std::time::Instant;
+
+use crate::tx_router::{CreatorFunctionType, TransactionCategory};
+
+use super::{
+    logging::{log_signal_dispatch_result, log_signal_dispatch_start},
+    pending_sequences::sequence_key_from_request,
+    SimulationManager, SimulationResult, TxSimulationJob,
+};
+
+impl SimulationManager {
+    pub(super) async fn handle_creator_transaction(
+        &self,
+        request: &TxSimulationJob,
+        now: Instant,
+    ) -> SimulationResult {
+        let mut aggregate_result = SimulationResult {
+            request: request.clone(),
+            pool_viability_result: None,
+            error: None,
+            simulation_time_ms: 0.0,
+            token_address: None,
+            pool_address: None,
+            pool_type: None,
+            debug_info: None,
+            liquidity_removal_result: None,
+        };
+
+        let processed = match self.build_processed_transaction(request, true).await {
+            Ok(tx) => tx,
+            Err(err) => {
+                aggregate_result.error =
+                    Some(format!("Failed to process creator transaction: {}", err));
+                return aggregate_result;
+            }
+        };
+
+        let replay_sequence =
+            if let Some(key) = sequence_key_from_request(request, Some(&processed)) {
+                self.record_pending_transaction(key, processed.clone(), now)
+                    .await
+            } else {
+                vec![processed.clone()]
+            };
+
+        if let TransactionCategory::CreatorTransaction { function_type, .. } = &request.category {
+            if matches!(function_type, CreatorFunctionType::LiquidityRemoval) {
+                let removal_results = self.simulate_liquidity_removal(request).await;
+                if removal_results.is_empty() {
+                    aggregate_result.error = Some("No pools found for token".to_string());
+                    aggregate_result.debug_info =
+                        Some("Liquidity removal simulation produced no pools".to_string());
+                    return aggregate_result;
+                }
+
+                let mut last_success = None;
+                for (pool_idx, pool_specific_result) in removal_results.into_iter().enumerate() {
+                    log_signal_dispatch_start(
+                        pool_specific_result.request.tx.hash.as_str(),
+                        Some(pool_idx),
+                    );
+                    let mut signal_manager = self.signal_manager.lock().await;
+                    let signals = signal_manager
+                        .process_simulation_result(&pool_specific_result)
+                        .await;
+                    log_signal_dispatch_result(signals.len(), Some(pool_idx));
+
+                    if pool_specific_result.error.is_none() {
+                        last_success = Some(pool_specific_result);
+                    } else if aggregate_result.error.is_none() {
+                        aggregate_result.error = pool_specific_result.error.clone();
+                    }
+                }
+
+                if let Some(success) = last_success {
+                    return success;
+                }
+
+                return aggregate_result;
+            }
+        }
+
+        let all_results = self
+            .simulate_tx_with_buy_sell_all_pools(request, &replay_sequence)
+            .await;
+
+        if all_results.is_empty() {
+            aggregate_result.error = Some("No pools found for token".to_string());
+            aggregate_result.debug_info =
+                Some("Token cache reported no pools; nothing to simulate".to_string());
+
+            log_signal_dispatch_start(aggregate_result.request.tx.hash.as_str(), None);
+            let mut signal_manager = self.signal_manager.lock().await;
+            let signals = signal_manager
+                .process_simulation_result(&aggregate_result)
+                .await;
+            log_signal_dispatch_result(signals.len(), None);
+
+            return aggregate_result;
+        }
+
+        let mut last_success = None;
+        for (pool_idx, pool_specific_result) in all_results.into_iter().enumerate() {
+            log_signal_dispatch_start(
+                pool_specific_result.request.tx.hash.as_str(),
+                Some(pool_idx),
+            );
+            let mut signal_manager = self.signal_manager.lock().await;
+            let signals = signal_manager
+                .process_simulation_result(&pool_specific_result)
+                .await;
+            log_signal_dispatch_result(signals.len(), Some(pool_idx));
+
+            if pool_specific_result.error.is_none() {
+                last_success = Some(pool_specific_result);
+            } else if aggregate_result.error.is_none() {
+                aggregate_result.error = pool_specific_result.error.clone();
+            }
+        }
+
+        if let Some(success) = last_success {
+            success
+        } else {
+            aggregate_result
+        }
+    }
+}
