@@ -11,7 +11,6 @@ use super::core::initialization::create_provider_factory;
 /// - CallDataBuilder for building CallRequest from DB data
 /// - Direct Reth database access via TransactionLoader
 use crate::block_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock};
-use crate::simulator::UnsignedTxBuilder;
 use crate::tx_processor::data_models::{
     ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
 };
@@ -20,7 +19,7 @@ use crate::tx_processor::{
     AddressBalanceChangeCalculator, LogDecoder, TransactionClassifier, TransactionTraceProcessor,
     TxProcessor,
 };
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::{Result, WrapErr};
 use reth_chain_query::ChainQuery;
@@ -44,7 +43,6 @@ pub struct ProcessedTxProvider {
         >,
     >,
     pub chain_query: Arc<ChainQuery>,
-    unsigned_tx_builder: Option<UnsignedTxBuilder>,
     tx_processor: TxProcessor,
     block_processor: BlockProcessor,
 }
@@ -70,13 +68,6 @@ impl ProcessedTxProvider {
         let transaction_loader =
             TransactionLoader::with_provider_factory(provider_factory.clone()).ok();
 
-        // Create unsigned tx builder if we have a transaction loader
-        let unsigned_tx_builder = if let Some(loader) = transaction_loader.clone() {
-            Some(UnsignedTxBuilder::new(loader))
-        } else {
-            None
-        };
-
         // Initialize tx processor
         let tx_processor = TxProcessor::new();
 
@@ -96,7 +87,6 @@ impl ProcessedTxProvider {
             transaction_loader,
             provider_factory,
             chain_query,
-            unsigned_tx_builder,
             tx_processor,
             block_processor,
         })
@@ -198,13 +188,6 @@ impl ProcessedTxProvider {
         let transaction_loader =
             TransactionLoader::with_provider_factory(provider_factory.clone()).ok();
 
-        // Create unsigned tx builder if we have a transaction loader
-        let unsigned_tx_builder = if let Some(loader) = transaction_loader.clone() {
-            Some(UnsignedTxBuilder::new(loader))
-        } else {
-            None
-        };
-
         // Initialize tx processor
         let tx_processor = TxProcessor::new();
 
@@ -224,7 +207,6 @@ impl ProcessedTxProvider {
             transaction_loader,
             provider_factory,
             chain_query,
-            unsigned_tx_builder,
             tx_processor,
             block_processor,
         })
@@ -497,41 +479,14 @@ impl ProcessedTxProvider {
         block_number: u64,
         tx_index: u64,
     ) -> Result<ProcessedTransaction> {
-        // Generate synthetic transaction hash for simulation
-        let tx_hash = B256::random();
-
-        // Extract transaction parameters from UnsignedTransaction
-        let from = unsigned_tx.from.unwrap_or(Address::ZERO);
-        let to = unsigned_tx.to;
-        let value = unsigned_tx.value.unwrap_or(U256::ZERO);
-        let input = unsigned_tx
-            .data
-            .as_ref()
-            .map(|d| d.to_vec())
-            .unwrap_or_default();
-        let gas_price = U256::from(unsigned_tx.gas_price.unwrap_or(20_000_000_000));
-        let gas_used = simulation_result.gas_used;
-        let nonce = unsigned_tx.nonce.unwrap_or(0);
-        let gas_limit = unsigned_tx.gas.unwrap_or(300_000);
-
-        // Use current timestamp for simulation
-        let block_timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        // Use tx_processor to create complete ProcessedTransaction with balance changes
-        let processed_tx = self
-            .tx_processor
+        self.tx_processor
             .process_transaction_from_simulation_result(
-                &unsigned_tx,
-                &simulation_result,
+                unsigned_tx,
+                simulation_result,
                 block_number,
                 tx_index,
             )
-            .await?;
-
-        Ok(processed_tx)
+            .await
     }
 
     /// Process all transactions within a block and return the structured block result.

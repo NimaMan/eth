@@ -29,7 +29,7 @@ pub struct BuySwapResult {
 /// - Supports Uniswap V2/V3 adapters (more can be added later).
 pub async fn simulate_buy_swap(
     simulator: Arc<TxSimulator>,
-    tx_processor: Arc<TxProcessor>,
+    _tx_processor: Arc<TxProcessor>,
     token_address: Address,
     pool_address: Address,
     pool_type: PoolType,

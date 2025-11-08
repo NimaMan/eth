@@ -1,10 +1,10 @@
 use alloy_consensus::Transaction as _;
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta, TxType},
+    transaction::{SignerRecoverable, TxType},
     EthereumTxEnvelope, TxEip4844, Typed2718,
 };
 use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
-use alloy_primitives::{Log as AlloyLog, TxKind, B256, U256};
+use alloy_primitives::{Log as AlloyLog, B256, U256};
 use eyre::Result;
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
@@ -18,7 +18,6 @@ use reth_provider::{
     TransactionsProvider,
 };
 use std::{cmp, path::Path, sync::Arc};
-use tracing::info;
 
 /// Transaction Loader that fetches from Reth database
 #[derive(Clone)]

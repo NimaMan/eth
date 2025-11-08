@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 
 use crate::tx_processor::data_models::ProcessedTransaction;
 
-use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult};
 
 pub(super) fn create_failed_result(
     config: PoolBuySellParameters,

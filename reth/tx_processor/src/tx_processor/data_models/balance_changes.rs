@@ -10,7 +10,7 @@
 ///   - movements: Detailed incoming/outgoing movements
 ///
 /// Note: currency_net stores ETH in wei, USDC/USDT with 6 decimals applied, etc.
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{I256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

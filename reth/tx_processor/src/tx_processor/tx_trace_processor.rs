@@ -11,8 +11,7 @@
 /// Just like Python's tx_trace_processor.py, this converts raw simulation traces
 /// into structured InternalTransaction objects.
 use super::data_models::InternalTransaction;
-use alloy_primitives::{Address, Bytes, U256};
-use eyre::Result;
+use alloy_primitives::U256;
 use tx_simulator::types::CallFrame;
 
 /// Processes transaction traces to extract internal transactions

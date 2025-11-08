@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use alloy_eips::eip2930::AccessListItem;
 use alloy_primitives::{Address, U256};
-use eyre::{eyre, Result, WrapErr};
+use eyre::{eyre, Result};
 use reth_primitives::SealedHeader;
 use reth_provider::{AccountReader, HeaderProvider};
 use tx_simulator::{TxSimulator, UnsignedTransaction};
@@ -36,7 +36,7 @@ use reth_chain_query::tx_builders::amm::{
 pub(super) async fn check_can_buy_sell_uniswap_v4(
     simulator: Arc<TxSimulator>,
     tx_processor: Arc<TxProcessor>,
-    mut config: PoolBuySellParameters,
+    config: PoolBuySellParameters,
 ) -> Result<PoolBuySellSimulationResult> {
     if config.block_delay > 0 {
         return Err(eyre!(

@@ -177,13 +177,9 @@ async fn prefund_denom_via_weth(
     }
 
     let (reserve0, reserve1) = decode_reserves(&reserve_response.output)?;
-    let (token0, token1) = if config.denom_address < config.weth_address {
-        (config.denom_address, config.weth_address)
-    } else {
-        (config.weth_address, config.denom_address)
-    };
+    let denom_first = config.denom_address < config.weth_address;
 
-    let (reserve_denom, reserve_weth) = if token0 == config.denom_address {
+    let (reserve_denom, reserve_weth) = if denom_first {
         (reserve0, reserve1)
     } else {
         (reserve1, reserve0)

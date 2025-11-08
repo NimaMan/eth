@@ -24,7 +24,7 @@ pub struct SellSwapResult {
 
 pub async fn simulate_sell_swap(
     simulator: Arc<TxSimulator>,
-    tx_processor: Arc<TxProcessor>,
+    _tx_processor: Arc<TxProcessor>,
     token_address: Address,
     pool_address: Address,
     pool_type: PoolType,

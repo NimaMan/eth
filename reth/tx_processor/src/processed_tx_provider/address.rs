@@ -40,7 +40,7 @@ impl AddressProcessedTxProvider {
             return Ok(());
         }
 
-        let mut blocks = self
+        let blocks = self
             .query_provider
             .get_address_account_history_blocks(address, start_block, end_block)
             .await?;

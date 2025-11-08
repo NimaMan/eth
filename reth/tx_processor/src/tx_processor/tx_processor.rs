@@ -20,7 +20,7 @@ use super::{
     TransactionTraceProcessor,
 };
 use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
 use reth_chain_query::FEE_RECIPIENTS;
 use serde_json::json;
@@ -391,9 +391,12 @@ impl TxProcessor {
             .as_secs();
 
         // Process logs from simulation result using tx_log_processor
-        let logs = self
-            .decoder
-            .extract_logs_from_call_frame(&simulation_result.call_trace);
+        let logs = if !simulation_result.logs.is_empty() {
+            simulation_result.logs.clone()
+        } else {
+            self.decoder
+                .extract_logs_from_call_frame(&simulation_result.call_trace)
+        };
 
         // Extract internal transactions from call trace
         let trace_processor = TransactionTraceProcessor::new();

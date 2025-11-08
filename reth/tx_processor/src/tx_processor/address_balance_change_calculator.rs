@@ -26,9 +26,8 @@ use lazy_static::lazy_static;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::FEE_RECIPIENTS;
 use std::collections::HashMap;
-use std::str::FromStr;
 
-/// Known token addresses mapped to their symbols
+// Known token addresses mapped to their symbols
 lazy_static! {
     static ref DENOM_ADDRESSES: HashMap<Address, &'static str> = {
         let mut m = HashMap::new();
@@ -65,7 +64,7 @@ fn subtract_as_i256(in_amount: U256, out_amount: U256) -> I256 {
     }
 }
 
-/// Token decimals for known currencies
+// Token decimals for known currencies
 lazy_static! {
     static ref ERC20_TOKEN_DECIMALS: HashMap<&'static str, u8> = {
         let mut m = HashMap::new();
@@ -120,7 +119,6 @@ struct AddressMovements {
 /// Balance change calculator
 pub struct AddressBalanceChangeCalculator {
     weth_address: Address,
-    eth_state_change_threshold: f64,
     token_state_change_threshold: f64,
     // Track movements per address per currency/token
     // currencies[address][currency_symbol] = AddressMovements
@@ -137,7 +135,6 @@ impl AddressBalanceChangeCalculator {
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
-            eth_state_change_threshold: 0.0005,
             token_state_change_threshold: 0.1,
             currency_movements: HashMap::new(),
             token_movements: HashMap::new(),
@@ -180,7 +177,7 @@ impl AddressBalanceChangeCalculator {
         }
 
         // Process ERC20 transfers (already decoded!)
-        for (i, transfer) in erc20_transfers.iter().enumerate() {
+        for transfer in erc20_transfers.iter() {
             let transfer_id =
                 TransferId::new(block_number, tx_index, transfer.log_index.to_string());
 

@@ -1,8 +1,8 @@
 use crate::tx_processor::TxProcessor;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{I256, U256};
 use eyre::{eyre, Result, WrapErr};
-use reth_primitives::{Header as _, SealedHeader};
-use reth_provider::{AccountReader, HeaderProvider};
+use reth_primitives::SealedHeader;
+use reth_provider::HeaderProvider;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
@@ -21,10 +21,6 @@ use crate::simulator::unsigned_tx_builder::UnsignedTxBuilder;
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
-};
-use reth_chain_query::dex::{
-    fetch_uniswap_v2_pair_address, fetch_uniswap_v3_pool_address, SUSHISWAP_FACTORY,
-    UNISWAP_V2_FACTORY, UNISWAP_V3_FACTORY,
 };
 use reth_chain_query::tx_builders::amm::uniswap_v2::{
     build_approve_v2, build_token_to_token_swap_supporting_fee_v2, build_token_to_token_swap_v2,

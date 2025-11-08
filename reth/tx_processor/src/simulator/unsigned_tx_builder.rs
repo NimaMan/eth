@@ -1,4 +1,4 @@
-use crate::tx_processor::data_models::{ProcessedAccessListItem, ProcessedTransaction};
+use crate::tx_processor::data_models::ProcessedTransaction;
 /// Unsigned Transaction Builder - Converts transaction data to UnsignedTransaction for simulation
 ///
 /// OBJECTIVE: Build UnsignedTransaction objects from transaction data loaded from Reth database
@@ -10,7 +10,7 @@ use crate::tx_processor::data_models::{ProcessedAccessListItem, ProcessedTransac
 ///
 /// Flow: TX Hash → Load from DB → Build UnsignedTransaction → Ready for simulation
 use crate::tx_processor::tx_loader::TransactionLoader;
-use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
+use alloy_eips::eip2930::AccessListItem;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
 use std::convert::TryInto;
