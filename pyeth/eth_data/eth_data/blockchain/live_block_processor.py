@@ -212,7 +212,8 @@ class LiveBlockProcessor:
         self.publish_task: Optional[asyncio.Task] = None
         self.index_task: Optional[asyncio.Task] = None
         self.pipeline_logger = get_logger(
-            name="live_block_processor.pipeline",
+            name="live_block_processor_pipeline",
+            log_folder="block_processor_pipeline",
             console_output=False,
         )
 
