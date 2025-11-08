@@ -3,7 +3,7 @@
 use crate::dex::common::{compute_uniswap_v3_create2_address, sort_tokens};
 use crate::dex::encoding::encode_function_call;
 use crate::TxSimulator;
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{address, Address, U256};
 use eyre::{eyre, Result};
 
 /// Uniswap V3 factory address.

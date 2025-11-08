@@ -4,7 +4,7 @@
 /// and fund flow analysis. These queries work with the tx_participants and transactions tables.
 use crate::postgres_db::{
     connection::PostgresDB,
-    models::{AddressTransaction, Transaction, TransactionWithParticipants, TxParticipant},
+    models::{AddressTransaction, Transaction, TransactionWithParticipants},
 };
 use eyre::Result;
 use sqlx::{query, query_as, Row};
@@ -33,7 +33,7 @@ pub async fn get_address_transactions(
         .await?
         .ok_or_else(|| eyre::eyre!("Address not found: {}", address))?;
 
-    let sql = if let Some(max_block) = max_block {
+    let sql = if max_block.is_some() {
         r#"
         SELECT DISTINCT
             t.tx_hash,

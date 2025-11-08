@@ -1,7 +1,7 @@
 use crate::reth_index::{
     database::RethIndexDB,
     models::{AddressMetrics, PoolData, TokenMetadata, TradeData},
-    tables::address_index::txumber,
+    tables::address_index::Txumber,
 };
 /// Reader interface for RethIndex
 ///
@@ -21,7 +21,7 @@ impl RethIndexReader {
     }
 
     /// Get all transactions for an address
-    pub fn get_transactions(&self, address: Address) -> Result<Vec<txumber>> {
+    pub fn get_transactions(&self, address: Address) -> Result<Vec<Txumber>> {
         self.db.get_transactions(address)
     }
 
@@ -31,7 +31,7 @@ impl RethIndexReader {
     }
 
     /// Get latest N transactions for an address
-    pub fn get_latest_transactions(&self, address: Address, count: usize) -> Result<Vec<txumber>> {
+    pub fn get_latest_transactions(&self, address: Address, count: usize) -> Result<Vec<Txumber>> {
         let mut txs = self.get_transactions(address)?;
         if count >= txs.len() {
             return Ok(txs);
@@ -41,25 +41,25 @@ impl RethIndexReader {
     }
 
     /// Get trade data for an address-token pair
-    pub fn get_trade(&self, address: Address, token: Address) -> Result<Option<TradeData>> {
+    pub fn get_trade(&self, _address: Address, _token: Address) -> Result<Option<TradeData>> {
         // TODO: Implement
         Ok(None)
     }
 
     /// Get address metrics
-    pub fn get_address_metrics(&self, address: Address) -> Result<Option<AddressMetrics>> {
+    pub fn get_address_metrics(&self, _address: Address) -> Result<Option<AddressMetrics>> {
         // TODO: Implement
         Ok(None)
     }
 
     /// Get token metadata
-    pub fn get_token(&self, token: Address) -> Result<Option<TokenMetadata>> {
+    pub fn get_token(&self, _token: Address) -> Result<Option<TokenMetadata>> {
         // TODO: Implement
         Ok(None)
     }
 
     /// Get pool data
-    pub fn get_pool(&self, pool: Address) -> Result<Option<PoolData>> {
+    pub fn get_pool(&self, _pool: Address) -> Result<Option<PoolData>> {
         // TODO: Implement
         Ok(None)
     }

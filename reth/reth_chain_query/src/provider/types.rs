@@ -2,7 +2,9 @@
 ///
 /// This module contains all the data structures used across different
 /// provider operations including transactions, blocks, and traces.
+use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, B256, U256};
+use reth_primitives::{transaction::TransactionSigned, Recovered};
 use serde::{Deserialize, Serialize};
 
 /// Transaction metadata (the transaction parameters, not execution results)
@@ -24,6 +26,13 @@ pub struct TransactionMetadata {
     pub transaction_type: u8,
     pub max_fee_per_gas: Option<U256>,
     pub max_priority_fee_per_gas: Option<U256>,
+    #[serde(default)]
+    pub access_list: Vec<AccessListItem>,
+    #[serde(default)]
+    pub blob_versioned_hashes: Vec<B256>,
+    pub max_fee_per_blob_gas: Option<U256>,
+    #[serde(default)]
+    pub signed_authorizations: Vec<SignedAuthorization>,
 }
 
 // Alias for backwards compatibility during migration
@@ -88,7 +97,7 @@ pub struct CallFrame {
 #[derive(Debug, Clone)]
 pub struct Block {
     pub header: BlockHeader,
-    pub transactions: Vec<reth_primitives::TransactionSignedEcRecovered>,
+    pub transactions: Vec<Recovered<TransactionSigned>>,
 }
 
 /// Type of call in trace
@@ -116,14 +125,14 @@ impl std::fmt::Display for CallType {
 /// State changes from transaction execution
 #[derive(Debug, Clone)]
 pub struct StateChanges {
-    pub balance_changes: Vec<BalanceChange>,
+    pub balance_changes: Vec<StateBalanceChange>,
     pub storage_changes: Vec<StorageChange>,
     pub nonce_changes: Vec<NonceChange>,
 }
 
 /// Balance change for an address
 #[derive(Debug, Clone)]
-pub struct BalanceChange {
+pub struct StateBalanceChange {
     pub address: Address,
     pub before: U256,
     pub after: U256,

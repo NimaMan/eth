@@ -2,7 +2,7 @@
 
 use crate::dex::encoding::{encode_bytes32, encode_function_call};
 use crate::TxSimulator;
-use alloy_primitives::{address, Address, B256, U256};
+use alloy_primitives::{address, Address, U256};
 use eyre::Result;
 
 /// Balancer Vault contract address (for dynamic pool discovery).

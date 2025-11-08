@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
 use super::cache::TimestampCache;
-use super::{estimate_block_number, estimate_timestamp};
+use super::estimate_timestamp;
 use crate::Result;
 use tx_simulator::TxSimulator;
 

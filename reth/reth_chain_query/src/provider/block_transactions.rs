@@ -7,22 +7,21 @@ use alloy_consensus::Transaction as _;
 /// - Receipts and logs from local DB (Receipts table)
 /// - Block metadata from local DB (Headers table)
 /// - Traces from local simulation (matches debug_traceBlockByNumber)
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::Result;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use reth_primitives::{transaction, Recovered, TransactionSignedEcRecovered};
+use reth_primitives::Recovered;
 use reth_provider::{
-    BlockBodyIndicesProvider, BlockNumReader, BlockReader, HeaderProvider, ReceiptProvider,
-    TransactionsProvider,
+    BlockBodyIndicesProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
 };
-use std::{cmp, time::Instant};
+use std::cmp;
 use tx_simulator::block_simulation::BlockTracer;
 
 use super::types::{Block, BlockHeader, RawBlockData, TransactionMetadata};
 use super::{
-    BlockTransactionOptions, BlockTransactions, CallFrame, CallType, FullTransactionData, Log,
-    RethQueryProvider, TransactionData, TransactionReceipt, TransactionTrace,
+    BlockTransactionOptions, BlockTransactions, FullTransactionData, Log, RethQueryProvider,
+    TransactionReceipt, TransactionTrace,
 };
 
 impl RethQueryProvider {
@@ -63,8 +62,6 @@ impl RethQueryProvider {
         block_number: u64,
         options: BlockTransactionOptions,
     ) -> Result<BlockTransactions> {
-        let start_time = Instant::now();
-
         let RawBlockData {
             header,
             transactions,
@@ -260,6 +257,19 @@ impl RethQueryProvider {
                 transaction_type: tx_type as u8,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
+                access_list: tx
+                    .access_list()
+                    .map(|list| Vec::from(list.clone()))
+                    .unwrap_or_default(),
+                blob_versioned_hashes: tx
+                    .blob_versioned_hashes()
+                    .map(|hashes| hashes.to_vec())
+                    .unwrap_or_default(),
+                max_fee_per_blob_gas: tx.max_fee_per_blob_gas().map(U256::from),
+                signed_authorizations: tx
+                    .authorization_list()
+                    .map(|auth| auth.to_vec())
+                    .unwrap_or_default(),
             });
         }
 
@@ -375,7 +385,7 @@ impl RethQueryProvider {
     }
 
     /// FROM RPC - Get traces for entire block
-    async fn get_block_traces_from_rpc(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
+    async fn get_block_traces_from_rpc(&self, _block_number: u64) -> Result<Vec<TransactionTrace>> {
         let _rpc_provider = self
             .rpc_provider
             .as_ref()
@@ -447,7 +457,6 @@ impl RethQueryProvider {
 
     /// Get block transaction count without loading all data
     pub async fn get_block_transaction_count(&self, block_number: u64) -> Result<usize> {
-        let provider = self.provider_factory.provider()?;
         let indices = self.get_block_tx_indices(block_number)?;
         Ok(indices.tx_count as usize)
     }

@@ -4,7 +4,7 @@
 /// - Market share and concentration metrics
 /// - Supply tracking across different currency units
 /// - Historical trends and changes
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use eyre::Result;
 use std::collections::HashMap;
 

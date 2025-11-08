@@ -5,13 +5,7 @@ use self::amm_swap_route::AmmSwapRoute;
 use alloy_primitives::{Address, U256};
 use tx_simulator::UnsignedTransaction;
 
-/// Build a buy (ETH -> Token) swap UnsignedTransaction for the given pool spec.
-///
-/// - buyer: recipient of token_out
-/// - token_out: the ERC-20 token being bought
-/// - amount_in_eth: ETH amount to spend (in wei)
-/// - slippage_bps: slippage in basis points (e.g., 50 = 0.5%). Currently unused (minOut=0)
-/// - deadline: unix timestamp deadline; use u64::MAX for no effective deadline
+/// Build a buy (ETH -> Token) swap for the given AMM route.
 pub fn build_buy_swap(
     route: &AmmSwapRoute,
     buyer: Address,
@@ -59,7 +53,6 @@ pub fn build_buy_swap(
             use_underlying,
             U256::ZERO,
         ),
-        // TODO: Implement Balancer/Fraxswap builders
         _ => amm::uniswap_v2::build_buy_swap_v2(
             amm::uniswap_v2::Router::UniswapV2,
             buyer,
@@ -71,7 +64,7 @@ pub fn build_buy_swap(
     }
 }
 
-/// Build a buy swap with explicit amountOutMin (slippage enforced by caller).
+/// Build a buy swap with explicit amountOutMin.
 pub fn build_buy_swap_with_min_out(
     route: &AmmSwapRoute,
     buyer: Address,
@@ -118,7 +111,7 @@ pub fn build_buy_swap_with_min_out(
     }
 }
 
-/// Build an ERC20 approve transaction to allow the protocol router to spend `amount` of `token`.
+/// Build an approve transaction for the given AMM route.
 pub fn build_approve_for_route(
     route: &AmmSwapRoute,
     owner: Address,
@@ -139,7 +132,6 @@ pub fn build_approve_for_route(
             amount,
         ),
         AmmSwapRoute::UniswapV3 { .. } => amm::uniswap_v3::build_approve_v3(owner, token, amount),
-        // Default to V2 router if unknown (can refine when Balancer/Curve supported)
         _ => amm::uniswap_v2::build_approve_v2(
             amm::uniswap_v2::Router::UniswapV2,
             owner,
@@ -149,7 +141,7 @@ pub fn build_approve_for_route(
     }
 }
 
-/// Build a sell swap (Token -> ETH/WETH) UnsignedTransaction for the given route.
+/// Build a sell (Token -> ETH) swap for the given AMM route.
 pub fn build_sell_swap(
     route: &AmmSwapRoute,
     seller: Address,
@@ -194,7 +186,7 @@ pub fn build_sell_swap(
     }
 }
 
-/// Build a sell swap with explicit amountOutMin (slippage enforced by caller).
+/// Build a sell swap with explicit amountOutMin.
 pub fn build_sell_swap_with_min_out(
     route: &AmmSwapRoute,
     seller: Address,
@@ -241,7 +233,7 @@ pub fn build_sell_swap_with_min_out(
     }
 }
 
-/// Build a token -> token swap UnsignedTransaction for the given route.
+/// Build a token -> token swap for the given AMM route.
 pub fn build_token_to_token_swap(
     route: &AmmSwapRoute,
     trader: Address,
@@ -291,7 +283,7 @@ pub fn build_token_to_token_swap(
     }
 }
 
-/// Build a token -> token swap with explicit amountOutMin (slippage enforced by caller).
+/// Build a token -> token swap with explicit amountOutMin.
 pub fn build_token_to_token_swap_with_min_out(
     route: &AmmSwapRoute,
     trader: Address,
@@ -348,7 +340,6 @@ pub fn build_token_to_token_swap_with_min_out(
 }
 
 /// Return the router/spender address for a given AMM route.
-/// Used when checking ERC20 allowance for sells.
 pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
     match *route {
         AmmSwapRoute::UniswapV2 { .. } => Address::from([
@@ -363,7 +354,6 @@ pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
             0xE5, 0x92, 0x42, 0x7A, 0x0A, 0xEc, 0xe9, 0x2D, 0xe3, 0xEd, 0xee, 0x1F, 0x18, 0xE0,
             0x15, 0x7C, 0x05, 0x86, 0x15, 0x64,
         ]),
-        // Defaults for not-yet-implemented protocols
         _ => Address::from([
             0x7a, 0x25, 0x0d, 0x56, 0x30, 0xB4, 0xcF, 0x53, 0x97, 0x39, 0xdF, 0x2C, 0x5d, 0xAc,
             0xb4, 0xc6, 0x59, 0xF2, 0x48, 0x8D,
@@ -374,17 +364,14 @@ pub fn spender_for_route(route: &AmmSwapRoute) -> Address {
 /// Permit payload for single-tx permit + swap flows.
 #[derive(Clone, Debug)]
 pub struct PermitData {
-    pub value: U256,   // allowance value to permit
-    pub deadline: u64, // permit deadline (unix ts)
+    pub value: U256,
+    pub deadline: u64,
     pub v: u8,
     pub r: [u8; 32],
     pub s: [u8; 32],
 }
 
-/// Build a sell swap that attempts to bundle permit approval into the same transaction
-/// when supported by the target route. Currently only Uniswap V3 routes are candidates
-/// (via SwapRouter.selfPermit + multicall). For other routes this falls back to a standard
-/// sell swap without permit bundling.
+/// Build a sell swap that bundles a permit when supported.
 pub fn build_sell_with_permit(
     route: &AmmSwapRoute,
     seller: Address,

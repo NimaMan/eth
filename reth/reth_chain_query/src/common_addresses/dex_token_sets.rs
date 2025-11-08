@@ -45,6 +45,7 @@ pub struct UniswapV4PoolInfo {
     pub symbol: &'static str,
     pub token_address: Address,
     pub denom_address: Address,
+    pub denom_symbol: &'static str,
     pub pool_manager: Address,
     pub pool_id: B256,
     pub fee: u32,
@@ -52,6 +53,7 @@ pub struct UniswapV4PoolInfo {
     pub hooks: Address,
     pub token_decimals: u8,
     pub denom_decimals: u8,
+    pub block_hint: Option<u64>,
 }
 
 /// Token metadata for a Curve pool constituent.
@@ -93,6 +95,14 @@ pub struct BalancerPoolInfo {
     pub vault_address: Address,
     pub swap_fee_bps: u32,
     pub tokens: Vec<BalancerTokenInfo>,
+}
+
+/// Stablecoin pair specification mapping to protocol-specific pair labels
+#[derive(Debug, Clone, Copy)]
+pub struct StablecoinPairSpec {
+    pub key: &'static str,
+    pub protocol: &'static str,
+    pub pair_label: &'static str,
 }
 
 const ETH_ADDRESS: Address = address!("EeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");
@@ -297,20 +307,40 @@ static UNISWAP_V4_POOL_SET: Lazy<Vec<UniswapV4PoolInfo>> = Lazy::new(|| {
     let usdc = resolve_token("USDC");
     let token_decimals = resolve_decimals("USDC");
     let denom_decimals = resolve_decimals("WETH");
-    vec![UniswapV4PoolInfo {
-        symbol: "USDC",
-        token_address: usdc,
-        denom_address: weth,
-        pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
-        pool_id: B256::from_slice(&hex_literal::hex!(
-            "6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa"
-        )),
-        fee: 100,
-        tick_spacing: 1,
-        hooks: address!("36FABF0DaCD49E94dDb3A21999F199068a9Fe8a8"),
-        token_decimals,
-        denom_decimals,
-    }]
+    vec![
+        UniswapV4PoolInfo {
+            symbol: "USDC",
+            token_address: usdc,
+            denom_address: weth,
+            denom_symbol: "WETH",
+            pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
+            pool_id: B256::from_slice(&hex_literal::hex!(
+                "11142dd4ac627021305b9349c2167d89744c4e45c92ce383c04120337f86495c"
+            )),
+            fee: 490,
+            tick_spacing: 10,
+            hooks: Address::ZERO,
+            token_decimals,
+            denom_decimals,
+            block_hint: Some(23560197),
+        },
+        UniswapV4PoolInfo {
+            symbol: "MOONSTR",
+            token_address: address!("7bf4C3Ea48522217446416D39dB92EBeF7848778"),
+            denom_address: address!("0000000000000000000000000000000000000000"),
+            denom_symbol: "ETH",
+            pool_manager: address!("000000000004444C5DC75cB358380d2E3de08a90"),
+            pool_id: B256::from_slice(&hex_literal::hex!(
+                "5f8705d214f90a577483f45910165dce245b435a26e661cf757a70fd665249ce"
+            )),
+            fee: 0,
+            tick_spacing: 60,
+            hooks: address!("213F0db3d48580954471B3E69E5F486292a36844"),
+            token_decimals: 18,
+            denom_decimals: 18,
+            block_hint: Some(23583177),
+        },
+    ]
 });
 
 static CURVE_POOL_SET: Lazy<Vec<CurvePoolInfo>> = Lazy::new(|| {
@@ -422,4 +452,107 @@ pub fn curve_pools() -> &'static [CurvePoolInfo] {
 /// Return the canonical Balancer pool metadata.
 pub fn balancer_pools() -> &'static [BalancerPoolInfo] {
     BALANCER_POOL_SET.as_slice()
+}
+
+static ETH_USDC_PAIR_SPECS: &[StablecoinPairSpec] = &[
+    StablecoinPairSpec {
+        key: "UniswapV2",
+        protocol: "UniswapV2",
+        pair_label: "ETH/USD",
+    },
+    StablecoinPairSpec {
+        key: "SushiSwap",
+        protocol: "SushiSwap",
+        pair_label: "ETH/USD",
+    },
+    StablecoinPairSpec {
+        key: "UniswapV3_500",
+        protocol: "UniswapV3",
+        pair_label: "ETH/USD_V3_500",
+    },
+    StablecoinPairSpec {
+        key: "UniswapV3_3000",
+        protocol: "UniswapV3",
+        pair_label: "ETH/USD_V3_3000",
+    },
+];
+
+static ETH_USDT_PAIR_SPECS: &[StablecoinPairSpec] = &[
+    StablecoinPairSpec {
+        key: "UniswapV2",
+        protocol: "UniswapV2",
+        pair_label: "ETH/USDT",
+    },
+    StablecoinPairSpec {
+        key: "SushiSwap",
+        protocol: "SushiSwap",
+        pair_label: "ETH/USDT",
+    },
+    StablecoinPairSpec {
+        key: "UniswapV3_3000",
+        protocol: "UniswapV3",
+        pair_label: "ETH/USDT_V3",
+    },
+    StablecoinPairSpec {
+        key: "Curve_TriCrypto2",
+        protocol: "Curve",
+        pair_label: "ETH/USDT_CURVE",
+    },
+];
+
+static ETH_DAI_PAIR_SPECS: &[StablecoinPairSpec] = &[
+    StablecoinPairSpec {
+        key: "UniswapV2",
+        protocol: "UniswapV2",
+        pair_label: "ETH/DAI",
+    },
+    StablecoinPairSpec {
+        key: "SushiSwap",
+        protocol: "SushiSwap",
+        pair_label: "ETH/DAI",
+    },
+];
+
+/// Stablecoin pair specs for ETH/USDC across supported venues.
+pub fn eth_usdc_pairs() -> &'static [StablecoinPairSpec] {
+    ETH_USDC_PAIR_SPECS
+}
+
+/// Stablecoin pair specs for ETH/USDT across supported venues.
+pub fn eth_usdt_pairs() -> &'static [StablecoinPairSpec] {
+    ETH_USDT_PAIR_SPECS
+}
+
+/// Stablecoin pair specs for ETH/DAI across supported venues.
+pub fn eth_dai_pairs() -> &'static [StablecoinPairSpec] {
+    ETH_DAI_PAIR_SPECS
+}
+
+static USDC_USDT_PAIR_SPECS: &[StablecoinPairSpec] = &[
+    StablecoinPairSpec {
+        key: "UniswapV3_100",
+        protocol: "UniswapV3",
+        pair_label: "USDC/USDT_V3_100",
+    },
+    StablecoinPairSpec {
+        key: "UniswapV3_500",
+        protocol: "UniswapV3",
+        pair_label: "USDC/USDT_V3_500",
+    },
+];
+
+/// Stablecoin pair specs for USDC/USDT across supported venues.
+pub fn usdc_usdt_pairs() -> &'static [StablecoinPairSpec] {
+    USDC_USDT_PAIR_SPECS
+}
+
+static DAI_USDC_PAIR_SPECS: &[StablecoinPairSpec] = &[StablecoinPairSpec {
+    key: "UniswapV3_100",
+    protocol: "UniswapV3",
+    pair_label: "DAI/USDC_V3",
+}];
+
+/// Stablecoin pair specs for DAI/USDC across supported venues.
+pub fn dai_usdc_pairs() -> &'static [StablecoinPairSpec] {
+    DAI_USDC_PAIR_SPECS
 }

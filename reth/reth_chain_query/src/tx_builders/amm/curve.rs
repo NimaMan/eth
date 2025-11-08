@@ -58,5 +58,6 @@ pub fn build_buy_swap_curve_v1(
         value: Some(amount_in_eth),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }

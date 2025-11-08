@@ -104,8 +104,6 @@ impl RethQueryProvider {
         let mut token_balances = HashMap::new();
         if !tokens.is_empty() {
             for token in tokens {
-                let mut total_token_balance = U256::ZERO;
-
                 // Batch get token balances for all exchange addresses
                 let balances = self
                     .batch_get_balances_for_token_holder_pairs(
@@ -114,7 +112,7 @@ impl RethQueryProvider {
                     )
                     .await?;
 
-                total_token_balance = balances.iter().sum();
+                let total_token_balance: U256 = balances.iter().sum();
 
                 if total_token_balance > U256::ZERO {
                     token_balances.insert(token, total_token_balance);

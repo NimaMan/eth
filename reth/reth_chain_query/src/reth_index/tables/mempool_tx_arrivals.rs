@@ -1,6 +1,6 @@
 /// Mempool Tx Arrival Times Table
 ///
-/// Minimal mapping: txumber (u64 big-endian) -> first_seen_ms (u64 big-endian)
+/// Minimal mapping: Txumber (u64 big-endian) -> first_seen_ms (u64 big-endian)
 /// Implemented in RethIndexDB via reth-libmdbx environment.
 use eyre::Result;
 

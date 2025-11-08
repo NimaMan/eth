@@ -1,9 +1,8 @@
-use super::RethQueryProvider;
 /// Caching layer - Efficient caching for frequently accessed data
 ///
 /// This module provides caching for block timestamps, storage slots,
 /// and other frequently accessed data to reduce database queries.
-use alloy_primitives::{Address, B256};
+use alloy_primitives::Address;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -106,7 +105,6 @@ struct CachedTokenMetadata {
     name: String,
     symbol: String,
     decimals: u8,
-    cached_at_block: u64,
 }
 
 impl TokenMetadataCache {
@@ -123,14 +121,13 @@ impl TokenMetadataCache {
             .map(|meta| (meta.name.clone(), meta.symbol.clone(), meta.decimals))
     }
 
-    pub fn insert(&self, token: Address, name: String, symbol: String, decimals: u8, block: u64) {
+    pub fn insert(&self, token: Address, name: String, symbol: String, decimals: u8) {
         self.cache.write().insert(
             token,
             CachedTokenMetadata {
                 name,
                 symbol,
                 decimals,
-                cached_at_block: block,
             },
         );
     }

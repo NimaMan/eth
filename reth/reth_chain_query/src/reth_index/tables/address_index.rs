@@ -1,8 +1,8 @@
 use alloy_primitives::Address;
 use eyre::Result;
 
-/// Transaction number type (matches reth's `txumber`).
-pub type txumber = u64;
+/// Transaction number type (matches reth's `Txumber`).
+pub type Txumber = u64;
 
 /// Each shard stores at most this many transaction numbers to keep values small.
 pub const SHARD_TX_CAPACITY: usize = 2_000;
@@ -56,7 +56,7 @@ impl AddressIndex {
     }
 
     /// Encode a sorted list of transaction numbers. Format: `[len:u32_le][tx0_le][tx1_le]...`.
-    pub fn encode_values(txs: &[txumber]) -> Vec<u8> {
+    pub fn encode_values(txs: &[Txumber]) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(4 + txs.len() * 8);
         bytes.extend_from_slice(&(txs.len() as u32).to_le_bytes());
         for tx in txs {
@@ -66,7 +66,7 @@ impl AddressIndex {
     }
 
     /// Decode the list encoded by [`encode_values`].
-    pub fn decode_values(bytes: &[u8]) -> Result<Vec<txumber>> {
+    pub fn decode_values(bytes: &[u8]) -> Result<Vec<Txumber>> {
         if bytes.len() < 4 {
             return Err(eyre::eyre!("invalid shard payload: too short"));
         }

@@ -9,11 +9,7 @@ use alloy_consensus::Transaction as _;
 /// - Accessing transaction metadata
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
-use reth_primitives::TransactionSignedEcRecovered;
-use reth_provider::{
-    BlockBodyIndicesProvider, BlockNumReader, BlockReader, HeaderProvider, ReceiptProvider,
-    TransactionsProvider,
-};
+use reth_provider::{HeaderProvider, ReceiptProvider, TransactionsProvider};
 use tx_simulator::UnsignedTransaction;
 
 use super::{
@@ -84,6 +80,20 @@ impl RethQueryProvider {
 
         let (max_fee_per_gas, max_priority_fee_per_gas) = Self::extract_dynamic_fee_fields(&tx);
 
+        let access_list = tx
+            .access_list()
+            .map(|list| list.to_vec())
+            .unwrap_or_default();
+        let blob_versioned_hashes = tx
+            .blob_versioned_hashes()
+            .map(|hashes| hashes.to_vec())
+            .unwrap_or_default();
+        let max_fee_per_blob_gas = tx.max_fee_per_blob_gas().map(U256::from);
+        let signed_authorizations = tx
+            .authorization_list()
+            .map(|auth| auth.to_vec())
+            .unwrap_or_default();
+
         Ok(TransactionData {
             hash: tx_hash,
             block_number,
@@ -100,10 +110,14 @@ impl RethQueryProvider {
             transaction_type: tx.tx_type() as u8,
             max_fee_per_gas,
             max_priority_fee_per_gas,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
         })
     }
 
-    /// Get transaction by sequential number (txumber)
+    /// Get transaction by sequential number (Txumber)
     /// More efficient than by hash as it's the primary key
     pub async fn get_transaction_by_number(&self, tx_number: u64) -> Result<TransactionData> {
         // Get transaction directly by ID
@@ -131,6 +145,20 @@ impl RethQueryProvider {
 
         let (max_fee_per_gas, max_priority_fee_per_gas) = Self::extract_dynamic_fee_fields(&tx);
 
+        let access_list = tx
+            .access_list()
+            .map(|list| list.to_vec())
+            .unwrap_or_default();
+        let blob_versioned_hashes = tx
+            .blob_versioned_hashes()
+            .map(|hashes| hashes.to_vec())
+            .unwrap_or_default();
+        let max_fee_per_blob_gas = tx.max_fee_per_blob_gas().map(U256::from);
+        let signed_authorizations = tx
+            .authorization_list()
+            .map(|auth| auth.to_vec())
+            .unwrap_or_default();
+
         Ok(TransactionData {
             hash: *tx_hash,
             block_number,
@@ -147,6 +175,10 @@ impl RethQueryProvider {
             transaction_type: tx.tx_type() as u8,
             max_fee_per_gas,
             max_priority_fee_per_gas,
+            access_list,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            signed_authorizations,
         })
     }
 
@@ -235,9 +267,15 @@ impl RethQueryProvider {
             },
             gas: Some(tx_data.gas_limit),
             gas_price: Some(tx_data.gas_price.try_into().unwrap_or(u128::MAX)),
-            max_fee_per_gas: None,
-            max_priority_fee_per_gas: None,
+            max_fee_per_gas: tx_data.max_fee_per_gas.and_then(|v| v.try_into().ok()),
+            max_priority_fee_per_gas: tx_data
+                .max_priority_fee_per_gas
+                .and_then(|v| v.try_into().ok()),
             nonce: None,
+            access_list: tx_data.access_list.clone(),
+            blob_versioned_hashes: tx_data.blob_versioned_hashes.clone(),
+            max_fee_per_blob_gas: tx_data.max_fee_per_blob_gas.and_then(|v| v.try_into().ok()),
+            signed_authorizations: tx_data.signed_authorizations.clone(),
         })
     }
 
@@ -251,7 +289,7 @@ impl RethQueryProvider {
         // Get trace if transaction has input data (contract interaction)
         let trace = if !transaction.input.is_empty() && transaction.to.is_some() {
             // Try to get trace via RPC if available
-            if let Some(rpc_provider) = &self.rpc_provider {
+            if let Some(_rpc_provider) = &self.rpc_provider {
                 match self.get_trace_from_rpc(tx_hash).await {
                     Ok(trace) => Some(trace),
                     Err(e) => {
@@ -285,8 +323,8 @@ impl RethQueryProvider {
     }
 
     /// Get trace from RPC using debug_traceTransaction
-    async fn get_trace_from_rpc(&self, tx_hash: B256) -> Result<TransactionTrace> {
-        let rpc_provider = self
+    async fn get_trace_from_rpc(&self, _tx_hash: B256) -> Result<TransactionTrace> {
+        let _rpc_provider = self
             .rpc_provider
             .as_ref()
             .ok_or_else(|| eyre::eyre!("RPC provider not configured"))?;
@@ -362,7 +400,7 @@ impl RethQueryProvider {
         Ok(provider.transaction_by_hash(tx_hash)?.is_some())
     }
 
-    /// Calculate txumber from block and transaction index
+    /// Calculate Txumber from block and transaction index
     pub fn calculate_tx_number(&self, block_number: u64, tx_index: u64) -> Result<u64> {
         let indices = self.get_block_tx_indices(block_number)?;
         Ok(indices.first_tx_num + tx_index)

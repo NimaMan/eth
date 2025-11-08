@@ -3,6 +3,7 @@
 //! This file is auto-generated from Python address files.
 //! Do not edit manually - regenerate using scripts/convert_addresses_to_rust.py
 
+use crate::common_addresses::wallets::WALLET_ADDRESSES;
 use alloy_primitives::{address, Address};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -18,6 +19,10 @@ pub static DENOM_ADDRESSES: Lazy<HashMap<Address, &'static str>> = Lazy::new(|| 
     m.insert(address!("8E870D67F660D95d5be530380D0eC0bd388289E1"), "PAX");
     m.insert(address!("956F47F50A910163D8BF957Cf5846D573E7f87CA"), "FEI");
     m.insert(address!("853d955aCEf822Db058eb8505911ED77F175b99e"), "FRAX");
+    m.insert(
+        address!("5E8422345238F34275888049021821E8E08CAa1f"),
+        "frxETH",
+    );
     m.insert(address!("5f98805A4E8be255a32880FDeC7F6728C6568bA0"), "LUSD");
     m.insert(address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), "WETH");
     m.insert(address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"), "WBTC");
@@ -180,6 +185,7 @@ pub static ERC20_TOKEN_DECIMALS: Lazy<HashMap<&'static str, u8>> = Lazy::new(|| 
     m.insert("PAX", 18);
     m.insert("FEI", 18);
     m.insert("FRAX", 18);
+    m.insert("frxETH", 18);
     m.insert("LUSD", 18);
     m.insert("BRZ", 18);
     m.insert("CADC", 18);
@@ -213,6 +219,7 @@ pub static ERC20_TOKEN_DECIMALS: Lazy<HashMap<&'static str, u8>> = Lazy::new(|| 
     m.insert("XUSD", 6);
     m.insert("ZUSD", 6);
     m.insert("WETH", 18);
+    m.insert("ETH", 18);
     m.insert("WBTC", 8);
     m.insert("WBNB", 18);
     m.insert("MATIC", 18);
@@ -278,6 +285,7 @@ pub static SYMBOL_TO_ADDRESS: Lazy<HashMap<&'static str, Address>> = Lazy::new(|
     for (address, symbol) in DENOM_ADDRESSES.iter() {
         m.insert(*symbol, *address);
     }
+    m.insert("ETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
     m
 });
 
@@ -298,6 +306,7 @@ pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|
         address!("000000000000000000000000000000000000dEaD"),
     );
     m.insert("WETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
+    m.insert("ETH", address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"));
     m.insert("WBTC", address!("2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"));
     m.insert(
         "TrustSwap: Team Finance Lock",
@@ -16049,6 +16058,12 @@ pub static ADDRESSES_BY_NAME: Lazy<HashMap<&'static str, Address>> = Lazy::new(|
         "21Shares CETH_7",
         address!("ff1dBB9e1D2e15B70869ab3BcBe7c1ac09048882"),
     );
+    for (label, address) in WALLET_ADDRESSES.iter() {
+        m.insert(*label, *address);
+    }
+    for (symbol, address) in SYMBOL_TO_ADDRESS.iter() {
+        m.entry(*symbol).or_insert(*address);
+    }
     m
 });
 

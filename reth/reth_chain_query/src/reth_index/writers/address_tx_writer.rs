@@ -7,7 +7,7 @@ use eyre::Result;
 use lru::LruCache;
 use tracing::warn;
 
-use crate::reth_index::tables::address_index::txumber;
+use crate::reth_index::tables::address_index::Txumber;
 use crate::reth_index::RethIndexDB;
 use crate::RethQueryProvider;
 
@@ -103,14 +103,8 @@ impl AddressTxWriter {
             return Ok(Some(0));
         }
 
-        let mut first_tx_num = None;
-        let mut next_tx_num_update = None;
-
-        match self.provider.get_block_tx_indices(block_number) {
-            Ok(indices) => {
-                first_tx_num = Some(indices.first_tx_num);
-                next_tx_num_update = Some(indices.first_tx_num + indices.tx_count);
-            }
+        let indices = match self.provider.get_block_tx_indices(block_number) {
+            Ok(indices) => indices,
             Err(_) => {
                 warn!(
                     block_number,
@@ -120,11 +114,11 @@ impl AddressTxWriter {
                 self.flush_pending_blocks()?;
                 return Ok(None);
             }
-        }
+        };
 
-        let first_tx_num = first_tx_num.expect("first_tx_num should be set");
+        let first_tx_num = indices.first_tx_num;
 
-        let mut map: HashMap<Address, Vec<txumber>> = HashMap::new();
+        let mut map: HashMap<Address, Vec<Txumber>> = HashMap::new();
 
         for participation in participations_vec {
             let AddressParticipation {
@@ -149,7 +143,7 @@ impl AddressTxWriter {
             return Ok(Some(0));
         }
 
-        let mut entries: Vec<(Address, Vec<txumber>)> = map.into_iter().collect();
+        let mut entries: Vec<(Address, Vec<Txumber>)> = map.into_iter().collect();
         entries.sort_by_key(|(address, _)| *address);
 
         for (_, txs) in entries.iter_mut() {

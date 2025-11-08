@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::reth_index::tables::{
-    address_index::{self, txumber, AddressIndex},
+    address_index::{self, AddressIndex, Txumber},
     mempool_tx_arrivals::MempoolTxArrivalTable,
 };
 
@@ -73,7 +73,7 @@ impl RethIndexDB {
                 address_index_dbi,
             })
         } else {
-            let mut rwtx = env.begin_rw_txn()?;
+            let rwtx = env.begin_rw_txn()?;
             let tx_arrival_dbi = rwtx.create_db(
                 Some(MempoolTxArrivalTable::TABLE_NAME),
                 DatabaseFlags::INTEGER_KEY,
@@ -102,7 +102,7 @@ impl RethIndexDB {
     }
 
     /// Fetch all transaction numbers associated with `address`.
-    pub fn get_transactions(&self, address: Address) -> Result<Vec<txumber>> {
+    pub fn get_transactions(&self, address: Address) -> Result<Vec<Txumber>> {
         let tx: Transaction<RO> = self.env.begin_ro_txn()?;
         let mut cursor = tx.cursor(&self.address_index_dbi)?;
 
@@ -129,7 +129,7 @@ impl RethIndexDB {
     /// entries for that address.
     pub fn append_address_transactions_batch(
         &self,
-        entries: &[(Address, Vec<txumber>)],
+        entries: &[(Address, Vec<Txumber>)],
     ) -> Result<usize> {
         if entries.is_empty() {
             return Ok(0);
@@ -153,7 +153,7 @@ impl RethIndexDB {
         &self,
         tx: &mut Transaction<RW>,
         address: Address,
-        txs: &Vec<txumber>,
+        txs: &Vec<Txumber>,
     ) -> Result<usize> {
         if txs.is_empty() {
             return Ok(0);
@@ -163,8 +163,8 @@ impl RethIndexDB {
         let prefix = AddressIndex::encode_shard_prefix(address);
 
         // Gather existing shards for this address (if any).
-        let mut shards: Vec<(Vec<u8>, Vec<txumber>, u64)> = Vec::new();
-        let mut existing_flat: Vec<txumber> = Vec::new();
+        let mut shards: Vec<(Vec<u8>, Vec<Txumber>, u64)> = Vec::new();
+        let mut existing_flat: Vec<Txumber> = Vec::new();
         let mut item = cursor.set_range::<Vec<u8>, Vec<u8>>(&prefix)?;
         while let Some((key, value)) = item {
             if AddressIndex::key_address(&key)? != address {
@@ -178,7 +178,7 @@ impl RethIndexDB {
             item = cursor.next::<Vec<u8>, Vec<u8>>()?;
         }
 
-        let mut new_values: Vec<txumber> = txs.iter().copied().collect();
+        let mut new_values: Vec<Txumber> = txs.iter().copied().collect();
         new_values.sort_unstable();
         new_values.dedup();
 
@@ -200,8 +200,8 @@ impl RethIndexDB {
             .copied()
             .expect("at least one value present with shards");
 
-        let mut greater_than_max: Vec<txumber> = Vec::new();
-        let mut missing_earlier: Vec<txumber> = Vec::new();
+        let mut greater_than_max: Vec<Txumber> = Vec::new();
+        let mut missing_earlier: Vec<Txumber> = Vec::new();
 
         for value in new_values.iter().copied() {
             if value > max_existing {
@@ -279,13 +279,13 @@ impl RethIndexDB {
         cursor: &mut reth_libmdbx::Cursor<RW>,
         address: Address,
         mut shard_id: u64,
-        txs: &mut Vec<txumber>,
+        txs: &mut Vec<Txumber>,
     ) -> Result<usize> {
         let mut inserted = 0usize;
 
         while !txs.is_empty() {
             let take = txs.len().min(address_index::SHARD_TX_CAPACITY);
-            let chunk: Vec<txumber> = txs.drain(..take).collect();
+            let chunk: Vec<Txumber> = txs.drain(..take).collect();
             let key = AddressIndex::encode_shard_key(address, shard_id);
             let encoded = AddressIndex::encode_values(&chunk);
             cursor.put(key.as_slice(), encoded.as_slice(), WriteFlags::UPSERT)?;
@@ -298,7 +298,7 @@ impl RethIndexDB {
 
     /// Write arrival timestamp (milliseconds) for a transaction number.
     pub fn put_tx_arrival_ms(&self, tx_number: u64, first_seen_ms: u64) -> Result<()> {
-        let mut tx: Transaction<RW> = self.env.begin_rw_txn()?;
+        let tx: Transaction<RW> = self.env.begin_rw_txn()?;
         let key = MempoolTxArrivalTable::encode_key(tx_number);
         let val = MempoolTxArrivalTable::encode_value(first_seen_ms);
         tx.put(self.tx_arrival_dbi.dbi(), &key, &val, WriteFlags::UPSERT)?;
@@ -323,7 +323,7 @@ impl RethIndexDB {
             return Ok(0);
         }
 
-        let mut tx: Transaction<RW> = self.env.begin_rw_txn()?;
+        let tx: Transaction<RW> = self.env.begin_rw_txn()?;
         for (tx_number, first_seen_ms) in entries.iter().copied() {
             let key = MempoolTxArrivalTable::encode_key(tx_number);
             let val = MempoolTxArrivalTable::encode_value(first_seen_ms);
@@ -335,7 +335,7 @@ impl RethIndexDB {
 
     /// Delete arrival timestamp for `tx_number`. Returns true if an entry existed.
     pub fn delete_tx_arrival(&self, tx_number: u64) -> Result<bool> {
-        let mut tx: Transaction<RW> = self.env.begin_rw_txn()?;
+        let tx: Transaction<RW> = self.env.begin_rw_txn()?;
         let key = MempoolTxArrivalTable::encode_key(tx_number);
         match tx.del(self.tx_arrival_dbi.dbi(), &key, Option::<&[u8]>::None) {
             Ok(true) => {

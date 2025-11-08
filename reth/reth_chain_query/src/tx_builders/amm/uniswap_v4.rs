@@ -46,6 +46,14 @@ static BAYGUS_ROUTER_BYTECODE: Lazy<Vec<u8>> = Lazy::new(|| {
     hex::decode(object).expect("invalid BaygusRouter bytecode hex")
 });
 
+/// Minimum sqrt price ratio supported by Uniswap v4 pools (in Q64.96 format).
+static MIN_SQRT_RATIO_X96: Lazy<U256> = Lazy::new(|| U256::from(4_295_128_739u64));
+/// Maximum sqrt price ratio supported by Uniswap v4 pools (in Q64.96 format).
+static MAX_SQRT_RATIO_X96: Lazy<U256> = Lazy::new(|| {
+    U256::from_str_radix("1461446703485210103287273052203988822378723970342", 10)
+        .expect("invalid MAX_SQRT_RATIO constant")
+});
+
 /// Canonical WETH deposit selector.
 const WETH_DEPOSIT_SELECTOR: [u8; 4] = [0xd0, 0xe3, 0x0d, 0xb0];
 /// Canonical WETH withdraw selector.
@@ -143,6 +151,7 @@ pub fn build_router_deploy_tx(
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -158,6 +167,7 @@ pub fn build_weth_deposit_tx(owner: Address, weth: Address, amount: U256) -> Uns
         value: Some(amount),
         data: Some(Bytes::from(WETH_DEPOSIT_SELECTOR.to_vec())),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -177,6 +187,7 @@ pub fn build_weth_withdraw_tx(owner: Address, weth: Address, amount: U256) -> Un
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -202,6 +213,7 @@ pub fn build_token_approval_tx(
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -228,6 +240,7 @@ pub fn build_baygus_router_deploy_tx(
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -249,6 +262,7 @@ pub fn build_baygus_router_multihop_tx(
         value: Some(eth_value),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     })
 }
 
@@ -274,7 +288,10 @@ pub fn build_baygus_single_hop_exact_input_call(
         params: UniswapV4SwapParams {
             zero_for_one: orientation.zero_for_one,
             amount_specified,
-            sqrt_price_limit_x96: request.sqrt_price_limit_x96.unwrap_or_default(),
+            sqrt_price_limit_x96: request
+                .sqrt_price_limit_x96
+                .clone()
+                .unwrap_or_else(|| default_sqrt_price_limit(orientation.zero_for_one)),
         },
         hook_data: request.hook_data.clone(),
         hook_adapter: request.hook_adapter,
@@ -362,6 +379,7 @@ pub fn build_swap_exact_input_single_tx(
         value: Some(value),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     })
 }
 
@@ -550,6 +568,14 @@ fn pad_i32(value: i32) -> [u8; 32] {
         buf[28..].copy_from_slice(&bytes);
     }
     buf
+}
+
+fn default_sqrt_price_limit(zero_for_one: bool) -> U256 {
+    if zero_for_one {
+        MIN_SQRT_RATIO_X96.clone() + U256::from(1u8)
+    } else {
+        MAX_SQRT_RATIO_X96.clone() - U256::from(1u8)
+    }
 }
 
 fn pad_u128(value: u128) -> [u8; 32] {

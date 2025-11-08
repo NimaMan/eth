@@ -62,6 +62,7 @@ impl ChainQuery {
     }
 
     /// Get provider factory for advanced queries
+    #[allow(dead_code)]
     pub(crate) fn provider_factory(&self) -> &tx_simulator::TxSimulator {
         &self.simulator
     }

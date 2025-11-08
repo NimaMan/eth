@@ -8,7 +8,6 @@ use std::sync::RwLock;
 /// Thread-safe cache for block timestamps
 pub struct TimestampCache {
     cache: RwLock<LruCache>,
-    max_size: usize,
 }
 
 impl TimestampCache {
@@ -16,7 +15,6 @@ impl TimestampCache {
     pub fn new(max_size: usize) -> Self {
         Self {
             cache: RwLock::new(LruCache::new(max_size)),
-            max_size,
         }
     }
 

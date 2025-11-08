@@ -11,7 +11,6 @@ use tx_simulator::TxSimulator;
 
 // Import our modules
 use crate::reth_index::RethIndexDB;
-use crate::time_utils::TimestampCache;
 
 // Re-export submodules
 mod address_index;
@@ -28,38 +27,9 @@ mod types;
 pub use address_index::*;
 pub use address_state::*;
 pub use amm::*;
-pub use batch_ops::*;
-pub use block_transactions::*;
 pub use caching::*;
 pub use contract_methods::*;
-pub use gas::*;
-pub use transactions::*;
 pub use types::*;
-
-/// Storage slot cache for tracking known slot positions
-pub struct StorageSlotCache {
-    // Maps (contract, mapping_name) -> slot position
-    // e.g., (USDC, "balances") -> 2
-    known_slots: std::collections::HashMap<(Address, String), u64>,
-}
-
-impl StorageSlotCache {
-    pub fn new() -> Self {
-        Self {
-            known_slots: std::collections::HashMap::new(),
-        }
-    }
-
-    pub fn get_slot(&self, contract: Address, mapping: &str) -> Option<u64> {
-        self.known_slots
-            .get(&(contract, mapping.to_string()))
-            .copied()
-    }
-
-    pub fn set_slot(&mut self, contract: Address, mapping: String, slot: u64) {
-        self.known_slots.insert((contract, mapping), slot);
-    }
-}
 
 /// Central provider for all Reth database queries
 pub struct RethQueryProvider {
@@ -79,12 +49,6 @@ pub struct RethQueryProvider {
     /// Optional RPC provider for trace data (temporary until local tracing)
     rpc_provider: Option<Arc<dyn std::any::Any + Send + Sync>>,
 
-    /// Block timestamp cache for efficient time conversions
-    block_cache: Arc<TimestampCache>,
-
-    /// Storage slot cache for known token balance positions
-    slot_cache: Arc<parking_lot::RwLock<StorageSlotCache>>,
-
     /// Optional RethIndex database for fast entity-centric queries
     reth_index: Option<Arc<RethIndexDB>>,
 }
@@ -99,8 +63,6 @@ impl RethQueryProvider {
             tx_simulator,
             provider_factory,
             rpc_provider: None,
-            block_cache: Arc::new(TimestampCache::new(10000)),
-            slot_cache: Arc::new(parking_lot::RwLock::new(StorageSlotCache::new())),
             reth_index: None,
         })
     }
@@ -113,8 +75,6 @@ impl RethQueryProvider {
             tx_simulator: simulator,
             provider_factory,
             rpc_provider: None,
-            block_cache: Arc::new(TimestampCache::new(10000)),
-            slot_cache: Arc::new(parking_lot::RwLock::new(StorageSlotCache::new())),
             reth_index: None,
         })
     }
@@ -138,8 +98,6 @@ impl RethQueryProvider {
             tx_simulator: simulator,
             provider_factory,
             rpc_provider: None,
-            block_cache: Arc::new(TimestampCache::new(10000)),
-            slot_cache: Arc::new(parking_lot::RwLock::new(StorageSlotCache::new())),
             reth_index: None,
         })
     }
@@ -324,9 +282,9 @@ impl RethQueryProvider {
     /// Get aggregated metrics for an address (requires RethIndex)
     pub fn get_address_metrics(
         &self,
-        address: Address,
+        _address: Address,
     ) -> Result<crate::reth_index::AddressMetrics> {
-        if let Some(reth_index) = &self.reth_index {
+        if let Some(_reth_index) = &self.reth_index {
             // TODO: Implement get_address_metrics in RethIndexDB
             Err(eyre::eyre!("get_address_metrics not yet implemented"))
         } else {

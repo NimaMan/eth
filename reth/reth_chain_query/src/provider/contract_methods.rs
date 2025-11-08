@@ -247,7 +247,7 @@ impl RethQueryProvider {
         &self,
         contract: Address,
         method_name: &str,
-        args: impl AsRef<[u8]>,
+        _args: impl AsRef<[u8]>,
         block: Option<u64>,
     ) -> Result<U256> {
         // For now, we'll handle common methods. In the future, this could use ABI encoding

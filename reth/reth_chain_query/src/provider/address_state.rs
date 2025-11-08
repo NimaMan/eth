@@ -10,7 +10,6 @@ use super::RethQueryProvider;
 use reth_db::tables;
 use reth_db::transaction::DbTx;
 use reth_db_api::{cursor::DbCursorRO, models::ShardedKey};
-use reth_storage_api::DBProvider;
 
 /// Represents a balance difference
 #[derive(Debug, Clone)]

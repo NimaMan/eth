@@ -92,6 +92,7 @@ pub fn build_buy_swap_v3(
         value: Some(amount_in_eth), // SwapRouter handles WETH wrapping
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -125,6 +126,7 @@ pub fn build_buy_swap_v3_with_min_out(
         value: Some(amount_in_eth),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -150,6 +152,7 @@ pub fn build_approve_v3(owner: Address, token: Address, amount: U256) -> Unsigne
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -183,6 +186,7 @@ pub fn build_sell_swap_v3(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -216,6 +220,7 @@ pub fn build_sell_swap_v3_with_min_out(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -250,6 +255,7 @@ pub fn build_token_to_token_swap_v3(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
@@ -284,6 +290,7 @@ pub fn build_token_to_token_swap_v3_with_min_out(
         value: Some(U256::ZERO),
         data: Some(calldata),
         nonce: None,
+        ..Default::default()
     }
 }
 
