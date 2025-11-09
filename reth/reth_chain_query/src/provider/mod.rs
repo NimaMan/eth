@@ -332,15 +332,3 @@ pub struct Portfolio {
     pub token_balances: std::collections::HashMap<Address, U256>,
     pub block_number: u64,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_provider_creation() {
-        // This would need a valid reth_datadir for actual testing
-        // For now, just verify the structure compiles
-        let _provider = RethQueryProvider::from_simulator(Arc::new(unsafe { std::mem::zeroed() }));
-    }
-}

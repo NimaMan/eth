@@ -19,14 +19,14 @@ impl RethQueryProvider {
         &self,
         token: Address,
         holder: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
     ) -> Result<U256> {
         // balanceOf(address) selector: 0x70a08231
         let selector = [0x70, 0xa0, 0x82, 0x31];
         let data = encode_contract_read_call_with_address_arg(selector, holder);
 
         let result = self
-            .simulate_contract_view_call(token, data, block, None)
+            .simulate_contract_view_call(token, data, block_number, None)
             .await?;
 
         if result.success {
@@ -42,7 +42,7 @@ impl RethQueryProvider {
         token: Address,
         owner: Address,
         spender: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
     ) -> Result<U256> {
         // allowance(address,address) selector: 0xdd62ed3e
         let mut payload = Vec::with_capacity(4 + 32 + 32);
@@ -55,7 +55,7 @@ impl RethQueryProvider {
         payload.extend_from_slice(spender.as_slice());
 
         let result = self
-            .simulate_contract_view_call(token, Bytes::from(payload), block, None)
+            .simulate_contract_view_call(token, Bytes::from(payload), block_number, None)
             .await?;
 
         if result.success {
@@ -69,7 +69,7 @@ impl RethQueryProvider {
     pub async fn get_token_total_supply(
         &self,
         token: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<U256> {
         // totalSupply() selector: 0x18160ddd
@@ -77,7 +77,7 @@ impl RethQueryProvider {
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block, block_header)
+            .simulate_contract_view_call(token, data, block_number, block_header)
             .await?;
 
         if result.success {
@@ -91,7 +91,7 @@ impl RethQueryProvider {
     pub async fn get_token_decimals(
         &self,
         token: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<u8> {
         // decimals() selector: 0x313ce567
@@ -99,14 +99,14 @@ impl RethQueryProvider {
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block, block_header)
+            .simulate_contract_view_call(token, data, block_number, block_header)
             .await?;
 
         if !result.success {
             tracing::warn!(
                 target: "reth_chain_query::contract_methods",
                 token = %token,
-                block = ?block,
+                block = ?block_number,
                 "decimals() call reverted"
             );
             return Err(eyre!("Failed to get token decimals for {token:?}"));
@@ -116,7 +116,7 @@ impl RethQueryProvider {
             tracing::warn!(
                 target: "reth_chain_query::contract_methods",
                 token = %token,
-                block = ?block,
+                block = ?block_number,
                 returned_bytes = result.output.len(),
                 "decimals() call returned insufficient data"
             );
@@ -133,7 +133,7 @@ impl RethQueryProvider {
     pub async fn get_token_symbol(
         &self,
         token: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<String> {
         // symbol() selector: 0x95d89b41
@@ -141,21 +141,27 @@ impl RethQueryProvider {
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block, block_header)
+            .simulate_contract_view_call(token, data, block_number, block_header)
             .await?;
 
-        if result.success {
-            Ok(decode_string_from_contract_output(&result.output))
-        } else {
-            Ok("UNKNOWN".to_string())
+        if !result.success {
+            tracing::warn!(
+                target: "reth_chain_query::contract_methods",
+                token = %token,
+                block = ?block_number,
+                "symbol() call reverted"
+            );
+            return Err(eyre!("Failed to get token symbol for {token:?}"));
         }
+
+        Ok(decode_string_from_contract_output(&result.output))
     }
 
     /// Get ERC20 name via name() view function
     pub async fn get_token_name(
         &self,
         token: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<String> {
         // name() selector: 0x06fdde03
@@ -163,47 +169,41 @@ impl RethQueryProvider {
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block, block_header)
+            .simulate_contract_view_call(token, data, block_number, block_header)
             .await?;
 
-        if result.success {
-            Ok(decode_string_from_contract_output(&result.output))
-        } else {
-            Ok("Unknown Token".to_string())
+        if !result.success {
+            tracing::warn!(
+                target: "reth_chain_query::contract_methods",
+                token = %token,
+                block = ?block_number,
+                "name() call reverted"
+            );
+            return Err(eyre!("Failed to get token name for {token:?}"));
         }
+
+        Ok(decode_string_from_contract_output(&result.output))
     }
 
     /// Get complete token metadata in one call
     pub async fn get_token_metadata(
         &self,
         token: Address,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<TokenMetadata> {
         let header_clone_a = block_header.clone();
         let header_clone_b = block_header.clone();
         let header_clone_c = block_header.clone();
         let (name, symbol, decimals) = tokio::try_join!(
-            self.get_token_name(token, block, header_clone_a),
-            self.get_token_symbol(token, block, header_clone_b),
-            self.get_token_decimals(token, block, header_clone_c),
+            self.get_token_name(token, block_number, header_clone_a),
+            self.get_token_symbol(token, block_number, header_clone_b),
+            self.get_token_decimals(token, block_number, header_clone_c),
         )?;
 
-        let total_supply = match self
-            .get_token_total_supply(token, block, block_header.clone())
-            .await
-        {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!(
-                    target: "reth_chain_query::contract_methods",
-                    token = %token,
-                    block = ?block,
-                    "totalSupply() call failed, defaulting to 0: {err}"
-                );
-                U256::ZERO
-            }
-        };
+        let total_supply = self
+            .get_token_total_supply(token, block_number, block_header.clone())
+            .await?;
 
         Ok(TokenMetadata {
             address: token,
@@ -215,7 +215,7 @@ impl RethQueryProvider {
     }
 
     /// Check if an address is a contract by checking for code
-    pub async fn is_contract(&self, address: Address, block: Option<u64>) -> Result<bool> {
+    pub async fn is_contract(&self, address: Address, block_number: Option<u64>) -> Result<bool> {
         // Try to get code size - contracts have code, EOAs don't
         let call = tx_simulator::UnsignedTransaction {
             from: Some(Address::ZERO),
@@ -228,7 +228,10 @@ impl RethQueryProvider {
 
         match self
             .tx_simulator
-            .simulate_unsigned_transaction_at_block(call, block.unwrap_or(self.get_latest_block()?))
+            .simulate_unsigned_transaction_at_block(
+                call,
+                block_number.unwrap_or(self.get_latest_block()?),
+            )
             .await
         {
             Ok(_) => {
@@ -248,7 +251,7 @@ impl RethQueryProvider {
         contract: Address,
         method_name: &str,
         _args: impl AsRef<[u8]>,
-        block: Option<u64>,
+        block_number: Option<u64>,
     ) -> Result<U256> {
         // For now, we'll handle common methods. In the future, this could use ABI encoding
         let data = match method_name {
@@ -271,7 +274,7 @@ impl RethQueryProvider {
         };
 
         let result = self
-            .simulate_contract_view_call(contract, data, block, None)
+            .simulate_contract_view_call(contract, data, block_number, None)
             .await?;
 
         if result.success {
@@ -285,14 +288,14 @@ impl RethQueryProvider {
         &self,
         contract: Address,
         data: Bytes,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<ViewFunctionResult> {
         self.tx_simulator
             .simulate_contract_read_only_call_with_options(
                 contract,
                 data,
-                block,
+                block_number,
                 block_header,
                 None,
             )

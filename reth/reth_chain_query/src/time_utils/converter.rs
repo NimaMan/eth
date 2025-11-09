@@ -170,23 +170,25 @@ impl BlockTimeConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time_utils::{
+        estimate_block_number, estimate_timestamp, AVERAGE_BLOCK_TIME, ETHEREUM_GENESIS_TIMESTAMP,
+    };
 
     #[test]
     fn test_estimate_timestamp() {
         let block = 1_000_000;
-        let estimated = super::estimate_timestamp(block);
+        let estimated = estimate_timestamp(block);
 
         // Should be roughly 12M seconds after genesis
-        let expected_seconds =
-            super::ETHEREUM_GENESIS_TIMESTAMP + (block * super::AVERAGE_BLOCK_TIME) as i64;
+        let expected_seconds = ETHEREUM_GENESIS_TIMESTAMP + (block * AVERAGE_BLOCK_TIME) as i64;
         assert_eq!(estimated.timestamp(), expected_seconds);
     }
 
     #[test]
     fn test_estimate_block_number() {
         let timestamp =
-            DateTime::from_timestamp(super::ETHEREUM_GENESIS_TIMESTAMP + 120_000, 0).unwrap();
-        let estimated = super::estimate_block_number(timestamp);
+            DateTime::from_timestamp(ETHEREUM_GENESIS_TIMESTAMP + 120_000, 0).unwrap();
+        let estimated = estimate_block_number(timestamp);
 
         // Should be roughly 10,000 blocks (120,000 / 12)
         assert_eq!(estimated, 10_000);
