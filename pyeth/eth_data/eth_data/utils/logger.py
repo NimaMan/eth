@@ -18,7 +18,7 @@ from typing import Optional
 
 
 # Default log directory; can be customized as needed
-ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/logs')
+ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/eth/logs')
 # Track all created log files
 _log_files = set()
 _SKIP_CLEANUP_FOLDERS = {"block_processor"}

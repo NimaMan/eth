@@ -18,6 +18,10 @@ class TransactionLogProcessor:
             'erc20_approval_events': [],
             'erc721_approval_events': [],
             'ownership_transferred_events': [],
+            'ownership_transfer_started_events': [],
+            'access_control_role_granted_events': [],
+            'access_control_role_revoked_events': [],
+            'proxy_admin_changed_events': [],
             'contract_creation_events': [],
             'trading_enabled_events': [],
             'trading_disabled_events': [],
@@ -118,6 +122,26 @@ class TransactionLogProcessor:
                 result['unique_addresses'].add(event.contract_address)
                 result['unique_addresses'].add(event.previous_owner)
                 result['unique_addresses'].add(event.new_owner)
+            elif isinstance(event, OwnershipTransferStartedEvent):
+                result['ownership_transfer_started_events'].append(event)
+                result['unique_addresses'].add(event.contract_address)
+                result['unique_addresses'].add(event.previous_owner)
+                result['unique_addresses'].add(event.new_owner)
+            elif isinstance(event, AccessControlRoleGrantedEvent):
+                result['access_control_role_granted_events'].append(event)
+                result['unique_addresses'].add(event.contract_address)
+                result['unique_addresses'].add(event.account)
+                result['unique_addresses'].add(event.sender)
+            elif isinstance(event, AccessControlRoleRevokedEvent):
+                result['access_control_role_revoked_events'].append(event)
+                result['unique_addresses'].add(event.contract_address)
+                result['unique_addresses'].add(event.account)
+                result['unique_addresses'].add(event.sender)
+            elif isinstance(event, ProxyAdminChangedEvent):
+                result['proxy_admin_changed_events'].append(event)
+                result['unique_addresses'].add(event.contract_address)
+                result['unique_addresses'].add(event.previous_admin)
+                result['unique_addresses'].add(event.new_admin)
             elif isinstance(event, TradingEnabledEvent):
                 result['trading_enabled_events'].append(event)
                 result['unique_addresses'].add(event.token_address)
@@ -229,6 +253,14 @@ class TransactionLogProcessor:
                 return self.parse_uniswap_v2_pair_created_event(log)
             elif topic == EVENT_TOPICS['OwnershipTransferred']:
                 return self.parse_ownership_transferred_event(log)
+            elif topic == EVENT_TOPICS['OwnershipTransferStarted']:
+                return self.parse_ownership_transfer_started_event(log)
+            elif topic == EVENT_TOPICS['RoleGranted']:
+                return self.parse_role_granted_event(log)
+            elif topic == EVENT_TOPICS['RoleRevoked']:
+                return self.parse_role_revoked_event(log)
+            elif topic == EVENT_TOPICS['AdminChanged']:
+                return self.parse_admin_changed_event(log)
             elif topic == EVENT_TOPICS['TradingEnabled']:
                 return self.parse_trading_enabled_event(log)
             elif topic == EVENT_TOPICS['TradingDisabled']:
@@ -566,6 +598,49 @@ class TransactionLogProcessor:
             contract_address=self.w3.to_checksum_address(log['address']),
             previous_owner=self.w3.to_checksum_address(topics[1][-40:]),
             new_owner=self.w3.to_checksum_address(topics[2][-40:]),
+            log_index=self._process_integer(log['logIndex'])
+        )
+
+    def parse_ownership_transfer_started_event(self, log: Dict[str, Any]) -> OwnershipTransferStartedEvent:
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        return OwnershipTransferStartedEvent(
+            contract_address=self.w3.to_checksum_address(log['address']),
+            previous_owner=self.w3.to_checksum_address(topics[1][-40:]),
+            new_owner=self.w3.to_checksum_address(topics[2][-40:]),
+            log_index=self._process_integer(log['logIndex'])
+        )
+
+    def parse_role_granted_event(self, log: Dict[str, Any]) -> AccessControlRoleGrantedEvent:
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        return AccessControlRoleGrantedEvent(
+            contract_address=self.w3.to_checksum_address(log['address']),
+            role=topics[1],
+            account=self.w3.to_checksum_address(topics[2][-40:]),
+            sender=self.w3.to_checksum_address(topics[3][-40:]),
+            log_index=self._process_integer(log['logIndex'])
+        )
+
+    def parse_role_revoked_event(self, log: Dict[str, Any]) -> AccessControlRoleRevokedEvent:
+        topics = [self._ensure_hex_string(topic) for topic in log['topics']]
+        return AccessControlRoleRevokedEvent(
+            contract_address=self.w3.to_checksum_address(log['address']),
+            role=topics[1],
+            account=self.w3.to_checksum_address(topics[2][-40:]),
+            sender=self.w3.to_checksum_address(topics[3][-40:]),
+            log_index=self._process_integer(log['logIndex'])
+        )
+
+    def parse_admin_changed_event(self, log: Dict[str, Any]) -> ProxyAdminChangedEvent:
+        data = self._ensure_hex_string(log['data'])[2:]
+        data = data.zfill(128)
+        previous_chunk = data[:64]
+        new_chunk = data[64:128]
+        previous_admin = self.w3.to_checksum_address('0x' + previous_chunk[-40:])
+        new_admin = self.w3.to_checksum_address('0x' + new_chunk[-40:])
+        return ProxyAdminChangedEvent(
+            contract_address=self.w3.to_checksum_address(log['address']),
+            previous_admin=previous_admin,
+            new_admin=new_admin,
             log_index=self._process_integer(log['logIndex'])
         )
     

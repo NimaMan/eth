@@ -110,6 +110,40 @@ class OwnershipTransferredEvent:
 
 
 @dataclass
+class OwnershipTransferStartedEvent:
+    contract_address: str
+    previous_owner: str
+    new_owner: str
+    log_index: int
+
+
+@dataclass
+class AccessControlRoleGrantedEvent:
+    contract_address: str
+    role: str
+    account: str
+    sender: str
+    log_index: int
+
+
+@dataclass
+class AccessControlRoleRevokedEvent:
+    contract_address: str
+    role: str
+    account: str
+    sender: str
+    log_index: int
+
+
+@dataclass
+class ProxyAdminChangedEvent:
+    contract_address: str
+    previous_admin: str
+    new_admin: str
+    log_index: int
+
+
+@dataclass
 class TradingEnabledEvent:
     token_address: ChecksumAddress
     block_number: int

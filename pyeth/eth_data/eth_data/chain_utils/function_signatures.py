@@ -216,6 +216,10 @@ EVENT_TOPICS = {
     
     # Token Management Events
     'OwnershipTransferred': w3.keccak(text="OwnershipTransferred(address,address)").hex(),
+    'OwnershipTransferStarted': w3.keccak(text="OwnershipTransferStarted(address,address)").hex(),
+    'RoleGranted': w3.keccak(text="RoleGranted(bytes32,address,address)").hex(),
+    'RoleRevoked': w3.keccak(text="RoleRevoked(bytes32,address,address)").hex(),
+    'AdminChanged': w3.keccak(text="AdminChanged(address,address)").hex(),
     'TradingEnabled': w3.keccak(text="TradingEnabled(uint256)").hex(),
     'TradingDisabled': w3.keccak(text="TradingDisabled(uint256)").hex(),
     'ExcludeFromFees': w3.keccak(text="ExcludeFromFees(address,bool)").hex(),

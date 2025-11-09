@@ -173,6 +173,10 @@ class ProcessedTransaction:
     deposit_events: List[DepositEvent] = field(default_factory=list)
     withdraw_events: List[WithdrawEvent] = field(default_factory=list)
     ownership_transferred_events: List[OwnershipTransferredEvent] = field(default_factory=list)
+    ownership_transfer_started_events: List[OwnershipTransferStartedEvent] = field(default_factory=list)
+    access_control_role_granted_events: List[AccessControlRoleGrantedEvent] = field(default_factory=list)
+    access_control_role_revoked_events: List[AccessControlRoleRevokedEvent] = field(default_factory=list)
+    proxy_admin_changed_events: List[ProxyAdminChangedEvent] = field(default_factory=list)
     contract_creation_events: List[ContractCreationEvent] = field(default_factory=list)
     trading_enabled_events: List[TradingEnabledEvent] = field(default_factory=list)
     trading_disabled_events: List[TradingDisabledEvent] = field(default_factory=list)
@@ -341,6 +345,10 @@ class ProcessedTransaction:
             "withdraw_events": self._list_to_dicts(self.withdraw_events),
             "uniswap_v2_pair_created_events": self._list_to_dicts(self.uniswap_v2_pair_created_events),
             "ownership_transferred_events": self._list_to_dicts(self.ownership_transferred_events),
+            "ownership_transfer_started_events": self._list_to_dicts(self.ownership_transfer_started_events),
+            "access_control_role_granted_events": self._list_to_dicts(self.access_control_role_granted_events),
+            "access_control_role_revoked_events": self._list_to_dicts(self.access_control_role_revoked_events),
+            "proxy_admin_changed_events": self._list_to_dicts(self.proxy_admin_changed_events),
             "contract_creation_events": self._list_to_dicts(self.contract_creation_events),
             "trading_enabled_events": self._list_to_dicts(self.trading_enabled_events),
             "trading_disabled_events": self._list_to_dicts(self.trading_disabled_events),
@@ -447,6 +455,10 @@ class ProcessedTransaction:
             withdraw_events=cls._coerce_sequence("withdraw_events", tx_dict.get('withdraw_events'), WithdrawEvent),
             uniswap_v2_pair_created_events=cls._coerce_sequence("uniswap_v2_pair_created_events", tx_dict.get('uniswap_v2_pair_created_events'), UniswapV2PairCreatedEvent),
             ownership_transferred_events=cls._coerce_sequence("ownership_transferred_events", tx_dict.get('ownership_transferred_events'), OwnershipTransferredEvent),
+            ownership_transfer_started_events=cls._coerce_sequence("ownership_transfer_started_events", tx_dict.get('ownership_transfer_started_events'), OwnershipTransferStartedEvent),
+            access_control_role_granted_events=cls._coerce_sequence("access_control_role_granted_events", tx_dict.get('access_control_role_granted_events'), AccessControlRoleGrantedEvent),
+            access_control_role_revoked_events=cls._coerce_sequence("access_control_role_revoked_events", tx_dict.get('access_control_role_revoked_events'), AccessControlRoleRevokedEvent),
+            proxy_admin_changed_events=cls._coerce_sequence("proxy_admin_changed_events", tx_dict.get('proxy_admin_changed_events'), ProxyAdminChangedEvent),
             contract_creation_events=cls._coerce_sequence("contract_creation_events", tx_dict.get('contract_creation_events'), ContractCreationEvent),
             trading_enabled_events=cls._coerce_sequence("trading_enabled_events", tx_dict.get('trading_enabled_events'), TradingEnabledEvent),
             trading_disabled_events=cls._coerce_sequence("trading_disabled_events", tx_dict.get('trading_disabled_events'), TradingDisabledEvent),
@@ -513,6 +525,10 @@ class ProcessedTransaction:
                  withdraw_events: Optional[List[WithdrawEvent]] = None,
                  uniswap_v2_pair_created_events: Optional[List[UniswapV2PairCreatedEvent]] = None,
                  ownership_transferred_events: Optional[List[OwnershipTransferredEvent]] = None,
+                 ownership_transfer_started_events: Optional[List[OwnershipTransferStartedEvent]] = None,
+                 access_control_role_granted_events: Optional[List[AccessControlRoleGrantedEvent]] = None,
+                 access_control_role_revoked_events: Optional[List[AccessControlRoleRevokedEvent]] = None,
+                 proxy_admin_changed_events: Optional[List[ProxyAdminChangedEvent]] = None,
                  contract_creation_events: Optional[List[ContractCreationEvent]] = None,
                  trading_enabled_events: Optional[List[TradingEnabledEvent]] = None,
                  trading_disabled_events: Optional[List[TradingDisabledEvent]] = None,
@@ -582,6 +598,10 @@ class ProcessedTransaction:
         self.withdraw_events = list(withdraw_events or [])
         self.uniswap_v2_pair_created_events = list(uniswap_v2_pair_created_events or [])
         self.ownership_transferred_events = list(ownership_transferred_events or [])
+        self.ownership_transfer_started_events = list(ownership_transfer_started_events or [])
+        self.access_control_role_granted_events = list(access_control_role_granted_events or [])
+        self.access_control_role_revoked_events = list(access_control_role_revoked_events or [])
+        self.proxy_admin_changed_events = list(proxy_admin_changed_events or [])
         self.contract_creation_events = list(contract_creation_events or [])
         self.trading_enabled_events = list(trading_enabled_events or [])
         self.trading_disabled_events = list(trading_disabled_events or [])
@@ -676,6 +696,10 @@ class ProcessedTransaction:
             self.withdraw_events == other.withdraw_events and
             self.uniswap_v2_pair_created_events == other.uniswap_v2_pair_created_events and
             self.ownership_transferred_events == other.ownership_transferred_events and
+            self.ownership_transfer_started_events == other.ownership_transfer_started_events and
+            self.access_control_role_granted_events == other.access_control_role_granted_events and
+            self.access_control_role_revoked_events == other.access_control_role_revoked_events and
+            self.proxy_admin_changed_events == other.proxy_admin_changed_events and
             self.contract_creation_events == other.contract_creation_events and
             self.trading_enabled_events == other.trading_enabled_events and
             self.trading_disabled_events == other.trading_disabled_events and
