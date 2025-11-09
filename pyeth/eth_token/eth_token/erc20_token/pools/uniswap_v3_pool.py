@@ -8,14 +8,15 @@ Key Features:
 - Virtual reserves calculated from current price and liquidity
 """
 
-from typing import Optional, Dict, List, Tuple, TYPE_CHECKING
-from dataclasses import dataclass, field
+from typing import Optional, Dict, Tuple
+from dataclasses import dataclass
 import math
 import pyreth
-from .base_pool import BasePool, logger
-from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
+
+from eth_token.erc20_token.pools.base_pool import BasePool, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
 
 
 UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
@@ -94,7 +95,7 @@ class UniswapV3Pool(BasePool):
             10000: 200  # 1.00%
         }.get(fee, 60)
     
-    def process_transaction(self, transaction: Dict):
+    def update_from_transaction(self, transaction: Dict):
         """
         Process V3 events from a transaction.
         
@@ -143,10 +144,11 @@ class UniswapV3Pool(BasePool):
         
         amount0 = float(swap.get('amount0', 0))
         amount1 = float(swap.get('amount1', 0))
-        self.state.volume0_in += max(0, amount0)
-        self.state.volume0_out += max(0, -amount0)
-        self.state.volume1_in += max(0, amount1)
-        self.state.volume1_out += max(0, -amount1)
+        token_amount, denom_amount = self._map_token_and_denom(amount0, amount1)
+        self.state.token_volume_in += max(0.0, token_amount)
+        self.state.token_volume_out += max(0.0, -token_amount)
+        self.state.denom_volume_in += max(0.0, denom_amount)
+        self.state.denom_volume_out += max(0.0, -denom_amount)
         self.state.total_swaps += 1
         
         # Store swap event
@@ -310,8 +312,8 @@ class UniswapV3Pool(BasePool):
         This provides compatibility with V2-style reserve queries.
         """
         if self.sqrt_price_x96 == 0 or self.current_liquidity == 0:
-            self.state.reserve0 = 0
-            self.state.reserve1 = 0
+            self.state.token_reserve = 0.0
+            self.state.denom_reserve = 0.0
             return
             
         sqrt_price = self.sqrt_price_x96 / (2**96)
@@ -325,14 +327,18 @@ class UniswapV3Pool(BasePool):
         token0_decimals = self._get_token0_decimals()
         token1_decimals = self._get_token1_decimals()
 
-        # Update state with properly scaled reserves
-        self.state.reserve0 = reserve0_raw / (10**token0_decimals)
-        self.state.reserve1 = reserve1_raw / (10**token1_decimals)
+        reserve0 = reserve0_raw / (10**token0_decimals)
+        reserve1 = reserve1_raw / (10**token1_decimals)
+        token_reserve, denom_reserve = self._map_token_and_denom(reserve0, reserve1)
+        self.state.token_reserve = token_reserve
+        self.state.denom_reserve = denom_reserve
         
     def _update_prices(self):
-        if self.state.reserve0 > 0 and self.state.reserve1 > 0:
-            self.state.price0 = self.state.reserve1 / self.state.reserve0
-            self.state.price1 = self.state.reserve0 / self.state.reserve1
+        token_reserve = self.get_token_reserve()
+        denom_reserve = self.get_denom_reserve()
+        if token_reserve > 0 and denom_reserve > 0:
+            self.state.price_denom_per_token = denom_reserve / token_reserve
+            self.state.price_token_per_denom = token_reserve / denom_reserve
             self._append_event(self.price_history, (self.state.last_update_block, self.get_price()))
 
     def _get_token0_decimals(self) -> int:
@@ -342,7 +348,7 @@ class UniswapV3Pool(BasePool):
     def _get_token1_decimals(self) -> int:
         """Get token1 decimals based on configuration."""
         return self.get_denom_decimals() if self.token1_is_denom else self.get_token_decimals()
-    
+
     def get_current_tick(self) -> int:
         """Get current tick."""
         return self.current_tick

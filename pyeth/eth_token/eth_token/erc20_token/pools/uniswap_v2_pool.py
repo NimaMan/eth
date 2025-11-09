@@ -32,12 +32,14 @@ Price Calculation:
 - Price impact calculations using constant product formula
 """
 
-from typing import Optional, Tuple, Dict, List, Iterable, Any
+from typing import Optional, Dict, List, Iterable, Any
 from dataclasses import dataclass, field
 import pyreth
+
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.utils import bounded_history
 from eth_data.utils.type_converter import convert_scaled_amount
 from eth_data.chain_utils.common_addresses import ROUTER_ADDRESSES,  ZERO_ADDRESS, canonicalize_dex_pool_type
 
@@ -89,9 +91,7 @@ class LPTokenTracker:
         self._approval_events: List[Dict[str, Any]] = []
 
     def _append_event(self, collection: List[Dict[str, Any]], entry: Dict[str, Any]) -> None:
-        collection.append(entry)
-        if len(collection) > self.history_limit:
-            del collection[: len(collection) - self.history_limit]
+        bounded_history.append_with_history_limit(collection, entry, self.history_limit)
 
     def _get_or_create_holder(self, address: str) -> LPHolderInfo:
         if address not in self._holders:
@@ -376,7 +376,7 @@ class UniswapV2Pool(BasePool):
             f"error={result.error_message}"
         )
         
-    def process_transaction(self, transaction: Dict):
+    def update_from_transaction(self, transaction: Dict):
         """Process V2 events from a transaction.        
         - univ2_syncs: Reserve updates
         - univ2_swaps: Trade events
@@ -436,23 +436,27 @@ class UniswapV2Pool(BasePool):
                 "UniswapV2Pool._process_sync: "
                 f"missing decimals (token0={token0_decimals}, token1={token1_decimals}) for pool {self.pool_address}"
             )
-            
+
+        token_reserve, denom_reserve = self._map_token_and_denom(reserve0, reserve1)
         self.update_reserves(
-            reserve0=reserve0, 
-            reserve1=reserve1, 
+            token_reserve=token_reserve,
+            denom_reserve=denom_reserve,
             block_number=transaction['block_number'],
             timestamp=transaction["block_timestamp"],
             tx_hash=transaction['hash']
         )
         
         # Store sync event
-        self._append_event(self.sync_events, {
-            'block': transaction['block_number'],
-            'tx_hash': transaction['hash'],
-            'reserve0': reserve0,
-            'reserve1': reserve1,
-            'timestamp': transaction["block_timestamp"],
-        })
+        self._append_event(
+            self.sync_events,
+            {
+                'block': transaction['block_number'],
+                'tx_hash': transaction['hash'],
+                'token_reserve': token_reserve,
+                'denom_reserve': denom_reserve,
+                'timestamp': transaction["block_timestamp"],
+            },
+        )
 
     def _process_swap(self, swap: dict, transaction: Dict):
         """Process a V2 swap event."""
@@ -468,15 +472,22 @@ class UniswapV2Pool(BasePool):
         amount1_out = float(swap.get('amount1Out', swap.get('amount1_out', 0)))
         
         # Update volumes
-        self.state.volume0_in += amount0_in
-        self.state.volume1_in += amount1_in  
-        self.state.volume0_out += amount0_out
-        self.state.volume1_out += amount1_out
+        token_in, denom_in = self._map_token_and_denom(amount0_in, amount1_in)
+        token_out, denom_out = self._map_token_and_denom(amount0_out, amount1_out)
+
+        self.state.token_volume_in += token_in
+        self.state.denom_volume_in += denom_in
+        self.state.token_volume_out += token_out
+        self.state.denom_volume_out += denom_out
         self.state.total_swaps += 1
         
         # Determine trade direction
-        is_buy = amount0_out > 0 and amount1_in > 0  # Getting token0 for token1
-        is_sell = amount0_in > 0 and amount1_out > 0  # Giving token0 for token1
+        if self.token1_is_denom:
+            is_buy = amount0_out > 0 and amount1_in > 0
+            is_sell = amount0_in > 0 and amount1_out > 0
+        else:
+            is_buy = amount1_out > 0 and amount0_in > 0
+            is_sell = amount1_in > 0 and amount0_out > 0
         
         # Store swap event
         self._append_event(self.swap_events, {
@@ -603,12 +614,13 @@ class UniswapV2Pool(BasePool):
         """
         pool_data = {
             'pool_address': self.pool_address,
-            'token_reserve': self.state.reserve_token,
-            'denom_reserve': self.state.reserve_denom,
+            'token_reserve': self.get_token_reserve(),
+            'denom_reserve': self.get_denom_reserve(),
             'trading_enabled': self.trading_enabled,
             'trading_enabled_block': self.trading_enabled_block,
             'trading_enabled_tx': self.trading_enabled_tx,
             'lp_tokens_approved_percentage': self.get_lp_approved_percentage()
         }
         return pool_data
+    
     

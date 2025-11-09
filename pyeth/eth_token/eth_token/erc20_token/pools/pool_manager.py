@@ -40,15 +40,19 @@ Interaction with Blockchain:
 
 from typing import Dict, List, Optional, Tuple, Any, Iterable, Set
 from collections import defaultdict
-from web3 import Web3
 
-from .base_pool import BasePool
-from .uniswap_v2_pool import UniswapV2Pool
-from .uniswap_v3_pool import UniswapV3Pool
-from .uniswap_v4_pool import UniswapV4Pool, PoolKey
+from eth_token.erc20_token.pools.base_pool import BasePool
+from eth_token.erc20_token.pools.uniswap_v2_pool import UniswapV2Pool
+from eth_token.erc20_token.pools.uniswap_v3_pool import UniswapV3Pool
+from eth_token.erc20_token.pools.uniswap_v4_pool import UniswapV4Pool, PoolKey
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
-from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS, canonicalize_dex_pool_type
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_data.chain_utils.common_addresses import (
+    DENOM_ADDRESSES,
+    DENOM_NAMES_TO_ADDRESS,
+    ZERO_ADDRESS,
+    canonicalize_dex_pool_type,
+)
 
 
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
@@ -118,16 +122,15 @@ class PoolManager:
         block_number: Optional[int] = None,
         block_header: Optional[str] = None,
     ) -> int:
-        checksum_address = Web3.to_checksum_address(denom_address)
-        if checksum_address not in self._denom_decimals_cache:
-            self._denom_decimals_cache[checksum_address] = int(
+        if denom_address not in self._denom_decimals_cache:
+            self._denom_decimals_cache[denom_address] = int(
                 self.token_chain_data_fetcher.get_token_decimals(
-                    checksum_address,
+                    denom_address,
                     block_number,
                     block_header,
                 )
             )
-        return self._denom_decimals_cache[checksum_address]
+        return self._denom_decimals_cache[denom_address]
 
     def _pool_decimal_kwargs(
         self,
@@ -146,7 +149,7 @@ class PoolManager:
             'history_limit': self.history_limit,
         }
 
-    def process_transaction(self, transaction: Dict):
+    def update_from_transaction(self, transaction: Dict):
         """
         Process a transaction and route events to appropriate pools.
         
@@ -163,12 +166,12 @@ class PoolManager:
         # Route events to existing pools
         for pool in self.pools.values():
             pool.update_latest_block_control_address_transactions(transaction)
-            pool.process_transaction(transaction)
+            pool.update_from_transaction(transaction)
             
         # Route V4 events to V4 pools
         for v4_pool in self.v4_pools.values():
             v4_pool.update_latest_block_control_address_transactions(transaction)
-            v4_pool.process_transaction(transaction)            
+            v4_pool.update_from_transaction(transaction)            
             
     def _check_pool_creations(self, transaction: Dict):
         """Check for new pool creation events."""
@@ -315,21 +318,9 @@ class PoolManager:
             hooks=hooks
         )
         
-        # V4 encodes native ETH as the zero address. Avoid metadata lookups because
-        # the PyReth chain query treats the zero address as non-contract and will
-        # reject decimals/symbol calls. Treat it as an 18-decimal native currency.
-        denom_is_native = denom_address == ZERO_ADDRESS
-        if denom_is_native:
-            decimal_kwargs = {
-                'token_decimals': self._get_token_decimals(
-                    transaction.get('block_number'),
-                    transaction.get('block_header'),
-                ),
-                'denom_decimals': 18,
-                'history_limit': self.history_limit,
-            }
-        else:
-            decimal_kwargs = self._pool_decimal_kwargs(
+        if denom_address == ZERO_ADDRESS:
+            denom_address = DENOM_NAMES_TO_ADDRESS["WETH"]            
+        decimal_kwargs = self._pool_decimal_kwargs(
                 denom_address,
                 block_number=transaction.get('block_number'),
                 block_header=transaction.get('block_header'),
@@ -525,7 +516,7 @@ class PoolManager:
             if len(parts) == 2:
                 pool_id = parts[1]
                 return self.v4_pools.get(pool_id)
-        pool = self.pools.get(Web3.to_checksum_address(pool_address))
+        pool = self.pools.get(pool_address)
         return pool
         
     def get_pools_by_protocol(self, protocol: str) -> List[BasePool]:
@@ -888,7 +879,6 @@ class PoolManager:
             # Skip if already being processed
             if pool_address in self._processing_pools:
                 return
-                
             self._processing_pools.add(pool_address)
             
             # Use chain data fetcher to get pool info

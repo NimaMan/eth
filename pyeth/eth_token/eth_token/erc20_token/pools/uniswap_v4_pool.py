@@ -27,14 +27,15 @@ Blockchain Interface:
 - getPoolKey(poolId): Retrieve PoolKey from PoolId
 """
 
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from web3 import Web3
-from .base_pool import BasePool, logger
+
+from eth_token.erc20_token.pools.base_pool import BasePool, logger
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.pyreth_client import pyreth
 from eth_data.chain_utils.common_addresses import ZERO_ADDRESS, canonicalize_dex_pool_type
-from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 
 
 UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
@@ -62,33 +63,6 @@ class UniswapV4Pool(BasePool):
     Uniswap V4 Pool, correctly modeling concentrated liquidity within the singleton architecture.
     """
     POOL_MANAGER = "0x000000000004444C5DC75cB358380d2E3de08a90"
-
-    # Discovered mainnet V4 pools for common pairs (via Reth DB logs)
-    # Note: V4 uses PoolId (bytes32) rather than pool addresses. These entries
-    # help manual wiring when constructing known pools for tokens.
-    KNOWN_POOLS: Dict[str, List[Dict[str, str | int]]] = {
-        # USDC / WETH
-        "USDC_WETH": [
-            {
-                "pool_id": "0x6d4bc5556c4b1b0d13d58f710e6de12b1d7a0711ef2b95dbf8507e96932162fa",
-                "currency0": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-                "currency1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                "fee": 1000,
-                "tick_spacing": 1,
-                "hooks": "0x36FABF0DaCD49E94dDb3A21999F199068a9Fe8a8",
-            },
-            {
-                "pool_id": "0xf54122f945300a5230ce2bf95ceb7a70248368fe59125ca43dcf00052054a236",
-                "currency0": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-                "currency1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-                "fee": 100,
-                "tick_spacing": 1,
-                "hooks": "0xf3621C65B9597819a854743ECe1A0f2d62c5A8A8",
-            },
-        ],
-        # USDT / WETH (no Initialize events found in recent history)
-        "USDT_WETH": [],
-    }
     
     def __init__(
         self,
@@ -103,7 +77,6 @@ class UniswapV4Pool(BasePool):
         pool_chain_fetcher: Optional['PoolChainDataFetcher'] = None,
         token_chain_fetcher: Optional['TokenChainDataFetcher'] = None,
         history_limit: int = 100,
-        denom_is_native: bool = False,
     ):
         super().__init__(
             pool_address=self.POOL_MANAGER,
@@ -119,7 +92,6 @@ class UniswapV4Pool(BasePool):
         
         self.pool_id = pool_id
         self.pool_key = pool_key
-        self.denom_is_native = denom_is_native
         
         # Display address for compatibility (PoolManager#poolId format)
         self.display_address = f"{self.POOL_MANAGER}-{pool_id}"
@@ -134,11 +106,9 @@ class UniswapV4Pool(BasePool):
         return UNISWAP_V4_PROTOCOL
 
     def get_denom_name(self) -> str:
-        if self.denom_is_native:
-            return "ETH"
         return super().get_denom_name()
     
-    def process_transaction(self, transaction: Dict):
+    def update_from_transaction(self, transaction: Dict):
         # V4 uses ModifyLiquidity for both mints and burns
         if transaction.get('uniswap_v4_modifies'):
             for modify in transaction['uniswap_v4_modifies']:
@@ -170,10 +140,11 @@ class UniswapV4Pool(BasePool):
 
         amount0 = float(swap.get('amount0', 0))
         amount1 = float(swap.get('amount1', 0))
-        self.state.volume0_in += max(0, amount0)
-        self.state.volume0_out += max(0, -amount0)
-        self.state.volume1_in += max(0, amount1)
-        self.state.volume1_out += max(0, -amount1)
+        token_amount, denom_amount = self._map_token_and_denom(amount0, amount1)
+        self.state.token_volume_in += max(0.0, token_amount)
+        self.state.token_volume_out += max(0.0, -token_amount)
+        self.state.denom_volume_in += max(0.0, denom_amount)
+        self.state.denom_volume_out += max(0.0, -denom_amount)
         self.state.total_swaps += 1
         
         self._append_event(self.swap_events, dict(swap))
@@ -287,8 +258,8 @@ class UniswapV4Pool(BasePool):
 
     def _update_virtual_reserves(self):
         if self.sqrt_price_x96 == 0 or self.current_liquidity == 0:
-            self.state.reserve0 = 0
-            self.state.reserve1 = 0
+            self.state.token_reserve = 0.0
+            self.state.denom_reserve = 0.0
             return
 
         sqrt_price = self.sqrt_price_x96 / (2**96)
@@ -299,13 +270,18 @@ class UniswapV4Pool(BasePool):
         token0_decimals = self._get_token0_decimals()
         token1_decimals = self._get_token1_decimals()
 
-        self.state.reserve0 = reserve0_raw / (10**token0_decimals)
-        self.state.reserve1 = reserve1_raw / (10**token1_decimals)
+        reserve0 = reserve0_raw / (10**token0_decimals)
+        reserve1 = reserve1_raw / (10**token1_decimals)
+        token_reserve, denom_reserve = self._map_token_and_denom(reserve0, reserve1)
+        self.state.token_reserve = token_reserve
+        self.state.denom_reserve = denom_reserve
         
     def _update_prices(self):
-        if self.state.reserve0 > 0 and self.state.reserve1 > 0:
-            self.state.price0 = self.state.reserve1 / self.state.reserve0
-            self.state.price1 = self.state.reserve0 / self.state.reserve1
+        token_reserve = self.get_token_reserve()
+        denom_reserve = self.get_denom_reserve()
+        if token_reserve > 0 and denom_reserve > 0:
+            self.state.price_denom_per_token = denom_reserve / token_reserve
+            self.state.price_token_per_denom = token_reserve / denom_reserve
             self._append_event(self.price_history, (self.state.last_update_block, self.get_price()))
 
     def _get_token0_decimals(self) -> int:
@@ -333,6 +309,7 @@ class UniswapV4Pool(BasePool):
         if currency1 == denom_addr:
             return self.get_denom_decimals()
         return int(self.token_chain_fetcher.get_token_decimals(currency1))
+
     
     # ChainQuery-backed fetchers should be used externally for live reserve data.
     
