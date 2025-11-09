@@ -838,11 +838,11 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token decimals via on-chain query
-    #[pyo3(signature = (token, block=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None))]
     fn get_token_decimals(
         &self,
         token: &str,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<&str>,
     ) -> PyResult<u8> {
         let token_addr = super::utils::parse_address(token)?;
@@ -853,21 +853,21 @@ impl PyChainQuery {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_decimals(token_addr, block, Some(header))
+                            .get_token_decimals(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_decimals(token_addr, block, None).await,
+                    None => provider.get_token_decimals(token_addr, block_number, None).await,
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token symbol via on-chain query
-    #[pyo3(signature = (token, block=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None))]
     fn get_token_symbol(
         &self,
         token: &str,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
@@ -878,21 +878,21 @@ impl PyChainQuery {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_symbol(token_addr, block, Some(header))
+                            .get_token_symbol(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_symbol(token_addr, block, None).await,
+                    None => provider.get_token_symbol(token_addr, block_number, None).await,
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token name via on-chain query
-    #[pyo3(signature = (token, block=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None))]
     fn get_token_name(
         &self,
         token: &str,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
@@ -903,21 +903,21 @@ impl PyChainQuery {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_name(token_addr, block, Some(header))
+                            .get_token_name(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_name(token_addr, block, None).await,
+                    None => provider.get_token_name(token_addr, block_number, None).await,
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 total supply as string (wei) via on-chain query
-    #[pyo3(signature = (token, block=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None))]
     fn get_token_total_supply(
         &self,
         token: &str,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<&str>,
     ) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
@@ -929,12 +929,12 @@ impl PyChainQuery {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_total_supply(token_addr, block, Some(header))
+                            .get_token_total_supply(token_addr, block_number, Some(header))
                             .await
                     }
                     None => {
                         provider
-                            .get_token_total_supply(token_addr, block, None)
+                            .get_token_total_supply(token_addr, block_number, None)
                             .await
                     }
                 }
@@ -944,11 +944,11 @@ impl PyChainQuery {
     }
 
     /// Get complete token metadata in a single call
-    #[pyo3(signature = (token, block=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None))]
     fn get_token_metadata(
         &self,
         token: &str,
-        block: Option<u64>,
+        block_number: Option<u64>,
         block_header: Option<&str>,
     ) -> PyResult<super::tokens::PyTokenMetadata> {
         let token_addr = super::utils::parse_address(token)?;
@@ -960,10 +960,10 @@ impl PyChainQuery {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_metadata(token_addr, block, Some(header))
+                            .get_token_metadata(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_metadata(token_addr, block, None).await,
+                    None => provider.get_token_metadata(token_addr, block_number, None).await,
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
