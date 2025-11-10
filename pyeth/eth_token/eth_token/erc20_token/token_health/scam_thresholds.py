@@ -1,13 +1,23 @@
 """
 Scam Detection Thresholds Configuration
 
-This module defines the liquidity thresholds below which pools are considered scams.
+This module defines the liquidity thresholds below which pools are considered scams
+and exposes shared constants for other scam checks (e.g., hidden mints).
 Different thresholds apply to different denomination currencies based on their value.
 """
 
 from typing import Dict, Optional
 
 from eth_data.chain_utils.common_addresses import DENOM_NAMES_TO_ADDRESS
+
+__all__ = [
+    "HIDDEN_MINTS_THRESHOLD",
+    "THRESHOLDS",
+    "get_threshold_for_token",
+]
+
+# Hidden-mint tolerance: circulating supply can exceed total supply by at most 1%.
+HIDDEN_MINTS_THRESHOLD = 1 + 1e-2
 
 # Thresholds for different asset categories
 THRESHOLDS = {

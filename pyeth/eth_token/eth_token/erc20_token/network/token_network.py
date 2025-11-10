@@ -24,7 +24,11 @@ class LiveTokenNetwork(LiveTokenNetworkBuilder):
         self.high_degree_node_threshold = high_degree_node_threshold
         
         # Initialize analyzers after parent class has set up the base graph (self.graph)
-        self.subgraph_analyzer = NetworkSubgraphAnalyzer(graph=self.graph, token_data=self.live_token.token_data, degree_threshold=self.high_degree_node_threshold)
+        self.subgraph_analyzer = NetworkSubgraphAnalyzer(
+            graph=self.graph,
+            degree_threshold=self.high_degree_node_threshold,
+            token=self.live_token,
+        )
     
     def get_agg_user_activity_df(self):
         all_users_activity = []

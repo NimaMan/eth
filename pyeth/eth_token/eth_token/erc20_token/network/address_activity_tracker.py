@@ -1,6 +1,5 @@
 import numpy as np
 from collections import defaultdict
-from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
 
 # ignore warnings
 import warnings
@@ -14,13 +13,15 @@ class AddressTokenActivityTracker:
                  entry_index=None,
                  entry_log_index=None, 
                  latest_block=None,
-                 token_data:ERC20TokenData=None,
+                 token=None,
+                 live_token=None,
                  address=None,
                  address_type=None,
                  is_fee_source=None,
                  fee_source=None, 
                  init_tx_fee=None):
-        self.token_data = token_data
+        self.token = token
+        self.live_token = live_token
         self.entry_block = entry_block
         self.latest_block = latest_block
         self.entry_index = entry_index
@@ -117,7 +118,11 @@ class AddressTokenActivityTracker:
     
     @property
     def token_latest_price(self):
-        pool_snapshot, best_price = self.token_data.liquidity_analyzer.get_best_price(for_buy=True)
+        best_price = None
+        if self.live_token:
+            best_quote = self.live_token.liquidity_matrix.get_best_price(for_buy=True)
+            if best_quote:
+                _, best_price = best_quote
         return best_price if best_price is not None else 0.0
         
     @property
@@ -192,7 +197,9 @@ class AddressTokenActivityTracker:
     
     @property
     def token_holdings_to_total_supply_ratio(self):
-        return self.token_holdings / self.token_data.total_supply
+        if not self.token or not self.token.total_supply:
+            return 0.0
+        return self.token_holdings / self.token.total_supply
 
     @property  
     def token_holdings_ratio(self):
@@ -247,10 +254,10 @@ class AddressTokenActivityTracker:
             #'fee_source': self.fee_source,
             'address_type': self.address_type,
             'address': self.address,
-            'is_scam': self.token_data.is_scam,
-            'scam_label': self.token_data.scam_label,
+            'is_scam': self.token.is_scam,
+            'scam_label': self.token.scam_label,
             'total_tx_fees': self.total_tx_fees,
-            'contract_address': self.token_data.contract_address,
+            'contract_address': self.token.contract_address,
         }
 
     def merge(self, other):
@@ -297,7 +304,7 @@ class AddressTokenActivityTracker:
             entry_block=min(self.entry_block, other.entry_block),
             entry_index=None,
             entry_log_index=None,
-            token_data=self.token_data,
+            token=self.token,
             address_type="Aggregated",
             associated_addresses=self.associated_addresses | other.associated_addresses
         )

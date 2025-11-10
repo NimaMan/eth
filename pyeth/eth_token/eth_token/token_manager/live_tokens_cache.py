@@ -58,10 +58,16 @@ class LiveTokensCache:
         """
         if not self.logger:
             return
-        # Promote to error if exception info is provided
         if kwargs.get("exc_info") and level == "info":
             level = "error"
-        log_fn = getattr(self.logger, level, self.logger.info)
+        log_fn = {
+            "info": self.logger.info,
+            "warning": self.logger.warning,
+            "error": self.logger.error,
+            "debug": self.logger.debug,
+        }.get(level)
+        if log_fn is None:
+            raise AttributeError(f"Logger missing level '{level}'")
         log_fn(message, **kwargs)
  
     def clear_cache(self):
@@ -98,13 +104,15 @@ class LiveTokensCache:
 
     def update_pool_mapping(self, token: ERC20Token) -> None:
         # Pool manager might not be initialized yet
-        pool_manager = getattr(getattr(token, "token_data", None), "pool_manager", None)
-        if not pool_manager:
+        if not hasattr(token, "pool_addresses"):
             return
+        current_addresses = set(token.pool_addresses or ())
 
         with self._lock:
-            current_addresses = set(pool_manager.get_all_pool_addresses())
             previous_addresses = self._token_pool_addresses.get(token.contract_address, set())
+
+            if not current_addresses and not previous_addresses:
+                return
 
             # Remove pools no longer associated with this token
             for pool_addr in previous_addresses - current_addresses:
@@ -189,8 +197,11 @@ class LiveTokensCache:
             del self.cache[key]
 
     def __getattr__(self, item: str):
-        """Get attribute from token_data"""
-        return getattr(self.cache, item)
+        """Proxy attribute access to the underlying cache OrderedDict."""
+        try:
+            return object.__getattribute__(self.cache, item)
+        except AttributeError as exc:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute '{item}'") from exc
     
     def _write_token_pnl(self, token_address: str) -> bool:
         """
@@ -212,15 +223,12 @@ class LiveTokensCache:
                 return False
                 
             # Check if any pool has trading enabled (trading_enabled_tx is not None)
-            if hasattr(token_entry.token, 'token_data') and token_entry.token.token_data:
-                pool_manager = token_entry.token.token_data.pool_manager
-                if pool_manager:
-                    # Get all pools and check if any have trading enabled
-                    pools = pool_manager.get_all_pools()
-                    # Trading is enabled if trading_enabled_tx is set
-                    has_trading = any(pool.trading_enabled_tx is not None for pool in pools.values())
-                    if has_trading:
-                        return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
+            pool_manager = token_entry.token.pool_manager
+            if pool_manager:
+                pools = pool_manager.get_all_pools()
+                has_trading = any(pool.trading_enabled_tx is not None for pool in pools.values())
+                if has_trading:
+                    return self.pnl_writer.write_token_pnl_to_db(token_entry.token)
             return False
         except Exception as e:
             self.log(f"Error writing PnL data for token {token_address}: {str(e)}", exc_info=True)

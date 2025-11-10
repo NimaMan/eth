@@ -4,6 +4,21 @@
 
 The ERC20 Token Live Tracking System is a comprehensive real-time blockchain analytics framework designed to monitor, analyze, and assess ERC20 tokens on Ethereum. It processes blockchain transactions to maintain token state, track liquidity pools across multiple DEX protocols, analyze trading networks, and detect potential scams through pattern recognition.
 
+## Transaction Processing Flow
+
+Each processed transaction moves through a deterministic pipeline:
+
+1. **Metadata refresh** – record latest block number, timestamp, and fee payer in `tx_hashes_to_makers`.
+2. **Creation handling** – if the transaction deployed the token, capture constructor info, seed the control tracker with the deployer, and set the lifecycle state to `CREATION`.
+3. **Pool pipeline** – pass the transaction through `PoolStateBridge` so every tracked pool updates reserves, LP balances, and trading guards.
+4. **Transfer pipeline** – run `TokenTransferTracker.update_from_transaction` to capture ERC20 transfers, denomination transfers, internal ETH movements, approvals, and address counters.
+5. **Control pipeline** – `ControlAddressTracker.update_from_transaction` consumes ownership transfers, AccessControl role events, proxy admin changes, and renouncement events; new controllers are pushed down to pools.
+6. **Governance pipeline** – `TokenStateMonitor.update_from_transaction` records trading/tax/max-buy events, and `detect_hidden_mint` compares reconstructed supply against on-chain totals; scam flags can transition the lifecycle directly to `INACTIVE_SCAM`.
+7. **Lifecycle derivation** – `_update_life_cycle_status` moves the token through `CREATION → PAIR_CREATION → TRADING_ENABLED → INACTIVE_*` based on the evidence collected above.
+8. **Bribe & network analysis** – update bribe totals, feed the address-activity tracker, and refresh the token-health predictor for downstream consumers.
+
+All subsystems expose a single `update_from_transaction` entry point, so the orchestrator always executes these steps in the same order.
+
 ## Token Control Model
 
 Ethereum enforces token behaviour through contract storage. Any change that toggles trading, rewrites tax parameters, freezes wallets, or drains liquidity must be executed by an address that satisfies the contract’s access control (e.g., `onlyOwner`, admin role, multisig). Ordinary traders invoking `transfer`/`swap` paths cannot mutate those variables—they merely read the flags that privileged callers set. The tracking system therefore keeps an explicit view of *who* can change token state and *which* transactions might have done so.
@@ -41,7 +56,6 @@ In practice we can enrich the control-address registry by:
 
 ## System Architecture
 
-```
 ┌─────────────────────┐
 │   ERC20Token       │  Main Facade
 │ (erc20_token.py)   │
@@ -59,7 +73,7 @@ In practice we can enrich the control-address registry by:
       │                │       └── V2/V3/V4 Pools │
       │                │                          │
       │                └── Liquidity Analysis     │
-      │                    └── PoolLiquidityMatrix
+      │                    └── MultiPoolLiquidityAnalyzer
       │
       ├─── Network Analysis Layer ─────────────────┐
       │                                            │
@@ -86,13 +100,11 @@ In practice we can enrich the control-address registry by:
                        │                            │
                        └── Actor Classification     │
                            └── Scam Scoring
-```
 
 ## Data Flow
 
 ### 1. Transaction Entry Point
 
-```python
 ERC20Token.update_from_transaction(transaction)
     ├── ERC20TokenData.update_from_transaction()
     │   ├── Parse transaction logs
@@ -109,11 +121,9 @@ ERC20Token.update_from_transaction(transaction)
         ├── Analyze volume patterns
         ├── Check actor involvement
         └── Generate scam scores
-```
 
 ### 2. Event Processing Pipeline
 
-```
 Transaction Logs
     │
     ├── Token Events
@@ -130,60 +140,35 @@ Transaction Logs
     └── Internal Transactions
         ├── ETH Transfers
         └── Contract Interactions
-```
 
 ## Core Components
 
 ### 1. ERC20Token (Main Interface)
 **File**: `erc20_token.py`
 
-The main facade that coordinates all subsystems:
-- Initializes data, network, and health components
-- Routes transactions to appropriate handlers
-- Provides unified access to token analytics
+The main facade that coordinates all subsystems. It initializes pool/network/health helpers,
+routes every processed transaction through the ordered pipeline, and exposes aggregated analytics
+such as transfer histories, liquidity views, control-address sets, and the latest health
+assessment.
 
-**Key Methods**:
-```python
-update_from_transaction(transaction)  # Process new blockchain data
-```
+### 2. Token Runtime State (formerly `ERC20TokenData`)
+**Compatibility module**: `token_state/erc20_token_data.py`
 
-**Key Properties**:
-```python
-token_data                 # ERC20TokenData backing store
-token_network              # LiveTokenNetwork view
-token_health_predictor     # Health-scoring coordinator
-latest_token_assessment    # Cached result from last health update
-```
+Historically the `ERC20TokenData` class owned every field. The runtime now stores the same data
+directly on `ERC20Token`, but a thin compatibility layer still exposes the type for downstream
+imports. The runtime keeps:
 
-### 2. ERC20TokenData (Data Management)
-**File**: `data/erc20_token_data.py`
-
-Maintains all token state and historical data:
-
-**Core Data**:
-- Token metadata (name, symbol, decimals, supply)
-- Creation details (block, timestamp, creator)
-- Trading status and enablement tracking
-
-**Event Collections**:
-```python
-# Transfer tracking (keyed by tx hash)
-erc20_transfers: Dict[str, List[Transfer]]
-eth_transfers: Dict[str, List[InternalTransfer]]
-other_denom_transfers: Dict[str, List[Transfer]]
-
-# Approvals & ownership
-approvals: List[Approval]
-owner_events: List[OwnershipTransferredEvent]
-approved_addresses: Set[str]
-address_tx_counter: Dict[str, int]
-bribe_amount_dict: Dict[str, float]  # Per-tx bribe accounting
-
-# Pool coordination
-pool_manager: PoolManager                  # Centralized pool registry
-liquidity_matrix: PoolLiquidityMatrix      # Aggregated liquidity/pricing view
-pools: PoolCollection                      # Convenience accessor for BasePool instances
-```
+- Core metadata: address, name, symbol, decimals, total supply, creation info.
+- Lifecycle status (`token_life_cycle_status`), manual scam overrides, bribe totals.
+- Transfer/approval histories managed by `TokenTransferTracker` (ERC20 transfers, denomination
+  transfers, internal ETH, approvals, approved addresses, address transaction counters,
+  reconstructed supply).
+- Ownership/control history from `ControlAddressTracker` (ownership events, renouncement metadata,
+  control-address set).
+- Pool views retrieved via `PoolStateBridge` (`pools`, `MultiPoolLiquidityAnalyzer`, reserve
+  summaries).
+- Governance data emitted by `TokenStateMonitor` (trading enabled timestamps, tax/max-buy events,
+  hidden-mint flags).
 
 ### 3. Pool Management System
 **Directory**: `data/pools/`
@@ -200,7 +185,7 @@ Modular pool tracking across Uniswap protocols:
 - `UniswapV3Pool`: Concentrated liquidity, tick-based pricing
 - `UniswapV4Pool`: Hook-enabled pools, PoolId identification
 
-**PoolLiquidityMatrix** (`data/pool_liquidity_matrix.py`):
+**MultiPoolLiquidityAnalyzer** (`pools/multi_pool_liquidity_analyzer.py`):
 - Snapshots liquidity/pricing across every tracked pool
 - Finds best executable prices (buy/sell) with trading availability checks
 - Aggregates reserves by denomination and total token exposure
@@ -222,7 +207,6 @@ Graph-based analysis of token transfer networks:
 - Calculates aggregated metrics for related addresses
 
 **Key Features**:
-```python
 # User activity tracking
 UserActivityData:
     - token_balance, denom_balance
@@ -234,7 +218,6 @@ NetworkSubgraphAnalyzer:
     - find_subgraphs()  # Connected components
     - get_related_addresses()  # Address clusters
     - simplify_graph()  # Remove noise
-```
 
 ### 5. Health Assessment
 **Directory**: `token_health/`
@@ -251,7 +234,6 @@ Pattern-based scam and manipulation detection:
 - Classifies actors (green/grey/neutral)
 
 **Detection Patterns**:
-```python
 # Deceptive transfers
 - >15 transfers or >20 addresses in single tx
 - Circular transfers without economic purpose
@@ -263,24 +245,20 @@ Pattern-based scam and manipulation detection:
 # Liquidity manipulation
 - Reserve depletion below thresholds
 - Hidden mints (supply > expected)
-```
 
 ## Key Algorithms
 
 ### Price Calculation
 
-**Best Price Selection** (`PoolLiquidityMatrix.get_best_price`):
-```python
+**Best Price Selection** (`MultiPoolLiquidityAnalyzer.get_best_price`):
 1. Iterate through all tracked pools
 2. Skip pools with zero/negative price or missing trading capability (`can_buy` / `can_sell`)
 3. Build lightweight snapshots (price, reserves, protocol metadata)
 4. Return min-price snapshot when buying, max-price snapshot when selling
-```
 
 ### Scam Detection
 
 **Multi-Signal Analysis**:
-```python
 ScamScore:
     - block_number: Detection block
     - confidence: 0.0 to 1.0
@@ -290,24 +268,20 @@ Signals:
     - Deceptive patterns (confidence: 0.5)
     - Malicious actors (confidence: 0.99)
     - Token scam label (confidence: 1.0)
-```
 
 ### Network Analysis
 
 **Related Address Detection**:
-```python
 1. Build directed graph from transfers
 2. Find strongly connected components
 3. Aggregate metrics per component:
    - Combined balances
    - Total profits
    - Shared counterparties
-```
 
 ## Usage Patterns
 
 ### 1. Real-time Token Monitoring
-```python
 # Initialize token tracking
 token = ERC20Token(contract_address)
 
@@ -317,30 +291,26 @@ for transaction in blockchain_stream:
     
 # Access current state
 # Returns (snapshot, price) when available
-best_buy = token.token_data.liquidity_matrix.get_best_price(for_buy=True)
+best_buy = token.liquidity_matrix.get_best_price(for_buy=True)
 if best_buy:
     best_buy_snapshot, buy_price = best_buy
 
 health = token.latest_token_assessment
-```
 
 ### 2. Pool Analysis
-```python
 # Get all pools for token
-pools = token.token_data.pool_manager.get_all_pools()
+pools = token.pool_manager.get_all_pools()
 
 # Summarise pool health (scam labels, reserves, trading status)
-pool_stats = token.token_data.pool_manager.get_pool_health_stats()
+pool_stats = token.pool_manager.get_pool_health_stats()
 
 # Liquidity distribution across denominations
-liquidity_by_denom = token.token_data.liquidity_matrix.total_liquidity_by_denom()
+liquidity_by_denom = token.liquidity_matrix.total_liquidity_by_denom()
 
 # LP holder analysis (V2)
 lp_distribution = pool.get_lp_holders()
-```
 
 ### 3. Network Analysis
-```python
 # Get user activity with related addresses
 user_df = token.token_network.get_agg_user_activity_df()
 
@@ -349,10 +319,8 @@ components = token.token_network.connected_components
 
 # Check specific address relationships
 related = token.token_network.subgraph_analyzer.get_related_addresses(addr)
-```
 
 ### 4. Health Assessment
-```python
 # Get latest health assessment
 assessment = token.latest_token_assessment
 
@@ -363,7 +331,6 @@ if assessment['is_scam']:
 # Review involved actors
 green_actors = assessment['involved_green_actors']
 mal_actors = assessment['involved_mal_actors']
-```
 
 ## Performance Considerations
 
@@ -435,7 +402,7 @@ mal_actors = assessment['involved_mal_actors']
 1. Create new pool class extending `BasePool`
 2. Add event handlers to `ERC20TokenData`
 3. Update `PoolManager` discovery logic
-4. Extend `PoolLiquidityMatrix` helpers or introduce protocol-specific simulation logic if needed
+4. Extend `MultiPoolLiquidityAnalyzer` helpers or introduce protocol-specific simulation logic if needed
 
 ### Adding New Health Signals
 1. Extend `VolumeAnalyzer` with new patterns

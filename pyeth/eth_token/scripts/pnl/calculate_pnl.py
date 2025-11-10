@@ -132,7 +132,7 @@ async def calculate_pnl(start_date_str, end_date_str, add_pnl_to_db=True, token_
                             pools_data[pool_address] = {
                                 "pool_type": pool.pool_type,
                                 "denom_address": pool.denom_address,
-                                "fee_tier": getattr(pool, 'fee_tier', None),
+                                "fee_tier": pool.fee_tier if hasattr(pool, 'fee_tier') else None,
                                 "is_scam": token.token_data.is_scam,
                                 "scam_label": token.token_data.scam_label,
                                 "trading_enabled": pool.trading_enabled,

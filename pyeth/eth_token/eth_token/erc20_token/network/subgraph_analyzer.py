@@ -58,7 +58,6 @@ import pandas as pd
 from collections import Counter
 from typing import List, Set, Dict, Optional
 from dataclasses import dataclass
-from eth_token.erc20_token.data.erc20_token_data import ERC20TokenData
 
 
 @dataclass
@@ -77,16 +76,16 @@ class SubgraphMetrics:
     
 
 class NetworkSubgraphAnalyzer:
-    def __init__(self, graph: nx.DiGraph, token_data: ERC20TokenData, degree_threshold: int = 10, frequency_threshold: float = 0.3):
-        """
-        Initialize component analyzer with original and simplified graphs.
-        
-        Args:
-            graph: Original network graph
-            simplified_graph: Simplified version of the graph
-        """
+    def __init__(
+        self,
+        graph: nx.DiGraph,
+        token,
+        degree_threshold: int = 10,
+        frequency_threshold: float = 0.3,
+    ):
+        """Initialize component analyzer with original and simplified graphs."""
         self.graph = graph
-        self.token_data = token_data
+        self.token = token
         self.degree_threshold = degree_threshold
         self.frequency_threshold = frequency_threshold
         self.removed_nodes = set()
@@ -96,14 +95,12 @@ class NetworkSubgraphAnalyzer:
     def default_addresses_to_remove(self) -> set:
         """Default addresses to remove"""
         addresses_to_remove = {
-            self.token_data.contract_address,
+            self.token.contract_address,
             "0x0000000000000000000000000000000000000000",
             "0x000000000000000000000000000000000000dEaD",
         }
-        # Add the pool addresses to the set of addresses to remove
-        addresses_to_remove = addresses_to_remove.union(set(self.token_data.pool_info.keys()))
-        # Add contract addresses to the set of addresses to remove
-        addresses_to_remove = addresses_to_remove.union(set(self.token_data.contract_address))
+        pool_info = self.token.pool_info if self.token else {}
+        addresses_to_remove = addresses_to_remove.union(set(pool_info.keys()))
         return addresses_to_remove
 
     def simplify(self) -> nx.DiGraph:
@@ -114,7 +111,7 @@ class NetworkSubgraphAnalyzer:
         3. Removing high-degree nodes (unless they're fee sources)
         """
         simplified_graph = self.graph.copy()
-        total_txs = len(self.token_data.tx_hashes)
+        total_txs = len(self.token.tx_hashes)
         
         # Skip if no transactions
         if total_txs == 0:
@@ -126,13 +123,13 @@ class NetworkSubgraphAnalyzer:
         # 1. Handle high-frequency addresses
         min_appearances = int(total_txs * self.frequency_threshold)
         
-        for address, count in self.token_data.address_tx_counter.items():
+        for address, count in self.token.address_tx_counter.items():
             if (address is not None and 
                 address not in default_addresses and 
                 count > min_appearances):
                 
                 # Address appears in too many transactions to be meaningful for connections
-                if address not in self.token_data.fee_sources:
+                if address not in self.token.fee_sources:
                     # Remove incoming edges to prevent artificial connections
                     if address in simplified_graph:
                         incoming_edges = list(simplified_graph.in_edges(address))
@@ -140,13 +137,13 @@ class NetworkSubgraphAnalyzer:
         
         # 2. Remove high in-degree nodes (many addresses interact with it)
         for node, degree in simplified_graph.in_degree():
-            if (node not in self.token_data.fee_sources and 
+            if (node not in self.token.fee_sources and 
                 degree > self.degree_threshold):
                 self.removed_nodes.add(node)
         
         # 3. Remove high out-degree nodes (initiates transactions with many addresses)
         for node, degree in simplified_graph.out_degree():
-            if (node not in self.token_data.fee_sources and 
+            if (node not in self.token.fee_sources and 
                 degree > 2*self.degree_threshold):
                 self.removed_nodes.add(node)
         

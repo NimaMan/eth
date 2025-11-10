@@ -87,14 +87,15 @@ class TokenHealthPredictor:
 
     def _check_token_scam_label(self, transaction: Dict, live_token) -> bool:
         """Check if the token has a scam label"""
-        if live_token.token_data.is_scam:
+        if live_token.is_scam:
+            label = live_token.scam_label or "Token flagged as scam"
             self.scam_scores[transaction.get('hash')] = ScamScore(
                 block_number=transaction.get('block_number'),
                 transaction_hash=transaction.get('hash'),
                 from_address=transaction.get('from_address'),
                 is_scam=True,
                 confidence=1,
-                reason=f"{live_token.token_data.scam_label}",
+                reason=label,
             )
     
     @property

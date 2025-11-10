@@ -25,11 +25,12 @@ from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional
 from collections import OrderedDict
 from tqdm import tqdm
-from eth_data.blockchain.block_processor import BlockProcessor
+
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_token.utils.logger import get_logger
+from eth_data.blockchain.block_processor import BlockProcessor
 
 
 class BlockTokenProcessor:
@@ -118,10 +119,7 @@ class BlockTokenProcessor:
             try:
                 token = ERC20Token(
                     contract_address,
-                    name=token_metadata.name,
-                    symbol=token_metadata.symbol,
-                    decimals=token_metadata.decimals,
-                    total_supply=token_metadata.total_supply,
+                    token_metadata,
                 )
                 token.update_from_transaction(transaction)
                 self.live_tokens_cache[contract_address] = token

@@ -20,11 +20,11 @@ class LiveTokenNetworkBuilder:
     
     @property
     def fee_sources(self):
-        return self.live_token.token_data.fee_sources
+        return self.live_token.fee_sources
     
     @property
     def tx_hashes(self):
-        return self.live_token.token_data.tx_hashes
+        return self.live_token.tx_hashes
     
     def _add_fee_source_edges(self, fee_source: str, addresses: list):
         """Add edges from fee source to all addresses involved in its transaction"""
@@ -37,32 +37,32 @@ class LiveTokenNetworkBuilder:
                 if not self.graph.has_edge(fee_source, address):
                     self.graph.add_edge(fee_source, address, type='tx owner')
 
-    def graph_add_or_update_address(self, 
-                               address: str, 
-                               state_changes: dict, 
-                               block_number: int, 
-                               tx_index: int, 
-                               fee_source: str, 
-                               bribe_amount: float,
-                               tx_fee: float):
+    def graph_add_or_update_address(
+        self,
+        address: str,
+        state_changes: dict,
+        block_number: int,
+        tx_index: int,
+        fee_source: str,
+        bribe_amount: float,
+        tx_fee: float,
+    ):
         """Add new address or update existing one with movement data"""
         is_fee_source = address == fee_source
         if address not in self.graph:
-            # Create new node if it doesn't exist
-            self.graph.add_node(
-                address, 
-                data=AddressTokenActivityTracker(
-                    address=address,
-                    address_type=None,
-                    token_data=self.live_token.token_data,
-                    entry_block=block_number,
-                    latest_block=block_number,
-                    entry_index=tx_index,
-                    entry_log_index=None,
-                    is_fee_source=is_fee_source,
-                    fee_source=fee_source,
-                )
+            tracker = AddressTokenActivityTracker(
+                address=address,
+                address_type=None,
+                token=self.live_token,
+                live_token=self.live_token,
+                entry_block=block_number,
+                latest_block=block_number,
+                entry_index=tx_index,
+                entry_log_index=None,
+                is_fee_source=is_fee_source,
+                fee_source=fee_source,
             )
+            self.graph.add_node(address, data=tracker)
     
         # Get the user activity tracker
         user_activity = self.graph.nodes[address]['data']
@@ -73,7 +73,7 @@ class LiveTokenNetworkBuilder:
             user_activity.bribe_amount += bribe_amount
         
         # Update movements
-        movements = state_changes['movements']
+        movements = state_changes.get('movements', {})
         
         # Add token movements (movements['tokens'][token_address]['in'/'out'])
         if 'tokens' in movements:
@@ -99,10 +99,10 @@ class LiveTokenNetworkBuilder:
         tx_hash = tx_dict['hash']
         tx_index = tx_dict['tx_index']
         fee_source = tx_dict['from_address']
-        bribe_amount = tx_dict['bribe_amount']
-        tx_fee = tx_dict['fees']['tx_fee']
-        erc20_transfers = self.live_token.token_data.erc20_transfers.get(tx_hash, [])
-        eth_transfers = self.live_token.token_data.eth_transfers.get(tx_hash, [])
+        bribe_amount = tx_dict.get('bribe_amount', 0.0) or 0.0
+        tx_fee = (tx_dict.get('fees') or {}).get('tx_fee', 0.0)
+        erc20_transfers = self.live_token.erc20_transfers.get(tx_hash, [])
+        eth_transfers = self.live_token.eth_transfers.get(tx_hash, [])
         # Get balance changes (only significant ones are returned by calculator)
         balance_changes = self.state_diff_calculator.calculate_address_balance_changes(
             tx_hash, 
@@ -112,6 +112,9 @@ class LiveTokenNetworkBuilder:
             eth_transfers, 
             erc20_transfers
             )
+        
+        if not balance_changes:
+            return
         
         # Add or update addresses with their movements
         for address, addr_state_changes in balance_changes.items():
