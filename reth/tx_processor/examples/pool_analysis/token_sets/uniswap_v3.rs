@@ -1,5 +1,7 @@
 use crate::{ExpectedBehavior, TokenConfig};
-use reth_chain_query::common_addresses::dex_token_sets::{uniswap_v3_tokens, UniswapV3TokenInfo};
+use reth_chain_query::common_addresses::dex_token_denom_pairs::{
+    uniswap_v3_tokens, UniswapV3TokenInfo,
+};
 
 pub fn token_configs() -> Vec<TokenConfig> {
     uniswap_v3_tokens()

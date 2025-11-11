@@ -1,8 +1,9 @@
 use crate::tx_processor::TxProcessor;
-use alloy_primitives::{I256, U256};
+use alloy_primitives::{Address, I256, U256};
 use eyre::{eyre, Result, WrapErr};
 use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
@@ -222,6 +223,24 @@ pub async fn check_can_buy_sell_pool(
                 false,
                 false,
             ));
+        }
+    }
+
+    if !config.prior_txs.is_empty() {
+        let mut next_nonces: HashMap<Address, u64> = HashMap::new();
+        for prior_tx in &config.prior_txs {
+            let next_nonce = prior_tx.nonce.saturating_add(1);
+            next_nonces
+                .entry(prior_tx.from_address)
+                .and_modify(|tracked| {
+                    if next_nonce > *tracked {
+                        *tracked = next_nonce;
+                    }
+                })
+                .or_insert(next_nonce);
+        }
+        for (address, next_nonce) in next_nonces {
+            chain.override_account_nonce(address, next_nonce);
         }
     }
 

@@ -91,4 +91,4 @@ Observations from the 2025-10-28 Live Run
 Design split (by crate)
 - reth_chain_query: tx builders (unsigned txs), provider (read‑only chain data)
 - tx_processor (this crate): simulators + `ProcessedTransaction`
-- eth_price_leverage: RL envs that map actions → unsigned tx(s), simulate, apply deltas, and compute rewards
+- eth_env: RL/supervised envs that map actions → unsigned tx(s), simulate, apply deltas, and compute rewards

@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 /// Uniswap V4 Trading Viability Analysis
 ///
 /// Iterates over the canonical Uniswap V4 pool catalog defined in
-/// `reth_chain_query::common_addresses::dex_token_sets` and validates that
+/// `reth_chain_query::common_addresses::dex_token_denom_pairs` and validates that
 /// each pool can execute a buy → approve → sell sequence using the Baygus
 /// router configuration shipped with the project.
 use eyre::Result;
@@ -139,7 +139,7 @@ async fn main() -> Result<()> {
     let pools = uniswap_v4_pools();
     if pools.is_empty() {
         return Err(eyre::eyre!(
-            "No canonical Uniswap V4 pools configured in dex_token_sets"
+            "No canonical Uniswap V4 pools configured in dex_token_denom_pairs"
         ));
     }
 
