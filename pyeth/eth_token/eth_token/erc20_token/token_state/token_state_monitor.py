@@ -17,8 +17,11 @@ __all__ = ["TokenStateMonitor"]
 class TokenStateMonitor:
     """Encapsulates governance-related token state."""
 
-    def __init__(self, *, hidden_mint_threshold: float = 1 + 1e-2) -> None:
+    def __init__(self, token: "LiveERC20Token",  *, hidden_mint_threshold: float = 1 + 1e-2) -> None:
         self.hidden_mint_threshold = hidden_mint_threshold
+        self._token = token
+        self.total_supply = token.total_supply
+        self.total_supply_from_transfers = token.total_supply_from_transfers
 
         # Trading enablement
         self.trading_enabled: bool = False
@@ -58,6 +61,8 @@ class TokenStateMonitor:
         self._process_tax_events(transaction)
         self._process_max_buy_limit_events(transaction)
         self._process_max_buy_ratio_events(transaction)
+        self.detect_hidden_mint(transaction=transaction)
+        
 
     def _process_trading_events(self, transaction: Dict) -> None:
         trading_events = transaction.get("trading_enabled_events") or []
@@ -119,11 +124,11 @@ class TokenStateMonitor:
     def detect_hidden_mint(
         self,
         *,
-        total_supply: Optional[float],
-        total_supply_from_transfers: Optional[float],
         transaction: Dict,
     ) -> bool:
         """Return True if hidden-mint conditions were triggered."""
+        total_supply = self.total_supply
+        total_supply_from_transfers = self.total_supply_from_transfers
         if float(total_supply_from_transfers) > float(total_supply) * self.hidden_mint_threshold:
             self.mark_scam(
                 label="hidden_mint",

@@ -34,7 +34,7 @@ from web3 import Web3
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
-from eth_data.utils.pyreth_client import pyreth
+from eth_data.pyreth_client import pyreth
 from eth_data.chain_utils.common_addresses import ZERO_ADDRESS, canonicalize_dex_pool_type
 
 

@@ -81,8 +81,8 @@ bribe exposure.
   - Component-level: cluster sizes, combined balances, relationship maps.
 
 - **Bribe Awareness**
-  - Integrates with `ERC20TokenData.bribe_amount_dict` to surface bribe
-    exposure directly on address trackers.
+  - Reads `ERC20Token.total_bribe_amount` / `bribe_amounts_by_tx` to
+    surface bribe exposure directly on address trackers.
 
 ## Usage Tips
 

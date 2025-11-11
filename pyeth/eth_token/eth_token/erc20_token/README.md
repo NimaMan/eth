@@ -10,12 +10,13 @@ Each processed transaction moves through a deterministic pipeline:
 
 1. **Metadata refresh** – record latest block number, timestamp, and fee payer in `tx_hashes_to_makers`.
 2. **Creation handling** – if the transaction deployed the token, capture constructor info, seed the control tracker with the deployer, and set the lifecycle state to `CREATION`.
-3. **Pool pipeline** – pass the transaction through `PoolStateBridge` so every tracked pool updates reserves, LP balances, and trading guards.
-4. **Transfer pipeline** – run `TokenTransferTracker.update_from_transaction` to capture ERC20 transfers, denomination transfers, internal ETH movements, approvals, and address counters.
-5. **Control pipeline** – `ControlAddressTracker.update_from_transaction` consumes ownership transfers, AccessControl role events, proxy admin changes, and renouncement events; new controllers are pushed down to pools.
-6. **Governance pipeline** – `TokenStateMonitor.update_from_transaction` records trading/tax/max-buy events, and `detect_hidden_mint` compares reconstructed supply against on-chain totals; scam flags can transition the lifecycle directly to `INACTIVE_SCAM`.
-7. **Lifecycle derivation** – `_update_life_cycle_status` moves the token through `CREATION → PAIR_CREATION → TRADING_ENABLED → INACTIVE_*` based on the evidence collected above.
-8. **Bribe & network analysis** – update bribe totals, feed the address-activity tracker, and refresh the token-health predictor for downstream consumers.
+3. **Transfer pipeline** – run `TokenTransferTracker.update_from_transaction` to capture ERC20 transfers, denomination transfers, internal ETH movements, approvals, bribe totals, and address counters.
+4. **Control pipeline** – `ControlAddressTracker.update_from_transaction` consumes ownership transfers, AccessControl role events, proxy admin changes, and renouncement events.
+5. **Governance pipeline** – `TokenStateMonitor.update_from_transaction` records trading/tax/max-buy events and other token-level toggles.
+6. **Controller propagation** – push the refreshed controller set into the pool manager so every pool replays prior transactions with the right senders.
+7. **Pool pipeline** – pass the transaction through `PoolStateBridge` so every tracked pool updates reserves, LP balances, and trading guards. The PyReth trading-viability simulator also runs here, ensuring that downstream systems see the final buy/sell status per pool.
+8. **Bribe & network analysis** – feed the address-activity tracker and refresh the token-health predictor for downstream consumers. These steps rely on the final pool state, so they execute after the pool pipeline.
+9. **Lifecycle derivation** – `_update_life_cycle_status` moves the token through `CREATION → PAIR_CREATION → TRADING_ENABLED → INACTIVE_*` once every subsystem has been updated.
 
 All subsystems expose a single `update_from_transaction` entry point, so the orchestrator always executes these steps in the same order.
 

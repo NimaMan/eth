@@ -49,7 +49,9 @@ class TokenTransferTracker:
         self.decimals = int(decimals)
         self.history_limit = int(history_limit)
         self.pool_manager = pool_manager
-
+        self.total_bribe_amount: float = 0.0
+        self.bribe_amounts_by_tx: Dict[str, float] = {}
+        
         self.erc20_transfers: MutableMapping[str, List[Dict]] = (
             erc20_transfers if erc20_transfers is not None else {}
         )
@@ -78,7 +80,15 @@ class TokenTransferTracker:
         self.add_internal_eth_transfers(transaction)
         self.add_approvals(transaction)
         self.update_address_tx_counter(transaction.get("unique_addresses") or [])
+        self.update_bribe_amount(transaction)
 
+    def update_bribe_amount(self, transaction: Dict) -> None:
+        bribe_amount = transaction.get('bribe_amount', 0) or 0
+        if bribe_amount > 0:
+            briber_address = transaction['from_address']
+            self.bribe_amounts_by_tx[briber_address] = bribe_amount
+            self.total_bribe_amount += bribe_amount
+    
     def add_transfers(self, transaction: Dict) -> None:
         """Process transfer events for all relevant tokens."""
 
@@ -164,7 +174,6 @@ class TokenTransferTracker:
 
     def update_address_tx_counter(self, unique_addresses: Iterable[str]) -> None:
         """Update the transaction counter for every unique address seen."""
-
         for unique_address in unique_addresses:
             if unique_address not in self.address_tx_counter:
                 self.address_tx_counter[unique_address] = 0

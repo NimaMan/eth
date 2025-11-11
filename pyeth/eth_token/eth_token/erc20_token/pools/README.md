@@ -68,7 +68,7 @@ The pool management system is designed to track and analyze liquidity pools for 
   - Support pool discovery when detected through swaps
   - Cache discovered pool configurations
 
-### Pool Liquidity Matrix (`pool_liquidity_matrix.py`)
+### Multi-Pool Liquidity Analyzer (`multi_pool_liquidity_analyzer.py`)
 - **Purpose**: Token-level analysis across all pools
 - **Responsibilities**:
   - Snapshot liquidity and pricing state for every tracked pool

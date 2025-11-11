@@ -7,7 +7,7 @@ Each pool instance tracks its own events and updates its state accordingly.
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 
-from eth_data.utils.pyreth_client import PyrethClient, pyreth
+from eth_data.pyreth_client import PyrethClient, pyreth
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
 from eth_token.erc20_token.pools.pool_data_models import PoolRuntimeState, PoolLifecycle
 from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker, logger

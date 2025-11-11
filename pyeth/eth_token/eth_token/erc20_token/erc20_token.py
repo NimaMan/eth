@@ -50,10 +50,6 @@ class ERC20Token:
         self.tx_hashes_to_makers: Dict[str, str] = {}
         self.transaction_fees: List[Dict[str, Any]] = []
 
-        # Bribe tracking
-        self.total_bribe_amount: float = 0.0
-        self.bribe_amount_dict: Dict[str, float] = {}
-
         # Latest block context
         self.latest_block_number: Optional[int] = None
         self.latest_block_timestamp: Optional[int] = None
@@ -71,7 +67,7 @@ class ERC20Token:
             pool_manager=self.pool_state.pool_manager,
         )
         self.control_tracker = ControlAddressTracker(history_limit=self.history_limit)
-        self.state_monitor = TokenStateMonitor(hidden_mint_threshold=HIDDEN_MINTS_THRESHOLD)
+        self.state_monitor = TokenStateMonitor(self, hidden_mint_threshold=HIDDEN_MINTS_THRESHOLD)
         self.token_network = LiveTokenNetwork(live_token=self)
         self.token_health_predictor = TokenHealthPredictor()
 
@@ -82,36 +78,17 @@ class ERC20Token:
     def update_from_transaction(self, transaction: Dict):
         if not transaction["status"]:
             return
-
-        self.record_transaction_metadata(transaction)
-        if self.is_contract_creation(transaction):
-            self.handle_contract_creation(transaction)
-            self._register_control_addresses(
-                [
-                    self.creator_address,
-                    transaction.get('from_address'),
-                ]
-            )
-            self._sync_token_decimals()
-
-        self.pool_state.update_from_transaction(transaction)
+        self.record_transaction_metadata(transaction) # Latest block attribute is udpated in the token first
+        self.handle_contract_creation(transaction)
         self.transfer_tracker.update_from_transaction(transaction)
         self.control_tracker.update_from_transaction(transaction)
-        self.pool_state.register_token_control_addresses(self.control_tracker.addresses)
         self.state_monitor.update_from_transaction(transaction)
-        self.update_bribe_amount(transaction)
+        self.pool_state.register_token_control_addresses(self.control_tracker.addresses)
+        self.pool_state.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
-        
-        self.state_monitor.detect_hidden_mint(
-            total_supply=self.total_supply,
-            total_supply_from_transfers=self.total_supply_from_transfers,
-            transaction=transaction,
-        )
-
-        self._update_lifecycle_status()
-
         self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
-
+        self._update_lifecycle_status()
+        
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -148,19 +125,16 @@ class ERC20Token:
         return bool(transaction.get('contract_creation_events'))
 
     def handle_contract_creation(self, transaction: Dict) -> None:
-        self.creation_block = transaction['block_number']
-        self.creation_timestamp = transaction['block_timestamp']
-        self.creation_tx = transaction['hash']
-        self.creator_address = transaction['from_address']
-        self.creator_nonce = transaction['nonce']
-        self.token_life_cycle_status = TokenLifecycleState.CREATION
-
-    def update_bribe_amount(self, transaction: Dict) -> None:
-        bribe_amount = transaction.get('bribe_amount', 0) or 0
-        if bribe_amount > 0:
-            briber_address = transaction['from_address']
-            self.bribe_amount_dict[briber_address] = bribe_amount
-            self.total_bribe_amount += bribe_amount
+        if self.is_contract_creation(transaction):
+            self.creation_block = transaction['block_number']
+            self.creation_timestamp = transaction['block_timestamp']
+            self.creation_tx = transaction['hash']
+            self.creator_address = transaction['from_address']
+            self.creator_nonce = transaction['nonce']
+            self.token_life_cycle_status = TokenLifecycleState.CREATION
+            control_addreses = [self.creator_address, transaction.get('from_address')]
+            self._register_control_addresses(control_addreses)
+            self._sync_token_decimals()
 
     @property
     def token_creation_age_blocks(self):
@@ -178,6 +152,18 @@ class ERC20Token:
             return None
         return (self.latest_block_timestamp - self.creation_timestamp) / 3600
 
+    @property
+    def total_bribe_amount(self) -> float:
+        return self.transfer_tracker.total_bribe_amount
+
+    @property
+    def bribe_amounts_by_tx(self) -> Dict[str, float]:
+        return dict(self.transfer_tracker.bribe_amounts_by_tx)
+
+    @property
+    def num_bribes(self):
+        return len(self.transfer_tracker.bribe_amounts_by_tx)
+    
     @property
     def pools(self):
         return self.pool_state.get_pool_collection()

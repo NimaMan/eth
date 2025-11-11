@@ -1,7 +1,7 @@
 """TokenChainDataFetcher: lightweight PyReth-backed token metadata helper."""
 
 from typing import Optional
-from eth_data.utils.pyreth_client import PyrethClient
+from eth_data.pyreth_client import PyrethClient
 
 
 class TokenChainDataFetcher:
