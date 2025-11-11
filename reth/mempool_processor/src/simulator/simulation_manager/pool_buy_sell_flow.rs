@@ -8,6 +8,7 @@ use crate::{
     tx_router::TransactionCategory,
 };
 
+use super::replay_context::{derive_pools_from_replay, PoolCandidate};
 use super::{SimulationManager, SimulationResult, TxSimulationJob};
 
 impl SimulationManager {
@@ -107,19 +108,34 @@ impl SimulationManager {
             0xd9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
         ]);
 
-        // Fetch pools for the token
-        let all_pools = self
+        let mut pool_candidates: Vec<PoolCandidate> = self
             .token_cache
             .get_pools_for_token(&token_address_str)
-            .await;
+            .await
+            .into_iter()
+            .map(PoolCandidate::from_cache)
+            .collect();
 
-        if all_pools.is_empty() {
-            info!("  No pools found in cache for token {}", token_address_str);
-            return vec![];
+        if pool_candidates.is_empty() {
+            pool_candidates =
+                derive_pools_from_replay(token_address, replay_sequence, weth_address);
+            if pool_candidates.is_empty() {
+                info!(
+                    "  No pools found in cache or replay fallback for token {}",
+                    token_address_str
+                );
+                return vec![];
+            }
+
+            info!(
+                "  Using {} replay-derived pool(s) for token {}",
+                pool_candidates.len(),
+                token_address_str
+            );
         }
 
         // Filter to V2 (supported) pools
-        let v2_pools: Vec<_> = all_pools
+        let v2_pools: Vec<_> = pool_candidates
             .into_iter()
             .filter(|pool_state| {
                 let is_v2 = matches!(
@@ -172,7 +188,7 @@ impl SimulationManager {
             let pool_type = format!("{:?}", pool_state.pool_type);
             info!(
                 "  [Pool {}] Simulating pool: {:?} (Type: {}, ETH: {:.6})",
-                pool_idx, pool_address, &pool_type, pool_state.eth_reserve
+                pool_idx, pool_address, &pool_type, pool_state.eth_reserve_hint
             );
 
             let denom_address = match pool_state

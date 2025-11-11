@@ -6,6 +6,7 @@ mod logging;
 mod manager;
 mod pending_sequences;
 mod pool_buy_sell_flow;
+mod replay_context;
 mod request_queue;
 mod types;
 
