@@ -33,8 +33,8 @@ class ERC20Token:
             token_metadata = self.token_chain_data_fetcher.get_token_metadata(self.contract_address)            
         self.name = token_metadata.name
         self.symbol = token_metadata.symbol
-        self.decimals = token_metadata.decimals
-        self.total_supply = token_metadata.total_supply
+        self.decimals = int(token_metadata.decimals)
+        self.total_supply = int(token_metadata.total_supply)
 
         self.history_limit = HISTORY_LIMIT
 
