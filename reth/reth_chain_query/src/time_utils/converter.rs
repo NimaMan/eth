@@ -186,8 +186,7 @@ mod tests {
 
     #[test]
     fn test_estimate_block_number() {
-        let timestamp =
-            DateTime::from_timestamp(ETHEREUM_GENESIS_TIMESTAMP + 120_000, 0).unwrap();
+        let timestamp = DateTime::from_timestamp(ETHEREUM_GENESIS_TIMESTAMP + 120_000, 0).unwrap();
         let estimated = estimate_block_number(timestamp);
 
         // Should be roughly 10,000 blocks (120,000 / 12)

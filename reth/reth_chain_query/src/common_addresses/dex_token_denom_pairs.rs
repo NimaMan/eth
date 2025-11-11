@@ -29,7 +29,6 @@ pub struct UniswapV3TokenInfo {
     pub fee_tier: u32,
     pub decimals: u8,
 }
-
 /// Minimal metadata required to describe a SushiSwap token/denom pair.
 #[derive(Debug, Clone, Copy)]
 pub struct SushiSwapTokenInfo {
