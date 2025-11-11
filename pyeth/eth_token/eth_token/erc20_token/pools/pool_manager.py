@@ -98,81 +98,45 @@ class PoolManager:
         self._token_decimals: Optional[int] = None
         self._denom_decimals_cache: Dict[str, int] = {}
         self._token_control_addresses: Set[str] = set()
-        self._latest_control_block: Optional[int] = None
-        self._latest_block_control_address_txs: Dict[str, Dict[str, Any]] = {}
-
-    def _get_token_decimals(
-        self,
-        block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
-    ) -> Optional[int]:
-        if self._token_decimals is None:
-            self._token_decimals = int(
-                self.token_chain_data_fetcher.get_token_decimals(
-                    self.token_address,
-                    block_number,
-                    block_header,
-                )
-            )
-        return self._token_decimals
-
-    def _get_denom_decimals(
-        self,
-        denom_address: str,
-        block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
-    ) -> int:
-        if denom_address not in self._denom_decimals_cache:
-            self._denom_decimals_cache[denom_address] = int(
-                self.token_chain_data_fetcher.get_token_decimals(
-                    denom_address,
-                    block_number,
-                    block_header,
-                )
-            )
-        return self._denom_decimals_cache[denom_address]
-
-    def _pool_decimal_kwargs(
-        self,
-        denom_address: str,
-        *,
-        block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
-    ) -> Dict[str, int]:
-        return {
-            'token_decimals': self._get_token_decimals(block_number, block_header),
-            'denom_decimals': self._get_denom_decimals(
-                denom_address,
-                block_number,
-                block_header,
-            ),
-            'history_limit': self.history_limit,
-        }
+        self.latest_block: Optional[int] = None
+        self._latest_block_txs: Dict[str, Dict[str, Any]] = {}
+        self._latest_block_txs_from_addresses_containing_control_adresses: Set[str] = set()
 
     def update_from_transaction(self, transaction: Dict):
-        """
-        Process a transaction and route events to appropriate pools.
-        
-        First checks for new pool creation events, then checks swap events
-        for pools we might have missed, then routes other events to existing pools.
-        """
-        self._update_block_control_addrress_transactions(transaction)
-        # Check for new pool creations
-        self._check_pool_creations(transaction)
-        
-        # Check swap events for pools we haven't seen yet
-        self._check_swap_events_for_pools(transaction)
+        self._update_latest_block_transactions(transaction)
+        self._check_pool_creations(transaction) # Check for new pool creations
+        self._check_swap_events_for_pools(transaction) # Check swap events for pools we haven't seen yet
         
         # Route events to existing pools
         for pool in self.pools.values():
-            pool.update_latest_block_control_address_transactions(transaction)
+            self.propagate_latest_block_cache_to_pool(pool)
             pool.update_from_transaction(transaction)
             
         # Route V4 events to V4 pools
         for v4_pool in self.v4_pools.values():
-            v4_pool.update_latest_block_control_address_transactions(transaction)
+            self.propagate_latest_block_cache_to_pool(v4_pool)
             v4_pool.update_from_transaction(transaction)            
-            
+    
+    def _get_denom_symbol(self, token_address: str) -> str:
+        return DENOM_ADDRESSES.get(token_address, 'Unknown')
+    
+    def _get_token_decimals(self, block_number: Optional[int] = None, block_header: Optional[str] = None) -> Optional[int]:
+        if self._token_decimals is None:
+            self._token_decimals = int(self.token_chain_data_fetcher.get_token_decimals(self.token_address,block_number,block_header))
+        return self._token_decimals
+
+    def _get_denom_decimals(self, denom_address: str, block_number: Optional[int] = None, block_header: Optional[str] = None) -> int:
+        if denom_address not in self._denom_decimals_cache:
+            self._denom_decimals_cache[denom_address] = int(self.token_chain_data_fetcher.get_token_decimals(denom_address, block_number,block_header))
+        return self._denom_decimals_cache[denom_address]
+
+    def _pool_decimal_kwargs(self, denom_address: str, block_number: Optional[int] = None, block_header: Optional[str] = None) -> Dict[str, int]:
+        return {
+            'token_decimals': self._get_token_decimals(block_number, block_header),
+            'denom_decimals': self._get_denom_decimals(denom_address, block_number, block_header),
+            'history_limit': self.history_limit,
+        }
+    
     def _check_pool_creations(self, transaction: Dict):
         """Check for new pool creation events."""
         # V2 pair creation
@@ -349,7 +313,7 @@ class PoolManager:
         self.pools_by_denom[pool.denom_address].append(pool.pool_address)
         if self._token_control_addresses:
             pool.register_token_control_addresses(self._token_control_addresses)
-        self._seed_pool_with_cached_control_transactions(pool)
+        self.propagate_latest_block_cache_to_pool(pool)
 
     def _register_v4_pool(self, pool: UniswapV4Pool):
         """Register a V4 pool in the manager. V4 pools are tracked separately by PoolId."""
@@ -358,7 +322,7 @@ class PoolManager:
         self.pools_by_denom[pool.denom_address].append(pool.pool_id)
         if self._token_control_addresses:
             pool.register_token_control_addresses(self._token_control_addresses)
-        self._seed_pool_with_cached_control_transactions(pool)
+        self.propagate_latest_block_cache_to_pool(pool)
     
     def add_pool(self, pool_address: str, protocol: str, denom_address: str, 
                  token1_is_denom: bool = True, **kwargs):
@@ -465,42 +429,40 @@ class PoolManager:
         self._token_control_addresses.update(addresses)
         for pool in self.get_all_pools():
             pool.register_token_control_addresses(addresses)
-        self.update_latest_block_control_address_transactions()
-
-    def update_latest_block_control_address_transactions(self) -> None:
-        if self._latest_block_control_address_txs:
-            filtered: Dict[str, Dict[str, Any]] = {}
-            for tx_hash, tx in self._latest_block_control_address_txs.items():
-                unique_addresses = set(tx.get('unique_addresses') or [])
-                if self._token_control_addresses.intersection(unique_addresses):
-                    filtered[tx_hash] = tx
-            self._latest_block_control_address_txs = filtered
-            if not filtered:
-                self._latest_control_block = None
-
-    def _update_block_control_addrress_transactions(self, transaction: Dict) -> None:
-        if not self._token_control_addresses:
-            return
+        
+    def _update_latest_block_transactions(self, transaction: Dict) -> None:
+        block_number = transaction.get('block_number')
+        if self.latest_block != block_number:
+            self.latest_block = block_number
+            self._latest_block_txs = {}
+            self._latest_block_txs_from_addresses_containing_control_adresses = set()
+        tx_hash = transaction.get('hash')
+        self._latest_block_txs[tx_hash] = transaction
         unique_addresses = set(transaction.get('unique_addresses') or [])
-        if not unique_addresses:
-            return
         if not self._token_control_addresses.intersection(unique_addresses):
             return
-        block_number = transaction.get('block_number')
-        if self._latest_control_block != block_number:
-            self._latest_control_block = block_number
-            self._latest_block_control_address_txs = {}
-        tx_hash = transaction.get('hash')
-        if tx_hash and tx_hash not in self._latest_block_control_address_txs:
-            self._latest_block_control_address_txs[tx_hash] = transaction
+        # Track the from addresses that have had token control addresses in their tx.
+        from_address = transaction.get('from_address')
+        self._latest_block_txs_from_addresses_containing_control_adresses.add(from_address)
+    
+    def _current_block_controller_transactions(self) -> Dict[str, Dict[str, Any]]:
+        if not self._latest_block_txs or not self._latest_block_txs_from_addresses_containing_control_adresses:
+            return {}
+        relevant: Dict[str, Dict[str, Any]] = {}
+        for tx_hash, tx in self._latest_block_txs.items():
+            if tx.get('from_address') in self._latest_block_txs_from_addresses_containing_control_adresses:
+                relevant[tx_hash] = tx
+        return relevant
 
-    def _seed_pool_with_cached_control_transactions(self, pool: BasePool) -> None:
-        if self._latest_control_block is None:
+    def propagate_latest_block_cache_to_pool(self, pool: BasePool) -> None:
+        if self.latest_block is None:
+            pool.clear_latest_block_control_transactions()
             return
-        if not self._latest_block_control_address_txs:
-            return
-        pool._latest_block_number = self._latest_control_block
-        pool.latest_block_control_address_txs = dict(self._latest_block_control_address_txs)
+        controller_txs = self._current_block_controller_transactions()
+        if controller_txs:
+            pool.set_latest_block_control_transactions(self.latest_block, controller_txs)
+        else:
+            pool.clear_latest_block_control_transactions()
 
     def get_pool(self, pool_address: str) -> Optional[BasePool]:
         """Get a specific pool by address or display address."""
@@ -518,19 +480,6 @@ class PoolManager:
                 return self.v4_pools.get(pool_id)
         pool = self.pools.get(pool_address)
         return pool
-        
-    def get_pools_by_protocol(self, protocol: str) -> List[BasePool]:
-        """Get all pools for a specific protocol."""
-        normalized_protocol = canonicalize_dex_pool_type(
-            PROTOCOL_ALIASES.get(protocol, protocol)
-        )
-        addresses = self.pools_by_protocol.get(normalized_protocol, [])
-        return [self.pools[addr] for addr in addresses]
-        
-    def get_pools_by_denom(self, denom_address: str) -> List[BasePool]:
-        """Get all pools paired with a specific denomination token."""
-        addresses = self.pools_by_denom.get(denom_address, [])
-        return [self.pools[addr] for addr in addresses]
         
     def get_all_pools(self) -> List[BasePool]:
         """Get all pools (V2, V3, and V4)."""
@@ -704,93 +653,14 @@ class PoolManager:
         return pool_info
         
     def get_all_pool_addresses(self) -> List[str]:
-        """
-        Get all pool addresses including V4 display addresses.
-        For V4 pools, returns the display address (PoolManager#poolId)
-        """
+        """Return pool addresses plus V4 display IDs."""
         addresses = list(self.pools.keys())
-        
-        # Add V4 display addresses
-        for pool in self.v4_pools.values():
-            addresses.append(pool.display_address)
-            
+        addresses.extend(pool.display_address for pool in self.v4_pools.values())
         return addresses
         
-    def get_denom_currencies(self) -> Dict[str, str]:
-        """Get mapping of pool address -> denom currency name."""
-        currencies = {}
-        
-        for address, pool in self.pools.items():
-            currencies[address] = self._get_denom_symbol(pool.denom_address)
-            
-        for pool in self.v4_pools.values():
-            currencies[pool.display_address] = self._get_denom_symbol(pool.denom_address)
-            
-        return currencies
-        
-    def get_trading_enabled_pools(self) -> List[Dict[str, Any]]:
-        """
-        Get list of pools where trading is enabled.
-        
-        Returns:
-            List of dicts with pool info including address, protocol, and tax rates
-        """
-        enabled_pools = []
-        
-        # Check regular pools (V2/V3)
-        for address, pool in self.pools.items():
-            if pool.trading_enabled:
-                enabled_pools.append({
-                    'address': address,
-                    'protocol': pool.get_protocol(),
-                    'buy_tax': pool.buy_tax,
-                    'sell_tax': pool.sell_tax,
-                    'trading_enabled_block': pool.trading_enabled_block,
-                    'denom': self._get_denom_symbol(pool.denom_address)
-                })
-        
-        # Check V4 pools
-        for pool_id, pool in self.v4_pools.items():
-            if pool.trading_enabled:
-                enabled_pools.append({
-                    'address': pool.display_address,
-                    'protocol': UNISWAP_V4_PROTOCOL,
-                    'buy_tax': pool.buy_tax,
-                    'sell_tax': pool.sell_tax,
-                    'trading_enabled_block': pool.trading_enabled_block,
-                    'denom': self._get_denom_symbol(pool.denom_address)
-                })
-                
-        return enabled_pools
-    
-    def get_pool_taxes(self) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
-        taxes = {}
-        
-        # Regular pools
-        for address, pool in self.pools.items():
-            taxes[address] = (pool.buy_tax, pool.sell_tax)
-            
-        # V4 pools
-        for pool in self.v4_pools.values():
-            taxes[pool.display_address] = (pool.buy_tax, pool.sell_tax)
-            
-        return taxes
-    
     def has_pools(self) -> bool:
         """Check if token has any pools."""
         return len(self.pools) > 0 or len(self.v4_pools) > 0
-    
-    def get_total_lp_supply(self) -> Dict[str, float]:
-        """Get total LP supply for all V2 pools.
-        
-        Returns:
-            Dict mapping pool address to LP token total supply
-        """
-        lp_supplies = {}
-        for address, pool in self.pools.items():
-            if pool.get_protocol() == UNISWAP_V2_PROTOCOL:
-                lp_supplies[address] = pool.lp_total_supply
-        return lp_supplies
     
     def _check_swap_events_for_pools(self, transaction: Dict):
         """
@@ -814,7 +684,9 @@ class PoolManager:
                 pool_address = swap.get('pool_address', '')
                 if pool_address and pool_address not in self.pools:
                     self._load_and_register_v3_pool(pool_address, transaction)
-                
+        
+        #TODO: only v2 and v3 are covered so far. other will come later.
+
     def _load_and_register_v2_pool(self, pair_address: str, transaction: Dict):
         """
         Load V2 pool configuration from the blockchain and register it.
@@ -925,7 +797,5 @@ class PoolManager:
         finally:
             self._processing_pools.discard(pool_address)
     
-    def _get_denom_symbol(self, token_address: str) -> str:
-        return DENOM_ADDRESSES.get(token_address, 'Unknown')
         
     

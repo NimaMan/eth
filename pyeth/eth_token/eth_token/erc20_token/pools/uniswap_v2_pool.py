@@ -335,8 +335,7 @@ class UniswapV2Pool(BasePool):
         denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
         config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
-        prior_transactions = self.latest_block_control_address_txs.values()
-        config.set_prior_transactions(prior_transactions)
+        config.set_prior_transactions(self.latest_block_control_address_txs_list)
         if transaction.get('previous_block_header'):
             config.set_block_header(transaction['previous_block_header'])
 
@@ -420,24 +419,14 @@ class UniswapV2Pool(BasePool):
     def _process_sync(self, sync: dict, transaction: Dict):
         """Process a sync event to update reserves."""
         # Get decimals for proper conversion
-        token0_decimals = self._get_token0_decimals()
-        token1_decimals = self._get_token1_decimals()
-        
-        # Update reserves from sync event (convert from raw values)
+        token0_decimals = self._decimals_for_token_position(is_token0=True)
+        token1_decimals = self._decimals_for_token_position(is_token0=False)
         reserve0_raw = float(sync['reserve0'])
         reserve1_raw = float(sync['reserve1'])
-        
-        # Handle cases where decimals might be None
-        if token0_decimals is not None and token1_decimals is not None:
-            reserve0 = reserve0_raw / (10 ** token0_decimals)
-            reserve1 = reserve1_raw / (10 ** token1_decimals)
-        else:
-            raise RuntimeError(
-                "UniswapV2Pool._process_sync: "
-                f"missing decimals (token0={token0_decimals}, token1={token1_decimals}) for pool {self.pool_address}"
-            )
-
+        reserve0 = reserve0_raw / (10 ** token0_decimals)
+        reserve1 = reserve1_raw / (10 ** token1_decimals)        
         token_reserve, denom_reserve = self._map_token_and_denom(reserve0, reserve1)
+
         self.update_reserves(
             token_reserve=token_reserve,
             denom_reserve=denom_reserve,
@@ -544,12 +533,6 @@ class UniswapV2Pool(BasePool):
     def get_recent_swaps(self, count: int = 10) -> list:
         return list(self.swap_events)[-count:]
         
-    def _get_token0_decimals(self) -> int:
-        return self.get_token_decimals() if self.token1_is_denom else self.get_denom_decimals()
-
-    def _get_token1_decimals(self) -> int:
-        return self.get_denom_decimals() if self.token1_is_denom else self.get_token_decimals()
-    
     def process_lp_transfer(self, transfer: Dict):
         self.lp_tracker.record_transfer(transfer)
     

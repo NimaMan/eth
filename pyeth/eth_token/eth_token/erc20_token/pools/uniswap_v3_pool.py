@@ -172,8 +172,7 @@ class UniswapV3Pool(BasePool):
         denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
         config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
-        prior_transactions = self.latest_block_control_address_txs.values()
-        config.set_prior_transactions(prior_transactions)
+        config.set_prior_transactions(self.latest_block_control_address_txs_list)
         if transaction.get('previous_block_header'):
             config.set_block_header(transaction['previous_block_header'])
 
@@ -324,8 +323,8 @@ class UniswapV3Pool(BasePool):
         reserve0_raw = self.current_liquidity / sqrt_price
         reserve1_raw = self.current_liquidity * sqrt_price
         
-        token0_decimals = self._get_token0_decimals()
-        token1_decimals = self._get_token1_decimals()
+        token0_decimals = self._decimals_for_token_position(is_token0=True)
+        token1_decimals = self._decimals_for_token_position(is_token0=False)
 
         reserve0 = reserve0_raw / (10**token0_decimals)
         reserve1 = reserve1_raw / (10**token1_decimals)
@@ -340,14 +339,6 @@ class UniswapV3Pool(BasePool):
             self.state.price_denom_per_token = denom_reserve / token_reserve
             self.state.price_token_per_denom = token_reserve / denom_reserve
             self._append_event(self.price_history, (self.state.last_update_block, self.get_price()))
-
-    def _get_token0_decimals(self) -> int:
-        """Get token0 decimals based on configuration."""
-        return self.get_token_decimals() if self.token1_is_denom else self.get_denom_decimals()
-
-    def _get_token1_decimals(self) -> int:
-        """Get token1 decimals based on configuration."""
-        return self.get_denom_decimals() if self.token1_is_denom else self.get_token_decimals()
 
     def get_current_tick(self) -> int:
         """Get current tick."""

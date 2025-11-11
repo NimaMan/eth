@@ -6,51 +6,15 @@ Each pool instance tracks its own events and updates its state accordingly.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
-from dataclasses import dataclass
-from enum import Enum
 
-from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker, logger
-from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
-from eth_token.erc20_token.data.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.utils.pyreth_client import PyrethClient, pyreth
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
-from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
-
-
-class PoolLifecycle(str, Enum):
-    """Lifecycle stages shared across Python, Rust, and analytics."""
-
-    DISCOVERED = "DISCOVERED"   # Pool observed on-chain (deployment), zero liquidity
-    LIQUIDITY_DEPOSITED = "LIQUIDITY_DEPOSITED"  # Liquidity deposited (non-zero reserves)
-    ACTIVE = "ACTIVE"           # Buy/sell viability confirmed
-    SCAM = "SCAM"               # Rug detected (Python flag or reserve tracker)
-    EVICTED = "EVICTED"         # Removed from active tracking
-
-
-@dataclass
-class PoolState:
-    """Current state of a pool."""
-    reserve0: float = 0.0
-    reserve1: float = 0.0
-    total_liquidity: float = 0.0
-    price0: float = 0.0  # token1 per token0
-    price1: float = 0.0  # token0 per token1
-    last_update_block: int = 0
-    last_sync_block: int = 0
-    lifecycle: PoolLifecycle = PoolLifecycle.DISCOVERED
-    can_buy: bool = False
-    can_sell: bool = False
-    
-    # Cumulative volumes
-    volume0_in: float = 0.0
-    volume1_in: float = 0.0
-    volume0_out: float = 0.0
-    volume1_out: float = 0.0
-    
-    # Liquidity events
-    total_mints: int = 0
-    total_burns: int = 0
-    total_swaps: int = 0
+from eth_token.erc20_token.pools.pool_data_models import PoolRuntimeState, PoolLifecycle
+from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker, logger
+from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
+from eth_token.erc20_token.token_health.scam_thresholds import get_threshold_for_token
+from eth_token.utils import bounded_history
 
 
 class BasePool(ABC):
@@ -85,15 +49,17 @@ class BasePool(ABC):
             token1_is_denom: Whether token1 is the denomination token
         """
         self.pool_address = pool_address
+        self.display_address = pool_address
         self.token_address = token_address
         self.denom_address = denom_address
-        self.denom_threshold = get_threshold_for_token(self.denom_address).get("threshold")
+        threshold_config = get_threshold_for_token(self.denom_address) or {}
+        self.denom_threshold = threshold_config.get("threshold", 0.0)
         
         self.token1_is_denom = token1_is_denom
         self.history_limit = history_limit
             
         # Current state
-        self.state = PoolState()
+        self.state = PoolRuntimeState()
         
         # Event storage (bounded to prevent memory issues)
         self.sync_events: List[Dict[str, Any]] = []
@@ -156,7 +122,7 @@ class BasePool(ABC):
         )
         self.token_control_addresses: Set[str] = set()
         self._latest_block_number: Optional[int] = None
-        self.latest_block_control_address_txs: Dict[str, Dict[str, Any]] = {}
+        self._latest_block_control_address_txs: Dict[str, Dict[str, Any]] = {}
 
     @abstractmethod
     def get_protocol(self) -> str:
@@ -164,64 +130,51 @@ class BasePool(ABC):
         pass
         
     @abstractmethod
-    def process_transaction(self, transaction: Dict):
+    def update_from_transaction(self, transaction: Dict):
         """
         Process a transaction and extract relevant events. Each pool type knows how to extract its specific events.
         """
         pass
 
-    def get_reserves(self) -> Tuple[float, float]:
-        """Get current reserves."""
-        return self.state.reserve0, self.state.reserve1
-        
     def get_price(self) -> float:
         """Get current price of our token in terms of denom."""
         # Return zero if the pool is scam
         if self.is_scam:
             return 0.0
-        if self.token1_is_denom:
-            # Our token is token0, denom is token1
-            # Price = denom_per_token = reserve1 / reserve0
-            return self.state.price0 if self.state.price0 > 0 else 0
-        else:
-            # Our token is token1, denom is token0
-            # Price = denom_per_token = reserve0 / reserve1
-            return self.state.price1 if self.state.price1 > 0 else 0
+        price = self.state.price_denom_per_token
+        return price if price > 0 else 0.0
             
     def get_token_reserve(self) -> float:
-        """Get our token's reserve."""
-        if self.token1_is_denom:
-            return self.state.reserve0
-        else:
-            return self.state.reserve1
+        """Get our token's reserve (canonical orientation)."""
+        return self.state.token_reserve
             
     def get_denom_reserve(self) -> float:
-        """Get denomination token's reserve."""
-        if self.token1_is_denom:
-            return self.state.reserve1
-        else:
-            return self.state.reserve0
+        """Get denomination token's reserve (canonical orientation)."""
+        return self.state.denom_reserve
 
     def _append_event(self, collection: List[Any], entry: Any) -> None:
-        collection.append(entry)
-        if len(collection) > self.history_limit:
-            del collection[: len(collection) - self.history_limit]
+        bounded_history.append_with_history_limit(collection, entry, self.history_limit)
             
-    def update_reserves(self, reserve0: float, reserve1: float, block_number: int, 
+    def _decimals_for_token_position(self, is_token0: bool) -> int:
+        if self.token1_is_denom:
+            return self.get_token_decimals() if is_token0 else self.get_denom_decimals()
+        return self.get_denom_decimals() if is_token0 else self.get_token_decimals()
+    
+    def update_reserves(self, token_reserve: float, denom_reserve: float, block_number: int, 
                        timestamp: int = 0, tx_hash: str = ''):
         """Update pool reserves and calculate prices."""
-        self.state.reserve0 = reserve0
-        self.state.reserve1 = reserve1
+        self.state.token_reserve = token_reserve
+        self.state.denom_reserve = denom_reserve
         self.state.last_update_block = block_number
         # Calculate prices
-        if reserve0 > 0:
-            self.state.price0 = reserve1 / reserve0
+        if token_reserve > 0:
+            self.state.price_denom_per_token = denom_reserve / token_reserve
         else:
-            self.state.price0 = 0.0
-        if reserve1 > 0:
-            self.state.price1 = reserve0 / reserve1
+            self.state.price_denom_per_token = 0.0
+        if denom_reserve > 0:
+            self.state.price_token_per_denom = token_reserve / denom_reserve
         else:
-            self.state.price1 = 0.0
+            self.state.price_token_per_denom = 0.0
             
         # Store price history
         price = self.get_price()
@@ -260,6 +213,12 @@ class BasePool(ABC):
                 and self.state.lifecycle == PoolLifecycle.DISCOVERED
             ):
                 self.state.lifecycle = PoolLifecycle.LIQUIDITY_DEPOSITED
+
+    def _map_token_and_denom(self, token0_value: float, token1_value: float) -> Tuple[float, float]:
+        """Return (token_value, denom_value) adjusted for pool orientation."""
+        if self.token1_is_denom:
+            return token0_value, token1_value
+        return token1_value, token0_value
 
     def mark_can_buy_from_event(self, transaction: Dict, event_type: str = 'swap'):
         """Mark token as buyable when detected from a DEX event (typically first swap)."""
@@ -386,17 +345,18 @@ class BasePool(ABC):
             return False
         return bool(self.token_control_addresses.intersection(unique_addresses))
 
-    def update_latest_block_control_address_transactions(self, transaction: Dict):
-        # Update latest block transactions involving control addresses
-        if not self._has_control_address(transaction):
-            return        
-        block_number = transaction.get('block_number')
-        # Reset if new block
-        if self._latest_block_number != block_number:
-            self._latest_block_number = block_number
-            self.latest_block_control_address_txs = {}
-        self.latest_block_control_address_txs[transaction.get('hash')] = transaction
+    def set_latest_block_control_transactions(self, block_number: Optional[int], transactions: Dict[str, Dict[str, Any]]) -> None:
+        self._latest_block_number = block_number
+        self._latest_block_control_address_txs = dict(transactions)
 
+    def clear_latest_block_control_transactions(self) -> None:
+        self._latest_block_number = None
+        self._latest_block_control_address_txs = {}
+
+    @property
+    def latest_block_control_address_txs_list(self) -> Dict[str, Dict[str, Any]]:
+        return list(self._latest_block_control_address_txs.values())
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get pool statistics."""
         return {

@@ -8,9 +8,11 @@ and detecting potential scam patterns.
 
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
-from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
-from eth_token.erc20_token.config.scam_thresholds import get_threshold_for_token
+
+from eth_token.erc20_token.token_health.scam_thresholds import get_threshold_for_token
 from eth_token.utils.logger import get_logger
+from eth_token.utils import bounded_history
+from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES
 
 
 logger = get_logger(name="PoolState", log_folder="pools")
@@ -81,9 +83,9 @@ class PoolReserveTracker:
         )
         
         # Store snapshot
-        self.reserve_history.append(snapshot)
-        if len(self.reserve_history) > self.history_limit:
-            del self.reserve_history[: len(self.reserve_history) - self.history_limit]
+        bounded_history.append_with_history_limit(
+            self.reserve_history, snapshot, self.history_limit
+        )
         self.latest_snapshot = snapshot
         
         # Check for scam patterns
@@ -95,11 +97,10 @@ class PoolReserveTracker:
         """
         # Get denomination token name
         denom_name = DENOM_ADDRESSES.get(self.denom_address)
-        if not denom_name:
-            return
-        
+        token_identifier = denom_name or self.denom_address
+
         # Get threshold config
-        threshold_config = get_threshold_for_token(denom_name)
+        threshold_config = get_threshold_for_token(token_identifier)
         if not threshold_config:
             return
         

@@ -189,8 +189,7 @@ class UniswapV4Pool(BasePool):
         denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
         config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
-        prior_transactions = self.latest_block_control_address_txs.values()
-        config.set_prior_transactions(prior_transactions)
+        config.set_prior_transactions(self.latest_block_control_address_txs_list)
         if transaction.get('previous_block_header'):
             # The block number is ignored when the header is set
             config.set_block_header(transaction['previous_block_header'])
