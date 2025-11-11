@@ -1,19 +1,19 @@
 use crate::header_utils::parse_sealed_header_from_json;
 use crate::tx_processor::processed_tx_bridge::{
     processed_transaction_from_py_dict, processed_transaction_from_py_object,
+    processed_transactions_from_py_iterable,
 };
 use crate::tx_processor::py_processed_transaction::PyProcessedTransaction;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 /// Python bindings for Pool Buy Sell Simulator
 ///
 /// Provides Python interface for pool trading viability analysis and simulation
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
+use pyo3::types::{PyAny, PyList, PyTuple};
 use reth_primitives::SealedHeader;
-use std::{convert::TryFrom, str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc};
 use tx_processor::simulator::types::{
-    DEFAULT_APPROVE_GAS_LIMIT, DEFAULT_BUY_GAS_LIMIT, DEFAULT_GAS_LIMIT_NO_PRIOR,
-    DEFAULT_SELL_GAS_LIMIT,
+    UniswapV4PoolConfig, DEFAULT_APPROVE_GAS_LIMIT, DEFAULT_BUY_GAS_LIMIT, DEFAULT_SELL_GAS_LIMIT,
 };
 use tx_processor::ProcessedTransaction as RustProcessedTransaction;
 use tx_processor::{
@@ -43,9 +43,9 @@ pub struct PyPoolBuySellSimulationResult {
     #[pyo3(get)]
     pub tokens_received_raw: String,
     #[pyo3(get)]
-    pub eth_spent_raw: String,
+    pub denom_spent_raw: String,
     #[pyo3(get)]
-    pub eth_received_raw: String,
+    pub denom_received_raw: String,
     #[pyo3(get)]
     pub error_message: Option<String>,
     #[pyo3(get)]
@@ -56,6 +56,8 @@ pub struct PyPoolBuySellSimulationResult {
     pub sell_transaction: PyProcessedTransaction,
     #[pyo3(get)]
     pub prior_transaction: Option<PyProcessedTransaction>,
+    #[pyo3(get)]
+    pub prior_transactions: Vec<PyProcessedTransaction>,
 }
 
 impl PyPoolBuySellSimulationResult {
@@ -68,6 +70,14 @@ impl PyPoolBuySellSimulationResult {
             _ => "UNKNOWN".to_string(),
         };
 
+        let prior_transactions: Vec<PyProcessedTransaction> = result
+            .prior_transactions
+            .iter()
+            .cloned()
+            .map(PyProcessedTransaction::from_processed_transaction)
+            .collect();
+        let legacy_prior = prior_transactions.first().cloned();
+
         Self {
             can_buy: result.can_buy,
             can_approve: result.can_approve,
@@ -77,8 +87,8 @@ impl PyPoolBuySellSimulationResult {
             pool_type: pool_type_str,
             block_number: result.block_number,
             tokens_received_raw: result.tokens_received.to_string(),
-            eth_spent_raw: result.eth_spent.to_string(),
-            eth_received_raw: result.eth_received.to_string(),
+            denom_spent_raw: result.denom_spent.to_string(),
+            denom_received_raw: result.denom_received.to_string(),
             error_message: result.failure_reason,
             buy_transaction: PyProcessedTransaction::from_processed_transaction(
                 result.buy_transaction.clone(),
@@ -89,10 +99,8 @@ impl PyPoolBuySellSimulationResult {
             sell_transaction: PyProcessedTransaction::from_processed_transaction(
                 result.sell_transaction.clone(),
             ),
-            prior_transaction: result
-                .prior_transaction
-                .as_ref()
-                .map(|tx| PyProcessedTransaction::from_processed_transaction(tx.clone())),
+            prior_transaction: legacy_prior,
+            prior_transactions,
         }
     }
 }
@@ -102,7 +110,7 @@ impl PyPoolBuySellSimulationResult {
 #[derive(Clone)]
 pub struct PyPoolBuySellParameters {
     #[pyo3(get, set)]
-    pub test_amount_eth: f64,
+    pub denom_amount: f64,
     #[pyo3(get, set)]
     pub buyer_address: String,
     #[pyo3(get, set)]
@@ -123,22 +131,22 @@ pub struct PyPoolBuySellParameters {
     pub slippage_tolerance: f64,
     #[pyo3(get, set)]
     pub block_delay: u64,
-    pub token_decimals: Option<u8>,
-    pub prior_gas_limit: Option<u64>,
-    pub prior_max_fee_per_gas_wei: Option<u128>,
-    pub prior_max_priority_fee_per_gas_wei: Option<u128>,
-    // Optional prior transaction to execute before buy/approve/sell
-    // Set via helper methods below
-    pub(crate) prior_tx: Option<RustProcessedTransaction>,
+    #[pyo3(get, set)]
+    pub denom_address: String,
+    #[pyo3(get, set)]
+    pub denom_decimals: u8,
+    pub token_decimals: u8,
+    pub(crate) prior_txs: Vec<RustProcessedTransaction>,
     pub(crate) block_header: Option<SealedHeader>,
+    pub(crate) uniswap_v4_config: Option<UniswapV4PoolConfig>,
 }
 
 #[pymethods]
 impl PyPoolBuySellParameters {
     #[new]
-    fn new() -> Self {
+    fn new(token_decimals: u8, denom_decimals: u8) -> Self {
         Self {
-            test_amount_eth: 0.01, // Default 0.01 ETH
+            denom_amount: 0.0,
             buyer_address: "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".to_string(),
             buy_gas_limit: DEFAULT_BUY_GAS_LIMIT,
             approve_gas_limit: DEFAULT_APPROVE_GAS_LIMIT,
@@ -149,20 +157,21 @@ impl PyPoolBuySellParameters {
             block_number: None,
             slippage_tolerance: 5.0,
             block_delay: 0,
-            token_decimals: None,
-            prior_gas_limit: None,
-            prior_max_fee_per_gas_wei: None,
-            prior_max_priority_fee_per_gas_wei: None,
-            prior_tx: None,
+            denom_address: "0x0000000000000000000000000000000000000000".to_string(),
+            denom_decimals: denom_decimals,
+            token_decimals,
+            prior_txs: Vec::new(),
             block_header: None,
+            uniswap_v4_config: None,
         }
     }
 
-    /// Create config with custom buy amount in ETH
+    /// Create config with custom buy amount in denomination token units
     #[staticmethod]
-    fn with_buy_amount(amount_eth: f64) -> Self {
-        let mut config = Self::new();
-        config.test_amount_eth = amount_eth;
+    #[pyo3(signature = (amount, token_decimals, denom_decimals))]
+    fn with_denom_amount(amount: f64, token_decimals: u8, denom_decimals: u8) -> Self {
+        let mut config = Self::new(token_decimals, denom_decimals);
+        config.denom_amount = amount;
         config
     }
 
@@ -176,7 +185,7 @@ impl PyPoolBuySellParameters {
     /// This transaction executes before buy/approve/sell.
     fn set_prior_tx_from_processed(&mut self, prior: &PyProcessedTransaction) {
         let processed = prior.to_processed_transaction();
-        self.apply_prior_processed(processed);
+        self.set_prior_sequence(vec![processed]);
     }
 
     /// Set a minimal prior transaction from unsigned parameters
@@ -233,7 +242,7 @@ impl PyPoolBuySellParameters {
             vec![]
         };
         // Build minimal processed transaction
-        let ptx = RustProcessedTransaction::new(
+        let mut ptx = RustProcessedTransaction::new(
             B256::ZERO,
             0,
             0,
@@ -243,19 +252,106 @@ impl PyPoolBuySellParameters {
             value,
             true,
             nonce.unwrap_or(0),
+            0,
             input,
         );
-        self.prior_tx = Some(ptx);
-        self.prior_gas_limit = gas_limit;
-        self.prior_max_fee_per_gas_wei = max_fee_per_gas_wei;
-        self.prior_max_priority_fee_per_gas_wei = max_priority_fee_per_gas_wei;
+        if let Some(limit) = gas_limit {
+            ptx.fees.gas_limit = limit;
+        }
+        if let Some(max_fee) = max_fee_per_gas_wei {
+            ptx.fees.max_fee_per_gas = Some(U256::from(max_fee));
+        }
+        if let Some(max_priority) = max_priority_fee_per_gas_wei {
+            ptx.fees.max_priority_fee = Some(U256::from(max_priority));
+        }
+        self.set_prior_sequence(vec![ptx]);
+        Ok(())
+    }
+
+    /// Configure Uniswap V4-specific pool parameters required for simulation.
+    #[pyo3(signature = (
+        pool_manager,
+        pool_id_hex,
+        currency0,
+        currency1,
+        fee,
+        tick_spacing,
+        hooks,
+        hook_data_hex=None
+    ))]
+    fn set_uniswap_v4_config(
+        &mut self,
+        pool_manager: &str,
+        pool_id_hex: &str,
+        currency0: &str,
+        currency1: &str,
+        fee: u32,
+        tick_spacing: i32,
+        hooks: &str,
+        hook_data_hex: Option<&str>,
+    ) -> PyResult<()> {
+        let pool_manager_addr =
+            Address::from_str(pool_manager.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid pool manager address: {}",
+                    e
+                ))
+            })?;
+        let currency0_addr =
+            Address::from_str(currency0.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid currency0 address: {}",
+                    e
+                ))
+            })?;
+        let currency1_addr =
+            Address::from_str(currency1.trim_start_matches("0x")).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid currency1 address: {}",
+                    e
+                ))
+            })?;
+        let hooks_addr = Address::from_str(hooks.trim_start_matches("0x")).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid hooks address: {}", e))
+        })?;
+
+        let pool_id = B256::from_str(pool_id_hex.trim_start_matches("0x")).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Invalid pool id (expected 32-byte hex): {}",
+                e
+            ))
+        })?;
+
+        let hook_data = if let Some(data) = hook_data_hex {
+            let clean = data.trim_start_matches("0x");
+            hex::decode(clean).map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Invalid hook data hex: {}",
+                    e
+                ))
+            })?
+        } else {
+            Vec::new()
+        };
+
+        self.uniswap_v4_config = Some(UniswapV4PoolConfig {
+            pool_manager: pool_manager_addr,
+            pool_id,
+            currency0: currency0_addr,
+            currency1: currency1_addr,
+            fee,
+            tick_spacing,
+            hooks: hooks_addr,
+            hook_data,
+        });
+
         Ok(())
     }
 
     #[pyo3(signature = (prior_dict))]
     fn set_prior_tx_from_dict(&mut self, prior_dict: &PyAny) -> PyResult<()> {
         let processed = processed_transaction_from_py_dict(prior_dict)?;
-        self.apply_prior_processed(processed);
+        self.set_prior_sequence(vec![processed]);
         Ok(())
     }
 
@@ -263,8 +359,20 @@ impl PyPoolBuySellParameters {
     /// dataclass, a PyProcessedTransaction, or a plain dictionary matching the schema.
     #[pyo3(signature = (prior_tx))]
     fn set_prior_processed_transaction(&mut self, prior_tx: &PyAny) -> PyResult<()> {
-        let processed = processed_transaction_from_py_object(prior_tx)?;
-        self.apply_prior_processed(processed);
+        if prior_tx.is_instance_of::<PyList>() || prior_tx.is_instance_of::<PyTuple>() {
+            let transactions = processed_transactions_from_py_iterable(prior_tx)?;
+            self.set_prior_sequence(transactions);
+        } else {
+            let processed = processed_transaction_from_py_object(prior_tx)?;
+            self.set_prior_sequence(vec![processed]);
+        }
+        Ok(())
+    }
+
+    #[pyo3(signature = (prior_iterable))]
+    fn set_prior_transactions(&mut self, prior_iterable: &PyAny) -> PyResult<()> {
+        let transactions = processed_transactions_from_py_iterable(prior_iterable)?;
+        self.set_prior_sequence(transactions);
         Ok(())
     }
 
@@ -277,45 +385,19 @@ impl PyPoolBuySellParameters {
     }
 
     #[getter(token_decimals)]
-    fn get_token_decimals(&self) -> Option<u8> {
+    fn get_token_decimals(&self) -> u8 {
         self.token_decimals
     }
 
     #[setter(token_decimals)]
     fn set_token_decimals(&mut self, value: u8) {
-        self.token_decimals = Some(value);
+        self.token_decimals = value;
     }
 }
 
 impl PyPoolBuySellParameters {
-    fn apply_prior_processed(&mut self, processed: RustProcessedTransaction) {
-        use std::convert::TryInto;
-
-        let gas_limit = if processed.fees.gas_limit > 0 {
-            processed.fees.gas_limit
-        } else {
-            processed.fees.gas_used
-        };
-        if gas_limit > 0 {
-            self.prior_gas_limit = Some(gas_limit);
-        }
-
-        self.prior_max_fee_per_gas_wei = processed
-            .fees
-            .max_fee_per_gas
-            .and_then(|value| u128::try_from(value).ok());
-        self.prior_max_priority_fee_per_gas_wei = processed
-            .fees
-            .max_priority_fee
-            .and_then(|value| u128::try_from(value).ok());
-
-        if self.prior_max_fee_per_gas_wei.is_none() {
-            if let Ok(price) = u128::try_from(processed.fees.gas_price) {
-                self.prior_max_fee_per_gas_wei = Some(price);
-            }
-        }
-
-        self.prior_tx = Some(processed);
+    fn set_prior_sequence(&mut self, transactions: Vec<RustProcessedTransaction>) {
+        self.prior_txs = transactions;
     }
 
     fn to_rust_config(
@@ -326,7 +408,18 @@ impl PyPoolBuySellParameters {
     ) -> PyResult<PoolBuySellParameters> {
         use alloy_primitives::U256;
 
-        let test_amount = U256::from((self.test_amount_eth * 1e18) as u128);
+        if self.denom_decimals == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "denom_decimals must be greater than zero",
+            ));
+        }
+        if self.denom_amount <= 0.0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "denom_amount must be greater than zero",
+            ));
+        }
+        let denom_scale = 10_f64.powi(self.denom_decimals as i32);
+        let denom_amount = U256::from((self.denom_amount * denom_scale).round() as u128);
         let buyer =
             Address::from_str(&self.buyer_address.trim_start_matches("0x")).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -335,11 +428,15 @@ impl PyPoolBuySellParameters {
                 ))
             })?;
 
-        let token_decimals = self.token_decimals.ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "token_decimals must be provided before running the simulator",
-            )
+        let denom_address = Address::from_str(self.denom_address.trim().trim_start_matches("0x"))
+            .map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid denom address: {}", e))
         })?;
+        if denom_address.is_zero() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "denom_address must be provided",
+            ));
+        }
 
         let gas_price = if self.gas_price_gwei == 0 {
             None
@@ -372,13 +469,23 @@ impl PyPoolBuySellParameters {
             .max_priority_fee_gwei
             .map(|value| ((value.max(0.0)) * 1e9).round() as u128);
 
+        let v4_config = if matches!(pool_type, PoolType::UniswapV4) {
+            Some(self.uniswap_v4_config.clone().ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "set_uniswap_v4_config(...) must be called before checking a Uniswap V4 pool",
+                )
+            })?)
+        } else {
+            self.uniswap_v4_config.clone()
+        };
+
         Ok(PoolBuySellParameters {
             token_address,
             pool_address,
             pool_type,
-            test_amount,
+            test_amount: denom_amount,
             buyer_address: buyer,
-            prior_tx: self.prior_tx.clone(),
+            prior_txs: self.prior_txs.clone(),
             block_number: self.block_number,
             slippage_tolerance: self.slippage_tolerance,
             gas_price,
@@ -387,17 +494,16 @@ impl PyPoolBuySellParameters {
             buy_gas_limit,
             approve_gas_limit,
             sell_gas_limit,
-            prior_gas_limit: self.prior_gas_limit,
-            prior_max_fee_per_gas: self.prior_max_fee_per_gas_wei,
-            prior_max_priority_fee_per_gas: self.prior_max_priority_fee_per_gas_wei,
             weth_address: Address::from([
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
+            denom_address,
+            denom_decimals: self.denom_decimals,
             block_delay: self.block_delay,
-            token_decimals,
+            token_decimals: self.token_decimals,
             block_header: self.block_header.clone(),
-            uniswap_v4_config: None,
+            uniswap_v4_config: v4_config,
         })
     }
 }
@@ -441,6 +547,12 @@ impl PyPoolBuySellSimulator {
         let processor = Arc::new(TxProcessor::new());
 
         Self::from_shared(simulator, processor)
+    }
+
+    /// Return a fresh default configuration object.
+    #[pyo3(signature = (token_decimals, denom_decimals))]
+    fn default_config(&self, token_decimals: u8, denom_decimals: u8) -> PyPoolBuySellParameters {
+        PyPoolBuySellParameters::new(token_decimals, denom_decimals)
     }
 
     /// Check if pool allows buying and selling tokens for Uniswap V2
@@ -577,11 +689,6 @@ impl PyPoolBuySellSimulator {
             })?;
 
         Ok(PyPoolBuySellSimulationResult::from_rust_result(result))
-    }
-
-    /// Get default configuration
-    fn default_config(&self) -> PyPoolBuySellParameters {
-        PyPoolBuySellParameters::new()
     }
 
     /// Get simulator information

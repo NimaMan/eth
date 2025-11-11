@@ -56,6 +56,61 @@ impl PyAddressTxIndexer {
             read_only,
         }
     }
+
+    fn writer_ref(&self) -> PyResult<&AddressTxWriter> {
+        self.writer.as_ref().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "AddressTxIndexer writer unavailable (read-only mode)",
+            )
+        })
+    }
+
+    fn parse_participations(
+        &self,
+        transactions: Vec<(u64, Vec<String>)>,
+    ) -> PyResult<Vec<AddressParticipation>> {
+        let mut participations: Vec<AddressParticipation> = Vec::with_capacity(transactions.len());
+
+        for (tx_index, addresses) in transactions {
+            if addresses.is_empty() {
+                continue;
+            }
+
+            let mut parsed: Vec<Address> = Vec::with_capacity(addresses.len());
+            for address_str in addresses {
+                let normalized = address_str.trim();
+                let without_prefix = normalized.strip_prefix("0x").unwrap_or(normalized);
+                let address = Address::from_str(without_prefix).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Invalid address {address_str}: {e}",
+                    ))
+                })?;
+                parsed.push(address);
+            }
+
+            if parsed.is_empty() {
+                continue;
+            }
+
+            participations.push(AddressParticipation {
+                tx_index,
+                addresses: parsed,
+            });
+        }
+
+        Ok(participations)
+    }
+
+    fn ingest_blocks(&self, blocks: Vec<(u64, Vec<AddressParticipation>)>) -> PyResult<Vec<usize>> {
+        if blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let writer = self.writer_ref()?;
+        writer
+            .ingest_block_batch(blocks)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
 }
 
 #[pymethods]
@@ -153,50 +208,43 @@ impl PyAddressTxIndexer {
             return Ok(0);
         }
 
-        let mut participations: Vec<AddressParticipation> = Vec::with_capacity(transactions.len());
-
-        for (tx_index, addresses) in transactions {
-            if addresses.is_empty() {
-                continue;
-            }
-
-            let mut parsed: Vec<Address> = Vec::with_capacity(addresses.len());
-            for address_str in addresses {
-                let normalized = address_str.trim();
-                let without_prefix = normalized.strip_prefix("0x").unwrap_or(normalized);
-                let address = Address::from_str(without_prefix).map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Invalid address {address_str}: {e}",
-                    ))
-                })?;
-                parsed.push(address);
-            }
-
-            if parsed.is_empty() {
-                continue;
-            }
-
-            participations.push(AddressParticipation {
-                tx_index,
-                addresses: parsed,
-            });
-        }
+        let participations = self.parse_participations(transactions)?;
 
         if participations.is_empty() {
             return Ok(0);
         }
 
-        let writer = self.writer.as_ref().ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressTxIndexer writer unavailable (read-only mode)",
-            )
-        })?;
+        let mut blocks = Vec::with_capacity(1);
+        blocks.push((block_number, participations));
+        let mut inserted = self.ingest_blocks(blocks)?;
+        Ok(inserted.pop().unwrap_or(0) as u64)
+    }
 
-        let inserted = writer
-            .ingest_block_participation(block_number, participations)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+    #[pyo3(signature = (blocks))]
+    pub fn write_transactions_batch(
+        &self,
+        blocks: Vec<(u64, Vec<(u64, Vec<String>)>)>,
+    ) -> PyResult<Vec<u64>> {
+        if self.read_only {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "AddressTxIndexer is read-only; writing is disabled",
+            ));
+        }
 
-        Ok(inserted as u64)
+        if blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut parsed_blocks: Vec<(u64, Vec<AddressParticipation>)> =
+            Vec::with_capacity(blocks.len());
+
+        for (block_number, transactions) in blocks {
+            let participations = self.parse_participations(transactions)?;
+            parsed_blocks.push((block_number, participations));
+        }
+
+        let inserted = self.ingest_blocks(parsed_blocks)?;
+        Ok(inserted.into_iter().map(|value| value as u64).collect())
     }
 
     pub fn address_transactions(&self, address: &str) -> PyResult<Vec<PyAddressTransactionRef>> {

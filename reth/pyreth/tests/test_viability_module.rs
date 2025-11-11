@@ -39,7 +39,9 @@ mod tests {
             Address::ZERO, // Would be real pool in actual test
             PoolType::UniswapV2,
         )
-        .with_test_amount(U256::from(1_000_000_000_000_000u64)); // 0.001 ETH
+        .with_test_amount(U256::from(1_000_000_000_000_000u64))
+        .with_denom_address(Address::ZERO)
+        .with_denom_decimals(18); // 0.001 ETH
 
         // This would fail with zero addresses, but tests compilation
         let result = analyze_pool_viability(simulator, tx_processor, config).await;
@@ -63,10 +65,14 @@ mod tests {
         // Test the configuration builder pattern
         let config = PoolBuySellParameters::new(Address::ZERO, Address::ZERO, PoolType::UniswapV2)
             .with_test_amount(U256::from(100))
+            .with_denom_address(Address::ZERO)
+            .with_denom_decimals(18)
             .with_buyer(Address::from([1u8; 20]))
             .with_block(12345678);
 
         assert_eq!(config.test_amount, U256::from(100));
+        assert_eq!(config.denom_address, Address::ZERO);
+        assert_eq!(config.denom_decimals, 18);
         assert_eq!(config.buyer_address, Address::from([1u8; 20]));
         assert_eq!(config.block_number, Some(12345678));
     }

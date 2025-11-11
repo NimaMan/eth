@@ -15,6 +15,10 @@ from textwrap import dedent
 from typing import Any, Dict, Optional, Tuple
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
+
+
 
 SIMULATION_BLOCK = 23592070
 TOKEN_ADDRESS = "0x162ba80A7c8d61090F52Da0e23260313d292b2Ec"
@@ -88,9 +92,9 @@ def main() -> None:
     reth = pyreth.PyReth()
     simulator = reth.pool_buy_sell_simulator()
 
-    config = pyreth.PoolBuySellParameters.with_buy_amount(BUY_AMOUNT_ETH)
+    config = pyreth.PoolBuySellParameters.with_denom_amount(BUY_AMOUNT_ETH, TOKEN_DECIMALS, WETH_DECIMALS)
+    config.denom_address = WETH_ADDRESS
     config.block_number = SIMULATION_BLOCK
-    config.token_decimals = TOKEN_DECIMALS
 
     prior_source, prior_fee_info = configure_prior_transaction(config, reth)
     if prior_source:

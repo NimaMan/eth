@@ -10,6 +10,7 @@
 /// 3. Expose single and batch operations for efficiency
 /// 4. Track balance changes between blocks
 /// 5. Share TxSimulator instance with other PyReth components
+use chrono::SecondsFormat;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
@@ -19,11 +20,12 @@ use std::sync::Arc;
 use crate::header_utils::parse_sealed_header_from_json;
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
-use reth_chain_query::common_addresses::find_uniswap_v4_pools_for_pair;
+use reth_chain_query::dex::find_uniswap_v4_pools_for_pair;
 use reth_chain_query::provider::{
     AddressTransactionRef, BalanceDiff, TransactionData as RustTransactionData,
 };
 use reth_chain_query::reth_index::RethIndexDB;
+use reth_chain_query::time_utils::BlockTimeConverter;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
 use reth_primitives::SealedHeader;
@@ -214,6 +216,7 @@ impl From<AddressTransactionRef> for PyAddressTransactionRef {
 pub struct PyChainQuery {
     pub(super) runtime: Arc<Runtime>,
     pub(super) provider: Arc<RethQueryProvider>,
+    time_converter: Arc<BlockTimeConverter>,
     // Store actual data for Python access
     portfolios: parking_lot::RwLock<HashMap<String, Portfolio>>,
     balance_changes: parking_lot::RwLock<HashMap<String, BalanceChanges>>,
@@ -253,6 +256,8 @@ impl PyChainQuery {
             ))
         })?);
 
+        let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
+
         let provider = RethQueryProvider::with_simulator(simulator)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
             .with_reth_index_db(index_db);
@@ -260,6 +265,7 @@ impl PyChainQuery {
         Ok(Self {
             runtime: Arc::new(runtime),
             provider: Arc::new(provider),
+            time_converter,
             portfolios: parking_lot::RwLock::new(HashMap::new()),
             balance_changes: parking_lot::RwLock::new(HashMap::new()),
             complete_balances: parking_lot::RwLock::new(HashMap::new()),
@@ -274,6 +280,20 @@ impl PyChainQuery {
         self.provider
             .get_latest_block()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    /// Convert a block number to an ISO8601 timestamp (UTC)
+    fn block_to_timestamp(&self, block_number: u64) -> PyResult<String> {
+        let timestamp =
+            super::utils::block_to_timestamp(&self.runtime, &self.time_converter, block_number)?;
+
+        Ok(timestamp.to_rfc3339_opts(SecondsFormat::Secs, true))
+    }
+
+    /// Convert an ISO8601 timestamp (UTC) to the nearest block at or before that time
+    fn timestamp_to_block(&self, timestamp: &str) -> PyResult<u64> {
+        let parsed = super::utils::parse_iso_timestamp(timestamp)?;
+        super::utils::timestamp_to_block_floor(&self.runtime, &self.time_converter, parsed)
     }
 
     /// Get ETH balance for an address
@@ -339,7 +359,7 @@ impl PyChainQuery {
             .collect())
     }
 
-    /// Fetch complete transaction metadata by global sequential number (txumber).
+    /// Fetch complete transaction metadata by global sequential number (Txumber).
     fn transaction_by_number(&self, tx_number: u64) -> PyResult<PyTransactionData> {
         let provider = self.provider.clone();
         let tx = self
@@ -816,22 +836,28 @@ impl PyChainQuery {
 
         // Access simulator directly for the discovery helper
         let sim = self.provider.simulator().clone();
-        let fut = find_uniswap_v4_pools_for_pair(&sim, pm, a, b, blocks_back, max_results);
+        let block_hint = if blocks_back == 0 {
+            None
+        } else {
+            Some(blocks_back)
+        };
+        let fut = find_uniswap_v4_pools_for_pair(&sim, pm, a, b, block_hint);
         let v = self
             .runtime
             .block_on(async move { fut.await })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let mut out = Vec::with_capacity(v.len());
-        for info in v {
+        let mut out = Vec::with_capacity(v.len().min(max_results));
+        for info in v.into_iter().take(max_results) {
             let d = PyDict::new(py);
             d.set_item("pool_id", format!("0x{:x}", info.pool_id))?;
-            d.set_item("currency0", format!("0x{}", hex::encode(info.currency0)))?;
-            d.set_item("currency1", format!("0x{}", hex::encode(info.currency1)))?;
+            d.set_item(
+                "pool_address",
+                format!("0x{}", hex::encode(info.pool_address)),
+            )?;
             d.set_item("fee", info.fee)?;
             d.set_item("tick_spacing", info.tick_spacing)?;
             d.set_item("hooks", format!("0x{}", hex::encode(info.hooks)))?;
-            d.set_item("block_number", info.block_number)?;
             out.push(d.into());
         }
         Ok(out)
@@ -856,7 +882,11 @@ impl PyChainQuery {
                             .get_token_decimals(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_decimals(token_addr, block_number, None).await,
+                    None => {
+                        provider
+                            .get_token_decimals(token_addr, block_number, None)
+                            .await
+                    }
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
@@ -881,7 +911,11 @@ impl PyChainQuery {
                             .get_token_symbol(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_symbol(token_addr, block_number, None).await,
+                    None => {
+                        provider
+                            .get_token_symbol(token_addr, block_number, None)
+                            .await
+                    }
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
@@ -906,7 +940,11 @@ impl PyChainQuery {
                             .get_token_name(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_name(token_addr, block_number, None).await,
+                    None => {
+                        provider
+                            .get_token_name(token_addr, block_number, None)
+                            .await
+                    }
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
@@ -963,7 +1001,11 @@ impl PyChainQuery {
                             .get_token_metadata(token_addr, block_number, Some(header))
                             .await
                     }
-                    None => provider.get_token_metadata(token_addr, block_number, None).await,
+                    None => {
+                        provider
+                            .get_token_metadata(token_addr, block_number, None)
+                            .await
+                    }
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;

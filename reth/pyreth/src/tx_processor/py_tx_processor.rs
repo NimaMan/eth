@@ -380,6 +380,10 @@ impl PyTxProcessor {
             max_priority_fee_per_gas: max_priority_fee_u256
                 .map(|v| v.try_into().unwrap_or(1_000_000_000)),
             nonce, // Let simulator determine nonce if None
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
         };
 
         // Simulate transaction

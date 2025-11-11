@@ -7,8 +7,8 @@
 /// - Transaction building (TxBuilder)
 use pyo3::prelude::*;
 
-use crate::agents::envs::stablecoin_env::{
-    PyChainSnapshot, PyPortfolioState, PyStablecoinAction, PyStablecoinEnv, PyStepOutput,
+use crate::agents::envs::eth15m_env::{
+    PyEth15mAction, PyEth15mEnv, PyEth15mFeeds, PyEth15mObservation, PyEth15mStep,
 };
 use crate::chain_query::{
     PyAccount, PyAddressTransactionRef, PyAddressTxIndexer, PyBalanceChange, PyBalanceChanges,
@@ -75,12 +75,12 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyTokenProcessedTxProvider>()?;
     m.add_class::<PyProcessedBlock>()?;
 
-    // RL agent env bindings
-    m.add_class::<PyStablecoinEnv>()?;
-    m.add_class::<PyStablecoinAction>()?;
-    m.add_class::<PyStepOutput>()?;
-    m.add_class::<PyChainSnapshot>()?;
-    m.add_class::<PyPortfolioState>()?;
+    // RL / forecasting environment bindings
+    m.add_class::<PyEth15mEnv>()?;
+    m.add_class::<PyEth15mFeeds>()?;
+    m.add_class::<PyEth15mAction>()?;
+    m.add_class::<PyEth15mStep>()?;
+    m.add_class::<PyEth15mObservation>()?;
 
     // Add module metadata
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

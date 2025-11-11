@@ -91,7 +91,7 @@ Implementation Notes
 
 - PyProcessedTransaction.to_dict() returns a schema that matches Python dataclasses exactly; large integers are preserved as strings.
 - Numeric‑looking strings are never down‑cast to floats in the binding conversion layer to avoid precision loss.
-- Extend PyPoolBuySellSimulationResult to include buy/approve/sell transactions (as PyProcessedTransaction) and optionally prior_tx.
+- Extend PyPoolBuySellSimulationResult to include buy/approve/sell transactions (as PyProcessedTransaction) and surface any prior_transactions applied during simulation.
 - Provide batch/streaming versions for high‑volume use cases (yield iter of PyProcessedTransaction, or Arrow/IPC in the future).
 - Document field‑by‑field schema mapping in docstrings and keep it in lock‑step with Rust/Python models.
 

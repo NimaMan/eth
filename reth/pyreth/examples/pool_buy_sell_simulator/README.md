@@ -90,6 +90,18 @@ PRIOR_UNSIGNED_FROM=0x... PRIOR_UNSIGNED_TO=0x... PRIOR_UNSIGNED_VALUE_WEI=0 \
 PRIOR_UNSIGNED_DATA_HEX=0x... python prior_tx_then_trade.py
 ```
 
+### 7. mind_of_pepe_replay.py
+**Purpose**: Replay the Mind of Pepe launch helpers before viability testing  
+**Features**:
+- Loads the contract creation + `openTrading()` transactions by hash
+- Demonstrates sequential `prior_txs` support via `set_prior_transactions`
+- Prints the replayed transaction hashes and viability summary
+
+**Usage**:
+```bash
+python mind_of_pepe_replay.py
+```
+
 ## API Reference
 
 ### Creating the Simulator
@@ -135,18 +147,18 @@ result = simulator.check_uniswap_v3_pool(
 
 ```python
 # Create custom configuration
-config = pyreth.PoolBuySellParameters()
-config.test_amount_eth = 0.1  # Test with 0.1 ETH
+config = pyreth.PoolBuySellParameters(18, 18)
+config.denom_amount = 0.1  # Test with 0.1 denom units (default WETH)
 config.buyer_address = "0x..."  # Custom buyer address
+config.denom_address = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"  # Denomination token
 config.buy_gas_limit = 500000
 config.approve_gas_limit = 200000
 config.sell_gas_limit = 500000
 config.slippage_tolerance = 0.5  # 0.5% slippage
 config.block_delay = 1  # Sell in next block
-config.token_decimals = 18  # Token decimals
 
 # Or create with specific amount
-config = pyreth.PoolBuySellParameters.with_buy_amount(0.05)
+config = pyreth.PoolBuySellParameters.with_denom_amount(0.05, 18, 18)
 ```
 
 ### Understanding Results

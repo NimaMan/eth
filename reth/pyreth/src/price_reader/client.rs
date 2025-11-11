@@ -1,11 +1,12 @@
 use crate::price_reader::price_data::PyPriceData;
 use alloy_primitives::U256;
-use eth_prices::price_readers::amm::UniswapV2Reader;
-use eth_prices::price_readers::oracle::chainlink::ChainlinkReader;
-use eth_prices::{price_readers::AggregatedPriceReader, EthPrices};
+use eth_prices::price_readers::snapshot::ChainlinkReader;
+use eth_prices::price_readers::snapshot::UniswapV2Reader;
+use eth_prices::{price_readers::MultiVenuePriceReader, EthPrices};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use reth_chain_query::common_addresses::{compute_uniswap_v2_pool, get_address_by_name};
+use reth_chain_query::common_addresses::get_address_by_name;
+use reth_chain_query::dex::compute_uniswap_v2_pool;
 use reth_chain_query::provider::RethQueryProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ use tx_simulator::TxSimulator;
 #[pyclass]
 pub struct PyEthPriceClient {
     inner: EthPrices,
-    aggregated_reader: Option<Arc<AggregatedPriceReader>>,
+    multi_venue_reader: Option<Arc<MultiVenuePriceReader>>,
 }
 
 impl PyEthPriceClient {
@@ -24,18 +25,27 @@ impl PyEthPriceClient {
     pub fn from_simulator(simulator: Arc<TxSimulator>) -> Self {
         // Wrap the cloned ProviderFactory in Arc to match expected type
         let provider_factory = Arc::new(simulator.provider_factory().clone());
-        let inner = EthPrices::from_provider(provider_factory.clone());
+        let inner = match EthPrices::from_provider(provider_factory.clone()).with_chainlink() {
+            Ok(initialized) => initialized,
+            Err(err) => {
+                eprintln!(
+                    "WARNING: failed to initialize Chainlink reader in PyEthPriceClient::from_simulator: {}",
+                    err
+                );
+                EthPrices::from_provider(provider_factory.clone())
+            }
+        };
 
-        // Also create aggregated reader
-        let aggregated = AggregatedPriceReader::new(provider_factory.clone())
+        // Also create multi-venue reader
+        let aggregated = MultiVenuePriceReader::new(provider_factory.clone())
             .with_all_amms(provider_factory.clone())
-            .unwrap_or_else(|_| AggregatedPriceReader::new(provider_factory.clone()))
+            .unwrap_or_else(|_| MultiVenuePriceReader::new(provider_factory.clone()))
             .with_all_oracles(provider_factory.clone())
-            .unwrap_or_else(|_| AggregatedPriceReader::new(provider_factory.clone()));
+            .unwrap_or_else(|_| MultiVenuePriceReader::new(provider_factory.clone()));
 
         Self {
             inner,
-            aggregated_reader: Some(Arc::new(aggregated)),
+            multi_venue_reader: Some(Arc::new(aggregated)),
         }
     }
 }
@@ -59,7 +69,7 @@ impl PyEthPriceClient {
 
         Ok(PyEthPriceClient {
             inner: client,
-            aggregated_reader: None,
+            multi_venue_reader: None,
         })
     }
 
@@ -159,12 +169,51 @@ impl PyEthPriceClient {
         PyPriceData::from_rust_data(rust_data, py)
     }
 
-    /// Get price from Chainlink
-    fn get_chainlink_price(&self, _pair: String) -> PyResult<PyPriceData> {
-        // TODO: Fix async handling for Chainlink
-        Err(PyErr::new::<pyo3::exceptions::PyNotImplementedError, _>(
-            "Chainlink price fetching temporarily disabled",
-        ))
+    /// Get price from Chainlink (latest block)
+    fn get_chainlink_price(&self, pair: String) -> PyResult<PyPriceData> {
+        let rt = Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to create async runtime: {}",
+                e
+            ))
+        })?;
+
+        let rust_data = rt
+            .block_on(self.inner.get_chainlink_price(&pair))
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Failed to get Chainlink price: {}",
+                    e
+                ))
+            })?;
+
+        Python::with_gil(|py| PyPriceData::from_rust_data(rust_data, py))
+    }
+
+    /// Get Chainlink price at a specific block
+    #[pyo3(signature = (pair, block_number))]
+    fn get_chainlink_price_at_block(
+        &self,
+        pair: String,
+        block_number: u64,
+    ) -> PyResult<PyPriceData> {
+        let rt = Runtime::new().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to create async runtime: {}",
+                e
+            ))
+        })?;
+
+        let rust_data = rt
+            .block_on(self.inner.get_chainlink_price_at_block(&pair, block_number))
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                    "Failed to get Chainlink price at block {}: {}",
+                    block_number, e
+                ))
+            })?;
+
+        Python::with_gil(|py| PyPriceData::from_rust_data(rust_data, py))
     }
 
     /// Get price from SushiSwap
@@ -236,7 +285,7 @@ impl PyEthPriceClient {
 
     /// Get all prices from all available sources
     fn get_all_prices(&self, py: Python<'_>, pair: &str) -> PyResult<HashMap<String, PyObject>> {
-        if let Some(aggregated) = &self.aggregated_reader {
+        if let Some(aggregated) = &self.multi_venue_reader {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let all_prices = rt.block_on(async { aggregated.get_all_prices_async(pair).await });
 
@@ -269,7 +318,7 @@ impl PyEthPriceClient {
 
     /// Get median price across all sources
     fn get_median_price(&self, pair: &str) -> PyResult<f64> {
-        if let Some(aggregated) = &self.aggregated_reader {
+        if let Some(aggregated) = &self.multi_venue_reader {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let median = rt.block_on(async { aggregated.get_median_price(pair).await });
 
@@ -292,7 +341,7 @@ impl PyEthPriceClient {
         pair: &str,
         weights: Option<HashMap<String, f64>>,
     ) -> PyResult<f64> {
-        if let Some(aggregated) = &self.aggregated_reader {
+        if let Some(aggregated) = &self.multi_venue_reader {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let avg = rt.block_on(async { aggregated.get_weighted_average(pair, weights).await });
 
@@ -337,8 +386,8 @@ impl PyEthPriceClient {
 
         summary.insert("initialized_sources".to_string(), sources.join(", "));
 
-        if self.aggregated_reader.is_some() {
-            summary.insert("aggregated_reader".to_string(), "Enabled".to_string());
+        if self.multi_venue_reader.is_some() {
+            summary.insert("multi_venue_reader".to_string(), "Enabled".to_string());
         }
 
         summary
@@ -581,8 +630,8 @@ impl PyEthPriceClient {
         hours: u64,
         step_secs: u64,
     ) -> PyResult<Vec<PyObject>> {
-        // Derive a shared ProviderFactory through any initialized reader under aggregated_reader
-        let provider_factory = if let Some(agg) = &self.aggregated_reader {
+        // Derive a shared ProviderFactory through any initialized reader under multi_venue_reader
+        let provider_factory = if let Some(agg) = &self.multi_venue_reader {
             if let Some(v2r) = &agg.uniswap_v2 {
                 Arc::new(v2r.provider_factory.clone())
             } else if let Some(v3r) = &agg.uniswap_v3 {
@@ -690,7 +739,7 @@ impl PyEthPriceClient {
 
             // Chainlink at block
             let cl = rt.block_on(chainlink.get_price_at_block("ETH/USD", b)).ok();
-            let cl_p = cl.as_ref().map(|p| p.price).unwrap_or(0.0);
+            let cl_p = cl.as_ref().map(|p| p.price_as_f64()).unwrap_or(0.0);
 
             // Uniswap V2 USDC per ETH
             let (r0u, r1u) = v2
@@ -736,8 +785,8 @@ impl PyEthPriceClient {
         step_blocks: u64,
         include_reserves: bool,
     ) -> PyResult<Vec<PyObject>> {
-        // Derive a shared ProviderFactory through any initialized reader under aggregated_reader
-        let provider_factory = if let Some(agg) = &self.aggregated_reader {
+        // Derive a shared ProviderFactory through any initialized reader under multi_venue_reader
+        let provider_factory = if let Some(agg) = &self.multi_venue_reader {
             if let Some(v2r) = &agg.uniswap_v2 {
                 Arc::new(v2r.provider_factory.clone())
             } else if let Some(v3r) = &agg.uniswap_v3 {
@@ -811,7 +860,7 @@ impl PyEthPriceClient {
 
             // Chainlink at block
             let cl = rt.block_on(chainlink.get_price_at_block("ETH/USD", b)).ok();
-            let cl_p = cl.as_ref().map(|p| p.price).unwrap_or(0.0);
+            let cl_p = cl.as_ref().map(|p| p.price_as_f64()).unwrap_or(0.0);
 
             // USDC pool reserves
             let (r0u, r1u) = v2

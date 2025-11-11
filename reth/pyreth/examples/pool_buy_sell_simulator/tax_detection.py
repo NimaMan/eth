@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
 
 def analyze_token_with_tax(simulator, token_name: str, token_addr: str, pool_addr: str, 
                           expected_tax: float, decimals: int = 18):
@@ -29,12 +31,12 @@ def analyze_token_with_tax(simulator, token_name: str, token_addr: str, pool_add
     
     try:
         # Create custom config with specific parameters
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = 1.0  # Use 1 ETH for better tax detection
-        config.token_decimals = decimals
+        config = pyreth.PoolBuySellParameters(decimals, WETH_DECIMALS)
+        config.denom_address = WETH_ADDRESS
+        config.denom_amount = 1.0  # Use 1 WETH (denom) for better tax detection
         config.block_delay = 1  # Sell in next block to avoid MEV
         
-        print(f"Running simulation with {config.test_amount_eth} ETH...")
+        print(f"Running simulation with {config.denom_amount} WETH...")
         
         # Check the pool
         result = simulator.check_uniswap_v2_pool(

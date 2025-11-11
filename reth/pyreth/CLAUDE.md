@@ -167,8 +167,9 @@ py_reth = pyreth.PyReth()
 
 def check_trading_enabled(token_address, pool_address):
     trading_sim = py_reth.trading_simulator()
-    config = trading_sim.default_config()
-    config = config.with_buy_amount(0.01)  # 0.01 ETH
+    config = trading_sim.default_config(18)
+    config = config.with_denom_amount(0.01, 18, 18)  # 0.01 denom units
+    config.denom_address = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
     
     result = trading_sim.simulate_with_config(
         token_address,

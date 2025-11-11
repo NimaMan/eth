@@ -77,6 +77,8 @@ pub struct PyProcessedTransaction {
     #[pyo3(get)]
     pub nonce: u64,
     #[pyo3(get)]
+    pub raw_tx_type: u8,
+    #[pyo3(get)]
     pub tx_type: String,
     #[pyo3(get)]
     pub actions: Vec<String>,
@@ -105,6 +107,7 @@ impl PyProcessedTransaction {
             value: ptx.value.to_string(),
             status: ptx.status,
             nonce: ptx.nonce,
+            raw_tx_type: ptx.raw_tx_type,
             tx_type: ptx.tx_type.clone(),
             actions: ptx.actions.clone(),
             input: format!("0x{}", hex::encode(&ptx.input)),
@@ -160,6 +163,7 @@ impl PyProcessedTransaction {
         dict.set_item("value", u256_to_py(py, &self.inner.value)?)?;
         dict.set_item("status", &self.status)?;
         dict.set_item("nonce", self.nonce)?;
+        dict.set_item("raw_tx_type", self.raw_tx_type)?;
         dict.set_item("input", &self.input)?;
         dict.set_item("tx_type", &self.tx_type)?;
         dict.set_item("actions", &self.actions)?;
@@ -345,6 +349,40 @@ impl PyProcessedTransaction {
             "permit2_events",
             vec_to_pylist(py, &self.inner.permit2_events)?,
         )?;
+        let access_list = PyList::empty(py);
+        for item in &self.inner.access_list {
+            let entry = PyDict::new(py);
+            entry.set_item("address", to_checksum_address(&item.address))?;
+            let keys = PyList::empty(py);
+            for key in &item.storage_keys {
+                keys.append(format!("{:#x}", key))?;
+            }
+            entry.set_item("storage_keys", keys)?;
+            access_list.append(entry)?;
+        }
+        dict.set_item("access_list", access_list)?;
+        let blob_hashes = PyList::empty(py);
+        for hash in &self.inner.blob_versioned_hashes {
+            blob_hashes.append(format!("{:#x}", hash))?;
+        }
+        dict.set_item("blob_versioned_hashes", blob_hashes)?;
+        if let Some(max_blob_fee) = &self.inner.max_fee_per_blob_gas {
+            dict.set_item("max_fee_per_blob_gas", u256_to_py(py, max_blob_fee)?)?;
+        } else {
+            dict.set_item("max_fee_per_blob_gas", py.None())?;
+        }
+        dict.set_item("blob_gas_used", self.inner.blob_gas_used)?;
+        let auth_list = PyList::empty(py);
+        for auth in &self.inner.signed_authorizations {
+            let json_value = serde_json::to_value(auth).map_err(|err| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to serialize signed authorization: {}",
+                    err
+                ))
+            })?;
+            auth_list.append(json_to_python(py, &json_value)?)?;
+        }
+        dict.set_item("signed_authorizations", auth_list)?;
 
         // Other events
         let other = PyList::empty(py);
@@ -362,8 +400,9 @@ impl PyProcessedTransaction {
             // currency_net
             let cnet = PyDict::new(py);
             for (sym, amount) in &changes.currency_net {
-                let converted = convert_currency_amount(py, sym, amount)?;
-                cnet.set_item(sym, converted)?;
+                if let Some(converted) = convert_currency_amount(py, sym, amount)? {
+                    cnet.set_item(sym, converted)?;
+                }
             }
             entry.set_item("currency_net", cnet)?;
             // token_net
@@ -1165,15 +1204,15 @@ impl PyProcessedTransaction {
         )
     }
 }
-fn convert_currency_amount(py: Python, symbol: &str, amount: &I256) -> PyResult<PyObject> {
-    let decimals: i32 = if symbol == "ETH" {
-        18
+fn convert_currency_amount(py: Python, symbol: &str, amount: &I256) -> PyResult<Option<PyObject>> {
+    let decimals: Option<i32> = if symbol == "ETH" {
+        Some(18)
     } else {
-        ERC20_TOKEN_DECIMALS
-            .get(symbol)
-            .copied()
-            .unwrap_or(18)
-            .into()
+        ERC20_TOKEN_DECIMALS.get(symbol).copied().map(i32::from)
+    };
+
+    let Some(decimals) = decimals else {
+        return Ok(None);
     };
 
     let magnitude = amount.unsigned_abs();
@@ -1192,5 +1231,5 @@ fn convert_currency_amount(py: Python, symbol: &str, amount: &I256) -> PyResult<
     let divisor = 10f64.powi(decimals);
     let result = PyFloat::new(py, rust_float / divisor);
 
-    Ok(result.into())
+    Ok(Some(result.into()))
 }

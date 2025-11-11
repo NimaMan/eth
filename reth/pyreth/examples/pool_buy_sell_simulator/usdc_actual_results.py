@@ -11,6 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
+
 
 def main():
     print("=" * 80)
@@ -30,9 +33,8 @@ def main():
         txp = reth.tx_processor()
         
         # Create config for 1 ETH
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = TEST_AMOUNT_ETH
-        config.token_decimals = 6  # USDC decimals
+        config = pyreth.PoolBuySellParameters(6, WETH_DECIMALS)
+        config.denom_amount = TEST_AMOUNT_ETH
         config.buyer_address = "0x0C96c602b1b332B8AB2093E5d72D804a24bd5689"
 
         # Optional: set a prior transaction to run before buy/approve/sell

@@ -1,7 +1,9 @@
-use eth_prices::{PriceData as RustPriceData, PriceSource};
+use eth_prices::{
+    AggregatorPriceSource, AmmPriceSource, LiquidityMetrics, OraclePriceSource,
+    PriceData as RustPriceData, PriceSource, SimulationPriceSource, Token,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::collections::HashMap;
 
 /// Python wrapper for price data from any source
 #[pyclass]
@@ -11,6 +13,16 @@ pub struct PyPriceData {
     pub pair: String,
     #[pyo3(get)]
     pub price: f64,
+    #[pyo3(get)]
+    pub price_numerator: String,
+    #[pyo3(get)]
+    pub price_denominator: String,
+    #[pyo3(get)]
+    pub inverse_price: f64,
+    #[pyo3(get)]
+    pub inverse_price_numerator: String,
+    #[pyo3(get)]
+    pub inverse_price_denominator: String,
     #[pyo3(get)]
     pub decimals: u8,
     #[pyo3(get)]
@@ -27,14 +39,21 @@ impl PyPriceData {
     /// Create from RustPriceData with Python context for source_info
     pub fn from_rust_data(data: RustPriceData, py: Python) -> PyResult<Self> {
         let source_info = Self::parse_price_source(&data.source, py)?;
+        let price = data.price_as_f64();
+        let inverse_price = data.inverse_price_as_f64();
 
         Ok(PyPriceData {
-            pair: data.pair,
-            price: data.price,
-            decimals: data.decimals,
+            pair: data.pair.label.clone(),
+            price,
+            price_numerator: data.price.numerator.to_string(),
+            price_denominator: data.price.denominator.to_string(),
+            inverse_price,
+            inverse_price_numerator: data.inverse_price.numerator.to_string(),
+            inverse_price_denominator: data.inverse_price.denominator.to_string(),
+            decimals: data.pair.quote.decimals,
             block_number: data.block_number,
             timestamp: data.timestamp,
-            source: format!("{:?}", data.source), // Keep backward compatibility
+            source: data.source.protocol().to_string(),
             source_info,
         })
     }
@@ -44,161 +63,146 @@ impl PyPriceData {
         let dict = PyDict::new(py);
 
         match source {
-            PriceSource::UniswapV2 {
-                pool_address,
-                reserve0,
-                reserve1,
-            } => {
-                dict.set_item("protocol", "UniswapV2")?;
-                dict.set_item("pool_address", pool_address)?;
-                dict.set_item("reserve0", *reserve0)?;
-                dict.set_item("reserve1", *reserve1)?;
-
-                // Determine stablecoin from pool address
-                let stablecoin = Self::identify_stablecoin_from_pool(pool_address);
-                dict.set_item("stablecoin", stablecoin)?;
-
-                // Determine tokens from known pools
-                let (token0, token1) = Self::identify_tokens_from_pool(pool_address);
-                dict.set_item("token0", token0)?;
-                dict.set_item("token1", token1)?;
-            }
-
-            PriceSource::UniswapV3 {
-                pool_address,
-                tick,
-                sqrt_price_x96,
-                fee_tier,
-                liquidity,
-            } => {
-                dict.set_item("protocol", "UniswapV3")?;
-                dict.set_item("pool_address", pool_address)?;
-                dict.set_item("tick", *tick)?;
-                dict.set_item("sqrt_price_x96", sqrt_price_x96)?;
-                dict.set_item("fee_tier", *fee_tier)?;
-                dict.set_item("liquidity", liquidity)?;
-
-                let stablecoin = Self::identify_stablecoin_from_pool(pool_address);
-                dict.set_item("stablecoin", stablecoin)?;
-
-                let (token0, token1) = Self::identify_tokens_from_pool(pool_address);
-                dict.set_item("token0", token0)?;
-                dict.set_item("token1", token1)?;
-            }
-
-            PriceSource::SushiSwap {
-                pool_address,
-                reserve0,
-                reserve1,
-            } => {
-                dict.set_item("protocol", "SushiSwap")?;
-                dict.set_item("pool_address", pool_address)?;
-                dict.set_item("reserve0", *reserve0)?;
-                dict.set_item("reserve1", *reserve1)?;
-
-                let stablecoin = Self::identify_stablecoin_from_pool(pool_address);
-                dict.set_item("stablecoin", stablecoin)?;
-
-                let (token0, token1) = Self::identify_tokens_from_pool(pool_address);
-                dict.set_item("token0", token0)?;
-                dict.set_item("token1", token1)?;
-            }
-
-            PriceSource::Curve {
-                pool_address,
-                pool_type,
-                balances,
-            } => {
-                dict.set_item("protocol", "Curve")?;
-                dict.set_item("pool_address", pool_address)?;
-                dict.set_item("pool_type", pool_type)?;
-                dict.set_item("balances", balances.clone())?;
-
-                let stablecoin = Self::identify_stablecoin_from_pool(pool_address);
-                dict.set_item("stablecoin", stablecoin)?;
-            }
-
-            PriceSource::Balancer {
-                pool_address,
-                pool_type,
-                balances,
-                weights,
-            } => {
-                dict.set_item("protocol", "Balancer")?;
-                dict.set_item("pool_address", pool_address)?;
-                dict.set_item("pool_type", pool_type)?;
-                dict.set_item("balances", balances.clone())?;
-                dict.set_item("weights", weights.clone())?;
-
-                let stablecoin = Self::identify_stablecoin_from_pool(pool_address);
-                dict.set_item("stablecoin", stablecoin)?;
-            }
-
-            PriceSource::Chainlink {
-                round_id,
-                updated_at,
-            } => {
-                dict.set_item("protocol", "Chainlink")?;
-                dict.set_item("round_id", *round_id)?;
-                dict.set_item("updated_at", *updated_at)?;
-                dict.set_item("stablecoin", "USD")?; // Chainlink feeds are in USD
-            }
-
-            _ => {
-                // For other protocols, provide basic info
-                dict.set_item("protocol", "Unknown")?;
-                dict.set_item("stablecoin", "Unknown")?;
-            }
+            PriceSource::Amm(data) => Self::parse_amm_source(py, data, dict)?,
+            PriceSource::Oracle(data) => Self::parse_oracle_source(py, data, dict)?,
+            PriceSource::Aggregator(data) => Self::parse_aggregator_source(py, data, dict)?,
+            PriceSource::Simulation(data) => Self::parse_simulation_source(py, data, dict)?,
         }
 
         Ok(dict.into())
     }
 
-    /// Identify stablecoin from known pool addresses
-    fn identify_stablecoin_from_pool(pool_address: &str) -> &'static str {
-        match pool_address.to_lowercase().as_str() {
-            // Uniswap V2 USDC/WETH
-            "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc" => "USDC",
-
-            // Uniswap V3 USDC/WETH pools
-            "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640" => "USDC", // 0.05%
-            "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8" => "USDC", // 0.3%
-
-            // DAI/USDC V3
-            "0x5777d92f208679db4b9778590fa3cab3ac9e2168" => "DAI",
-
-            // Add more known pools as needed
-            _ => {
-                // Try to infer from address patterns or return Unknown
-                if pool_address.contains("usdc") || pool_address.contains("USDC") {
-                    "USDC"
-                } else if pool_address.contains("usdt") || pool_address.contains("USDT") {
-                    "USDT"
-                } else if pool_address.contains("dai") || pool_address.contains("DAI") {
-                    "DAI"
-                } else {
-                    "Unknown"
-                }
-            }
-        }
+    fn parse_amm_source(py: Python, data: &AmmPriceSource, dict: &PyDict) -> PyResult<()> {
+        dict.set_item("protocol", data.protocol.as_str())?;
+        dict.set_item("price_id", data.price_id.to_string())?;
+        dict.set_item(
+            "pool_address",
+            format!("0x{}", hex::encode(data.pool.address.as_slice())),
+        )?;
+        dict.set_item("token0", data.pool.token0.symbol.clone())?;
+        dict.set_item("token1", data.pool.token1.symbol.clone())?;
+        dict.set_item("token0_info", Self::token_to_dict(py, &data.pool.token0)?)?;
+        dict.set_item("token1_info", Self::token_to_dict(py, &data.pool.token1)?)?;
+        dict.set_item("fee_bps", data.pool.kind.fee_bps())?;
+        dict.set_item("liquidity_tier", data.liquidity.liquidity_tier)?;
+        dict.set_item("raw_liquidity", data.liquidity.raw_liquidity.to_string())?;
+        let stablecoin =
+            Self::identify_stablecoin_from_tokens(&data.pool.token0, &data.pool.token1);
+        dict.set_item("stablecoin", stablecoin)?;
+        Ok(())
     }
 
-    /// Identify token pair from known pool addresses
-    fn identify_tokens_from_pool(pool_address: &str) -> (&'static str, &'static str) {
-        match pool_address.to_lowercase().as_str() {
-            // Uniswap V2 USDC/WETH
-            "0xb4e16d0168e52d35cacd2c6185b44281ec28c9dc" => ("USDC", "WETH"),
+    fn parse_oracle_source(_: Python, data: &OraclePriceSource, dict: &PyDict) -> PyResult<()> {
+        dict.set_item("protocol", data.price_id.protocol.as_str())?;
+        dict.set_item("price_id", data.price_id.to_string())?;
+        dict.set_item(
+            "feed_address",
+            format!("0x{}", hex::encode(data.feed_address)),
+        )?;
+        dict.set_item("answer", data.answer.to_string())?;
+        dict.set_item("answer_decimals", data.answer_decimals)?;
+        dict.set_item(
+            "round_id",
+            data.round_id
+                .map(|r| format!("{:#x}", r))
+                .unwrap_or_else(|| "None".into()),
+        )?;
+        dict.set_item("updated_at", data.updated_at)?;
+        Ok(())
+    }
 
-            // Uniswap V3 USDC/WETH pools
-            "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640" => ("USDC", "WETH"), // 0.05%
-            "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8" => ("USDC", "WETH"), // 0.3%
-
-            // DAI/USDC V3
-            "0x5777d92f208679db4b9778590fa3cab3ac9e2168" => ("DAI", "USDC"),
-
-            // Default to unknown
-            _ => ("Unknown", "Unknown"),
+    fn parse_aggregator_source(
+        py: Python,
+        data: &AggregatorPriceSource,
+        dict: &PyDict,
+    ) -> PyResult<()> {
+        dict.set_item("protocol", data.protocol.as_str())?;
+        dict.set_item("routes", data.routes.clone())?;
+        dict.set_item("amount_in", data.amount_in.to_string())?;
+        dict.set_item("amount_out", data.amount_out.to_string())?;
+        if let Some(estimated) = data.estimated_gas {
+            dict.set_item("estimated_gas", estimated.to_string())?;
         }
+        dict.set_item("from_token", data.from_token.symbol.clone())?;
+        dict.set_item("to_token", data.to_token.symbol.clone())?;
+        dict.set_item(
+            "from_token_info",
+            Self::token_to_dict(py, &data.from_token)?,
+        )?;
+        dict.set_item("to_token_info", Self::token_to_dict(py, &data.to_token)?)?;
+        Ok(())
+    }
+
+    fn parse_simulation_source(
+        py: Python,
+        data: &SimulationPriceSource,
+        dict: &PyDict,
+    ) -> PyResult<()> {
+        dict.set_item("protocol", data.price_id.protocol.as_str())?;
+        dict.set_item("price_id", data.price_id.to_string())?;
+        dict.set_item("route", data.route.clone())?;
+        dict.set_item("direction", format!("{:?}", data.direction))?;
+        dict.set_item("account", format!("0x{}", hex::encode(data.account)))?;
+        dict.set_item("input_token", Self::token_to_dict(py, &data.input_token)?)?;
+        dict.set_item("output_token", Self::token_to_dict(py, &data.output_token)?)?;
+        dict.set_item("input_amount", data.input_amount.to_string())?;
+        dict.set_item("output_amount", data.output_amount.to_string())?;
+        if let Some(tax) = data.tax_percent {
+            dict.set_item("tax_percent", tax)?;
+        }
+        if let Some(liq) = &data.liquidity {
+            dict.set_item("liquidity", Self::liquidity_to_dict(py, liq)?)?;
+        }
+        Ok(())
+    }
+
+    fn token_to_dict(py: Python, token: &Token) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item(
+            "address",
+            format!("0x{}", hex::encode(token.address.as_slice())),
+        )?;
+        dict.set_item("symbol", token.symbol.clone())?;
+        dict.set_item("decimals", token.decimals)?;
+        Ok(dict.into())
+    }
+
+    fn liquidity_to_dict(py: Python, data: &LiquidityMetrics) -> PyResult<PyObject> {
+        let dict = PyDict::new(py);
+        dict.set_item("raw_liquidity", data.raw_liquidity.to_string())?;
+        dict.set_item("liquidity_tier", data.liquidity_tier)?;
+        dict.set_item("significance_multiplier", data.significance_multiplier)?;
+        dict.set_item("protocol", data.protocol.as_str())?;
+        Ok(dict.into())
+    }
+
+    fn identify_stablecoin_from_tokens(token0: &Token, token1: &Token) -> &'static str {
+        Self::classify_stable_symbol(&token0.symbol)
+            .or_else(|| Self::classify_stable_symbol(&token1.symbol))
+            .unwrap_or("Unknown")
+    }
+
+    fn classify_stable_symbol(symbol: &str) -> Option<&'static str> {
+        macro_rules! match_symbol {
+            ($sym:literal, $value:literal) => {
+                if symbol.eq_ignore_ascii_case($sym) {
+                    return Some($value);
+                }
+            };
+        }
+
+        match_symbol!("USDC", "USDC");
+        match_symbol!("USDT", "USDT");
+        match_symbol!("DAI", "DAI");
+        match_symbol!("FRAX", "FRAX");
+        match_symbol!("LUSD", "LUSD");
+        match_symbol!("USDP", "USDP");
+        match_symbol!("BUSD", "BUSD");
+        match_symbol!("TUSD", "TUSD");
+        match_symbol!("USDD", "USDD");
+        match_symbol!("GUSD", "GUSD");
+        match_symbol!("PYUSD", "PYUSD");
+        None
     }
 }
 
@@ -213,6 +217,11 @@ impl From<RustPriceData> for PyPriceData {
                 PyPriceData {
                     pair: "Unknown".to_string(),
                     price: 0.0,
+                    price_numerator: "0".to_string(),
+                    price_denominator: "1".to_string(),
+                    inverse_price: 0.0,
+                    inverse_price_numerator: "0".to_string(),
+                    inverse_price_denominator: "1".to_string(),
                     decimals: 0,
                     block_number: 0,
                     timestamp: 0,
@@ -261,6 +270,11 @@ impl PyPriceData {
         let dict = PyDict::new(py);
         dict.set_item("pair", &self.pair)?;
         dict.set_item("price", self.price)?;
+        dict.set_item("price_numerator", &self.price_numerator)?;
+        dict.set_item("price_denominator", &self.price_denominator)?;
+        dict.set_item("inverse_price", self.inverse_price)?;
+        dict.set_item("inverse_price_numerator", &self.inverse_price_numerator)?;
+        dict.set_item("inverse_price_denominator", &self.inverse_price_denominator)?;
         dict.set_item("decimals", self.decimals)?;
         dict.set_item("block_number", self.block_number)?;
         dict.set_item("timestamp", self.timestamp)?;

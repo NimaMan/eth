@@ -37,6 +37,33 @@ pub(crate) fn processed_transaction_from_py_dict(
     processed_transaction_from_mapping(prior_dict)
 }
 
+pub(crate) fn processed_transactions_from_py_iterable(
+    prior_iterable: &PyAny,
+) -> PyResult<Vec<RustProcessedTransaction>> {
+    if prior_iterable.is_none() {
+        return Ok(Vec::new());
+    }
+
+    if prior_iterable.is_instance_of::<PyString>() {
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "prior transactions must be provided as an iterable of processed transaction objects",
+        ));
+    }
+
+    let iter = prior_iterable.iter().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "prior transactions must be an iterable of processed transaction objects",
+        )
+    })?;
+
+    let mut transactions = Vec::new();
+    for item in iter {
+        let obj = item?;
+        transactions.push(processed_transaction_from_py_object(obj)?);
+    }
+    Ok(transactions)
+}
+
 fn processed_transaction_from_mapping(obj: &PyAny) -> PyResult<RustProcessedTransaction> {
     let py = obj.py();
     let owned_dict = to_owned_dict(py, obj)?;
