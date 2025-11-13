@@ -13,7 +13,7 @@ def test_live_data_registry_redis_available():
     """
     Ensure the Redis instance backing the live data registry is reachable and writable.
     """
-    client = get_sysnc_client()
+    client = get_sync_client()
     assert client.ping(), f"Redis at {DEFAULT_REDIS_URL} did not respond to PING"
 
     key = f"test:live_data_registry:{uuid.uuid4().hex}"

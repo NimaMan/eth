@@ -270,7 +270,8 @@ class LiveBlockProcessor:
                 break
             try:
                 block_number, processed_block = item
-                success = await self.publish_block(block_number, processed_block)
+                await self._publish_live_block_snapshot(block_number, processed_block)
+                success = await self.publish_block(block_number)
                 if not success:
                     self.logger.warning(
                         "Failed to publish block %s, will continue with next items",
@@ -373,8 +374,8 @@ class LiveBlockProcessor:
                 
         raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")
 
-    async def publish_block(self, block_number: int, processed_block: ProcessedBlockResult):
-        """Publish the processed block to RabbitMQ. Continue on failure."""
+    async def publish_block(self, block_number: int):
+        """Publish the processed block number to RabbitMQ. Continue on failure."""
         try:
             # Only try to setup if we don't have an exchange
             if not self.blocks_exchange:
@@ -383,23 +384,9 @@ class LiveBlockProcessor:
                     self.logger.error(f"Failed to initialize RabbitMQ for block {block_number}")
                     return False  # Return False but don't reset exchange
             
-            try:
-                payload = {
-                    "block_number": block_number,
-                    "block_header": processed_block.block_header,
-                    "transactions": processed_block.transactions,
-                }
-                normalized_payload = transaction_serializer(payload)
-                block_data = orjson.dumps(
-                    normalized_payload,
-                    option=orjson.OPT_SERIALIZE_NUMPY
-                )
-            except Exception as e:
-                self.logger.error(f"Serialization error for block {block_number}: {e}")
-                return False  # Continue with next block without resetting exchange
-        
+            payload = orjson.dumps({"block_number": block_number})
             message = aio_pika.Message(
-                body=block_data,
+                body=payload,
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 content_type='application/json',
                 headers={'block_number': str(block_number)} 
@@ -533,7 +520,11 @@ class LiveBlockProcessor:
         if not self._live_data_publisher:
             return
         try:
-            snapshot = build_block_snapshot(processed_block, block_number=block_number)
+            snapshot = build_block_snapshot(
+                processed_block,
+                block_number=block_number,
+                include_transactions=True,
+            )
             await self._live_data_publisher.publish_block(block_number, snapshot)
             self._record_retained_block(block_number)
             await self._evict_old_blocks()
