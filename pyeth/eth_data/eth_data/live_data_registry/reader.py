@@ -24,6 +24,10 @@ class LiveDataReader:
         raw = self.redis.get(keys.block_key(block_number))
         return _decode(raw)
 
+    def get_block_snapshot(self, block_number: int) -> Optional[Dict[str, Any]]:
+        """Alias for get_block to emphasize block snapshot semantics."""
+        return self.get_block(block_number)
+
     def get_latest_block_number(self) -> Optional[int]:
         value = self.redis.get(keys.latest_block_key())
         if value is None:
@@ -42,6 +46,10 @@ class LiveDataReader:
     def get_token(self, token_address: str) -> Optional[Dict[str, Any]]:
         raw = self.redis.get(keys.token_key(token_address))
         return _decode(raw)
+
+    def get_token_snapshot(self, token_address: str) -> Optional[Dict[str, Any]]:
+        """Return the stored token snapshot for address if present."""
+        return self.get_token(token_address)
 
     def get_position(self, portfolio_id: str, token_address: str) -> Optional[Dict[str, Any]]:
         raw = self.redis.get(keys.position_key(portfolio_id, token_address))
