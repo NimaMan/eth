@@ -28,6 +28,8 @@ pub mod time_utils;
 pub mod tx_builders;
 pub mod utils;
 
+pub use utils::function_signatures;
+
 // Re-export new provider architecture
 pub use provider::provider_factory_from_datadir;
 pub use provider::{
