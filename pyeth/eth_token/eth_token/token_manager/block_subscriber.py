@@ -24,6 +24,7 @@ import aio_pika
 from aiormq.exceptions import ChannelInvalidStateError
 from eth_token.utils.logger import get_logger
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
+from eth_data.live_data_registry import LiveDataReader
 
 
 class BlockSubscriber():
@@ -33,6 +34,7 @@ class BlockSubscriber():
         callback: Optional[Callable] = None,
         logger=None,
         block_token_processor: Optional[BlockTokenProcessor] = None,
+        live_data_reader: Optional[LiveDataReader] = None,
         ):
         self.logger = logger or get_logger(name="subscriber", log_folder="tokens_live")
         self.rabbitmq_url = rabbitmq_url
@@ -50,6 +52,7 @@ class BlockSubscriber():
         self.callback = callback
         # Remove priority queue since we only keep latest block
         self.block_token_processor = block_token_processor
+        self.live_data_reader = live_data_reader or LiveDataReader()
         
     async def connect(self):
         """Establish connection to RabbitMQ with exclusive queue for broadcast"""
@@ -169,24 +172,45 @@ class BlockSubscriber():
         try:
             async with message.process():
                 payload = orjson.loads(message.body.decode())
+                block_payload = self._resolve_block_payload(payload)
+                if block_payload is None:
+                    self.logger.warning("Unable to resolve block payload from message: %s", payload)
+                    return
 
                 if self.callback:
-                    await self.callback(payload)
+                    await self.callback(block_payload)
                 elif self.block_token_processor:
-                    block_header = None
-                    block_transactions = payload
-                    if isinstance(payload, dict):
-                        block_header = payload.get("block_header")
-                        block_transactions = payload.get("transactions", [])
-                    if block_header is None:
-                        self.logger.warning(
-                            "Received block %s without block_header",
-                            payload.get("block_number") if isinstance(payload, dict) else "unknown",
-                        )
+                    block_number = block_payload.get("block_number")
+                    if block_number is None:
+                        self.logger.warning("Block payload missing block_number; skipping")
+                        return
                     self.block_token_processor.process_block_tokens(
-                        block_transactions,
-                        block_header=block_header,
+                        block_payload,
+                        block_number,
                     )
                     
         except Exception as e:
             self.logger.error(f"Error processing block in BlockSubscriber: {e}", exc_info=True)
+
+    def _resolve_block_payload(self, payload):
+        if isinstance(payload, dict) and "transactions" in payload:
+            return payload
+
+        block_number = None
+        if isinstance(payload, dict):
+            block_number = payload.get("block_number")
+        elif isinstance(payload, int):
+            block_number = payload
+
+        if block_number is None:
+            return None
+
+        snapshot = self.live_data_reader.get_block(int(block_number))
+        if snapshot is None:
+            return None
+
+        return {
+            "block_number": snapshot.get("block_number", block_number),
+            "block_header": snapshot.get("header"),
+            "transactions": snapshot.get("transactions", []),
+        }
