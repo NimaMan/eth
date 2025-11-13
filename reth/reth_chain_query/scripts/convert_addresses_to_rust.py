@@ -16,15 +16,15 @@ ETH_DATA_PATH = "/home/nima/code/crypto/py/eth_data"
 sys.path.append(ETH_DATA_PATH)
 
 from eth_data.chain_utils.common_addresses import (
+    CEX_ADDRESSES_BY_NAME,
+    DENOM_ADDRESSES,
+    ERC20_TOKEN_DECIMALS,
+    ETF_ADDRESSES_BY_NAME,
     STABLECOINS_ADDRESS_BY_NAME,
     STABLECOIN_UNIT_BY_NAME,
-    ERC20_TOKEN_DECIMALS,
-    DENOM_ADDRESSES,
     addresses_by_name,
+    fee_recipients,
 )
-from eth_data.chain_utils.common_addresses.all_cex_addresses import CEX_ADDRESSES_BY_NAME
-from eth_data.chain_utils.common_addresses.all_etf_addresses import ETF_ADDRESSES_BY_NAME
-from eth_data.chain_utils.common_addresses.validators import fee_recipients
 
 
 def format_address(addr: str) -> str:

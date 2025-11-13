@@ -3,16 +3,18 @@
 /// Handles MDBX environment creation and provides helpers for the analytics
 /// tables that sit alongside the canonical Reth database.
 use alloy_primitives::Address;
-use eyre::Result;
+use eyre::{eyre, Result};
+use reth_libmdbx::Error as MdbxError;
 use reth_libmdbx::{
-    Database, DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, Transaction,
+    Database, DatabaseFlags, Environment, EnvironmentFlags, Geometry, Mode, SyncMode, Transaction,
     WriteFlags, RO, RW,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tracing::warn;
 
 use crate::reth_index::tables::{
-    address_index::{self, AddressIndex, Txumber},
+    address_index::{AddressIndex, Txumber},
     mempool_tx_arrivals::MempoolTxArrivalTable,
 };
 
@@ -48,18 +50,15 @@ impl RethIndexDB {
             std::fs::create_dir_all(path)?;
         }
 
-        let mut builder = Environment::builder();
-
-        if read_only {
+        let env = if read_only {
+            let mut builder = Environment::builder();
             builder.set_flags(EnvironmentFlags::from(Mode::ReadOnly));
             builder.set_max_dbs(32);
+            builder.set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+            builder.open(path)?
         } else {
-            builder
-                .set_max_dbs(32)
-                .set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
-        }
-
-        let env = builder.open(path)?;
+            Self::open_rw_environment(path)?
+        };
 
         if read_only {
             let tx: Transaction<RO> = env.begin_ro_txn()?;
@@ -78,8 +77,19 @@ impl RethIndexDB {
                 Some(MempoolTxArrivalTable::TABLE_NAME),
                 DatabaseFlags::INTEGER_KEY,
             )?;
-            let address_index_dbi =
-                rwtx.create_db(Some(AddressIndex::TABLE_NAME), DatabaseFlags::empty())?;
+            let address_index_dbi = match rwtx.create_db(
+                Some(AddressIndex::TABLE_NAME),
+                DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
+            ) {
+                Ok(dbi) => dbi,
+                Err(MdbxError::Incompatible) => {
+                    return Err(eyre!(
+                        "AddressTx index table exists with a legacy layout. Delete {} and rebuild the index.",
+                        path.display()
+                    ));
+                }
+                Err(err) => return Err(err.into()),
+            };
             rwtx.commit()?;
 
             Ok(Self {
@@ -88,6 +98,54 @@ impl RethIndexDB {
                 tx_arrival_dbi,
                 address_index_dbi,
             })
+        }
+    }
+
+    fn sync_flags_from_env() -> EnvironmentFlags {
+        let env_value =
+            std::env::var("PYRETH_INDEX_DB_SYNC_MODE").unwrap_or_else(|_| "safe-no-sync".into());
+        let normalized = env_value.trim().to_ascii_lowercase();
+        let sync_mode = match normalized.as_str() {
+            "durable" => SyncMode::Durable,
+            "no-metasync" | "nometasync" => SyncMode::NoMetaSync,
+            "safe-no-sync" | "safenosync" | "safe_no_sync" => SyncMode::SafeNoSync,
+            "utterly-no-sync" | "utterlynosync" => SyncMode::UtterlyNoSync,
+            _ => {
+                warn!(
+                    sync_mode = %env_value,
+                    "Invalid PYRETH_INDEX_DB_SYNC_MODE value; falling back to safe-no-sync"
+                );
+                SyncMode::SafeNoSync
+            }
+        };
+        EnvironmentFlags::from(Mode::ReadWrite { sync_mode })
+    }
+
+    fn open_rw_environment(path: &Path) -> Result<Environment> {
+        let mut tuned = Environment::builder();
+        tuned.write_map();
+        tuned.set_flags(Self::sync_flags_from_env());
+        tuned
+            .set_max_dbs(32)
+            .set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+
+        match tuned.open(path) {
+            Ok(env) => Ok(env),
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Failed to open MDBX environment with tuned settings, falling back to defaults"
+                );
+                let mut fallback = Environment::builder();
+                fallback
+                    .set_max_dbs(32)
+                    .set_geometry(Geometry::<std::ops::RangeInclusive<usize>>::default());
+                fallback.open(path).map_err(|fallback_err| {
+                    eyre!(
+                        "Failed to open MDBX env with tuned settings ({err}) and fallback also failed ({fallback_err})"
+                    )
+                })
+            }
         }
     }
 
@@ -107,17 +165,13 @@ impl RethIndexDB {
         let mut cursor = tx.cursor(&self.address_index_dbi)?;
 
         let mut txs = Vec::new();
-        let mut item =
-            cursor.set_range::<Vec<u8>, Vec<u8>>(&AddressIndex::encode_shard_prefix(address))?;
+        let key = AddressIndex::encode_key(address);
 
-        while let Some((key, value)) = item {
-            if AddressIndex::key_address(&key)? != address {
-                break;
+        if let Some((_, value)) = cursor.set_key::<Vec<u8>, Vec<u8>>(key.as_slice())? {
+            txs.push(AddressIndex::decode_value(&value)?);
+            while let Some((_, value)) = cursor.next_dup::<Vec<u8>, Vec<u8>>()? {
+                txs.push(AddressIndex::decode_value(&value)?);
             }
-
-            let mut shard = AddressIndex::decode_values(&value)?;
-            txs.append(&mut shard);
-            item = cursor.next::<Vec<u8>, Vec<u8>>()?;
         }
 
         Ok(txs)
@@ -135,23 +189,52 @@ impl RethIndexDB {
             return Ok(0);
         }
 
-        let mut tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut total = 0usize;
-
-        for (address, txs) in entries {
-            if txs.is_empty() {
-                continue;
-            }
-            total += self.append_for_address(&mut tx, *address, txs)?;
-        }
-
+        let tx: Transaction<RW> = self.env.begin_rw_txn()?;
+        let mut cursor = tx.cursor(&self.address_index_dbi)?;
+        let total = self.append_entries_with_cursor(&mut cursor, entries)?;
         tx.commit()?;
         Ok(total)
     }
 
+    /// Append transactions for multiple blocks inside a single MDBX transaction.
+    pub fn append_block_entry_slices(
+        &self,
+        blocks: &[&[(Address, Vec<Txumber>)]],
+    ) -> Result<Vec<usize>> {
+        if blocks.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tx: Transaction<RW> = self.env.begin_rw_txn()?;
+        let mut cursor = tx.cursor(&self.address_index_dbi)?;
+        let mut per_block = Vec::with_capacity(blocks.len());
+
+        for entries in blocks {
+            per_block.push(self.append_entries_with_cursor(&mut cursor, entries)?);
+        }
+
+        tx.commit()?;
+        Ok(per_block)
+    }
+
+    fn append_entries_with_cursor(
+        &self,
+        cursor: &mut reth_libmdbx::Cursor<RW>,
+        entries: &[(Address, Vec<Txumber>)],
+    ) -> Result<usize> {
+        let mut inserted = 0usize;
+        for (address, txs) in entries {
+            if txs.is_empty() {
+                continue;
+            }
+            inserted += self.append_for_address(cursor, *address, txs)?;
+        }
+        Ok(inserted)
+    }
+
     fn append_for_address(
         &self,
-        tx: &mut Transaction<RW>,
+        cursor: &mut reth_libmdbx::Cursor<RW>,
         address: Address,
         txs: &Vec<Txumber>,
     ) -> Result<usize> {
@@ -159,138 +242,21 @@ impl RethIndexDB {
             return Ok(0);
         }
 
-        let mut cursor = tx.cursor(&self.address_index_dbi)?;
-        let prefix = AddressIndex::encode_shard_prefix(address);
-
-        // Gather existing shards for this address (if any).
-        let mut shards: Vec<(Vec<u8>, Vec<Txumber>, u64)> = Vec::new();
-        let mut existing_flat: Vec<Txumber> = Vec::new();
-        let mut item = cursor.set_range::<Vec<u8>, Vec<u8>>(&prefix)?;
-        while let Some((key, value)) = item {
-            if AddressIndex::key_address(&key)? != address {
-                break;
-            }
-
-            let (_, shard_id) = AddressIndex::decode_shard_key(&key)?;
-            let shard_values = AddressIndex::decode_values(&value)?;
-            existing_flat.extend_from_slice(&shard_values);
-            shards.push((key, shard_values, shard_id));
-            item = cursor.next::<Vec<u8>, Vec<u8>>()?;
-        }
-
-        let mut new_values: Vec<Txumber> = txs.iter().copied().collect();
-        new_values.sort_unstable();
-        new_values.dedup();
-
-        if new_values.is_empty() {
-            return Ok(0);
-        }
-
-        if shards.is_empty() {
-            let inserted = new_values.len();
-            let mut to_write = new_values;
-            self.insert_additional_shards(&mut cursor, address, 0, &mut to_write)?;
-            return Ok(inserted);
-        }
-
-        // Existing data present – determine if we can append or need a rewrite.
-        let existing_len = existing_flat.len();
-        let max_existing = existing_flat
-            .last()
-            .copied()
-            .expect("at least one value present with shards");
-
-        let mut greater_than_max: Vec<Txumber> = Vec::new();
-        let mut missing_earlier: Vec<Txumber> = Vec::new();
-
-        for value in new_values.iter().copied() {
-            if value > max_existing {
-                greater_than_max.push(value);
-            } else if existing_flat.binary_search(&value).is_err() {
-                missing_earlier.push(value);
-            }
-        }
-
-        if missing_earlier.is_empty() {
-            // All new entries are strictly greater than the current max (or duplicates that already
-            // exist). Append efficiently without rewriting earlier shards.
-            if greater_than_max.is_empty() {
-                return Ok(0);
-            }
-
-            let (last_key, last_values, last_shard_id) =
-                shards.last_mut().expect("non-empty shards");
-
-            let mut inserted = 0usize;
-            let available = address_index::SHARD_TX_CAPACITY.saturating_sub(last_values.len());
-            if available > 0 {
-                let take = available.min(greater_than_max.len());
-                if take > 0 {
-                    last_values.extend_from_slice(&greater_than_max[..take]);
-                    let encoded = AddressIndex::encode_values(last_values);
-                    cursor.put(last_key.as_slice(), encoded.as_slice(), WriteFlags::UPSERT)?;
-                    inserted += take;
-                    greater_than_max.drain(..take);
-                }
-            }
-
-            if !greater_than_max.is_empty() {
-                inserted += self.insert_additional_shards(
-                    &mut cursor,
-                    address,
-                    *last_shard_id + 1,
-                    &mut greater_than_max,
-                )?;
-            }
-
-            return Ok(inserted);
-        }
-
-        // We have new entries that belong before the current max. Merge everything and rewrite.
-        let mut combined = existing_flat;
-        combined.extend(missing_earlier.iter().copied());
-        combined.extend(greater_than_max.iter().copied());
-        combined.sort_unstable();
-        combined.dedup();
-
-        let combined_len = combined.len();
-        let newly_inserted = combined_len.saturating_sub(existing_len);
-        if newly_inserted == 0 {
-            return Ok(0);
-        }
-
-        // Remove existing shards for the address so we can rewrite them in order.
-        let mut item = cursor.set_range::<Vec<u8>, Vec<u8>>(&prefix)?;
-        while let Some((key, _)) = item {
-            if AddressIndex::key_address(&key)? != address {
-                break;
-            }
-            cursor.del(WriteFlags::CURRENT)?;
-            item = cursor.next::<Vec<u8>, Vec<u8>>()?;
-        }
-
-        let mut to_write = combined;
-        self.insert_additional_shards(&mut cursor, address, 0, &mut to_write)?;
-        Ok(newly_inserted)
-    }
-
-    fn insert_additional_shards(
-        &self,
-        cursor: &mut reth_libmdbx::Cursor<RW>,
-        address: Address,
-        mut shard_id: u64,
-        txs: &mut Vec<Txumber>,
-    ) -> Result<usize> {
+        let key = AddressIndex::encode_key(address);
         let mut inserted = 0usize;
 
-        while !txs.is_empty() {
-            let take = txs.len().min(address_index::SHARD_TX_CAPACITY);
-            let chunk: Vec<Txumber> = txs.drain(..take).collect();
-            let key = AddressIndex::encode_shard_key(address, shard_id);
-            let encoded = AddressIndex::encode_values(&chunk);
-            cursor.put(key.as_slice(), encoded.as_slice(), WriteFlags::UPSERT)?;
-            shard_id += 1;
-            inserted += chunk.len();
+        for tx_number in txs.iter().copied() {
+            let value = AddressIndex::encode_value(tx_number);
+            match cursor.put(key.as_slice(), &value, WriteFlags::NO_DUP_DATA) {
+                Ok(_) => {
+                    inserted += 1;
+                }
+                Err(MdbxError::KeyExist) => {
+                    // Duplicate entry, skip.
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
 
         Ok(inserted)

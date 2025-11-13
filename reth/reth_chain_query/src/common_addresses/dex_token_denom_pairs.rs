@@ -16,8 +16,10 @@ use crate::dex::BALANCER_VAULT;
 pub struct UniswapV2TokenInfo {
     pub symbol: &'static str,
     pub token_address: Address,
-    pub denom_address: Address,
     pub decimals: u8,
+    pub denom_symbol: &'static str,
+    pub denom_address: Address,
+    pub denom_decimals: u8,
 }
 
 /// Minimal metadata required to describe a Uniswap V3 token/denom pair.
@@ -25,17 +27,21 @@ pub struct UniswapV2TokenInfo {
 pub struct UniswapV3TokenInfo {
     pub symbol: &'static str,
     pub token_address: Address,
-    pub denom_address: Address,
-    pub fee_tier: u32,
     pub decimals: u8,
+    pub denom_symbol: &'static str,
+    pub denom_address: Address,
+    pub denom_decimals: u8,
+    pub fee_tier: u32,
 }
 /// Minimal metadata required to describe a SushiSwap token/denom pair.
 #[derive(Debug, Clone, Copy)]
 pub struct SushiSwapTokenInfo {
     pub symbol: &'static str,
     pub token_address: Address,
-    pub denom_address: Address,
     pub decimals: u8,
+    pub denom_symbol: &'static str,
+    pub denom_address: Address,
+    pub denom_decimals: u8,
 }
 
 /// Minimal metadata required to describe a Uniswap V4 pool.
@@ -116,7 +122,6 @@ fn resolve_decimals(symbol: &str) -> u8 {
 }
 
 static UNISWAP_V2_TOKEN_SET: Lazy<Vec<UniswapV2TokenInfo>> = Lazy::new(|| {
-    let weth = resolve_token("WETH");
     let entries: &[(&str, &str)] = &[
         // Stablecoins
         ("USDC", "WETH"),
@@ -179,25 +184,18 @@ static UNISWAP_V2_TOKEN_SET: Lazy<Vec<UniswapV2TokenInfo>> = Lazy::new(|| {
 
     entries
         .iter()
-        .map(|(symbol, denom)| {
-            let token = resolve_token(symbol);
-            let denom_addr = if *denom == "WETH" {
-                weth
-            } else {
-                resolve_token(denom)
-            };
-            UniswapV2TokenInfo {
-                symbol,
-                token_address: token,
-                denom_address: denom_addr,
-                decimals: resolve_decimals(symbol),
-            }
+        .map(|(symbol, denom)| UniswapV2TokenInfo {
+            symbol,
+            token_address: resolve_token(symbol),
+            decimals: resolve_decimals(symbol),
+            denom_symbol: denom,
+            denom_address: resolve_token(denom),
+            denom_decimals: resolve_decimals(denom),
         })
         .collect()
 });
 
 static UNISWAP_V3_TOKEN_SET: Lazy<Vec<UniswapV3TokenInfo>> = Lazy::new(|| {
-    let weth = resolve_token("WETH");
     let entries: &[(&str, &str, u32)] = &[
         // 0.05% fee tier
         ("USDC", "WETH", 500),
@@ -252,26 +250,19 @@ static UNISWAP_V3_TOKEN_SET: Lazy<Vec<UniswapV3TokenInfo>> = Lazy::new(|| {
 
     entries
         .iter()
-        .map(|(symbol, denom, fee_tier)| {
-            let token = resolve_token(symbol);
-            let denom_addr = if *denom == "WETH" {
-                weth
-            } else {
-                resolve_token(denom)
-            };
-            UniswapV3TokenInfo {
-                symbol,
-                token_address: token,
-                denom_address: denom_addr,
-                fee_tier: *fee_tier,
-                decimals: resolve_decimals(symbol),
-            }
+        .map(|(symbol, denom, fee_tier)| UniswapV3TokenInfo {
+            symbol,
+            token_address: resolve_token(symbol),
+            decimals: resolve_decimals(symbol),
+            denom_symbol: denom,
+            denom_address: resolve_token(denom),
+            denom_decimals: resolve_decimals(denom),
+            fee_tier: *fee_tier,
         })
         .collect()
 });
 
 static SUSHISWAP_TOKEN_SET: Lazy<Vec<SushiSwapTokenInfo>> = Lazy::new(|| {
-    let weth = resolve_token("WETH");
     let entries: &[(&str, &str)] = &[
         ("USDC", "WETH"),
         ("USDT", "WETH"),
@@ -284,19 +275,13 @@ static SUSHISWAP_TOKEN_SET: Lazy<Vec<SushiSwapTokenInfo>> = Lazy::new(|| {
 
     entries
         .iter()
-        .map(|(symbol, denom)| {
-            let token = resolve_token(symbol);
-            let denom_addr = if *denom == "WETH" {
-                weth
-            } else {
-                resolve_token(denom)
-            };
-            SushiSwapTokenInfo {
-                symbol,
-                token_address: token,
-                denom_address: denom_addr,
-                decimals: resolve_decimals(symbol),
-            }
+        .map(|(symbol, denom)| SushiSwapTokenInfo {
+            symbol,
+            token_address: resolve_token(symbol),
+            decimals: resolve_decimals(symbol),
+            denom_symbol: denom,
+            denom_address: resolve_token(denom),
+            denom_decimals: resolve_decimals(denom),
         })
         .collect()
 });

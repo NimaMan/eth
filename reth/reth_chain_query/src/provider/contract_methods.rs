@@ -5,8 +5,10 @@ use super::RethQueryProvider;
 /// This is the universal way to get token balances that works with any implementation,
 /// including proxies, upgradeable contracts, and non-standard tokens.
 use alloy_primitives::{Address, Bytes, U256};
-use eyre::{eyre, Result};
+use eyre::{eyre, Report, Result};
 use reth_primitives::SealedHeader;
+use reth_provider::HeaderProvider;
+use tracing::debug;
 use tx_simulator::contract_method_simulator::{
     decode_string_from_contract_output, decode_uint256_from_contract_output,
     encode_contract_read_call_with_address_arg,
@@ -291,15 +293,64 @@ impl RethQueryProvider {
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<ViewFunctionResult> {
-        self.tx_simulator
+        let allow_fallback = block_number.is_none() && block_header.is_none();
+        let first_attempt = self
+            .tx_simulator
             .simulate_contract_read_only_call_with_options(
                 contract,
-                data,
+                data.clone(),
                 block_number,
-                block_header,
+                block_header.clone(),
                 None,
             )
-            .await
+            .await;
+
+        match first_attempt {
+            Ok(result) => Ok(result),
+            Err(err) => {
+                if allow_fallback && Self::is_header_not_found_error(&err) {
+                    if let Some((fallback_block, fallback_header)) = self.previous_block_header()? {
+                        debug!(
+                            target: "reth_chain_query::contract_methods",
+                            contract = %contract,
+                            fallback_block,
+                            "Retrying contract view call with previous block header"
+                        );
+                        return self
+                            .tx_simulator
+                            .simulate_contract_read_only_call_with_options(
+                                contract,
+                                data,
+                                Some(fallback_block),
+                                Some(fallback_header),
+                                None,
+                            )
+                            .await;
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    fn previous_block_header(&self) -> Result<Option<(u64, SealedHeader)>> {
+        let latest = self.get_latest_block()?;
+        if latest == 0 {
+            return Ok(None);
+        }
+        let fallback_block = latest - 1;
+        let header = self.fetch_sealed_header(fallback_block)?;
+        Ok(header.map(|sealed| (fallback_block, sealed)))
+    }
+
+    fn fetch_sealed_header(&self, block_number: u64) -> Result<Option<SealedHeader>> {
+        let provider = self.provider_factory.provider()?;
+        let header = provider.header_by_number(block_number)?;
+        Ok(header.map(SealedHeader::new_unhashed))
+    }
+
+    fn is_header_not_found_error(err: &Report) -> bool {
+        err.to_string().contains("No header for block")
     }
 }
 

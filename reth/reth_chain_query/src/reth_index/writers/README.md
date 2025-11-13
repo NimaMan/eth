@@ -14,10 +14,29 @@ to 120 s) before calling back into PyReth. Combined with
 `AddressTxWriter::flush_pending_blocks` flushing pending entries in ascending
 block order, backlog flushes remain append-only and no longer trigger a
 full-shard rewrite when the node briefly lags transaction indices. The Rust
-writer batches all ready blocks into a single MDBX transaction and the database
-layer keeps an append-only fast path that touches only the tail shard whenever
-new transaction numbers are strictly increasing, cutting the typical write time
-per block by avoiding repeated shard rewrites.
+writer batches all ready blocks into a single MDBX transaction (capped via
+`PYRETH_ADDRESS_TX_MAX_FLUSH_BLOCKS`, default 20) and the database layer keeps
+an append-only fast path that touches only the tail shard whenever new
+transaction numbers are strictly increasing. To shrink fsync time the MDBX
+environment now defaults to `PYRETH_INDEX_DB_SYNC_MODE=safe-no-sync`; set the
+variable to `durable` if you prefer the original fully-synchronous behavior
+(writes will return to the ~10 s/block range as we trade durability).
+
+### Storage layout rewrite (Nov 2025)
+
+Older versions stored transaction numbers per address in 2 000-entry shards.
+Every append had to read, decode, and rewrite the entire shard, which meant
+touching ~16 KiB per address even when we only needed to add a single tx number.
+The new layout is intentionally simple: the MDBX table is `DUP_SORT |
+DUP_FIXED`, the key is just the 20-byte address, and every tx participation is
+stored as an 8-byte duplicate value. Appends therefore become pure
+`cursor.put(address, tx_number)` calls with no read/modify/write overhead, and
+queries iterate dup values directly.
+
+**Migration:** MDBX cannot convert the old table in place. If you see
+`AddressTx index table exists with a legacy layout` on startup, delete the old
+`reth_index/address_to_txs` files (or the whole `reth_index` directory) and rerun
+the indexer so it can rebuild the table with dup-sort flags.
 
 ## Symptoms Observed From Production Logs
 
