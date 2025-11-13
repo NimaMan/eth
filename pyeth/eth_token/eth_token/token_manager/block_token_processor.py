@@ -20,7 +20,6 @@ Responsibilities
    sync while offering a simple synchronous mutation API callable from async workflows.
 """
 
-import orjson
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional, List
@@ -56,8 +55,7 @@ class BlockTokenProcessor:
     ) -> int:
         """Process a single block's transactions sequentially."""
         block_tx_list = process_block_result.get('transactions')
-        raw_block_header = process_block_result.get('block_header')
-        block_header = self._normalize_block_header(raw_block_header)
+        block_header = process_block_result.get('block_header')
         previous_block_header = self._recent_block_headers.get(block_number - 1)
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._store_block_header(block_number, block_header)
@@ -77,8 +75,8 @@ class BlockTokenProcessor:
 
     def add_block_headers_to_tx(self, tx, block_header, previous_block_header):
         tx_data = self._ensure_tx_dict(tx)
-        tx_data['block_header'] = self._normalize_block_header(block_header)
-        tx_data['previous_block_header'] = self._normalize_block_header(previous_block_header)
+        tx_data['block_header'] = block_header
+        tx_data['previous_block_header'] = previous_block_header
         return tx_data
 
     def map_transactions_to_tokens(
@@ -90,7 +88,9 @@ class BlockTokenProcessor:
         token_tx_map: Dict[str, List[Dict[str, Any]]] = OrderedDict()
         for tx in transactions:
             tx_data = self.add_block_headers_to_tx(tx, block_header, previous_block_header)
-            self._check_for_token_creation(tx_data, token_tx_map)
+            created_token = self._check_for_token_creation(tx_data)
+            if created_token:
+                token_tx_map.setdefault(created_token.contract_address, []).append(tx_data)
 
             contracts = tx_data.get("erc20_contracts") or set()
             if not contracts:
@@ -107,7 +107,7 @@ class BlockTokenProcessor:
         if not token:
             return
         for tx in token_transactions:
-            self._update_token_from_transaction(token=token, transaction=tx)        
+            self._update_token_from_transaction(token=token, transaction=tx)
 
         # Update the pool and token mapping so that we know which pools belong to which tokens        
         self.updated_tokens[token_address] = token
@@ -122,7 +122,7 @@ class BlockTokenProcessor:
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Failed to update token {token.contract_address} at tx {transaction.get('hash')}: {e}") 
 
-    def _check_for_token_creation(self, transaction: Dict, token_tx_map):
+    def _check_for_token_creation(self, transaction: Dict):
         """Process a single transaction and update relevant tokens"""
         block_number = transaction["block_number"]
         try:
@@ -131,11 +131,10 @@ class BlockTokenProcessor:
                 transaction, block_number
             )
             if is_token_creation:
-                token = self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
-                if token:
-                    token_tx_map.setdefault(token.contract_address, []).append(transaction)
+                return self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
+        return None
 
     def _is_token_creation(self, transaction: Dict, block_number: int) -> Optional[Dict[str, Any]]:
         """Return token metadata if transaction deploys a new ERC-20 contract."""
@@ -193,18 +192,6 @@ class BlockTokenProcessor:
         self._recent_block_headers[block_number] = block_header
         while len(self._recent_block_headers) > 2:
             self._recent_block_headers.popitem(last=False)
-
-    @staticmethod
-    def _normalize_block_header(header: Any) -> Any:
-        if header is None:
-            return None
-        if isinstance(header, str):
-            return header
-        if isinstance(header, dict):
-            return orjson.dumps(header).decode()
-        if hasattr(header, "to_rpc_dict"):
-            return orjson.dumps(header.to_rpc_dict()).decode()
-        return str(header)
 
 
 class HistoricalBlockTokenProcessor:
