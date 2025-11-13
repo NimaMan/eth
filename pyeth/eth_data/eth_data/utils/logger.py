@@ -21,7 +21,9 @@ from typing import Optional
 ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/eth/logs')
 # Track all created log files
 _log_files = set()
-_SKIP_CLEANUP_FOLDERS = {"block_processor"}
+_SKIP_CLEANUP_FOLDERS = set()
+_SKIP_CLEANUP_KEYWORDS = {"live_block_processor"}
+_MIN_LINES_TO_KEEP = max(1, int(os.getenv("ETH_LOG_MIN_LINES", "2")))
 
 
 def _should_skip_cleanup(log_path: str) -> bool:
@@ -34,8 +36,17 @@ def _should_skip_cleanup(log_path: str) -> bool:
         # Path outside ETH_LOG_DIR – never skip
         return False
 
-    first_component = rel_path.split(os.sep, 1)[0]
-    return first_component in _SKIP_CLEANUP_FOLDERS
+    parts = rel_path.split(os.sep)
+    if parts and parts[0] in _SKIP_CLEANUP_FOLDERS:
+        return True
+
+    filename = parts[-1] if parts else rel_path
+    lowercase_path = filename.lower()
+    for keyword in _SKIP_CLEANUP_KEYWORDS:
+        if keyword in lowercase_path:
+            return True
+
+    return False
 
 
 def register_skip_cleanup_folder(folder_name: str) -> None:
@@ -44,6 +55,36 @@ def register_skip_cleanup_folder(folder_name: str) -> None:
     """
     if folder_name:
         _SKIP_CLEANUP_FOLDERS.add(folder_name)
+
+
+def register_skip_cleanup_keyword(keyword: str) -> None:
+    """
+    Allow code to exclude files whose names contain `keyword`.
+    """
+    if keyword:
+        _SKIP_CLEANUP_KEYWORDS.add(keyword.lower())
+
+
+def _should_remove_file(path: str) -> bool:
+    try:
+        with open(path, "r") as f:
+            line_count = sum(1 for _ in f)
+        return line_count < _MIN_LINES_TO_KEEP
+    except OSError:
+        return False
+
+
+def _remove_if_needed(path: str) -> None:
+    if _should_skip_cleanup(path):
+        return
+    if not os.path.exists(path):
+        return
+    if _should_remove_file(path):
+        try:
+            os.remove(path)
+            print(f"Removed log file: {path}")
+        except OSError as exc:
+            print(f"Error deleting log file {path}: {exc}")
 
 
 def get_logger(
@@ -125,16 +166,9 @@ def cleanup_empty_logs():
     Scans both tracked files and the entire log directory structure.
     """
     # First clean up tracked files
-    for log_file in _log_files:
+    for log_file in list(_log_files):
         try:
-            if _should_skip_cleanup(log_file):
-                continue
-            if os.path.exists(log_file):
-                with open(log_file, 'r') as f:
-                    line_count = sum(1 for _ in f)
-                if line_count < 2:
-                    os.remove(log_file)
-                    print(f"Removed tracked empty log file: {log_file}")
+            _remove_if_needed(log_file)
         except Exception as e:
             print(f"Error cleaning up tracked log file {log_file}: {str(e)}")
     
@@ -144,14 +178,8 @@ def cleanup_empty_logs():
             for file in files:
                 if file.endswith('.log'):
                     log_file_path = os.path.join(root, file)
-                    if _should_skip_cleanup(log_file_path):
-                        continue
                     try:
-                        with open(log_file_path, 'r') as f:
-                            line_count = sum(1 for _ in f)
-                        if line_count < 2:
-                            os.remove(log_file_path)
-                            print(f"Removed untracked empty log file: {log_file_path}")
+                        _remove_if_needed(log_file_path)
                     except Exception as e:
                         print(f"Error cleaning up untracked log file {log_file_path}: {str(e)}")
     except Exception as e:

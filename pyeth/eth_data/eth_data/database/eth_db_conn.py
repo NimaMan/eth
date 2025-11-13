@@ -1,9 +1,8 @@
 from sqlalchemy import create_engine, Engine, event
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import os
-from typing import Optional
-from baygus.utils.logger import get_logger
+from eth_data.utils.logger import get_logger
 
 # Global engine cache for connection reuse
 _engines = {}

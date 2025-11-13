@@ -138,15 +138,29 @@ The system is configured via parameters passed to the `LiveBlockProcessor`, typi
 - `http_url`: The HTTP RPC URL of the Ethereum node.
 - `rabbitmq_url`: The connection URL for the RabbitMQ server.
 - `index_address_txs`: A boolean flag to enable/disable writing address participation to the index database.
+- `PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS`: Optional integer (defaults to 120) that controls how long the address-index writer buffers a block before handing it to PyReth. Increasing the value gives Reth more time to seal its TransactionLookup stage; setting it to `0` restores immediate writes.
 
 #### Observed Latency (Nov 2025)
 
-Running `scripts/monitor_block_arrival.py` against the current stack shows:
+`scripts/monitor_block_arrival.py` still reports healthy inbound heads (median lag ≈ 2.1 s, interval ≈ 12 s), so the node/WebSocket feed is not the bottleneck. The live pipeline logger pinpoints the slow stages.
 
-- **Head arrival lag** averages ~2 s (chain timestamp → WebSocket arrival). This is the baseline delay to expect in processor logs even when the node is healthy.
-- **RabbitMQ publish delay** averages ~20 s (arrival → message on `blocks_exchange`), with observed spikes up to ~40 s. The cause is architectural: `monitor_new_blocks` serially awaits `publish_block` and the optional address-index writer, so any slowdown in those calls blocks new head handling and messages arrive in bursts.
+##### Pipeline instrumentation snapshot — 2025‑11‑09 14:11–14:22 CET
 
-Tracked action item: decouple publishing/indexing from the head-ingestion coroutine or otherwise instrument/optimize `publish_block` so blocks reach RabbitMQ within a few seconds. Until then, downstream consumers should tolerate occasional 20–40 s publish latency.
+Source: `eth/logs/block_processor_pipeline/live_block_processor_pipeline_20251109_141102.log`.
+
+- `process_duration` now averages **9.4 s** (p95 10.9 s, max 11.5 s) while `head_to_process` stays ≈ 0 s, so `BlockProcessor.process_block` itself is consuming the wall-clock budget before we even enqueue the block. See blocks 23761919‑23761928 at `eth/logs/block_processor_pipeline/live_block_processor_pipeline_20251109_141102.log:6-15`.
+- `publish_time` stays in the same 9–10 s band (p95 53 s, max 63 s). This measurement includes the synchronous `transaction_serializer` + `orjson.dumps` in `publish_block`, so RabbitMQ is waiting for Python to materialize ~200 full `ProcessedTransaction` objects, not vice versa.
+- `index_time` is now near-zero for head blocks because the async index worker buffers each block for at least `PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS` (default 120 s) before calling `TransactionAddresstoTxIndexer.write_transactions_address_tx` (see `eth_data/database/writers/transaction_writer.py:1-154`). The lag ensures Reth’s transaction lookup stage has already sealed the block, so writes stay append-only and complete in milliseconds instead of the 8–63 s spikes we saw earlier.
+- When either serialization or the PyReth writer stalls, `head_to_publish` inflates to the same magnitude (median 19.2 s, p95 53 s) even though WebSocket delivery stayed timely. The backlog then flushes multiple heads in the same second (e.g., blocks 23761929‑23761931 at lines 16‑18), giving the illusion that Ethereum emitted “duplicate” timestamps.
+
+**Conclusion:** The current live service is CPU/IO bound inside our own synchronous stages (block processing, `TransactionAddresstoTxIndexer`, and JSON serialization), not RabbitMQ or the upstream node. These steps all run on the main event loop thread, so any spike (PyReth flush, JSON GC, or a transaction-heavy block) immediately translates into 20–60 s publish delays.
+
+**Action items:**
+1. Offload `TransactionAddresstoTxIndexer` to a dedicated worker (separate process or queue) so PyReth writes cannot block head ingestion. Even a background thread would help because `write_transactions` releases the event loop for tens of seconds today.
+2. Trim the RabbitMQ payload or pre-serialize transactions outside the hot path. A lighter message (header + tx hashes) would drop `publish_time` from ~9 s to sub-second.
+3. Keep the pipeline logger enabled while iterating—it is the only place we see `process_duration`, `publish_time`, and `index_time` per block, so regressions are immediately obvious.
+
+Until we ship the above, downstream consumers must tolerate publish jitter up to ~1 minute despite the processor handling each block correctly.
 
 ### Dependencies
 - **Core**: `web3.py`, `aio_pika` (for RabbitMQ), `orjson`.
