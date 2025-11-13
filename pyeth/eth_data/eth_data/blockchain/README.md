@@ -87,3 +87,37 @@ The same registry infrastructure can be applied to other shared state such as
 token snapshots or strategy positions. The contract stays the same:
 publish once to Redis → broadcast a lightweight notification → let consumers
 hydrate from the cache when needed.
+
+## Sequence Diagram
+
+```
+WebSocket newHeads
+        |
+        v
++----------------------+        +----------------------+        +---------------------+
+|   LiveBlockProcessor |        |    Live Data Registry|        | RabbitMQ (FANOUT)   |
++----------------------+        +----------------------+        +---------------------+
+        |                                 |                               |
+        | fetch block via HTTP            |                               |
+        |-------------------------------->|                               |
+        | process transactions            |                               |
+        |                                 |                               |
+        | write snapshot (block, txs)     |                               |
+        |-------------------------------->|                               |
+        |                                 | store under live:block:<n>    |
+        |                                 |                               |
+        | publish {"block_number": n}     |                               |
+        |---------------------------------------------------------->      |
+        |                                 |                               |
+        v                                 v                               v
+                      Redis snapshot readers        RabbitMQ queue (x-max-length=1)
+                      (BlockSubscriber, notebooks, etc.)
+
+BlockSubscriber flow:
+   RabbitMQ message -> read block number
+   -> LiveDataReader.get_block_snapshot(n)
+   -> feed full payload to BlockTokenProcessor
+
+Optional path (independent):
+   Processed block -> Reth address index writer
+```

@@ -69,7 +69,7 @@ class AddressMetricsUpdater:
             
         try:
             token_address = token.contract_address
-            is_scam = token.token_data.is_scam
+            is_scam = token.is_scam
             
             # Get all addresses that traded this token
             with self.Session() as session:

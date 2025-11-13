@@ -139,6 +139,8 @@ The system is configured via parameters passed to the `LiveBlockProcessor`, typi
 - `rabbitmq_url`: The connection URL for the RabbitMQ server.
 - `index_address_txs`: A boolean flag to enable/disable writing address participation to the index database.
 - `PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS`: Optional integer (defaults to 120) that controls how long the address-index writer buffers a block before handing it to PyReth. Increasing the value gives Reth more time to seal its TransactionLookup stage; setting it to `0` restores immediate writes.
+- `PYRETH_ADDRESS_TX_MAX_FLUSH_BLOCKS`: Maximum number of matured blocks the writer will push into a single MDBX transaction (default 20). Lower the value if you prefer smaller, more frequent commits.
+- `PYRETH_INDEX_DB_SYNC_MODE`: Controls MDBX durability vs. latency. Defaults to `safe-no-sync` for fast writes; set to `durable` to restore fully synchronous commits if you can tolerate the extra latency.
 
 #### Observed Latency (Nov 2025)
 

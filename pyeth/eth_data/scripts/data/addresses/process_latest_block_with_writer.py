@@ -8,7 +8,7 @@ from typing import Optional, Set, Tuple
 from web3 import Web3
 
 from eth_data.blockchain.block_processor import BlockProcessor
-from eth_data.utils.pyreth_client import PyrethClient
+from py.eth_data.eth_data.pyreth_client import PyrethClient
 
 SECONDS_PER_DAY = 24 * 60 * 60
 

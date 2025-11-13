@@ -15,11 +15,11 @@ from typing import Dict, Optional
 from decimal import Decimal
 from .base_queries import BaseEntityQuery, TimePeriod
 
-from eth_data.chain_utils.common_addresses.stablecoin_addresses import (
+from eth_data.chain_utils.common_addresses import (
+    ERC20_TOKEN_DECIMALS,
     STABLECOINS_ADDRESS_BY_NAME,
     STABLECOIN_UNIT_BY_NAME,
 )
-from eth_data.chain_utils.common_addresses import ERC20_TOKEN_DECIMALS
 
 
 class StablecoinQueries(BaseEntityQuery):

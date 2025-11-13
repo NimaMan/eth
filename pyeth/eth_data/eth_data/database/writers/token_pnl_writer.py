@@ -31,8 +31,8 @@ class TokenPnLWriter:
     def _mark_creator_as_scammer(self, token):
         """Checks if a token is a scam and marks its creator's address label accordingly."""
         token_address = token.contract_address
-        creator_address = token.token_data.creator_address
-        is_scam = token.token_data.is_scam
+        creator_address = token.creator_address
+        is_scam = token.is_scam
 
         if not (is_scam and creator_address):
             return # Nothing to do if it's not a scam or no creator address
@@ -90,28 +90,28 @@ class TokenPnLWriter:
                 # Still ensure the token exists in the DB even if no activity
                 if hasattr(token, 'contract_address'): # Check if token object is valid enough
                      # DEBUG: Log token data fields
-                     # self.logger.debug(f"TokenPnLWriter (no activity) - Token {token.contract_address}: creation_tx={token.token_data.creation_tx}, trading_enabled_tx={token.token_data.trading_enabled_tx}")
+                     # self.logger.debug(f"TokenPnLWriter (no activity) - Token {token.contract_address}: creation_tx={token.creation_tx}, trading_enabled_tx={token.trading_enabled_tx}")
                      
                      token_db_data = {
                          "contract_address": token.contract_address,
-                         "creator_address": token.token_data.creator_address,
-                         "is_scam": token.token_data.is_scam,
-                         "scam_label": token.token_data.scam_label,
-                         "creation_tx": token.token_data.creation_tx
+                         "creator_address": token.creator_address,
+                         "is_scam": token.is_scam,
+                         "scam_label": token.scam_label,
+                         "creation_tx": token.creation_tx
                      }
                      self._ensure_token_in_db(token_db_data)
                 return True # Return True as the operation wasn't an error, just no data
                 
             # Ensure token record exists in the database
             # DEBUG: Log token data fields
-            # self.logger.debug(f"TokenPnLWriter (with activity) - Token {token.contract_address}: creation_tx={token.token_data.creation_tx}, trading_enabled_tx={token.token_data.trading_enabled_tx}")
+            # self.logger.debug(f"TokenPnLWriter (with activity) - Token {token.contract_address}: creation_tx={token.creation_tx}, trading_enabled_tx={token.trading_enabled_tx}")
             
             token_db_data = {
                 "contract_address": token.contract_address,
-                "creator_address": token.token_data.creator_address,
-                "is_scam": token.token_data.is_scam,
-                "scam_label": token.token_data.scam_label,
-                "creation_tx": token.token_data.creation_tx
+                "creator_address": token.creator_address,
+                "is_scam": token.is_scam,
+                "scam_label": token.scam_label,
+                "creation_tx": token.creation_tx
             }
             self._ensure_token_in_db(token_db_data)
             

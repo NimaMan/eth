@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Sequence
 from web3 import Web3
-from eth_data.utils.pyreth_client import PyrethClient
+from eth_data.pyreth_client import PyrethClient
 
 
 @dataclass(frozen=True)
