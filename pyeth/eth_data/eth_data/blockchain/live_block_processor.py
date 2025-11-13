@@ -113,18 +113,20 @@ Note: This system is designed for production use with emphasis on:
 """
 
 import asyncio
+from collections import deque
 import dataclasses
+from typing import Optional
+
+import aio_pika
 import orjson
 from hexbytes import HexBytes
 from web3 import AsyncWeb3, Web3
 from web3.providers import WebSocketProvider
-import aio_pika
-from typing import Optional
 
 from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
-#from eth_data.tx_alert.block_alert_processor import BlockAlertProcessor
 from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
+from eth_data.live_data_registry import LiveDataPublisher, build_block_snapshot
 from eth_data.utils.logger import get_logger
 
 
@@ -176,7 +178,8 @@ class LiveBlockProcessor:
         http_url: str = "http://127.0.0.1:8545",
         rabbitmq_url: str = "amqp://guest:guest@localhost/",
         index_address_txs: bool = False, 
-        logger=None
+        logger=None,
+        live_block_cache_size: int = 3,
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
@@ -208,6 +211,11 @@ class LiveBlockProcessor:
         self.blocks_exchange = None
         self.alerts_exchange = None
         self.reconnect_delay = 1  
+        self._live_block_retention = max(0, int(live_block_cache_size))
+        self._recent_blocks = deque()
+        self._live_data_publisher = (
+            LiveDataPublisher() if self._live_block_retention > 0 else None
+        )
 
         # Downstream pipeline state
         self._queue_maxsize = 128
@@ -270,6 +278,7 @@ class LiveBlockProcessor:
                     )
                 elif self.index_queue is not None:
                     await self.index_queue.put((block_number, processed_block))
+                await self._publish_live_block_snapshot(block_number, processed_block)
             except Exception as exc:
                 self.logger.error("Publish worker error for block %s: %s", block_number, exc)
             finally:
@@ -401,7 +410,7 @@ class LiveBlockProcessor:
                 routing_key='processed_blocks'
             )
             return True
-            
+           
         except aio_pika.exceptions.ConnectionClosed:
             self.logger.error(f"RabbitMQ connection lost while publishing block {block_number}")
             self.blocks_exchange = None  # Only reset on actual connection issues
@@ -484,10 +493,6 @@ class LiveBlockProcessor:
                         if processed_block_result:
                             work_item = (block_number, processed_block_result)
                             await self._dispatch_work_item(work_item)
-
-                            #alerts = await self.block_alert_processor.process_block_transactions(processed_block)
-                            #if alerts and len(alerts) > 0:
-                            #     await self.publish_alert(alerts)
                             
                     except Exception as e:
                         self.logger.error(f"{__name__} Error processing live block {block_number}: {e}", exc_info=True)
@@ -519,6 +524,44 @@ class LiveBlockProcessor:
             
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
+
+    async def _publish_live_block_snapshot(
+        self,
+        block_number: int,
+        processed_block: ProcessedBlockResult,
+    ) -> None:
+        if not self._live_data_publisher:
+            return
+        try:
+            snapshot = build_block_snapshot(processed_block, block_number=block_number)
+            await self._live_data_publisher.publish_block(block_number, snapshot)
+            self._record_retained_block(block_number)
+            await self._evict_old_blocks()
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to publish live snapshot for block %s: %s",
+                block_number,
+                exc,
+            )
+
+    def _record_retained_block(self, block_number: int) -> None:
+        if block_number in self._recent_blocks:
+            self._recent_blocks.remove(block_number)
+        self._recent_blocks.append(block_number)
+
+    async def _evict_old_blocks(self) -> None:
+        if not self._live_data_publisher:
+            return
+        while len(self._recent_blocks) > self._live_block_retention:
+            evicted = self._recent_blocks.popleft()
+            try:
+                await self._live_data_publisher.delete_block(evicted)
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to evict live snapshot for block %s: %s",
+                    evicted,
+                    exc,
+                )
 
     async def run(self):
         """Main entry point to run the LiveBlockProcessor."""
