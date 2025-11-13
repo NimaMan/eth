@@ -73,7 +73,6 @@ class ERC20Token:
 
         self.pool_state.register_token_control_addresses(self.control_tracker.addresses)
         self._sync_token_decimals()
-        self.latest_token_assessment: Optional[Dict[str, Any]] = None
 
     def update_from_transaction(self, transaction: Dict):
         if not transaction["status"]:
@@ -86,7 +85,7 @@ class ERC20Token:
         self.pool_state.register_token_control_addresses(self.control_tracker.addresses)
         self.pool_state.update_from_transaction(transaction)
         self.token_network.update_from_transaction(transaction)
-        self.latest_token_assessment = self.token_health_predictor.update_from_transaction(transaction, self)
+        self.token_health_predictor.update_from_transaction(transaction, self)
         self._update_lifecycle_status()
         
     # ------------------------------------------------------------------
@@ -400,6 +399,10 @@ class ERC20Token:
     @property
     def scam_tx(self) -> Optional[str]:
         return self.state_monitor.scam_tx if self.state_monitor.is_scam else None
+
+    @property
+    def latest_token_assessment(self):
+        return self.token_health_predictor.token_health_assessment
 
     @property
     def scam_reason(self) -> str:
