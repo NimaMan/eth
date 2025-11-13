@@ -114,60 +114,18 @@ Note: This system is designed for production use with emphasis on:
 
 import asyncio
 from collections import deque
-import dataclasses
 from typing import Optional
 
 import aio_pika
 import orjson
-from hexbytes import HexBytes
-from web3 import AsyncWeb3, Web3
+from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 
-from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
+from eth_data.blockchain.block_data_models import ProcessedBlockResult
 from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
 from eth_data.live_data_registry import LiveDataPublisher, build_block_snapshot
 from eth_data.utils.logger import get_logger
-
-
-def transaction_serializer(obj):
-    """Serializer that handles dataclasses values"""
-    if isinstance(obj, BlockHeader):
-        return obj.to_rpc_dict()
-    if dataclasses.is_dataclass(obj):
-        return transaction_serializer(dataclasses.asdict(obj))
-    if isinstance(obj, (HexBytes, bytes)):
-        return obj.hex()
-    if isinstance(obj, set):
-        return list(obj)
-    if isinstance(obj, str) and Web3.is_checksum_address(obj):
-        return obj
-    if isinstance(obj, dict):
-        return {k: transaction_serializer(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [transaction_serializer(item) for item in obj]
-    if isinstance(obj, int) and (obj > 2**63 - 1 or obj < -(2**63)):
-        return str(obj)
-    return obj
-
-
-def alert_serializer(alert_data):
-    """Serialize alert data, converting bytes and other special types to JSON-compatible format"""
-    if dataclasses.is_dataclass(alert_data):
-        return transaction_serializer(dataclasses.asdict(alert_data))
-    if isinstance(alert_data, (str, int, float, bool, type(None))):
-        return alert_data
-    elif isinstance(alert_data, bytes):
-        return alert_data.hex()  # Convert bytes to hex string
-    elif isinstance(alert_data, (list, tuple)):
-        return [alert_serializer(item) for item in alert_data]
-    elif isinstance(alert_data, dict):
-        return {k: alert_serializer(v) for k, v in alert_data.items()}
-    elif hasattr(alert_data, '__dict__'):
-        # Handle dataclass/custom objects
-        return {k: alert_serializer(v) for k, v in alert_data.__dict__.items()}
-    else:
-        return str(alert_data)
 
 
 class LiveBlockProcessor:
@@ -279,7 +237,6 @@ class LiveBlockProcessor:
                     )
                 elif self.index_queue is not None:
                     await self.index_queue.put((block_number, processed_block))
-                await self._publish_live_block_snapshot(block_number, processed_block)
             except Exception as exc:
                 self.logger.error("Publish worker error for block %s: %s", block_number, exc)
             finally:
@@ -418,11 +375,10 @@ class LiveBlockProcessor:
                     return False
             
             try:
-                # Try to serialize first to catch any serialization errors
-                normalized_alert = alert_serializer(alert_data)
                 serialized_data = orjson.dumps(
-                    normalized_alert,
-                    option=orjson.OPT_SERIALIZE_NUMPY
+                    alert_data,
+                    option=orjson.OPT_SERIALIZE_NUMPY,
+                    default=str,
                 )
             except Exception as e:
                 self.logger.error(f"Alert serialization error: {e}")
