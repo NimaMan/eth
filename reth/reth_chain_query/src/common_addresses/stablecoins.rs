@@ -121,6 +121,12 @@ pub const STABLECOINS: &[StablecoinInfo] = &[
         unit: "Japanese Yen",
     },
     StablecoinInfo {
+        address: address!("431d5dff03120afa4bdf332c61a6e1766ef37bdb"),
+        symbol: "JPYCv2",
+        decimals: 18,
+        unit: "Japanese Yen",
+    },
+    StablecoinInfo {
         address: address!("5f98805A4E8be255a32880FDeC7F6728C6568bA0"),
         symbol: "LUSD",
         decimals: 18,

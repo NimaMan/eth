@@ -13,7 +13,7 @@
 
 use alloy_primitives::{address, Address};
 use eyre::Result;
-use reth_chain_query::common_addresses::denom_tokens::get_address_by_name;
+use reth_chain_query::common_addresses::get_address_by_name;
 use reth_chain_query::dex::*;
 use reth_chain_query::TxSimulator;
 
