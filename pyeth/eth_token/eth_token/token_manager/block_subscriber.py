@@ -209,8 +209,16 @@ class BlockSubscriber():
         if snapshot is None:
             return None
 
+        header = snapshot.get("header")
+        header_json = None
+        if header is not None:
+            if isinstance(header, str):
+                header_json = header
+            else:
+                header_json = orjson.dumps(header).decode()
+
         return {
             "block_number": snapshot.get("block_number", block_number),
-            "block_header": snapshot.get("header"),
+            "block_header": header_json,
             "transactions": snapshot.get("transactions", []),
         }

@@ -38,7 +38,7 @@ def test_resolve_payload_fetches_from_live_data_reader():
     resolved = subscriber._resolve_block_payload({"block_number": 20})
 
     assert resolved["block_number"] == 20
-    assert resolved["block_header"] == snapshot["header"]
+    assert resolved["block_header"] == '{"number":"0x14"}'
     assert resolved["transactions"] == snapshot["transactions"]
     assert reader.requested == [20]
 
