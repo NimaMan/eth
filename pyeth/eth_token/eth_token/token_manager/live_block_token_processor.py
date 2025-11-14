@@ -44,6 +44,8 @@ Historical (Warm-up) -> Live Transition:
 """
 
 import asyncio
+from eth_data.live_data_registry import LiveDataPublisher
+from eth_token.erc20_token.token_snapshot import build_token_snapshot
 from eth_token.token_manager.block_subscriber import LiveBlockSnapshotSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
@@ -76,6 +78,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         self._subscriber_task = None
         self._monitor_task = None
         self._watcher_task = None
+        self.token_snapshot_publisher = LiveDataPublisher()
 
     async def _on_task_done(self, name: str, task: asyncio.Task):
         """Handle unexpected background task completion by logging and initiating shutdown."""
@@ -132,6 +135,29 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
             except Exception as gather_err:
                   self.logger.error(f"Error gathering PnL write tasks via cache for block {current_block}: {gather_err}", exc_info=True)
 
+    async def _publish_token_snapshots(self, block_number: int, updated_tokens: dict):
+        """Serialize updated tokens and persist their snapshots to Redis."""
+        if not updated_tokens:
+            return
+
+        async def _write_snapshot(token_address, token_obj):
+            try:
+                snapshot = build_token_snapshot(token_obj)
+                await self.token_snapshot_publisher.publish_token(token_address, snapshot)
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to publish token snapshot for %s at block %s: %s",
+                    token_address,
+                    block_number,
+                    exc,
+                    exc_info=True,
+                )
+
+        await asyncio.gather(
+            *[_write_snapshot(addr, token) for addr, token in updated_tokens.items()],
+            return_exceptions=True,
+        )
+
     async def _monitor_token_updates(self):
         """Monitor for token updates using event notification"""
         while not self._is_shutting_down:
@@ -141,7 +167,9 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 current_block = self.latest_processed_block
                 self.logger.info(f"Processing block {current_block}({len(self.updated_tokens)} tokens)")
                 if self.updated_tokens:
-                    await self.unprocessed_token_updates.put((current_block, self.updated_tokens))
+                    updated_snapshot_tokens = dict(self.updated_tokens)
+                    await self._publish_token_snapshots(current_block, updated_snapshot_tokens)
+                    await self.unprocessed_token_updates.put((current_block, updated_snapshot_tokens))
                     self.new_updates_event.set()
                 # Clear the event for next block
                 self.block_processed_event.clear()
