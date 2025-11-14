@@ -5,7 +5,7 @@ Manages live trading positions with proper database integration.
 Coordinates between strategy decisions, signal publishing, and database tracking.
 """
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Iterable
 import asyncio
 from uuid import UUID
 from web3 import Web3
@@ -17,6 +17,7 @@ from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSign
 from eth_portfolio_manager.live_trading.live_strategy_engine import LiveStrategyEngine
 from eth_data.database.writers.live_trading_position_writer import LiveTradingPositionWriter
 from eth_portfolio_manager.utils.logger import get_logger
+from eth_portfolio_manager.live_trading.portfolio_state_store import PortfolioStateStore
 
 
 class LivePositionManager:
@@ -32,11 +33,13 @@ class LivePositionManager:
     
     def __init__(self, wallet_id: int, strategy_engine: LiveStrategyEngine,
                  position_writer: LiveTradingPositionWriter,
-                 signal_publisher: Optional[TradeSignalPublisher] = None):
+                 signal_publisher: Optional[TradeSignalPublisher] = None,
+                 state_store: Optional[PortfolioStateStore] = None):
         self.wallet_id = wallet_id
         self.strategy_engine = strategy_engine
         self.position_writer = position_writer
         self.signal_publisher = signal_publisher
+        self.state_store = state_store
         self.logger = get_logger(f"LivePositionManager-{strategy_engine.strategy_name}")
         
         # Track active positions: token_address -> position_data
@@ -162,6 +165,9 @@ class LivePositionManager:
                 
                 self.logger.info(f"Created live position {position_id} for {token_address[:10]}...")
                 
+            if position_id:
+                await self._persist_state([token_address])
+
             return position_id
             
         except Exception as e:
@@ -198,6 +204,7 @@ class LivePositionManager:
                         token_address = signal.token_address
                         if token_address in self._active_positions:
                             self._active_positions[token_address]['state'] = 'BUY_CONFIRMED'
+                            await self._persist_state([token_address])
                 
                 elif signal.decision == TradingDecision.SUBMIT_SELL:
                     success = self.position_writer.update_position_state(
@@ -212,8 +219,10 @@ class LivePositionManager:
                     if success:
                         # Remove from active positions (position closed)
                         token_address = signal.token_address
-                        self._active_positions.pop(token_address, None)
+                        removed = self._active_positions.pop(token_address, None)
                         self._signal_position_map.pop(signal_id, None)
+                        if removed:
+                            await self._remove_state([token_address])
                 
                 self.logger.info(
                     f"Position {position_id} confirmed: {signal.decision.name} "
@@ -229,8 +238,10 @@ class LivePositionManager:
                 
                 # Clean up tracking
                 token_address = signal.token_address
-                self._active_positions.pop(token_address, None)
+                removed = self._active_positions.pop(token_address, None)
                 self._signal_position_map.pop(signal_id, None)
+                if removed:
+                    await self._remove_state([token_address])
                 
                 self.logger.error(
                     f"Position {position_id} failed: {confirmation.error}"
@@ -274,3 +285,21 @@ class LivePositionManager:
     def get_position_count(self) -> int:
         """Get count of active positions."""
         return len(self._active_positions)
+
+    async def _persist_state(self, addresses: Optional[Iterable[str]] = None):
+        if not self.state_store:
+            return
+        if not addresses:
+            await self.state_store.upsert_positions(self._active_positions)
+            return
+        subset = {
+            addr: self._active_positions[addr]
+            for addr in addresses
+            if addr in self._active_positions
+        }
+        if subset:
+            await self.state_store.upsert_positions(subset)
+
+    async def _remove_state(self, addresses: Iterable[str]):
+        if self.state_store:
+            await self.state_store.remove_positions(addresses)

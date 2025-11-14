@@ -18,6 +18,7 @@ from eth_portfolio_manager.live_trading.live_strategy_engine import LiveStrategy
 from eth_portfolio_manager.live_trading.live_position_manager import LivePositionManager
 from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSignalPublisher
 from eth_data.database.writers.live_trading_position_writer import LiveTradingPositionWriter
+from eth_portfolio_manager.live_trading.portfolio_state_store import PortfolioStateStore
 
 
 class LiveTradingCoordinator:
@@ -37,6 +38,9 @@ class LiveTradingCoordinator:
         
         # Initialize signal publisher (optional - can be None for testing)
         self.signal_publisher = TradeSignalPublisher(self.logger)
+
+        # Shared portfolio state store for dashboards/APIs
+        self.portfolio_state_store = PortfolioStateStore(logger=self.logger)
         
         # Position managers by wallet_id
         self._position_managers: Dict[int, Dict[str, LivePositionManager]] = {}
@@ -64,7 +68,8 @@ class LiveTradingCoordinator:
                 wallet_id=wallet_id,
                 strategy_engine=strategy_engine,
                 position_writer=self.position_writer,
-                signal_publisher=self.signal_publisher
+                signal_publisher=self.signal_publisher,
+                state_store=self.portfolio_state_store
             )
             
             # Store by wallet_id and strategy name
