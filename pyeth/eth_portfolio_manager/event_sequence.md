@@ -8,7 +8,7 @@ To understand the flow of data and control signals within the `LiveBacktestEngin
 
 *   **`LiveBacktestEngineWithMempool`**: The main orchestrator running multiple asyncio tasks. Manages strategies, results, pool levels, and scam detection logic.
 *   **`LiveBlockTokenProcessor`**: Processes historical and live blocks, identifies relevant token updates, manages `LiveTokensCache`.
-*   **`BlockSubscriber`**: Underlying component (used by `LiveBlockTokenProcessor`) that listens for new blocks (e.g., via RabbitMQ or `eth_subscribe`).
+*   **`LiveBlockSnapshotSubscriber`**: Underlying component (used by `LiveBlockTokenProcessor`) that listens for new blocks (e.g., via RabbitMQ or `eth_subscribe`).
 *   **`LiveTokensCache`**: In-memory cache holding `LiveERC20Token` objects, managed by `LiveBlockTokenProcessor`. Can optionally contain `TokenPnLWriter`.
 *   **`MempoolProcessor`**: Independent component polling the mempool and simulating transactions to get state diffs.
 *   **Strategy Engines / Position Managers**: Components applying trading logic based on confirmed token updates.
@@ -37,7 +37,7 @@ To understand the flow of data and control signals within the `LiveBacktestEngin
 
 ## Flow A: Confirmed Block Processing
 
-1.  **Block Arrival:** `BlockSubscriber` receives a new block (e.g., from RabbitMQ).
+1.  **Block Arrival:** `LiveBlockSnapshotSubscriber` receives a new block (e.g., from RabbitMQ).
 2.  **Processor Callback (`LiveBlockTokenProcessor`)**: `process_block_live(block_data)` is called.
 3.  **Core Block Processing (`LiveBlockTokenProcessor`)**:
     *   Calls `self.process_block(block_data)` (inherited method).
@@ -141,7 +141,7 @@ The current placement prioritizes critical operations (strategy execution and po
 To clarify the complete sequence across components in a single block processing iteration:
 
 1. **Block Processing & TokenData Updates**
-   * New block → BlockSubscriber → LiveBlockTokenProcessor.process_block_live()
+   * New block → LiveBlockSnapshotSubscriber → LiveBlockTokenProcessor.process_block_live()
    * Token states updated in LiveTokensCache (in-memory)
 
 2. **Token Update Notification**

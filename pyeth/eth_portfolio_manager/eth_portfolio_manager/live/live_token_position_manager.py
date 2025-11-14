@@ -116,7 +116,7 @@ from enum import Enum
 
 from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_token.erc20_token.erc20_token import ERC20Token
-from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
+from eth_token.erc20_token.token_state.erc20_token_data import TokenLifecycleState
 from eth_portfolio_manager.core.data_models import TradingDecision, TokenPositionData, TokenPositionState
 
 
@@ -126,7 +126,7 @@ class LiveTokenPositionManager:
         self.investment_strategy = investment_strategy()
 
     def _compute_trading_ages(self, token: ERC20Token, position) -> (Optional[int], Optional[float]):
-        pool_manager = getattr(token.token_data, "pool_manager", None)
+        pool_manager = getattr(token, "pool_manager", None)
         if not pool_manager:
             return None, None
 
@@ -136,7 +136,7 @@ class LiveTokenPositionManager:
             pool = pool_manager.get_pool(pool_address)
 
         if pool is None:
-            pool_addresses = getattr(token.token_data, "pool_addresses", tuple())
+            pool_addresses = getattr(token, "pool_addresses", tuple())
             for address in pool_addresses:
                 pool = pool_manager.get_pool(address)
                 if pool is not None:
@@ -147,7 +147,7 @@ class LiveTokenPositionManager:
         if pool is None:
             return None, None
 
-        current_block = getattr(token.token_data, "latest_block_number", None)
+        current_block = getattr(token, "latest_block_number", None)
         age_blocks = None
         if current_block is not None:
             try:
@@ -219,7 +219,7 @@ class LiveTokenPositionManager:
            - Position marked as inactive
         """
         # First check for scam status
-        if token.token_status == TokenStatusEnum.INACTIVE_SCAM:
+        if token.token_life_cycle_status == TokenLifecycleState.INACTIVE_SCAM:
             return self._update_scammed_position(position, token)
         
         # Then update based on current position state
@@ -243,8 +243,8 @@ class LiveTokenPositionManager:
         age_blocks, age_hours = self._compute_trading_ages(token, position)
         position.token_age_blocks = age_blocks
         position.token_age_hours = age_hours
-        position.block_number = token.token_data.latest_block_number
-        position.last_updated_time = token.token_data.latest_block_timestamp
+        position.block_number = token.latest_block_number
+        position.last_updated_time = token.latest_block_timestamp
         position.has_active_position = False
         
         return position
@@ -275,8 +275,8 @@ class LiveTokenPositionManager:
         age_blocks, age_hours = self._compute_trading_ages(token, position)
         position.token_age_blocks = age_blocks
         position.token_age_hours = age_hours
-        position.block_number = token.token_data.latest_block_number
-        position.last_updated_time = token.token_data.latest_block_timestamp
+        position.block_number = token.latest_block_number
+        position.last_updated_time = token.latest_block_timestamp
         position.current_Xprice = token.sync_info.current_price_ratio
             
         # Update price and value metrics based on position state
@@ -329,7 +329,7 @@ class LiveTokenPositionManager:
             position.has_active_position = True
             
             # Record entry data
-            position.entry_block = token.token_data.latest_block_number
+            position.entry_block = token.latest_block_number
             position.entry_Xprice = token.sync_info.current_price_ratio
             
             # Update current metrics
@@ -343,8 +343,8 @@ class LiveTokenPositionManager:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
+            position.block_number = token.latest_block_number
+            position.last_updated_time = token.latest_block_timestamp
             
         return position
 
@@ -374,8 +374,8 @@ class LiveTokenPositionManager:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
+            position.block_number = token.latest_block_number
+            position.last_updated_time = token.latest_block_timestamp
             
         return position
 
@@ -405,8 +405,8 @@ class LiveTokenPositionManager:
             position.unrealized_profit = position.current_value - position.purchase_value
             
             # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
+            position.block_number = token.latest_block_number
+            position.last_updated_time = token.latest_block_timestamp
             
         return position
 
@@ -436,7 +436,7 @@ class LiveTokenPositionManager:
             position.unrealized_profit = 0
             
             # Update timestamp
-            position.block_number = token.token_data.latest_block_number
-            position.last_updated_time = token.token_data.latest_block_timestamp
+            position.block_number = token.latest_block_number
+            position.last_updated_time = token.latest_block_timestamp
             
         return position

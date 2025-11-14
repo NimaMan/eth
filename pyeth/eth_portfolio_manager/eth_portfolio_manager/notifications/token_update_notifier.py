@@ -1,8 +1,8 @@
 """
-Token Tracking Publisher - Publish token state to external consumers
+Token Update Notifier - Broadcast which tokens changed in the latest block.
 
-This component publishes token and pool information via ZeroMQ to
-external consumers like the Rust mempool processor.
+This component now publishes only token address lists via ZeroMQ;
+consumers hydrate full state from Redis snapshots.
 """
 
 import asyncio
@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 from eth_portfolio_manager.utils.logger import get_logger
 
 
-class TokenTrackingPublisher:
+class TokenUpdateNotifier:
     """
     Publishes token tracking updates to external consumers.
     
@@ -29,8 +29,8 @@ class TokenTrackingPublisher:
         rep_endpoint: str = "tcp://*:5558",
         logger=None
     ):
-        """Initialize the publisher."""
-        self.logger = logger or get_logger("token_tracking_publisher")
+        """Initialize the notifier."""
+        self.logger = logger or get_logger("token_update_notifier")
         self.pub_endpoint = pub_endpoint
         self.rep_endpoint = rep_endpoint
         
@@ -48,7 +48,7 @@ class TokenTrackingPublisher:
         self._last_published_block = 0
     
     def set_cache(self, cache):
-        """Set reference to token tracking cache for data access."""
+        """Set reference to the token update cache."""
         self.cache = cache
     
     async def start(self):
@@ -56,7 +56,7 @@ class TokenTrackingPublisher:
         if self._is_running:
             return
         
-        self.logger.info("Starting token tracking publisher")
+        self.logger.info("Starting token update notifier")
         self._is_running = True
         
         try:
@@ -86,7 +86,7 @@ class TokenTrackingPublisher:
         if not self._is_running:
             return
         
-        self.logger.info("Stopping token tracking publisher")
+        self.logger.info("Stopping token update notifier")
         self._is_running = False
         
         # Cancel request handler
@@ -107,7 +107,7 @@ class TokenTrackingPublisher:
         if self._context:
             self._context.term()
         
-        self.logger.info("Token tracking publisher stopped")
+        self.logger.info("Token update notifier stopped")
     
     async def publish_all(self):
         """
@@ -118,21 +118,20 @@ class TokenTrackingPublisher:
             return
         
         try:
-            # Get all tokens from cache
-            all_tokens = await self.cache.get_all_tokens_for_publishing()
+            token_addresses = await self.cache.get_all_token_addresses()
             
-            if all_tokens:
+            if token_addresses:
                 message = {
                     'type': 'full_update',
                     'timestamp': time.time(),
-                    'token_count': len(all_tokens),
-                    'data': all_tokens
+                    'token_count': len(token_addresses),
+                    'data': token_addresses
                 }
                 
                 json_data = json.dumps(message)
                 await self._pub_socket.send_string(json_data)
                 
-                self.logger.info(f"Published full update with {len(all_tokens)} tokens")
+                self.logger.info(f"Published full update with {len(token_addresses)} tokens")
             
         except Exception as e:
             self.logger.error(f"Error publishing full update: {e}")
@@ -146,23 +145,22 @@ class TokenTrackingPublisher:
             return
         
         try:
-            # Get only the tokens that were updated in this block
-            updated_tokens = await self.cache.get_updated_tokens_for_publishing()
+            updated_addresses = await self.cache.get_updated_token_addresses()
             
-            if updated_tokens:
+            if updated_addresses:
                 message = {
                     'type': 'block_update',
                     'timestamp': time.time(),
                     'block_number': block_number,
-                    'token_count': len(updated_tokens),
-                    'data': updated_tokens
+                    'token_count': len(updated_addresses),
+                    'data': updated_addresses
                 }
                 
                 json_data = json.dumps(message)
                 await self._pub_socket.send_string(json_data)
                 
                 self._last_published_block = block_number
-                self.logger.debug(f"Published block {block_number} update with {len(updated_tokens)} updated tokens")
+                self.logger.debug(f"Published block {block_number} update with {len(updated_addresses)} updated tokens")
             else:
                 self.logger.debug(f"No tokens updated in block {block_number}, skipping publish")
             
@@ -216,12 +214,12 @@ class TokenTrackingPublisher:
         
         if request_type == 'get_all_tokens':
             # Get all tokens
-            all_tokens = await self.cache.get_all_tokens_for_publishing()
+            token_addresses = await self.cache.get_all_token_addresses()
             
             return {
                 'status': 'success',
-                'count': len(all_tokens),
-                'data': all_tokens
+                'count': len(token_addresses),
+                'data': token_addresses
             }
         
         elif request_type == 'get_stats':

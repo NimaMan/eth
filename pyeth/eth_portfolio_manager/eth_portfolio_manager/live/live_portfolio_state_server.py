@@ -33,8 +33,7 @@ Key Features:
 
 import orjson
 from datetime import datetime
-from typing import Dict, List, Optional
-import asyncio
+from typing import Dict, List
 import redis.asyncio as aioredis
 
 from eth_portfolio_manager.core.token_position import TokenPosition

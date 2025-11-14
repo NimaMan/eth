@@ -100,7 +100,7 @@ from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision, TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
-from eth_portfolio_manager.publishers.trade_signal_publisher import TradeSignalPublisher, ExecutionConfirmation, ExecutionStatus
+from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSignalPublisher, ExecutionConfirmation, ExecutionStatus
 from eth_portfolio_manager.utils.logger import get_logger
 
 
@@ -183,7 +183,7 @@ class LiveStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             
             # Publish signal to eth_kartal if publisher available
             if self.signal_publisher and self.wallet_address:
@@ -205,7 +205,7 @@ class LiveStrategyEngine:
                     # Continue with position update even if signal publishing fails
             
             # Record entry static data
-            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_block = live_token.latest_block_number
             token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = signal.quantity
 
@@ -234,10 +234,10 @@ class LiveStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
-            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_block = live_token.latest_block_number
             token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
@@ -266,7 +266,7 @@ class LiveStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             
             # Publish signal to eth_kartal if publisher available
             if self.signal_publisher and self.wallet_address:
@@ -289,9 +289,9 @@ class LiveStrategyEngine:
                     # Continue with position update even if signal publishing fails
             
             # Record exit static data directly from the token data
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_block = live_token.latest_block_number
             token_position.static_data.exit_price_ratio = current_price_ratio
-            token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
+            token_position.static_data.exit_timestamp = live_token.latest_block_timestamp
             
             # Update the latest snapshot in place for sell submission
             token_position.latest_snapshot.position_state = TokenPositionState.SELL_SUBMITTED
@@ -324,7 +324,7 @@ class LiveStrategyEngine:
             token_position.latest_snapshot.has_active_position = False
 
             # Record exit static data
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_block = live_token.latest_block_number
                         
         return token_position
     

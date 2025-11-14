@@ -57,7 +57,7 @@ Ethereum Node → Block Processor → Token Processor → Portfolio Manager → 
 ### Detailed Pipeline Stages
 
 1. **Block Reception & Processing**
-   - `BlockSubscriber` connects to Ethereum node WebSocket
+   - `LiveBlockSnapshotSubscriber` connects to Ethereum node WebSocket
    - Receives new blocks in real-time
    - Extracts all transactions and logs
 
@@ -286,7 +286,7 @@ class TokenPositionDynamicSnapshot:
 
 ### Flow A: Confirmed Block Processing
 
-1. **Block Arrival**: BlockSubscriber receives new block from Ethereum node
+1. **Block Arrival**: LiveBlockSnapshotSubscriber receives new block from Ethereum node
 2. **Block Processing**: 
    - LiveBlockTokenProcessor.process_block_live() called
    - Parses all transactions and logs in the block

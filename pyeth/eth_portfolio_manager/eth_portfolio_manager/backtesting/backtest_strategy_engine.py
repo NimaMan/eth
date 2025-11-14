@@ -177,9 +177,9 @@ class BacktestStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.INIT:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record entry static data
-            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_block = live_token.latest_block_number
             token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
@@ -207,10 +207,10 @@ class BacktestStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_SUBMITTED:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             token_position.latest_snapshot.position_state = TokenPositionState.BUY_CONFIRMED
 
-            token_position.static_data.entry_block = live_token.token_data.latest_block_number
+            token_position.static_data.entry_block = live_token.latest_block_number
             token_position.static_data.entry_price_ratio = current_price_ratio
             token_position.static_data.purchase_value = self.investment_strategy.config.position_size_eth
 
@@ -237,11 +237,11 @@ class BacktestStrategyEngine:
         if token_position.latest_snapshot.position_state == TokenPositionState.BUY_CONFIRMED:
             current_price_ratio = 0
             if token_position.static_data.pool_address:
-                current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
+                current_price_ratio = live_token.latest_pools_price_ratio.get(token_position.static_data.pool_address, 0)
             # Record exit static data directly from the token data
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_block = live_token.latest_block_number
             token_position.static_data.exit_price_ratio = current_price_ratio
-            token_position.static_data.exit_timestamp = live_token.token_data.latest_block_timestamp
+            token_position.static_data.exit_timestamp = live_token.latest_block_timestamp
             
             # Update the latest snapshot in place for sell submission
             token_position.latest_snapshot.position_state = TokenPositionState.SELL_SUBMITTED
@@ -274,6 +274,6 @@ class BacktestStrategyEngine:
             token_position.latest_snapshot.has_active_position = False
 
             # Record exit static data
-            token_position.static_data.exit_block = live_token.token_data.latest_block_number
+            token_position.static_data.exit_block = live_token.latest_block_number
                         
         return token_position

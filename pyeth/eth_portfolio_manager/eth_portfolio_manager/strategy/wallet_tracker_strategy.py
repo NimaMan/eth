@@ -14,7 +14,7 @@ from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_portfolio_manager.core.token_position import TokenPosition
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 from eth_portfolio_manager.core.data_models import TokenPositionState
-from eth_token.erc20_token.erc20_token import ERC20Token
+from eth_token.erc20_token.erc20_token import ERC20Token, TokenLifecycleState
 from eth_portfolio_manager.utils.logger import get_logger
 
 
@@ -126,8 +126,8 @@ class WalletTrackerStrategy(BaseStrategy):
             return None
         
         # Check token status
-        token_status = getattr(token.token_data, 'token_status', None)
-        if token_status != 'TRADING_ENABLED':
+        token_status = getattr(token, 'token_life_cycle_status', None)
+        if token_status != TokenLifecycleState.TRADING_ENABLED:
             return None
         
         # Check for scam

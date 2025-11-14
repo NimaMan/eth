@@ -13,7 +13,7 @@ from web3 import Web3
 from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.core.data_models import TradeSignal, TradingDecision
 from eth_portfolio_manager.core.token_position import TokenPosition
-from eth_portfolio_manager.publishers.trade_signal_publisher import TradeSignalPublisher, ExecutionConfirmation, ExecutionStatus
+from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSignalPublisher, ExecutionConfirmation, ExecutionStatus
 from eth_portfolio_manager.live_trading.live_strategy_engine import LiveStrategyEngine
 from eth_data.database.writers.live_trading_position_writer import LiveTradingPositionWriter
 from eth_portfolio_manager.utils.logger import get_logger
@@ -129,7 +129,7 @@ class LivePositionManager:
             token_address = Web3.to_checksum_address(token.token_address)
             
             # Get pool information
-            pool_addresses = getattr(token.token_data, 'pool_addresses', [])
+            pool_addresses = getattr(token, 'pool_addresses', [])
             pool_address = pool_addresses[0] if pool_addresses else None
             
             if not pool_address:
@@ -249,8 +249,8 @@ class LivePositionManager:
             # Get current price from token
             pool_address = position_data['pool_address']
             current_price = 0
-            if pool_address and hasattr(token.token_data, 'latest_pools_price_ratio'):
-                current_price = token.token_data.latest_pools_price_ratio.get(pool_address, 0)
+            if pool_address:
+                current_price = token.latest_pools_price_ratio.get(pool_address, 0)
             
             if current_price > 0 and position_data.get('quantity_eth'):
                 # Calculate current value

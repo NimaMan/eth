@@ -52,8 +52,7 @@ Special Cases:
 from typing import Optional
 from dataclasses import dataclass
 
-from eth_token.erc20_token.erc20_token import ERC20Token
-from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token, TokenLifecycleState
 
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
@@ -106,7 +105,7 @@ class BuyScamStrategy(BaseStrategy):
         """Handle INIT state: Submit buy if trading enabled"""
         if token.latest_token_assessment.get('is_scam'):
             return TradeSignal(
-                token_address=token.token_data.contract_address,
+                token_address=token.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,
                 quantity=self.config.position_size_eth,
                 strategy_name=self.strategy_parameters["strategy_name"],
@@ -116,7 +115,7 @@ class BuyScamStrategy(BaseStrategy):
     def handle_buy_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
-            token_address=token.token_data.contract_address,
+            token_address=token.contract_address,
             decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
             strategy_name=self.strategy_parameters["strategy_name"],
@@ -126,7 +125,7 @@ class BuyScamStrategy(BaseStrategy):
         """Handle BUY_CONFIRMED state: Submit sell if price target reached"""
         if position.latest_snapshot.roi >= self.config.profit_target_x:
             return TradeSignal(
-                token_address=token.token_data.contract_address,
+                token_address=token.contract_address,
                 decision=TradingDecision.SUBMIT_SELL,
                 quantity=position.latest_snapshot.quantity,
                 strategy_name=self.strategy_parameters["strategy_name"],
@@ -136,7 +135,7 @@ class BuyScamStrategy(BaseStrategy):
     def handle_sell_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle SELL_SUBMITTED state: Confirm sell on next update"""
         return TradeSignal(
-            token_address=token.token_data.contract_address,
+            token_address=token.contract_address,
             decision=TradingDecision.CONFIRM_SELL,
             quantity=position.latest_snapshot.quantity,
             strategy_name=self.strategy_parameters["strategy_name"],

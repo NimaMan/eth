@@ -49,11 +49,11 @@ class StrategyPositionManager:
       This method uses the composite key (token_address:pool_address) in the cache.
       """
       try:
-         token_address = live_token.token_data.contract_address
+         token_address = live_token.contract_address
          results: Dict[str, Optional[TokenPosition]] = {}
          
          # Assuming pool_addresses is a collection of one or more pool address strings.
-         for pool_address in live_token.token_data.pool_addresses:
+         for pool_address in live_token.pool_addresses:
             token_position = self.token_positions_cache.get(token_address, pool_address)
             if token_position is None:
                token_position = self.create_position(live_token)

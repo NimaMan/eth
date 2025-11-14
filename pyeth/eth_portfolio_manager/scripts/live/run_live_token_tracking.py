@@ -25,7 +25,6 @@ import asyncio
 import os
 import sys
 import atexit
-import traceback
 from web3 import Web3
 
 from eth_portfolio_manager.live_trading.live_token_tracker import LiveTokenTracker
@@ -151,8 +150,8 @@ class LivePortfolioServiceWithPoolSharing:
                 self.logger.info("📡 Signal publishing to eth_kartal enabled")
             
             # Log ZMQ endpoints from the live tracker
-            pub_endpoint = getattr(self.engine.token_tracking_publisher, 'pub_endpoint', 'Unknown')
-            rep_endpoint = getattr(self.engine.token_tracking_publisher, 'rep_endpoint', 'Unknown')
+            pub_endpoint = getattr(self.engine.token_update_notifier, 'pub_endpoint', 'Unknown')
+            rep_endpoint = getattr(self.engine.token_update_notifier, 'rep_endpoint', 'Unknown')
             self.logger.info(f"ZeroMQ PUB socket bound to {pub_endpoint}")
             self.logger.info(f"ZeroMQ REP socket bound to {rep_endpoint}")
             self.logger.info("Waiting for Rust mempool processor to connect...")
@@ -252,7 +251,7 @@ async def run_live_portfolio_with_pool_sharing(
 
 
 if __name__ == "__main__":
-    warmup_blocks = 10000  # Number of blocks to warm up on startup  
+    warmup_blocks = 1000  # Number of blocks to warm up on startup  
     save_strategy_results = True  # Enable to use live_trading_db
     add_pnl_to_db = False  # Disable PnL tracking to avoid writer errors
     min_eth_threshold = 0.01  # Minimum ETH reserve (0.01 ETH)

@@ -41,8 +41,7 @@ Configuration:
 from typing import Optional
 from dataclasses import dataclass
 
-from eth_token.erc20_token.erc20_token import ERC20Token
-from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token, TokenLifecycleState
 
 from eth_portfolio_manager.core.data_models import TokenPositionState
 from eth_portfolio_manager.core.token_position import TokenPosition
@@ -90,9 +89,9 @@ class MarketTracker(BaseStrategy):
 
     def handle_init_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle INIT state: Submit buy if trading enabled"""
-        if token.token_data.token_status == TokenStatusEnum.TRADING_ENABLED:
+        if token.token_life_cycle_status == TokenLifecycleState.TRADING_ENABLED:
             return TradeSignal(
-                token_address=token.token_data.contract_address,
+                token_address=token.contract_address,
                 decision=TradingDecision.SUBMIT_BUY,
                 quantity=self.config.position_size_eth,
                 strategy_name=self.strategy_name,
@@ -102,7 +101,7 @@ class MarketTracker(BaseStrategy):
     def handle_buy_submitted_state(self, token: ERC20Token, position: TokenPosition) -> Optional[TradeSignal]:
         """Handle BUY_SUBMITTED state: Confirm buy on next update"""
         return TradeSignal(
-            token_address=token.token_data.contract_address,
+            token_address=token.contract_address,
             decision=TradingDecision.CONFIRM_BUY,
             quantity=self.config.position_size_eth,
             strategy_name=self.strategy_name,

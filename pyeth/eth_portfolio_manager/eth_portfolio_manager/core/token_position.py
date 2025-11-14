@@ -64,8 +64,7 @@ Usage Guidelines:
 """
 
 from typing import Optional, List, Tuple, Dict, Any
-from eth_token.erc20_token.erc20_token import ERC20Token
-from eth_token.erc20_token.data.erc20_token_data import TokenStatusEnum
+from eth_token.erc20_token.erc20_token import ERC20Token, TokenLifecycleState
 from eth_portfolio_manager.core.data_models import TokenPositionStaticData, TokenPositionDynamicSnapshot, TokenPositionState
 
 
@@ -103,21 +102,21 @@ class TokenPosition:
         and initializes the aggregate with a new TokenPositionStaticData instance.
         """
         static_data = TokenPositionStaticData(
-            token_address=live_token.token_data.contract_address,
-            symbol=live_token.token_data.symbol,
+            token_address=live_token.contract_address,
+            symbol=live_token.symbol,
             currency=None,
             pool_address=None,
             pool_type=None,
-            creation_block=live_token.token_data.creation_block,
-            creation_timestamp=live_token.token_data.creation_timestamp,
+            creation_block=live_token.creation_block,
+            creation_timestamp=live_token.creation_timestamp,
             trading_enabled_block=None,
             trading_enabled_timestamp=None,
             purchase_value=0.0,  # Initially zero, updated on buy signal.
             entry_price_ratio=None, # Initially zero, updated on buy signal.
             exit_price_ratio=None, # Initially zero, updated on sell signal.
-            entry_block=live_token.token_data.creation_block, # update when the first buy signal is received
+            entry_block=live_token.creation_block, # update when the first buy signal is received
             exit_block=0, # update when the first sell signal is received
-            entry_timestamp=live_token.token_data.creation_timestamp, # update when the first buy signal is received
+            entry_timestamp=live_token.creation_timestamp, # update when the first buy signal is received
             exit_timestamp=0, # update when the first sell signal is received
             entry_tx_fee=0.0, # update when the first buy signal is received
             exit_tx_fee=0.0 # update when the first sell signal is received
@@ -154,7 +153,7 @@ class TokenPosition:
         self.add_snapshot(TokenPositionDynamicSnapshot())
 
     def _resolve_target_pool(self, live_token: ERC20Token):
-        pool_manager = getattr(live_token.token_data, "pool_manager", None)
+        pool_manager = getattr(live_token, "pool_manager", None)
         if not pool_manager:
             return None
 
@@ -163,7 +162,7 @@ class TokenPosition:
             pool = pool_manager.get_pool(self.static_data.pool_address)
 
         if pool is None:
-            pool_addresses = getattr(live_token.token_data, "pool_addresses", tuple())
+            pool_addresses = getattr(live_token, "pool_addresses", tuple())
             for address in pool_addresses:
                 pool = pool_manager.get_pool(address)
                 if pool is not None:
@@ -176,7 +175,7 @@ class TokenPosition:
         if pool is None:
             return None, None
 
-        current_block = getattr(live_token.token_data, "latest_block_number", None)
+        current_block = getattr(live_token, "latest_block_number", None)
         age_blocks = None
         if current_block is not None:
             try:
@@ -219,7 +218,7 @@ class TokenPosition:
         4. Updates scam-related metrics
         5. Updates position state based on the new block data
         """
-        if live_token.token_data.token_status == TokenStatusEnum.INACTIVE_SCAM:
+        if live_token.token_life_cycle_status == TokenLifecycleState.INACTIVE_SCAM:
             self.update_scammed_position(live_token)
             return
         
@@ -238,14 +237,14 @@ class TokenPosition:
                     self.static_data.pool_type = None
 
             if not self.static_data.currency:
-                pool_info_dict = live_token.token_data.get_pool_info_dict()
+                pool_info_dict = live_token.get_pool_info_dict()
                 if self.static_data.pool_address in pool_info_dict:
                     pool_info = pool_info_dict[self.static_data.pool_address]
                     self.static_data.currency = pool_info.get('denom_currency')
 
         current_price_ratio = 0
         if self.static_data.pool_address:
-            current_price_ratio = live_token.token_data.latest_pools_price_ratio.get(self.static_data.pool_address, 0)
+            current_price_ratio = live_token.latest_pools_price_ratio.get(self.static_data.pool_address, 0)
         roi = 0
         current_value = 0
         unrealized_profit = 0
@@ -261,7 +260,7 @@ class TokenPosition:
         # Create new snapshot with updated data
         new_snapshot = TokenPositionDynamicSnapshot(
             current_price_ratio=current_price_ratio,
-            reserve=live_token.token_data.get_pool_reserve(self.static_data.pool_address) if self.static_data.pool_address else 0,
+            reserve=live_token.get_pool_reserve(self.static_data.pool_address) if self.static_data.pool_address else 0,
             roi=roi,
             current_value=current_value,
             realized_profit=self.latest_snapshot.realized_profit,
@@ -269,16 +268,16 @@ class TokenPosition:
             quantity=self.latest_snapshot.quantity if self.latest_snapshot else 0,
             token_age_blocks=age_blocks,
             token_age_hours=age_hours,
-            block_number=live_token.token_data.latest_block_number,
-            timestamp=live_token.token_data.latest_block_timestamp,
+            block_number=live_token.latest_block_number,
+            timestamp=live_token.latest_block_timestamp,
             has_active_position=self.latest_snapshot.has_active_position if self.latest_snapshot else False,
             position_state=self.latest_snapshot.position_state if self.latest_snapshot else TokenPositionState.INIT,
             scam_probability=live_token.latest_token_assessment.get('scam_probability'),
             scam_reason=live_token.latest_token_assessment.get('scam_reason'),
             num_greys=live_token.latest_token_assessment.get('num_greys'),
             num_greens=live_token.latest_token_assessment.get('num_greens'),
-            num_bribers=live_token.token_data.num_bribes,
-            token_bribe_amount=live_token.token_data.total_bribe_amount
+            num_bribers=live_token.num_bribes,
+            token_bribe_amount=live_token.total_bribe_amount
         )
         
         self.add_snapshot(new_snapshot)
@@ -300,16 +299,16 @@ class TokenPosition:
                 quantity=current_snapshot.quantity,
                 token_age_blocks=age_blocks,
                 token_age_hours=age_hours,
-                block_number=live_token.token_data.latest_block_number,
-                timestamp=live_token.token_data.latest_block_timestamp,
+                block_number=live_token.latest_block_number,
+                timestamp=live_token.latest_block_timestamp,
                 has_active_position=True,
                 position_state=TokenPositionState.SCAMMED,
                 scam_probability=1.0,
                 scam_reason=live_token.latest_token_assessment.get('scam_reason'),
                 num_greys=live_token.latest_token_assessment.get('num_greys'),
                 num_greens=live_token.latest_token_assessment.get('num_greens'),
-                num_bribers=live_token.token_data.num_bribes,
-                token_bribe_amount=live_token.token_data.total_bribe_amount
+                num_bribers=live_token.num_bribes,
+                token_bribe_amount=live_token.total_bribe_amount
             )
             self.add_snapshot(new_snapshot)
   

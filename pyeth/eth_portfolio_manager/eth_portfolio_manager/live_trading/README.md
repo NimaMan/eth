@@ -79,9 +79,9 @@ Ethereum Blockchain
 LiveBlockTokenProcessor (block & event processing)
         ↓
 LiveTokenTracker (orchestration)
-        ├─→ TokenTrackingCache (pool reserves)
+        ├─→ TokenUpdateCache (addresses per block)
         │       ↓
-        │   TokenTrackingPublisher → Rust Mempool Processor
+        │   TokenUpdateNotifier → Rust Mempool Processor
         │   (ZMQ 5557/5558)
         │
         ├─→ Strategy Processing
@@ -131,13 +131,13 @@ def extract_wallet_address(strategy):
 
 ## Integration Points
 
-### Pool Level Publishing (Python → Rust)
-- **Purpose**: Share real-time liquidity for scam detection
-- **Publisher**: TokenTrackingPublisher
+### Token Update Publishing (Python → Rust)
+- **Purpose**: Share real-time list of tokens changed this block
+- **Notifier**: TokenUpdateNotifier
 - **Ports**: 
   - 5557 (PUB): Real-time updates
   - 5558 (REP): Query interface
-- **Data**: Pool reserves, token addresses, block numbers
+- **Data**: Token contract addresses + block numbers (consumers hydrate snapshots from Redis)
 
 ### Trading Signals (Python → eth_kartal)
 - **Purpose**: Execute trades on-chain

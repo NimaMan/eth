@@ -36,7 +36,7 @@ Architecture:
                                                            ▼
 ┌─────────────────────────┐                     ┌─────────────────────┐
 │                         │                     │                     │
-│  TokenTrackingCache     │◄───────────────────┤  Pool Reserve       │
+│  TokenUpdateCache       │◄───────────────────┤  Pool Reserve       │
 │                         │                     │  Extraction         │
 └─────────────┬───────────┘                     └─────────────────────┘
               │
@@ -44,7 +44,7 @@ Architecture:
               ▼
 ┌─────────────────────────┐     ZeroMQ          ┌─────────────────────┐
 │                         │     PUB (5557)      │                     │
-│  TokenTrackingPublisher ├────────────────────►│  Rust Mempool       │
+│  TokenUpdateNotifier    ├────────────────────►│  Rust Mempool       │
 │                         │     REP (5558)      │  Processor          │
 └─────────────────────────┘                     └─────────────────────┘
 ```
@@ -55,7 +55,7 @@ Event Flow:
 2. **Event Extraction**: LiveBlockTokenProcessor extracts token transfers and pool events
 3. **Queue Processing**: Token updates are queued for processing
 4. **Strategy Execution**: Updates trigger strategy evaluation
-5. **Pool Extraction**: TokenTrackingCache captures pool reserve changes
+5. **Update Tracking**: TokenUpdateCache records which tokens changed per block
 6. **Data Publishing**: Pool levels published to Rust via ZMQ
 
 Integration Points:
@@ -99,11 +99,11 @@ from datetime import datetime
 from eth_token.token_manager.live_block_token_processor import LiveBlockTokenProcessor
 from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
 from eth_portfolio_manager.live_trading.live_strategy_engine import LiveStrategyEngine
-from eth_portfolio_manager.publishers.trade_signal_publisher import TradeSignalPublisher
+from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSignalPublisher
 from eth_data.database.writers.live_token_position_results_writer import LiveResultsWriter
 from eth_portfolio_manager.utils.logger import get_logger
-from eth_portfolio_manager.publishers.token_tracking_cache import TokenTrackingCache
-from eth_portfolio_manager.publishers.token_tracking_publisher import TokenTrackingPublisher
+from eth_portfolio_manager.notifications.token_update_cache import TokenUpdateCache
+from eth_portfolio_manager.notifications.token_update_notifier import TokenUpdateNotifier
 from eth_data.database.writers.token_status_writer import TokenStatusWriter
 
 
@@ -181,14 +181,14 @@ class LiveTokenTracker:
             self.strategy_run_ids = {}
 
         # Token info tracking components
-        self.token_tracking_cache = TokenTrackingCache(logger=self.logger)
-        self.token_tracking_publisher = TokenTrackingPublisher(
+        self.token_update_cache = TokenUpdateCache(logger=self.logger)
+        self.token_update_notifier = TokenUpdateNotifier(
             pub_endpoint="tcp://*:5557",
             rep_endpoint="tcp://*:5558",
             logger=self.logger,
         )
         # Connect cache to publisher
-        self.token_tracking_publisher.set_cache(self.token_tracking_cache)
+        self.token_update_notifier.set_cache(self.token_update_cache)
 
         # Token status persistence
         self.token_status_writer = TokenStatusWriter(logger=self.logger)
@@ -212,12 +212,12 @@ class LiveTokenTracker:
         self.logger.info("Token processor started")
 
         # Start the token tracking publisher
-        self.logger.info("Starting token tracking publisher...")
-        await self.token_tracking_publisher.start()
-        self.logger.info("Token tracking publisher started")
+        self.logger.info("Starting token update notifier...")
+        await self.token_update_notifier.start()
+        self.logger.info("Token update notifier started")
         
         # Publish initial state
-        await self.token_tracking_publisher.publish_all()
+        await self.token_update_notifier.publish_all()
 
         # Start the main token processing task
         self.logger.info("Starting main token processing task...")
@@ -255,8 +255,8 @@ class LiveTokenTracker:
 
         # Stop the token info publisher
         try:
-            await self.token_tracking_publisher.stop()
-            self.logger.info("Token tracking publisher stopped.")
+            await self.token_update_notifier.stop()
+            self.logger.info("Token update notifier stopped.")
         except Exception as e:
             self.logger.error(f"Error stopping token tracking publisher: {e}", exc_info=True)
 
@@ -329,7 +329,7 @@ class LiveTokenTracker:
                             await asyncio.gather(*tasks)
                             
                             # Update token tracking cache
-                            await self.token_tracking_cache.update_from_token_objects(
+                            await self.token_update_cache.update_from_token_objects(
                                 updated_tokens, block_number
                             )
                             
@@ -338,13 +338,13 @@ class LiveTokenTracker:
                                 await self._persist_token_and_pool_status(updated_tokens)
                             
                             # Publish updated token info to Rust
-                            await self.token_tracking_publisher.publish_block_updates(block_number)
+                            await self.token_update_notifier.publish_block_updates(block_number)
                             
                             # Get and publish wallet positions
                             wallet_positions = self.get_wallet_positions()
                             if wallet_positions:
                                 # TODO: Implement wallet position publishing if needed
-                                # The token_tracking_publisher doesn't have publish_wallet_positions method
+                                # The token_update_notifier only broadcasts token addresses currently
                                 pass
                             
                             # Save Strategy Results
@@ -454,24 +454,6 @@ class LiveTokenTracker:
             except Exception as e:
                 self.logger.error(f"Error scheduling PnL write for token {token_address}, block {block_number}: {e}")
                     
-    def get_pool_level(self, pool_address):
-        """Get the current ETH level for a specific pool."""
-        pool_info = self.token_tracking_cache.get_pool(pool_address)
-        return pool_info.denom_reserve if pool_info else None
-        
-    def get_all_pool_levels(self):
-        """Get all current pool ETH levels."""
-        levels = {}
-        for token_addr, token_info in self.token_tracking_cache.get_all_tokens().items():
-            for pool_addr, pool_info in token_info.pools.items():
-                levels[pool_addr] = pool_info.denom_reserve
-        return levels
-        
-    def get_pool_token(self, pool_address):
-        """Get the token address associated with a pool."""
-        token_address = self.token_tracking_cache._pool_to_token.get(pool_address)
-        return token_address
-    
     def get_wallet_positions(self):
         """Get position information from wallet tracker strategy."""
         positions = {}
@@ -491,40 +473,40 @@ class LiveTokenTracker:
         for token_address, token in updated_tokens.items():
             try:
                 # DEBUG: Log what's in the token data
-                # self.logger.debug(f"Token {token_address} data: creation_tx={getattr(token.token_data, 'creation_tx', 'NOT_FOUND')}, trading_enabled_tx={getattr(token.token_data, 'trading_enabled_tx', 'NOT_FOUND')}")
+                # self.logger.debug(f"Token {token_address} data: creation_tx={getattr(token, 'creation_tx', 'NOT_FOUND')}, trading_enabled_tx={getattr(token, 'trading_enabled_tx', 'NOT_FOUND')}")
                 
                 # Prepare token data for persistence
                 token_data = {
                     "contract_address": token.contract_address,
-                    "creator_address": token.token_data.creator_address,
-                    "is_scam": token.token_data.is_scam,
-                    "scam_label": token.token_data.scam_label,
-                    "creation_tx": token.token_data.creation_tx,
-                    "trading_enabled_tx": token.token_data.trading_enabled_tx
+                    "creator_address": token.creator_address,
+                    "is_scam": token.is_scam,
+                    "scam_label": token.scam_label,
+                    "creation_tx": token.creation_tx,
+                    "trading_enabled_tx": token.trading_enabled_tx
                 }
                 
                 # Prepare pools data
                 pools_data = {}
-                pool_addresses = token.token_data.pool_addresses or []
-                pool_info_dict = token.token_data.get_pool_info_dict()
+                pool_addresses = token.pool_addresses or []
+                pool_info_dict = token.get_pool_info_dict()
                 
                 # Get pool health stats for scam information
                 pool_health_stats = {}
-                pool_health_stats = token.token_data.pool_manager.get_pool_health_stats()
+                pool_health_stats = token.pool_manager.get_pool_health_stats()
                 
                 for pool_address in pool_addresses:
                     if pool_address in pool_info_dict:
                         pool_info = pool_info_dict[pool_address]
-                        denom_reserve = token.token_data.get_pool_reserve(pool_address)
-                        token_reserve = token.token_data.get_pool_token_reserve(pool_address)
+                        denom_reserve = token.get_pool_reserve(pool_address)
+                        token_reserve = token.get_pool_token_reserve(pool_address)
                         
                         # Get scam info from health stats
                         pool_health = pool_health_stats.get(pool_address, {})
                         
                         # Get pool object for trading_enabled info
                         pool_obj = None
-                        if hasattr(token.token_data, 'pool_manager') and token.token_data.pool_manager:
-                            pool_obj = token.token_data.pool_manager.get_pool(pool_address)
+                        if token.pool_manager:
+                            pool_obj = token.pool_manager.get_pool(pool_address)
                         
                         if denom_reserve is not None and token_reserve is not None:
                             pools_data[pool_address] = {

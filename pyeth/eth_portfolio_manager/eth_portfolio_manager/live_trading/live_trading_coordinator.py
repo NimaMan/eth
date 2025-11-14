@@ -16,7 +16,7 @@ from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_portfolio_manager.strategy.base_strategy import BaseStrategy
 from eth_portfolio_manager.live_trading.live_strategy_engine import LiveStrategyEngine
 from eth_portfolio_manager.live_trading.live_position_manager import LivePositionManager
-from eth_portfolio_manager.publishers.trade_signal_publisher import TradeSignalPublisher
+from eth_portfolio_manager.notifications.trade_signal_publisher import TradeSignalPublisher
 from eth_data.database.writers.live_trading_position_writer import LiveTradingPositionWriter
 
 
