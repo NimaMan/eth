@@ -8,13 +8,16 @@
 use pyo3::prelude::*;
 
 use crate::agents::envs::eth15m_env::{
-    PyEth15mAction, PyEth15mEnv, PyEth15mFeeds, PyEth15mObservation, PyEth15mStep,
+    PyEth15mFeeds, PyEth15mObservation, PyPolymarketTarget, PyWindowRecord,
 };
+use crate::chain_query::common_addresses::register as register_common_addresses;
+use crate::chain_query::function_signatures::register as register_function_signatures;
 use crate::chain_query::{
     PyAccount, PyAddressTransactionRef, PyAddressTxIndexer, PyBalanceChange, PyBalanceChanges,
     PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo, PyPortfolio, PyTokenMetadata,
     PyTransactionData,
 };
+use crate::dex::register as register_dex;
 use crate::price_reader::{PyEthPriceClient, PyPriceData};
 use crate::provider::{
     PyAddressProcessedTxProvider, PyProcessedBlock, PyProcessedTxProvider,
@@ -75,12 +78,16 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyTokenProcessedTxProvider>()?;
     m.add_class::<PyProcessedBlock>()?;
 
-    // RL / forecasting environment bindings
-    m.add_class::<PyEth15mEnv>()?;
+    // ETH15m data bindings
     m.add_class::<PyEth15mFeeds>()?;
-    m.add_class::<PyEth15mAction>()?;
-    m.add_class::<PyEth15mStep>()?;
     m.add_class::<PyEth15mObservation>()?;
+    m.add_class::<PyWindowRecord>()?;
+    m.add_class::<PyPolymarketTarget>()?;
+
+    // Common addresses utilities
+    register_common_addresses(m)?;
+    register_function_signatures(m)?;
+    register_dex(m)?;
 
     // Add module metadata
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

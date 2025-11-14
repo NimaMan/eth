@@ -1,13 +1,15 @@
 #[cfg(feature = "prices")]
 mod real {
     use crate::price_reader::PyPriceData;
-    use eth_env::data::{FeedSnapshot, PriceFeeds};
-    use eth_env::{EnvError, Eth15mAction, Eth15mConfig, Eth15mEnv, Eth15mObservation, Eth15mStep};
+    use eth_env::data::pairs::PairProtocol;
+    use eth_env::data::{windows, FeedSnapshot, PairRequest, PriceFeeds};
+    use eth_env::EnvError;
     use eth_prices::core::PriceData;
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
-    use serde_json;
+    use pyo3::FromPyObject;
     use std::collections::HashMap;
+    use std::str::FromStr;
     use tokio::runtime::Runtime;
 
     fn default_reth_datadir() -> String {
@@ -55,6 +57,139 @@ mod real {
         Py::new(py, PyPriceData::from_rust_data(price, py)?)
     }
 
+    #[derive(FromPyObject)]
+    struct PyPairRequest {
+        protocol: String,
+        token: String,
+        denom: Option<String>,
+        fee: Option<u32>,
+    }
+
+    fn convert_pair_requests(
+        requests: Option<Vec<PyPairRequest>>,
+    ) -> PyResult<Option<Vec<PairRequest>>> {
+        if let Some(reqs) = requests {
+            let mut out = Vec::with_capacity(reqs.len());
+            for req in reqs {
+                let protocol = PairProtocol::from_str(&req.protocol).ok_or_else(|| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "unknown pair protocol '{}'",
+                        req.protocol
+                    ))
+                })?;
+                let denom = req.denom.unwrap_or_else(|| "WETH".to_string());
+                out.push(PairRequest {
+                    protocol,
+                    token: req.token.to_uppercase(),
+                    denom: denom.to_uppercase(),
+                    fee_tier: req.fee,
+                });
+            }
+            Ok(Some(out))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[pyclass]
+    #[derive(Clone)]
+    pub struct PyWindowRecord {
+        #[pyo3(get)]
+        pub start_block: u64,
+        #[pyo3(get)]
+        pub end_block: u64,
+        #[pyo3(get)]
+        pub timestamp_start: i64,
+        #[pyo3(get)]
+        pub timestamp_end: i64,
+        #[pyo3(get)]
+        pub chainlink_price_start: f64,
+        #[pyo3(get)]
+        pub chainlink_price_end: f64,
+        #[pyo3(get)]
+        pub chainlink_return: f64,
+        #[pyo3(get)]
+        pub base_fee_per_gas: u64,
+        #[pyo3(get)]
+        pub usdc_mean_mid: f64,
+        #[pyo3(get)]
+        pub usdc_spread_bps: f64,
+        #[pyo3(get)]
+        pub usdc_venue_count: usize,
+        #[pyo3(get)]
+        pub usdt_mean_mid: f64,
+        #[pyo3(get)]
+        pub usdt_spread_bps: f64,
+        #[pyo3(get)]
+        pub usdt_venue_count: usize,
+        #[pyo3(get)]
+        pub dai_mean_mid: f64,
+        #[pyo3(get)]
+        pub dai_spread_bps: f64,
+        #[pyo3(get)]
+        pub dai_venue_count: usize,
+        #[pyo3(get)]
+        pub target_up: bool,
+    }
+
+    impl From<windows::WindowRecord> for PyWindowRecord {
+        fn from(record: windows::WindowRecord) -> Self {
+            Self {
+                start_block: record.start_block,
+                end_block: record.end_block,
+                timestamp_start: record.timestamp_start,
+                timestamp_end: record.timestamp_end,
+                chainlink_price_start: record.chainlink_price_start,
+                chainlink_price_end: record.chainlink_price_end,
+                chainlink_return: record.chainlink_return,
+                base_fee_per_gas: record.base_fee_per_gas,
+                usdc_mean_mid: record.usdc_mean_mid,
+                usdc_spread_bps: record.usdc_spread_bps,
+                usdc_venue_count: record.usdc_venue_count,
+                usdt_mean_mid: record.usdt_mean_mid,
+                usdt_spread_bps: record.usdt_spread_bps,
+                usdt_venue_count: record.usdt_venue_count,
+                dai_mean_mid: record.dai_mean_mid,
+                dai_spread_bps: record.dai_spread_bps,
+                dai_venue_count: record.dai_venue_count,
+                target_up: record.target_up,
+            }
+        }
+    }
+
+    #[pyclass]
+    #[derive(Clone)]
+    pub struct PyPolymarketTarget {
+        #[pyo3(get)]
+        pub window_index: usize,
+        #[pyo3(get)]
+        pub window_start_timestamp: i64,
+        #[pyo3(get)]
+        pub window_end_timestamp: i64,
+        #[pyo3(get)]
+        pub start_block: u64,
+        #[pyo3(get)]
+        pub end_block: u64,
+    }
+
+    impl PyPolymarketTarget {
+        fn new(
+            window_index: usize,
+            window_start_timestamp: i64,
+            window_end_timestamp: i64,
+            start_block: u64,
+            end_block: u64,
+        ) -> Self {
+            Self {
+                window_index,
+                window_start_timestamp,
+                window_end_timestamp,
+                start_block,
+                end_block,
+            }
+        }
+    }
+
     #[pyclass]
     #[derive(Clone)]
     pub struct PyEth15mObservation {
@@ -72,152 +207,22 @@ mod real {
         pub eth_usdt_prices: Py<PyDict>,
         #[pyo3(get)]
         pub eth_dai_prices: Py<PyDict>,
+        #[pyo3(get)]
+        pub pair_prices: Py<PyDict>,
     }
 
     impl PyEth15mObservation {
-        fn from_observation(py: Python<'_>, obs: Eth15mObservation) -> PyResult<Self> {
-            Ok(Self {
-                timestamp_unix: obs.timestamp_unix,
-                block_number: obs.block_number,
-                base_fee_per_gas: obs.base_fee_per_gas,
-                chainlink_price: price_to_py(py, obs.chainlink_price)?,
-                eth_usdc_prices: price_map_to_dict(py, obs.eth_usdc_prices)?,
-                eth_usdt_prices: price_map_to_dict(py, obs.eth_usdt_prices)?,
-                eth_dai_prices: price_map_to_dict(py, obs.eth_dai_prices)?,
-            })
-        }
-
         fn from_snapshot(py: Python<'_>, snapshot: FeedSnapshot) -> PyResult<Self> {
-            let obs: Eth15mObservation = snapshot.into();
-            Self::from_observation(py, obs)
-        }
-    }
-
-    #[pyclass]
-    pub struct PyEth15mStep {
-        #[pyo3(get)]
-        pub observation: PyEth15mObservation,
-        #[pyo3(get)]
-        pub reward: f64,
-        #[pyo3(get)]
-        pub done: bool,
-        #[pyo3(get)]
-        pub info: String,
-    }
-
-    impl PyEth15mStep {
-        fn from_step(py: Python<'_>, step: Eth15mStep) -> PyResult<Self> {
-            let info = if step.info.is_null() {
-                "null".to_string()
-            } else {
-                serde_json::to_string(&step.info).unwrap_or_else(|_| "null".into())
-            };
             Ok(Self {
-                observation: PyEth15mObservation::from_observation(py, step.observation)?,
-                reward: step.reward,
-                done: step.done,
-                info,
+                timestamp_unix: snapshot.timestamp_unix,
+                block_number: snapshot.block_number,
+                base_fee_per_gas: snapshot.base_fee_per_gas,
+                chainlink_price: price_to_py(py, snapshot.chainlink_price)?,
+                eth_usdc_prices: price_map_to_dict(py, snapshot.eth_usdc_prices)?,
+                eth_usdt_prices: price_map_to_dict(py, snapshot.eth_usdt_prices)?,
+                eth_dai_prices: price_map_to_dict(py, snapshot.eth_dai_prices)?,
+                pair_prices: price_map_to_dict(py, snapshot.pair_prices)?,
             })
-        }
-    }
-
-    #[pyclass]
-    #[derive(Clone)]
-    pub struct PyEth15mAction {
-        pub(crate) inner: Eth15mAction,
-    }
-
-    #[pymethods]
-    impl PyEth15mAction {
-        #[new]
-        #[pyo3(signature = (prediction=None))]
-        fn new(prediction: Option<f64>) -> Self {
-            match prediction {
-                Some(price) => Self {
-                    inner: Eth15mAction::Predict { price },
-                },
-                None => Self {
-                    inner: Eth15mAction::Hold,
-                },
-            }
-        }
-
-        #[staticmethod]
-        fn hold() -> Self {
-            Self {
-                inner: Eth15mAction::Hold,
-            }
-        }
-
-        #[staticmethod]
-        fn predict(price: f64) -> Self {
-            Self {
-                inner: Eth15mAction::Predict { price },
-            }
-        }
-    }
-
-    #[pyclass]
-    pub struct PyEth15mEnv {
-        inner: Eth15mEnv,
-        rt: Runtime,
-    }
-
-    #[pymethods]
-    impl PyEth15mEnv {
-        #[new]
-        #[pyo3(signature = (reth_datadir=None, dataset_capacity=2048))]
-        fn new(reth_datadir: Option<String>, dataset_capacity: usize) -> PyResult<Self> {
-            let mut config = Eth15mConfig::default();
-            if let Some(path) = reth_datadir {
-                config.reth_datadir = path;
-            } else {
-                config.reth_datadir = default_reth_datadir();
-            }
-            config.dataset_capacity = dataset_capacity;
-            let env = Eth15mEnv::new(config).map_err(map_env_error)?;
-            let rt = create_runtime()?;
-            Ok(Self { inner: env, rt })
-        }
-
-        fn reset(&mut self, py: Python<'_>) -> PyResult<PyEth15mObservation> {
-            let obs = self
-                .rt
-                .block_on(self.inner.reset())
-                .map_err(map_env_error)?;
-            PyEth15mObservation::from_observation(py, obs)
-        }
-
-        fn step(&mut self, py: Python<'_>, action: &PyEth15mAction) -> PyResult<PyEth15mStep> {
-            let step = self
-                .rt
-                .block_on(self.inner.step(action.inner.clone()))
-                .map_err(map_env_error)?;
-            PyEth15mStep::from_step(py, step)
-        }
-
-        fn latest_block(&self) -> PyResult<u64> {
-            self.inner.latest_block_number().map_err(map_env_error)
-        }
-
-        fn latest_snapshot(&self, py: Python<'_>) -> PyResult<PyEth15mObservation> {
-            let obs = self
-                .rt
-                .block_on(self.inner.latest_observation())
-                .map_err(map_env_error)?;
-            PyEth15mObservation::from_observation(py, obs)
-        }
-
-        fn snapshot_at_block(
-            &self,
-            py: Python<'_>,
-            block_number: u64,
-        ) -> PyResult<PyEth15mObservation> {
-            let obs = self
-                .rt
-                .block_on(self.inner.observation_at_block(block_number))
-                .map_err(map_env_error)?;
-            PyEth15mObservation::from_observation(py, obs)
         }
     }
 
@@ -241,10 +246,16 @@ mod real {
             self.feeds.latest_block_number().map_err(map_env_error)
         }
 
-        fn latest_snapshot(&self, py: Python<'_>) -> PyResult<PyEth15mObservation> {
+        #[pyo3(signature = (pair_requests=None))]
+        fn latest_snapshot(
+            &self,
+            py: Python<'_>,
+            pair_requests: Option<Vec<PyPairRequest>>,
+        ) -> PyResult<PyEth15mObservation> {
+            let reqs = convert_pair_requests(pair_requests)?;
             let snapshot = self
                 .rt
-                .block_on(self.feeds.fetch_snapshot())
+                .block_on(self.feeds.fetch_snapshot(reqs.as_deref()))
                 .map_err(map_env_error)?;
             PyEth15mObservation::from_snapshot(py, snapshot)
         }
@@ -253,38 +264,195 @@ mod real {
             &self,
             py: Python<'_>,
             block_number: u64,
+            pair_requests: Option<Vec<PyPairRequest>>,
         ) -> PyResult<PyEth15mObservation> {
+            let reqs = convert_pair_requests(pair_requests)?;
             let snapshot = self
                 .rt
-                .block_on(self.feeds.fetch_snapshot_at_block(block_number))
+                .block_on(
+                    self.feeds
+                        .fetch_snapshot_at_block(block_number, reqs.as_deref()),
+                )
                 .map_err(map_env_error)?;
             PyEth15mObservation::from_snapshot(py, snapshot)
         }
 
-        #[pyo3(signature = (start_block, count, step=1))]
+        #[pyo3(signature = (start_block, count, step=1, pair_requests=None))]
         fn snapshot_range(
             &self,
             py: Python<'_>,
             start_block: u64,
             count: usize,
             step: u64,
+            pair_requests: Option<Vec<PyPairRequest>>,
         ) -> PyResult<Vec<PyEth15mObservation>> {
             if step == 0 {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                     "step must be at least 1",
                 ));
             }
+            let reqs = convert_pair_requests(pair_requests)?;
             let mut block = start_block;
             let mut out = Vec::with_capacity(count);
             for _ in 0..count {
                 let snapshot = self
                     .rt
-                    .block_on(self.feeds.fetch_snapshot_at_block(block))
+                    .block_on(self.feeds.fetch_snapshot_at_block(block, reqs.as_deref()))
                     .map_err(map_env_error)?;
                 out.push(PyEth15mObservation::from_snapshot(py, snapshot)?);
                 block = block.saturating_sub(step);
             }
             Ok(out)
+        }
+
+        #[pyo3(signature = (start_block, window_count, interval_blocks, pair_requests=None))]
+        fn export_windows(
+            &self,
+            start_block: u64,
+            window_count: usize,
+            interval_blocks: u64,
+            pair_requests: Option<Vec<PyPairRequest>>,
+        ) -> PyResult<Vec<PyWindowRecord>> {
+            let reqs = convert_pair_requests(pair_requests)?;
+            let records = self
+                .rt
+                .block_on(windows::collect_windows(
+                    &self.feeds,
+                    start_block,
+                    window_count,
+                    interval_blocks,
+                    reqs.as_deref(),
+                ))
+                .map_err(map_env_error)?;
+            Ok(records.into_iter().map(PyWindowRecord::from).collect())
+        }
+
+        fn block_at_timestamp(&self, timestamp_unix: i64) -> PyResult<u64> {
+            self.rt
+                .block_on(self.feeds.block_at_timestamp(timestamp_unix))
+                .map_err(map_env_error)
+        }
+
+        #[pyo3(signature = (timestamp_unix, pair_requests=None))]
+        fn snapshot_at_timestamp(
+            &self,
+            py: Python<'_>,
+            timestamp_unix: i64,
+            pair_requests: Option<Vec<PyPairRequest>>,
+        ) -> PyResult<PyEth15mObservation> {
+            let reqs = convert_pair_requests(pair_requests)?;
+            let snapshot = self
+                .rt
+                .block_on(
+                    self.feeds
+                        .fetch_snapshot_at_timestamp(timestamp_unix, reqs.as_deref()),
+                )
+                .map_err(map_env_error)?;
+            PyEth15mObservation::from_snapshot(py, snapshot)
+        }
+
+        #[pyo3(signature = (start_timestamp, end_timestamp, step_blocks=1, pair_requests=None))]
+        fn block_series_between(
+            &self,
+            py: Python<'_>,
+            start_timestamp: i64,
+            end_timestamp: i64,
+            step_blocks: u64,
+            pair_requests: Option<Vec<PyPairRequest>>,
+        ) -> PyResult<Vec<PyEth15mObservation>> {
+            if end_timestamp <= start_timestamp {
+                return Ok(Vec::new());
+            }
+            let step = step_blocks.max(1);
+            let reqs = convert_pair_requests(pair_requests)?;
+            let start_block = self
+                .rt
+                .block_on(self.feeds.block_at_timestamp(start_timestamp))
+                .map_err(map_env_error)?;
+            let end_block = self
+                .rt
+                .block_on(self.feeds.block_at_timestamp(end_timestamp))
+                .map_err(map_env_error)?;
+            if end_block < start_block {
+                return Ok(Vec::new());
+            }
+            let mut block = start_block;
+            let mut out = Vec::new();
+            loop {
+                let snapshot = self
+                    .rt
+                    .block_on(self.feeds.fetch_snapshot_at_block(block, reqs.as_deref()))
+                    .map_err(map_env_error)?;
+                out.push(PyEth15mObservation::from_snapshot(py, snapshot)?);
+                if block >= end_block {
+                    break;
+                }
+                match block.checked_add(step) {
+                    Some(next) if next <= end_block => block = next,
+                    _ => break,
+                }
+            }
+            Ok(out)
+        }
+
+        #[pyo3(signature = (start_timestamp, end_timestamp, interval_minutes=15))]
+        fn polymarket_targets(
+            &self,
+            start_timestamp: i64,
+            end_timestamp: i64,
+            interval_minutes: u32,
+        ) -> PyResult<Vec<PyPolymarketTarget>> {
+            if interval_minutes == 0 {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "interval_minutes must be positive",
+                ));
+            }
+            if end_timestamp <= start_timestamp {
+                return Ok(Vec::new());
+            }
+            let interval_secs = i64::from(interval_minutes) * 60;
+            let mut cursor = align_timestamp(start_timestamp, interval_secs, true);
+            let stop = align_timestamp(end_timestamp, interval_secs, false);
+            if cursor >= stop {
+                return Ok(Vec::new());
+            }
+            let mut out = Vec::new();
+            let mut index = 0usize;
+            while cursor < stop {
+                let next = cursor + interval_secs;
+                let start_block = self
+                    .rt
+                    .block_on(self.feeds.block_at_timestamp(cursor))
+                    .map_err(map_env_error)?;
+                let end_block = self
+                    .rt
+                    .block_on(self.feeds.block_at_timestamp(next))
+                    .map_err(map_env_error)?;
+                out.push(PyPolymarketTarget::new(
+                    index,
+                    cursor,
+                    next,
+                    start_block,
+                    end_block,
+                ));
+                index += 1;
+                cursor = next;
+            }
+            Ok(out)
+        }
+    }
+
+    fn align_timestamp(timestamp: i64, interval_secs: i64, forward: bool) -> i64 {
+        if interval_secs <= 0 {
+            return timestamp;
+        }
+        let remainder = timestamp % interval_secs;
+        if remainder == 0 {
+            timestamp
+        } else if forward {
+            timestamp + (interval_secs - remainder)
+        } else {
+            timestamp - remainder
         }
     }
 }
@@ -302,14 +470,11 @@ mod stub {
     pub struct PyEth15mObservation;
 
     #[pyclass]
-    pub struct PyEth15mStep;
-
-    #[pyclass]
     #[derive(Clone)]
-    pub struct PyEth15mAction;
+    pub struct PyPolymarketTarget;
 
     #[pyclass]
-    pub struct PyEth15mEnv;
+    pub struct PyWindowRecord;
 
     #[pyclass]
     pub struct PyEth15mFeeds;
@@ -329,7 +494,7 @@ mod stub {
     }
 
     #[pymethods]
-    impl PyEth15mStep {
+    impl PyPolymarketTarget {
         #[new]
         fn new() -> PyResult<Self> {
             Err(disabled!("pyreth built without `prices` feature"))
@@ -337,18 +502,9 @@ mod stub {
     }
 
     #[pymethods]
-    impl PyEth15mAction {
+    impl PyWindowRecord {
         #[new]
         fn new() -> PyResult<Self> {
-            Err(disabled!("pyreth built without `prices` feature"))
-        }
-    }
-
-    #[pymethods]
-    impl PyEth15mEnv {
-        #[new]
-        #[pyo3(signature = (_reth_datadir=None, _dataset_capacity=2048))]
-        fn new(_reth_datadir: Option<String>, _dataset_capacity: usize) -> PyResult<Self> {
             Err(disabled!("pyreth built without `prices` feature"))
         }
     }
