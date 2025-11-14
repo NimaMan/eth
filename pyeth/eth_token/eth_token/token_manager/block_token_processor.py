@@ -22,7 +22,7 @@ Responsibilities
 
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from collections import OrderedDict
 from tqdm import tqdm
 
@@ -44,7 +44,6 @@ class BlockTokenProcessor:
         self.latest_processed_block = 0
         self.start_block = None  # Track the first block we process
         self._recent_block_headers: "OrderedDict[int, Any]" = OrderedDict()
-        self._token_transactions_current_block: Dict[str, List[Dict[str, Any]]] = {}
 
         self.token_chain_fetcher = TokenChainDataFetcher()
 
@@ -59,82 +58,38 @@ class BlockTokenProcessor:
         previous_block_header = self._recent_block_headers.get(block_number - 1)
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._store_block_header(block_number, block_header)
-        token_tx_map = self.map_transactions_to_tokens(
-            block_tx_list,
-            block_header,
-            previous_block_header,
-        )
-        for token_address, txs in token_tx_map.items():
-            self._apply_token_transactions(token_address=token_address, token_transactions=txs)
+        for tx in block_tx_list:
+            tx_data = self._ensure_tx_dict(tx)
+            tx_data['block_header'] = block_header
+            tx_data['previous_block_header'] = previous_block_header
+            # Ensure transactions mutate token state in canonical block order
+            self._process_transaction(tx_data, block_number)
 
         # Set start_block on first block processed
         if self.start_block is None:
             self.start_block = block_number
+
+        
         self.processed_blocks[block_number] = True # Mark the block as processed
         return block_number
 
-    def add_block_headers_to_tx(self, tx, block_header, previous_block_header):
-        tx_data = self._ensure_tx_dict(tx)
-        tx_data['block_header'] = block_header
-        tx_data['previous_block_header'] = previous_block_header
-        return tx_data
-
-    def map_transactions_to_tokens(
-        self,
-        transactions,
-        block_header,
-        previous_block_header,
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        token_tx_map: Dict[str, List[Dict[str, Any]]] = OrderedDict()
-        for tx in transactions:
-            tx_data = self.add_block_headers_to_tx(tx, block_header, previous_block_header)
-            created_token = self._check_for_token_creation(tx_data)
-            if created_token:
-                token_tx_map.setdefault(created_token.contract_address, []).append(tx_data)
-
-            contracts = tx_data.get("erc20_contracts") or set()
-            if not contracts:
-                continue
-            for token_address in contracts:
-                token = self.live_tokens_cache[token_address]
-                if not token:
-                    continue
-                token_tx_map.setdefault(token.contract_address, []).append(tx_data)
-        return token_tx_map
-    
-    def _apply_token_transactions(self, token_address, token_transactions: Dict[str, List[Dict[str, Any]]]) -> None:        
-        token = self.live_tokens_cache[token_address]
-        if not token:
-            return
-        for tx in token_transactions:
-            self._update_token_from_transaction(token=token, transaction=tx)
-
-        # Update the pool and token mapping so that we know which pools belong to which tokens        
-        self.updated_tokens[token_address] = token
-        if self.updated_tokens:
-            for token in self.updated_tokens.values():
-                self.live_tokens_cache.update_pool_mapping(token)
-
-    def _update_token_from_transaction(self, token: ERC20Token, transaction: Dict):
-        """Safely update a token with transaction data"""
-        try:
-            token.update_from_transaction(transaction)
-        except Exception as e:
-            self.logger.error(f"{self.__class__.__name__} Failed to update token {token.contract_address} at tx {transaction.get('hash')}: {e}") 
-
-    def _check_for_token_creation(self, transaction: Dict):
+    def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
-        block_number = transaction["block_number"]
+        transaction = self._ensure_tx_dict(transaction)
         try:
             # Handle contract creation
             is_token_creation, token_metadata, contract_address = self._is_token_creation(
                 transaction, block_number
             )
             if is_token_creation:
-                return self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
+                self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
+                return
+                
+            # Handle regular transactions
+            self._handle_token_update_from_transaction(transaction)
+                
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
-        return None
 
     def _is_token_creation(self, transaction: Dict, block_number: int) -> Optional[Dict[str, Any]]:
         """Return token metadata if transaction deploys a new ERC-20 contract."""
@@ -171,10 +126,37 @@ class BlockTokenProcessor:
                 self.updated_tokens[contract_address] = token
                 if self.logger:
                     self.logger.info(f"New token created: {contract_address} in block {block_number}")
-                return token
+
             except Exception as e:
                 self.logger.error(f"{self.__class__.__name__} Failed to create token {contract_address} at tx {transaction.get('hash')}: {e}")
-        return None
+
+    def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
+        """Safely update a token with transaction data"""
+        try:
+            token.update_from_transaction(transaction)
+        except Exception as e:
+            self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} at tx {transaction.get('hash')}: {e}") 
+
+    def _handle_token_update_from_transaction(self, transaction: Dict):
+        """Handle transaction involving existing tokens"""
+        erc20_contracts = transaction.get('erc20_contracts', set())
+        if not erc20_contracts:
+            return
+            
+        for token_address in erc20_contracts:
+            token = self.live_tokens_cache[token_address]
+            if token:
+                self._update_token(
+                    token=token,
+                    transaction=transaction,
+                    token_address=token_address
+                )
+                self.updated_tokens[token_address] = token
+        
+        # Update the pool and token mapping so that we know which pools belong to which tokens
+        if self.updated_tokens:
+            for token in self.updated_tokens.values():
+                self.live_tokens_cache.update_pool_mapping(token)
 
     @staticmethod
     def _ensure_tx_dict(tx: Any) -> Dict:
