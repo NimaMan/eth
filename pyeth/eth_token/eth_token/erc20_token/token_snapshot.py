@@ -7,20 +7,46 @@ those objects wholesale is both expensive (lots of nested structures)
 and fragile (non-JSON types, circular references).  Instead we expose a
 curated dictionary snapshot that captures the fields external processes
 care about: metadata, latest block context, pool status, control
-addresses, and a few summary metrics from the trackers.
+addresses, tax information, and per-pool trading state.
+
+Snapshot structure
+------------------
+The dict returned by :func:`build_token_snapshot` has these top-level sections:
+
+``contract_address``: canonical address (checksum) of the token.
+
+``metadata``: name, symbol, decimals, total_supply.
+
+``creation``: creator address, block, timestamp, creation tx hash.
+
+``latest_block``: block number / timestamp the token was last updated.
+
+``status``: lifecycle enum, scam flags, ownership info, trading state.
+
+``control``: current owner, renouncement info, control address list.
+
+``pools``: for each DEX pool we track -> reserves, prices, trading
+           flags, scam flags, pool ids (V4), LP approval stats.
+
+``transfers``: aggregate bribe/tax info, per-address tx counters,
+               approved addresses.
+
+``transfer_history`` (optional): bounded history of ERC20 / ETH /
+               other-denom transfers + approvals. Only populated when
+               ``include_history=True`` to keep snapshots lean.
 
 Call ``build_token_snapshot`` with an ``ERC20Token`` to obtain a JSON
-friendly dict. Heavy histories are omitted by default; pass
-``include_history=True`` to include trimmed histories for debugging.
+friendly dict. Use :class:`TokenSnapshot` for typed access and
+``load_token_snapshot`` when you need to pull snapshots from the live
+data registry (Redis) in another process.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, Iterable, List, MutableMapping, Optional
 
-from .erc20_token import ERC20Token
-from .erc20_token import TokenLifecycleState  # re-export for type hints
+from erc20_token.erc20_token import ERC20Token, TokenLifecycleState
+from eth_data.live_data_registry import RedisSnapshotReader
+
 
 SNAPSHOT_VERSION = 1
 DEFAULT_HISTORY_SNAPSHOT_LIMIT = 25
@@ -72,15 +98,21 @@ def build_token_snapshot(
             "trading_enabled_block": token.trading_enabled_block,
             "trading_enabled_tx": token.trading_enabled_tx,
             "ownership_renounced": token.ownership_renounced,
+            "latest_activity_block": token.latest_block_number,
         },
         "control": {
             "current_owner": token.current_owner,
             "ownership_renounced_block": token.ownership_renounced_block,
             "control_addresses": sorted(a for a in token.token_control_addresses if a),
+            "tax_setter_addresses": sorted(getattr(token, "tax_setter_addresses", set())),
         },
         "pools": {
             "addresses": list(token.pool_addresses),
             "info": pool_info,
+            "flags": {
+                addr: _build_pool_flags(token, addr)
+                for addr in token.pool_addresses or ()
+            },
             "reserves": token.all_pool_reserves,
             "prices": token.current_prices,
             "total_liquidity_by_denom": token.total_liquidity_by_denom,
@@ -152,15 +184,13 @@ class TokenSnapshot:
 
 def load_token_snapshot(
     token_address: str,
-    reader: Optional["LiveDataReader"] = None,
+    reader: Optional["RedisSnapshotReader"] = None,
 ) -> Optional[TokenSnapshot]:
     """
     Fetch the latest snapshot for ``token_address`` from the live data registry.
     """
     if reader is None:
-        from eth_data.live_data_registry import LiveDataReader
-
-        reader = LiveDataReader()
+        reader = RedisSnapshotReader()
     snapshot = reader.get_token_snapshot(token_address)
     if snapshot is None:
         return None
@@ -185,6 +215,24 @@ def _trim_mapping(
     for key, values in mapping.items():
         trimmed[key] = _trim_list(values, limit)
     return trimmed
+
+
+def _build_pool_flags(token: ERC20Token, pool_address: str) -> Dict[str, Any]:
+    pool_obj = token.pool_manager.get_pool(pool_address) if token.pool_manager else None
+    return {
+        "is_scam": getattr(pool_obj, "is_scam", False),
+        "scam_label": getattr(pool_obj, "scam_label", None),
+        "lifecycle": getattr(pool_obj, "lifecycle", None),
+        "control_addresses": getattr(pool_obj, "control_addresses", []),
+        "can_buy": getattr(pool_obj, "can_buy", False),
+        "can_sell": getattr(pool_obj, "can_sell", False),
+        "trading_enabled": getattr(pool_obj, "trading_enabled", False),
+        "trading_enabled_block": getattr(pool_obj, "trading_enabled_block", None),
+        "trading_enabled_tx": getattr(pool_obj, "trading_enabled_tx", None),
+        "lp_tokens_approved_percentage": getattr(pool_obj, "lp_tokens_approved_percentage", None),
+        "latest_block_number": getattr(pool_obj, "latest_block_number", None),
+        "last_update_time": getattr(pool_obj, "last_update_time", None),
+    }
 
 
 __all__ = [

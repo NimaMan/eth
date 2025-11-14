@@ -1,6 +1,6 @@
 import pytest
 
-from eth_token.token_manager.block_subscriber import BlockSubscriber
+from eth_token.token_manager.block_subscriber import LiveBlockSnapshotSubscriber
 
 
 class DummyReader:
@@ -19,9 +19,9 @@ def test_resolve_payload_with_transactions_passthrough():
         "transactions": [{"hash": "0xabc"}],
         "block_header": {"number": "0xa"},
     }
-    subscriber = BlockSubscriber()
+    subscriber = LiveBlockSnapshotSubscriber()
 
-    resolved = subscriber._resolve_block_payload(payload)
+    resolved = subscriber._load_block_payload(payload)
 
     assert resolved is payload
 
@@ -33,9 +33,9 @@ def test_resolve_payload_fetches_from_live_data_reader():
         "transactions": [{"hash": "0xdef"}],
     }
     reader = DummyReader(snapshot)
-    subscriber = BlockSubscriber(live_data_reader=reader)
+    subscriber = LiveBlockSnapshotSubscriber(block_snapshot_reader=reader)
 
-    resolved = subscriber._resolve_block_payload({"block_number": 20})
+    resolved = subscriber._load_block_payload({"block_number": 20})
 
     assert resolved["block_number"] == 20
     assert resolved["block_header"] == '{"number":"0x14"}'
@@ -45,8 +45,8 @@ def test_resolve_payload_fetches_from_live_data_reader():
 
 def test_resolve_payload_missing_snapshot_returns_none():
     reader = DummyReader(snapshot=None)
-    subscriber = BlockSubscriber(live_data_reader=reader)
+    subscriber = LiveBlockSnapshotSubscriber(block_snapshot_reader=reader)
 
-    resolved = subscriber._resolve_block_payload({"block_number": 30})
+    resolved = subscriber._load_block_payload({"block_number": 30})
 
     assert resolved is None

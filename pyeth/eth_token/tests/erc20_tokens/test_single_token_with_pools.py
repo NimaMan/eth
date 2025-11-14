@@ -47,10 +47,10 @@ async def test_token_with_pool_persistence(token_address: str):
     # Prepare token data
     token_data = {
         "contract_address": token.contract_address,
-        "creator_address": token.token_data.creator_address,
-        "is_scam": token.token_data.is_scam,
-        "scam_label": token.token_data.scam_label,
-        "creation_tx": token.token_data.creation_tx
+        "creator_address": token.creator_address,
+        "is_scam": token.is_scam,
+        "scam_label": token.scam_label,
+        "creation_tx": token.creation_tx
     }
     
     # Prepare pools data with trading_enabled info
@@ -64,9 +64,9 @@ async def test_token_with_pool_persistence(token_address: str):
             pools_data[pool_address] = {
                 "pool_type": pool.pool_type,
                 "denom_address": pool.denom_address,
-                "fee_tier": getattr(pool, 'fee_tier', None),
-                "is_scam": token.token_data.is_scam,
-                "scam_label": token.token_data.scam_label,
+                "fee_tier": pool.fee_tier if hasattr(pool, 'fee_tier') else None,
+                "is_scam": token.is_scam,
+                "scam_label": token.scam_label,
                 "trading_enabled": pool.trading_enabled,
                 "trading_enabled_block": pool.trading_enabled_block,
                 "trading_enabled_tx": pool.trading_enabled_tx

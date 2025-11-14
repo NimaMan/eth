@@ -2,7 +2,7 @@
 
 import pytest
 
-from eth_token.erc20_token.data.token_chain_data_fetcher import (
+from py.eth_token.eth_token.erc20_token.token_chain_data_fetcher import (
     TokenChainDataFetcher,
 )
 

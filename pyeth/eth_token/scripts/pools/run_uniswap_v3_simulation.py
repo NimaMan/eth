@@ -23,9 +23,8 @@ def run_simulation(test_amount_eth: float = 1.0) -> None:
     client = PyrethClient.instance()
     simulator = client.pool_buy_sell_simulator()
 
-    config = pyreth.PoolBuySellParameters()
-    config.test_amount_eth = test_amount_eth
-    config.token_decimals = USDC_DECIMALS
+    config = pyreth.PoolBuySellParameters(USDC_DECIMALS, 18)
+    config.denom_amount = test_amount_eth
     # Leaving `block_number` unset lets the simulator pick the latest head.
 
     result = simulator.check_uniswap_v3_pool(
@@ -36,19 +35,21 @@ def run_simulation(test_amount_eth: float = 1.0) -> None:
     )
 
     token_factor = Decimal(10) ** USDC_DECIMALS
-    tokens_raw = getattr(result, "tokens_received_raw", None)
-    eth_spent_raw = getattr(result, "eth_spent_raw", None)
-    eth_received_raw = getattr(result, "eth_received_raw", None)
+    tokens_raw = result.tokens_received_raw if hasattr(result, "tokens_received_raw") else None
+    denom_spent_raw = result.denom_spent_raw if hasattr(result, "denom_spent_raw") else None
+    denom_received_raw = (
+        result.denom_received_raw if hasattr(result, "denom_received_raw") else None
+    )
 
     tokens_received = (
         Decimal(tokens_raw) / token_factor if tokens_raw is not None else None
     )
-    eth_spent = (
-        Decimal(eth_spent_raw) / ETH_DECIMALS if eth_spent_raw is not None else None
+    denom_spent = (
+        Decimal(denom_spent_raw) / ETH_DECIMALS if denom_spent_raw is not None else None
     )
-    eth_received = (
-        Decimal(eth_received_raw) / ETH_DECIMALS
-        if eth_received_raw is not None
+    denom_received = (
+        Decimal(denom_received_raw) / ETH_DECIMALS
+        if denom_received_raw is not None
         else None
     )
 
@@ -62,10 +63,10 @@ def run_simulation(test_amount_eth: float = 1.0) -> None:
     print(f"Can sell    : {result.can_sell}")
     print(f"Buy tax %   : {result.buy_tax_percentage:.4f}")
     print(f"Sell tax %  : {result.sell_tax_percentage:.4f}")
-    if tokens_received is not None and eth_spent is not None and eth_received is not None:
+    if tokens_received is not None and denom_spent is not None and denom_received is not None:
         print(f"USDC bought : {tokens_received:.6f} USDC")
-        print(f"ETH spent   : {eth_spent:.6f} ETH")
-        print(f"ETH received: {eth_received:.6f} ETH")
+        print(f"ETH spent   : {denom_spent:.6f} ETH")
+        print(f"ETH received: {denom_received:.6f} ETH")
     else:
         print("USDC bought : <upgrade PyReth bindings to view amount metrics>")
     print(f"Block used  : {result.block_number}")

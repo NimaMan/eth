@@ -1,5 +1,5 @@
 """
-BlockSubscriber: Handles block data subscription and queuing
+LiveBlockSnapshotSubscriber: Handles block data subscription and snapshot resolution
 
 Objective:
 ---------
@@ -18,25 +18,24 @@ Algorithm:
 import asyncio
 import orjson
 import uuid
-from typing import Optional, Callable, Dict, List
+from typing import Optional, Callable
 
 import aio_pika
 from aiormq.exceptions import ChannelInvalidStateError
-from eth_token.utils.logger import get_logger
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
-from eth_data.live_data_registry import LiveDataReader
+from eth_data.live_data_registry import RedisSnapshotReader
 
 
-class BlockSubscriber():
+class LiveBlockSnapshotSubscriber:
     def __init__(
         self,
         rabbitmq_url: str = "amqp://guest:guest@localhost/",
         callback: Optional[Callable] = None,
         logger=None,
         block_token_processor: Optional[BlockTokenProcessor] = None,
-        live_data_reader: Optional[LiveDataReader] = None,
+        block_snapshot_reader: Optional[RedisSnapshotReader] = None,
         ):
-        self.logger = logger or get_logger(name="subscriber", log_folder="tokens_live")
+        self.logger = logger
         self.rabbitmq_url = rabbitmq_url
         self.connection = None
         self.channel = None
@@ -46,13 +45,13 @@ class BlockSubscriber():
     
         # Create unique queue name for this consumer instance
         self.queue_name = f"token_tracking_blocks_{uuid.uuid4().hex[:8]}"
-        self.exchange_name = "blocks_exchange"
+        self.exchange_name = "block_published_notifier"
         self.routing_key = ""
 
         self.callback = callback
         # Remove priority queue since we only keep latest block
         self.block_token_processor = block_token_processor
-        self.live_data_reader = live_data_reader or LiveDataReader()
+        self.block_snapshot_reader = block_snapshot_reader or RedisSnapshotReader()
         
     async def connect(self):
         """Establish connection to RabbitMQ with exclusive queue for broadcast"""
@@ -77,7 +76,7 @@ class BlockSubscriber():
             )
             await self.queue.bind(self.exchange, routing_key=self.routing_key)
             self.logger.info(
-                f"Subscribed to RabbitMQ blocks exchange '{self.exchange_name}' via exclusive queue '{self.queue_name}'"
+                f"Subscribed to RabbitMQ block notifier '{self.exchange_name}' via exclusive queue '{self.queue_name}'"
             )
         except Exception as e:
             self.logger.error(f"Failed to connect to RabbitMQ: {e}")
@@ -162,17 +161,17 @@ class BlockSubscriber():
             else:
                 self.logger.info(f"RabbitMQ connection for '{self.queue_name}' already closed or not established.")
             
-            self.logger.info(f"Block subscriber for queue '{self.queue_name}' stopped successfully.")
+            self.logger.info(f"Live block snapshot subscriber for queue '{self.queue_name}' stopped successfully.")
             
         except Exception as e:
-            self.logger.error(f"Error during block subscriber shutdown for queue '{self.queue_name}': {e}", exc_info=True)
+            self.logger.error(f"Error during snapshot subscriber shutdown for queue '{self.queue_name}': {e}", exc_info=True)
 
     async def process_message(self, message: aio_pika.Message):
         """Process block immediately without queuing"""
         try:
             async with message.process():
                 payload = orjson.loads(message.body.decode())
-                block_payload = self._resolve_block_payload(payload)
+                block_payload = self._load_block_payload(payload)
                 if block_payload is None:
                     self.logger.warning("Unable to resolve block payload from message: %s", payload)
                     return
@@ -190,9 +189,9 @@ class BlockSubscriber():
                     )
                     
         except Exception as e:
-            self.logger.error(f"Error processing block in BlockSubscriber: {e}", exc_info=True)
+            self.logger.error(f"Error processing block in LiveBlockSnapshotSubscriber: {e}", exc_info=True)
 
-    def _resolve_block_payload(self, payload):
+    def _load_block_payload(self, payload):
         if isinstance(payload, dict) and "transactions" in payload:
             return payload
 
@@ -205,7 +204,7 @@ class BlockSubscriber():
         if block_number is None:
             return None
 
-        snapshot = self.live_data_reader.get_block(int(block_number))
+        snapshot = self.block_snapshot_reader.get_block(int(block_number))
         if snapshot is None:
             return None
 
@@ -215,6 +214,7 @@ class BlockSubscriber():
             if isinstance(header, str):
                 header_json = header
             else:
+                # Backcompat for older snapshots stored as dicts
                 header_json = orjson.dumps(header).decode()
 
         return {

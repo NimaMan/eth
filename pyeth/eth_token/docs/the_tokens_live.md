@@ -8,7 +8,7 @@
 graph TD
     A[LiveTokenManager] --> B[TokenEventSubscriber]
     A[LiveTokenManager] --> C[TokenDataAggregator]
-    B --> D[BlockSubscriber]
+    B --> D[LiveBlockSnapshotSubscriber]
     B --> E[AlertSubscriber]
     C --> F[TokenMetricsCalculator]
     C --> G[TokenStateManager]
@@ -52,11 +52,11 @@ sequenceDiagram
 ### **Event-Driven Architecture**
 
 - RabbitMQ Producer (Independent Process):
-• Publishes processed block transactions to the “blocks_exchange.”
+• Publishes processed block transactions to the “block_published_notifier.”
 • Runs continuously, feeding new data onto the message queue.
 
-- SubscriberManager & BlockSubscriber:
-• The BlockSubscriber listens to “blocks_exchange” and receives new block data.
+- SubscriberManager & LiveBlockSnapshotSubscriber:
+• The LiveBlockSnapshotSubscriber listens to “block_published_notifier” and receives new block data.
 • Each incoming block (with transactions) is put into an in-memory asyncio.Queue within SubscriberManager via add_block().
 
 - Processing Loop:

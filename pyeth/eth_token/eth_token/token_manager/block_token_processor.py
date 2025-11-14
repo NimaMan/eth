@@ -35,7 +35,7 @@ from eth_data.blockchain.block_processor import BlockProcessor
 
 class BlockTokenProcessor:
     def __init__(self, logger=None, add_pnl_to_db: bool = False):
-        self.logger = logger or get_logger(name="token_manager")
+        self.logger = logger
         # Token tracking
         self.add_pnl_to_db = add_pnl_to_db
         self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
@@ -44,7 +44,6 @@ class BlockTokenProcessor:
         self.latest_processed_block = 0
         self.start_block = None  # Track the first block we process
         self._recent_block_headers: "OrderedDict[int, Any]" = OrderedDict()
-
         self.token_chain_fetcher = TokenChainDataFetcher()
 
     def process_block_tokens(

@@ -22,7 +22,7 @@ Architecture & Flow:
 Event Flow:
 -----------
 1. Block Processing:
-   - BlockSubscriber receives new block -> process_block_live()
+   - LiveBlockSnapshotSubscriber receives new block -> process_block_live()
    - process_block_live() processes block -> sets block_processed_event
 
 2. Token Update Monitoring:
@@ -44,7 +44,7 @@ Historical (Warm-up) -> Live Transition:
 """
 
 import asyncio
-from eth_token.token_manager.block_subscriber import BlockSubscriber
+from eth_token.token_manager.block_subscriber import LiveBlockSnapshotSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
 
@@ -56,7 +56,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                  add_pnl_to_db: bool = False):
         super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)  
         # Initialize subscriber with our callback and block_token_processor
-        self.block_subscriber = BlockSubscriber(
+        self.block_subscriber = LiveBlockSnapshotSubscriber(
             callback=self.process_block_live,
             logger=self.logger,
             block_token_processor=self,  # Pass the processor
@@ -170,7 +170,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
             self._subscriber_task = asyncio.create_task(self.block_subscriber.start())
             # Watch for unexpected termination of subscriber task
             self._subscriber_task.add_done_callback(
-                lambda t: asyncio.create_task(self._on_task_done("BlockSubscriber", t))
+                lambda t: asyncio.create_task(self._on_task_done("LiveBlockSnapshotSubscriber", t))
             )
             
             # 3. Start monitoring for updates

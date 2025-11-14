@@ -1,5 +1,6 @@
 from typing import Any, Dict, Iterable, List, Optional, Set
 import enum
+from web3 import Web3
 
 from eth_token.erc20_token.token_state.pool_state_bridge import PoolStateBridge
 from eth_token.erc20_token.token_state.token_transfer_tracker import TokenTransferTracker
@@ -27,7 +28,7 @@ class ERC20Token:
 
     def __init__(self, contract_address: str, token_metadata=None):
 
-        self.contract_address = contract_address
+        self.contract_address = Web3.to_checksum_address(contract_address)
         self.token_chain_data_fetcher = TokenChainDataFetcher()
         if token_metadata is None:
             token_metadata = self.token_chain_data_fetcher.get_token_metadata(self.contract_address)            

@@ -32,7 +32,7 @@ async def build_token(contract_address: str) -> Tuple[ERC20Token, Dict[int, str]
             processed_block_result = await block_processor.process_block(block_number)
             block_header = processed_block_result.block_header
             for tx in processed_block_result:
-                pool_addresses = set(token.token_data.pool_manager.get_all_pool_addresses())
+                pool_addresses = set(token.pool_addresses)
                 unique_addrs = set(tx.unique_addresses)
                 if contract_address in unique_addrs or unique_addrs & pool_addresses:
                     token_block_coverage[tx.block_number] = tx.hash
@@ -55,8 +55,7 @@ async def main() -> None:
         return
 
     for pool in token.pools:
-        pool_id = getattr(pool, "display_address", getattr(pool, "pool_address", "unknown"))
-        print(f"Pool {pool_id} trading enabled tx: {pool.trading_enabled_tx}")
+        print(f"Pool {pool.display_address} trading enabled tx: {pool.trading_enabled_tx}")
 
 
 if __name__ == "__main__":

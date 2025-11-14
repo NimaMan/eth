@@ -111,10 +111,10 @@ async def write_single_token_pnl_to_db(token_address: str):
     # Prepare token data (without trading_enabled_tx)
     token_data = {
         "contract_address": live_token.contract_address,
-        "creator_address": live_token.token_data.creator_address,
-        "is_scam": live_token.token_data.is_scam,
-        "scam_label": live_token.token_data.scam_label,
-        "creation_tx": live_token.token_data.creation_tx
+        "creator_address": live_token.creator_address,
+        "is_scam": live_token.is_scam,
+        "scam_label": live_token.scam_label,
+        "creation_tx": live_token.creation_tx
     }
 
     # Prepare pools data with trading_enabled info
@@ -132,9 +132,9 @@ async def write_single_token_pnl_to_db(token_address: str):
             pools_data[pool_address] = {
                 "pool_type": pool_type,
                 "denom_address": pool.denom_address,
-                "fee_tier": getattr(pool, 'fee_tier', None),
-                "is_scam": live_token.token_data.is_scam,
-                "scam_label": live_token.token_data.scam_label,
+                "fee_tier": pool.fee_tier if hasattr(pool, 'fee_tier') else None,
+                "is_scam": live_token.is_scam,
+                "scam_label": live_token.scam_label,
                 "trading_enabled": pool.trading_enabled,
                 "trading_enabled_block": pool.trading_enabled_block,
                 "trading_enabled_tx": pool.trading_enabled_tx
