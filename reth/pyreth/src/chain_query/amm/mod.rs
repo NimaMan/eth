@@ -6,7 +6,7 @@
 use alloy_primitives::U256;
 use pyo3::prelude::*;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
-use reth_chain_query::{provider::PoolLiquidityInfo, RethQueryProvider};
+use reth_chain_query::{PoolLiquidityInfo, RethQueryProvider};
 use reth_primitives::SealedHeader;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
