@@ -53,6 +53,17 @@ class PoolChainDataFetcher:
         """Expose the underlying PyReth chain query handle."""
         return self._chain_query
 
+    def _call_chain_query_with_optional_header(self, method_name: str, *args, **kwargs):
+        """Invoke a ChainQuery method, retrying without block_header on older builds."""
+        method = getattr(self._chain_query, method_name)
+        try:
+            return method(*args, **kwargs)
+        except TypeError as exc:
+            block_header = kwargs.pop("block_header", None)
+            if block_header is None or "block_header" not in str(exc):
+                raise
+            return method(*args, **kwargs)
+
     # -----------------------------
     # Normalization helpers
     # -----------------------------
@@ -122,7 +133,8 @@ class PoolChainDataFetcher:
 
         Returns a dict with keys: protocol, pool, token0, token1, reserve0, reserve1, block_number.
         """
-        info = self._chain_query.get_uniswap_v2_liquidity(
+        info = self._call_chain_query_with_optional_header(
+            "get_uniswap_v2_liquidity",
             pool_address,
             block=block,
             block_header=block_header,
@@ -140,7 +152,8 @@ class PoolChainDataFetcher:
     ) -> Dict[str, Any]:
         """Get UniswapV3 liquidity using PyReth (liquidity, tick at block)."""
         fee_tier = int(fee_tier)
-        info = self._chain_query.get_uniswap_v3_liquidity(
+        info = self._call_chain_query_with_optional_header(
+            "get_uniswap_v3_liquidity",
             pool_address,
             fee_tier,
             block=block,
@@ -158,7 +171,8 @@ class PoolChainDataFetcher:
         block_header: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Get UniswapV4 liquidity using PyReth via PoolManager + PoolId."""
-        info = self._chain_query.get_uniswap_v4_liquidity(
+        info = self._call_chain_query_with_optional_header(
+            "get_uniswap_v4_liquidity",
             pool_manager,
             pool_id_hex,
             block=block,
