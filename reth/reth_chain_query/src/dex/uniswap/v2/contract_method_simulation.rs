@@ -18,7 +18,7 @@ impl RethQueryProvider {
         header: Option<&SealedHeader>,
     ) -> Result<(Address, Address)> {
         let token0_res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(
                 pair,
                 Bytes::from(SELECTOR_TOKEN0.to_vec()),
@@ -28,7 +28,7 @@ impl RethQueryProvider {
             .await?;
 
         let token1_res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(
                 pair,
                 Bytes::from(SELECTOR_TOKEN1.to_vec()),
@@ -60,7 +60,7 @@ impl RethQueryProvider {
         header: Option<&SealedHeader>,
     ) -> Result<(U256, U256, u32)> {
         let res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(
                 pair,
                 Bytes::from(SELECTOR_GET_RESERVES.to_vec()),

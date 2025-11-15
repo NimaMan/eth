@@ -18,15 +18,14 @@ mod address_state;
 mod batch_ops;
 mod block_transactions;
 mod caching;
-pub mod contracts;
 mod gas;
 mod transactions;
 mod types;
 
+pub use crate::contracts::erc20::*;
 pub use address_index::*;
 pub use address_state::*;
 pub use caching::*;
-pub use contracts::erc20::*;
 pub use types::*;
 
 /// Central provider for all Reth database queries

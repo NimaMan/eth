@@ -17,7 +17,7 @@ impl RethQueryProvider {
         let block_number = block.unwrap_or(self.get_latest_block()?);
         let header_present = header.is_some();
 
-        let state = self.tx_simulator.get_chain_state_at_block(block_number)?;
+        let state = self.simulator().get_chain_state_at_block(block_number)?;
 
         // slot0 at storage slot 0
         let slot0_storage = state
@@ -49,7 +49,7 @@ impl RethQueryProvider {
         let timestamp = if let Some(h) = header {
             h.header().timestamp
         } else {
-            self.provider_factory
+            self.provider_factory()
                 .block_by_number(block_number)
                 .map_err(|e| eyre::eyre!(e.to_string()))?
                 .ok_or_else(|| {

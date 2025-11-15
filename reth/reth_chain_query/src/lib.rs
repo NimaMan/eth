@@ -1,3 +1,4 @@
+pub mod contracts;
 pub mod entities;
 /// Reth Chain Query Library
 ///
@@ -59,9 +60,7 @@ pub use utils::time_utils::{
 };
 
 // Re-export DEX helpers
-pub use dex::{
-    balancer::*, curve::*, pool_types::*, sushiswap::*, uniswap_v2::*, uniswap_v3::*, uniswap_v4::*,
-};
+pub use dex::*;
 
 // Re-export common addresses
 pub use common_addresses::{

@@ -1,4 +1,5 @@
 use super::RethQueryProvider;
+use crate::contracts::erc20::TokenMetadata;
 /// Batch operations - Optimized queries for multiple items
 ///
 /// These methods provide efficient batch processing for multiple queries,
@@ -92,7 +93,7 @@ impl RethQueryProvider {
         &self,
         tokens: Vec<Address>,
         block: Option<u64>,
-    ) -> Result<Vec<super::contract_methods::TokenMetadata>> {
+    ) -> Result<Vec<Option<TokenMetadata>>> {
         let futures = tokens
             .into_iter()
             .map(|token| self.get_token_metadata(token, block, None));
@@ -144,7 +145,7 @@ impl RethQueryProvider {
     ) -> Result<std::collections::HashMap<Address, bool>> {
         let futures = addresses
             .iter()
-            .map(|address| self.is_contract(*address, block));
+            .map(|address| self.has_code(*address, block));
 
         let results = try_join_all(futures).await?;
 

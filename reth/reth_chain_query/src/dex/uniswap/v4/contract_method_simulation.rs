@@ -27,7 +27,7 @@ impl RethQueryProvider {
         let call_data_slot0 = Bytes::from(params);
 
         let slot0_res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(
                 pool_manager,
                 call_data_slot0,
@@ -63,7 +63,7 @@ impl RethQueryProvider {
         let call_data_liq = Bytes::from(params_liq);
 
         let liq_res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(
                 pool_manager,
                 call_data_liq,
@@ -80,7 +80,7 @@ impl RethQueryProvider {
         let timestamp = if let Some(h) = header {
             h.header().timestamp
         } else {
-            self.provider_factory
+            self.provider_factory()
                 .block_by_number(block_number)
                 .map_err(|e| eyre::eyre!(e.to_string()))?
                 .ok_or_else(|| {
@@ -94,41 +94,5 @@ impl RethQueryProvider {
         };
 
         Ok((sqrt_price_x96, tick, liquidity, timestamp))
-    }
-
-    /// Find a recent Uniswap V4 pool id by scanning Initialize events on PoolManager.
-    /// Returns the first (most recent) matching pool_id and the block it was found in.
-    pub async fn uni_v4_find_recent_pool_id(
-        &self,
-        pool_manager: Address,
-        blocks_back: u64,
-    ) -> Result<Option<(B256, u64)>> {
-        // Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)
-        let init_sig =
-            keccak256(b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)");
-
-        let latest = self.get_latest_block()?;
-        let start = latest.saturating_sub(blocks_back);
-
-        for block in (start..=latest).rev() {
-            let receipts = match self.fetch_block_receipts_only(block).await {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            for rec in receipts {
-                for log in rec.logs {
-                    if log.address == pool_manager
-                        && !log.topics.is_empty()
-                        && log.topics[0] == init_sig
-                        && log.topics.len() >= 2
-                    {
-                        // topics[1] is the pool id (bytes32)
-                        return Ok(Some((log.topics[1], block)));
-                    }
-                }
-            }
-        }
-
-        Ok(None)
     }
 }

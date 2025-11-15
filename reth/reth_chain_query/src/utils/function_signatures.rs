@@ -363,3 +363,17 @@ pub static UNISWAP_CONTRACTS: Lazy<HashMap<&'static str, &'static str>> = Lazy::
         ("0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6", "QUOTER"),
     ])
 });
+
+/// Canonical ERC-20 selectors exposed for bytecode detectors.
+pub mod erc20 {
+    use hex_literal::hex;
+
+    pub const NAME: [u8; 4] = hex!("06fdde03");
+    pub const SYMBOL: [u8; 4] = hex!("95d89b41");
+    pub const DECIMALS: [u8; 4] = hex!("313ce567");
+    pub const TOTAL_SUPPLY: [u8; 4] = hex!("18160ddd");
+    pub const BALANCE_OF: [u8; 4] = hex!("70a08231");
+    pub const TRANSFER: [u8; 4] = hex!("a9059cbb");
+    pub const TRANSFER_FROM: [u8; 4] = hex!("23b872dd");
+    pub const APPROVE: [u8; 4] = hex!("095ea7b3");
+}

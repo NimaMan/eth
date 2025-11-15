@@ -35,9 +35,16 @@ async fn main() -> Result<()> {
     println!("{}", "-".repeat(40));
 
     let metadata_header = load_sealed_header(&provider, block_override)?;
-    let metadata = provider
+    let metadata = match provider
         .get_token_metadata(token_address, block_override, metadata_header.clone())
-        .await?;
+        .await?
+    {
+        Some(meta) => meta,
+        None => {
+            println!("Address {token_address:#x} does not expose the ERC-20 interface.");
+            return Ok(());
+        }
+    };
     println!("Name:     {}", metadata.name);
     println!("Symbol:   {}", metadata.symbol);
     println!("Decimals: {}", metadata.decimals);
@@ -111,7 +118,7 @@ async fn main() -> Result<()> {
     println!("\n🔍 Contract Analysis:");
     println!("{}", "-".repeat(40));
 
-    let is_contract = provider.is_contract(token_address, block_override).await?;
+    let is_contract = provider.has_code(token_address, block_override).await?;
     println!(
         "Is Contract:      {}",
         if is_contract { "Yes ✅" } else { "No ❌" }

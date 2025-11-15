@@ -19,7 +19,7 @@ impl RethQueryProvider {
         data.extend_from_slice(selector);
         data.extend_from_slice(pool_id.as_slice());
         let res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
             .await?;
         if !res.success || res.output.len() < 64 {
@@ -42,7 +42,7 @@ impl RethQueryProvider {
         data.extend_from_slice(&GET_POOL_TOKENS_SEL);
         data.extend_from_slice(pool_id.as_slice());
         let res = self
-            .tx_simulator
+            .simulator()
             .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
             .await?;
         if !res.success || res.output.len() < 96 {

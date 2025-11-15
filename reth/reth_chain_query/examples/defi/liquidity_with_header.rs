@@ -7,7 +7,7 @@
 //! to show the data matches.
 
 use alloy_primitives::address;
-use eyre::Result;
+use eyre::{eyre, Result};
 use reth_chain_query::{AmmSwapRoute, RethQueryProvider};
 use reth_primitives::SealedHeader;
 use reth_provider::HeaderProvider;
@@ -76,7 +76,8 @@ async fn main() -> Result<()> {
 
     let weth_meta = provider
         .get_token_metadata(weth, Some(latest_block), header_for_weth)
-        .await?;
+        .await?
+        .ok_or_else(|| eyre!("WETH bytecode did not expose ERC-20 metadata"))?;
     let usdc_decimals = provider
         .get_token_decimals(usdc, Some(latest_block), header_for_usdc)
         .await?;
