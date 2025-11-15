@@ -3,7 +3,7 @@ use super::metadata::TokenMetadata;
 use crate::contracts::common::{build_two_address_payload, call_uint256_view, contains_signature};
 use crate::utils::function_signatures::erc20;
 use crate::RethQueryProvider;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, B256};
 use eyre::Result;
 use hex_literal::hex;
 use reth_primitives::SealedHeader;
@@ -21,8 +21,9 @@ impl RethQueryProvider {
         token: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
+        tx_hash: Option<B256>,
     ) -> Result<Option<TokenMetadata>> {
-        self.fetch_metadata_if_erc20(token, block_number, block_header)
+        self.fetch_metadata_if_erc20(token, block_number, block_header, tx_hash)
             .await
     }
 
@@ -31,9 +32,10 @@ impl RethQueryProvider {
         address: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
+        tx_hash: Option<B256>,
     ) -> Result<bool> {
         Ok(self
-            .fetch_metadata_if_erc20(address, block_number, block_header)
+            .fetch_metadata_if_erc20(address, block_number, block_header, tx_hash)
             .await?
             .is_some())
     }
@@ -43,6 +45,7 @@ impl RethQueryProvider {
         address: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
+        tx_hash: Option<B256>,
     ) -> Result<Option<TokenMetadata>> {
         let resolved_block = block_header
             .as_ref()
@@ -50,7 +53,7 @@ impl RethQueryProvider {
             .or(block_number)
             .unwrap_or(self.get_latest_block()?);
 
-        prepare_state_for_metadata(self, address, block_number, block_header.clone())?;
+        prepare_state_for_metadata(self, block_number, block_header.clone(), tx_hash).await?;
 
         if block_header.is_none() {
             self.simulator().assert_block_available(resolved_block)?;

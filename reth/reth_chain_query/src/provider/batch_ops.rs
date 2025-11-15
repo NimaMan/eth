@@ -96,7 +96,7 @@ impl RethQueryProvider {
     ) -> Result<Vec<Option<TokenMetadata>>> {
         let futures = tokens
             .into_iter()
-            .map(|token| self.get_token_metadata(token, block, None));
+            .map(|token| self.get_token_metadata(token, block, None, None));
 
         try_join_all(futures).await
     }

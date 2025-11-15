@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     let metadata_header = load_sealed_header(&provider, block_override)?;
     let metadata = match provider
-        .get_token_metadata(token_address, block_override, metadata_header.clone())
+        .get_token_metadata(token_address, block_override, metadata_header.clone(), None)
         .await?
     {
         Some(meta) => meta,

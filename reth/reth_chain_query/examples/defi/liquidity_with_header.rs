@@ -75,7 +75,7 @@ async fn main() -> Result<()> {
     let header_for_usdc = Some(sealed_header);
 
     let weth_meta = provider
-        .get_token_metadata(weth, Some(latest_block), header_for_weth)
+        .get_token_metadata(weth, Some(latest_block), header_for_weth, None)
         .await?
         .ok_or_else(|| eyre!("WETH bytecode did not expose ERC-20 metadata"))?;
     let usdc_decimals = provider
