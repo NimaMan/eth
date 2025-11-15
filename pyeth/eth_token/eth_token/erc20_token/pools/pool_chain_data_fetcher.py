@@ -124,8 +124,8 @@ class PoolChainDataFetcher:
         """
         info = self._chain_query.get_uniswap_v2_liquidity(
             pool_address,
-            block,
-            block_header,
+            block=block,
+            block_header=block_header,
         )
         if info is None:
             raise RuntimeError(f"Missing V2 liquidity for pool {pool_address}")
@@ -143,8 +143,8 @@ class PoolChainDataFetcher:
         info = self._chain_query.get_uniswap_v3_liquidity(
             pool_address,
             fee_tier,
-            block,
-            block_header,
+            block=block,
+            block_header=block_header,
         )
         if info is None:
             raise RuntimeError(f"Missing V3 liquidity for pool {pool_address}")
@@ -161,8 +161,8 @@ class PoolChainDataFetcher:
         info = self._chain_query.get_uniswap_v4_liquidity(
             pool_manager,
             pool_id_hex,
-            block,
-            block_header,
+            block=block,
+            block_header=block_header,
         )
         if info is None:
             raise RuntimeError(

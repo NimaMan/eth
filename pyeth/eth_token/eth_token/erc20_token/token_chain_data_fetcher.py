@@ -82,10 +82,26 @@ class TokenChainDataFetcher:
         block_header: Optional[str] = None,
         tx_hash: Optional[str] = None,
     ):
-        metadata = self._chain_query.get_token_metadata(
-            token_address,
-            block_number,
-            block_header,
-            tx_hash,
-        )
+        kwargs = {
+            "block_number": block_number,
+            "block_header": block_header,
+        }
+        if tx_hash:
+            kwargs["tx_hash"] = tx_hash
+
+        try:
+            metadata = self._chain_query.get_token_metadata(
+                token_address,
+                **kwargs,
+            )
+        except TypeError as exc:
+            # Older PyReth builds do not accept `tx_hash`. Retry without it.
+            if "tx_hash" in kwargs and "tx_hash" in str(exc):
+                kwargs.pop("tx_hash", None)
+                metadata = self._chain_query.get_token_metadata(
+                    token_address,
+                    **kwargs,
+                )
+            else:
+                raise
         return metadata
