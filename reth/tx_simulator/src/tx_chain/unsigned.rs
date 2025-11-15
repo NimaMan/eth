@@ -129,6 +129,10 @@ impl UnsignedTxChainSimulation {
         self.results.push(result.clone());
     }
 
+    pub(crate) fn into_forked_state(self) -> ForkedState {
+        self.forked_state
+    }
+
     /// Check whether an address currently has bytecode in the forked state.
     pub fn account_has_code(&mut self, address: Address) -> eyre::Result<bool> {
         let info = self.forked_state.db.basic(address)?;
@@ -271,8 +275,17 @@ impl TxSimulator {
         at_block: Option<u64>,
         block_header: Option<SealedHeader>,
     ) -> Result<UnsignedTxChainSimulation> {
-        if let Some(header) = block_header {
+        if let Some(header) = block_header.clone() {
             let block_number = header.number;
+            if let Some(forked_state) = self
+                .replay_block_from_live_data(block_number, Some(header.clone()))
+                .await?
+            {
+                return Ok(UnsignedTxChainSimulation::new(
+                    Arc::new(self.clone()),
+                    forked_state,
+                ));
+            }
             let forked_state = self.create_forked_state_with_header(block_number, header)?;
             return Ok(UnsignedTxChainSimulation::new(
                 Arc::new(self.clone()),
@@ -280,7 +293,17 @@ impl TxSimulator {
             ));
         }
 
-        let block_number = at_block.unwrap_or(self.get_latest_block()?);
+        let latest = self.get_latest_block()?;
+        let block_number = at_block.unwrap_or(latest);
+        if block_number > latest {
+            if let Some(forked_state) = self.replay_block_from_live_data(block_number, None).await?
+            {
+                return Ok(UnsignedTxChainSimulation::new(
+                    Arc::new(self.clone()),
+                    forked_state,
+                ));
+            }
+        }
         let forked_state = self.create_forked_state(block_number)?;
 
         Ok(UnsignedTxChainSimulation::new(

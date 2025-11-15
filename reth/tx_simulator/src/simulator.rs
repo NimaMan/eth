@@ -1,5 +1,9 @@
+use crate::header_utils::parse_sealed_header_from_json;
+use crate::live_chain_cache::{build_unsigned_transaction, LiveChainCache};
+use crate::single_tx::unsigned::UnsignedTransaction;
+use crate::tx_chain::sequential::ForkedState;
 use crate::types::SimulationDefaults;
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::path::Path;
 /// Core transaction simulator implementation
 ///
@@ -15,6 +19,7 @@ use reth_node_types::NodeTypesWithDBAdapter;
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderFactory, StateProvider,
 };
+use serde_json::Value;
 
 /// Transaction Simulator with direct database access
 #[derive(Clone)]
@@ -23,6 +28,7 @@ pub struct TxSimulator {
         ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     pub(crate) evm_config: EthEvmConfig,
     pub(crate) defaults: SimulationDefaults,
+    pub(crate) live_chain_cache: Option<Arc<LiveChainCache>>,
 }
 
 impl TxSimulator {
@@ -59,6 +65,7 @@ impl TxSimulator {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
+            live_chain_cache: None,
         })
     }
 
@@ -75,7 +82,13 @@ impl TxSimulator {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
+            live_chain_cache: None,
         })
+    }
+
+    pub fn with_live_chain_cache(mut self, cache: LiveChainCache) -> Self {
+        self.live_chain_cache = Some(Arc::new(cache));
+        self
     }
 
     /// Current simulator defaults (fees, view call behaviour)
@@ -176,6 +189,70 @@ impl TxSimulator {
             block_header.base_fee_per_gas.map(|v| v as u128),
         ))
     }
+}
+
+impl TxSimulator {
+    pub(crate) fn live_chain_cache(&self) -> Option<Arc<LiveChainCache>> {
+        self.live_chain_cache.clone()
+    }
+
+    pub(crate) async fn replay_block_from_live_data(
+        &self,
+        block_number: u64,
+        header_hint: Option<reth_primitives::SealedHeader>,
+    ) -> Result<Option<ForkedState>> {
+        let Some(cache) = self.live_chain_cache() else {
+            return Ok(None);
+        };
+
+        let Some(snapshot) = cache.fetch_processed_block_snapshot(block_number).await? else {
+            return Ok(None);
+        };
+
+        let header = match header_hint {
+            Some(header) => header,
+            None => {
+                let header_json = snapshot
+                    .header_json()
+                    .ok_or_else(|| eyre!("live snapshot missing header JSON"))?;
+                parse_sealed_header_from_json(header_json)?
+            }
+        };
+
+        let parent_block = header
+            .number
+            .checked_sub(1)
+            .ok_or_else(|| eyre!("cannot replay state for genesis block"))?;
+
+        self.assert_block_available(parent_block)?;
+
+        let mut forked_state = self.create_forked_state(parent_block)?;
+        forked_state.block_number = header.number;
+        forked_state.block_header = header.clone();
+        forked_state.nonces.clear();
+
+        let transactions = parse_snapshot_transactions(snapshot.transactions())?;
+        if transactions.is_empty() {
+            return Ok(Some(forked_state));
+        }
+
+        let simulator = Arc::new(self.clone());
+        let mut chain =
+            crate::tx_chain::unsigned::UnsignedTxChainSimulation::new(simulator, forked_state);
+        for tx in transactions {
+            chain.step(tx).await?;
+        }
+
+        Ok(Some(chain.into_forked_state()))
+    }
+}
+
+fn parse_snapshot_transactions(values: &[Value]) -> Result<Vec<UnsignedTransaction>> {
+    let mut txs = Vec::with_capacity(values.len());
+    for value in values {
+        txs.push(build_unsigned_transaction(value)?);
+    }
+    Ok(txs)
 }
 
 // Alias for compatibility

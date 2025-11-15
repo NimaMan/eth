@@ -1,7 +1,6 @@
 use super::{ProcessedBlockSnapshot, StateOverlaySnapshot};
 use eyre::{eyre, Result};
-use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, Client, RedisError};
+use redis::{aio::ConnectionManager, AsyncCommands, Client};
 
 const PROCESSED_BLOCK_PREFIX: &str = "live:processed_block_snapshot:";
 const LATEST_BLOCK_NUMBER_KEY: &str = "live:block_number:latest";
@@ -126,14 +125,14 @@ impl LiveChainCache {
             pipe.cmd("DEL").arg(state_overlay_key(evict_target));
         }
 
-        pipe.query_async(&mut conn).await?;
+        pipe.query_async::<_, ()>(&mut conn).await?;
         Ok(())
     }
 
     async fn connection(&self) -> Result<ConnectionManager> {
         let conn = self
             .client
-            .get_tokio_connection_manager()
+            .get_connection_manager()
             .await
             .map_err(|err| eyre!("failed to connect to redis: {}", err))?;
         Ok(conn)

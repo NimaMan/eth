@@ -21,4 +21,12 @@ impl ProcessedBlockSnapshot {
     pub fn block_number(&self) -> Option<u64> {
         self.block_number
     }
+
+    pub fn header_json(&self) -> Option<&str> {
+        self.header.as_deref()
+    }
+
+    pub fn transactions(&self) -> &[Value] {
+        &self.transactions
+    }
 }

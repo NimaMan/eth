@@ -25,6 +25,7 @@ pub mod tx_chain {
 }
 pub mod block_trace;
 pub mod contract_method_simulator;
+pub mod header_utils;
 pub mod live_chain_cache;
 pub mod simulation_revert_decoder;
 
