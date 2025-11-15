@@ -129,7 +129,10 @@ impl TxSimulator {
         self.assert_block_available(block_number)?;
         let provider = self.provider_factory.provider()?;
         let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
-            eyre::eyre!("No header for block whilst getting base-fee {}", block_number)
+            eyre::eyre!(
+                "No header for block whilst getting base-fee {}",
+                block_number
+            )
         })?;
 
         let base_fee = block_header

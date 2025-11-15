@@ -37,6 +37,9 @@ revm-inspectors = "0.30.0"
 # For serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_bytes = "0.11"
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+bincode = "1.3"
 
 # For RPC benchmarking
 jsonrpsee = { version = "0.24", features = ["http-client"] }

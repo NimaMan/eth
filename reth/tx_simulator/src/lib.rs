@@ -14,9 +14,9 @@ pub mod simulator;
 pub mod types;
 // New structured modules
 pub mod single_tx {
+    pub mod parallel;
     pub mod signed;
     pub mod unsigned;
-    pub mod parallel;
 }
 pub mod tx_chain {
     pub mod sequential;
@@ -25,6 +25,7 @@ pub mod tx_chain {
 }
 pub mod block_trace;
 pub mod contract_method_simulator;
+pub mod live_chain_cache;
 pub mod simulation_revert_decoder;
 
 // Back-compat module paths for external crates relying on previous layout
@@ -55,11 +56,11 @@ pub use gas::{
     TxGasParameters,
 };
 pub use simulator::{RethTxSimulator, TxSimulator};
+pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use single_tx::signed::SignedTransaction;
 pub use single_tx::unsigned::UnsignedTransaction;
 pub use tx_chain::signed::SignedTxChainSimulation;
 pub use tx_chain::unsigned::{ChainStateInfo, UnsignedTxChainSimulation};
-pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use types::{
     CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult, RevertContext,
     SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,

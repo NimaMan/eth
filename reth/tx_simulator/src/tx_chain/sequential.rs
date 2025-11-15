@@ -530,10 +530,7 @@ impl TxSimulator {
     }
 }
 
-fn fork_state_has_code(
-    forked_state: &mut ForkedState,
-    address: Address,
-) -> eyre::Result<bool> {
+fn fork_state_has_code(forked_state: &mut ForkedState, address: Address) -> eyre::Result<bool> {
     let info = forked_state.db.basic(address)?;
     Ok(info
         .map(|acc| {
