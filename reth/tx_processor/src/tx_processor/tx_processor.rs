@@ -13,16 +13,17 @@
 /// Key insight: Uses the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs
 /// instead of the broken manual filtering approach that was throwing away events.
 use super::data_models::{
-    InternalTransaction, ProcessedAccessListItem, ProcessedTransaction, TransactionFees,
+    ContractCreationEvent, ETHTransfer, InternalTransaction, ProcessedAccessListItem,
+    ProcessedTransaction, TradingDisabledEvent, TradingEnabledEvent, TransactionFees,
 };
 use super::{
     AddressBalanceChangeCalculator, DecodedEvent, LogDecoder, TransactionClassifier,
-    TransactionTraceProcessor,
+    TransactionTraceProcessor, TransactionType,
 };
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
-use reth_chain_query::FEE_RECIPIENTS;
+use reth_chain_query::{function_signatures::FUNCTION_SIGNATURES, FEE_RECIPIENTS};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -96,6 +97,11 @@ impl TxProcessor {
         let mut uniswap_v4_initializes = Vec::new();
         let mut uniswap_v4_modifies = Vec::new();
         let mut uniswap_v4_swaps = Vec::new();
+        let mut uniswap_v4_donates = Vec::new();
+        let mut uniswap_v4_protocol_fee_updates = Vec::new();
+        let mut uniswap_v4_dynamic_lp_fee_updates = Vec::new();
+        let mut uniswap_v4_protocol_fee_controller_updates = Vec::new();
+        let mut uniswap_v4_balance_deltas = Vec::new();
         let mut permit2_events = Vec::new();
         let mut deposit_events = Vec::new();
         let mut withdraw_events = Vec::new();
@@ -151,52 +157,25 @@ impl TxProcessor {
                         uniswap_v4_modifies.push(event)
                     }
                     DecodedEvent::UniswapV4SwapEvent(event) => uniswap_v4_swaps.push(event),
+                    DecodedEvent::UniswapV4DonateEvent(event) => uniswap_v4_donates.push(event),
+                    DecodedEvent::UniswapV4FeeUpdatedEvent(event) => {
+                        uniswap_v4_protocol_fee_updates.push(event)
+                    }
+                    DecodedEvent::UniswapV4DynamicLPFeeUpdatedEvent(event) => {
+                        uniswap_v4_dynamic_lp_fee_updates.push(event)
+                    }
+                    DecodedEvent::UniswapV4FeeControllerUpdatedEvent(event) => {
+                        uniswap_v4_protocol_fee_controller_updates.push(event)
+                    }
+                    DecodedEvent::UniswapV4BalanceDeltaEvent(event) => {
+                        uniswap_v4_balance_deltas.push(event)
+                    }
                     DecodedEvent::Permit2Event(event) => permit2_events.push(event),
                     DecodedEvent::UniswapV3CollectEvent(_) => {
                         other_events.push(build_unknown_event_record(
                             log,
                             log_index as u64,
                             Some("UniswapV3CollectEvent"),
-                            &candidate_addresses,
-                        ));
-                    }
-                    DecodedEvent::UniswapV4DonateEvent(_) => {
-                        other_events.push(build_unknown_event_record(
-                            log,
-                            log_index as u64,
-                            Some("UniswapV4DonateEvent"),
-                            &candidate_addresses,
-                        ));
-                    }
-                    DecodedEvent::UniswapV4FeeUpdatedEvent(_) => {
-                        other_events.push(build_unknown_event_record(
-                            log,
-                            log_index as u64,
-                            Some("UniswapV4FeeUpdatedEvent"),
-                            &candidate_addresses,
-                        ));
-                    }
-                    DecodedEvent::UniswapV4DynamicLPFeeUpdatedEvent(_) => {
-                        other_events.push(build_unknown_event_record(
-                            log,
-                            log_index as u64,
-                            Some("UniswapV4DynamicLPFeeUpdatedEvent"),
-                            &candidate_addresses,
-                        ));
-                    }
-                    DecodedEvent::UniswapV4FeeControllerUpdatedEvent(_) => {
-                        other_events.push(build_unknown_event_record(
-                            log,
-                            log_index as u64,
-                            Some("UniswapV4FeeControllerUpdatedEvent"),
-                            &candidate_addresses,
-                        ));
-                    }
-                    DecodedEvent::UniswapV4BalanceDeltaEvent(_) => {
-                        other_events.push(build_unknown_event_record(
-                            log,
-                            log_index as u64,
-                            Some("UniswapV4BalanceDeltaEvent"),
                             &candidate_addresses,
                         ));
                     }
@@ -240,6 +219,11 @@ impl TxProcessor {
             max_priority_fee: max_priority_fee_per_gas.clone(),
         };
 
+        // Determine simple ETH transfer events before building the struct (mirrors Python `_extract_eth_transfers`)
+        let empty_internals: &[InternalTransaction] = &[];
+        let eth_transfers =
+            self.extract_eth_transfers(from, to, value, &input, empty_internals);
+
         // STEP 3: Create ProcessedTransaction with all extracted data
         let mut processed_tx = ProcessedTransaction::new(
             tx_hash,
@@ -277,6 +261,12 @@ impl TxProcessor {
         processed_tx.uniswap_v4_initializes = uniswap_v4_initializes;
         processed_tx.uniswap_v4_modifies = uniswap_v4_modifies;
         processed_tx.uniswap_v4_swaps = uniswap_v4_swaps;
+        processed_tx.uniswap_v4_donates = uniswap_v4_donates;
+        processed_tx.uniswap_v4_protocol_fee_updates = uniswap_v4_protocol_fee_updates;
+        processed_tx.uniswap_v4_dynamic_lp_fee_updates = uniswap_v4_dynamic_lp_fee_updates;
+        processed_tx.uniswap_v4_protocol_fee_controller_updates =
+            uniswap_v4_protocol_fee_controller_updates;
+        processed_tx.uniswap_v4_balance_deltas = uniswap_v4_balance_deltas;
         processed_tx.permit2_events = permit2_events;
         processed_tx.deposit_events = deposit_events;
         processed_tx.withdraw_events = withdraw_events;
@@ -290,6 +280,7 @@ impl TxProcessor {
         processed_tx.max_fee_per_blob_gas = max_fee_per_blob_gas;
         processed_tx.blob_gas_used = blob_gas_used;
         processed_tx.signed_authorizations = signed_authorizations;
+        processed_tx.eth_transfers = eth_transfers;
 
         let mut erc20_contracts = HashSet::new();
         for transfer in &processed_tx.erc20_transfers {
@@ -327,14 +318,16 @@ impl TxProcessor {
 
         processed_tx.erc20_contracts = erc20_contracts;
 
+        let tx_type_label = self.classify_tx_type(&processed_tx);
+        self.add_tx_type_events(&tx_type_label, &mut processed_tx);
+
         populate_unique_addresses(&mut processed_tx);
 
         processed_tx.bribe_amount =
             Self::calculate_bribe_amount(&processed_tx.internal_transactions);
 
-        // STEP 5: Classify transaction type based on decoded events
-        // TODO: Implement proper classification logic
-        processed_tx.tx_type = self.determine_transaction_type(&processed_tx);
+        processed_tx.actions = self.identify_actions(&tx_type_label, &processed_tx);
+        processed_tx.tx_type = tx_type_label;
 
         Ok(processed_tx)
     }
@@ -470,24 +463,230 @@ impl TxProcessor {
         processed_tx.struct_logs = simulation_result.struct_logs.clone();
         processed_tx.bribe_amount =
             Self::calculate_bribe_amount(&processed_tx.internal_transactions);
+        processed_tx.eth_transfers = self.extract_eth_transfers(
+            from,
+            to,
+            value,
+            &input,
+            &processed_tx.internal_transactions,
+        );
+        let tx_type_label = self.classify_tx_type(&processed_tx);
+        self.add_tx_type_events(&tx_type_label, &mut processed_tx);
+        populate_unique_addresses(&mut processed_tx);
+        processed_tx.actions = self.identify_actions(&tx_type_label, &processed_tx);
+        processed_tx.tx_type = tx_type_label;
 
         Ok(processed_tx)
     }
 
-    /// Determine transaction type based on decoded events and transaction data
-    fn determine_transaction_type(&self, processed_tx: &ProcessedTransaction) -> String {
-        // Simple classification logic for now
-        if !processed_tx.erc20_transfers.is_empty() {
-            "ERC20_TRANSFER".to_string()
-        } else if !processed_tx.erc721_transfers.is_empty() {
-            "ERC721_TRANSFER".to_string()
-        } else if !processed_tx.erc1155_transfers.is_empty() {
-            "ERC1155_TRANSFER".to_string()
-        } else if processed_tx.value > U256::ZERO {
-            "ETH_TRANSFER".to_string()
-        } else {
-            "CONTRACT_INTERACTION".to_string()
+    fn classify_tx_type(&self, processed_tx: &ProcessedTransaction) -> String {
+        if let Some(signature_type) = self.detect_signature_tx_type(processed_tx) {
+            return signature_type.to_string();
         }
+
+        if !processed_tx.trading_enabled_events.is_empty() {
+            return "Trading Enabled".to_string();
+        }
+        if !processed_tx.trading_disabled_events.is_empty() {
+            return "Trading Disabled".to_string();
+        }
+        if !processed_tx.contract_creation_events.is_empty() || processed_tx.to_address.is_none() {
+            return "Contract Creation".to_string();
+        }
+
+        match self.classifier.classify(processed_tx) {
+            TransactionType::Transfer => {
+                if !processed_tx.erc20_transfers.is_empty() {
+                    "ERC20 Transfer".to_string()
+                } else if !processed_tx.erc721_transfers.is_empty() {
+                    "ERC721 Transfer".to_string()
+                } else if !processed_tx.erc1155_transfers.is_empty() {
+                    "ERC1155 Transfer".to_string()
+                } else if !processed_tx.eth_transfers.is_empty()
+                    || (processed_tx.value > U256::ZERO && processed_tx.input.is_empty())
+                {
+                    "Ether Transfer".to_string()
+                } else {
+                    "Transfer".to_string()
+                }
+            }
+            TransactionType::Swap => "Swap".to_string(),
+            TransactionType::AddLiquidity => "Add Liquidity".to_string(),
+            TransactionType::RemoveLiquidity => "Remove Liquidity".to_string(),
+            TransactionType::Approval => "Approval".to_string(),
+            TransactionType::ContractCreation => "Contract Creation".to_string(),
+            TransactionType::ContractInteraction => "Contract Interaction".to_string(),
+            TransactionType::Failed => "Failed".to_string(),
+            TransactionType::Unknown => "Contract Interaction".to_string(),
+        }
+    }
+
+    fn detect_signature_tx_type(
+        &self,
+        processed_tx: &ProcessedTransaction,
+    ) -> Option<&'static str> {
+        if processed_tx.input.len() < 4 {
+            return None;
+        }
+        let selector = hex::encode(&processed_tx.input[..4]);
+        let label = FUNCTION_SIGNATURES.get(&selector)?;
+        match *label {
+            "Trading Enabled" | "Set Fees/Enable Trading" => Some("Trading Enabled"),
+            "Disable Trading" => Some("Trading Disabled"),
+            _ => None,
+        }
+    }
+
+    fn identify_actions(
+        &self,
+        tx_type: &str,
+        processed_tx: &ProcessedTransaction,
+    ) -> Vec<String> {
+        let mut actions: Vec<String> = Vec::new();
+
+        Self::push_action_if(&mut actions, tx_type == "Contract Creation", "Contract Creation");
+        Self::push_action_if(
+            &mut actions,
+            tx_type == "Trading Enabled" || !processed_tx.trading_enabled_events.is_empty(),
+            "Trading Enable",
+        );
+        Self::push_action_if(
+            &mut actions,
+            tx_type == "Trading Disabled" || !processed_tx.trading_disabled_events.is_empty(),
+            "Trading Disable",
+        );
+        if self.is_add_liquidity_action(processed_tx) {
+            Self::push_action_if(&mut actions, true, "Add Liquidity");
+        }
+        if self.is_swap_action(processed_tx) {
+            Self::push_action_if(&mut actions, true, "Swap");
+        }
+        Self::push_action_if(
+            &mut actions,
+            !processed_tx.ownership_transferred_events.is_empty(),
+            "Ownership Change",
+        );
+
+        actions
+    }
+
+    fn push_action_if(actions: &mut Vec<String>, condition: bool, action: &str) {
+        if condition && !actions.iter().any(|existing| existing == action) {
+            actions.push(action.to_string());
+        }
+    }
+
+    fn add_tx_type_events(&self, tx_type: &str, processed_tx: &mut ProcessedTransaction) {
+        match tx_type {
+            "Trading Enabled" => {
+                if let Some(token_address) = processed_tx.to_address {
+                    let already_present = processed_tx
+                        .trading_enabled_events
+                        .iter()
+                        .any(|event| event.token_address == token_address);
+                    if !already_present {
+                        processed_tx.trading_enabled_events.push(TradingEnabledEvent {
+                            token_address,
+                            block_number: processed_tx.block_number,
+                            log_index: 0,
+                        });
+                    }
+                    processed_tx.erc20_contracts.insert(token_address);
+                }
+            }
+            "Trading Disabled" => {
+                if let Some(token_address) = processed_tx.to_address {
+                    let already_present = processed_tx
+                        .trading_disabled_events
+                        .iter()
+                        .any(|event| event.token_address == token_address);
+                    if !already_present {
+                        processed_tx.trading_disabled_events.push(TradingDisabledEvent {
+                            token_address,
+                            block_number: processed_tx.block_number,
+                            log_index: 0,
+                        });
+                    }
+                    processed_tx.erc20_contracts.insert(token_address);
+                }
+            }
+            "Contract Creation" => {
+                if let Some(contract_address) = processed_tx.contract_address {
+                    let already_present = processed_tx
+                        .contract_creation_events
+                        .iter()
+                        .any(|event| event.contract_address == contract_address);
+                    if !already_present {
+                        processed_tx
+                            .contract_creation_events
+                            .push(ContractCreationEvent { contract_address });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn is_add_liquidity_action(&self, tx: &ProcessedTransaction) -> bool {
+        self.is_add_liquidity_action_v2(tx) || self.is_add_liquidity_action_v3(tx)
+    }
+
+    fn is_add_liquidity_action_v2(&self, tx: &ProcessedTransaction) -> bool {
+        !tx.uniswap_v2_syncs.is_empty() && !tx.uniswap_v2_mints.is_empty()
+    }
+
+    fn is_add_liquidity_action_v3(&self, tx: &ProcessedTransaction) -> bool {
+        let has_position = !tx.uniswap_v3_positions.is_empty();
+        if !has_position {
+            return false;
+        }
+
+        let has_transfers = tx.erc20_transfers.len() >= 2;
+        if !has_transfers {
+            return false;
+        }
+
+        let has_pool_created = !tx.uniswap_v3_pools.is_empty();
+        let has_initialization = !tx.uniswap_v3_initializations.is_empty();
+
+        if has_pool_created {
+            has_initialization && has_position && has_transfers
+        } else {
+            has_position && has_transfers
+        }
+    }
+
+    fn is_swap_action(&self, tx: &ProcessedTransaction) -> bool {
+        !tx.uniswap_v2_swaps.is_empty()
+            || !tx.uniswap_v3_swaps.is_empty()
+            || !tx.uniswap_v4_swaps.is_empty()
+    }
+
+    fn extract_eth_transfers(
+        &self,
+        from: Address,
+        to: Option<Address>,
+        value: U256,
+        input: &[u8],
+        internal_transactions: &[InternalTransaction],
+    ) -> Vec<ETHTransfer> {
+        let mut transfers = Vec::new();
+        let is_simple_transfer = value > U256::ZERO
+            && input.is_empty()
+            && internal_transactions.is_empty()
+            && to.is_some();
+
+        if is_simple_transfer {
+            if let Some(to_address) = to {
+                transfers.push(ETHTransfer {
+                    from_address: from,
+                    to_address,
+                    amount: value,
+                });
+            }
+        }
+
+        transfers
     }
 
     pub(crate) fn calculate_bribe_amount(internal_transactions: &[InternalTransaction]) -> U256 {
@@ -628,6 +827,29 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
     for event in &tx.uniswap_v4_swaps {
         set.insert(event.pool_manager_address);
         set.insert(event.sender);
+    }
+
+    for event in &tx.uniswap_v4_donates {
+        set.insert(event.pool_manager_address);
+        set.insert(event.sender);
+    }
+
+    for event in &tx.uniswap_v4_protocol_fee_updates {
+        set.insert(event.pool_manager_address);
+    }
+
+    for event in &tx.uniswap_v4_dynamic_lp_fee_updates {
+        set.insert(event.pool_manager_address);
+    }
+
+    for event in &tx.uniswap_v4_protocol_fee_controller_updates {
+        set.insert(event.pool_manager_address);
+        set.insert(event.protocol_fee_controller);
+    }
+
+    for event in &tx.uniswap_v4_balance_deltas {
+        set.insert(event.pool_manager_address);
+        set.insert(event.settler);
     }
 
     for event in &tx.permit2_events {
