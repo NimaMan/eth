@@ -193,7 +193,7 @@ impl TxSimulator {
 }
 
 impl TxSimulator {
-    pub(crate) fn live_chain_cache(&self) -> Option<Arc<LiveChainCache>> {
+    pub fn live_chain_cache(&self) -> Option<Arc<LiveChainCache>> {
         self.live_chain_cache.clone()
     }
 
