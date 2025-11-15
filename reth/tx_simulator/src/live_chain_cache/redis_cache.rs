@@ -86,6 +86,29 @@ impl LiveChainCache {
         }
     }
 
+    /// Fetch a single processed transaction from a stored block snapshot by the
+    /// transaction hash. Returns the JSON value if found.
+    pub async fn find_processed_transaction(
+        &self,
+        block_number: u64,
+        tx_hash: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        let Some(snapshot) = self.fetch_processed_block_snapshot(block_number).await? else {
+            return Ok(None);
+        };
+        for value in snapshot.transactions() {
+            if value
+                .get("hash")
+                .and_then(serde_json::Value::as_str)
+                .map(|hash| hash.eq_ignore_ascii_case(tx_hash))
+                .unwrap_or(false)
+            {
+                return Ok(Some(value.clone()));
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn fetch_state_overlay_snapshot(
         &self,
         block_number: u64,
