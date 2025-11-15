@@ -239,6 +239,7 @@ impl TxSimulator {
 
         // Commit state changes to forked state
         forked_state.db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
@@ -270,6 +271,7 @@ impl TxSimulator {
             revert_context,
             call_trace: call_frame,
             struct_logs,
+            logs: emitted_logs,
         })
     }
 

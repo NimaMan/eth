@@ -93,6 +93,10 @@ impl UnsignedTxChainSimulation {
         }
     }
 
+    pub fn override_account_nonce(&mut self, address: Address, next_nonce: u64) {
+        self.forked_state.nonces.insert(address, next_nonce);
+    }
+
     fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {
         if let Some(from) = tx.from {
             if tx.nonce.is_none() {

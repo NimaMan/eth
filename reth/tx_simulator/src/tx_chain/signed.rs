@@ -95,6 +95,7 @@ impl SignedTxChainSimulation {
         );
         let res = evm.transact(tx_env)?;
         self.forked_state.db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
@@ -114,6 +115,7 @@ impl SignedTxChainSimulation {
             revert_context: None,
             call_trace: call_frame,
             struct_logs: None,
+            logs: emitted_logs,
         })
     }
 

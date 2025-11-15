@@ -40,6 +40,7 @@ struct UnsignedExecutionResult {
     simulation: SimulationResult,
     call_trace: Option<CallFrame>,
     struct_logs: Option<Vec<StructLog>>,
+    logs: Vec<alloy_primitives::Log>,
 }
 
 impl UnsignedExecutionResult {
@@ -52,6 +53,7 @@ impl UnsignedExecutionResult {
             simulation,
             call_trace,
             struct_logs,
+            logs,
         } = self;
 
         FullSimulationResult {
@@ -61,6 +63,7 @@ impl UnsignedExecutionResult {
             revert_context: simulation.revert_context,
             call_trace: call_trace.unwrap_or_default(),
             struct_logs,
+            logs,
         }
     }
 }
@@ -331,6 +334,7 @@ impl TxSimulator {
                 .evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
         let res = evm.transact(tx_env)?;
         db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
@@ -374,6 +378,7 @@ impl TxSimulator {
             simulation,
             call_trace,
             struct_logs,
+            logs: emitted_logs,
         })
     }
 

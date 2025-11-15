@@ -3,7 +3,7 @@
 /// This module contains all the public types used throughout the tx_simulator library.
 /// These types represent simulation results, internal transactions, and configuration options.
 use crate::gas::TxGasParameters;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, Log as AlloyLog, U256};
 pub use alloy_rpc_types_trace::geth::{CallFrame, StructLog};
 use reth_primitives::SealedHeader;
 use std::collections::HashMap;
@@ -37,6 +37,8 @@ pub struct FullSimulationResult {
     /// Optional per-opcode logs from geth's default tracer (`structLogs` in RPC responses).
     /// Present when the simulation was executed with step recording enabled (full trace helpers).
     pub struct_logs: Option<Vec<StructLog>>,
+    /// Raw EVM logs emitted during execution (matches transaction receipt logs).
+    pub logs: Vec<AlloyLog>,
 }
 
 /// Result of a single transaction in a sequence

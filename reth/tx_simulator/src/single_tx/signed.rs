@@ -33,6 +33,7 @@ enum SignedTraceMode {
 struct SignedExecutionResult {
     simulation: SimulationResult,
     call_trace: Option<CallFrame>,
+    logs: Vec<alloy_primitives::Log>,
 }
 
 impl SignedExecutionResult {
@@ -44,6 +45,7 @@ impl SignedExecutionResult {
         let SignedExecutionResult {
             simulation,
             call_trace,
+            logs,
         } = self;
 
         FullSimulationResult {
@@ -53,6 +55,7 @@ impl SignedExecutionResult {
             revert_context: simulation.revert_context,
             call_trace: call_trace.unwrap_or_default(),
             struct_logs: None,
+            logs,
         }
     }
 }
@@ -194,6 +197,7 @@ impl TxSimulator {
 
         let res = evm.transact(tx_env)?;
         db.commit(res.state);
+        let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
         let gas_used = res.result.gas_used();
@@ -219,6 +223,7 @@ impl TxSimulator {
         Ok(SignedExecutionResult {
             simulation,
             call_trace,
+            logs: emitted_logs,
         })
     }
 
