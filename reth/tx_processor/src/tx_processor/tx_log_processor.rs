@@ -1,6 +1,7 @@
 use super::data_models::receipt_models::*;
 use alloy_primitives::{Address, Log as AlloyLog, B256, U256};
 use eyre::Result;
+use reth_chain_query::function_signatures::EVENT_TOPICS;
 
 /// Event signatures for common token standards and DEX protocols
 pub struct EventSignatures {
@@ -51,74 +52,76 @@ pub struct EventSignatures {
 
     // Contract events
     pub ownership_transferred: B256,
+    pub ownership_transfer_started: B256,
+    pub role_granted: B256,
+    pub role_revoked: B256,
+    pub admin_changed: B256,
     pub trading_enabled: B256,
     pub trading_disabled: B256,
 }
 
+fn topic(name: &str) -> B256 {
+    *EVENT_TOPICS
+        .get(name)
+        .unwrap_or_else(|| panic!("missing event topic: {name}"))
+}
+
 impl EventSignatures {
     pub fn new() -> Self {
-        use alloy_primitives::keccak256;
-
         Self {
             // ERC20
-            transfer: keccak256(b"Transfer(address,address,uint256)"),
-            approval: keccak256(b"Approval(address,address,uint256)"),
+            transfer: topic("Transfer"),
+            approval: topic("Approval"),
 
             // ERC721
-            transfer_erc721: keccak256(b"Transfer(address,address,uint256)"),
-            approval_erc721: keccak256(b"Approval(address,address,uint256)"),
-            approval_for_all: keccak256(b"ApprovalForAll(address,address,bool)"),
+            transfer_erc721: topic("Transfer"),
+            approval_erc721: topic("Approval"),
+            approval_for_all: topic("ApprovalForAll"),
 
             // ERC1155
-            transfer_single: keccak256(b"TransferSingle(address,address,address,uint256,uint256)"),
-            transfer_batch: keccak256(
-                b"TransferBatch(address,address,address,uint256[],uint256[])",
-            ),
+            transfer_single: topic("TransferSingle"),
+            transfer_batch: topic("TransferBatch"),
 
             // Uniswap V2
-            sync: keccak256(b"Sync(uint112,uint112)"),
-            swap: keccak256(b"Swap(address,uint256,uint256,uint256,uint256,address)"),
-            mint: keccak256(b"Mint(address,uint256,uint256)"),
-            burn: keccak256(b"Burn(address,uint256,uint256,address)"),
-            pair_created: keccak256(b"PairCreated(address,address,address,uint256)"),
+            sync: topic("Sync"),
+            swap: topic("Swap"),
+            mint: topic("Mint"),
+            burn: topic("Burn"),
+            pair_created: topic("PairCreated"),
 
             // Uniswap V3
-            pool_created: keccak256(b"PoolCreated(address,address,uint24,int24,address)"),
-            initialize: keccak256(b"Initialize(uint160,int24)"),
-            mint_v3: keccak256(b"Mint(address,address,int24,int24,uint128,uint256,uint256)"),
-            burn_v3: keccak256(b"Burn(address,int24,int24,uint128,uint256,uint256)"),
-            swap_v3: keccak256(b"Swap(address,address,int256,int256,uint160,uint128,int24)"),
-            increase_liquidity: keccak256(b"IncreaseLiquidity(uint256,uint128,uint256,uint256)"),
-            decrease_liquidity: keccak256(b"DecreaseLiquidity(uint256,uint128,uint256,uint256)"),
-            collect: keccak256(b"Collect(uint256,address,uint256,uint256)"),
+            pool_created: topic("PoolCreatedV3"),
+            initialize: topic("InitializeV3"),
+            mint_v3: topic("MintV3"),
+            burn_v3: topic("BurnV3"),
+            swap_v3: topic("SwapV3"),
+            increase_liquidity: topic("IncreaseLiquidityV3"),
+            decrease_liquidity: topic("DecreaseLiquidityV3"),
+            collect: topic("Collect"),
 
             // Uniswap V4
-            initialize_v4: keccak256(
-                b"Initialize(bytes32,address,address,uint24,int24,address,uint160,int24)",
-            ),
-            modify_liquidity: keccak256(
-                b"ModifyLiquidity(bytes32,address,int24,int24,int256,bytes32)",
-            ),
-            swap_v4: keccak256(b"Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)"),
-            donate: keccak256(b"Donate(bytes32,address,int256,int256)"),
-            protocol_fee_updated: keccak256(b"ProtocolFeeUpdated(bytes32,uint24)"),
-            dynamic_lp_fee_updated: keccak256(b"DynamicLPFeeUpdated(bytes32,uint24)"),
-            protocol_fee_controller_updated: keccak256(b"ProtocolFeeControllerUpdated(address)"),
-            balance_delta: B256::from([
-                0x40, 0xe9, 0xce, 0xcb, 0x9f, 0x5f, 0x1f, 0x1c, 0x5b, 0x9c, 0x97, 0xde, 0xc2, 0x91,
-                0x7b, 0x7e, 0xe9, 0x2e, 0x57, 0xba, 0x55, 0x63, 0x70, 0x8d, 0xac, 0xa9, 0x4d, 0xd8,
-                0x4a, 0xd7, 0x11, 0x2f,
-            ]),
-            permit2: keccak256(b"Permit(address,address,address,uint160,uint48,uint48)"),
+            initialize_v4: topic("InitializeV4"),
+            modify_liquidity: topic("ModifyLiquidityV4"),
+            swap_v4: topic("SwapV4"),
+            donate: topic("DonateV4"),
+            protocol_fee_updated: topic("ProtocolFeeUpdatedV4"),
+            dynamic_lp_fee_updated: topic("DynamicLPFeeUpdatedV4"),
+            protocol_fee_controller_updated: topic("ProtocolFeeControllerUpdatedV4"),
+            balance_delta: topic("BalanceDeltaV4"),
+            permit2: topic("Permit2"),
 
             // General actions
-            deposit: keccak256(b"Deposit(address,uint256)"),
-            withdraw: keccak256(b"Withdraw(address,uint256)"),
+            deposit: topic("Deposit"),
+            withdraw: topic("Withdraw"),
 
             // Contract events
-            ownership_transferred: keccak256(b"OwnershipTransferred(address,address)"),
-            trading_enabled: keccak256(b"TradingEnabled()"),
-            trading_disabled: keccak256(b"TradingDisabled()"),
+            ownership_transferred: topic("OwnershipTransferred"),
+            ownership_transfer_started: topic("OwnershipTransferStarted"),
+            role_granted: topic("RoleGranted"),
+            role_revoked: topic("RoleRevoked"),
+            admin_changed: topic("AdminChanged"),
+            trading_enabled: topic("TradingEnabled"),
+            trading_disabled: topic("TradingDisabled"),
         }
     }
 }
@@ -257,6 +260,19 @@ impl LogDecoder {
         }
         if event_signature == self.signatures.ownership_transferred && log.topics().len() == 3 {
             return self.decode_ownership_transferred(log, log_index);
+        }
+        if event_signature == self.signatures.ownership_transfer_started && log.topics().len() == 3
+        {
+            return self.decode_ownership_transfer_started(log, log_index);
+        }
+        if event_signature == self.signatures.role_granted && log.topics().len() == 4 {
+            return self.decode_access_control_role_granted(log, log_index);
+        }
+        if event_signature == self.signatures.role_revoked && log.topics().len() == 4 {
+            return self.decode_access_control_role_revoked(log, log_index);
+        }
+        if event_signature == self.signatures.admin_changed && log.topics().len() == 3 {
+            return self.decode_proxy_admin_changed(log, log_index);
         }
         if event_signature == self.signatures.trading_enabled && log.topics().len() == 1 {
             return self.decode_trading_enabled(log, log_index);
@@ -1762,6 +1778,123 @@ impl LogDecoder {
         )))
     }
 
+    fn decode_ownership_transfer_started(
+        &self,
+        log: &AlloyLog,
+        log_index: u64,
+    ) -> Result<Option<DecodedEvent>> {
+        if log.topics().len() != 3 {
+            return Ok(None);
+        }
+
+        let previous_owner_bytes: &[u8] = log.topics()[1].as_ref();
+        let new_owner_bytes: &[u8] = log.topics()[2].as_ref();
+
+        if previous_owner_bytes.len() < 32 || new_owner_bytes.len() < 32 {
+            return Ok(None);
+        }
+
+        let previous_owner = Address::from_slice(&previous_owner_bytes[12..32]);
+        let new_owner = Address::from_slice(&new_owner_bytes[12..32]);
+
+        Ok(Some(DecodedEvent::OwnershipTransferStartedEvent(
+            OwnershipTransferStartedEvent {
+                contract_address: log.address,
+                previous_owner,
+                new_owner,
+                log_index,
+            },
+        )))
+    }
+
+    fn decode_access_control_role_granted(
+        &self,
+        log: &AlloyLog,
+        log_index: u64,
+    ) -> Result<Option<DecodedEvent>> {
+        if log.topics().len() != 4 {
+            return Ok(None);
+        }
+
+        let account_bytes: &[u8] = log.topics()[2].as_ref();
+        let sender_bytes: &[u8] = log.topics()[3].as_ref();
+        if account_bytes.len() < 32 || sender_bytes.len() < 32 {
+            return Ok(None);
+        }
+
+        let role = log.topics()[1];
+        let account = Address::from_slice(&account_bytes[12..32]);
+        let sender = Address::from_slice(&sender_bytes[12..32]);
+
+        Ok(Some(DecodedEvent::AccessControlRoleGrantedEvent(
+            AccessControlRoleGrantedEvent {
+                contract_address: log.address,
+                role,
+                account,
+                sender,
+                log_index,
+            },
+        )))
+    }
+
+    fn decode_access_control_role_revoked(
+        &self,
+        log: &AlloyLog,
+        log_index: u64,
+    ) -> Result<Option<DecodedEvent>> {
+        if log.topics().len() != 4 {
+            return Ok(None);
+        }
+
+        let account_bytes: &[u8] = log.topics()[2].as_ref();
+        let sender_bytes: &[u8] = log.topics()[3].as_ref();
+        if account_bytes.len() < 32 || sender_bytes.len() < 32 {
+            return Ok(None);
+        }
+
+        let role = log.topics()[1];
+        let account = Address::from_slice(&account_bytes[12..32]);
+        let sender = Address::from_slice(&sender_bytes[12..32]);
+
+        Ok(Some(DecodedEvent::AccessControlRoleRevokedEvent(
+            AccessControlRoleRevokedEvent {
+                contract_address: log.address,
+                role,
+                account,
+                sender,
+                log_index,
+            },
+        )))
+    }
+
+    fn decode_proxy_admin_changed(
+        &self,
+        log: &AlloyLog,
+        log_index: u64,
+    ) -> Result<Option<DecodedEvent>> {
+        if log.topics().len() != 3 {
+            return Ok(None);
+        }
+
+        let previous_admin_bytes: &[u8] = log.topics()[1].as_ref();
+        let new_admin_bytes: &[u8] = log.topics()[2].as_ref();
+        if previous_admin_bytes.len() < 32 || new_admin_bytes.len() < 32 {
+            return Ok(None);
+        }
+
+        let previous_admin = Address::from_slice(&previous_admin_bytes[12..32]);
+        let new_admin = Address::from_slice(&new_admin_bytes[12..32]);
+
+        Ok(Some(DecodedEvent::ProxyAdminChangedEvent(
+            ProxyAdminChangedEvent {
+                contract_address: log.address,
+                previous_admin,
+                new_admin,
+                log_index,
+            },
+        )))
+    }
+
     // TradingEnabled decoder
     fn decode_trading_enabled(
         &self,
@@ -1923,6 +2056,10 @@ pub enum DecodedEvent {
     DepositEvent(DepositEvent),
     WithdrawEvent(WithdrawEvent),
     OwnershipTransferredEvent(OwnershipTransferredEvent),
+    OwnershipTransferStartedEvent(OwnershipTransferStartedEvent),
+    AccessControlRoleGrantedEvent(AccessControlRoleGrantedEvent),
+    AccessControlRoleRevokedEvent(AccessControlRoleRevokedEvent),
+    ProxyAdminChangedEvent(ProxyAdminChangedEvent),
     TradingEnabledEvent(TradingEnabledEvent),
     TradingDisabledEvent(TradingDisabledEvent),
     Permit2Event(Permit2Event),

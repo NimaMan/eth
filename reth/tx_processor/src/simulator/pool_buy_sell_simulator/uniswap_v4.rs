@@ -21,7 +21,7 @@ use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
 use crate::tx_processor::TxProcessor;
-use reth_chain_query::tx_builders::amm::{
+use tx_simulator::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
     build_baygus_single_hop_exact_input_call,
     build_token_approval_tx as build_v4_token_approval_tx,

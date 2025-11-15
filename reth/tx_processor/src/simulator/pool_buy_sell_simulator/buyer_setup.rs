@@ -3,10 +3,13 @@ use std::sync::Arc;
 use alloy_primitives::{Bytes, U256};
 use eyre::{eyre, Result};
 use reth_chain_query::dex::{fetch_uniswap_v2_pair_address, UNISWAP_V2_FACTORY};
-use reth_chain_query::tx_builders::amm::uniswap_v2::{
-    build_approve_v2, build_token_to_token_swap_supporting_fee_v2, Router as UniswapV2Router,
+use tx_simulator::{
+    tx_builders::{
+        amm_swap_route::AmmSwapRoute, build_approve_for_route, build_sell_swap,
+        uniswap_v4::build_weth_deposit_tx as build_v4_weth_deposit_tx,
+    },
+    TxSimulator, UnsignedTxChainSimulation,
 };
-use tx_simulator::{TxSimulator, UnsignedTxChainSimulation};
 
 use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
 use super::fees::apply_fee_policy;
@@ -14,7 +17,6 @@ use super::results::create_failed_result;
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
-use reth_chain_query::tx_builders::amm::build_weth_deposit_tx as build_v4_weth_deposit_tx;
 
 const GET_RESERVES_SELECTOR: [u8; 4] = [0x09, 0x02, 0xf1, 0xac];
 const FEE_NUMERATOR: u128 = 997;
@@ -212,12 +214,9 @@ async fn prefund_denom_via_weth(
         return Ok(Some(failure));
     }
 
-    let mut approve_tx = build_approve_v2(
-        UniswapV2Router::UniswapV2,
-        config.buyer_address,
-        config.weth_address,
-        U256::MAX,
-    );
+    let route = AmmSwapRoute::UniswapV2 { pool: pair_address };
+    let mut approve_tx =
+        build_approve_for_route(&route, config.buyer_address, config.weth_address, U256::MAX);
     approve_tx.gas = Some(config.approve_gas_limit);
     apply_fee_policy(&mut approve_tx, config, base_fee);
     let approve_result = chain
@@ -262,12 +261,12 @@ async fn prefund_denom_via_weth(
         return Ok(Some(failure));
     }
 
-    let mut swap_tx = build_token_to_token_swap_supporting_fee_v2(
-        UniswapV2Router::UniswapV2,
+    let mut swap_tx = build_sell_swap(
+        &route,
         config.buyer_address,
         config.weth_address,
-        config.denom_address,
         weth_buffered,
+        0,
         u64::MAX,
     );
     swap_tx.gas = Some(config.buy_gas_limit);

@@ -23,12 +23,11 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
 };
-use reth_chain_query::tx_builders::amm::uniswap_v2::{
-    build_approve_v2, build_token_to_token_swap_supporting_fee_v2, build_token_to_token_swap_v2,
-    Router as UniswapV2Router,
-};
-use reth_chain_query::tx_builders::amm::uniswap_v3::{
-    build_approve_v3, build_token_to_token_swap_v3,
+use tx_simulator::tx_builders::{
+    amm_swap_route::AmmSwapRoute,
+    build_approve_for_route, build_buy_swap, build_sell_swap,
+    uniswap_v2::{build_approve_v2, Router as UniswapV2Router},
+    uniswap_v3::build_approve_v3,
 };
 pub async fn check_can_buy_sell_pool(
     simulator: Arc<TxSimulator>,
@@ -85,22 +84,16 @@ pub async fn check_can_buy_sell_pool(
     };
 
     let route = match config.pool_type {
-        PoolType::UniswapV2 => {
-            reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute::UniswapV2 {
-                pool: config.pool_address,
-            }
-        }
-        PoolType::SushiSwap => {
-            reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute::SushiswapV2 {
-                pool: config.pool_address,
-            }
-        }
-        PoolType::UniswapV3 { fee_tier } => {
-            reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute::UniswapV3 {
-                pool: config.pool_address,
-                fee_tier,
-            }
-        }
+        PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 {
+            pool: config.pool_address,
+        },
+        PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 {
+            pool: config.pool_address,
+        },
+        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+            pool: config.pool_address,
+            fee_tier,
+        },
         PoolType::UniswapV4 => {
             // Return a well-formed failure result to callers with a clear reason
             return Ok(create_failed_result(
@@ -356,41 +349,14 @@ pub async fn check_can_buy_sell_pool(
     // BUY
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
-    let mut buy_tx = match config.pool_type {
-        PoolType::UniswapV2 => build_token_to_token_swap_v2(
-            UniswapV2Router::UniswapV2,
-            config.buyer_address,
-            config.denom_address,
-            config.token_address,
-            config.test_amount,
-            slippage_bps,
-            deadline,
-        ),
-        PoolType::SushiSwap => build_token_to_token_swap_v2(
-            UniswapV2Router::SushiswapV2,
-            config.buyer_address,
-            config.denom_address,
-            config.token_address,
-            config.test_amount,
-            slippage_bps,
-            deadline,
-        ),
-        PoolType::UniswapV3 { fee_tier } => build_token_to_token_swap_v3(
-            config.buyer_address,
-            config.denom_address,
-            config.token_address,
-            config.test_amount,
-            fee_tier,
-            slippage_bps,
-            deadline,
-        ),
-        other => {
-            return Err(eyre::eyre!(
-                "Pool type {:?} not yet implemented for denomination token swaps",
-                other
-            ));
-        }
-    };
+    let mut buy_tx = build_buy_swap(
+        &route,
+        config.buyer_address,
+        config.token_address,
+        config.test_amount,
+        slippage_bps,
+        deadline,
+    );
     buy_tx.gas = Some(config.buy_gas_limit);
     apply_fee_policy(&mut buy_tx, &config, base_fee);
     let buy_sim_result = chain
@@ -468,7 +434,7 @@ pub async fn check_can_buy_sell_pool(
     }
 
     // APPROVE
-    let mut approve_tx = reth_chain_query::tx_builders::build_approve_for_route(
+    let mut approve_tx = build_approve_for_route(
         &route,
         config.buyer_address,
         config.token_address,
@@ -574,32 +540,17 @@ pub async fn check_can_buy_sell_pool(
             err.wrap_err(context)
         })?;
     }
-    let mut sell_tx = match config.pool_type {
-        PoolType::UniswapV2 => build_token_to_token_swap_supporting_fee_v2(
-            UniswapV2Router::UniswapV2,
-            config.buyer_address,
-            config.token_address,
-            config.denom_address,
-            tokens_received,
-            deadline,
-        ),
-        PoolType::SushiSwap => build_token_to_token_swap_supporting_fee_v2(
-            UniswapV2Router::SushiswapV2,
-            config.buyer_address,
-            config.token_address,
-            config.denom_address,
-            tokens_received,
-            deadline,
-        ),
-        PoolType::UniswapV3 { fee_tier } => build_token_to_token_swap_v3(
-            config.buyer_address,
-            config.token_address,
-            config.denom_address,
-            tokens_received,
+    let sell_route = match config.pool_type {
+        PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 {
+            pool: config.pool_address,
+        },
+        PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 {
+            pool: config.pool_address,
+        },
+        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
+            pool: config.pool_address,
             fee_tier,
-            slippage_bps,
-            deadline,
-        ),
+        },
         other => {
             return Err(eyre::eyre!(
                 "Pool type {:?} not yet implemented for denomination token swaps",
@@ -607,6 +558,14 @@ pub async fn check_can_buy_sell_pool(
             ));
         }
     };
+    let mut sell_tx = build_sell_swap(
+        &sell_route,
+        config.buyer_address,
+        config.token_address,
+        tokens_received,
+        slippage_bps,
+        deadline,
+    );
     sell_tx.gas = Some(config.sell_gas_limit);
     apply_fee_policy(&mut sell_tx, &config, base_fee);
     let sell_block = if config.block_delay > 0 {

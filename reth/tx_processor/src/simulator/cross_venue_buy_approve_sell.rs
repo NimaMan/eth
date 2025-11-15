@@ -6,7 +6,7 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 use super::types::PoolBuySellParameters;
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
-use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
+use tx_simulator::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 
 #[derive(Debug, Clone)]
 pub struct CrossVenueArbResult {

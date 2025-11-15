@@ -195,6 +195,40 @@ pub struct OwnershipTransferredEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OwnershipTransferStartedEvent {
+    pub contract_address: Address,
+    pub previous_owner: Address,
+    pub new_owner: Address,
+    pub log_index: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccessControlRoleGrantedEvent {
+    pub contract_address: Address,
+    pub role: B256,
+    pub account: Address,
+    pub sender: Address,
+    pub log_index: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AccessControlRoleRevokedEvent {
+    pub contract_address: Address,
+    pub role: B256,
+    pub account: Address,
+    pub sender: Address,
+    pub log_index: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProxyAdminChangedEvent {
+    pub contract_address: Address,
+    pub previous_admin: Address,
+    pub new_admin: Address,
+    pub log_index: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TradingEnabledEvent {
     pub token_address: Address,
     pub block_number: u64,

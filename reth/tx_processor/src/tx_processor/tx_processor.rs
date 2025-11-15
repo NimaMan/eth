@@ -13,7 +13,7 @@
 /// Key insight: Uses the WORKING approach from chain_state_persisting_sequential_tx_simulator.rs
 /// instead of the broken manual filtering approach that was throwing away events.
 use super::data_models::{
-    ContractCreationEvent, ETHTransfer, InternalTransaction, ProcessedAccessListItem,
+    tx_models::ETHTransfer, ContractCreationEvent, InternalTransaction, ProcessedAccessListItem,
     ProcessedTransaction, TradingDisabledEvent, TradingEnabledEvent, TransactionFees,
 };
 use super::{
@@ -107,6 +107,10 @@ impl TxProcessor {
         let mut withdraw_events = Vec::new();
         let mut uniswap_v2_pair_created_events = Vec::new();
         let mut ownership_transferred_events = Vec::new();
+        let mut ownership_transfer_started_events = Vec::new();
+        let mut access_control_role_granted_events = Vec::new();
+        let mut access_control_role_revoked_events = Vec::new();
+        let mut proxy_admin_changed_events = Vec::new();
         let mut trading_enabled_events = Vec::new();
         let mut trading_disabled_events = Vec::new();
         let mut other_events = Vec::new();
@@ -145,6 +149,18 @@ impl TxProcessor {
                     }
                     DecodedEvent::OwnershipTransferredEvent(event) => {
                         ownership_transferred_events.push(event)
+                    }
+                    DecodedEvent::OwnershipTransferStartedEvent(event) => {
+                        ownership_transfer_started_events.push(event)
+                    }
+                    DecodedEvent::AccessControlRoleGrantedEvent(event) => {
+                        access_control_role_granted_events.push(event)
+                    }
+                    DecodedEvent::AccessControlRoleRevokedEvent(event) => {
+                        access_control_role_revoked_events.push(event)
+                    }
+                    DecodedEvent::ProxyAdminChangedEvent(event) => {
+                        proxy_admin_changed_events.push(event)
                     }
                     DecodedEvent::TradingEnabledEvent(event) => trading_enabled_events.push(event),
                     DecodedEvent::TradingDisabledEvent(event) => {
@@ -221,8 +237,7 @@ impl TxProcessor {
 
         // Determine simple ETH transfer events before building the struct (mirrors Python `_extract_eth_transfers`)
         let empty_internals: &[InternalTransaction] = &[];
-        let eth_transfers =
-            self.extract_eth_transfers(from, to, value, &input, empty_internals);
+        let eth_transfers = self.extract_eth_transfers(from, to, value, &input, empty_internals);
 
         // STEP 3: Create ProcessedTransaction with all extracted data
         let mut processed_tx = ProcessedTransaction::new(
@@ -272,6 +287,10 @@ impl TxProcessor {
         processed_tx.withdraw_events = withdraw_events;
         processed_tx.uniswap_v2_pair_created_events = uniswap_v2_pair_created_events;
         processed_tx.ownership_transferred_events = ownership_transferred_events;
+        processed_tx.ownership_transfer_started_events = ownership_transfer_started_events;
+        processed_tx.access_control_role_granted_events = access_control_role_granted_events;
+        processed_tx.access_control_role_revoked_events = access_control_role_revoked_events;
+        processed_tx.proxy_admin_changed_events = proxy_admin_changed_events;
         processed_tx.trading_enabled_events = trading_enabled_events;
         processed_tx.trading_disabled_events = trading_disabled_events;
         processed_tx.other_events = other_events;
@@ -537,14 +556,14 @@ impl TxProcessor {
         }
     }
 
-    fn identify_actions(
-        &self,
-        tx_type: &str,
-        processed_tx: &ProcessedTransaction,
-    ) -> Vec<String> {
+    fn identify_actions(&self, tx_type: &str, processed_tx: &ProcessedTransaction) -> Vec<String> {
         let mut actions: Vec<String> = Vec::new();
 
-        Self::push_action_if(&mut actions, tx_type == "Contract Creation", "Contract Creation");
+        Self::push_action_if(
+            &mut actions,
+            tx_type == "Contract Creation",
+            "Contract Creation",
+        );
         Self::push_action_if(
             &mut actions,
             tx_type == "Trading Enabled" || !processed_tx.trading_enabled_events.is_empty(),
@@ -563,7 +582,8 @@ impl TxProcessor {
         }
         Self::push_action_if(
             &mut actions,
-            !processed_tx.ownership_transferred_events.is_empty(),
+            !processed_tx.ownership_transferred_events.is_empty()
+                || !processed_tx.ownership_transfer_started_events.is_empty(),
             "Ownership Change",
         );
 
@@ -585,11 +605,13 @@ impl TxProcessor {
                         .iter()
                         .any(|event| event.token_address == token_address);
                     if !already_present {
-                        processed_tx.trading_enabled_events.push(TradingEnabledEvent {
-                            token_address,
-                            block_number: processed_tx.block_number,
-                            log_index: 0,
-                        });
+                        processed_tx
+                            .trading_enabled_events
+                            .push(TradingEnabledEvent {
+                                token_address,
+                                block_number: processed_tx.block_number,
+                                log_index: 0,
+                            });
                     }
                     processed_tx.erc20_contracts.insert(token_address);
                 }
@@ -601,11 +623,13 @@ impl TxProcessor {
                         .iter()
                         .any(|event| event.token_address == token_address);
                     if !already_present {
-                        processed_tx.trading_disabled_events.push(TradingDisabledEvent {
-                            token_address,
-                            block_number: processed_tx.block_number,
-                            log_index: 0,
-                        });
+                        processed_tx
+                            .trading_disabled_events
+                            .push(TradingDisabledEvent {
+                                token_address,
+                                block_number: processed_tx.block_number,
+                                log_index: 0,
+                            });
                     }
                     processed_tx.erc20_contracts.insert(token_address);
                 }
@@ -877,6 +901,30 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(event.contract_address);
         set.insert(event.previous_owner);
         set.insert(event.new_owner);
+    }
+
+    for event in &tx.ownership_transfer_started_events {
+        set.insert(event.contract_address);
+        set.insert(event.previous_owner);
+        set.insert(event.new_owner);
+    }
+
+    for event in &tx.access_control_role_granted_events {
+        set.insert(event.contract_address);
+        set.insert(event.account);
+        set.insert(event.sender);
+    }
+
+    for event in &tx.access_control_role_revoked_events {
+        set.insert(event.contract_address);
+        set.insert(event.account);
+        set.insert(event.sender);
+    }
+
+    for event in &tx.proxy_admin_changed_events {
+        set.insert(event.contract_address);
+        set.insert(event.previous_admin);
+        set.insert(event.new_admin);
     }
 
     for event in &tx.contract_creation_events {

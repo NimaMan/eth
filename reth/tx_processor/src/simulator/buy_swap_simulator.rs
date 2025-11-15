@@ -7,7 +7,7 @@ use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::TxProcessor;
 
 use super::types::{PoolBuySellParameters, PoolType};
-use reth_chain_query::tx_builders::{self, amm_swap_route::AmmSwapRoute};
+use tx_simulator::tx_builders::{self, amm_swap_route::AmmSwapRoute};
 
 /// Result of a single buy swap simulation
 #[derive(Debug, Clone)]
