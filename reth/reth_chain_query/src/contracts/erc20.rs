@@ -217,7 +217,7 @@ impl RethQueryProvider {
     }
 
     /// Check if an address is a contract by checking for code
-    pub async fn is_contract(&self, address: Address, block_number: Option<u64>) -> Result<bool> {
+    pub async fn is_erc20_contract(&self, address: Address, block_number: Option<u64>) -> Result<bool> {
         // Try to get code size - contracts have code, EOAs don't
         let call = tx_simulator::UnsignedTransaction {
             from: Some(Address::ZERO),
