@@ -25,8 +25,8 @@ use reth_chain_query::provider::{
     AddressTransactionRef, BalanceDiff, TransactionData as RustTransactionData,
 };
 use reth_chain_query::reth_index::RethIndexDB;
-use reth_chain_query::time_utils::BlockTimeConverter;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
+use reth_chain_query::BlockTimeConverter;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
 use reth_primitives::SealedHeader;
 use tokio::runtime::Runtime;
@@ -982,41 +982,45 @@ impl PyChainQuery {
     }
 
     /// Get complete token metadata in a single call
-    #[pyo3(signature = (token, block_number=None, block_header=None))]
+    #[pyo3(signature = (token, block_number=None, block_header=None, tx_hash=None))]
     fn get_token_metadata(
         &self,
         token: &str,
         block_number: Option<u64>,
         block_header: Option<&str>,
-    ) -> PyResult<super::tokens::PyTokenMetadata> {
+        tx_hash: Option<&str>,
+    ) -> PyResult<Option<super::tokens::PyTokenMetadata>> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
         let block_header = Self::parse_optional_header(block_header)?;
+        let tx_hash = tx_hash
+            .map(|hash| super::utils::parse_hash(hash))
+            .transpose()?;
         let meta = self
             .runtime
             .block_on(async move {
                 match block_header {
                     Some(header) => {
                         provider
-                            .get_token_metadata(token_addr, block_number, Some(header))
+                            .get_token_metadata(token_addr, block_number, Some(header), tx_hash)
                             .await
                     }
                     None => {
                         provider
-                            .get_token_metadata(token_addr, block_number, None)
+                            .get_token_metadata(token_addr, block_number, None, tx_hash)
                             .await
                     }
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        Ok(super::tokens::PyTokenMetadata {
-            address: format!("0x{}", hex::encode(meta.address)),
-            name: meta.name,
-            symbol: meta.symbol,
-            decimals: meta.decimals,
-            total_supply: meta.total_supply.to_string(),
-        })
+        Ok(meta.map(|inner| super::tokens::PyTokenMetadata {
+            address: format!("0x{}", hex::encode(inner.address)),
+            name: inner.name,
+            symbol: inner.symbol,
+            decimals: inner.decimals,
+            total_supply: inner.total_supply.to_string(),
+        }))
     }
 }
 
