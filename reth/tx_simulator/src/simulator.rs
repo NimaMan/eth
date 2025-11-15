@@ -108,17 +108,28 @@ impl TxSimulator {
         &self.provider_factory
     }
 
+    /// Ensure the requested block is already persisted in the local database
+    pub fn assert_block_available(&self, block_number: u64) -> Result<()> {
+        let latest = self.get_latest_block()?;
+        if block_number > latest {
+            return Err(eyre::eyre!(
+                "State for block {} not yet available (latest persisted block {})",
+                block_number,
+                latest
+            ));
+        }
+        Ok(())
+    }
+
     /// Get the base fee for a specific block
     ///
     /// This is needed for EIP-1559 transactions to ensure gas prices are set correctly.
     /// Returns the base fee in wei.
     pub fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
+        self.assert_block_available(block_number)?;
         let provider = self.provider_factory.provider()?;
         let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
-            eyre::eyre!(
-                "No header for block whilst getting base-fee {}",
-                block_number
-            )
+            eyre::eyre!("No header for block whilst getting base-fee {}", block_number)
         })?;
 
         let base_fee = block_header
@@ -131,6 +142,7 @@ impl TxSimulator {
     /// Get chain state at a specific block
     /// Returns a StateProvider that gives access to all blockchain state at that block
     pub fn get_chain_state_at_block(&self, block_number: u64) -> Result<Box<dyn StateProvider>> {
+        self.assert_block_available(block_number)?;
         let state = self
             .provider_factory
             .history_by_block_number(block_number)?;
@@ -145,6 +157,7 @@ impl TxSimulator {
 
     /// Get block metadata (timestamp, gas_limit, gas_used, base_fee)
     pub fn get_block_metadata(&self, block_number: u64) -> Result<(u64, u64, u64, Option<u128>)> {
+        self.assert_block_available(block_number)?;
         let provider = self.provider_factory.provider()?;
         let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
             eyre::eyre!(

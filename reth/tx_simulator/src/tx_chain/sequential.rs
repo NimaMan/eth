@@ -156,6 +156,7 @@ impl TxSimulator {
     /// Simulate a sequence of transactions where each builds on previous state changes.
     /// Create a forked state at a specific block for sequential simulation
     pub(crate) fn create_forked_state(&self, block_number: u64) -> Result<ForkedState> {
+        self.assert_block_available(block_number)?;
         let provider = self.provider_factory.provider()?;
         // Important: fetching the canonical header can fail briefly if the MDBX mapping
         // has not advanced yet even though the block is visible via RPC.
@@ -172,6 +173,7 @@ impl TxSimulator {
         block_number: u64,
         block_header: SealedHeader,
     ) -> Result<ForkedState> {
+        self.assert_block_available(block_number)?;
         let state = self
             .provider_factory
             .history_by_block_number(block_number)?;

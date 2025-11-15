@@ -99,6 +99,7 @@ impl TxSimulator {
     /// Attempt to load state for the requested block, retrying briefly if the database
     /// has not indexed the block yet (common for live feeds).
     pub(crate) async fn load_state_for_block(&self, block_number: u64) -> Result<StateProviderBox> {
+        self.assert_block_available(block_number)?;
         let retry_delay = Duration::from_millis(STATE_RETRY_DELAY_MS);
 
         for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {

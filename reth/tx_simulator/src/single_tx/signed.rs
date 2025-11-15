@@ -169,6 +169,7 @@ impl TxSimulator {
         inspector_config: TracingInspectorConfig,
         trace_mode: SignedTraceMode,
     ) -> Result<SignedExecutionResult> {
+        simulator.assert_block_available(block_number)?;
         let provider = simulator.provider_factory.provider()?;
         let block_header = provider
             .header_by_number(block_number)?
