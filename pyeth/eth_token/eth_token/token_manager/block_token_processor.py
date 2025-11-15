@@ -101,9 +101,13 @@ class BlockTokenProcessor:
                 contract_address,
                 block_number,
                 transaction.get('block_header'),
+                transaction.get('hash'),
             )
+            if token_metadata is None:
+                return False, None, None
             return True, token_metadata, contract_address
         except Exception as exc:
+            self.logger.error(f"{self.__class__.__name__} Error getting token metadata for contract {contract_address} in transaction {transaction.get('hash')}: {exc}")
             return False, None, None
 
     def _handle_token_creation(

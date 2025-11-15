@@ -80,12 +80,12 @@ class TokenChainDataFetcher:
         token_address: str,
         block_number: Optional[int] = None,
         block_header: Optional[str] = None,
+        tx_hash: Optional[str] = None,
     ):
         metadata = self._chain_query.get_token_metadata(
             token_address,
             block_number,
             block_header,
+            tx_hash,
         )
-        if metadata is None:
-            raise RuntimeError(f"Token {token_address} is missing metadata in PyReth")
         return metadata
