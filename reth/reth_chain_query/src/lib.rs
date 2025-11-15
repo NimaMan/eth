@@ -24,7 +24,6 @@ pub mod query_engine;
 pub mod common_addresses;
 pub mod dex;
 pub mod postgres_db;
-pub mod time_utils;
 pub mod tx_builders;
 pub mod utils;
 
@@ -55,7 +54,7 @@ pub use entities::{
 pub use query_engine::ChainQuery;
 
 // Re-export time utilities
-pub use time_utils::{
+pub use utils::time_utils::{
     BlockTimeConverter, BlockTimestamp, PeriodBoundary, PeriodType, TimePeriod, TimestampCache,
 };
 

@@ -22,7 +22,7 @@ pub struct RethQueryProvider {
 - `get_latest_base_fee()` – Base fee of the tip block
 - `get_block_gas_metadata(b)` – `(gas_limit, gas_used, base_fee_opt)`
 
-### AMM Queries (`amm/*`)
+### DEX Queries (`dex/amm/*`)
 - `uni_v2_get_tokens(pair, block)` – Read `token0`/`token1` via local view calls
 - `uni_v2_get_reserves(pair, block)` – Read Uniswap V2 reserves at `block`
 - `uni_v2_calc_amount_out(amount_in, reserve_in, reserve_out)` – Pure math helper

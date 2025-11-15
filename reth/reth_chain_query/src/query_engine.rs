@@ -7,7 +7,7 @@ use reth_primitives::SealedHeader;
 use std::sync::Arc;
 use tx_simulator::TxSimulator;
 
-use super::{provider::RethQueryProvider, time_utils::BlockTimeConverter};
+use super::{provider::RethQueryProvider, utils::time_utils::BlockTimeConverter};
 
 /// ChainQuery provides direct database access for blockchain queries
 ///

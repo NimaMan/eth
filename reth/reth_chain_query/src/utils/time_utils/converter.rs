@@ -170,7 +170,7 @@ impl BlockTimeConverter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time_utils::{
+    use crate::utils::time_utils::{
         estimate_block_number, estimate_timestamp, AVERAGE_BLOCK_TIME, ETHEREUM_GENESIS_TIMESTAMP,
     };
 

@@ -15,20 +15,18 @@ use crate::reth_index::RethIndexDB;
 // Re-export submodules
 mod address_index;
 mod address_state;
-mod amm;
 mod batch_ops;
 mod block_transactions;
 mod caching;
-mod contract_methods;
+pub mod contracts;
 mod gas;
 mod transactions;
 mod types;
 
 pub use address_index::*;
 pub use address_state::*;
-pub use amm::*;
 pub use caching::*;
-pub use contract_methods::*;
+pub use contracts::erc20::*;
 pub use types::*;
 
 /// Central provider for all Reth database queries
