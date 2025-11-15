@@ -5,7 +5,11 @@ use eyre::{bail, eyre, Result};
 use serde_json::{Map, Value};
 use std::str::FromStr;
 
-pub fn build_unsigned_transaction(value: &Value) -> Result<UnsignedTransaction> {
+/// Build an unsigned transaction directly from the JSON/dict representation
+/// of a processed transaction stored in our live snapshots.
+pub fn build_unsigned_transaction_from_processed_tx_json(
+    value: &Value,
+) -> Result<UnsignedTransaction> {
     let obj = value
         .as_object()
         .ok_or_else(|| eyre!("processed transaction must be a JSON object"))?;

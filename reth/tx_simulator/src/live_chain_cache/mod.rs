@@ -3,9 +3,7 @@
 mod block_snapshot;
 mod overlay;
 mod redis_cache;
-mod transaction;
 
 pub use block_snapshot::ProcessedBlockSnapshot;
 pub use overlay::StateOverlaySnapshot;
 pub use redis_cache::{LiveChainCache, LiveChainCacheBuilder};
-pub use transaction::build_unsigned_transaction;

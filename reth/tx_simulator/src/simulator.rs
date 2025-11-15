@@ -1,8 +1,9 @@
 use crate::header_utils::parse_sealed_header_from_json;
-use crate::live_chain_cache::{build_unsigned_transaction, LiveChainCache};
+use crate::live_chain_cache::LiveChainCache;
 use crate::single_tx::unsigned::UnsignedTransaction;
 use crate::tx_chain::sequential::ForkedState;
 use crate::types::SimulationDefaults;
+use crate::unsigned_tx_builder::build_unsigned_transaction_from_processed_tx_json;
 use eyre::{eyre, Result};
 use std::path::Path;
 /// Core transaction simulator implementation
@@ -250,7 +251,7 @@ impl TxSimulator {
 fn parse_snapshot_transactions(values: &[Value]) -> Result<Vec<UnsignedTransaction>> {
     let mut txs = Vec::with_capacity(values.len());
     for value in values {
-        txs.push(build_unsigned_transaction(value)?);
+        txs.push(build_unsigned_transaction_from_processed_tx_json(value)?);
     }
     Ok(txs)
 }

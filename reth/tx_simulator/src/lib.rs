@@ -28,6 +28,7 @@ pub mod contract_method_simulator;
 pub mod header_utils;
 pub mod live_chain_cache;
 pub mod simulation_revert_decoder;
+pub mod unsigned_tx_builder;
 
 // Back-compat module paths for external crates relying on previous layout
 pub mod unsigned_tx_simulator {
