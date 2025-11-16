@@ -16,18 +16,17 @@ use crate::reth_index::RethIndexDB;
 mod address_index;
 mod address_state;
 mod batch_ops;
-mod block_transactions;
+pub mod block;
 mod caching;
 mod gas;
-pub mod rpc;
 mod transactions;
-mod types;
+pub mod types;
 
 pub use crate::contracts::erc20::*;
 pub use address_index::*;
 pub use address_state::*;
+pub use block::{types::*, RpcBlockDataFetcher};
 pub use caching::*;
-pub use rpc::block_data_fetcher::RpcBlockDataFetcher;
 pub use types::*;
 
 /// Central provider for all Reth database queries

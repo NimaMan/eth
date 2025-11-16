@@ -122,6 +122,10 @@ name = "verify_dex_pool_computation"
 path = "examples/defi/verify_dex_pool_computation.rs"
 
 [[example]]
+name = "verify_block_rpc_equivalence"
+path = "examples/block/verify_block_rpc_equivalence.rs"
+
+[[example]]
 name = "liquidity_readers"
 path = "examples/defi/liquidity_readers.rs"
 [[example]]

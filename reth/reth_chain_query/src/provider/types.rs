@@ -4,12 +4,11 @@
 /// provider operations including transactions, blocks, and traces.
 use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::{transaction::TransactionSigned, Recovered};
 use serde::{Deserialize, Serialize};
 
 /// Transaction metadata (the transaction parameters, not execution results)
 /// This is what was submitted to the network, not what happened when it executed
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionMetadata {
     pub hash: B256,
     pub block_number: u64,
@@ -39,7 +38,7 @@ pub struct TransactionMetadata {
 pub type TransactionData = TransactionMetadata;
 
 /// Transaction receipt with logs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransactionReceipt {
     pub tx_hash: B256,
     pub status: bool,
@@ -51,7 +50,7 @@ pub struct TransactionReceipt {
 }
 
 /// Event log from transaction
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Log {
     pub address: Address,
     pub topics: Vec<B256>,
@@ -70,7 +69,7 @@ pub struct TransactionWithTrace {
 }
 
 /// Transaction trace from simulation or RPC
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionTrace {
     pub call_frame: CallFrame,
     pub gas_used: u64,
@@ -79,7 +78,7 @@ pub struct TransactionTrace {
 }
 
 /// Call frame representing execution trace
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallFrame {
     pub from: Address,
     pub to: Option<Address>,
@@ -91,13 +90,6 @@ pub struct CallFrame {
     pub depth: u32,
     pub call_type: CallType,
     pub subcalls: Vec<CallFrame>,
-}
-
-/// Block with transactions (for get_block_with_txs compatibility)
-#[derive(Debug, Clone)]
-pub struct Block {
-    pub header: BlockHeader,
-    pub transactions: Vec<Recovered<TransactionSigned>>,
 }
 
 /// Type of call in trace
@@ -153,61 +145,4 @@ pub struct NonceChange {
     pub address: Address,
     pub before: u64,
     pub after: u64,
-}
-
-/// Complete block with all transactions
-#[derive(Debug, Clone)]
-pub struct BlockTransactions {
-    pub block_number: u64,
-    pub block_hash: B256,
-    pub timestamp: u64,
-    pub gas_used: u64,
-    pub gas_limit: u64,
-    pub base_fee_per_gas: Option<u64>,
-    pub transactions: Vec<FullTransactionData>,
-}
-
-/// Raw block data fetched from the database (optionally including traces)
-#[derive(Debug, Clone)]
-pub struct RawBlockData {
-    pub header: BlockHeader,
-    pub transactions: Vec<TransactionMetadata>,
-    pub receipts: Vec<TransactionReceipt>,
-    pub traces: Option<Vec<TransactionTrace>>,
-}
-
-/// Full transaction data including metadata, receipt, and optional trace
-#[derive(Debug, Clone)]
-pub struct FullTransactionData {
-    /// Transaction metadata (from database)
-    pub tx_metadata: TransactionMetadata,
-    /// Transaction receipt with logs (from database)
-    pub tx_receipt: TransactionReceipt,
-
-    /// Transaction trace from RPC or simulation (optional)
-    pub tx_trace: Option<TransactionTrace>,
-
-    /// State changes computed from trace
-    pub state_changes: Option<StateChanges>,
-}
-
-/// Options for fetching block transactions
-#[derive(Debug, Clone, Default)]
-pub struct BlockTransactionOptions {
-    /// Include trace data (from RPC or simulation)
-    pub include_traces: bool,
-    /// Include state changes
-    pub include_state_changes: bool,
-}
-
-/// Block header information from Headers table
-#[derive(Debug, Clone)]
-pub struct BlockHeader {
-    pub number: u64,
-    pub hash: B256,
-    pub parent_hash: B256,
-    pub timestamp: u64,
-    pub gas_limit: u64,
-    pub gas_used: u64,
-    pub base_fee_per_gas: Option<u64>,
 }

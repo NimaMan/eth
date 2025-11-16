@@ -95,6 +95,16 @@ fn parse_hash(value: &str) -> eyre::Result<B256> {
 }
 
 fn parse_u64_hex(value: &str) -> eyre::Result<u64> {
-    let trimmed = value.strip_prefix("0x").unwrap_or(value);
-    u64::from_str_radix(trimmed, 16).map_err(|err| eyre::eyre!("invalid hex {}: {}", value, err))
+    let trimmed = value.trim();
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        let digits = if hex.is_empty() { "0" } else { hex };
+        u64::from_str_radix(digits, 16).map_err(|err| eyre::eyre!("invalid hex {}: {}", value, err))
+    } else {
+        trimmed
+            .parse::<u64>()
+            .map_err(|err| eyre::eyre!("invalid decimal {}: {}", value, err))
+    }
 }
