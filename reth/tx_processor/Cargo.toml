@@ -1,6 +1,6 @@
 [package]
 name    = "tx_processor"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [features]
@@ -32,6 +32,10 @@ path = "examples/block/process_block.rs"
 [[example]]
 name = "process_block_batch"
 path = "examples/block/process_block_batch.rs"
+
+[[example]]
+name = "compare_block_sources"
+path = "examples/block/compare_block_sources.rs"
 
 [[example]]
 name = "provider_process_block"
@@ -83,6 +87,10 @@ path = "examples/pool_analysis/can_buy_sell_common_tokens_uniswap_v4.rs"
 name = "usdc_to_dai_uniswap_v3"
 path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
 
+[[example]]
+name = "live_block_service"
+path = "examples/live/run_live_block_service.rs"
+
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
@@ -95,6 +103,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
 hex-literal = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 alloy-primitives = "1.1.2"
 alloy-eips = "1.0.38"
 rlp = "0.5"
@@ -104,6 +113,7 @@ tiny-keccak = { version = "2.0", features = ["keccak"] }
 reqwest = { version = "0.11", features = ["json"] } # For benchmark comparison with Python
 futures = "0.3"
 lazy_static = "1.5"
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Basic Alloy dependencies for examples
 alloy-consensus = "1.0.0"

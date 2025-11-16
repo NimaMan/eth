@@ -18,7 +18,7 @@ src/tx_processor/data_models/
 ```
 
 `ProcessedTransaction` is the top-level struct exported via
-`tx_processor::ProcessedTransaction`. All helpers (`ProcessedBlockTransaction`,`ProcessedBlock`, etc.) ultimately compose these data types.
+`tx_processor::ProcessedTransaction`. All helpers (`ProcessedBlockTransactions`,`ProcessedBlock`, etc.) ultimately compose these data types.
 
 ## Core Principles
 
@@ -63,4 +63,3 @@ src/tx_processor/data_models/
 Keeping this directory in sync with the Python data models guarantees that the
 live pipeline (simulators, block processors, alert systems) can exchange
 processed transactions without precision loss or ad-hoc conversions.
-

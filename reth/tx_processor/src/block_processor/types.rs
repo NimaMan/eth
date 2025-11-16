@@ -7,12 +7,12 @@ use reth_chain_query::provider::{
 #[derive(Debug, Clone)]
 pub struct ProcessedBlock {
     pub header: BlockHeader,
-    pub transactions: Vec<ProcessedBlockTransaction>,
+    pub transactions: Vec<ProcessedBlockTransactions>,
 }
 
 /// Per-transaction payload emitted by [`ProcessedBlock`].
 #[derive(Debug, Clone)]
-pub struct ProcessedBlockTransaction {
+pub struct ProcessedBlockTransactions {
     pub metadata: TransactionData,
     pub receipt: TransactionReceipt,
     pub processed: ProcessedTransaction,

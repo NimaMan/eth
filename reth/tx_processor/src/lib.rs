@@ -17,13 +17,17 @@ pub use tx_simulator::{
 
 // Export transaction processing modules
 pub mod block_processor;
+pub mod live_pipeline;
 pub mod processed_tx_provider;
 pub mod simulator;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
 pub use block_processor::{
-    BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockTransaction,
+    BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockTransactions,
+};
+pub use live_pipeline::{
+    LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
 };
 pub use processed_tx_provider::{
     AddressProcessedTxProvider, ProcessedTxProvider, TokenProcessedTxProvider,

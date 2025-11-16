@@ -5,32 +5,33 @@ use crate::tx_processor::data_models::{
     ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
-use alloy_primitives::{keccak256, Address};
+use alloy_primitives::{keccak256, Address, B256};
 use eyre::Result;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::{
-    provider::{RawBlockData, TransactionData, TransactionReceipt, TransactionTrace},
+    provider::{
+        BlockDataFetcher, RawBlockData, RpcBlockDataFetcher, TransactionData, TransactionReceipt,
+        TransactionTrace,
+    },
     RethQueryProvider,
 };
 use rlp::RlpStream;
 use std::sync::Arc;
 
-pub use types::{BlockBatchOptions, ProcessedBlock, ProcessedBlockTransaction};
+pub use types::{BlockBatchOptions, ProcessedBlock, ProcessedBlockTransactions};
 
 /// High-level orchestration for processing entire blocks worth of transactions.
 #[derive(Clone)]
 pub struct BlockProcessor {
-    provider: Arc<RethQueryProvider>,
+    fetcher: Arc<BlockDataFetcher>,
     tx_processor: Arc<TxProcessor>,
 }
 
 impl BlockProcessor {
     /// Build a block processor with a shared provider handle.
     pub fn new(provider: Arc<RethQueryProvider>) -> Self {
-        Self {
-            provider,
-            tx_processor: Arc::new(TxProcessor::new()),
-        }
+        let fetcher = Arc::new(BlockDataFetcher::new(provider));
+        Self::with_block_fetcher(fetcher)
     }
 
     /// Build a block processor re-using an existing [`TxProcessor`].
@@ -38,20 +39,44 @@ impl BlockProcessor {
         provider: Arc<RethQueryProvider>,
         tx_processor: Arc<TxProcessor>,
     ) -> Self {
-        Self {
-            provider,
-            tx_processor,
-        }
+        let fetcher = Arc::new(BlockDataFetcher::new(provider));
+        Self::with_block_fetcher_and_tx(fetcher, tx_processor)
     }
 
-    /// Access the underlying query provider.
-    pub fn provider(&self) -> &Arc<RethQueryProvider> {
-        &self.provider
+    /// Build a block processor with an RPC block fetcher in addition to MDBX.
+    pub fn with_rpc_fetcher(
+        provider: Arc<RethQueryProvider>,
+        rpc_fetcher: RpcBlockDataFetcher,
+    ) -> Self {
+        let fetcher = BlockDataFetcher::new(provider).with_rpc_fetcher(rpc_fetcher);
+        let fetcher = Arc::new(fetcher);
+        Self::with_block_fetcher(fetcher)
+    }
+
+    /// Build a block processor with an explicit block data fetcher handle.
+    pub fn with_block_fetcher(fetcher: Arc<BlockDataFetcher>) -> Self {
+        Self::with_block_fetcher_and_tx(fetcher, Arc::new(TxProcessor::new()))
+    }
+
+    /// Build a block processor with explicit fetcher and tx-processor handles.
+    pub fn with_block_fetcher_and_tx(
+        fetcher: Arc<BlockDataFetcher>,
+        tx_processor: Arc<TxProcessor>,
+    ) -> Self {
+        Self {
+            fetcher,
+            tx_processor,
+        }
     }
 
     /// Access the transaction processor used for decoding.
     pub fn tx_processor(&self) -> &Arc<TxProcessor> {
         &self.tx_processor
+    }
+
+    /// Access the underlying block data fetcher.
+    pub fn block_fetcher(&self) -> &Arc<BlockDataFetcher> {
+        &self.fetcher
     }
 
     /// Process a single block by number, fetching the raw data first.
@@ -66,8 +91,27 @@ impl BlockProcessor {
         include_traces: bool,
     ) -> Result<ProcessedBlock> {
         let raw = self
-            .provider
-            .fetch_raw_block_data(block_number, include_traces)
+            .fetcher
+            .fetch_db_block(block_number, include_traces)
+            .await?;
+        self.process_raw_block(raw).await
+    }
+
+    /// Access the underlying query provider.
+    pub fn provider(&self) -> &Arc<RethQueryProvider> {
+        self.fetcher.provider()
+    }
+
+    /// Process a block fetched through RPC (useful for live pipelines).
+    pub async fn process_block_via_rpc(
+        &self,
+        block_hash: B256,
+        block_number: u64,
+        include_traces: bool,
+    ) -> Result<ProcessedBlock> {
+        let raw = self
+            .fetcher
+            .fetch_rpc_block_by_hash(block_hash, block_number, include_traces)
             .await?;
         self.process_raw_block(raw).await
     }
@@ -132,7 +176,7 @@ impl BlockProcessor {
                 .process_single_transaction(&metadata, &receipt, trace.as_ref())
                 .await?;
 
-            processed_transactions.push(ProcessedBlockTransaction {
+            processed_transactions.push(ProcessedBlockTransactions {
                 metadata,
                 receipt,
                 processed,
