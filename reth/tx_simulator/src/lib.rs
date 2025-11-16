@@ -26,7 +26,7 @@ pub mod tx_chain {
 pub mod block_trace;
 pub mod contract_method_simulator;
 pub mod header_utils;
-pub mod live_chain_cache;
+pub mod live_chain_data;
 pub mod simulation_revert_decoder;
 pub mod tx_builders;
 
@@ -52,11 +52,16 @@ pub mod block_simulation {
     pub use crate::block_trace::types::*;
 }
 
+pub mod live_chain_cache {
+    pub use crate::live_chain_data::live_chain_cache::*;
+}
+
 // Re-export main types
 pub use gas::{
     GasHeuristic, GasInputs, GasResolutionContext, GasTxType, ResolvedGasParameters,
     TxGasParameters,
 };
+pub use live_chain_data::{LiveChainCache, LiveChainCacheBuilder};
 pub use simulator::{RethTxSimulator, TxSimulator};
 pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use single_tx::signed::SignedTransaction;

@@ -197,6 +197,14 @@ impl TxSimulator {
         self.live_chain_cache.clone()
     }
 
+    /// Returns the latest block number advertised by the live cache, if any.
+    pub async fn live_latest_block_number(&self) -> Result<Option<u64>> {
+        let Some(cache) = self.live_chain_cache() else {
+            return Ok(None);
+        };
+        cache.latest_block_number().await
+    }
+
     pub(crate) async fn replay_block_from_live_data(
         &self,
         block_number: u64,
@@ -206,17 +214,21 @@ impl TxSimulator {
             return Ok(None);
         };
 
-        let Some(snapshot) = cache.fetch_processed_block_snapshot(block_number).await? else {
+        let Some(latest_live) = cache.latest_block_number().await? else {
             return Ok(None);
         };
+        if block_number > latest_live {
+            return Ok(None);
+        }
 
         let header = match header_hint {
             Some(header) => header,
             None => {
-                let header_json = snapshot
-                    .header_json()
-                    .ok_or_else(|| eyre!("live snapshot missing header JSON"))?;
-                parse_sealed_header_from_json(header_json)?
+                let header_json = cache
+                    .fetch_block_header(block_number)
+                    .await?
+                    .ok_or_else(|| eyre!("missing live block header for {}", block_number))?;
+                parse_sealed_header_from_json(&header_json)?
             }
         };
 
@@ -232,7 +244,10 @@ impl TxSimulator {
         forked_state.block_header = header.clone();
         forked_state.nonces.clear();
 
-        let transactions = parse_snapshot_transactions(snapshot.transactions())?;
+        let Some(raw_txs) = cache.fetch_processed_block(block_number).await? else {
+            return Ok(None);
+        };
+        let transactions = parse_snapshot_transactions(&raw_txs)?;
         if transactions.is_empty() {
             return Ok(Some(forked_state));
         }
