@@ -41,7 +41,7 @@ impl BlockProcessingLogger {
             .iter()
             .filter(|tx| !tx.processed.status)
             .count();
-        let duration_secs = (processed.processed_at - processed.observation.arrival_time)
+        let duration_secs = (processed.processed_at - processed.head_arrival)
             .num_microseconds()
             .unwrap_or(0) as f64
             / 1_000_000f64;

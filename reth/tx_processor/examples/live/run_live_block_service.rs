@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, sync::Arc, time::Duration};
+use std::{env, path::PathBuf, sync::Arc};
 
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
@@ -12,9 +12,10 @@ async fn main() -> Result<()> {
 
     let reth_datadir = env::var("RETH_DATA_DIR")
         .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-    let beacon_api = env::var("BEACON_API").unwrap_or_else(|_| "http://127.0.0.1:5052".to_string());
     let execution_rpc =
         env::var("EXECUTION_RPC").unwrap_or_else(|_| "http://127.0.0.1:8545".to_string());
+    let execution_ws =
+        env::var("EXECUTION_WS").unwrap_or_else(|_| "ws://127.0.0.1:8546".to_string());
     let redis_url = env::var("REDIS_URL").ok();
     let notifier_channel = env::var("REDIS_BLOCK_CHANNEL")
         .ok()
@@ -28,10 +29,8 @@ async fn main() -> Result<()> {
         .map(|path| PathBuf::from(path));
 
     let processor_config = LiveBlockProcessorConfig::default()
-        .with_beacon_api(beacon_api)
         .with_execution_rpc(execution_rpc)
-        .poll_interval(Duration::from_millis(200))
-        .readiness_timeout(Duration::from_secs(10));
+        .with_execution_ws(execution_ws);
 
     let provider = Arc::new(RethQueryProvider::new(&reth_datadir)?);
 

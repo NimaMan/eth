@@ -27,21 +27,12 @@ impl RedisBlockPublisher {
 
     pub async fn publish_snapshot(&self, snapshot: &LiveBlockSnapshot) -> Result<()> {
         let mut conn = self.connection().await?;
-        let block_key = keys::processed_block_snapshot_key(snapshot.block_number);
         let header_key = keys::block_header_key(snapshot.block_number);
         let latest_key = keys::latest_block_number_key();
         let tx_map_key = keys::processed_transactions_key(snapshot.block_number);
 
         let mut pipe = redis::pipe();
         pipe.atomic();
-
-        {
-            let cmd = pipe.cmd("SET");
-            cmd.arg(&block_key).arg(&snapshot.payload);
-            if let Some(ttl) = self.ttl_seconds {
-                cmd.arg("EX").arg(ttl);
-            }
-        }
 
         pipe.cmd("SET").arg(&latest_key).arg(snapshot.block_number);
 

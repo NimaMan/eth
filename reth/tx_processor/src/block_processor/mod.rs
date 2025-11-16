@@ -23,6 +23,7 @@ pub use types::{BlockBatchOptions, ProcessedBlock, ProcessedBlockTransactions};
 /// High-level orchestration for processing entire blocks worth of transactions.
 #[derive(Clone)]
 pub struct BlockProcessor {
+    provider: Option<Arc<RethQueryProvider>>,
     fetcher: Arc<BlockDataFetcher>,
     tx_processor: Arc<TxProcessor>,
 }
@@ -30,8 +31,8 @@ pub struct BlockProcessor {
 impl BlockProcessor {
     /// Build a block processor with a shared provider handle.
     pub fn new(provider: Arc<RethQueryProvider>) -> Self {
-        let fetcher = Arc::new(BlockDataFetcher::new(provider));
-        Self::with_block_fetcher(fetcher)
+        let fetcher = Arc::new(BlockDataFetcher::new(provider.clone()));
+        Self::with_block_fetcher_impl(Some(provider), fetcher, Arc::new(TxProcessor::new()))
     }
 
     /// Build a block processor re-using an existing [`TxProcessor`].
@@ -39,8 +40,8 @@ impl BlockProcessor {
         provider: Arc<RethQueryProvider>,
         tx_processor: Arc<TxProcessor>,
     ) -> Self {
-        let fetcher = Arc::new(BlockDataFetcher::new(provider));
-        Self::with_block_fetcher_and_tx(fetcher, tx_processor)
+        let fetcher = Arc::new(BlockDataFetcher::new(provider.clone()));
+        Self::with_block_fetcher_impl(Some(provider), fetcher, tx_processor)
     }
 
     /// Build a block processor with an RPC block fetcher in addition to MDBX.
@@ -48,14 +49,15 @@ impl BlockProcessor {
         provider: Arc<RethQueryProvider>,
         rpc_fetcher: RpcBlockDataFetcher,
     ) -> Self {
-        let fetcher = BlockDataFetcher::new(provider).with_rpc_fetcher(rpc_fetcher);
+        let fetcher = BlockDataFetcher::new(provider.clone()).with_rpc_fetcher(rpc_fetcher);
         let fetcher = Arc::new(fetcher);
-        Self::with_block_fetcher(fetcher)
+        Self::with_block_fetcher_impl(Some(provider), fetcher, Arc::new(TxProcessor::new()))
     }
 
     /// Build a block processor with an explicit block data fetcher handle.
     pub fn with_block_fetcher(fetcher: Arc<BlockDataFetcher>) -> Self {
-        Self::with_block_fetcher_and_tx(fetcher, Arc::new(TxProcessor::new()))
+        let provider = fetcher.provider().cloned();
+        Self::with_block_fetcher_impl(provider, fetcher, Arc::new(TxProcessor::new()))
     }
 
     /// Build a block processor with explicit fetcher and tx-processor handles.
@@ -63,7 +65,17 @@ impl BlockProcessor {
         fetcher: Arc<BlockDataFetcher>,
         tx_processor: Arc<TxProcessor>,
     ) -> Self {
+        let provider = fetcher.provider().cloned();
+        Self::with_block_fetcher_impl(provider, fetcher, tx_processor)
+    }
+
+    fn with_block_fetcher_impl(
+        provider: Option<Arc<RethQueryProvider>>,
+        fetcher: Arc<BlockDataFetcher>,
+        tx_processor: Arc<TxProcessor>,
+    ) -> Self {
         Self {
+            provider,
             fetcher,
             tx_processor,
         }
@@ -97,9 +109,9 @@ impl BlockProcessor {
         self.process_raw_block(raw).await
     }
 
-    /// Access the underlying query provider.
-    pub fn provider(&self) -> &Arc<RethQueryProvider> {
-        self.fetcher.provider()
+    /// Access the underlying query provider if configured (MDBX mode only).
+    pub fn provider(&self) -> Option<&Arc<RethQueryProvider>> {
+        self.provider.as_ref()
     }
 
     /// Process a block fetched through RPC (useful for live pipelines).
