@@ -1,5 +1,8 @@
-use reth_chain_query::{provider::RpcBlockDataFetcher, Result, RethQueryProvider};
-use std::env;
+use reth_chain_query::{
+    provider::{BlockDataFetcher, RpcBlockDataFetcher},
+    Result, RethQueryProvider,
+};
+use std::{env, sync::Arc};
 
 /// cargo run --example block/verify_block_rpc_equivalence -- <block_number?>
 #[tokio::main]
@@ -9,7 +12,7 @@ async fn main() -> Result<()> {
     let rpc_url = env::var("EXECUTION_RPC").unwrap_or_else(|_| "http://127.0.0.1:8545".into());
     let args: Vec<String> = env::args().collect();
 
-    let provider = RethQueryProvider::new(&datadir)?;
+    let provider = Arc::new(RethQueryProvider::new(&datadir)?);
     let latest = provider.get_latest_block()?;
     let block_number = if args.len() > 1 {
         args[1].parse::<u64>().unwrap_or(latest)
@@ -22,10 +25,11 @@ async fn main() -> Result<()> {
         block_number, rpc_url
     );
 
-    let db_block = provider.fetch_raw_block_data(block_number, true).await?;
-    let rpc_fetcher = RpcBlockDataFetcher::new(&rpc_url)?;
-    let rpc_block = rpc_fetcher
-        .fetch_raw_block_data(db_block.header.hash, block_number, true)
+    let fetcher =
+        BlockDataFetcher::new(provider).with_rpc_fetcher(RpcBlockDataFetcher::new(&rpc_url)?);
+    let db_block = fetcher.fetch_db_block(block_number, true).await?;
+    let rpc_block = fetcher
+        .fetch_rpc_block_by_hash(db_block.header.hash, block_number, true)
         .await?;
 
     compare_blocks(&db_block, &rpc_block);

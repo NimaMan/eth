@@ -25,7 +25,7 @@ pub mod types;
 pub use crate::contracts::erc20::*;
 pub use address_index::*;
 pub use address_state::*;
-pub use block::{types::*, RpcBlockDataFetcher};
+pub use block::{types::*, BlockDataFetcher, RpcBlockDataFetcher};
 pub use caching::*;
 pub use types::*;
 
