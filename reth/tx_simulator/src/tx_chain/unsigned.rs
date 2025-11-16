@@ -12,9 +12,9 @@ use crate::{
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     tx_chain::sequential::ForkedState,
-    types::{FullSimulationResult, RevertContext, SimulationResult},
+    types::{FullSimulationResult, RevertContext, SimulationResult, ViewFunctionResult},
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use reth_primitives::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
@@ -144,6 +144,34 @@ impl UnsignedTxChainSimulation {
                     .unwrap_or_else(|| acc.code_hash != KECCAK_EMPTY)
             })
             .unwrap_or(false))
+    }
+
+    /// Execute a read-only contract call against the current forked state.
+    pub fn simulate_view_call(
+        &mut self,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ViewFunctionResult> {
+        let view_defaults = &self.simulator.defaults.view_call;
+        let mut unsigned_tx = UnsignedTransaction::default();
+        unsigned_tx.from = Some(view_defaults.from);
+        unsigned_tx.to = Some(contract);
+        unsigned_tx.value = Some(U256::ZERO);
+        unsigned_tx.data = Some(data);
+        unsigned_tx.gas = Some(view_defaults.gas_limit);
+
+        let block_number = self.forked_state.block_number;
+        let result = self.simulator.simulate_on_fork_with_trace(
+            &mut self.forked_state,
+            unsigned_tx,
+            block_number,
+        )?;
+
+        Ok(ViewFunctionResult {
+            success: result.success,
+            output: result.call_trace.output.clone().unwrap_or_default(),
+            gas_used: result.gas_used,
+        })
     }
 
     /// Internal method to execute transaction with fused inspector
