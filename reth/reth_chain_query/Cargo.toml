@@ -50,6 +50,9 @@ parking_lot = "0.12"
 lru = "0.12"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "stream"] }
+eventsource-stream = "0.2"
+tokio-stream = "0.1"
 
 # For RPC verification examples
 jsonrpsee = { version = "0.24", features = ["http-client"] }
@@ -93,10 +96,6 @@ path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
 [[example]]
 name = "verify_block_receipts_rpc_equivalence"
 path = "examples/block/verify_block_receipts_rpc_equivalence.rs"
-
-[[example]]
-name = "signed_bundle_simulation"
-path = "examples/tx_builder/signed_bundle_simulation.rs"
 
 [[example]]
 name = "stablecoin_total_supply"
@@ -143,3 +142,11 @@ path = "examples/reth_index/list_tx_arrivals.rs"
 [[example]]
 name = "write_arrival_for_hash"
 path = "examples/reth_index/write_arrival_for_hash.rs"
+
+[[example]]
+name = "live_head_latency"
+path = "examples/live_chain/head_latency.rs"
+
+[[example]]
+name = "live_head_sample"
+path = "examples/live_chain/head_sample.rs"

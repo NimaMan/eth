@@ -1,5 +1,6 @@
 pub mod contracts;
 pub mod entities;
+pub mod live_chain;
 /// Reth Chain Query Library
 ///
 /// Direct blockchain state queries using Reth's local database.

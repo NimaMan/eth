@@ -367,34 +367,7 @@ impl RethQueryProvider {
 
     /// Get traces for all transactions in a block
     async fn get_block_traces(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
-        // Try RPC first if available
-        if let Some(_rpc_provider) = &self.rpc_provider {
-            match self.get_block_traces_from_rpc(block_number).await {
-                Ok(traces) => return Ok(traces),
-                Err(e) => {
-                    eprintln!(
-                        "Failed to get traces from RPC, falling back to simulation: {}",
-                        e
-                    );
-                }
-            }
-        }
-
-        // Fallback to simulator-based tracing
         self.simulate_block_traces(block_number).await
-    }
-
-    /// FROM RPC - Get traces for entire block
-    async fn get_block_traces_from_rpc(&self, _block_number: u64) -> Result<Vec<TransactionTrace>> {
-        let _rpc_provider = self
-            .rpc_provider
-            .as_ref()
-            .ok_or_else(|| eyre::eyre!("RPC provider not configured"))?;
-
-        // Use debug_traceBlockByNumber
-        // Note: Implementation depends on alloy RPC support
-
-        Err(eyre::eyre!("RPC block traces not yet implemented"))
     }
 
     /// Simulate all transactions in the block to produce call traces
