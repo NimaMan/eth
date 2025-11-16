@@ -75,10 +75,22 @@ impl RpcBlockDataFetcher {
         Ok(traces)
     }
 
+    pub async fn trace_block_by_number(&self, block_number: u64) -> Result<Vec<Value>> {
+        let params = rpc_params![
+            format!("0x{block_number:x}"),
+            serde_json::json!({"tracer": "callTracer", "timeout": "60s"})
+        ];
+        let traces = self
+            .debug
+            .request::<Vec<Value>, _>("debug_traceBlockByNumber", params)
+            .await?;
+        Ok(traces)
+    }
+
     pub async fn fetch_raw_block_data(
         &self,
         block_hash: B256,
-        _block_number: u64,
+        block_number: u64,
         include_traces: bool,
     ) -> Result<RawBlockData> {
         let block_value = self
@@ -94,9 +106,8 @@ impl RpcBlockDataFetcher {
         let receipts = parse_receipts(&receipts_value, header.number)?;
 
         let traces = if include_traces {
-            let hashes = transactions.iter().map(|tx| tx.hash).collect::<Vec<_>>();
-            let trace_values = self.trace_transactions(&hashes).await?;
-            Some(parse_traces(&trace_values)?)
+            let trace_entries = self.trace_block_by_number(block_number).await?;
+            Some(parse_block_traces(trace_entries)?)
         } else {
             None
         };
@@ -236,8 +247,21 @@ fn parse_logs(receipt: &Value, block_number: u64) -> Result<Vec<Log>> {
     Ok(result)
 }
 
+#[allow(dead_code)]
 fn parse_traces(values: &[Value]) -> Result<Vec<TransactionTrace>> {
     values.iter().map(parse_trace).collect()
+}
+
+fn parse_block_traces(entries: Vec<Value>) -> Result<Vec<TransactionTrace>> {
+    let mut traces = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let trace_value = match entry {
+            Value::Object(mut map) => map.remove("result").unwrap_or(Value::Object(map)),
+            other => other,
+        };
+        traces.push(parse_trace(&trace_value)?);
+    }
+    Ok(traces)
 }
 
 fn parse_trace(value: &Value) -> Result<TransactionTrace> {
