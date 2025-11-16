@@ -7,7 +7,13 @@ use alloy_primitives::{Address, Bytes, B256};
 use eyre::Result;
 use hex_literal::hex;
 use reth_primitives::SealedHeader;
-use tx_simulator::contract_method_simulator::encode_contract_read_call_with_address_arg;
+use tx_simulator::{
+    contract_method_simulator::{
+        decode_string_from_contract_output, encode_contract_read_call_with_address_arg,
+    },
+    types::ViewFunctionResult,
+    UnsignedTxChainSimulation,
+};
 
 const TRANSFER_TOPIC: [u8; 32] =
     hex!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
@@ -21,9 +27,10 @@ impl RethQueryProvider {
         token: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
-        tx_hash: Option<B256>,
+        pending_tx_hashes: Option<Vec<B256>>,
     ) -> Result<Option<TokenMetadata>> {
-        self.fetch_metadata_if_erc20(token, block_number, block_header, tx_hash)
+        let hashes = pending_tx_hashes.unwrap_or_default();
+        self.fetch_metadata_if_erc20(token, block_number, block_header, &hashes)
             .await
     }
 
@@ -32,10 +39,11 @@ impl RethQueryProvider {
         address: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
-        tx_hash: Option<B256>,
+        pending_tx_hashes: Option<Vec<B256>>,
     ) -> Result<bool> {
+        let hashes = pending_tx_hashes.unwrap_or_default();
         Ok(self
-            .fetch_metadata_if_erc20(address, block_number, block_header, tx_hash)
+            .fetch_metadata_if_erc20(address, block_number, block_header, &hashes)
             .await?
             .is_some())
     }
@@ -45,7 +53,7 @@ impl RethQueryProvider {
         address: Address,
         block_number: Option<u64>,
         block_header: Option<SealedHeader>,
-        tx_hash: Option<B256>,
+        pending_tx_hashes: &[B256],
     ) -> Result<Option<TokenMetadata>> {
         let resolved_block = block_header
             .as_ref()
@@ -53,9 +61,11 @@ impl RethQueryProvider {
             .or(block_number)
             .unwrap_or(self.get_latest_block()?);
 
-        prepare_state_for_metadata(self, block_number, block_header.clone(), tx_hash).await?;
+        let mut pending_chain =
+            prepare_state_for_metadata(self, block_number, block_header.clone(), pending_tx_hashes)
+                .await?;
 
-        if block_header.is_none() {
+        if pending_chain.is_none() && block_header.is_none() {
             self.simulator().assert_block_available(resolved_block)?;
         }
 
@@ -78,6 +88,7 @@ impl RethQueryProvider {
             Bytes::copy_from_slice(&erc20::TOTAL_SUPPLY),
             resolved_block,
             block_header.clone(),
+            pending_chain.as_mut(),
         )
         .await?
         {
@@ -93,6 +104,7 @@ impl RethQueryProvider {
             balance_payload,
             resolved_block,
             block_header.clone(),
+            pending_chain.as_mut(),
         )
         .await?
         .is_none()
@@ -108,6 +120,7 @@ impl RethQueryProvider {
             allowance_payload,
             resolved_block,
             block_header.clone(),
+            pending_chain.as_mut(),
         )
         .await?
         .is_none()
@@ -115,14 +128,55 @@ impl RethQueryProvider {
             return Ok(None);
         }
 
-        let header_clone_a = block_header.clone();
-        let header_clone_b = block_header.clone();
-        let header_clone_c = block_header.clone();
-        let (name, symbol, decimals) = tokio::try_join!(
-            self.get_token_name(address, Some(resolved_block), header_clone_a),
-            self.get_token_symbol(address, Some(resolved_block), header_clone_b),
-            self.get_token_decimals(address, Some(resolved_block), header_clone_c),
-        )?;
+        let (name, symbol, decimals) = if let Some(chain) = pending_chain.as_mut() {
+            let name_res = self
+                .execute_view_call_with_pending(
+                    address,
+                    Bytes::copy_from_slice(&erc20::NAME),
+                    resolved_block,
+                    block_header.clone(),
+                    Some(chain),
+                )
+                .await?;
+            let symbol_res = self
+                .execute_view_call_with_pending(
+                    address,
+                    Bytes::copy_from_slice(&erc20::SYMBOL),
+                    resolved_block,
+                    block_header.clone(),
+                    Some(chain),
+                )
+                .await?;
+            let decimals_value = call_uint256_view(
+                self,
+                address,
+                Bytes::copy_from_slice(&erc20::DECIMALS),
+                resolved_block,
+                block_header.clone(),
+                Some(chain),
+            )
+            .await?;
+
+            let decimals = match decimals_value {
+                Some(value) => value.to::<u8>(),
+                None => return Ok(None),
+            };
+
+            (
+                decode_string_from_contract_output(&name_res.output),
+                decode_string_from_contract_output(&symbol_res.output),
+                decimals,
+            )
+        } else {
+            let header_clone_a = block_header.clone();
+            let header_clone_b = block_header.clone();
+            let header_clone_c = block_header.clone();
+            tokio::try_join!(
+                self.get_token_name(address, Some(resolved_block), header_clone_a),
+                self.get_token_symbol(address, Some(resolved_block), header_clone_b),
+                self.get_token_decimals(address, Some(resolved_block), header_clone_c),
+            )?
+        };
 
         Ok(Some(TokenMetadata {
             address,
@@ -131,5 +185,21 @@ impl RethQueryProvider {
             decimals,
             total_supply,
         }))
+    }
+
+    async fn execute_view_call_with_pending(
+        &self,
+        contract: Address,
+        data: Bytes,
+        block_number: u64,
+        block_header: Option<SealedHeader>,
+        chain: Option<&mut UnsignedTxChainSimulation>,
+    ) -> Result<ViewFunctionResult> {
+        if let Some(chain) = chain {
+            chain.simulate_view_call(contract, data)
+        } else {
+            self.simulate_contract_view_call(contract, data, Some(block_number), block_header)
+                .await
+        }
     }
 }

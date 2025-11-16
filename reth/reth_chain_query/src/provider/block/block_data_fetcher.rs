@@ -13,7 +13,7 @@ use crate::provider::{
 /// Higher-level processors can hold a single [`BlockDataFetcher`] and decide
 /// which backing source (database vs RPC) they want to use for each block.
 pub struct BlockDataFetcher {
-    provider: Arc<RethQueryProvider>,
+    provider: Option<Arc<RethQueryProvider>>,
     rpc_fetcher: Option<RpcBlockDataFetcher>,
 }
 
@@ -21,8 +21,16 @@ impl BlockDataFetcher {
     /// Build a new fetcher backed by the local MDBX database.
     pub fn new(provider: Arc<RethQueryProvider>) -> Self {
         Self {
-            provider,
+            provider: Some(provider),
             rpc_fetcher: None,
+        }
+    }
+
+    /// Build a fetcher that only talks to RPC (no MDBX access).
+    pub fn rpc_only(rpc_fetcher: RpcBlockDataFetcher) -> Self {
+        Self {
+            provider: None,
+            rpc_fetcher: Some(rpc_fetcher),
         }
     }
 
@@ -34,8 +42,8 @@ impl BlockDataFetcher {
     }
 
     /// Access the underlying provider handle.
-    pub fn provider(&self) -> &Arc<RethQueryProvider> {
-        &self.provider
+    pub fn provider(&self) -> Option<&Arc<RethQueryProvider>> {
+        self.provider.as_ref()
     }
 
     /// Access the RPC fetcher if configured.
@@ -49,7 +57,11 @@ impl BlockDataFetcher {
         block_number: u64,
         include_traces: bool,
     ) -> Result<RawBlockData> {
-        self.provider
+        let provider = self
+            .provider
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("database access not configured for this fetcher"))?;
+        provider
             .fetch_raw_block_data(block_number, include_traces)
             .await
     }

@@ -55,7 +55,7 @@ eventsource-stream = "0.2"
 tokio-stream = "0.1"
 
 # For RPC verification examples
-jsonrpsee = { version = "0.24", features = ["http-client"] }
+jsonrpsee = { version = "0.24", features = ["http-client", "ws-client"] }
 alloy-rpc-types-trace = "1.0"
 
 # Address State examples
@@ -154,3 +154,7 @@ path = "examples/live_chain/head_latency.rs"
 [[example]]
 name = "live_head_sample"
 path = "examples/live_chain/head_sample.rs"
+
+[[example]]
+name = "live_head_channel_comparison"
+path = "examples/live_chain/head_channel_comparison.rs"
