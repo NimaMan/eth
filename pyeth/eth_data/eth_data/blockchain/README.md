@@ -21,7 +21,8 @@ Reth index writer fits in.
 3. **Redis snapshot**  
    Once a block is processed, `_publish_live_block_snapshot` serialises the
    result via the **live data registry** and stores it under
-   `live:block:<number>` plus `live:block:latest`. The snapshot includes:
+   `block:processed_block_snapshot:<number>` plus `block:latest_block_number`.
+   The snapshot includes:
    - canonical header (all roots, timestamps, base fee…)
    - transaction count
    - full processed transactions (JSON-normalised: sets → lists, big ints → str,
@@ -30,15 +31,15 @@ Reth index writer fits in.
 
 4. **RabbitMQ notification**  
    After the snapshot is written, the processor drops a minimal message
-   (`{"block_number": N}`) onto the `blocks_exchange` FANOUT exchange.
+   (`{"block_number": N}`) onto the `block_published_notifier` FANOUT exchange.
    Each consumer maintains its own exclusive, auto-delete queue configured with
    `x-max-length = 1` so they always see the newest block number without
    accumulating history.
 
 5. **Consumers hydrate from Redis**  
-   `eth_token.token_manager.BlockSubscriber` (and any other consumer) receives
+   `eth_token.token_manager.LiveBlockSnapshotSubscriber` (and any other consumer) receives
    the RabbitMQ message, reads the block number, and calls the live data
-   registry’s `LiveDataReader.get_block_snapshot(number)` to fetch the full
+   registry’s `RedisSnapshotReader.get_block_snapshot(number)` to fetch the full
    payload. That snapshot is then fed to `BlockTokenProcessor`, ensuring every
    consumer sees identical processed data regardless of when they started.
 
@@ -71,10 +72,10 @@ every consumer a consistent, JSON-safe snapshot to read at their own pace.
   That guarantees only the latest block number is retained.
 - Because the exchange is FANOUT, every consumer gets every notification.
 
-## Block Subscriber Flow
+## Live Block Snapshot Subscriber Flow
 
 1. RabbitMQ message arrives (`{"block_number": 23790000}`).
-2. Subscriber calls `LiveDataReader.get_block_snapshot(23790000)`.
+2. Subscriber calls `RedisSnapshotReader.get_block_snapshot(23790000)`.
 3. Snapshot is validated (must contain header + transactions).
 4. Callback (or `BlockTokenProcessor`) receives the fully hydrated block.
 
@@ -104,18 +105,18 @@ WebSocket newHeads
         |                                 |                               |
         | write snapshot (block, txs)     |                               |
         |-------------------------------->|                               |
-        |                                 | store under live:block:<n>    |
+|                                 | store under block:processed_block_snapshot:<n>    |
         |                                 |                               |
         | publish {"block_number": n}     |                               |
         |---------------------------------------------------------->      |
         |                                 |                               |
         v                                 v                               v
                       Redis snapshot readers        RabbitMQ queue (x-max-length=1)
-                      (BlockSubscriber, notebooks, etc.)
+                      (LiveBlockSnapshotSubscriber, notebooks, etc.)
 
-BlockSubscriber flow:
+LiveBlockSnapshotSubscriber flow:
    RabbitMQ message -> read block number
-   -> LiveDataReader.get_block_snapshot(n)
+   -> RedisSnapshotReader.get_block_snapshot(n)
    -> feed full payload to BlockTokenProcessor
 
 Optional path (independent):
