@@ -64,7 +64,7 @@ async fn execute_pepe_trading_workflow(
     println!("\n🚀 Starting PEPE workflow at block {}", block);
 
     // Start a simulation chain with trace capability (use latest block)
-    let mut chain = simulator.start_simulation_chain(None, None).await?;
+    let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
 
     // Step 1: Buy PEPE tokens with 0.1 ETH

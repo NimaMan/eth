@@ -242,7 +242,7 @@ async fn main() -> Result<()> {
         // Direct simulation with unsigned call (matching RPC behavior)
         let direct_result = if let Some(unsigned_tx) = unsigned_tx {
             simulator
-                .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(*sim_block), None)
+                .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(*sim_block))
                 .await
         } else {
             continue;

@@ -67,7 +67,7 @@ async fn check_token_info(
     // totalSupply() - 0x18160ddd
     let total_supply_data = Bytes::from(hex::decode("18160ddd")?);
     let result = simulator
-        .simulate_view_function(token, total_supply_data, None, None)
+        .simulate_view_function(token, total_supply_data, None)
         .await?;
 
     if result.success {
@@ -78,7 +78,7 @@ async fn check_token_info(
     // decimals() - 0x313ce567
     let decimals_data = Bytes::from(hex::decode("313ce567")?);
     let result = simulator
-        .simulate_view_function(token, decimals_data, None, None)
+        .simulate_view_function(token, decimals_data, None)
         .await?;
 
     let decimals = if result.success {
@@ -92,7 +92,7 @@ async fn check_token_info(
     // symbol() - 0x95d89b41
     let symbol_data = Bytes::from(hex::decode("95d89b41")?);
     let result = simulator
-        .simulate_view_function(token, symbol_data, None, None)
+        .simulate_view_function(token, symbol_data, None)
         .await?;
 
     if result.success {
@@ -103,7 +103,7 @@ async fn check_token_info(
     // name() - 0x06fdde03
     let name_data = Bytes::from(hex::decode("06fdde03")?);
     let result = simulator
-        .simulate_view_function(token, name_data, None, None)
+        .simulate_view_function(token, name_data, None)
         .await?;
 
     if result.success {
@@ -122,7 +122,7 @@ async fn check_token_info(
             );
 
         let result = simulator
-            .simulate_view_function(token, balance_data, None, None)
+            .simulate_view_function(token, balance_data, None)
             .await?;
 
         if result.success {

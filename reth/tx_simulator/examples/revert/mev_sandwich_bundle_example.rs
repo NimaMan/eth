@@ -105,7 +105,6 @@ async fn main() -> Result<()> {
 
     let options = SequentialSimulationOptions {
         at_block: Some(reference_block),
-        block_header: None,
         stop_on_failure: true, // Bundle must execute atomically
         auto_increment_nonces: true,
         gas_limit_per_tx: None,

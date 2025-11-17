@@ -24,9 +24,9 @@ use crate::{
 use alloy_consensus::transaction::Either;
 use alloy_eips::eip2930::AccessList;
 use alloy_eips::eip7702::{RecoveredAuthorization, SignedAuthorization};
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::collections::HashMap;
-use tokio::task;
+use tokio::{runtime::Handle, task};
 
 // Reth imports
 use alloy_primitives::Address;
@@ -71,20 +71,25 @@ impl TxSimulator {
         }
 
         let simulator = self.clone();
+        let handle = Handle::current();
 
         task::spawn_blocking(move || {
-            // Determine the forked context (either reuse a supplied header or resolve one now).
-            let (mut forked_state, _resolved_block) =
-                if let Some(header) = options.block_header.clone() {
-                    let block_number = header.number;
-                    (
-                        simulator.create_forked_state_with_header(block_number, header)?,
-                        block_number,
-                    )
-                } else {
-                    let block_number = options.at_block.unwrap_or(simulator.get_latest_block()?);
-                    (simulator.create_forked_state(block_number)?, block_number)
-                };
+            // Determine the forked context (historical MDBX or live replay via cache).
+            let latest = simulator.get_latest_block()?;
+            let block_number = options.at_block.unwrap_or(latest);
+
+            let mut forked_state = if block_number <= latest {
+                simulator.create_forked_state(block_number)?
+            } else {
+                handle
+                    .block_on(simulator.replay_block_from_live_data(block_number, None))?
+                    .ok_or_else(|| {
+                        eyre!(
+                            "state for block {} not yet available locally or via live cache",
+                            block_number
+                        )
+                    })?
+            };
 
             let mut results = Vec::new();
             let mut cumulative_gas_used = 0u64;

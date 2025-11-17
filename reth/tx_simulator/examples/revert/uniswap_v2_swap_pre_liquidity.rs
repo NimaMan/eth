@@ -41,11 +41,7 @@ async fn main() -> Result<()> {
     };
 
     let result = simulator
-        .simulate_unsigned_transaction_with_trace(
-            unsigned.clone(),
-            Some(BLOCK_BEFORE_LIQUIDITY),
-            None,
-        )
+        .simulate_unsigned_transaction_with_trace(unsigned.clone(), Some(BLOCK_BEFORE_LIQUIDITY))
         .await?;
 
     let state = simulator.get_chain_state_at_block(BLOCK_BEFORE_LIQUIDITY)?;

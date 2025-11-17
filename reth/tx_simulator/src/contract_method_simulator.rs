@@ -4,16 +4,12 @@
 /// without creating a transaction. These are commonly used for querying token balances,
 /// total supply, decimals, and other contract state.
 use crate::{
-    config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
     types::{ViewCallOverrides, ViewFunctionResult},
 };
 use alloy_primitives::{Address, Bytes, U256};
-use eyre::{eyre, Result};
-use reth_primitives::SealedHeader;
-use reth_provider::StateProviderBox;
-use tokio::time::{sleep, Duration};
+use eyre::Result;
 
 impl TxSimulator {
     /// Simulate a read-only contract method call (view/pure function)
@@ -31,7 +27,6 @@ impl TxSimulator {
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
         overrides: Option<ViewCallOverrides>,
     ) -> Result<ViewFunctionResult> {
         let resolved = overrides
@@ -60,7 +55,7 @@ impl TxSimulator {
 
         // We need to use the trace version to get the actual output data
         let result = self
-            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block), block_header)
+            .simulate_unsigned_transaction_with_trace(unsigned_tx, Some(block))
             .await?;
 
         // Extract the output from the call trace
@@ -84,61 +79,9 @@ impl TxSimulator {
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<ViewFunctionResult> {
-        self.simulate_contract_read_only_call_with_options(
-            contract,
-            data,
-            block_number,
-            block_header,
-            None,
-        )
-        .await
-    }
-
-    /// Attempt to load state for the requested block, retrying briefly if the database
-    /// has not indexed the block yet (common for live feeds).
-    pub(crate) async fn load_state_for_block(&self, block_number: u64) -> Result<StateProviderBox> {
-        self.assert_block_available(block_number)?;
-        let retry_delay = Duration::from_millis(STATE_RETRY_DELAY_MS);
-
-        for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
-            let simulator = self.clone();
-            match tokio::task::spawn_blocking(move || {
-                simulator
-                    .provider_factory
-                    .history_by_block_number(block_number)
-            })
+        self.simulate_contract_read_only_call_with_options(contract, data, block_number, None)
             .await
-            {
-                Ok(Ok(state)) => return Ok(state),
-                Ok(Err(err)) => {
-                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
-                        return Err(eyre!(
-                            "Failed to fetch state for block {}: {}",
-                            block_number,
-                            err
-                        ));
-                    }
-                }
-                Err(join_err) => {
-                    if attempt == STATE_RETRY_MAX_ATTEMPTS {
-                        return Err(eyre!(
-                            "State fetch task panicked for block {}: {}",
-                            block_number,
-                            join_err
-                        ));
-                    }
-                }
-            }
-
-            sleep(retry_delay).await;
-        }
-
-        Err(eyre!(
-            "Failed to obtain state provider for block {}",
-            block_number
-        ))
     }
 }
 

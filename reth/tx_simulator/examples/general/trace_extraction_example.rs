@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     };
 
     let trace_only = simulator
-        .simulate_unsigned_transaction_with_trace(eth_transfer.clone(), Some(test_block), None)
+        .simulate_unsigned_transaction_with_trace(eth_transfer.clone(), Some(test_block))
         .await?;
     let full_trace = simulator
         .simulate_unsigned_transaction_with_full_trace_at_block(eth_transfer, test_block)

@@ -86,7 +86,7 @@ async fn execute_trading_workflow(
     println!("\n🚀 Starting {} workflow at block {}", token_symbol, block);
 
     // Start a simulation chain with trace capability (use latest block)
-    let mut chain = simulator.start_simulation_chain(None, None).await?;
+    let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
 
     // Step 1: Buy tokens with 0.1 ETH

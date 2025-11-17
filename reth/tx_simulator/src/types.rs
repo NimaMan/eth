@@ -5,7 +5,6 @@
 use crate::gas::TxGasParameters;
 use alloy_primitives::{Address, Bytes, Log as AlloyLog, U256};
 pub use alloy_rpc_types_trace::geth::{CallFrame, StructLog};
-use reth_primitives::SealedHeader;
 use std::collections::HashMap;
 
 /// Additional context to help explain reverts when raw error data is missing.
@@ -72,8 +71,6 @@ pub struct SequentialSimulationResult {
 pub struct SequentialSimulationOptions {
     /// Block number to simulate at (None = latest)
     pub at_block: Option<u64>,
-    /// Optional pre-fetched block header to reuse (bypasses header lookup when provided)
-    pub block_header: Option<SealedHeader>,
     /// Whether to stop simulation on first failure (default: true)
     pub stop_on_failure: bool,
     /// Whether to auto-increment nonces for repeated senders (default: true)
@@ -86,7 +83,6 @@ impl Default for SequentialSimulationOptions {
     fn default() -> Self {
         Self {
             at_block: None,
-            block_header: None,
             stop_on_failure: true,
             auto_increment_nonces: true,
             gas_limit_per_tx: None,

@@ -192,8 +192,9 @@ against Reth’s local state without broadcasting anything. They all share the s
 pipeline:
 
 1. Resolve the block context (header + state snapshot). Callers may provide a `SealedHeader`; if
-   they pass `None` we pull the canonical header from MDBX and wait for the state snapshot to
-   become available.
+   they pass `None` we first try the canonical MDBX snapshot and, when the requested block is ahead
+   of the local database, automatically hydrate it from the live Redis feed by replaying the
+   missing processed transactions.
 2. Build an `TxEnv` from the `UnsignedTransaction`, including automatic nonce detection and
    gas-price resolution (legacy or EIP-1559) when fields are omitted.
 3. Spin up a revm instance with tracing configured to the requested fidelity, execute the call, and
@@ -206,7 +207,7 @@ Available methods:
 | `simulate_unsigned_transaction(unsigned)` | Runs the call against the latest canonical block and returns a `SimulationResult`. | Quick “does it succeed, how much gas?” checks. |
 | `simulate_unsigned_transaction_at_block(unsigned, block_number)` | Same as above but pinned to a specific block. | Historical replays or deterministic diffs. |
 | `simulate_unsigned_transaction_on_state(unsigned, block_header, state)` | Executes using a pre-fetched header/state snapshot. | Callers that already hold their own fork/context (e.g., bundle simulators). |
-| `simulate_unsigned_transaction_with_trace(unsigned, block_number?, block_header?)` | Returns a `FullSimulationResult` that includes the `CallFrame` tree (logs/returns, no `struct_logs`). Automatically resolves the block context unless both arguments are supplied. | When you need decoded internal calls/logs similar to `debug_traceCall`. |
+| `simulate_unsigned_transaction_with_trace(unsigned, block_number?)` | Returns a `FullSimulationResult` that includes the `CallFrame` tree (logs/returns, no `struct_logs`). Automatically resolves the block context via the chain data loader when `block_number` is omitted. | When you need decoded internal calls/logs similar to `debug_traceCall`. |
 | `simulate_unsigned_transaction_with_trace_on_state(unsigned, block_header, state)` | Same as above but accepts a prepared context. | Fork-aware callers that reuse state snapshots. |
 | `simulate_unsigned_transaction_with_full_trace_at_block(unsigned, block_number)` | Highest-fidelity trace (logs + step recording) for a block. | Deep debugging, MEV/arb research, replaying DeFi interactions. |
 | `simulate_unsigned_transaction_with_full_trace_on_state(unsigned, block_header, state)` | Full trace using a prepared context. | When the caller already fetched header/state (e.g., parallel pipelines). |
@@ -220,9 +221,9 @@ All of the public APIs return:
 Implementation notes:
 
 * `prepare_block_context` orchestrates header resolution (`fetch_block_header`) and the
-  retrying state loader (`load_state_for_block`). The defaults are tuned for live usage (12
-  attempts with 25 ms delay) to smooth over the brief gap between header import and state
-  availability.
+  retrying state loader (`load_state_for_block`). It will fall back to the live Redis snapshots
+  and replay the missing blocks whenever MDBX hasn’t indexed them yet, so consumers no longer need
+  to pass canonical headers explicitly.
 * `create_tx_env` handles nonce detection, legacy vs. EIP-1559 pricing rules, and default gas
   limits when none are supplied.
 * The actual execution happens in `run_unsigned_transaction[_with_trace]`, ensuring every public
@@ -248,7 +249,7 @@ Behavior:
 #### tx_chain::unsigned (Stateful Unsigned Chain)
 
 Entry point:
-- `TxSimulator::start_simulation_chain(&self, at_block: Option<u64>, block_header: Option<SealedHeader>) -> eyre::Result<UnsignedTxChainSimulation>`
+- `TxSimulator::start_simulation_chain(&self, at_block: Option<u64>) -> eyre::Result<UnsignedTxChainSimulation>`
 
 Methods:
 - `step(&mut self, unsigned: UnsignedTransaction) -> eyre::Result<SimulationResult>`
@@ -286,10 +287,10 @@ Entry point:
 - `TxSimulator::simulate_unsigned_tx_sequence(&self, txs: Vec<UnsignedTransaction>, options: SequentialSimulationOptions) -> eyre::Result<SequentialSimulationResult>`
 
 Options:
-- `SequentialSimulationOptions { at_block: Option<u64>, block_header: Option<SealedHeader>, stop_on_failure: bool, auto_increment_nonces: bool, gas_limit_per_tx: Option<u64> }`
+- `SequentialSimulationOptions { at_block: Option<u64>, stop_on_failure: bool, auto_increment_nonces: bool, gas_limit_per_tx: Option<u64> }`
 
 Semantics:
-- Resolves a forked state once (using `block_header` when supplied) and reuses a fused inspector across the entire sequence.
+- Resolves a forked state once (using MDBX when available or live replay via `ChainDataLoader`) and reuses a fused inspector across the entire sequence.
 - Returns per-transaction results plus aggregate counters; respects `stop_on_failure`.
 - `simulate_on_fork_with_trace` now populates `struct_logs` when full tracing is requested.
 

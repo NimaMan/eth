@@ -71,7 +71,7 @@ async fn execute_floki_trading_workflow(
     println!("\n🚀 Starting FLOKI workflow at block {}", block);
 
     // Start a simulation chain with trace capability (use latest block)
-    let mut chain = simulator.start_simulation_chain(None, None).await?;
+    let mut chain = simulator.start_simulation_chain(None).await?;
     println!("📍 Chain initialized");
 
     // Step 1: Buy FLOKI tokens with 0.1 ETH
@@ -223,7 +223,7 @@ async fn execute_floki_trading_workflow(
     println!("This tests if state persistence is the issue.\n");
 
     // Start a fresh chain
-    let mut chain2 = simulator.start_simulation_chain(None, None).await?;
+    let mut chain2 = simulator.start_simulation_chain(None).await?;
     println!("📍 Fresh chain initialized");
 
     // Step 1: Buy with step() (ensures state persistence)
@@ -310,7 +310,7 @@ async fn execute_floki_trading_workflow(
     println!("REDUCED AMOUNT TEST: Selling only 10,000 FLOKI");
     println!("{}", "=".repeat(60));
 
-    let mut chain3 = simulator.start_simulation_chain(None, None).await?;
+    let mut chain3 = simulator.start_simulation_chain(None).await?;
     println!("\n📍 Fresh chain initialized for reduced amount test");
 
     // Buy and approve with step()

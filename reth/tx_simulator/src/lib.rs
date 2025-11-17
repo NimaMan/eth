@@ -1,3 +1,4 @@
+pub mod chain_data_loader;
 pub mod config;
 pub mod gas;
 pub mod simulator;

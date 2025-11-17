@@ -250,7 +250,6 @@ println!("Call trace depth: {}", full_result.call_trace.calls.len());
 ```rust
 let options = SequentialSimulationOptions {
     at_block: Some(block_number),
-    block_header: None,
     stop_on_failure: true,
     auto_increment_nonces: true,
     gas_limit_per_tx: Some(300_000),
@@ -265,7 +264,7 @@ let result = simulator
 
 ```rust
 // Start a simulation chain
-let mut chain = simulator.start_simulation_chain(Some(block_number), None).await?;
+let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
 
 // Execute transactions step by step
 let buy_result = chain.step(buy_tx).await?;
@@ -483,7 +482,7 @@ println!("Bundle success: {}", result.sequence_success);
 
 ```rust
 // Start simulation chain
-let mut chain = simulator.start_simulation_chain(None, None).await?;
+let mut chain = simulator.start_simulation_chain(None).await?;
 
 // Execute buy transaction
 let buy_result = chain.step(buy_tx).await?;

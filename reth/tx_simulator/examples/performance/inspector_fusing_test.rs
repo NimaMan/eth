@@ -41,7 +41,6 @@ async fn main() -> Result<()> {
 
     let options = SequentialSimulationOptions {
         at_block: None,
-        block_header: None,
         stop_on_failure: false,
         auto_increment_nonces: false,
         gas_limit_per_tx: Some(30_000),

@@ -16,7 +16,6 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -70,7 +69,7 @@ impl UnsignedTxChainSimulation {
     ///
     /// # Example
     /// ```rust
-    /// let mut chain = simulator.start_simulation_chain(None, None).await?;
+    /// let mut chain = simulator.start_simulation_chain(None).await?;
     /// let result = chain.step(buy_unsigned_tx).await?;
     /// // State now includes the effects of buy_unsigned_tx
     /// ```
@@ -291,7 +290,7 @@ impl TxSimulator {
     /// # Example
     /// ```rust
     /// let simulator = TxSimulator::new("/path/to/db")?;
-    /// let mut chain = simulator.start_simulation_chain(None, None).await?;
+    /// let mut chain = simulator.start_simulation_chain(None).await?;
     ///
     /// // Execute transactions sequentially with state preservation
     /// let buy_result = chain.step(buy_tx).await?;
@@ -301,12 +300,14 @@ impl TxSimulator {
     pub async fn start_simulation_chain(
         &self,
         at_block: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<UnsignedTxChainSimulation> {
-        if let Some(header) = block_header.clone() {
-            let block_number = header.number;
+        let latest = self.get_latest_block()?;
+        let block_number = at_block.unwrap_or(latest);
+
+        if block_number > latest {
             if let Some(forked_state) = self
-                .replay_block_from_live_data(block_number, Some(header.clone()))
+                .chain_data_loader()
+                .replay_live_state(block_number, None)
                 .await?
             {
                 return Ok(UnsignedTxChainSimulation::new(
@@ -314,26 +315,13 @@ impl TxSimulator {
                     forked_state,
                 ));
             }
-            let forked_state = self.create_forked_state_with_header(block_number, header)?;
-            return Ok(UnsignedTxChainSimulation::new(
-                Arc::new(self.clone()),
-                forked_state,
+            return Err(eyre::eyre!(
+                "state for block {} not yet available locally or via live cache",
+                block_number
             ));
         }
 
-        let latest = self.get_latest_block()?;
-        let block_number = at_block.unwrap_or(latest);
-        if block_number > latest {
-            if let Some(forked_state) = self.replay_block_from_live_data(block_number, None).await?
-            {
-                return Ok(UnsignedTxChainSimulation::new(
-                    Arc::new(self.clone()),
-                    forked_state,
-                ));
-            }
-        }
         let forked_state = self.create_forked_state(block_number)?;
-
         Ok(UnsignedTxChainSimulation::new(
             Arc::new(self.clone()),
             forked_state,

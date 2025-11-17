@@ -5,9 +5,11 @@
 /// RPC. The "full trace" helpers enable step recording so `FullSimulationResult::struct_logs` is populated,
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
+    chain_data_loader::{BlockContext, BlockStateProvider},
     gas::{GasHeuristic, GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
+    tx_chain::sequential::ForkedState,
     types::{FullSimulationResult, RevertContext, SimulationResult},
 };
 use eyre::Result;
@@ -23,7 +25,7 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame, GethDefaultTracingOptions, StructLog};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
-use reth_provider::{HeaderProvider, StateProvider, StateProviderBox};
+use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -103,9 +105,10 @@ impl TxSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<SimulationResult> {
-        let (block_header, state) = self.prepare_block_context(block_number, None).await?;
-        self.execute_unsigned_transaction(unsigned_tx, block_header, state)
+        let context = self.prepare_block_context(block_number).await?;
+        self.execute_with_block_context(unsigned_tx, context, UnsignedTraceMode::None)
             .await
+            .map(UnsignedExecutionResult::into_simulation)
     }
 
     /// Simulate an unsigned transaction using a pre-fetched header and state snapshot.
@@ -129,14 +132,18 @@ impl TxSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<FullSimulationResult> {
         let block_number = block_number.unwrap_or(self.get_latest_block()?);
-        let (block_header, state) = self
-            .prepare_block_context(block_number, block_header)
-            .await?;
-        self.execute_unsigned_transaction_with_trace(unsigned_tx, block_header, state)
-            .await
+        let context = self.prepare_block_context(block_number).await?;
+        self.execute_with_block_context(
+            unsigned_tx,
+            context,
+            UnsignedTraceMode::Call {
+                call_config: CallConfig::default().with_log(),
+            },
+        )
+        .await
+        .map(UnsignedExecutionResult::into_full)
     }
 
     /// Simulate an unsigned transaction with a pre-fetched context and capture a callTracer-style trace.
@@ -160,9 +167,16 @@ impl TxSimulator {
         unsigned_tx: UnsignedTransaction,
         block_number: u64,
     ) -> Result<FullSimulationResult> {
-        let (block_header, state) = self.prepare_block_context(block_number, None).await?;
-        self.execute_unsigned_transaction_with_full_trace(unsigned_tx, block_header, state)
-            .await
+        let context = self.prepare_block_context(block_number).await?;
+        self.execute_with_block_context(
+            unsigned_tx,
+            context,
+            UnsignedTraceMode::Full {
+                call_config: CallConfig::default().with_log(),
+            },
+        )
+        .await
+        .map(UnsignedExecutionResult::into_full)
     }
 
     /// Simulate an unsigned transaction with a pre-fetched context and the highest-fidelity trace.
@@ -180,25 +194,91 @@ impl TxSimulator {
             .await
     }
 
-    async fn prepare_block_context(
+    async fn execute_with_block_context(
         &self,
-        block_number: u64,
-        block_header: Option<SealedHeader>,
-    ) -> Result<(SealedHeader, StateProviderBox)> {
-        let resolved_header = match block_header {
-            Some(block_header) => block_header,
-            None => self.fetch_block_header(block_number)?,
-        };
-        let state = self.load_state_for_block(block_number).await?;
-        Ok((resolved_header, state))
+        unsigned_tx: UnsignedTransaction,
+        context: BlockContext,
+        trace_mode: UnsignedTraceMode,
+    ) -> Result<UnsignedExecutionResult> {
+        match context.state {
+            BlockStateProvider::Historical(state) => {
+                self.execute_on_state_provider(unsigned_tx, context.header, state, trace_mode)
+                    .await
+            }
+            BlockStateProvider::LiveFork(mut fork_state) => {
+                self.execute_on_live_fork(unsigned_tx, &mut fork_state, trace_mode)
+            }
+        }
     }
 
-    fn fetch_block_header(&self, block_number: u64) -> Result<SealedHeader> {
-        let provider = self.provider_factory.provider()?;
-        let header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-        Ok(SealedHeader::new_unhashed(header))
+    async fn execute_on_state_provider(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        block_header: SealedHeader,
+        state: StateProviderBox,
+        trace_mode: UnsignedTraceMode,
+    ) -> Result<UnsignedExecutionResult> {
+        match trace_mode {
+            UnsignedTraceMode::None => self
+                .execute_unsigned_transaction(unsigned_tx, block_header, state)
+                .await
+                .map(|simulation| UnsignedExecutionResult {
+                    simulation,
+                    call_trace: None,
+                    struct_logs: None,
+                    logs: Vec::new(),
+                }),
+            UnsignedTraceMode::Call { .. } => self
+                .execute_unsigned_transaction_with_trace(unsigned_tx, block_header, state)
+                .await
+                .map(|full| Self::execution_from_full_result(full, false)),
+            UnsignedTraceMode::Full { .. } => self
+                .execute_unsigned_transaction_with_full_trace(unsigned_tx, block_header, state)
+                .await
+                .map(|full| Self::execution_from_full_result(full, true)),
+        }
+    }
+
+    fn execute_on_live_fork(
+        &self,
+        unsigned_tx: UnsignedTransaction,
+        forked_state: &mut ForkedState,
+        trace_mode: UnsignedTraceMode,
+    ) -> Result<UnsignedExecutionResult> {
+        match trace_mode {
+            UnsignedTraceMode::None => {
+                let simulation = self.simulate_on_fork_without_trace(forked_state, unsigned_tx)?;
+                Ok(UnsignedExecutionResult {
+                    simulation,
+                    call_trace: None,
+                    struct_logs: None,
+                    logs: Vec::new(),
+                })
+            }
+            UnsignedTraceMode::Call { .. } => {
+                let mut full = self.simulate_on_fork_with_trace(
+                    forked_state,
+                    unsigned_tx,
+                    forked_state.block_number,
+                )?;
+                full.struct_logs = None;
+                Ok(Self::execution_from_full_result(full, false))
+            }
+            UnsignedTraceMode::Full { .. } => {
+                let full = self.simulate_on_fork_with_trace(
+                    forked_state,
+                    unsigned_tx,
+                    forked_state.block_number,
+                )?;
+                Ok(Self::execution_from_full_result(full, true))
+            }
+        }
+    }
+
+    async fn prepare_block_context(&self, block_number: u64) -> Result<BlockContext> {
+        self.chain_data_loader()
+            .load_block_context(block_number, None)
+            .await
     }
 
     async fn execute_unsigned_transaction(
@@ -379,6 +459,47 @@ impl TxSimulator {
             call_trace,
             struct_logs,
             logs: emitted_logs,
+        })
+    }
+
+    fn execution_from_full_result(
+        mut full: FullSimulationResult,
+        keep_struct_logs: bool,
+    ) -> UnsignedExecutionResult {
+        let struct_logs = if keep_struct_logs {
+            full.struct_logs.take()
+        } else {
+            None
+        };
+        let simulation = SimulationResult {
+            success: full.success,
+            gas_used: full.gas_used,
+            revert_reason: full.revert_reason,
+            revert_context: full.revert_context,
+        };
+
+        UnsignedExecutionResult {
+            simulation,
+            call_trace: Some(full.call_trace),
+            struct_logs,
+            logs: full.logs,
+        }
+    }
+
+    fn simulate_on_fork_without_trace(
+        &self,
+        forked_state: &mut ForkedState,
+        unsigned_tx: UnsignedTransaction,
+    ) -> Result<SimulationResult> {
+        let mut inspector = None;
+        let result =
+            self.simulate_on_fork_with_inspector(forked_state, unsigned_tx, &mut inspector)?;
+
+        Ok(SimulationResult {
+            success: result.success,
+            gas_used: result.gas_used,
+            revert_reason: result.revert_reason,
+            revert_context: result.revert_context,
         })
     }
 
