@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     ];
 
     for route in routes {
-        let info = provider.get_route_liquidity(&route, None, None).await?;
+        let info = provider.get_route_liquidity(&route, None).await?;
         println!("\nProtocol: {}", info.protocol);
         println!("Pool:     0x{:x}", info.pool);
         if let (Some(t0), Some(t1)) = (info.token0, info.token1) {

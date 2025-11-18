@@ -3,7 +3,6 @@
 /// Central hub for all blockchain data queries using direct database access
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
 use std::sync::Arc;
 use tx_simulator::TxSimulator;
 
@@ -108,10 +107,9 @@ impl ChainQuery {
         &self,
         token: Address,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<U256> {
         self.provider
-            .get_token_total_supply(token, block_number, block_header)
+            .get_token_total_supply(token, block_number)
             .await
     }
 

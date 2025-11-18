@@ -1,6 +1,5 @@
 use alloy_primitives::B256;
 use eyre::Result;
-use reth_primitives::SealedHeader;
 use serde_json::Value;
 use tracing::{debug, warn};
 
@@ -15,7 +14,6 @@ use tx_simulator::{
 pub(super) async fn prepare_state_for_metadata(
     provider: &RethQueryProvider,
     block_number: Option<u64>,
-    block_header: Option<SealedHeader>,
     pending_tx_hashes: &[B256],
 ) -> Result<Option<UnsignedTxChainSimulation>> {
     if pending_tx_hashes.is_empty() {
@@ -27,19 +25,16 @@ pub(super) async fn prepare_state_for_metadata(
         return Ok(None);
     };
 
-    let resolved_block = block_header
-        .as_ref()
-        .map(|header| header.number)
-        .or(block_number)
-        .unwrap_or(simulator.get_latest_block()?);
+    let resolved_block = block_number.unwrap_or(simulator.get_latest_block()?);
 
     let mut chain = simulator
-        .start_simulation_chain(Some(resolved_block), block_header.clone())
+        .start_simulation_chain(Some(resolved_block))
         .await?;
 
     for hash in pending_tx_hashes {
         let hash_hex = format!("0x{}", hex::encode(hash.as_slice()));
-        let Some(tx_value) = find_pending_transaction(&cache, resolved_block, &hash_hex).await? else {
+        let Some(tx_value) = find_pending_transaction(&cache, resolved_block, &hash_hex).await?
+        else {
             warn!(
                 target: "reth_chain_query::erc20",
                 block = resolved_block,

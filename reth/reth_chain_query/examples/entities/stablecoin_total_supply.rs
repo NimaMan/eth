@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     for (symbol, addr_str, decimals) in stablecoins {
         let address = Address::from_str(addr_str)?;
 
-        match provider.get_token_total_supply(address, None, None).await {
+        match provider.get_token_total_supply(address, None).await {
             Ok(supply) => {
                 let formatted = format_units(supply, decimals)?;
                 let supply_float: f64 = formatted.parse().unwrap_or(0.0);
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
     for (symbol, addr_str, decimals) in top_stables {
         let address = Address::from_str(addr_str)?;
 
-        if let Ok(supply) = provider.get_token_total_supply(address, None, None).await {
+        if let Ok(supply) = provider.get_token_total_supply(address, None).await {
             let formatted = format_units(supply, decimals)?;
             let supply_float: f64 = formatted.parse().unwrap_or(0.0);
             let market_share = (supply_float / total_stablecoin_supply) * 100.0;

@@ -1,8 +1,9 @@
 use crate::RethQueryProvider;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
-use tx_simulator::{contract_method_simulator::decode_uint256_from_contract_output, UnsignedTxChainSimulation};
+use tx_simulator::{
+    contract_method_simulator::decode_uint256_from_contract_output, UnsignedTxChainSimulation,
+};
 
 /// Execute a view function expected to return a 32-byte word. Returns `Ok(None)`
 /// if the call fails or produces an unexpected payload length.
@@ -11,14 +12,13 @@ pub async fn call_uint256_view(
     contract: Address,
     data: Bytes,
     block_number: u64,
-    block_header: Option<SealedHeader>,
     chain: Option<&mut UnsignedTxChainSimulation>,
 ) -> Result<Option<U256>> {
     let result = if let Some(chain) = chain {
         chain.simulate_view_call(contract, data)
     } else {
         provider
-            .simulate_contract_view_call(contract, data, Some(block_number), block_header)
+            .simulate_contract_view_call(contract, data, Some(block_number))
             .await
     };
 

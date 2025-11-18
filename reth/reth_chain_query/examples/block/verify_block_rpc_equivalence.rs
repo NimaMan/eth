@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     let block_number = if args.len() > 1 {
         args[1].parse::<u64>().unwrap_or(latest)
     } else {
-        latest.saturating_sub(5)
+        latest
     };
 
     println!(
@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
 
     let fetcher =
         BlockDataFetcher::new(provider).with_rpc_fetcher(RpcBlockDataFetcher::new(&rpc_url)?);
-    let db_block = fetcher.fetch_db_block(block_number, true).await?;
+    let db_block = fetcher.fetch_db_block(block_number).await?;
     let rpc_block = fetcher
-        .fetch_rpc_block_by_hash(db_block.header.hash, block_number, true)
+        .fetch_rpc_block_by_hash(db_block.header.hash, block_number)
         .await?;
 
     compare_blocks(&db_block, &rpc_block);
@@ -41,6 +41,14 @@ fn compare_blocks(
     db: &reth_chain_query::provider::RawBlockData,
     rpc: &reth_chain_query::provider::RawBlockData,
 ) {
+    use std::io::Write;
+    let log_path = "/home/nima/code/crypto/eth/logs/dev/block_fetcher_diffs.log";
+    let mut log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .expect("failed to open dev log file");
+
     if db == rpc {
         println!("✅ Blocks match exactly (including traces)");
         return;
@@ -51,6 +59,12 @@ fn compare_blocks(
             "❌ Header mismatch:\n  db: {:?}\n  rpc: {:?}",
             db.header, rpc.header
         );
+        writeln!(
+            log_file,
+            "[header] block={} db_hash={:#x} rpc_hash={:#x}",
+            db.header.number, db.header.hash, rpc.header.hash
+        )
+        .ok();
     }
 
     if db.transactions != rpc.transactions {
@@ -71,11 +85,19 @@ fn compare_blocks(
             filtered_b.tx_number = 0;
             if filtered_a != filtered_b {
                 println!("  ↳ first mismatch at tx {} hash {:?}", idx, a.hash);
+                writeln!(
+                    log_file,
+                    "[tx_meta] block={} idx={} hash={:#x}",
+                    db.header.number, idx, a.hash
+                )
+                .ok();
                 println!(
                     "    • db gas_price={} rpc gas_price={}",
                     a.gas_price, b.gas_price
                 );
                 println!("    • db nonce={} rpc nonce={}", a.nonce, b.nonce);
+                writeln!(log_file, "[tx_meta_db] {:?}", filtered_a).ok();
+                writeln!(log_file, "[tx_meta_rpc] {:?}", filtered_b).ok();
                 break;
             }
         }
@@ -90,6 +112,12 @@ fn compare_blocks(
         for (idx, (a, b)) in db.receipts.iter().zip(rpc.receipts.iter()).enumerate() {
             if a != b {
                 println!("  ↳ first receipt mismatch at tx {}", idx);
+                writeln!(
+                    log_file,
+                    "[receipt] block={} idx={} hash={:#x}",
+                    db.header.number, idx, db.transactions[idx].hash
+                )
+                .ok();
                 println!("    • status: db={} rpc={}", a.status, b.status);
                 println!(
                     "    • cumulative gas: db={} rpc={}",
@@ -130,11 +158,19 @@ fn compare_blocks(
                         "  ↳ first trace mismatch at tx {} (gas_used db={} rpc={})",
                         idx, da.gas_used, rb.gas_used
                     );
+                    writeln!(
+                        log_file,
+                        "[trace] block={} idx={} hash={:#x}",
+                        db.header.number, idx, db.transactions[idx].hash
+                    )
+                    .ok();
                     println!("    • error: db={:?} rpc={:?}", da.error, rb.error);
                     println!(
                         "    • call frames equal: {}",
                         da.call_frame == rb.call_frame
                     );
+                    writeln!(log_file, "[trace_db] {:?}", da.call_frame).ok();
+                    writeln!(log_file, "[trace_rpc] {:?}", rb.call_frame).ok();
                     break;
                 }
             }

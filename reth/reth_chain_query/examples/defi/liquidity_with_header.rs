@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
         pool: uni_v2_usdc_weth,
     };
     let liquidity = provider
-        .get_route_liquidity(&route, Some(latest_block), Some(sealed_header.clone()))
+        .get_route_liquidity(&route, Some(latest_block))
         .await?;
     println!(
         "UniswapV2 reserves @{} → reserve0={} reserve1={}",
@@ -69,24 +69,19 @@ async fn main() -> Result<()> {
         liquidity.reserve1.unwrap_or_default()
     );
 
-    // Use the cached header for token metadata calls so the simulator does not
-    // need to fetch it again.
-    let header_for_weth = Some(sealed_header.clone());
-    let header_for_usdc = Some(sealed_header);
-
     let weth_meta = provider
-        .get_token_metadata(weth, Some(latest_block), header_for_weth, None)
+        .get_token_metadata(weth, Some(latest_block), None)
         .await?
         .ok_or_else(|| eyre!("WETH bytecode did not expose ERC-20 metadata"))?;
     let usdc_decimals = provider
-        .get_token_decimals(usdc, Some(latest_block), header_for_usdc)
+        .get_token_decimals(usdc, Some(latest_block))
         .await?;
 
     println!(
         "WETH metadata: name={} symbol={} decimals={} total_supply={}",
         weth_meta.name, weth_meta.symbol, weth_meta.decimals, weth_meta.total_supply
     );
-    println!("USDC decimals (header-backed call): {usdc_decimals}");
+    println!("USDC decimals: {usdc_decimals}");
 
     println!("\n✅ Header-aware liquidity example completed.");
     Ok(())

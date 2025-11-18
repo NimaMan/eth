@@ -34,9 +34,8 @@ async fn main() -> Result<()> {
     println!("\n📋 Basic Information:");
     println!("{}", "-".repeat(40));
 
-    let metadata_header = load_sealed_header(&provider, block_override)?;
     let metadata = match provider
-        .get_token_metadata(token_address, block_override, metadata_header.clone(), None)
+        .get_token_metadata(token_address, block_override, None)
         .await?
     {
         Some(meta) => meta,
@@ -54,9 +53,8 @@ async fn main() -> Result<()> {
     println!("\n💰 Supply Information:");
     println!("{}", "-".repeat(40));
 
-    let supply_header = load_sealed_header(&provider, block_override)?;
     match provider
-        .get_token_total_supply(token_address, block_override, supply_header.clone())
+        .get_token_total_supply(token_address, block_override)
         .await
     {
         Ok(supply) => {
@@ -190,24 +188,4 @@ fn parse_args() -> (Option<String>, Option<u64>) {
     }
 
     (token, block)
-}
-
-fn load_sealed_header(
-    provider: &RethQueryProvider,
-    block: Option<u64>,
-) -> Result<Option<SealedHeader>> {
-    let Some(block_number) = block else {
-        return Ok(None);
-    };
-
-    let provider_handle = provider
-        .provider_factory()
-        .provider()
-        .map_err(|e| eyre!("Failed to access provider: {}", e))?;
-
-    let header = provider_handle
-        .header_by_number(block_number)?
-        .ok_or_else(|| eyre!("No header available for block {}", block_number))?;
-
-    Ok(Some(SealedHeader::new(header.clone(), header.hash_slow())))
 }
