@@ -7,7 +7,6 @@ This directory contains integration/performance tests for the Python block-proce
 - `test_block_processor.py` / `test_block_processor_performance.py` – end-to-end validation and profiling of `BlockProcessor`.
 - `test_block_fetcher_performance.py` – stress-tests the block fetcher over HTTP.
 - `test_batch_data_processor.py` – ensures the receipt/trace batching logic still behaves as expected.
-- `test_block_encoding_regression.py` – legacy serialization regression test for historical blocks that once failed to encode; retained because it still exercises tricky payloads.
 - `test_monitor_new_blocks.py` – optional WebSocket smoke test (skipped by default) that verifies the node can be reached and blocks can be processed live.
 
 ### Prerequisites

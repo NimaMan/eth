@@ -1,25 +1,19 @@
 
 
+try:
+    import pyreth
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("pyreth must be installed to use AddressTypeLabeler") from exc
+
+
 class AddressTypeLabeler:
-    def __init__(self, w3):
-        self.w3 = w3
+    def __init__(self, w3=None):
+        self._pyreth = pyreth.PyReth()
+        self._chain_query = self._pyreth.chain_query()
 
     def is_contract(self, address):
-        # Normalize address to checksum format for consistency
-        try:
-            checksum_address = self.w3.to_checksum_address(address)
-        except ValueError:
-            raise ValueError(f"Invalid Ethereum address format: {address}")
-
-        # Check if there's code at the address
-        code = self.w3.eth.get_code(checksum_address)
-        is_contract = len(code) > 2  # '0x' is returned for EOAs
-
-        return is_contract
+        return self._chain_query.is_contract(address, None)
 
     def get_address_type(self, address):
         """Returns 'Contract' if the address is a contract, else 'Wallet'."""
-        if self.is_contract(address):
-            return "Contract"
-        else:
-            return "Wallet"
+        return "Contract" if self.is_contract(address) else "Wallet"

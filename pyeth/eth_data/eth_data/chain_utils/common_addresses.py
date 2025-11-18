@@ -2,10 +2,24 @@
 from typing import Optional
 from web3 import Web3
 import pyreth
-from .pool_addresses import POOL_FACTORIES, ROUTERS
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+POOL_FACTORIES = dict(pyreth.pool_factories())
+ROUTERS = dict(pyreth.routers())
 ROUTER_ADDRESSES = set(ROUTERS.values())
+
+
+def get_pool_protocol(factory_address: str) -> Optional[str]:
+    """Return the protocol label for a known factory address."""
+    return pyreth.get_pool_protocol(factory_address)
+
+
+def is_v4_pool_manager(address: str) -> bool:
+    return pyreth.is_uniswap_v4_pool_manager(address)
+
+
+def is_known_factory(address: str) -> bool:
+    return pyreth.is_known_factory(address)
 
 DEX_POOL_TYPES = tuple(pyreth.dex_pool_types())
 DEX_POOL_TYPE_SET = set(DEX_POOL_TYPES)
@@ -56,6 +70,26 @@ ETF_ADDRESSES_BY_NAME = dict(pyreth.etf_address_map())
 ETF_NAMES_BY_ADDRESS = {addr: name for name, addr in ETF_ADDRESSES_BY_NAME.items()}
 ETF_ADDRESS_SET = set(ETF_ADDRESSES_BY_NAME.values())
 
+def _pair_dict(info, include_fee=False):
+    data = {
+        "token": info.symbol,
+        "token_address": info.token_address,
+        "token_decimals": info.decimals,
+        "denom": info.denom_symbol,
+        "denom_address": info.denom_address,
+        "denom_decimals": info.denom_decimals,
+    }
+    if include_fee:
+        data["fee"] = info.fee_tier
+    return data
+
+UNISWAP_V2_PAIRS = [_pair_dict(info) for info in pyreth.uniswap_v2_pairs()]
+UNISWAP_V2_PAIR_LOOKUP = {(entry["token"], entry["denom"]): entry for entry in UNISWAP_V2_PAIRS}
+UNISWAP_V3_PAIRS = [_pair_dict(info, include_fee=True) for info in pyreth.uniswap_v3_pairs()]
+UNISWAP_V3_PAIR_LOOKUP = {(entry["token"], entry["denom"], entry["fee"]): entry for entry in UNISWAP_V3_PAIRS}
+SUSHISWAP_PAIRS = [_pair_dict(info) for info in pyreth.sushiswap_pairs()]
+SUSHISWAP_PAIR_LOOKUP = {(entry["token"], entry["denom"]): entry for entry in SUSHISWAP_PAIRS}
+
 fee_recipients = pyreth.fee_recipients()
 fee_recipients_set = set(fee_recipients.keys())
 
@@ -64,31 +98,20 @@ denominator_addresses_by_name = {
     for key in ("WETH", "USDC", "USDT", "DAI")
     if key in addresses_by_name
 }
+
 denominator_names_by_address = {v: k for k, v in denominator_addresses_by_name.items()}
-denominator_byte_addresses_by_name = {
-    key: byte_addresses_by_name[key] for key in denominator_addresses_by_name
-}
-denominator_names_by_byte_address = {
-    v: k for k, v in denominator_byte_addresses_by_name.items()
-}
+denominator_byte_addresses_by_name = {key: byte_addresses_by_name[key] for key in denominator_addresses_by_name}
+denominator_names_by_byte_address = {v: k for k, v in denominator_byte_addresses_by_name.items()}
 
-alleged_mr_beast_wallet = [
-    "0x9e67D018488aD636B538e4158E9e7577F2ECac12",
-    "0x3640f50C46632E03F2677f85Ec0372a8Dd70b8f4",
-    "0xED3F5d401a270416e5008ce35E07Eb0721D6f8B4",
-    "0x949cC70bAa140f5b55717ca938E3c7e4C3b3A016",
-    "0xb5bf6777e3524aD0ffCC5a37375cc49a4BE92F64",
-    "0x2c071Af9dCeFB7155659B662480CbB8679977394",
-    "0x4f7B657a2cAe7A8808Df1D889838d5Da33007ae8",
-]
-
-sandwich_attackers = [
-    "0xae2Fc483527B8EF99EB5D9B44875F005ba1FaE13",
-]
 
 __all__ = [
     "ZERO_ADDRESS",
+    "POOL_FACTORIES",
+    "ROUTERS",
     "ROUTER_ADDRESSES",
+    "get_pool_protocol",
+    "is_v4_pool_manager",
+    "is_known_factory",
     "DEX_POOL_TYPES",
     "DEX_POOL_TYPE_SET",
     "canonicalize_dex_pool_type",
@@ -108,6 +131,12 @@ __all__ = [
     "ETF_ADDRESSES_BY_NAME",
     "ETF_NAMES_BY_ADDRESS",
     "ETF_ADDRESS_SET",
+    "UNISWAP_V2_PAIRS",
+    "UNISWAP_V2_PAIR_LOOKUP",
+    "UNISWAP_V3_PAIRS",
+    "UNISWAP_V3_PAIR_LOOKUP",
+    "SUSHISWAP_PAIRS",
+    "SUSHISWAP_PAIR_LOOKUP",
     "denominator_addresses_by_name",
     "denominator_names_by_address",
     "denominator_byte_addresses_by_name",

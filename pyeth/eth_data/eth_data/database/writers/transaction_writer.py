@@ -4,7 +4,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from eth_data.utils.logger import get_logger
 from eth_data.pyreth_client import PyrethClient
 
 
@@ -20,7 +19,6 @@ def _env_int(name: str, default: int) -> int:
 
 ADDRESS_TX_WRITE_LAG_SECONDS = max(0, _env_int("PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS", 120))
 ADDRESS_TX_MAX_FLUSH_BLOCKS = max(1, _env_int("PYRETH_ADDRESS_TX_MAX_FLUSH_BLOCKS", 20))
-_LOGGER = get_logger("address_tx_writer", log_folder="block_processor")
 
 
 @dataclass
@@ -35,7 +33,6 @@ class TransactionAddresstoTxIndexer:
         self.last_appended = 0
         self._write_lag_seconds = ADDRESS_TX_WRITE_LAG_SECONDS
         self._pending_blocks: Dict[int, _PendingBlock] = {}
-        self._logger = _LOGGER
 
     def write_transactions_address_tx(self, processed_txs: Iterable[object]) -> int:
         self.last_appended = 0
