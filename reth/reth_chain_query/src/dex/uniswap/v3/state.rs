@@ -60,7 +60,7 @@ pub async fn fetch_uniswap_v3_pool_address(
     let call_data = encode_function_call(UNISWAP_V3_FACTORY_GET_POOL, &params);
 
     let response = simulator
-        .simulate_view_function(factory, call_data, block_number, None)
+        .simulate_view_function(factory, call_data, block_number)
         .await?;
 
     if !response.success {

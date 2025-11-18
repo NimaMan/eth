@@ -1,8 +1,6 @@
+use crate::provider::RethQueryProvider;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
-
-use crate::provider::RethQueryProvider;
 use reth_provider::BlockReader;
 
 impl RethQueryProvider {
@@ -13,10 +11,8 @@ impl RethQueryProvider {
         pool_manager: Address,
         pool_id: B256,
         block: Option<u64>,
-        header: Option<&SealedHeader>,
     ) -> Result<(U256, i32, U256, u64)> {
         let block_number = block.unwrap_or(self.get_latest_block()?);
-        let header_present = header.is_some();
 
         // Build calldata for getSlot0(bytes32)
         let sig_slot0 = b"getSlot0(bytes32)";
@@ -28,12 +24,7 @@ impl RethQueryProvider {
 
         let slot0_res = self
             .simulator()
-            .simulate_view_function(
-                pool_manager,
-                call_data_slot0,
-                Some(block_number),
-                header.cloned(),
-            )
+            .simulate_view_function(pool_manager, call_data_slot0, Some(block_number))
             .await?;
 
         // Expect ABI-encoded (uint160 sqrtPriceX96, int24 tick, uint8 protocolFee, uint8 hookFee)
@@ -64,12 +55,7 @@ impl RethQueryProvider {
 
         let liq_res = self
             .simulator()
-            .simulate_view_function(
-                pool_manager,
-                call_data_liq,
-                Some(block_number),
-                header.cloned(),
-            )
+            .simulate_view_function(pool_manager, call_data_liq, Some(block_number))
             .await?;
         if !liq_res.success || liq_res.output.len() < 32 {
             return Err(eyre::eyre!("getLiquidity failed"));
@@ -77,21 +63,17 @@ impl RethQueryProvider {
         let liquidity = U256::from_be_bytes::<32>(liq_res.output[0..32].try_into().unwrap());
 
         // Fetch timestamp for the block
-        let timestamp = if let Some(h) = header {
-            h.header().timestamp
-        } else {
-            self.provider_factory()
-                .block_by_number(block_number)
-                .map_err(|e| eyre::eyre!(e.to_string()))?
-                .ok_or_else(|| {
-                    eyre::eyre!(
-                        "Invalid block {} while reading UniswapV4 state (header supplied: {})",
-                        block_number,
-                        header_present
-                    )
-                })?
-                .timestamp
-        };
+        let timestamp = self
+            .provider_factory()
+            .block_by_number(block_number)
+            .map_err(|e| eyre::eyre!(e.to_string()))?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Invalid block {} while reading UniswapV4 state",
+                    block_number
+                )
+            })?
+            .timestamp;
 
         Ok((sqrt_price_x96, tick, liquidity, timestamp))
     }

@@ -50,7 +50,7 @@ pub async fn fetch_uniswap_v2_pair_address(
     call_data.extend_from_slice(&params);
 
     let response = simulator
-        .simulate_view_function(factory, Bytes::from(call_data), block_number, None)
+        .simulate_view_function(factory, Bytes::from(call_data), block_number)
         .await?;
 
     if !response.success {

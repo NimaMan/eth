@@ -1,6 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
 use reth_provider::BlockReader;
 
 use crate::provider::RethQueryProvider;
@@ -12,10 +11,8 @@ impl RethQueryProvider {
         &self,
         pool: Address,
         block: Option<u64>,
-        header: Option<&SealedHeader>,
     ) -> Result<(U256, i32, U256, u64)> {
         let block_number = block.unwrap_or(self.get_latest_block()?);
-        let header_present = header.is_some();
 
         let state = self.simulator().get_chain_state_at_block(block_number)?;
 
@@ -46,21 +43,17 @@ impl RethQueryProvider {
         let liquidity = U256::from_be_bytes(liquidity_storage.to_be_bytes::<32>());
 
         // Fetch timestamp for the block
-        let timestamp = if let Some(h) = header {
-            h.header().timestamp
-        } else {
-            self.provider_factory()
-                .block_by_number(block_number)
-                .map_err(|e| eyre::eyre!(e.to_string()))?
-                .ok_or_else(|| {
-                    eyre::eyre!(
-                        "Invalid block {} while reading UniswapV3 state (header supplied: {})",
-                        block_number,
-                        header_present
-                    )
-                })?
-                .timestamp
-        };
+        let timestamp = self
+            .provider_factory()
+            .block_by_number(block_number)
+            .map_err(|e| eyre::eyre!(e.to_string()))?
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Invalid block {} while reading UniswapV3 state",
+                    block_number
+                )
+            })?
+            .timestamp;
 
         Ok((sqrt_price_x96, tick, liquidity, timestamp))
     }

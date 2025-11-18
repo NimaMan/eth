@@ -34,12 +34,7 @@ pub async fn fetch_sushiswap_pair_address(
     call_data.extend_from_slice(&params);
 
     let response = simulator
-        .simulate_view_function(
-            SUSHISWAP_FACTORY,
-            Bytes::from(call_data),
-            block_number,
-            None,
-        )
+        .simulate_view_function(SUSHISWAP_FACTORY, Bytes::from(call_data), block_number)
         .await?;
 
     if !response.success {

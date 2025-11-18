@@ -1,6 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
 
 use crate::common_addresses::DENOM_ADDRESSES;
 use crate::provider::RethQueryProvider;
@@ -37,25 +36,21 @@ impl RethQueryProvider {
         &self,
         route: &AmmSwapRoute,
         block: Option<u64>,
-        header: Option<SealedHeader>,
     ) -> Result<PoolLiquidityInfo> {
         let block_number = block.unwrap_or(self.get_latest_block()?);
-        let header_ref = header.as_ref();
         match *route {
             AmmSwapRoute::UniswapV2 { pool } => {
                 // token0/token1 via token0()/token1() view
                 let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number), header_ref)
+                    .uni_v2_get_tokens(pool, Some(block_number))
                     .await
                     .unwrap_or((Address::ZERO, Address::ZERO));
                 let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
                 let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
-                let (r0, r1, _ts) = self
-                    .uni_v2_get_reserves(pool, Some(block_number), header_ref)
-                    .await?;
+                let (r0, r1, _ts) = self.uni_v2_get_reserves(pool, Some(block_number)).await?;
                 let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number), header.clone()),
-                    self.get_token_decimals(t1, Some(block_number), header.clone()),
+                    self.get_token_decimals(t0, Some(block_number)),
+                    self.get_token_decimals(t1, Some(block_number)),
                 ) {
                     Ok((a, b)) => (a, b),
                     Err(_) => (18u8, 18u8),
@@ -82,17 +77,15 @@ impl RethQueryProvider {
             }
             AmmSwapRoute::SushiswapV2 { pool } => {
                 let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number), header_ref)
+                    .uni_v2_get_tokens(pool, Some(block_number))
                     .await
                     .unwrap_or((Address::ZERO, Address::ZERO));
                 let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
                 let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
-                let (r0, r1, _ts) = self
-                    .uni_v2_get_reserves(pool, Some(block_number), header_ref)
-                    .await?;
+                let (r0, r1, _ts) = self.uni_v2_get_reserves(pool, Some(block_number)).await?;
                 let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number), header.clone()),
-                    self.get_token_decimals(t1, Some(block_number), header.clone()),
+                    self.get_token_decimals(t0, Some(block_number)),
+                    self.get_token_decimals(t1, Some(block_number)),
                 ) {
                     Ok((a, b)) => (a, b),
                     Err(_) => (18u8, 18u8),
@@ -120,17 +113,17 @@ impl RethQueryProvider {
             AmmSwapRoute::UniswapV3 { pool, .. } => {
                 // token addresses via token0()/token1() as well
                 let (t0, t1) = self
-                    .uni_v2_get_tokens(pool, Some(block_number), header_ref)
+                    .uni_v2_get_tokens(pool, Some(block_number))
                     .await
                     .unwrap_or((Address::ZERO, Address::ZERO));
                 let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
                 let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
                 let (sqrt, tick, liq, _ts) = self
-                    .uni_v3_get_slot0_and_liquidity(pool, Some(block_number), header_ref)
+                    .uni_v3_get_slot0_and_liquidity(pool, Some(block_number))
                     .await?;
                 let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number), header.clone()),
-                    self.get_token_decimals(t1, Some(block_number), header.clone()),
+                    self.get_token_decimals(t0, Some(block_number)),
+                    self.get_token_decimals(t1, Some(block_number)),
                 ) {
                     Ok((a, b)) => (a, b),
                     Err(_) => (18u8, 18u8),
@@ -161,12 +154,7 @@ impl RethQueryProvider {
             } => {
                 // V4: fetch slot0 + liquidity via PoolManager
                 let (sqrt, tick, liq, _ts) = self
-                    .uni_v4_get_slot0_and_liquidity(
-                        pool_manager,
-                        pool_id,
-                        Some(block_number),
-                        header_ref,
-                    )
+                    .uni_v4_get_slot0_and_liquidity(pool_manager, pool_id, Some(block_number))
                     .await?;
                 Ok(PoolLiquidityInfo {
                     protocol: "Uniswap-V4",
@@ -219,8 +207,8 @@ impl RethQueryProvider {
                 let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
                 // Try decimals for both tokens
                 let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number), None),
-                    self.get_token_decimals(t1, Some(block_number), None),
+                    self.get_token_decimals(t0, Some(block_number)),
+                    self.get_token_decimals(t1, Some(block_number)),
                 ) {
                     Ok((a, b)) => (a, b),
                     Err(_) => (18, 18),
@@ -276,8 +264,8 @@ impl RethQueryProvider {
                 let s0 = DENOM_ADDRESSES.get(&t0).map(|s| (*s).to_string());
                 let s1 = DENOM_ADDRESSES.get(&t1).map(|s| (*s).to_string());
                 let (d0, d1) = match tokio::try_join!(
-                    self.get_token_decimals(t0, Some(block_number), None),
-                    self.get_token_decimals(t1, Some(block_number), None),
+                    self.get_token_decimals(t0, Some(block_number)),
+                    self.get_token_decimals(t1, Some(block_number)),
                 ) {
                     Ok((a, b)) => (a, b),
                     Err(_) => (18, 18),

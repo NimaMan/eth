@@ -20,7 +20,7 @@ impl RethQueryProvider {
         data.extend_from_slice(pool_id.as_slice());
         let res = self
             .simulator()
-            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
+            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block)
             .await?;
         if !res.success || res.output.len() < 64 {
             return Err(eyre::eyre!("getPool(bytes32) call failed"));
@@ -43,7 +43,7 @@ impl RethQueryProvider {
         data.extend_from_slice(pool_id.as_slice());
         let res = self
             .simulator()
-            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block, None)
+            .simulate_view_function(BALANCER_VAULT, Bytes::from(data), block)
             .await?;
         if !res.success || res.output.len() < 96 {
             return Err(eyre::eyre!("getPoolTokens(bytes32) call failed"));

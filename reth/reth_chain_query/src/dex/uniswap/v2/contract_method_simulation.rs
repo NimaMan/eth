@@ -1,8 +1,6 @@
+use crate::provider::RethQueryProvider;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
-
-use crate::provider::RethQueryProvider;
 
 /// Function selectors used by Uniswap V2 pair contract
 const SELECTOR_TOKEN0: [u8; 4] = [0x0d, 0xfe, 0x16, 0x81]; // token0()
@@ -15,26 +13,15 @@ impl RethQueryProvider {
         &self,
         pair: Address,
         block: Option<u64>,
-        header: Option<&SealedHeader>,
     ) -> Result<(Address, Address)> {
         let token0_res = self
             .simulator()
-            .simulate_view_function(
-                pair,
-                Bytes::from(SELECTOR_TOKEN0.to_vec()),
-                block,
-                header.cloned(),
-            )
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN0.to_vec()), block)
             .await?;
 
         let token1_res = self
             .simulator()
-            .simulate_view_function(
-                pair,
-                Bytes::from(SELECTOR_TOKEN1.to_vec()),
-                block,
-                header.cloned(),
-            )
+            .simulate_view_function(pair, Bytes::from(SELECTOR_TOKEN1.to_vec()), block)
             .await?;
 
         if !token0_res.success || token0_res.output.len() < 32 {
@@ -57,16 +44,10 @@ impl RethQueryProvider {
         &self,
         pair: Address,
         block: Option<u64>,
-        header: Option<&SealedHeader>,
     ) -> Result<(U256, U256, u32)> {
         let res = self
             .simulator()
-            .simulate_view_function(
-                pair,
-                Bytes::from(SELECTOR_GET_RESERVES.to_vec()),
-                block,
-                header.cloned(),
-            )
+            .simulate_view_function(pair, Bytes::from(SELECTOR_GET_RESERVES.to_vec()), block)
             .await?;
 
         if !res.success || res.output.len() < 96 {

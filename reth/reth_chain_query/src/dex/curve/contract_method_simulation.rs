@@ -105,7 +105,7 @@ impl RethQueryProvider {
         data.extend_from_slice(&idx);
         let res = self
             .simulator()
-            .simulate_view_function(pool, Bytes::from(data), block, None)
+            .simulate_view_function(pool, Bytes::from(data), block)
             .await?;
         if !res.success || res.output.len() < 32 {
             return Ok(None);
@@ -128,7 +128,7 @@ impl RethQueryProvider {
         data.extend_from_slice(&idx);
         let res = self
             .simulator()
-            .simulate_view_function(pool, Bytes::from(data), block, None)
+            .simulate_view_function(pool, Bytes::from(data), block)
             .await?;
         if !res.success || res.output.len() < 32 {
             return Ok(None);

@@ -22,7 +22,7 @@ pub async fn find_curve_pool_for_coins(
     let call_data = encode_function_call(CURVE_FIND_POOL_FOR_COINS, &params);
 
     let result = simulator
-        .simulate_view_function(CURVE_REGISTRY, call_data, block_number, None)
+        .simulate_view_function(CURVE_REGISTRY, call_data, block_number)
         .await?;
 
     if result.success && result.output.len() >= 32 {

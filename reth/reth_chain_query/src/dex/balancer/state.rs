@@ -22,7 +22,7 @@ pub async fn verify_balancer_pool_tokens(
     let call_data = encode_function_call(BALANCER_GET_POOL_TOKENS, &params);
 
     let result = simulator
-        .simulate_view_function(BALANCER_VAULT, call_data, block_number, None)
+        .simulate_view_function(BALANCER_VAULT, call_data, block_number)
         .await?;
 
     if result.success {
@@ -46,7 +46,7 @@ pub async fn get_balancer_pool_tokens(
     let call_data = encode_function_call(BALANCER_GET_POOL_TOKENS, &params);
 
     let result = simulator
-        .simulate_view_function(BALANCER_VAULT, call_data, block_number, None)
+        .simulate_view_function(BALANCER_VAULT, call_data, block_number)
         .await?;
 
     if result.success {
