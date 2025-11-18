@@ -1,9 +1,6 @@
 use crate::RethQueryProvider;
 use alloy_primitives::{Address, Bytes, U256};
-use eyre::{eyre, Report, Result};
-use reth_primitives::SealedHeader;
-use reth_provider::HeaderProvider;
-use tracing::debug;
+use eyre::{eyre, Result};
 use tx_simulator::contract_method_simulator::{
     decode_string_from_contract_output, decode_uint256_from_contract_output,
     encode_contract_read_call_with_address_arg,
@@ -21,7 +18,7 @@ impl RethQueryProvider {
         let data = encode_contract_read_call_with_address_arg(selector, holder);
 
         let result = self
-            .simulate_contract_view_call(token, data, block_number, None)
+            .simulate_contract_view_call(token, data, block_number)
             .await?;
 
         if result.success {
@@ -46,7 +43,7 @@ impl RethQueryProvider {
         payload.extend_from_slice(spender.as_slice());
 
         let result = self
-            .simulate_contract_view_call(token, Bytes::from(payload), block_number, None)
+            .simulate_contract_view_call(token, Bytes::from(payload), block_number)
             .await?;
 
         if result.success {
@@ -60,13 +57,12 @@ impl RethQueryProvider {
         &self,
         token: Address,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<U256> {
         let selector = [0x18, 0x16, 0x0d, 0xdd];
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block_number, block_header)
+            .simulate_contract_view_call(token, data, block_number)
             .await?;
 
         if result.success {
@@ -80,13 +76,12 @@ impl RethQueryProvider {
         &self,
         token: Address,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<u8> {
         let selector = [0x31, 0x3c, 0xe5, 0x67];
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block_number, block_header)
+            .simulate_contract_view_call(token, data, block_number)
             .await?;
 
         if !result.success {
@@ -120,13 +115,12 @@ impl RethQueryProvider {
         &self,
         token: Address,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<String> {
         let selector = [0x95, 0xd8, 0x9b, 0x41];
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block_number, block_header)
+            .simulate_contract_view_call(token, data, block_number)
             .await?;
 
         if !result.success {
@@ -146,13 +140,12 @@ impl RethQueryProvider {
         &self,
         token: Address,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<String> {
         let selector = [0x06, 0xfd, 0xde, 0x03];
         let data = Bytes::from(selector.to_vec());
 
         let result = self
-            .simulate_contract_view_call(token, data, block_number, block_header)
+            .simulate_contract_view_call(token, data, block_number)
             .await?;
 
         if !result.success {
@@ -185,7 +178,7 @@ impl RethQueryProvider {
         };
 
         let result = self
-            .simulate_contract_view_call(contract, data, block_number, None)
+            .simulate_contract_view_call(contract, data, block_number)
             .await?;
 
         if result.success {
@@ -200,71 +193,10 @@ impl RethQueryProvider {
         contract: Address,
         data: Bytes,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
     ) -> Result<ViewFunctionResult> {
-        if block_header.is_none() {
-            if let Some(block) = block_number {
-                self.simulator().assert_block_available(block)?;
-            }
-        }
-        let allow_fallback = block_number.is_none() && block_header.is_none();
-        let first_attempt = self
-            .simulator()
-            .simulate_contract_read_only_call_with_options(
-                contract,
-                data.clone(),
-                block_number,
-                block_header.clone(),
-                None,
-            )
-            .await;
-
-        match first_attempt {
-            Ok(result) => Ok(result),
-            Err(err) => {
-                if allow_fallback && Self::is_header_not_found_error(&err) {
-                    if let Some((fallback_block, fallback_header)) = self.previous_block_header()? {
-                        debug!(
-                            target: "reth_chain_query::contract_methods",
-                            contract = %contract,
-                            fallback_block,
-                            "Retrying contract view call with previous block header"
-                        );
-                        return self
-                            .simulator()
-                            .simulate_contract_read_only_call_with_options(
-                                contract,
-                                data,
-                                Some(fallback_block),
-                                Some(fallback_header),
-                                None,
-                            )
-                            .await;
-                    }
-                }
-                Err(err)
-            }
-        }
-    }
-
-    fn previous_block_header(&self) -> Result<Option<(u64, SealedHeader)>> {
-        let latest = self.get_latest_block()?;
-        if latest == 0 {
-            return Ok(None);
-        }
-        let fallback_block = latest - 1;
-        let header = self.fetch_sealed_header(fallback_block)?;
-        Ok(header.map(|sealed| (fallback_block, sealed)))
-    }
-
-    fn fetch_sealed_header(&self, block_number: u64) -> Result<Option<SealedHeader>> {
-        let provider = self.provider_factory().provider()?;
-        let header = provider.header_by_number(block_number)?;
-        Ok(header.map(SealedHeader::new_unhashed))
-    }
-
-    fn is_header_not_found_error(err: &Report) -> bool {
-        err.to_string().contains("No header for block")
+        self.simulator()
+            .simulate_contract_read_only_call_with_options(contract, data, block_number, None)
+            .await
     }
 }
 
