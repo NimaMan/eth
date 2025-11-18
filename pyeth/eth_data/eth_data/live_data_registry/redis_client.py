@@ -12,8 +12,7 @@ import redis
 import redis.asyncio as aioredis
 
 DEFAULT_REDIS_URL = (
-    os.getenv("LIVE_DATA_REDIS_URL")
-    or os.getenv("REDIS_URL")
+    os.getenv("LIVE_BLOCKCHAIN_DATA_REDIS_URL")
     or "redis://localhost:6379/0"
 )
 

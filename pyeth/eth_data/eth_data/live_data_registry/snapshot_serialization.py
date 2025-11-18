@@ -41,13 +41,14 @@ def build_block_snapshot(
     Build a JSON-friendly dict for a processed block.
     """
     header_dict = normalize_block_header(processed_block.block_header)
+    header_json = orjson.dumps(header_dict).decode()
     resolved_number = (
         block_number
         or (int(header_dict.get("number", "0"), 16) if header_dict.get("number") else None)
     )
     snapshot: Dict[str, Any] = {
         "block_number": resolved_number,
-        "header": header_dict,
+        "header": header_json,
         "tx_count": len(processed_block.transactions),
     }
     if include_transactions:

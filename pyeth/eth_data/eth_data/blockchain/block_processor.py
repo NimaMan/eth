@@ -55,8 +55,7 @@ Key Components and Flow:
 
 Implementation Details:
 --------------------
-1. Data Flow:sudo systemctl start rabbitmq-server
-sudo systemctl enable rabbitmq-server
+1. Data Flow:
    a. Input: Block number(s) or block data
    b. Processing:
       - Fetch blocks (`BlockFetcher`)

@@ -2,8 +2,6 @@
 Async publisher for live snapshots.
 """
 
-from __future__ import annotations
-
 import time
 from typing import Any, Dict, Optional
 
@@ -29,7 +27,6 @@ class LiveDataPublisher:
         ttl_seconds: Optional[int] = None,
     ) -> None:
         payload = _prepare_payload(snapshot)
-        block_k = keys.processed_block_snapshot_key(block_number)
         header_k = keys.block_header_key(block_number)
         latest_k = keys.latest_block_number_key()
         tx_map_k = keys.processed_tx_map_key(block_number)
@@ -44,7 +41,6 @@ class LiveDataPublisher:
             tx_map[tx_hash] = _dumps_json(tx)
 
         async with self.redis.pipeline(transaction=False) as pipe:
-            pipe.set(block_k, payload, ex=ttl_seconds)
             pipe.set(latest_k, block_number)
 
             if header_payload:
@@ -93,7 +89,6 @@ class LiveDataPublisher:
         Remove a previously published block snapshot.
         """
         await self.redis.delete(
-            keys.processed_block_snapshot_key(block_number),
             keys.block_header_key(block_number),
             keys.processed_tx_map_key(block_number),
         )

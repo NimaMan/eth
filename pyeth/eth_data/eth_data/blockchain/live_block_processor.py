@@ -1,12 +1,12 @@
 """
-LiveBlockProcessor: Real-time Ethereum Block Processing and Alert System
+LiveBlockProcessor: Real-time Ethereum Block Processing and Notification System
 
 Objective:
 ---------
 Create a high-performance, resilient system that:
 1. Monitors the Ethereum blockchain in real-time
 2. Processes blocks and their transactions
-3. Generates and publishes alerts based on transaction patterns in less than 1 second
+3. Publishes live block metadata to downstream consumers in less than 1 second
 4. Maintains system stability through proper error handling and reconnection logic
 
 Architecture & Workflow:
@@ -25,40 +25,31 @@ Architecture & Workflow:
         * Contract interactions
         * Other relevant on-chain events
 
-3. Message Queue Integration:
-    - Uses RabbitMQ for reliable message delivery
-    - Maintains two separate exchanges:
-        * blocks_exchange: For processed block data
-        * alerts_exchange: For detected alerts
-    - Implements persistent messaging to prevent data loss
-
-4. Alert Processing:
-    - Analyzes transactions for specific patterns
-    - Generates alerts based on configurable criteria
-    - Processes alerts concurrently for better performance
+3. Message Distribution:
+    - Publishes processed block numbers to Redis Pub/Sub (`live_blocks` by default)
+    - Writes block headers and processed transactions to Redis for downstream replay
+    - Ensures consumers receive both the notification and the cached state
 
 Key Design Decisions:
 -------------------
 1. Separation of Concerns:
     - WebSocket for notifications, HTTP for data fetching
-    - Separate exchanges for blocks and alerts
+    - Redis for both live notifications and short-term state storage
     - Modular processing pipeline for maintainability
 
 2. Error Handling:
     - Graceful handling of connection failures
     - Automatic reconnection with backoff
     - Continued processing despite individual failures
-    - Exchange reinitialization on connection issues
 
 3. Performance Optimization:
     - Asynchronous processing throughout
-    - Efficient serialization with orjson
     - Minimal blocking operations
-    - Concurrent alert processing
+    - Concurrent tasks for Redis publishing and address indexing
 
 4. Data Integrity:
-    - Persistent message delivery
-    - Transaction validation
+    - Redis snapshot retention protects consumers from transient node lag
+    - Transaction validation before publishing
     - Proper cleanup on shutdown
     - Error logging for debugging
 
@@ -66,20 +57,18 @@ Configuration Options:
 --------------------
 - websocket_url: WebSocket endpoint for real-time updates
 - http_url: HTTP endpoint for detailed data fetching
-- rabbitmq_url: RabbitMQ connection string
-- save_erc20_txns: Toggle for ERC20 transaction storage
+- redis_url: Redis connection string (falls back to LIVE_BLOCKCHAIN_DATA_REDIS_URL)
+- live_block_cache_size: Number of recent block snapshots to retain
 
 Error Handling Strategy:
 ----------------------
 1. Connection Failures:
     - Automatic reconnection with exponential backoff
-    - Separate handling for WebSocket and RabbitMQ
     - Resource cleanup before reconnection attempts
 
 2. Processing Errors:
     - Continue processing on non-critical errors
     - Log errors for debugging
-    - Reset connections when necessary
     - Maintain system stability
 
 3. Data Validation:
@@ -90,14 +79,13 @@ Error Handling Strategy:
 Dependencies:
 ------------
 - web3: Ethereum interaction
-- aio_pika: RabbitMQ integration
-- orjson: High-performance JSON handling
+- redis: Redis Pub/Sub
 - asyncio: Asynchronous operations
 
 Usage:
 ------
 1. Initialize:
-    processor = LiveBlockProcessor(websocket_url, http_url, rabbitmq_url)
+    processor = LiveBlockProcessor(websocket_url, http_url)
 
 2. Run:
     await processor.run()
@@ -113,11 +101,10 @@ Note: This system is designed for production use with emphasis on:
 """
 
 import asyncio
+import os
 from collections import deque
 from typing import Optional
 
-import aio_pika
-import orjson
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 
@@ -126,6 +113,7 @@ from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
 from eth_data.live_data_registry import LiveDataPublisher, build_block_snapshot
 from eth_data.utils.logger import get_logger
+from eth_data.notifications import RedisSignalPublisher
 
 
 class LiveBlockProcessor:
@@ -134,17 +122,21 @@ class LiveBlockProcessor:
         self,
         websocket_url: str = "ws://127.0.0.1:8546",
         http_url: str = "http://127.0.0.1:8545",
-        rabbitmq_url: str = "amqp://guest:guest@localhost/",
         index_address_txs: bool = False, 
         logger=None,
+        redis_url: Optional[str] = None,
+        block_notification_channel: str = "live_blocks",
         live_block_cache_size: int = 3,
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
         self.w3 = AsyncWeb3(self.provider)
-        self.rabbitmq_url = rabbitmq_url
         self.index_address_txs = index_address_txs
         self.logger = logger or get_logger(name="live_block_processor")
+        self.redis_url = redis_url or os.getenv(
+            "LIVE_BLOCKCHAIN_DATA_REDIS_URL", "redis://localhost:6379/0"
+        )
+        self._block_notification_channel = block_notification_channel
         
         # Initialize BlockProcessor with HTTP connection for detailed data fetching
         self.block_processor = BlockProcessor(
@@ -162,18 +154,13 @@ class LiveBlockProcessor:
             )
             self.block_processor.transaction_writer = None
             self.block_processor.index_address_txs = False
-        #self.block_alert_processor = BlockAlertProcessor()
-        # RabbitMQ connection and channel
-        self.connection = None
-        self.channel = None
-        self.blocks_exchange = None
-        self.alerts_exchange = None
         self.reconnect_delay = 1  
         self._live_block_retention = max(0, int(live_block_cache_size))
         self._recent_blocks = deque()
         self._live_data_publisher = (
             LiveDataPublisher() if self._live_block_retention > 0 else None
         )
+        self._block_signal_publisher = RedisSignalPublisher(redis_url=self.redis_url)
 
         # Downstream pipeline state
         self._queue_maxsize = 128
@@ -229,10 +216,10 @@ class LiveBlockProcessor:
             try:
                 block_number, processed_block = item
                 await self._publish_live_block_snapshot(block_number, processed_block)
-                success = await self.publish_block(block_number)
-                if not success:
+                notified = await self.publish_block_notification(block_number)
+                if not notified:
                     self.logger.warning(
-                        "Failed to publish block %s, will continue with next items",
+                        "Failed to publish block %s notification, continuing",
                         block_number,
                     )
                 elif self.index_queue is not None:
@@ -280,139 +267,28 @@ class LiveBlockProcessor:
             raise RuntimeError("Publish queue not initialized. Did you call start_workers()?")
         await self.publish_queue.put(work_item)
 
-    async def setup_rabbitmq(self, max_retries=3):
-        """Initialize RabbitMQ connection and channel with retries."""
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                # First cleanup any existing connections
-                if self.connection:
-                    if not self.connection.is_closed:
-                        await self.connection.close()
-                    self.connection = None
-                    self.channel = None
-                    self.blocks_exchange = None
-                    self.alerts_exchange = None
-
-                # Log the connection attempt with more details
-                self.logger.info(f"Attempting to connect to RabbitMQ at {self.rabbitmq_url}")
-                
-                # Create new connection
-                self.connection = await aio_pika.connect_robust(self.rabbitmq_url)
-                self.channel = await self.connection.channel()
-                
-                # Declare exchanges only - let consumers create their own queues
-                self.blocks_exchange = await self.channel.declare_exchange(
-                    "blocks_exchange",
-                    aio_pika.ExchangeType.FANOUT,
-                    durable=True
-                )
-                self.alerts_exchange = await self.channel.declare_exchange(
-                    "txn_alerts_exchange",
-                    aio_pika.ExchangeType.FANOUT,
-                    durable=True
-                )
-                        
-                self.logger.info("Successfully connected to RabbitMQ - exchanges declared")
-                return True
-                
-            except Exception as e:
-                retry_count += 1
-                # Enhanced error logging with exception type
-                self.logger.error(f"Failed to setup RabbitMQ connection (attempt {retry_count}/{max_retries}): {type(e).__name__}: {e}")
-                
-                # Add specific check for common connection issues
-                if "Connection refused" in str(e):
-                    self.logger.error("RabbitMQ connection refused - check if the server is running at the specified address")
-                elif "authentication" in str(e).lower():
-                    self.logger.error("RabbitMQ authentication failed - check credentials")
-                
-                await asyncio.sleep(min(2 ** retry_count, 30))  # Exponential backoff
-                
-        raise RuntimeError(f"Failed to setup RabbitMQ after {max_retries} attempts")
-
-    async def publish_block(self, block_number: int):
-        """Publish the processed block number to RabbitMQ. Continue on failure."""
-        try:
-            # Only try to setup if we don't have an exchange
-            if not self.blocks_exchange:
-                success = await self.setup_rabbitmq()
-                if not success:
-                    self.logger.error(f"Failed to initialize RabbitMQ for block {block_number}")
-                    return False  # Return False but don't reset exchange
-            
-            payload = orjson.dumps({"block_number": block_number})
-            message = aio_pika.Message(
-                body=payload,
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                content_type='application/json',
-                headers={'block_number': str(block_number)} 
+    async def publish_block_notification(self, block_number: int) -> bool:
+        """Publish the processed block number via Redis Pub/Sub. Continue on failure."""
+        if not self._block_signal_publisher or not self._block_notification_channel:
+            self.logger.warning(
+                "Redis signal publisher not configured; skipping block %s notification",
+                block_number,
             )
-            
-            await self.blocks_exchange.publish(
-                message, 
-                routing_key='processed_blocks'
+            return False
+        try:
+            await self._block_signal_publisher.publish(
+                self._block_notification_channel,
+                {"block_number": block_number},
             )
             return True
-           
-        except aio_pika.exceptions.ConnectionClosed:
-            self.logger.error(f"RabbitMQ connection lost while publishing block {block_number}")
-            self.blocks_exchange = None  # Only reset on actual connection issues
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"{__name__} Error publishing block {block_number}: {e}")
-            return False  # Don't reset exchange for other errors
-
-    async def publish_alert(self, alert_data):
-        """Publish alert to RabbitMQ alerts exchange"""
-        try:
-            # First check if exchange exists, if not set it up
-            if not self.alerts_exchange:
-                success = await self.setup_rabbitmq()
-                if not success:
-                    self.logger.error("Failed to initialize RabbitMQ for alert")
-                    return False
-            
-            try:
-                serialized_data = orjson.dumps(
-                    alert_data,
-                    option=orjson.OPT_SERIALIZE_NUMPY,
-                    default=str,
-                )
-            except Exception as e:
-                self.logger.error(f"Alert serialization error: {e}")
-                return False  # Continue without resetting exchange
-            
-            message = aio_pika.Message(
-                body=serialized_data,
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                content_type='application/json'
+        except Exception as exc:
+            self.logger.error(
+                "Error publishing block %s notification to Redis: %s",
+                block_number,
+                exc,
+                exc_info=True,
             )
-            
-            await self.alerts_exchange.publish(
-                message, 
-                routing_key="eth_txn_alerts"
-            )
-            return True
-            
-        except aio_pika.exceptions.ConnectionClosed:
-            self.logger.error(f"{__name__}: RabbitMQ connection lost while publishing alert")
-            self.alerts_exchange = None  # Only reset on connection issues
             return False
-            
-        except Exception as e:
-            self.logger.error(f"{__name__}: Error publishing alert: {e}", exc_info=True)
-            return False  # Don't reset exchange for other errors
-
-    async def process_latest_block_alerts(self, processed_block):
-        """Process alerts for the latest block"""
-        try:
-            alerts = await self.block_alert_processor.process_block_transactions(processed_block.transactions)
-            return alerts
-        except Exception as e:
-            self.logger.error(f" {__name__} Error processing alerts: {e}")
-            return
 
     async def monitor_new_blocks(self):
         """Monitor new blocks in real-time using WebSocket subscription."""
@@ -452,19 +328,10 @@ class LiveBlockProcessor:
             await self.w3.provider.disconnect()
 
     async def cleanup(self):
-        """Cleanup WebSocket and RabbitMQ connections."""
+        """Cleanup WebSocket connections and background workers."""
         try:
             await self.stop_workers()
             await self.w3.provider.disconnect()
-            
-            if self.connection and not self.connection.is_closed:
-                await self.connection.close()
-                
-            self.blocks_exchange = None
-            self.alerts_exchange = None
-            self.channel = None
-            self.connection = None
-            
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
 

@@ -8,7 +8,7 @@ Objective:
 - Handle priorities and concurrent processing
 
 Flow:
-1. Consume blocks (containing a list of DetailedTransactions in a dict) from RabbitMQ blocks_exchange
+1. Consume blocks (containing a list of DetailedTransactions in a dict) from RabbitMQ block_published_notifier
 2. Process transactions concurrently using txAlertProcessor
 3. Publish generated alerts to alerts_exchange
 """

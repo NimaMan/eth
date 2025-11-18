@@ -1,11 +1,7 @@
 """
 Synchronous reader helpers for live data snapshots.
 """
-
-from __future__ import annotations
-
 from typing import Any, Dict, Optional
-
 import orjson
 
 from . import keys
@@ -21,11 +17,16 @@ class RedisSnapshotReader:
         self.redis = redis_client or get_sync_client(redis_url)
 
     def get_block(self, block_number: int) -> Optional[Dict[str, Any]]:
-        raw = self.redis.get(keys.processed_block_snapshot_key(block_number))
-        return _decode(raw)
+        header = self.fetch_block_header(block_number)
+        txs = self.fetch_processed_block(block_number)
+        if header is None or txs is None:
+            return None
+        return {
+            "header": header,
+            "transactions": txs,
+        }
 
     def get_block_snapshot(self, block_number: int) -> Optional[Dict[str, Any]]:
-        """Alias for get_block to emphasize block snapshot semantics."""
         return self.get_block(block_number)
 
     def fetch_block_header(self, block_number: int) -> Optional[Dict[str, Any]]:
@@ -62,10 +63,13 @@ class RedisSnapshotReader:
 
     def fetch_processed_block(self, block_number: int) -> Optional[list]:
         """Return the ordered processed transactions for a block if cached."""
-        snapshot = self.get_block_snapshot(block_number)
-        if not snapshot:
+        hash_key = keys.processed_tx_map_key(block_number)
+        raw = self.redis.hgetall(hash_key)
+        if not raw:
             return None
-        return snapshot.get("transactions")
+        txs = [_decode(value) for value in raw.values() if value]
+        txs.sort(key=_tx_sort_key)
+        return txs
 
     def get_processed_tx(self, block_number: int, tx_hash: str) -> Optional[Dict[str, Any]]:
         """Return a single processed transaction by block/tx hash."""
@@ -82,6 +86,21 @@ def _decode(payload: Optional[str]) -> Optional[Dict[str, Any]]:
     if payload is None:
         return None
     return orjson.loads(payload)
+
+
+def _tx_sort_key(value: Optional[Dict[str, Any]]) -> int:
+    if not isinstance(value, dict):
+        return 0
+    tx_data = value.get("transaction") or {}
+    idx = tx_data.get("tx_index")
+    if idx is None:
+        idx = value.get("tx_index")
+    if isinstance(idx, int):
+        return idx
+    try:
+        return int(idx)
+    except (TypeError, ValueError):
+        return 0
 
 
 __all__ = ["RedisSnapshotReader"]

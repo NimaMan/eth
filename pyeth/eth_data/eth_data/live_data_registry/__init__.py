@@ -9,7 +9,7 @@ and retention policy stay consistent.
 """
 
 from .publisher import LiveDataPublisher
-from .reader import LiveDataReader
+from .reader import RedisSnapshotReader
 from .snapshot_serialization import (
     build_block_snapshot,
     normalize_block_header,
@@ -17,7 +17,7 @@ from .snapshot_serialization import (
 
 __all__ = [
     "LiveDataPublisher",
-    "LiveDataReader",
+    "RedisSnapshotReader",
     "build_block_snapshot",
     "normalize_block_header",
 ]

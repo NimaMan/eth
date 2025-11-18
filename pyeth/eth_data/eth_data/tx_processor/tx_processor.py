@@ -181,11 +181,6 @@ class TransactionProcessor:
             )
             if token_address:
                 logs['erc20_contracts'].add(token_address)
-        elif tx_type == "Set Tax":
-            # Add the contract address to erc20_contracts for Set Tax transactions
-            token_address = self._to_checksum_address(transaction.get('to'))
-            if token_address:
-                logs['erc20_contracts'].add(token_address)
         elif tx_type == "Contract Creation":
             contract_address = self._to_checksum_address(receipt.get('contractAddress'))
             if contract_address:

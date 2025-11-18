@@ -1,76 +1,45 @@
 import asyncio
 
-import orjson
-
 from eth_data.blockchain.live_block_processor import LiveBlockProcessor
 
 
-class _FakeExchange:
+class _FakeSignalPublisher:
     def __init__(self):
         self.published = []
 
-    async def publish(self, message, routing_key: str):
-        self.published.append((message, routing_key))
+    async def publish(self, channel, payload):
+        self.published.append((channel, payload))
 
 
-def test_publish_block_uses_existing_exchange():
-    processor = LiveBlockProcessor(rabbitmq_url="amqp://guest:guest@localhost/")
-    fake_exchange = _FakeExchange()
-    processor.blocks_exchange = fake_exchange
+def test_publish_block_notification_uses_existing_publisher():
+    processor = LiveBlockProcessor()
+    fake_publisher = _FakeSignalPublisher()
+    processor._block_signal_publisher = fake_publisher
 
-    success = asyncio.run(processor.publish_block(26))
+    success = asyncio.run(processor.publish_block_notification(26))
 
     assert success is True
-    assert len(fake_exchange.published) == 1
-    message, routing_key = fake_exchange.published[0]
-    assert routing_key == "processed_blocks"
-    payload = orjson.loads(message.body)
+    assert len(fake_publisher.published) == 1
+    channel, payload = fake_publisher.published[0]
+    assert channel == "live_blocks"
     assert payload["block_number"] == 26
 
 
-def test_publish_block_initializes_exchange(monkeypatch):
-    processor = LiveBlockProcessor(rabbitmq_url="amqp://guest:guest@localhost/")
-    fake_exchange = _FakeExchange()
+def test_publish_block_notification_custom_channel():
+    processor = LiveBlockProcessor(block_notification_channel="custom_blocks")
+    fake_publisher = _FakeSignalPublisher()
+    processor._block_signal_publisher = fake_publisher
 
-    async def fake_setup() -> bool:
-        processor.blocks_exchange = fake_exchange
-        return True
-
-    monkeypatch.setattr(processor, "setup_rabbitmq", fake_setup)
-
-    success = asyncio.run(processor.publish_block(100))
+    success = asyncio.run(processor.publish_block_notification(100))
 
     assert success is True
-    assert len(fake_exchange.published) == 1
+    assert fake_publisher.published[0][0] == "custom_blocks"
 
 
-def test_publish_alert_uses_existing_exchange():
-    processor = LiveBlockProcessor(rabbitmq_url="amqp://guest:guest@localhost/")
-    fake_exchange = _FakeExchange()
-    processor.alerts_exchange = fake_exchange
+def test_publish_block_notification_without_publisher_returns_false():
+    processor = LiveBlockProcessor()
+    processor._block_signal_publisher = None
 
-    alert_payload = {"alert": "example", "value": 1}
+    success = asyncio.run(processor.publish_block_notification(1))
 
-    success = asyncio.run(processor.publish_alert(alert_payload))
-
-    assert success is True
-    assert len(fake_exchange.published) == 1
-    message, routing_key = fake_exchange.published[0]
-    assert routing_key == "eth_txn_alerts"
-    assert orjson.loads(message.body) == alert_payload
-
-
-def test_publish_alert_initializes_exchange(monkeypatch):
-    processor = LiveBlockProcessor(rabbitmq_url="amqp://guest:guest@localhost/")
-    fake_exchange = _FakeExchange()
-
-    async def fake_setup() -> bool:
-        processor.alerts_exchange = fake_exchange
-        return True
-
-    monkeypatch.setattr(processor, "setup_rabbitmq", fake_setup)
-
-    success = asyncio.run(processor.publish_alert({"alert": "init"}))
-
-    assert success is True
-    assert len(fake_exchange.published) == 1
+    assert success is False

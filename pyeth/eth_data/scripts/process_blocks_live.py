@@ -55,8 +55,7 @@ async def main(index_address_txs: bool = True):
     # Initialize components
     _processor = LiveBlockProcessor(
         index_address_txs=index_address_txs,
-        rabbitmq_url="amqp://guest:guest@127.0.0.1/",
-        logger=logger
+        logger=logger,
     )
     
     # Register signal handlers for graceful shutdown

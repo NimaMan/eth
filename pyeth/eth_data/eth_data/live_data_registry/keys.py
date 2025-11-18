@@ -6,10 +6,6 @@ def block_header_key(block_number: int) -> str:
     return f"block:block_header:{int(block_number)}"
 
 
-def processed_block_snapshot_key(block_number: int) -> str:
-    return f"block:processed_block_snapshot:{int(block_number)}"
-
-
 def latest_block_number_key() -> str:
     return "block:latest_block_number"
 
@@ -39,7 +35,6 @@ def position_key(portfolio_id: str, token_address: str) -> str:
 
 __all__ = [
     "block_header_key",
-    "processed_block_snapshot_key",
     "latest_block_number_key",
     "chain_state_snapshot_key",
     "latest_chain_state_block_number_key",

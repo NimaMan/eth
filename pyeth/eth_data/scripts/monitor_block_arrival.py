@@ -6,22 +6,22 @@ The script:
 2. Logs each head arrival with both the chain timestamp and the local receive time.
 3. Sleeps for a second, then tries to fetch the full block over HTTP to see if it is
    already available, logging any lag.
+4. Optionally listens to the Redis `live_blocks` channel to measure how quickly our
+   block processor publishes processed block notifications.
 
 Run it for ~60 seconds (default) to compare the cadence you receive vs. the expected
 12s target and to capture how quickly your node serves up full block data.
 """
 
-from __future__ import annotations
-
 import argparse
 import asyncio
 import datetime as dt
+import json
 import statistics
 from collections import defaultdict
 from typing import Dict, List, Optional
 
-import aio_pika
-from aio_pika.exceptions import QueueEmpty
+import redis.asyncio as aioredis
 
 from web3 import AsyncWeb3
 from web3.exceptions import BlockNotFound
@@ -43,7 +43,8 @@ async def monitor_block_arrivals(
     websocket_url: str,
     http_url: str,
     duration_seconds: int = 60,
-    rabbitmq_url: str = "amqp://guest:guest@localhost/",
+    redis_url: str = "redis://localhost:6379/0",
+    redis_channel: str = "live_blocks",
 ) -> None:
     """Subscribe to newHeads and log arrival + fetch latencies for roughly duration_seconds."""
     ws_w3 = AsyncWeb3(WebSocketProvider(websocket_url))
@@ -151,15 +152,11 @@ async def monitor_block_arrivals(
 
     async def publish_monitor() -> None:
         try:
-            connection = await aio_pika.connect_robust(rabbitmq_url)
-            channel = await connection.channel()
-            exchange = await channel.declare_exchange(
-                "blocks_exchange", aio_pika.ExchangeType.FANOUT, durable=True
-            )
-            queue = await channel.declare_queue(exclusive=True, auto_delete=True)
-            await queue.bind(exchange, routing_key="processed_blocks")
+            client = aioredis.from_url(redis_url, decode_responses=True)
+            pubsub = client.pubsub()
+            await pubsub.subscribe(redis_channel)
         except Exception as exc:
-            logger.error("Failed to connect to RabbitMQ: %s", exc)
+            logger.error("Failed to subscribe to Redis channel %s: %s", redis_channel, exc)
             return
 
         try:
@@ -169,29 +166,41 @@ async def monitor_block_arrivals(
                 if remaining <= 0:
                     break
                 try:
-                    message = await asyncio.wait_for(queue.get(), timeout=remaining)
-                except asyncio.TimeoutError:
-                    break
-                except QueueEmpty:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Redis Pub/Sub error: %s", exc)
+                    await asyncio.sleep(1)
                     continue
-                async with message.process(ignore_processed=True):
-                    publish_time = dt.datetime.now(dt.timezone.utc)
-                    headers = message.headers or {}
-                    block_number = headers.get("block_number")
-                    if block_number is None:
-                        continue
-                    block_number = int(block_number)
-                    arrival_time = arrival_times.get(block_number)
-                    if arrival_time:
-                        publish_latencies.append((publish_time - arrival_time).total_seconds())
-                    else:
-                        pending_publish[block_number].append(publish_time)
+                if message is None:
+                    await asyncio.sleep(0)
+                    continue
+
+                publish_time = dt.datetime.now(dt.timezone.utc)
+                data = message.get("data")
+                try:
+                    payload = json.loads(data)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+
+                block_number = payload.get("block_number")
+                if block_number is None:
+                    continue
+                block_number = int(block_number)
+                arrival_time = arrival_times.get(block_number)
+                if arrival_time:
+                    publish_latencies.append((publish_time - arrival_time).total_seconds())
+                else:
+                    pending_publish[block_number].append(publish_time)
         finally:
             try:
-                await channel.close()
+                await pubsub.unsubscribe(redis_channel)
             except Exception:
                 pass
-            await connection.close()
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+            await client.close()
 
     try:
         head_task = asyncio.create_task(head_monitor())
@@ -211,7 +220,8 @@ async def monitor_block_arrivals(
 
         if pending_publish:
             logger.warning(
-                "Pending RabbitMQ messages without arrival timestamps: %s", list(pending_publish)[:5]
+                "Pending block notifications without arrival timestamps: %s",
+                list(pending_publish)[:5],
             )
 
         def summarize(label: str, samples: List[float]) -> None:
@@ -254,9 +264,14 @@ def parse_args() -> argparse.Namespace:
         help="How many seconds to run before exiting",
     )
     parser.add_argument(
-        "--rabbitmq-url",
-        default="amqp://guest:guest@localhost/",
-        help="RabbitMQ connection string for processed block stream",
+        "--redis-url",
+        default="redis://localhost:6379/0",
+        help="Redis connection string for live block notifications",
+    )
+    parser.add_argument(
+        "--redis-channel",
+        default="live_blocks",
+        help="Redis Pub/Sub channel carrying processed block numbers",
     )
     return parser.parse_args()
 
@@ -267,7 +282,8 @@ async def _async_main() -> None:
         websocket_url=args.websocket_url,
         http_url=args.http_url,
         duration_seconds=args.duration,
-        rabbitmq_url=args.rabbitmq_url,
+        redis_url=args.redis_url,
+        redis_channel=args.redis_channel,
     )
 
 
