@@ -62,7 +62,7 @@ pub use gas::{
     GasHeuristic, GasInputs, GasResolutionContext, GasTxType, ResolvedGasParameters,
     TxGasParameters,
 };
-pub use live_chain_data::{LiveChainCache, LiveChainCacheBuilder};
+pub use live_chain_cache::{LiveChainCache, LiveChainCacheBuilder};
 pub use simulator::{RethTxSimulator, TxSimulator};
 pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use single_tx::signed::SignedTransaction;

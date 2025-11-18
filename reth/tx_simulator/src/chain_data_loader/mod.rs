@@ -215,7 +215,14 @@ impl<'a> ChainDataLoader<'a> {
             let raw = cache
                 .fetch_processed_block(next_block)
                 .await?
-                .ok_or_else(|| eyre!("missing processed transactions for block {}", next_block))?;
+                .ok_or_else(|| {
+                    eyre!(
+                        "missing processed transactions for block {} while replaying {}->{}; this block must be present in the live Redis cache",
+                        next_block,
+                        persisted_block,
+                        target_block
+                    )
+                })?;
             let transactions = decode_processed_transactions(&raw)?;
             if transactions.is_empty() {
                 current = next_block;
