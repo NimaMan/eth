@@ -52,18 +52,12 @@ impl BlockDataFetcher {
     }
 
     /// Fetch block data directly from MDBX.
-    pub async fn fetch_db_block(
-        &self,
-        block_number: u64,
-        include_traces: bool,
-    ) -> Result<RawBlockData> {
+    pub async fn fetch_db_block(&self, block_number: u64) -> Result<RawBlockData> {
         let provider = self
             .provider
             .as_ref()
             .ok_or_else(|| eyre::eyre!("database access not configured for this fetcher"))?;
-        provider
-            .fetch_raw_block_data(block_number, include_traces)
-            .await
+        provider.fetch_raw_block_data(block_number, true).await
     }
 
     /// Fetch block data from RPC using a block hash (and number for logging).
@@ -71,13 +65,12 @@ impl BlockDataFetcher {
         &self,
         block_hash: B256,
         block_number: u64,
-        include_traces: bool,
     ) -> Result<RawBlockData> {
         let rpc = self
             .rpc_fetcher
             .as_ref()
             .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
-        rpc.fetch_raw_block_data(block_hash, block_number, include_traces)
+        rpc.fetch_raw_block_data(block_hash, block_number, true)
             .await
     }
 }
