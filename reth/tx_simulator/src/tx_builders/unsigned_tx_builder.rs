@@ -86,42 +86,18 @@ fn assign_fee_fields(obj: &Map<String, Value>, tx: &mut UnsignedTransaction) -> 
                 .ok_or_else(|| eyre!("fees missing gas_price for legacy-like transaction"))?;
             tx.gas_price = Some(parse_u128(gas_price_value)?);
         }
-        2 | 3 | 4 => {
+        2 => {
             let max_fee_value = fees_obj
                 .get("max_fee_per_gas")
-                .ok_or_else(|| eyre!("fees missing max_fee_per_gas for 1559-style transaction"))?;
+                .ok_or_else(|| eyre!("fees missing max_fee_per_gas for EIP-1559 transaction"))?;
             let max_priority_value = fees_obj
                 .get("max_priority_fee")
-                .ok_or_else(|| eyre!("fees missing max_priority_fee for 1559-style transaction"))?;
+                .ok_or_else(|| eyre!("fees missing max_priority_fee for EIP-1559 transaction"))?;
             tx.max_fee_per_gas = Some(parse_u128(max_fee_value)?);
             tx.max_priority_fee_per_gas = Some(parse_u128(max_priority_value)?);
-
-            if tx_type == 3 {
-                if tx.max_fee_per_blob_gas.is_none() {
-                    // Many historical snapshots omit blob fee fields. Fall back to the gas
-                    // settings so we can continue simulating even if the blob metadata is missing.
-                    let fallback = tx.max_fee_per_gas.or(tx.gas_price).unwrap_or_default();
-                    tx.max_fee_per_blob_gas = Some(fallback);
-                }
-            }
         }
         _ => {
-            // Treat any unknown types as EIP-1559 style so we can keep simulating them without
-            // exploding. This mirrors how the Python processor handled forward-compatible types.
-            let max_fee_value = fees_obj.get("max_fee_per_gas").ok_or_else(|| {
-                eyre!(
-                    "fees missing max_fee_per_gas for transaction type {}",
-                    tx_type
-                )
-            })?;
-            let max_priority_value = fees_obj.get("max_priority_fee").ok_or_else(|| {
-                eyre!(
-                    "fees missing max_priority_fee for transaction type {}",
-                    tx_type
-                )
-            })?;
-            tx.max_fee_per_gas = Some(parse_u128(max_fee_value)?);
-            tx.max_priority_fee_per_gas = Some(parse_u128(max_priority_value)?);
+            bail!("unsupported transaction type {}", tx_type);
         }
     }
 
