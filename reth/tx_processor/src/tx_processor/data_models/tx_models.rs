@@ -88,8 +88,6 @@ pub struct ProcessedTransaction {
     pub permit2_events: Vec<Permit2Event>,
     pub access_list: Vec<ProcessedAccessListItem>,
     pub blob_versioned_hashes: Vec<B256>,
-    pub max_fee_per_blob_gas: Option<U256>,
-    pub blob_gas_used: Option<u64>,
     pub signed_authorizations: Vec<SignedAuthorization>,
 
     // Other events and actions
@@ -198,8 +196,6 @@ impl ProcessedTransaction {
             permit2_events: Vec::new(),
             access_list: Vec::new(),
             blob_versioned_hashes: Vec::new(),
-            max_fee_per_blob_gas: None,
-            blob_gas_used: None,
             signed_authorizations: Vec::new(),
             erc20_approval_events: Vec::new(),
             erc721_approval_events: Vec::new(),

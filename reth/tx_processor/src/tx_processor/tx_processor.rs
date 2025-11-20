@@ -233,6 +233,8 @@ impl TxProcessor {
             protocol_type,
             max_fee_per_gas: max_fee_per_gas.clone(),
             max_priority_fee: max_priority_fee_per_gas.clone(),
+            max_fee_per_blob_gas: max_fee_per_blob_gas.clone(),
+            blob_gas_used,
         };
 
         // Determine simple ETH transfer events before building the struct (mirrors Python `_extract_eth_transfers`)
@@ -296,8 +298,6 @@ impl TxProcessor {
         processed_tx.other_events = other_events;
         processed_tx.access_list = access_list;
         processed_tx.blob_versioned_hashes = blob_versioned_hashes;
-        processed_tx.max_fee_per_blob_gas = max_fee_per_blob_gas;
-        processed_tx.blob_gas_used = blob_gas_used;
         processed_tx.signed_authorizations = signed_authorizations;
         processed_tx.eth_transfers = eth_transfers;
 

@@ -13,6 +13,8 @@ pub struct TransactionFees {
     pub protocol_type: String,          // "legacy", "eip1559", "eip2930"
     pub max_fee_per_gas: Option<U256>,  // User's max willingness
     pub max_priority_fee: Option<U256>, // User's max tip
+    pub max_fee_per_blob_gas: Option<U256>,
+    pub blob_gas_used: Option<u64>,
 }
 
 impl TransactionFees {
@@ -26,6 +28,8 @@ impl TransactionFees {
             protocol_type: "unknown".to_string(),
             max_fee_per_gas: None,
             max_priority_fee: None,
+            max_fee_per_blob_gas: None,
+            blob_gas_used: None,
         }
     }
 
@@ -45,6 +49,8 @@ impl TransactionFees {
             protocol_type: "eip1559".to_string(),
             max_fee_per_gas: Some(max_fee_per_gas),
             max_priority_fee: Some(max_priority_fee),
+            max_fee_per_blob_gas: None,
+            blob_gas_used: None,
         }
     }
 }
