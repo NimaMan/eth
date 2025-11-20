@@ -47,6 +47,7 @@ pub struct TransactionReceipt {
     pub cumulative_gas_used: u64,
     pub effective_gas_price: U256,
     pub contract_address: Option<Address>,
+    pub blob_gas_used: Option<u64>,
 }
 
 /// Event log from transaction

@@ -7,6 +7,7 @@ use alloy_consensus::Transaction as _;
 /// - Getting transaction receipts and logs
 /// - Building CallRequests for simulation
 /// - Accessing transaction metadata
+use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::Result;
 use reth_provider::{HeaderProvider, ReceiptProvider, TransactionsProvider};
@@ -215,6 +216,10 @@ impl RethQueryProvider {
             })
             .collect();
 
+        let blob_gas_used = tx
+            .blob_versioned_hashes()
+            .map(|hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB);
+
         Ok(TransactionReceipt {
             tx_hash,
             status: receipt.success,
@@ -223,6 +228,7 @@ impl RethQueryProvider {
             cumulative_gas_used: receipt.cumulative_gas_used,
             effective_gas_price: U256::from(tx.effective_gas_price(header.base_fee_per_gas)),
             contract_address: None,
+            blob_gas_used,
         })
     }
 

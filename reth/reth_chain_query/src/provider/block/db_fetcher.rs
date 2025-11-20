@@ -7,6 +7,7 @@ use alloy_consensus::Transaction as _;
 /// - Receipts and logs from local DB (Receipts table)
 /// - Block metadata from local DB (Headers table)
 /// - Traces from local simulation (matches debug_traceBlockByNumber)
+use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::Result;
@@ -331,6 +332,10 @@ impl RethQueryProvider {
             };
             previous_cumulative = cumulative;
 
+            let blob_gas_used = tx
+                .blob_versioned_hashes()
+                .map(|hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB);
+
             tx_receipts.push(TransactionReceipt {
                 tx_hash: *tx.hash(),
                 status: receipt.success,
@@ -339,6 +344,7 @@ impl RethQueryProvider {
                 cumulative_gas_used: cumulative,
                 effective_gas_price: U256::from(tx.effective_gas_price(header.base_fee_per_gas)),
                 contract_address: None,
+                blob_gas_used,
             });
         }
 

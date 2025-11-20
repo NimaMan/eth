@@ -201,6 +201,7 @@ fn parse_receipts(receipts: &[Value], block_number: u64) -> Result<Vec<Transacti
         let cumulative_gas_used = parse_u64(required_field(receipt, "cumulativeGasUsed")?)?;
         let effective_gas_price = parse_u256(required_field(receipt, "effectiveGasPrice")?)?;
         let contract_address = parse_address_optional(receipt.get("contractAddress"))?;
+        let blob_gas_used = parse_u64_opt(receipt.get("blobGasUsed"))?;
         let logs = parse_logs(receipt, block_number)?;
 
         result.push(TransactionReceipt {
@@ -211,6 +212,7 @@ fn parse_receipts(receipts: &[Value], block_number: u64) -> Result<Vec<Transacti
             cumulative_gas_used,
             effective_gas_price,
             contract_address,
+            blob_gas_used,
         });
     }
     Ok(result)

@@ -56,7 +56,7 @@ impl RethQueryProvider {
         let mut pending_chain =
             prepare_state_for_metadata(self, block_number, pending_tx_hashes).await?;
 
-        // Rely on the simulator's ChainDataLoader to hydrate the block context. If neither MDBX
+        // Rely on the simulator's BlockContextLoader to hydrate the block context. If neither MDBX
         // nor the live cache can supply the requested block, the subsequent view calls will fail
         // with a descriptive error.
 
