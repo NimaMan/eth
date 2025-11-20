@@ -52,28 +52,40 @@ pub fn build_unsigned_transaction_from_processed_tx_json(
         tx.blob_versioned_hashes = build_hashes(hashes)?;
     }
 
-    if let Some(max_blob_fee) = obj.get("max_fee_per_blob_gas") {
-        if !max_blob_fee.is_null() {
-            tx.max_fee_per_blob_gas = Some(parse_u128(max_blob_fee)?);
-        }
-    }
-
-    assign_fee_fields(obj, &mut tx)?;
-
-    Ok(tx)
-}
-
-fn assign_fee_fields(obj: &Map<String, Value>, tx: &mut UnsignedTransaction) -> Result<()> {
-    let raw_type = obj
+    let raw_type_value = obj
         .get("raw_tx_type")
         .ok_or_else(|| eyre!("processed transaction missing raw_tx_type"))?;
-    let tx_type = parse_u64(raw_type)?;
+    let tx_type = parse_u64(raw_type_value)?;
 
     let fees_obj = obj
         .get("fees")
         .and_then(Value::as_object)
         .ok_or_else(|| eyre!("processed transaction missing fees object"))?;
 
+    assign_fee_fields(tx_type, fees_obj, &mut tx)?;
+
+    let max_blob_fee = obj
+        .get("max_fee_per_blob_gas")
+        .filter(|value| !value.is_null())
+        .or_else(|| {
+            fees_obj
+                .get("max_fee_per_blob_gas")
+                .filter(|value| !value.is_null())
+        });
+    if let Some(max_blob_fee_value) = max_blob_fee {
+        tx.max_fee_per_blob_gas = Some(parse_u128(max_blob_fee_value)?);
+    } else if tx_type == 3 {
+        return Err(eyre!("blob transaction missing max_fee_per_blob_gas"));
+    }
+
+    Ok(tx)
+}
+
+fn assign_fee_fields(
+    tx_type: u64,
+    fees_obj: &Map<String, Value>,
+    tx: &mut UnsignedTransaction,
+) -> Result<()> {
     let gas_limit_value = fees_obj
         .get("gas_limit")
         .ok_or_else(|| eyre!("fees missing gas_limit"))?;
@@ -86,7 +98,7 @@ fn assign_fee_fields(obj: &Map<String, Value>, tx: &mut UnsignedTransaction) -> 
                 .ok_or_else(|| eyre!("fees missing gas_price for legacy-like transaction"))?;
             tx.gas_price = Some(parse_u128(gas_price_value)?);
         }
-        2 => {
+        2 | 3 => {
             let max_fee_value = fees_obj
                 .get("max_fee_per_gas")
                 .ok_or_else(|| eyre!("fees missing max_fee_per_gas for EIP-1559 transaction"))?;
