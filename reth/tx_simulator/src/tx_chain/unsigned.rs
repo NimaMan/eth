@@ -306,7 +306,7 @@ impl TxSimulator {
 
         if block_number > latest {
             if let Some(forked_state) = self
-                .chain_data_loader()
+                .block_context_loader()
                 .replay_live_state(block_number, None)
                 .await?
             {

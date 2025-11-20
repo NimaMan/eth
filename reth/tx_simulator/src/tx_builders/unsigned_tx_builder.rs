@@ -98,7 +98,8 @@ fn assign_fee_fields(
                 .ok_or_else(|| eyre!("fees missing gas_price for legacy-like transaction"))?;
             tx.gas_price = Some(parse_u128(gas_price_value)?);
         }
-        2 | 3 => {
+        // Treat 2 (EIP-1559), 3 (EIP-4844 blob), and 4 (EIP-7702 auth list) with the same fee fields.
+        2 | 3 | 4 => {
             let max_fee_value = fees_obj
                 .get("max_fee_per_gas")
                 .ok_or_else(|| eyre!("fees missing max_fee_per_gas for EIP-1559 transaction"))?;

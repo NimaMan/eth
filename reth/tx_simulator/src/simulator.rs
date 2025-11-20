@@ -1,22 +1,25 @@
-use crate::chain_data_loader::ChainDataLoader;
+use crate::block_context::{self, BlockContext, BlockContextLoader, BlockStateProvider};
 use crate::live_chain_cache::LiveChainCache;
-use crate::tx_chain::sequential::ForkedState;
 use crate::types::SimulationDefaults;
-use eyre::Result;
+use eyre::{eyre, Result};
+use std::future::Future;
 use std::path::Path;
 /// Core transaction simulator implementation
 ///
 /// This module contains the main TxSimulator struct and its core methods
 /// for initialization and database access.
 use std::sync::Arc;
+use tokio::{runtime::Runtime, task};
+use tracing::warn;
 
 // Core Reth imports
 use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
 use reth_node_ethereum::{EthEvmConfig, EthereumNode};
 use reth_node_types::NodeTypesWithDBAdapter;
+use reth_primitives::SealedHeader;
 use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderFactory, StateProvider,
+    providers::StaticFileProvider, BlockNumReader, ProviderFactory, StateProvider,
 };
 
 /// Transaction Simulator with direct database access
@@ -27,6 +30,7 @@ pub struct TxSimulator {
     pub(crate) evm_config: EthEvmConfig,
     pub(crate) defaults: SimulationDefaults,
     pub(crate) live_chain_cache: Option<Arc<LiveChainCache>>,
+    loader_runtime: Arc<Runtime>,
 }
 
 impl TxSimulator {
@@ -59,12 +63,19 @@ impl TxSimulator {
 
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
-        Ok(Self {
+        let loader_runtime = Arc::new(
+            Runtime::new().map_err(|err| eyre!("failed to create loader runtime: {}", err))?,
+        );
+
+        let mut simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
-        })
+            loader_runtime,
+        };
+        simulator.attach_default_live_chain_cache();
+        Ok(simulator)
     }
 
     /// Create new simulator with an existing provider factory
@@ -76,12 +87,19 @@ impl TxSimulator {
         let chain_spec = provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
 
-        Ok(Self {
+        let loader_runtime = Arc::new(
+            Runtime::new().map_err(|err| eyre!("failed to create loader runtime: {}", err))?,
+        );
+
+        let mut simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
-        })
+            loader_runtime,
+        };
+        simulator.attach_default_live_chain_cache();
+        Ok(simulator)
     }
 
     pub fn with_live_chain_cache(mut self, cache: LiveChainCache) -> Self {
@@ -137,30 +155,27 @@ impl TxSimulator {
     /// This is needed for EIP-1559 transactions to ensure gas prices are set correctly.
     /// Returns the base fee in wei.
     pub fn get_base_fee_at_block(&self, block_number: u64) -> Result<u128> {
-        self.assert_block_available(block_number)?;
-        let provider = self.provider_factory.provider()?;
-        let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
-            eyre::eyre!(
-                "No header for block whilst getting base-fee {}",
+        let context = self.load_block_context_blocking(block_number, None)?;
+        let base_fee = context.header.base_fee_per_gas.ok_or_else(|| {
+            eyre!(
+                "No base fee for block {} (likely pre-London or header missing base fee)",
                 block_number
             )
         })?;
-
-        let base_fee = block_header
-            .base_fee_per_gas
-            .ok_or_else(|| eyre::eyre!("No base fee for block {} (pre-London?)", block_number))?;
-
         Ok(base_fee as u128)
     }
 
     /// Get chain state at a specific block
     /// Returns a StateProvider that gives access to all blockchain state at that block
     pub fn get_chain_state_at_block(&self, block_number: u64) -> Result<Box<dyn StateProvider>> {
-        self.assert_block_available(block_number)?;
-        let state = self
-            .provider_factory
-            .history_by_block_number(block_number)?;
-        Ok(state)
+        let context = self.load_block_context_blocking(block_number, None)?;
+        match context.state {
+            BlockStateProvider::Historical(state) => Ok(state),
+            BlockStateProvider::LiveFork(_) => Err(eyre!(
+                "State for block {} only exists in the live cache; use simulation APIs instead",
+                block_number
+            )),
+        }
     }
 
     // === Block Simulation Methods (temporarily disabled) ===
@@ -171,20 +186,12 @@ impl TxSimulator {
 
     /// Get block metadata (timestamp, gas_limit, gas_used, base_fee)
     pub fn get_block_metadata(&self, block_number: u64) -> Result<(u64, u64, u64, Option<u128>)> {
-        self.assert_block_available(block_number)?;
-        let provider = self.provider_factory.provider()?;
-        let block_header = provider.header_by_number(block_number)?.ok_or_else(|| {
-            eyre::eyre!(
-                "No header for block whilst getting block metadata {}",
-                block_number
-            )
-        })?;
-
+        let context = self.load_block_context_blocking(block_number, None)?;
         Ok((
-            block_header.timestamp,
-            block_header.gas_limit,
-            block_header.gas_used,
-            block_header.base_fee_per_gas.map(|v| v as u128),
+            context.header.timestamp,
+            context.header.gas_limit,
+            context.header.gas_used,
+            context.header.base_fee_per_gas.map(|v| v as u128),
         ))
     }
 }
@@ -203,18 +210,51 @@ impl TxSimulator {
     }
 
     /// Helper accessor for the shared chain data loader.
-    pub fn chain_data_loader(&self) -> ChainDataLoader<'_> {
-        ChainDataLoader::new(self)
+    pub fn block_context_loader(&self) -> BlockContextLoader<'_> {
+        BlockContextLoader::new(self)
     }
 
-    pub(crate) async fn replay_block_from_live_data(
+    /// Execute a block-context future on either the caller's runtime (when safe) or the
+    /// simulator's dedicated loader runtime.
+    fn run_block_context_future<F>(&self, fut: F) -> F::Output
+    where
+        F: Future,
+    {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            task::block_in_place(|| handle.block_on(fut))
+        } else {
+            self.loader_runtime.block_on(fut)
+        }
+    }
+
+    pub(crate) fn load_block_context_blocking(
         &self,
         block_number: u64,
-        header_hint: Option<reth_primitives::SealedHeader>,
-    ) -> Result<Option<ForkedState>> {
-        self.chain_data_loader()
-            .replay_live_state(block_number, header_hint)
-            .await
+        header_hint: Option<SealedHeader>,
+    ) -> Result<BlockContext> {
+        self.run_block_context_future(
+            self.block_context_loader()
+                .load_block_context(block_number, header_hint),
+        )
+    }
+
+    fn attach_default_live_chain_cache(&mut self) {
+        if self.live_chain_cache.is_some() {
+            return;
+        }
+
+        let redis_url = block_context::resolve_live_data_redis_url();
+        match LiveChainCache::new(&redis_url) {
+            Ok(cache) => {
+                self.live_chain_cache = Some(Arc::new(cache));
+            }
+            Err(err) => {
+                warn!(
+                    "failed to initialize live chain cache at {}: {}",
+                    redis_url, err
+                );
+            }
+        }
     }
 }
 

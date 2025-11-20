@@ -290,7 +290,7 @@ Options:
 - `SequentialSimulationOptions { at_block: Option<u64>, stop_on_failure: bool, auto_increment_nonces: bool, gas_limit_per_tx: Option<u64> }`
 
 Semantics:
-- Resolves a forked state once (using MDBX when available or live replay via `ChainDataLoader`) and reuses a fused inspector across the entire sequence.
+- Resolves a forked state once (using MDBX when available or live replay via the `BlockContextLoader`) and reuses a fused inspector across the entire sequence.
 - Returns per-transaction results plus aggregate counters; respects `stop_on_failure`.
 - `simulate_on_fork_with_trace` now populates `struct_logs` when full tracing is requested.
 

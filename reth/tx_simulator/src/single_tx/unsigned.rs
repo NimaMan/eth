@@ -5,7 +5,7 @@
 /// RPC. The "full trace" helpers enable step recording so `FullSimulationResult::struct_logs` is populated,
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
-    chain_data_loader::{BlockContext, BlockStateProvider},
+    block_context::{BlockContext, BlockStateProvider},
     gas::{GasHeuristic, GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
@@ -276,7 +276,7 @@ impl TxSimulator {
     }
 
     async fn prepare_block_context(&self, block_number: u64) -> Result<BlockContext> {
-        self.chain_data_loader()
+        self.block_context_loader()
             .load_block_context(block_number, None)
             .await
     }

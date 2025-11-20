@@ -12,6 +12,7 @@
 /// For interactive, step-by-step simulation where you need to inspect results
 /// between transactions, use SimulationChain instead.
 use crate::{
+    block_context::{BlockContext, BlockStateProvider},
     gas::{GasHeuristic, GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
@@ -26,14 +27,14 @@ use alloy_eips::eip2930::AccessList;
 use alloy_eips::eip7702::{RecoveredAuthorization, SignedAuthorization};
 use eyre::{eyre, Result};
 use std::collections::HashMap;
-use tokio::{runtime::Handle, task};
+use tokio::task;
 
 // Reth imports
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::SealedHeader;
-use reth_provider::{HeaderProvider, StateProvider};
+use reth_provider::StateProvider;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::primitives::KECCAK_EMPTY;
@@ -71,25 +72,13 @@ impl TxSimulator {
         }
 
         let simulator = self.clone();
-        let handle = Handle::current();
 
         task::spawn_blocking(move || {
             // Determine the forked context (historical MDBX or live replay via cache).
             let latest = simulator.get_latest_block()?;
             let block_number = options.at_block.unwrap_or(latest);
 
-            let mut forked_state = if block_number <= latest {
-                simulator.create_forked_state(block_number)?
-            } else {
-                handle
-                    .block_on(simulator.replay_block_from_live_data(block_number, None))?
-                    .ok_or_else(|| {
-                        eyre!(
-                            "state for block {} not yet available locally or via live cache",
-                            block_number
-                        )
-                    })?
-            };
+            let mut forked_state = simulator.create_forked_state(block_number)?;
 
             let mut results = Vec::new();
             let mut cumulative_gas_used = 0u64;
@@ -155,22 +144,14 @@ impl TxSimulator {
             })
         })
         .await
-        .map_err(|e| eyre::eyre!("Spawn blocking failed: {}", e))?
+        .map_err(|e| eyre!("Spawn blocking failed: {}", e))?
     }
 
     /// Simulate a sequence of transactions where each builds on previous state changes.
     /// Create a forked state at a specific block for sequential simulation
     pub(crate) fn create_forked_state(&self, block_number: u64) -> Result<ForkedState> {
-        self.assert_block_available(block_number)?;
-        let provider = self.provider_factory.provider()?;
-        // Important: fetching the canonical header can fail briefly if the MDBX mapping
-        // has not advanced yet even though the block is visible via RPC.
-        let block_header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-        let sealed_header = SealedHeader::new(block_header.clone(), block_header.hash_slow());
-
-        self.create_forked_state_with_header(block_number, sealed_header)
+        let context = self.load_block_context_blocking(block_number, None)?;
+        Self::forked_state_from_context(block_number, context)
     }
 
     pub(crate) fn create_forked_state_with_header(
@@ -178,18 +159,23 @@ impl TxSimulator {
         block_number: u64,
         block_header: SealedHeader,
     ) -> Result<ForkedState> {
-        self.assert_block_available(block_number)?;
-        let state = self
-            .provider_factory
-            .history_by_block_number(block_number)?;
-        let db = CacheDB::new(StateProviderDatabase::new(state));
+        let context = self.load_block_context_blocking(block_number, Some(block_header))?;
+        Self::forked_state_from_context(block_number, context)
+    }
 
-        Ok(ForkedState {
-            db,
-            block_number,
-            block_header,
-            nonces: HashMap::new(),
-        })
+    fn forked_state_from_context(block_number: u64, context: BlockContext) -> Result<ForkedState> {
+        match context.state {
+            BlockStateProvider::Historical(state) => {
+                let db = CacheDB::new(StateProviderDatabase::new(state));
+                Ok(ForkedState {
+                    db,
+                    block_number,
+                    block_header: context.header,
+                    nonces: HashMap::new(),
+                })
+            }
+            BlockStateProvider::LiveFork(fork) => Ok(fork),
+        }
     }
 
     /// Simulate a transaction on a forked state with full trace

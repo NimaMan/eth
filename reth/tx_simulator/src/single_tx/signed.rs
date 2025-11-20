@@ -3,6 +3,7 @@
 /// This module contains methods for simulating fully signed transactions
 /// with valid signatures (v, r, s).
 use crate::{
+    block_context::BlockStateProvider,
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     types::{FullSimulationResult, SimulationResult},
@@ -19,7 +20,6 @@ use alloy_primitives::Bytes;
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame};
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::{Recovered, TransactionSigned};
-use reth_provider::HeaderProvider;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -169,15 +169,17 @@ impl TxSimulator {
         inspector_config: TracingInspectorConfig,
         trace_mode: SignedTraceMode,
     ) -> Result<SignedExecutionResult> {
-        simulator.assert_block_available(block_number)?;
-        let provider = simulator.provider_factory.provider()?;
-        let block_header = provider
-            .header_by_number(block_number)?
-            .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-
-        let state = simulator
-            .provider_factory
-            .history_by_block_number(block_number)?;
+        let context = simulator.load_block_context_blocking(block_number, None)?;
+        let state = match context.state {
+            BlockStateProvider::Historical(state) => state,
+            BlockStateProvider::LiveFork(_) => {
+                return Err(eyre::eyre!(
+                    "Signed transaction simulation requires persisted state for block {}",
+                    block_number
+                ));
+            }
+        };
+        let block_header = context.header;
 
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
         let mut inspector = TracingInspector::new(inspector_config);
