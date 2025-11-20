@@ -146,8 +146,8 @@ class TransactionProcessor:
     def _extract_transaction_fees(self, transaction: Dict[str, Any], receipt: Dict[str, Any]) -> TransactionFees:
         """Extract transaction fee information from transaction and receipt"""
         # Get effective gas price and gas used from receipt
-        effective_gas_price = self._normalize_int(receipt['effectiveGasPrice'])
-        gas_used = self._normalize_int(receipt['gasUsed'])
+        effective_gas_price = self._normalize_int(receipt.get('effectiveGasPrice') or 0)
+        gas_used = self._normalize_int(receipt.get('gasUsed') or 0)
         total_fee = effective_gas_price * gas_used
 
         gas_limit_raw = transaction.get('gas')
@@ -156,7 +156,18 @@ class TransactionProcessor:
         gas_limit = self._normalize_int(gas_limit_raw)
 
         # Get gas fields - priority fee will be calculated later in ranking module
+        # Protocol classifier returns snake_case keys for its calculated fields
         gas_fields = self.protocol_classifier.get_gas_fields(transaction, receipt)
+        
+        # Raw transaction data uses camelCase
+        max_fee_per_blob_gas = transaction.get("maxFeePerBlobGas")
+        if max_fee_per_blob_gas is not None:
+            max_fee_per_blob_gas = self._normalize_int(max_fee_per_blob_gas)
+            
+        # Raw receipt data uses camelCase
+        blob_gas_used = receipt.get("blobGasUsed")
+        if blob_gas_used is not None:
+            blob_gas_used = self._normalize_int(blob_gas_used)
 
         return TransactionFees(
             gas_price=effective_gas_price,
@@ -164,8 +175,11 @@ class TransactionProcessor:
             gas_limit=gas_limit,
             tx_fee=total_fee,
             protocol_type=gas_fields.get('protocol_type', 'unknown'),
+            # gas_fields uses snake_case
             max_fee_per_gas=gas_fields.get('max_fee_per_gas'),
-            max_priority_fee=gas_fields.get('max_priority_fee')
+            max_priority_fee=gas_fields.get('max_priority_fee'),
+            max_fee_per_blob_gas=max_fee_per_blob_gas,
+            blob_gas_used=blob_gas_used,
         )
     
     def _add_tx_type_events(self, tx_type: str, logs: Dict[str, List[Any]], transaction: Dict[str, Any], receipt: Dict[str, Any]) -> None:
@@ -306,6 +320,14 @@ class TransactionProcessor:
             transaction, from_address, to_address, value_wei, internal_transactions
         )
 
+        blob_hashes = transaction.get("blobVersionedHashes") or []
+        normalized_blob_hashes = []
+        for entry in blob_hashes:
+            if isinstance(entry, bytes):
+                normalized_blob_hashes.append(f"0x{entry.hex()}")
+            else:
+                normalized_blob_hashes.append(str(entry))
+
         processed_tx = ProcessedTransaction(
             hash=tx_hash,
             tx_type=tx_type,
@@ -341,6 +363,7 @@ class TransactionProcessor:
             eth_transfers=eth_transfers,
             internal_transactions=internal_transactions,
             fees=fees,
+            blob_versioned_hashes=normalized_blob_hashes,
             unique_addresses=unique_addresses,
             erc20_contracts=erc20_contracts,
             bribe_amount=bribe_amount,

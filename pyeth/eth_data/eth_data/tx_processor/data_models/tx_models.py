@@ -92,6 +92,8 @@ class TransactionFees:
     gas_used: int
     gas_limit: int  # Gas limit supplied with the transaction
     tx_fee: int  # Total fee in wei (gas_price * gas_used)
+    max_fee_per_blob_gas: Optional[int] = None
+    blob_gas_used: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -102,6 +104,8 @@ class TransactionFees:
             "protocol_type": self.protocol_type,
             "max_fee_per_gas": self.max_fee_per_gas,
             "max_priority_fee": self.max_priority_fee,
+            "max_fee_per_blob_gas": self.max_fee_per_blob_gas,
+            "blob_gas_used": self.blob_gas_used,
         }
 
     @property
@@ -121,6 +125,10 @@ class TransactionFees:
             self.max_fee_per_gas = _ensure_int(self.max_fee_per_gas, "fees.max_fee_per_gas")
         if self.max_priority_fee is not None:
             self.max_priority_fee = _ensure_int(self.max_priority_fee, "fees.max_priority_fee")
+        if self.max_fee_per_blob_gas is not None:
+            self.max_fee_per_blob_gas = _ensure_int(self.max_fee_per_blob_gas, "fees.max_fee_per_blob_gas")
+        if self.blob_gas_used is not None:
+            self.blob_gas_used = _ensure_int(self.blob_gas_used, "fees.blob_gas_used")
 
 
 @dataclass
@@ -212,8 +220,6 @@ class ProcessedTransaction:
     permit2_events: List[Permit2Event] = field(default_factory=list)
     access_list: List[AccessListEntry] = field(default_factory=list)
     blob_versioned_hashes: List[str] = field(default_factory=list)
-    max_fee_per_blob_gas: Optional[int] = None
-    blob_gas_used: Optional[int] = None
     signed_authorizations: List[Dict[str, Any]] = field(default_factory=list)
 
     other_events: List[Dict[str, Any]] = field(default_factory=list)
@@ -371,8 +377,6 @@ class ProcessedTransaction:
             "permit2_events": self._list_to_dicts(self.permit2_events),
             "access_list": self._list_to_dicts(self.access_list),
             "blob_versioned_hashes": list(self.blob_versioned_hashes),
-            "max_fee_per_blob_gas": self.max_fee_per_blob_gas,
-            "blob_gas_used": self.blob_gas_used,
             "signed_authorizations": self._list_to_dicts(self.signed_authorizations),
             "other_events": self.other_events,
             "address_balance_changes": self.address_balance_changes,
@@ -417,12 +421,6 @@ class ProcessedTransaction:
         blob_versioned_hashes = [
             _ensure_hex_str(item, "blob_versioned_hashes") for item in blob_hashes_raw
         ]
-        max_fee_per_blob_gas = tx_dict.get('max_fee_per_blob_gas')
-        if max_fee_per_blob_gas is not None:
-            max_fee_per_blob_gas = _ensure_int(max_fee_per_blob_gas, "max_fee_per_blob_gas")
-        blob_gas_used = tx_dict.get('blob_gas_used')
-        if blob_gas_used is not None:
-            blob_gas_used = _ensure_int(blob_gas_used, "blob_gas_used")
         signed_authorizations = list(tx_dict.get('signed_authorizations') or [])
 
         return cls(
@@ -481,8 +479,6 @@ class ProcessedTransaction:
             permit2_events=cls._coerce_sequence("permit2_events", tx_dict.get('permit2_events'), Permit2Event),
             access_list=cls._coerce_sequence("access_list", tx_dict.get('access_list'), AccessListEntry),
             blob_versioned_hashes=blob_versioned_hashes,
-            max_fee_per_blob_gas=max_fee_per_blob_gas,
-            blob_gas_used=blob_gas_used,
             signed_authorizations=signed_authorizations,
             other_events=list(tx_dict.get('other_events') or []),
             fees=fees,
@@ -560,8 +556,6 @@ class ProcessedTransaction:
                  bribe_amount: int = 0,
                  access_list: Optional[List[AccessListEntry]] = None,
                  blob_versioned_hashes: Optional[List[str]] = None,
-                 max_fee_per_blob_gas: Optional[int] = None,
-                 blob_gas_used: Optional[int] = None,
                  signed_authorizations: Optional[List[Dict[str, Any]]] = None,
                  ):
         """Initialize DetailedTransaction with type conversion handling"""
@@ -638,12 +632,6 @@ class ProcessedTransaction:
         self.blob_versioned_hashes = [
             _ensure_hex_str(item, "blob_versioned_hashes") for item in (blob_versioned_hashes or [])
         ]
-        self.max_fee_per_blob_gas = (
-            _ensure_int(max_fee_per_blob_gas, "max_fee_per_blob_gas") if max_fee_per_blob_gas is not None else None
-        )
-        self.blob_gas_used = (
-            _ensure_int(blob_gas_used, "blob_gas_used") if blob_gas_used is not None else None
-        )
         self.signed_authorizations = []
         for auth in signed_authorizations or []:
             if isinstance(auth, dict):
@@ -721,8 +709,6 @@ class ProcessedTransaction:
             self.permit2_events == other.permit2_events and
             self.access_list == other.access_list and
             self.blob_versioned_hashes == other.blob_versioned_hashes and
-            self.max_fee_per_blob_gas == other.max_fee_per_blob_gas and
-            self.blob_gas_used == other.blob_gas_used and
             self.signed_authorizations == other.signed_authorizations and
             self.other_events == other.other_events and
             self.fees == other.fees and

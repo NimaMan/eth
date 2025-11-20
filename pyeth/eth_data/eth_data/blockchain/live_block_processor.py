@@ -105,6 +105,7 @@ import os
 from collections import deque
 from typing import Optional
 
+import orjson
 from web3 import AsyncWeb3
 from web3.providers import WebSocketProvider
 
@@ -126,7 +127,7 @@ class LiveBlockProcessor:
         logger=None,
         redis_url: Optional[str] = None,
         block_notification_channel: str = "live_blocks",
-        live_block_cache_size: int = 3,
+        live_block_cache_size: int = 5,
     ):
         # Initialize WebSocket provider and web3 instance
         self.provider = WebSocketProvider(websocket_url)
@@ -348,6 +349,28 @@ class LiveBlockProcessor:
                 block_number=block_number,
                 include_transactions=True,
             )
+            header_payload = snapshot.get("header") or ""
+            if len(header_payload.strip()) < 10:
+                self.logger.warning(
+                    "Rebuilding missing/invalid header payload for block %s (len=%s)",
+                    block_number,
+                    len(header_payload),
+                )
+                # Fallback to refetch the header directly from the RPC node.
+                block_data = await self.block_processor.block_fetcher.fetch_block_by_number(
+                    block_number
+                )
+                fallback_header = self.block_processor._extract_block_header(block_data)
+                if fallback_header is not None:
+                    snapshot["header"] = orjson.dumps(
+                        fallback_header.to_rpc_dict()
+                    ).decode()
+                else:
+                    self.logger.error(
+                        "Block %s header refetch returned None; skipping publish",
+                        block_number,
+                    )
+                    return
             await self._live_data_publisher.publish_block(block_number, snapshot)
             self._record_retained_block(block_number)
             await self._evict_old_blocks()

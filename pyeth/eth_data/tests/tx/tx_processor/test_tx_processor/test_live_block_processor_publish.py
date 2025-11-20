@@ -1,45 +1,63 @@
 import asyncio
+import json
+import logging
+import os
+import uuid
+
+import redis.asyncio as aioredis
 
 from eth_data.blockchain.live_block_processor import LiveBlockProcessor
 
 
-class _FakeSignalPublisher:
-    def __init__(self):
-        self.published = []
-
-    async def publish(self, channel, payload):
-        self.published.append((channel, payload))
-
-
-def test_publish_block_notification_uses_existing_publisher():
-    processor = LiveBlockProcessor()
-    fake_publisher = _FakeSignalPublisher()
-    processor._block_signal_publisher = fake_publisher
-
-    success = asyncio.run(processor.publish_block_notification(26))
-
-    assert success is True
-    assert len(fake_publisher.published) == 1
-    channel, payload = fake_publisher.published[0]
-    assert channel == "live_blocks"
-    assert payload["block_number"] == 26
+def _build_test_logger():
+    logger = logging.getLogger("test_live_block_processor_publish")
+    if not logger.handlers:
+        logger.addHandler(logging.NullHandler())
+    logger.propagate = False
+    return logger
 
 
-def test_publish_block_notification_custom_channel():
-    processor = LiveBlockProcessor(block_notification_channel="custom_blocks")
-    fake_publisher = _FakeSignalPublisher()
-    processor._block_signal_publisher = fake_publisher
-
-    success = asyncio.run(processor.publish_block_notification(100))
-
-    assert success is True
-    assert fake_publisher.published[0][0] == "custom_blocks"
+TEST_LOGGER = _build_test_logger()
+REDIS_URL = os.getenv("LIVE_BLOCKCHAIN_DATA_REDIS_URL", "redis://localhost:6379/0")
 
 
-def test_publish_block_notification_without_publisher_returns_false():
-    processor = LiveBlockProcessor()
-    processor._block_signal_publisher = None
+async def _next_pubsub_message(pubsub, timeout: float = 5.0):
+    async def _wait_for_message():
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+            if message is not None:
+                return message
+            await asyncio.sleep(0)
 
-    success = asyncio.run(processor.publish_block_notification(1))
+    return await asyncio.wait_for(_wait_for_message(), timeout=timeout)
 
-    assert success is False
+
+def test_live_block_processor_publishes_blocks_via_redis():
+    asyncio.run(_assert_block_notification())
+
+
+async def _assert_block_notification():
+    channel = f"test_live_blocks_{uuid.uuid4().hex}"
+    processor = LiveBlockProcessor(
+        block_notification_channel=channel,
+        redis_url=REDIS_URL,
+        logger=TEST_LOGGER,
+    )
+
+    redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe(channel)
+
+    try:
+        success = await processor.publish_block_notification(123456)
+        assert success is True
+
+        message = await _next_pubsub_message(pubsub)
+        assert message["channel"] == channel
+        payload = json.loads(message["data"])
+        assert payload["block_number"] == 123456
+    finally:
+        await pubsub.unsubscribe(channel)
+        await pubsub.aclose()
+        await redis_client.aclose()
+        await processor.cleanup()
