@@ -1,6 +1,6 @@
 """TokenChainDataFetcher: lightweight PyReth-backed token metadata helper."""
 
-from typing import Optional
+from typing import Optional, List
 from eth_data.pyreth_client import PyrethClient
 
 
@@ -19,13 +19,8 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
     ) -> int:
-        decimals = self._chain_query.get_token_decimals(
-            token_address,
-            block_number,
-            block_header,
-        )
+        decimals = self._chain_query.get_token_decimals(token_address, block_number)
         if decimals is None:
             raise RuntimeError(f"Token {token_address} is missing decimals in PyReth")
         return int(decimals)
@@ -34,13 +29,8 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
     ) -> str:
-        symbol = self._chain_query.get_token_symbol(
-            token_address,
-            block_number,
-            block_header,
-        )
+        symbol = self._chain_query.get_token_symbol(token_address, block_number)
         if symbol is None:
             raise RuntimeError(f"Token {token_address} is missing symbol in PyReth")
         return symbol
@@ -49,13 +39,8 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
     ) -> str:
-        name = self._chain_query.get_token_name(
-            token_address,
-            block_number,
-            block_header,
-        )
+        name = self._chain_query.get_token_name(token_address, block_number)
         if name is None:
             raise RuntimeError(f"Token {token_address} is missing name in PyReth")
         return name
@@ -64,13 +49,8 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
     ) -> int:
-        total_supply = self._chain_query.get_token_total_supply(
-            token_address,
-            block_number,
-            block_header,
-        )
+        total_supply = self._chain_query.get_token_total_supply(token_address, block_number)
         if total_supply is None:
             raise RuntimeError(f"Token {token_address} is missing total supply in PyReth")
         return int(total_supply)
@@ -79,29 +59,10 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        block_header: Optional[str] = None,
-        tx_hash: Optional[str] = None,
+        pending_tx_hashes: Optional[List[str]] = None,
     ):
-        kwargs = {
-            "block_number": block_number,
-            "block_header": block_header,
-        }
-        if tx_hash:
-            kwargs["tx_hash"] = tx_hash
-
-        try:
-            metadata = self._chain_query.get_token_metadata(
-                token_address,
-                **kwargs,
-            )
-        except TypeError as exc:
-            # Older PyReth builds do not accept `tx_hash`. Retry without it.
-            if "tx_hash" in kwargs and "tx_hash" in str(exc):
-                kwargs.pop("tx_hash", None)
-                metadata = self._chain_query.get_token_metadata(
-                    token_address,
-                    **kwargs,
-                )
-            else:
-                raise
-        return metadata
+        return self._chain_query.get_token_metadata(
+            token_address,
+            block_number,
+            pending_tx_hashes or None,
+        )
