@@ -60,6 +60,24 @@ The script prints the sender balances, required gas fee, and the metadata respon
 
 ---
 
+### 3. denom_token_metadata.rs
+
+**Purpose**: Iterate through the denom token list embedded in `reth_chain_query` and fetch metadata for each contract at a given block. This is useful for sanity-checking token deployments or confirming that the metadata simulator is behaving correctly across a known basket of assets.
+
+**Usage**:
+
+```bash
+cargo run --example denom_token_metadata -- --block <block_number>
+```
+
+Arguments:
+- `--block` – optional block to use (defaults to latest persisted block).
+- `--datadir` – inherits the same default logic as other examples (`RETH_DATADIR` or `~/.local/share/reth/mainnet`).
+
+The script prints the metadata tuple for each denom token (name, symbol, decimals, total supply) or notes if a contract fails the ERC‑20 check.
+
+---
+
 ## Important Notes
 
 ⚠️ **THESE EXAMPLES ARE FOR EDUCATIONAL PURPOSES ONLY**

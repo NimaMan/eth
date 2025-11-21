@@ -91,6 +91,14 @@ path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
 name = "live_block_service"
 path = "examples/live/run_live_block_service.rs"
 
+[[example]]
+name = "token_metadata_with_prior_tx"
+path = "examples/token_parameter_extraction/token_metadata_with_prior_tx.rs"
+
+[[example]]
+name = "denom_token_metadata"
+path = "examples/token_parameter_extraction/denom_token_metadata.rs"
+
 [dependencies]
 # Use the working modular tx_simulator (NOT the broken reth_tx_simulator)
 tx_simulator = { path = "../tx_simulator" }
@@ -104,6 +112,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 hex = "0.4"
 hex-literal = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.5", features = ["derive"] }
 alloy-primitives = "1.1.2"
 alloy-eips = "1.0.38"
 rlp = "0.5"
