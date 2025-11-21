@@ -45,10 +45,11 @@ Historical (Warm-up) -> Live Transition:
 
 import asyncio
 from eth_data.live_data_registry import LiveDataPublisher
-from eth_token.erc20_token.token_snapshot import build_token_snapshot
-from eth_token.token_manager.block_subscriber import LiveBlockSnapshotSubscriber
+from eth_token.erc20_token.token_snapshot import TokenSnapshot
+from eth_token.token_manager.redis_block_subscriber import RedisBlockSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
+from eth_token.utils.logger import get_logger
 
 
 class LiveBlockTokenProcessor(BlockTokenProcessor):
@@ -56,12 +57,12 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                  warmup_blocks: int = 1000,
                  logger=None,
                  add_pnl_to_db: bool = False):
-        super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)  
+        logger = logger or get_logger(name="LiveBlockTokenProcessor", log_folder="tokens_live")
+        super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)
         # Initialize subscriber with our callback and block_token_processor
-        self.block_subscriber = LiveBlockSnapshotSubscriber(
+        self.block_subscriber = RedisBlockSubscriber(
             callback=self.process_block_live,
             logger=self.logger,
-            block_token_processor=self,  # Pass the processor
         )
 
         self.block_range_token_processor = HistoricalBlockTokenProcessor(
@@ -75,10 +76,11 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         self.new_updates_event = asyncio.Event()  # Event to signal new updates is available
         self._shutdown_event = asyncio.Event() # Event to signal shutdown
         self._is_shutting_down = False
-        self._subscriber_task = None
         self._monitor_task = None
         self._watcher_task = None
         self.token_snapshot_publisher = LiveDataPublisher()
+        self.metrics_logger = metrics_logger
+        self._published_token_addresses = set()
 
     async def _on_task_done(self, name: str, task: asyncio.Task):
         """Handle unexpected background task completion by logging and initiating shutdown."""
@@ -106,15 +108,16 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         """Process incoming blocks"""
         if self._is_shutting_down:
             return
+        block_number = processed_block_result.get("block_number")
         try:
             self.latest_processed_block = self.process_block_tokens(
                 processed_block_result,
-                block_number=processed_block_result["block_number"],
+                block_number=block_number,
             )
             self.block_processed_event.set() # Signal block processed            
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}", exc_info=True)
-    
+            
     async def _schedule_pnl_writes_for_updated_tokens(self, current_block: int):
         """Schedules PnL writes for tokens updated in the current block."""
         if not (self.add_pnl_to_db and self.live_tokens_cache.pnl_writer):
@@ -142,8 +145,9 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
 
         async def _write_snapshot(token_address, token_obj):
             try:
-                snapshot = build_token_snapshot(token_obj)
+                snapshot = TokenSnapshot.from_token(token_obj).json_ready_dict()
                 await self.token_snapshot_publisher.publish_token(token_address, snapshot)
+                self._published_token_addresses.add(token_address)
             except Exception as exc:
                 self.logger.error(
                     "Failed to publish token snapshot for %s at block %s: %s",
@@ -193,13 +197,12 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 except Exception as e:
                     self.logger.error(f"Error during historical processing: {e}")
                     raise
-          
-            # 2. Create a task to start the block subscriber for getting live processed blocks
-            self._subscriber_task = asyncio.create_task(self.block_subscriber.start())
-            # Watch for unexpected termination of subscriber task
-            self._subscriber_task.add_done_callback(
-                lambda t: asyncio.create_task(self._on_task_done("LiveBlockSnapshotSubscriber", t))
-            )
+
+            # Switch into live mode for subsequent block processing
+            self.is_live_mode = True
+
+            # 2. Subscribe to live processed blocks (listener keeps running internally)
+            await self.block_subscriber.start()
             
             # 3. Start monitoring for updates
             self._monitor_task = asyncio.create_task(self._monitor_token_updates())
@@ -239,15 +242,6 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         try:
             # Stop the subscriber first
             await self.block_subscriber.stop()
-            
-            # Cancel subscriber task if running
-            if self._subscriber_task and not self._subscriber_task.done():
-                self._subscriber_task.cancel()
-                try:
-                    await self._subscriber_task
-                except asyncio.CancelledError:
-                    pass
-                
             self.logger.info("Live block processor stopped successfully")
 
             # Stop monitoring task if running
@@ -269,8 +263,23 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                     self.logger.debug(f"Unprocessed token updates: {item}")
                 except asyncio.QueueEmpty:
                     break
+            await self._cleanup_published_token_snapshots()
             self._shutdown_event.set()
             self.logger.info("LiveBlockTokenProcessor shutdown complete")
         except Exception as e:
             self.logger.error(f"Error during LiveBlockTokenProcessor shutdown: {e}")
             raise
+
+    async def _cleanup_published_token_snapshots(self):
+        if not self._published_token_addresses:
+            return
+        try:
+            await asyncio.gather(
+                *[
+                    self.token_snapshot_publisher.delete_token(address)
+                    for address in self._published_token_addresses
+                ],
+                return_exceptions=True,
+            )
+        finally:
+            self._published_token_addresses.clear()

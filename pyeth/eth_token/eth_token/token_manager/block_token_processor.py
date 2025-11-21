@@ -22,7 +22,7 @@ Responsibilities
 
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from collections import OrderedDict
 from tqdm import tqdm
 
@@ -43,27 +43,17 @@ class BlockTokenProcessor:
         self.processed_blocks: Dict[int, bool] = OrderedDict()
         self.latest_processed_block = 0
         self.start_block = None  # Track the first block we process
-        self._recent_block_headers: "OrderedDict[int, Any]" = OrderedDict()
         self.token_chain_fetcher = TokenChainDataFetcher()
+        self.is_live_mode = False
 
-    def process_block_tokens(
-        self,
-        process_block_result, 
-        block_number
-    ) -> int:
+    def process_block_tokens(self, process_block_result, block_number) -> int:
         """Process a single block's transactions sequentially."""
         block_tx_list = process_block_result.get('transactions')
-        block_header = process_block_result.get('block_header')
-        previous_block_header = self._recent_block_headers.get(block_number - 1)
         self.updated_tokens.clear() # Clear the updated tokens cache
-        self._store_block_header(block_number, block_header)
         for tx in block_tx_list:
             tx_data = self._ensure_tx_dict(tx)
-            tx_data['block_header'] = block_header
-            tx_data['previous_block_header'] = previous_block_header
             # Ensure transactions mutate token state in canonical block order
-            self._process_transaction(tx_data, block_number)
-
+            self._process_transaction(tx_data, block_number)                        
         # Set start_block on first block processed
         if self.start_block is None:
             self.start_block = block_number
@@ -97,11 +87,16 @@ class BlockTokenProcessor:
             return False, None, None
 
         try:
+            metadata_block = block_number
+            pending_transactions = None
+            if self.is_live_mode:
+                metadata_block = block_number - 1
+                pending_transactions = [transaction]
+
             token_metadata = self.token_chain_fetcher.get_token_metadata(
                 contract_address,
-                block_number,
-                transaction.get('block_header'),
-                transaction.get('hash'),
+                metadata_block,
+                pending_transactions=pending_transactions,
             )
             if token_metadata is None:
                 return False, None, None
@@ -172,11 +167,6 @@ class BlockTokenProcessor:
         if hasattr(tx, "__dict__"):
             return dict(vars(tx))
         raise TypeError(f"Unsupported transaction type: {type(tx)!r}")
-
-    def _store_block_header(self, block_number: int, block_header: Any) -> None:
-        self._recent_block_headers[block_number] = block_header
-        while len(self._recent_block_headers) > 2:
-            self._recent_block_headers.popitem(last=False)
 
 
 class HistoricalBlockTokenProcessor:

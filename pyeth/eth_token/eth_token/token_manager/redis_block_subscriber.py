@@ -30,9 +30,39 @@ class RedisBlockSubscriber:
             block_number = payload.get("block_number")
             if block_number is None:
                 return
-            processed = await self.block_snapshot_reader.fetch_processed_block(block_number)
-            if processed and self.callback:
-                await self.callback(processed)
+            try:
+                processed = await asyncio.to_thread(
+                    self.block_snapshot_reader.fetch_processed_block,
+                    block_number,
+                )
+            except Exception as exc:
+                if self.logger:
+                    self.logger.error(
+                        "Failed to fetch processed block %s from Redis: %s",
+                        block_number,
+                        exc,
+                        exc_info=True,
+                    )
+                return
+
+            if not processed or not self.callback:
+                return
+
+            try:
+                await self.callback(
+                    {
+                        "block_number": block_number,
+                        "transactions": processed,
+                    }
+                )
+            except Exception as exc:
+                if self.logger:
+                    self.logger.error(
+                        "Error delivering block %s to callback: %s",
+                        block_number,
+                        exc,
+                        exc_info=True,
+                    )
 
         await self._subscriber.subscribe([self.channel], _handler)
 

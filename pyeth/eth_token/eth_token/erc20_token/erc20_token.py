@@ -31,7 +31,9 @@ class ERC20Token:
         self.contract_address = Web3.to_checksum_address(contract_address)
         self.token_chain_data_fetcher = TokenChainDataFetcher()
         if token_metadata is None:
-            token_metadata = self.token_chain_data_fetcher.get_token_metadata(self.contract_address)            
+            token_metadata = self.token_chain_data_fetcher.get_token_metadata(self.contract_address)
+        if token_metadata is None:
+            raise RuntimeError(f"Token {self.contract_address} does not expose ERC20 metadata")
         self.name = token_metadata.name
         self.symbol = token_metadata.symbol
         self.decimals = int(token_metadata.decimals)
