@@ -33,8 +33,12 @@ impl TxSimulator {
             .unwrap_or_default()
             .resolve(&self.defaults.view_call);
 
+        // Determine block we will query and derive the base fee for fee fields
+        let block = block_number.unwrap_or(self.get_latest_block()?);
+        let base_fee = self.get_base_fee_at_block(block).unwrap_or(1);
+
         // Build a call request for the view function
-        let unsigned_tx = UnsignedTransaction {
+        let mut unsigned_tx = UnsignedTransaction {
             from: Some(resolved.from),
             to: Some(contract),
             value: Some(U256::ZERO), // View functions shouldn't accept value
@@ -49,9 +53,8 @@ impl TxSimulator {
             max_fee_per_blob_gas: None,
             signed_authorizations: Vec::new(),
         };
-
-        // Get block number
-        let block = block_number.unwrap_or(self.get_latest_block()?);
+        unsigned_tx.max_fee_per_gas = Some(base_fee);
+        unsigned_tx.max_priority_fee_per_gas = Some(0);
 
         // We need to use the trace version to get the actual output data
         let result = self
