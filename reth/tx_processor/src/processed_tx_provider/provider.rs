@@ -58,38 +58,9 @@ fn derive_create_address(from: Address, nonce: u64) -> Address {
 impl ProcessedTxProvider {
     /// Initialize the ProcessedTxProvider
     pub fn new(reth_datadir: &str) -> Result<Self> {
-        // Create shared provider factory
         let provider_factory = create_provider_factory(reth_datadir)?;
-
-        // Initialize NEW tx_simulator WITH SHARED PROVIDER FACTORY
         let simulator = TxSimulator::with_provider_factory(provider_factory.clone())?;
-        let decoder = LogDecoder::new();
-        let classifier = TransactionClassifier::new();
-        let transaction_loader =
-            TransactionLoader::with_provider_factory(provider_factory.clone()).ok();
-
-        // Initialize tx processor
-        let tx_processor = TxProcessor::new();
-
-        let block_processor = BlockProcessor::new(Arc::new(
-            reth_chain_query::RethQueryProvider::with_provider_factory(Arc::new(
-                provider_factory.clone(),
-            ))?,
-        ));
-
-        // Share the simulator to avoid duplicate DB connections
-        let chain_query = Arc::new(ChainQuery::from_simulator(Arc::new(simulator.clone()))?);
-
-        Ok(Self {
-            simulator,
-            decoder,
-            classifier,
-            transaction_loader,
-            provider_factory,
-            chain_query,
-            tx_processor,
-            block_processor,
-        })
+        Self::build(simulator, provider_factory)
     }
 
     /// Load and decode a transaction from DB only (no simulation)
@@ -171,6 +142,12 @@ impl ProcessedTxProvider {
         Ok(processed_tx)
     }
 
+    /// Create ProcessedTxProvider with an existing TxSimulator (shared across consumers)
+    pub fn with_simulator(simulator: Arc<TxSimulator>) -> Result<Self> {
+        let provider_factory = simulator.provider_factory().clone();
+        Self::build(simulator.as_ref().clone(), provider_factory)
+    }
+
     /// Create ProcessedTxProvider with an existing provider factory
     /// This is useful when sharing a database connection across multiple components
     pub fn with_provider_factory(
@@ -181,8 +158,19 @@ impl ProcessedTxProvider {
             >,
         >,
     ) -> Result<Self> {
-        // Initialize NEW tx_simulator WITH SHARED PROVIDER FACTORY
         let simulator = TxSimulator::with_provider_factory(provider_factory.clone())?;
+        Self::build(simulator, provider_factory)
+    }
+
+    fn build(
+        simulator: TxSimulator,
+        provider_factory: reth_provider::ProviderFactory<
+            reth_node_types::NodeTypesWithDBAdapter<
+                reth_node_ethereum::EthereumNode,
+                std::sync::Arc<reth_db::DatabaseEnv>,
+            >,
+        >,
+    ) -> Result<Self> {
         let decoder = LogDecoder::new();
         let classifier = TransactionClassifier::new();
         let transaction_loader =

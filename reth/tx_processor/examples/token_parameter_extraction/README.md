@@ -35,6 +35,31 @@ Environment variables:
 
 ---
 
+### 2. token_metadata_with_prior_tx.rs
+
+**Purpose**: Reproduce the python `token_metadata.py` workflow entirely in Rust. The example:
+
+1. Loads a processed transaction by hash via `ProcessedTxProvider`.
+2. Converts it into an `UnsignedTransaction` (the same payload we send from Python).
+3. Replays that transaction at `block_number - 1` and asks `RethQueryProvider::get_token_metadata` for the freshly created contract.
+
+**Usage**:
+
+```bash
+cargo run --example token_metadata_with_prior_tx -- \
+  --tx-hash 0x... --contract 0x... --metadata-block <block-1>
+```
+
+Arguments:
+- `--tx-hash` – contract creation transaction to replay.
+- `--contract` – token address to query (defaults to the contract created by the tx).
+- `--metadata-block` – block number to simulate against (defaults to tx_block - 1).
+- `--datadir` – override the Reth datadir path (`RETH_DATADIR` is honored otherwise).
+
+The script prints the sender balances, required gas fee, and the metadata response/error so you can directly compare it with the Python helper.
+
+---
+
 ## Important Notes
 
 ⚠️ **THESE EXAMPLES ARE FOR EDUCATIONAL PURPOSES ONLY**
