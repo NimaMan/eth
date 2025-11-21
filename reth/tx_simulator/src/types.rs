@@ -138,14 +138,9 @@ pub struct ParallelTxSimulationResult {
 #[derive(Debug, Clone)]
 pub struct FeeDefaults {
     pub pre_london_base_fee: u128,
-    pub derived_tip_divisor: u128,
     pub min_priority_fee: u128,
-    pub priority_fee_cushion_divisor: u128,
-    pub priority_fee_min_cushion: u128,
     pub legacy_pre_london_base_fee: u128,
     pub legacy_gas_price_multiplier: u128,
-    pub bundle_default_priority_fee: u128,
-    pub bundle_max_fee_multiplier: u128,
     pub chain_id: Option<u64>,
     pub max_fee_per_blob_gas: u128,
 }
@@ -154,14 +149,9 @@ impl Default for FeeDefaults {
     fn default() -> Self {
         Self {
             pre_london_base_fee: 1_000_000_000,
-            derived_tip_divisor: 100,
             min_priority_fee: 1,
-            priority_fee_cushion_divisor: 10,
-            priority_fee_min_cushion: 100_000_000,
             legacy_pre_london_base_fee: 20_000_000_000,
             legacy_gas_price_multiplier: 3,
-            bundle_default_priority_fee: 1_000_000_000,
-            bundle_max_fee_multiplier: 10,
             chain_id: Some(1),
             max_fee_per_blob_gas: 0,
         }

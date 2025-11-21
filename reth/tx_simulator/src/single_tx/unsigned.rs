@@ -6,7 +6,7 @@
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
-    gas::{GasHeuristic, GasInputs, GasResolutionContext},
+    gas::{GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
@@ -545,7 +545,7 @@ impl TxSimulator {
         };
 
         let fee_defaults = &self.defaults.fee;
-        let gas_resolution = crate::gas::resolve_gas(
+        let simulation_gas = crate::gas::prepare_tx_env_gas(
             None,
             &self.defaults.tx_gas,
             GasInputs {
@@ -559,15 +559,9 @@ impl TxSimulator {
                 block_gas_limit,
                 base_fee,
             },
-            GasHeuristic::DynamicTip {
-                tip_divisor: fee_defaults.derived_tip_divisor,
-                min_priority_fee: fee_defaults.min_priority_fee,
-                headroom_divisor: fee_defaults.priority_fee_cushion_divisor,
-                min_headroom: fee_defaults.priority_fee_min_cushion,
-            },
         )?;
-        let gas_price = gas_resolution.gas_price;
-        let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
+        let gas_price = simulation_gas.gas_price;
+        let gas_priority_fee = simulation_gas.max_priority_fee_per_gas;
 
         // Create TxEnv - no signature needed!
         let access_list = AccessList::from(request.access_list.clone());
@@ -583,9 +577,9 @@ impl TxSimulator {
             .unwrap_or(fee_defaults.max_fee_per_blob_gas);
 
         Ok(TxEnv {
-            tx_type: gas_resolution.tx_type.as_reth_tx_type(),
+            tx_type: simulation_gas.tx_type.as_reth_tx_type(),
             caller: caller.into(),
-            gas_limit: gas_resolution.gas_limit,
+            gas_limit: simulation_gas.gas_limit,
             gas_price,
             gas_priority_fee,
             kind: if let Some(to) = request.to {

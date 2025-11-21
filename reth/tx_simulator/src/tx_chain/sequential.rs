@@ -13,7 +13,7 @@
 /// between transactions, use SimulationChain instead.
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
-    gas::{GasHeuristic, GasInputs, GasResolutionContext},
+    gas::{GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     single_tx::unsigned::UnsignedTransaction,
@@ -464,7 +464,7 @@ impl TxSimulator {
         };
 
         let fee_defaults = &self.defaults.fee;
-        let gas_resolution = crate::gas::resolve_gas(
+        let simulation_gas = crate::gas::prepare_tx_env_gas(
             None,
             &self.defaults.tx_gas,
             GasInputs {
@@ -478,13 +478,9 @@ impl TxSimulator {
                 block_gas_limit,
                 base_fee,
             },
-            GasHeuristic::Multiplier {
-                default_priority_fee: fee_defaults.bundle_default_priority_fee,
-                max_fee_multiplier: fee_defaults.bundle_max_fee_multiplier,
-            },
         )?;
-        let gas_price = gas_resolution.gas_price;
-        let gas_priority_fee = gas_resolution.max_priority_fee_per_gas;
+        let gas_price = simulation_gas.gas_price;
+        let gas_priority_fee = simulation_gas.max_priority_fee_per_gas;
         let access_list = AccessList::from(request.access_list.clone());
         let blob_hashes = request.blob_versioned_hashes.clone();
         let authorization_list: Vec<Either<SignedAuthorization, RecoveredAuthorization>> = request
@@ -499,9 +495,9 @@ impl TxSimulator {
 
         // Create TxEnv - no signature needed!
         Ok(TxEnv {
-            tx_type: gas_resolution.tx_type.as_reth_tx_type(),
+            tx_type: simulation_gas.tx_type.as_reth_tx_type(),
             caller: caller.into(),
-            gas_limit: gas_resolution.gas_limit,
+            gas_limit: simulation_gas.gas_limit,
             gas_price,
             gas_priority_fee,
             kind: if let Some(to) = request.to {
