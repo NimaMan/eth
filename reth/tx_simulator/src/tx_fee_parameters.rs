@@ -1,18 +1,10 @@
-//! Gas parameter resolution
+//! Transaction fee parameter validation and packaging.
 //!
-//! This module centralises every decision the simulator makes when callers omit
-//! fee fields. The flow is:
-//! 1. Collect explicit inputs (`GasInputs`) and optional overrides of the
-//!    configured transaction gas parameters (`TxGasParameters`).
-//! 2. Decide whether the transaction should be treated as legacy or EIP-1559 by
-//!    looking at explicit inputs and resolved defaults.
-//! 3. Clamp the resulting values so max fee ≥ base fee + priority fee and fall
-//!    back to the configured minimum gas limit when needed.
-//! 4. Produce a `SimulationGasParameters` carrying the resolved tx type, gas limit, max
-//!    fee, and priority fee for the `TxEnv` builders.
-//!
-//! Having everything here lets the rest of the simulator call `prepare_tx_env_gas`
-//! rather than duplicating logic across single-tx, chain, and bundle code paths.
+//! Callers must supply the exact gas limit and fee caps they want to simulate.
+//! This module simply checks those fields are present, ensures legacy vs
+//! EIP-1559 mode is respected, and packages the values into a
+//! `SimulationGasParameters` struct that the TxEnv builders can consume. No
+//! defaults or heuristics are applied here—missing inputs result in errors.
 
 use crate::types::FeeDefaults;
 use eyre::{eyre, Result};

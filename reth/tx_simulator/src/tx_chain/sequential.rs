@@ -491,9 +491,7 @@ impl TxSimulator {
             .cloned()
             .map(Either::Left)
             .collect();
-        let max_fee_per_blob_gas = simulation_gas
-            .max_fee_per_blob_gas
-            .unwrap_or(fee_defaults.max_fee_per_blob_gas);
+        let max_fee_per_blob_gas = simulation_gas.max_fee_per_blob_gas.unwrap_or(0);
 
         // Create TxEnv - no signature needed!
         Ok(TxEnv {
