@@ -6,10 +6,10 @@
 /// matching the high-fidelity output callers expect from `debug_traceTransaction`.
 use crate::{
     block_context::{BlockContext, BlockStateProvider},
-    gas::{GasInputs, GasResolutionContext},
     simulation_revert_decoder::decode_revert_reason,
     simulator::TxSimulator,
     tx_chain::sequential::ForkedState,
+    tx_fee_parameters::{GasInputs, TxFeeContext},
     types::{FullSimulationResult, RevertContext, SimulationResult},
 };
 use eyre::Result;
@@ -545,7 +545,7 @@ impl TxSimulator {
         };
 
         let fee_defaults = &self.defaults.fee;
-        let simulation_gas = crate::gas::prepare_tx_env_gas(
+        let simulation_gas = crate::tx_fee_parameters::prepare_tx_env_gas(
             None,
             &self.defaults.tx_gas,
             GasInputs {
@@ -553,8 +553,10 @@ impl TxSimulator {
                 gas_price: request.gas_price,
                 max_fee_per_gas: request.max_fee_per_gas,
                 max_priority_fee_per_gas: request.max_priority_fee_per_gas,
+                max_fee_per_blob_gas: request.max_fee_per_blob_gas,
+                has_blob: !request.blob_versioned_hashes.is_empty(),
             },
-            GasResolutionContext {
+            TxFeeContext {
                 fee_defaults,
                 block_gas_limit,
                 base_fee,
@@ -572,7 +574,7 @@ impl TxSimulator {
             .cloned()
             .map(Either::Left)
             .collect();
-        let max_fee_per_blob_gas = request
+        let max_fee_per_blob_gas = simulation_gas
             .max_fee_per_blob_gas
             .unwrap_or(fee_defaults.max_fee_per_blob_gas);
 

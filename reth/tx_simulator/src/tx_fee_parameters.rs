@@ -15,20 +15,21 @@
 //! rather than duplicating logic across single-tx, chain, and bundle code paths.
 
 use crate::types::FeeDefaults;
-use eyre::Result;
+use eyre::{eyre, Result};
 
-/// Transaction gas parameters that callers can override when building requests.
+/// Transaction fee parameters that callers can override when building requests.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TxGasParameters {
     pub gas_limit: Option<u64>,
     pub gas_price: Option<u128>,
     pub max_fee_per_gas: Option<u128>,
     pub max_priority_fee_per_gas: Option<u128>,
+    pub max_fee_per_blob_gas: Option<u128>,
 }
 
-/// Context for resolving gas parameters.
+/// Context required to validate fee parameters.
 #[derive(Debug, Clone, Copy)]
-pub struct GasResolutionContext<'a> {
+pub struct TxFeeContext<'a> {
     pub fee_defaults: &'a FeeDefaults,
     pub block_gas_limit: u128,
     pub base_fee: Option<u128>,
@@ -42,6 +43,7 @@ pub struct SimulationGasParameters {
     pub gas_price: u128,
     pub max_fee_per_gas: Option<u128>,
     pub max_priority_fee_per_gas: Option<u128>,
+    pub max_fee_per_blob_gas: Option<u128>,
 }
 
 impl SimulationGasParameters {
@@ -77,6 +79,8 @@ pub struct GasInputs {
     pub gas_price: Option<u128>,
     pub max_fee_per_gas: Option<u128>,
     pub max_priority_fee_per_gas: Option<u128>,
+    pub max_fee_per_blob_gas: Option<u128>,
+    pub has_blob: bool,
 }
 
 /// Resolve gas settings for the given lane, returning concrete parameters for simulation.
@@ -84,25 +88,19 @@ pub fn prepare_tx_env_gas(
     override_params: Option<&TxGasParameters>,
     default_params: &TxGasParameters,
     inputs: GasInputs,
-    context: GasResolutionContext<'_>,
+    context: TxFeeContext<'_>,
 ) -> Result<SimulationGasParameters> {
     let override_params = override_params.copied();
     let default_params = *default_params;
-    let effective_base_fee = context
-        .base_fee
-        .unwrap_or(context.fee_defaults.pre_london_base_fee);
+    let _ = context;
 
-    let mut gas_limit = inputs
+    let gas_limit = inputs
         .gas
         .or(override_params.and_then(|p| p.gas_limit))
         .or(default_params.gas_limit)
-        .unwrap_or_else(|| {
-            let capped = context.block_gas_limit.min(u128::from(u64::MAX));
-            capped as u64
-        });
-
+        .ok_or_else(|| eyre!("missing gas limit for transaction"))?;
     if gas_limit == 0 {
-        gas_limit = crate::config::gas::MIN_GAS_LIMIT;
+        return Err(eyre!("transaction gas limit must be greater than zero"));
     }
 
     let explicit_max_fee = inputs
@@ -117,6 +115,16 @@ pub fn prepare_tx_env_gas(
         .gas_price
         .or(override_params.and_then(|p| p.gas_price))
         .or(default_params.gas_price);
+    let blob_fee = inputs
+        .max_fee_per_blob_gas
+        .or(override_params.and_then(|p| p.max_fee_per_blob_gas))
+        .or(default_params.max_fee_per_blob_gas);
+
+    if inputs.has_blob && blob_fee.is_none() {
+        return Err(eyre!(
+            "missing max_fee_per_blob_gas for transaction containing blob data"
+        ));
+    }
 
     let has_any_eip1559_input =
         inputs.max_fee_per_gas.is_some() || inputs.max_priority_fee_per_gas.is_some();
@@ -136,14 +144,10 @@ pub fn prepare_tx_env_gas(
     };
 
     if matches!(tx_type, GasTxType::Eip1559) {
-        let resolved_priority = priority_fee.unwrap_or(context.fee_defaults.min_priority_fee);
-        let min_required = effective_base_fee.saturating_add(resolved_priority);
-
-        let mut effective_max_fee = explicit_max_fee.unwrap_or(min_required);
-        if effective_max_fee < min_required {
-            effective_max_fee = min_required;
-        }
-
+        let resolved_priority = priority_fee
+            .ok_or_else(|| eyre!("missing max_priority_fee_per_gas for EIP-1559 transaction"))?;
+        let effective_max_fee = explicit_max_fee
+            .ok_or_else(|| eyre!("missing max_fee_per_gas for EIP-1559 transaction"))?;
         let gas_price = effective_max_fee;
 
         Ok(SimulationGasParameters {
@@ -152,15 +156,11 @@ pub fn prepare_tx_env_gas(
             gas_price,
             max_fee_per_gas: Some(effective_max_fee),
             max_priority_fee_per_gas: Some(resolved_priority),
+            max_fee_per_blob_gas: blob_fee,
         })
     } else {
-        // Legacy transaction path.
-        let fallback_base = context
-            .base_fee
-            .unwrap_or(context.fee_defaults.legacy_pre_london_base_fee);
-        let resolved_price = legacy_gas_price.unwrap_or_else(|| {
-            fallback_base.saturating_mul(context.fee_defaults.legacy_gas_price_multiplier)
-        });
+        let resolved_price =
+            legacy_gas_price.ok_or_else(|| eyre!("missing gas_price for legacy transaction"))?;
 
         Ok(SimulationGasParameters {
             tx_type,
@@ -168,6 +168,7 @@ pub fn prepare_tx_env_gas(
             gas_price: resolved_price,
             max_fee_per_gas: None,
             max_priority_fee_per_gas: None,
+            max_fee_per_blob_gas: blob_fee,
         })
     }
 }

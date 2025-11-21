@@ -2,7 +2,7 @@
 ///
 /// This module contains all the public types used throughout the tx_simulator library.
 /// These types represent simulation results, internal transactions, and configuration options.
-use crate::gas::TxGasParameters;
+use crate::tx_fee_parameters::TxGasParameters;
 use alloy_primitives::{Address, Bytes, Log as AlloyLog, U256};
 pub use alloy_rpc_types_trace::geth::{CallFrame, StructLog};
 use std::collections::HashMap;
@@ -137,10 +137,6 @@ pub struct ParallelTxSimulationResult {
 /// Default fee handling when transactions omit explicit gas parameters
 #[derive(Debug, Clone)]
 pub struct FeeDefaults {
-    pub pre_london_base_fee: u128,
-    pub min_priority_fee: u128,
-    pub legacy_pre_london_base_fee: u128,
-    pub legacy_gas_price_multiplier: u128,
     pub chain_id: Option<u64>,
     pub max_fee_per_blob_gas: u128,
 }
@@ -148,10 +144,6 @@ pub struct FeeDefaults {
 impl Default for FeeDefaults {
     fn default() -> Self {
         Self {
-            pre_london_base_fee: 1_000_000_000,
-            min_priority_fee: 1,
-            legacy_pre_london_base_fee: 20_000_000_000,
-            legacy_gas_price_multiplier: 3,
             chain_id: Some(1),
             max_fee_per_blob_gas: 0,
         }

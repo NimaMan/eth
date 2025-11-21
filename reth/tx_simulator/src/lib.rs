@@ -1,7 +1,3 @@
-pub mod block_context;
-pub mod config;
-pub mod gas;
-pub mod simulator;
 /// Transaction Simulator Library
 ///
 /// This library provides high-performance Ethereum transaction simulation
@@ -12,8 +8,11 @@ pub mod simulator;
 /// - View function calls
 /// - Batch transaction simulation
 /// - Returns raw CallFrame traces for tx_processor to analyze
+pub mod block_context;
+pub mod config;
+pub mod simulator;
+pub mod tx_fee_parameters;
 pub mod types;
-// New structured modules
 pub mod single_tx {
     pub mod parallel;
     pub mod signed;
@@ -22,6 +21,7 @@ pub mod single_tx {
 pub mod tx_chain {
     pub mod sequential;
     pub mod signed;
+    pub mod token_metadata;
     pub mod unsigned;
 }
 pub mod block_trace;
@@ -58,10 +58,7 @@ pub mod live_chain_cache {
 }
 
 // Re-export main types
-pub use gas::{
-    GasHeuristic, GasInputs, GasResolutionContext, GasTxType, ResolvedGasParameters,
-    TxGasParameters,
-};
+pub use crate::tx_chain::token_metadata::{TokenMetadataResult, TokenMetadataSimulator};
 pub use live_chain_cache::{LiveChainCache, LiveChainCacheBuilder};
 pub use simulator::{RethTxSimulator, TxSimulator};
 pub use single_tx::parallel::ParallelTxSimulationOptions;
@@ -69,6 +66,9 @@ pub use single_tx::signed::SignedTransaction;
 pub use single_tx::unsigned::UnsignedTransaction;
 pub use tx_chain::signed::SignedTxChainSimulation;
 pub use tx_chain::unsigned::{ChainStateInfo, UnsignedTxChainSimulation};
+pub use tx_fee_parameters::{
+    GasInputs, GasTxType, SimulationGasParameters, TxFeeContext, TxGasParameters,
+};
 pub use types::{
     CallFrame, FeeDefaults, FullSimulationResult, ParallelTxSimulationResult, RevertContext,
     SequentialSimulationOptions, SequentialSimulationResult, SequentialTransactionResult,
