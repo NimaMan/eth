@@ -4,7 +4,6 @@ use reth_chain_query::{
     common_addresses::DENOM_ADDRESSES,
     RethQueryProvider,
 };
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Debug, Parser)]
@@ -13,33 +12,16 @@ use std::sync::Arc;
     about = "Fetch metadata for all denom tokens tracked in reth_chain_query"
 )]
 struct Args {
-    /// Optional Reth datadir (defaults to ~/.local/share/reth/mainnet or $RETH_DATADIR)
-    #[arg(long)]
-    datadir: Option<PathBuf>,
-
     /// Optional block number to query against (defaults to latest)
     #[arg(long)]
     block: Option<u64>,
 }
 
-fn resolve_datadir(cli_value: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(path) = cli_value {
-        return Ok(path);
-    }
-    if let Ok(from_env) = std::env::var("RETH_DATADIR") {
-        return Ok(PathBuf::from(from_env));
-    }
-    Ok(PathBuf::from("/home/nima/.local/share/reth/mainnet"))
-}
-
 fn main() -> Result<()> {
     let args = Args::parse();
-    let datadir = resolve_datadir(args.datadir)?;
-    let datadir_str = datadir
-        .to_str()
-        .ok_or_else(|| eyre!("Invalid datadir path: {}", datadir.display()))?;
+    let datadir = std::env::var("RETH_DATADIR").unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
 
-    let provider = Arc::new(RethQueryProvider::new(datadir_str)?);
+    let provider = Arc::new(RethQueryProvider::new(&datadir)?);
     let block = args.block;
 
     let rt = tokio::runtime::Runtime::new()?;
