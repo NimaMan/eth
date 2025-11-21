@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::header_utils::parse_sealed_header_from_json;
+use crate::tx_processor::processed_tx_bridge::processed_transactions_from_py_iterable;
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
 use reth_chain_query::dex::find_uniswap_v4_pools_for_pair;
@@ -28,8 +28,9 @@ use reth_chain_query::reth_index::RethIndexDB;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::BlockTimeConverter;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
-use reth_primitives::SealedHeader;
 use tokio::runtime::Runtime;
+use tx_processor::tx_builder::UnsignedTxBuilder;
+use tx_simulator::UnsignedTransaction;
 
 /// Python wrapper for Account information
 #[pyclass(name = "Account")]
@@ -224,19 +225,6 @@ pub struct PyChainQuery {
 }
 
 impl PyChainQuery {
-    fn parse_optional_header(block_header: Option<&str>) -> PyResult<Option<SealedHeader>> {
-        if let Some(json) = block_header {
-            let sealed = parse_sealed_header_from_json(json).map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Invalid block header: {e}"
-                ))
-            })?;
-            Ok(Some(sealed))
-        } else {
-            Ok(None)
-        }
-    }
-
     /// Create from shared TxSimulator
     pub fn from_simulator(simulator: Arc<tx_simulator::TxSimulator>) -> PyResult<Self> {
         let runtime = Runtime::new()
@@ -709,79 +697,53 @@ impl PyChainQuery {
     }
 
     /// Get Uniswap V2 pool liquidity (reserves) at a block
-    #[pyo3(signature = (pool, block=None, block_header=None))]
+    #[pyo3(signature = (pool, block=None))]
     fn get_uniswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
-        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV2 { pool: pool_addr };
-        super::amm::get_pool_liquidity(
-            self.runtime.clone(),
-            self.provider.clone(),
-            route,
-            block,
-            block_header,
-        )
+        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
     }
 
     /// Get Sushiswap V2 pool liquidity (reserves) at a block
-    #[pyo3(signature = (pool, block=None, block_header=None))]
+    #[pyo3(signature = (pool, block=None))]
     fn get_sushiswap_v2_liquidity(
         &self,
         pool: &str,
         block: Option<u64>,
-        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::SushiswapV2 { pool: pool_addr };
-        super::amm::get_pool_liquidity(
-            self.runtime.clone(),
-            self.provider.clone(),
-            route,
-            block,
-            block_header,
-        )
+        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
     }
 
     /// Get Uniswap V3 pool liquidity/tick at a block
-    #[pyo3(signature = (pool, fee_tier, block=None, block_header=None))]
+    #[pyo3(signature = (pool, fee_tier, block=None))]
     fn get_uniswap_v3_liquidity(
         &self,
         pool: &str,
         fee_tier: u32,
         block: Option<u64>,
-        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header)?;
         let pool_addr = super::utils::parse_address(pool)?;
         let route = AmmSwapRoute::UniswapV3 {
             pool: pool_addr,
             fee_tier,
         };
-        super::amm::get_pool_liquidity(
-            self.runtime.clone(),
-            self.provider.clone(),
-            route,
-            block,
-            block_header,
-        )
+        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
     }
 
     /// Get Uniswap V4 pool liquidity/tick via PoolManager and PoolId
-    #[pyo3(signature = (pool_manager, pool_id_hex, block=None, block_header=None))]
+    #[pyo3(signature = (pool_manager, pool_id_hex, block=None))]
     fn get_uniswap_v4_liquidity(
         &self,
         pool_manager: &str,
         pool_id_hex: &str,
         block: Option<u64>,
-        block_header: Option<&str>,
     ) -> PyResult<super::amm::PyPoolLiquidityInfo> {
-        let block_header = Self::parse_optional_header(block_header)?;
         let pm = super::utils::parse_address(pool_manager)?;
         let pid_clean = pool_id_hex.trim_start_matches("0x");
         let mut arr = [0u8; 32];
@@ -793,13 +755,7 @@ impl PyChainQuery {
             pool_manager: pm,
             pool_id: pid,
         };
-        super::amm::get_pool_liquidity(
-            self.runtime.clone(),
-            self.provider.clone(),
-            route,
-            block,
-            block_header,
-        )
+        super::amm::get_pool_liquidity(self.runtime.clone(), self.provider.clone(), route, block)
     }
 
     /// Find a recent Uniswap V4 pool id by scanning Initialize events on PoolManager.
@@ -864,152 +820,90 @@ impl PyChainQuery {
     }
 
     /// Get ERC20 token decimals via on-chain query
-    #[pyo3(signature = (token, block_number=None, block_header=None))]
-    fn get_token_decimals(
-        &self,
-        token: &str,
-        block_number: Option<u64>,
-        block_header: Option<&str>,
-    ) -> PyResult<u8> {
+    #[pyo3(signature = (token, block_number=None))]
+    fn get_token_decimals(&self, token: &str, block_number: Option<u64>) -> PyResult<u8> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
-            .block_on(async move {
-                match block_header {
-                    Some(header) => {
-                        provider
-                            .get_token_decimals(token_addr, block_number, Some(header))
-                            .await
-                    }
-                    None => {
-                        provider
-                            .get_token_decimals(token_addr, block_number, None)
-                            .await
-                    }
-                }
-            })
+            .block_on(async move { provider.get_token_decimals(token_addr, block_number).await })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token symbol via on-chain query
-    #[pyo3(signature = (token, block_number=None, block_header=None))]
-    fn get_token_symbol(
-        &self,
-        token: &str,
-        block_number: Option<u64>,
-        block_header: Option<&str>,
-    ) -> PyResult<String> {
+    #[pyo3(signature = (token, block_number=None))]
+    fn get_token_symbol(&self, token: &str, block_number: Option<u64>) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
-            .block_on(async move {
-                match block_header {
-                    Some(header) => {
-                        provider
-                            .get_token_symbol(token_addr, block_number, Some(header))
-                            .await
-                    }
-                    None => {
-                        provider
-                            .get_token_symbol(token_addr, block_number, None)
-                            .await
-                    }
-                }
-            })
+            .block_on(async move { provider.get_token_symbol(token_addr, block_number).await })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 token name via on-chain query
-    #[pyo3(signature = (token, block_number=None, block_header=None))]
-    fn get_token_name(
-        &self,
-        token: &str,
-        block_number: Option<u64>,
-        block_header: Option<&str>,
-    ) -> PyResult<String> {
+    #[pyo3(signature = (token, block_number=None))]
+    fn get_token_name(&self, token: &str, block_number: Option<u64>) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header)?;
         self.runtime
-            .block_on(async move {
-                match block_header {
-                    Some(header) => {
-                        provider
-                            .get_token_name(token_addr, block_number, Some(header))
-                            .await
-                    }
-                    None => {
-                        provider
-                            .get_token_name(token_addr, block_number, None)
-                            .await
-                    }
-                }
-            })
+            .block_on(async move { provider.get_token_name(token_addr, block_number).await })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     /// Get ERC20 total supply as string (wei) via on-chain query
-    #[pyo3(signature = (token, block_number=None, block_header=None))]
-    fn get_token_total_supply(
-        &self,
-        token: &str,
-        block_number: Option<u64>,
-        block_header: Option<&str>,
-    ) -> PyResult<String> {
+    #[pyo3(signature = (token, block_number=None))]
+    fn get_token_total_supply(&self, token: &str, block_number: Option<u64>) -> PyResult<String> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header)?;
         let supply = self
             .runtime
             .block_on(async move {
-                match block_header {
-                    Some(header) => {
-                        provider
-                            .get_token_total_supply(token_addr, block_number, Some(header))
-                            .await
-                    }
-                    None => {
-                        provider
-                            .get_token_total_supply(token_addr, block_number, None)
-                            .await
-                    }
-                }
+                provider
+                    .get_token_total_supply(token_addr, block_number)
+                    .await
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
         Ok(supply.to_string())
     }
 
     /// Get complete token metadata in a single call
-    #[pyo3(signature = (token, block_number=None, block_header=None, tx_hash=None))]
+    #[pyo3(signature = (token, block_number=None, pending_transactions=None))]
     fn get_token_metadata(
         &self,
         token: &str,
         block_number: Option<u64>,
-        block_header: Option<&str>,
-        tx_hash: Option<&str>,
+        pending_transactions: Option<&PyAny>,
     ) -> PyResult<Option<super::tokens::PyTokenMetadata>> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let block_header = Self::parse_optional_header(block_header)?;
-        let tx_hash = tx_hash
-            .map(|hash| super::utils::parse_hash(hash))
-            .transpose()?;
+        let pending_unsigneds: Vec<UnsignedTransaction> = if let Some(iterable) =
+            pending_transactions
+        {
+            let processed = processed_transactions_from_py_iterable(iterable)?;
+            processed
+                .into_iter()
+                .map(|ptx| {
+                    let mut unsigned = UnsignedTxBuilder::build_unsigned_from_processed_tx(&ptx);
+                    unsigned.nonce = Some(ptx.nonce);
+                    if unsigned.gas.is_none() && ptx.fees.gas_limit > 0 {
+                        unsigned.gas = Some(ptx.fees.gas_limit);
+                    }
+                    unsigned
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let meta = self
             .runtime
             .block_on(async move {
-                match block_header {
-                    Some(header) => {
-                        provider
-                            .get_token_metadata(token_addr, block_number, Some(header), tx_hash)
-                            .await
-                    }
-                    None => {
-                        provider
-                            .get_token_metadata(token_addr, block_number, None, tx_hash)
-                            .await
-                    }
+                if pending_unsigneds.is_empty() {
+                    provider
+                        .get_token_metadata(token_addr, block_number, &[])
+                        .await
+                } else {
+                    provider
+                        .get_token_metadata(token_addr, block_number, pending_unsigneds.as_slice())
+                        .await
                 }
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
