@@ -1,6 +1,7 @@
 use alloy_primitives::address;
-use reth_chain_query::common_addresses::denom_tokens::{
-    get_token_decimals, get_token_symbol,
+use reth_chain_query::{
+    common_addresses::denom_tokens::{get_token_decimals, get_token_symbol},
+    RethQueryProvider,
 };
 
 #[test]
@@ -12,6 +13,9 @@ fn denom_tokens_have_expected_metadata() {
         (address!("dAC17F958D2ee523a2206206994597C13D831ec7"), "USDT", 6),
         (address!("853d955aCEf822Db058eb8505911ED77F175b99e"), "FRAX", 18),
     ];
+
+    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")
+        .expect("failed to open Reth datadir for metadata tests");
 
     for (addr, expected_symbol, expected_decimals) in cases {
         let symbol = get_token_symbol(addr)
@@ -27,5 +31,14 @@ fn denom_tokens_have_expected_metadata() {
             decimals, expected_decimals,
             "unexpected decimals for symbol {symbol}"
         );
+
+        let metadata =                                 
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(provider.get_token_metadata(addr, Some(23848765), &[]))
+                .unwrap_or_else(|err| panic!("metadata fetch failed for {addr:?}: {err}"))
+                .expect("metadata is None");
+        assert_eq!(metadata.symbol, expected_symbol);
+        assert_eq!(metadata.decimals, expected_decimals);
     }
 }
