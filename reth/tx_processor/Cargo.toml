@@ -77,6 +77,10 @@ path = "examples/baygus_router/buy_sell_balancer.rs"
 name = "cross_protocol_chaining"
 path = "examples/baygus_router/cross_protocol_chaining.rs"
 
+[[example]]
+name = "rescue_sweep"
+path = "examples/baygus_router/rescue_sweep.rs"
+
 
 # Pool analysis examples
 [[example]]
