@@ -141,11 +141,16 @@ contract BaygusRouter is ILockCallback {
             uint256 amountIn,
             uint256 amountOutMin,
             address[] memory path,
-            address recipient
-        ) = abi.decode(input, (uint256, uint256, address[], address));
+            address recipient,
+            bool payerIsUser
+        ) = abi.decode(input, (uint256, uint256, address[], address, bool));
 
-        // Transfer tokens from user to router
-        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        // Transfer tokens from user to router if payer is user
+        if (payerIsUser) {
+            IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        } else if (amountIn == 0) {
+            amountIn = IERC20(path[0]).balanceOf(address(this));
+        }
 
         // Approve V2/Sushi Router
         IERC20(path[0]).approve(router, amountIn);
@@ -175,10 +180,14 @@ contract BaygusRouter is ILockCallback {
     }
 
     function _v3Swap(bytes calldata input) internal {
-        ISwapRouter.ExactInputSingleParams memory params = abi.decode(input, (ISwapRouter.ExactInputSingleParams));
+        (ISwapRouter.ExactInputSingleParams memory params, bool payerIsUser) = abi.decode(input, (ISwapRouter.ExactInputSingleParams, bool));
         
         // Transfer tokenIn from user to router
-        IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
+        if (payerIsUser) {
+            IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
+        } else if (params.amountIn == 0) {
+            params.amountIn = IERC20(params.tokenIn).balanceOf(address(this));
+        }
         
         // Approve V3 Router
         address v3Router = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
@@ -210,39 +219,47 @@ contract BaygusRouter is ILockCallback {
             int128 j,
             uint256 dx,
             uint256 min_dy,
-            bool useUnderlying
-        ) = abi.decode(input, (address, address, address, address, int128, int128, uint256, uint256, bool));
+            bool useUnderlying,
+            bool payerIsUser
+        ) = abi.decode(input, (address, address, address, address, int128, int128, uint256, uint256, bool, bool));
+
+        bool success;
+        bytes memory returndata;
 
         // Transfer From
-        (bool success, bytes memory data) = tokenIn.call(
-            abi.encodeWithSelector(IERC20.transferFrom.selector, msg.sender, address(this), dx)
-        );
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "Curve: TransferFrom failed");
+        if (payerIsUser) {
+            (success, returndata) = tokenIn.call(
+                abi.encodeWithSelector(IERC20.transferFrom.selector, msg.sender, address(this), dx)
+            );
+            require(success && (returndata.length == 0 || abi.decode(returndata, (bool))), "Curve: TransferFrom failed");
+        } else if (dx == 0) {
+            dx = IERC20(tokenIn).balanceOf(address(this));
+        }
 
         // Approve
-        (success, data) = tokenIn.call(
+        (success, returndata) = tokenIn.call(
             abi.encodeWithSelector(IERC20.approve.selector, pool, dx)
         );
-        require(success && (data.length == 0 || abi.decode(data, (bool))), "Curve: Approve failed");
+        require(success && (returndata.length == 0 || abi.decode(returndata, (bool))), "Curve: Approve failed");
 
         uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
 
         // Exchange
         if (useUnderlying) {
-             (success, data) = pool.call(
+             (success, returndata) = pool.call(
                 abi.encodeWithSignature("exchange_underlying(int128,int128,uint256,uint256)", i, j, dx, min_dy)
             );
         } else {
-             (success, data) = pool.call(
+             (success, returndata) = pool.call(
                 abi.encodeWithSignature("exchange(int128,int128,uint256,uint256)", i, j, dx, min_dy)
             );
         }
         
         if (!success) {
-             if (data.length > 0) {
+             if (returndata.length > 0) {
                 assembly {
-                    let returndata_size := mload(data)
-                    revert(add(32, data), returndata_size)
+                    let returndata_size := mload(returndata)
+                    revert(add(32, returndata), returndata_size)
                 }
             } else {
                 revert("Curve: Exchange failed");
@@ -264,11 +281,16 @@ contract BaygusRouter is ILockCallback {
             address assetOut,
             address recipient,
             uint256 amount,
-            uint256 limit
-        ) = abi.decode(input, (bytes32, address, address, address, uint256, uint256));
+            uint256 limit,
+            bool payerIsUser
+        ) = abi.decode(input, (bytes32, address, address, address, uint256, uint256, bool));
 
         // Transfer From
-        IERC20(assetIn).transferFrom(msg.sender, address(this), amount);
+        if (payerIsUser) {
+            IERC20(assetIn).transferFrom(msg.sender, address(this), amount);
+        } else if (amount == 0) {
+            amount = IERC20(assetIn).balanceOf(address(this));
+        }
 
         // Approve Vault
         IERC20(assetIn).approve(BALANCER_VAULT, amount);
