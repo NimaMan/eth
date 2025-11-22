@@ -1,3 +1,10 @@
+//! Utilities for parsing Ethereum block headers from JSON.
+//!
+//! This module provides functions to deserialize JSON representations of block headers
+//! into `reth_primitives::SealedHeader` objects, along with various helper functions
+//! for parsing different primitive types (e.g., `B256`, `Address`, `U256`, `Bloom`)
+//! from JSON values. It's designed to facilitate the consumption of block data
+//! from external sources (like RPC responses) for simulation purposes.
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{
     Address as AlloyAddress, Bloom, Bytes as AlloyBytes, B256, B64, U256 as AlloyU256,

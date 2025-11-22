@@ -3,8 +3,7 @@
 //! Callers must supply the exact gas limit and fee caps they want to simulate.
 //! This module simply checks those fields are present, ensures legacy vs
 //! EIP-1559 mode is respected, and packages the values into a
-//! `SimulationGasParameters` struct that the TxEnv builders can consume. No
-//! defaults or heuristics are applied here—missing inputs result in errors.
+//! `SimulationGasParameters` struct that the TxEnv builders can consume.
 
 use crate::types::FeeDefaults;
 use eyre::{eyre, Result};

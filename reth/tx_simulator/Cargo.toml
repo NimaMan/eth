@@ -42,6 +42,7 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 bincode = "1.3"
 ethers = { version = "2.0.7", default-features = false, features = ["rustls"] }
 once_cell = "1.18"
+reqwest = { version = "0.12", features = ["json"] }
 
 # For RPC benchmarking
 jsonrpsee = { version = "0.24", features = ["http-client"] }
@@ -137,6 +138,10 @@ path = "examples/block/verify_block_trace_rpc_equivalence.rs"
 [[example]]
 name = "live_block_replay_window"
 path = "examples/block_context/live_block_replay_window.rs"
+
+[[example]]
+name = "compare_live_headers"
+path = "examples/block_context/compare_live_headers.rs"
 
 # Tx builder examples
 [[example]]
