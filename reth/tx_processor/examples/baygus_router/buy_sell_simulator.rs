@@ -15,7 +15,7 @@ use tx_processor::tx_processor::TxProcessor;
 use tx_processor::UnsignedTransaction;
 use tx_simulator::TxSimulator;
 
-const TEST_AMOUNT_WEI: u128 = 100_000_000_000_000_000; // 0.1 ETH
+const TEST_AMOUNT_WEI: u128 = 1_000_000_000_000_000_000; // 1 ETH
 
 fn main() -> Result<()> {
     // 1. Setup Simulator (Synchronous)
@@ -271,7 +271,7 @@ fn encode_execute(commands: alloy_primitives::Bytes, inputs: Vec<alloy_primitive
     
     data.extend_from_slice(&U256::from(64).to_be_bytes::<32>());
     let padded_commands_len = (commands.len() + 31) / 32 * 32;
-    let inputs_offset = 64 + 32 + padded_commands_len;
+    let inputs_offset = 64 + 32 + padded_commands_len; 
     data.extend_from_slice(&U256::from(inputs_offset).to_be_bytes::<32>());
     
     data.extend_from_slice(&U256::from(commands.len()).to_be_bytes::<32>());
