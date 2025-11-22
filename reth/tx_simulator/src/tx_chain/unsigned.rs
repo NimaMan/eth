@@ -16,6 +16,7 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
+use reth_primitives::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -152,14 +153,24 @@ impl UnsignedTxChainSimulation {
         data: Bytes,
     ) -> Result<ViewFunctionResult> {
         let view_defaults = &self.simulator.defaults.view_call;
+        let block_number = self.forked_state.block_number;
+        let base_fee = self
+            .forked_state
+            .block_header
+            .header()
+            .base_fee_per_gas
+            .map(|v| v as u128)
+            .unwrap_or(1);
+
         let mut unsigned_tx = UnsignedTransaction::default();
         unsigned_tx.from = Some(view_defaults.from);
         unsigned_tx.to = Some(contract);
         unsigned_tx.value = Some(U256::ZERO);
         unsigned_tx.data = Some(data);
         unsigned_tx.gas = Some(view_defaults.gas_limit);
+        unsigned_tx.max_fee_per_gas = Some(base_fee);
+        unsigned_tx.max_priority_fee_per_gas = Some(0);
 
-        let block_number = self.forked_state.block_number;
         let result = self.simulator.simulate_on_fork_with_trace(
             &mut self.forked_state,
             unsigned_tx,
@@ -301,15 +312,32 @@ impl TxSimulator {
         &self,
         at_block: Option<u64>,
     ) -> Result<UnsignedTxChainSimulation> {
+        self.start_simulation_chain_with_gas_block(at_block, None)
+            .await
+    }
+
+    /// Start a simulation chain with state from `at_block` but allow overriding gas/environment
+    /// parameters with `gas_block_number`. When `gas_block_number` is `None`, it defaults to
+    /// `at_block` (or the latest block if `at_block` is also `None`).
+    pub async fn start_simulation_chain_with_gas_block(
+        &self,
+        at_block: Option<u64>,
+        gas_block_number: Option<u64>,
+    ) -> Result<UnsignedTxChainSimulation> {
         let latest = self.get_latest_block()?;
         let block_number = at_block.unwrap_or(latest);
 
         if block_number > latest {
-            if let Some(forked_state) = self
+            if let Some(mut forked_state) = self
                 .block_context_loader()
                 .replay_live_state(block_number, None)
                 .await?
             {
+                let gas_block = gas_block_number.unwrap_or(block_number);
+                if gas_block != block_number {
+                    self.override_forked_block_header_gas(&mut forked_state, gas_block)
+                        .await?;
+                }
                 return Ok(UnsignedTxChainSimulation::new(
                     Arc::new(self.clone()),
                     forked_state,
@@ -321,10 +349,42 @@ impl TxSimulator {
             ));
         }
 
-        let forked_state = self.create_forked_state(block_number)?;
+        let mut forked_state = self.create_forked_state(block_number)?;
+        let gas_block = gas_block_number.unwrap_or(block_number);
+        if gas_block != block_number {
+            self.override_forked_block_header_gas(&mut forked_state, gas_block)
+                .await?;
+        }
+
         Ok(UnsignedTxChainSimulation::new(
             Arc::new(self.clone()),
             forked_state,
         ))
+    }
+}
+
+impl TxSimulator {
+    async fn override_forked_block_header_gas(
+        &self,
+        forked_state: &mut ForkedState,
+        gas_block_number: u64,
+    ) -> Result<()> {
+        let gas_header = self
+            .block_context_loader()
+            .load_block_header(gas_block_number, None)
+            .await?;
+
+        let mut combined_header = forked_state.block_header.header().clone();
+        let src = gas_header.header();
+
+        combined_header.gas_limit = src.gas_limit;
+        combined_header.base_fee_per_gas = src.base_fee_per_gas;
+        combined_header.blob_gas_used = src.blob_gas_used;
+        combined_header.excess_blob_gas = src.excess_blob_gas;
+        combined_header.parent_beacon_block_root = src.parent_beacon_block_root;
+        combined_header.requests_hash = src.requests_hash;
+
+        forked_state.block_header = SealedHeader::new_unhashed(combined_header);
+        Ok(())
     }
 }
