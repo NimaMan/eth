@@ -73,6 +73,10 @@ path = "examples/baygus_router/buy_sell_curve.rs"
 name = "buy_sell_balancer"
 path = "examples/baygus_router/buy_sell_balancer.rs"
 
+[[example]]
+name = "cross_protocol_chaining"
+path = "examples/baygus_router/cross_protocol_chaining.rs"
+
 
 # Pool analysis examples
 [[example]]
