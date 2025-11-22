@@ -78,72 +78,116 @@ contract BaygusRouter is ILockCallback {
         poolManager = poolManager_;
     }
 
-    function swapExactInputSingle(
-        SwapExactInputSingleParams calldata request
-    ) external payable returns (BalanceDelta memory delta) {
-        if (_entered) revert RouterReentrant();
-        if (request.recipient == address(0)) revert InvalidRecipient();
+    // Command constants
+    uint256 private constant CMD_V4_SWAP = 0x01;
+    uint256 private constant CMD_V2_SWAP = 0x02;
 
+    function execute(bytes calldata commands, bytes[] calldata inputs) external payable {
+        if (_entered) revert RouterReentrant();
         _entered = true;
         uint256 previousNative = _nativeBuffer;
         _nativeBuffer = msg.value;
 
-        bytes memory payload = abi.encode(uint8(0), abi.encode(request, msg.sender));
-        bytes memory response = IPoolManager(poolManager).lock(payload);
-        delta = abi.decode(response, (BalanceDelta));
+        for (uint256 i = 0; i < commands.length; i++) {
+            uint256 command = uint8(commands[i]);
+            bytes calldata input = inputs[i];
+            _dispatch(command, input);
+        }
 
         if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
         _nativeBuffer = previousNative;
         _entered = false;
-
-        return delta;
     }
 
-    function swapExactInputPath(
-        MultiHopParams calldata request
-    ) external payable returns (BalanceDelta memory finalDelta) {
-        if (request.hops.length == 0) revert EmptyPath();
-        if (_entered) revert RouterReentrant();
-        if (request.recipient == address(0)) revert InvalidRecipient();
+    function _dispatch(uint256 command, bytes calldata input) internal {
+        if (command == CMD_V4_SWAP) {
+            _v4Swap(input);
+        } else if (command == CMD_V2_SWAP) {
+            _v2Swap(input);
+        } else {
+            revert("Invalid command");
+        }
+    }
 
-        _entered = true;
-        uint256 previousNative = _nativeBuffer;
-        _nativeBuffer = msg.value;
+    function _v4Swap(bytes calldata input) internal {
+        // Existing V4 logic logic moved here, decoding input to determine single or multi-hop
+        // For now, we assume the input encodes the operation type (single/multi) and the params.
+        // This requires a slight adjustment to how we encode the V4 payload.
+        // Let's reuse the existing encoding structure: (uint8 op, bytes memory payload)
+        
+        // However, since we are inside the router, we need to call `unlock` on the PoolManager.
+        // The `unlockCallback` will be called back.
+        
+        // To keep state context, we can pass the input directly to the callback via the data.
+        // Or we can optimize. For V4, we need the callback.
+        
+        bytes memory response = IPoolManager(poolManager).unlock(input);
+        // We can decode response if needed, but typically we check slippage inside the callback or after.
+        // The existing logic returned delta. Here we might consume it or settle it.
+    }
 
-        bytes memory payload = abi.encode(
-            uint8(1),
-            abi.encode(
-                msg.sender,
-                request.recipient,
-                request.finalMinAmount0,
-                request.finalMinAmount1,
-                request.hops
+    function _v2Swap(bytes calldata input) internal {
+        (
+            uint256 amountIn,
+            uint256 amountOutMin,
+            address[] memory path,
+            address recipient
+        ) = abi.decode(input, (uint256, uint256, address[], address));
+
+        // Transfer tokens from user to router
+        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+
+        // Approve V2 Router
+        // Note: In production, use a constant or look up via mapping
+        address v2Router = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D; 
+        IERC20(path[0]).approve(v2Router, amountIn);
+
+        // Execute Swap
+        // Using low-level call to avoid interface dependency for now
+        (bool success, bytes memory returndata) = v2Router.call(
+            abi.encodeWithSignature(
+                "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
+                amountIn,
+                amountOutMin,
+                path,
+                recipient,
+                block.timestamp
             )
         );
-
-        bytes memory response = IPoolManager(poolManager).lock(payload);
-        finalDelta = abi.decode(response, (BalanceDelta));
-
-        if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
-        _nativeBuffer = previousNative;
-        _entered = false;
-
-        return finalDelta;
+        if (!success) {
+            if (returndata.length > 0) {
+                assembly {
+                    let returndata_size := mload(returndata)
+                    revert(add(32, returndata), returndata_size)
+                }
+            } else {
+                revert("V2 Swap Failed");
+            }
+        }
     }
 
-    function lockAcquired(bytes calldata data) external override returns (bytes memory) {
+    // Keep existing functions for backward compatibility during refactor if needed,
+    // but preferably we switch to execute.
+    // For now, I will comment out the old external functions or repurpose them.
+
+    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         if (msg.sender != poolManager) revert UnauthorizedPoolManager();
 
+        // Decode the data passed from _v4Swap -> unlock
+        // The data should contain the swap details.
+        
         (uint8 op, bytes memory payload) = abi.decode(data, (uint8, bytes));
+        
         if (op == 0) {
-            (SwapExactInputSingleParams memory request, address singleInitiator) = abi.decode(
+             (SwapExactInputSingleParams memory request, address singleInitiator) = abi.decode(
                 payload,
                 (SwapExactInputSingleParams, address)
             );
             BalanceDelta memory delta = _executeSingle(request, singleInitiator);
             return abi.encode(delta);
         }
-
+        
+        // ... (MultiHop logic) ...
         (
             address initiator,
             address recipient,
@@ -178,7 +222,16 @@ contract BaygusRouter is ILockCallback {
         });
 
         _invokeBeforeSwap(context);
-        delta = IPoolManager(poolManager).swap(context.key, context.params, context.hookData);
+        try IPoolManager(poolManager).swap(context.key, context.params, context.hookData) returns (
+            BalanceDelta memory swapDelta
+        ) {
+            delta = swapDelta;
+        } catch (bytes memory reason) {
+            if (reason.length == 0) revert();
+            assembly {
+                revert(add(reason, 0x20), mload(reason))
+            }
+        }
         _handleSettlement(context, delta);
         _validateDelta(context, delta);
         _invokeAfterSwap(context, delta);
@@ -208,11 +261,17 @@ contract BaygusRouter is ILockCallback {
             });
 
             _invokeBeforeSwap(context);
-            BalanceDelta memory delta = IPoolManager(poolManager).swap(
-                context.key,
-                context.params,
-                context.hookData
-            );
+            BalanceDelta memory delta;
+            try IPoolManager(poolManager).swap(context.key, context.params, context.hookData) returns (
+                BalanceDelta memory hopDelta
+            ) {
+                delta = hopDelta;
+            } catch (bytes memory reason) {
+                if (reason.length == 0) revert();
+                assembly {
+                    revert(add(reason, 0x20), mload(reason))
+                }
+            }
             _handleSettlement(context, delta);
             _validateDelta(context, delta);
             _invokeAfterSwap(context, delta);
@@ -232,26 +291,28 @@ contract BaygusRouter is ILockCallback {
     }
 
     function _handleSettlement(SwapContext memory context, BalanceDelta memory delta) internal {
-        if (delta.amount0 < 0) {
-            _settleCurrency(context.sender, context.key.currency0, _abs(delta.amount0));
-        } else if (delta.amount0 > 0) {
-            _takeCurrency(context.recipient, context.key.currency0, _abs(delta.amount0));
+        if (delta.amount0 > 0) {
+            _settleCurrency(context.sender, context.key.currency0, uint256(int256(delta.amount0)));
+        } else if (delta.amount0 < 0) {
+            _takeCurrency(context.recipient, context.key.currency0, uint256(int256(-delta.amount0)));
         }
 
-        if (delta.amount1 < 0) {
-            _settleCurrency(context.sender, context.key.currency1, _abs(delta.amount1));
-        } else if (delta.amount1 > 0) {
-            _takeCurrency(context.recipient, context.key.currency1, _abs(delta.amount1));
+        if (delta.amount1 > 0) {
+            _settleCurrency(context.sender, context.key.currency1, uint256(int256(delta.amount1)));
+        } else if (delta.amount1 < 0) {
+            _takeCurrency(context.recipient, context.key.currency1, uint256(int256(-delta.amount1)));
         }
     }
 
     function _settleCurrency(address payer, address currency, uint256 amount) internal {
         if (amount == 0) return;
 
+        IPoolManager manager = IPoolManager(poolManager);
+
         if (currency == address(0)) {
             if (_nativeBuffer < amount) revert InsufficientNativeLiquidity();
             _nativeBuffer -= amount;
-            IPoolManager(poolManager).settle{value: amount}(currency, amount);
+            manager.settle{value: amount}(address(0));
         } else {
             bool ok;
             if (payer == address(this)) {
@@ -260,7 +321,7 @@ contract BaygusRouter is ILockCallback {
                 ok = IERC20(currency).transferFrom(payer, poolManager, amount);
             }
             if (!ok) revert ERC20TransferFailed();
-            IPoolManager(poolManager).settle(currency, amount);
+            manager.settle(currency);
         }
     }
 

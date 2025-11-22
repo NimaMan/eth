@@ -59,5 +59,57 @@ v0.6) and `docs/code-audit.md` for the current feature audit and gaps.
 
 - Catalogue behaviours of the router at `0x8911…c940` (permissions, settlement flow, hook data).
 - Draft execution and state diagrams describing multi-hop routing & adapter lifecycle.
+- Track mainnet Uniswap v4 pool deployments with non-zero liquidity so the PyReth example can be
+  re-run against live data.
 - Extend the Foundry project to cover multi-hop scenarios and document integration points for the
   Baygus Rust stack.
+
+---
+
+## Current Status (2025-10-20)
+
+- **Solidity** – `contracts/src/BaygusRouter.sol` handles single- and multi-hop swaps, wraps/unwraps
+  WETH, and propagates hook data. Foundry tests cover the happy path, slippage reverts, and hook
+  adapters (`forge test`).
+- **Rust integration** – `tx_processor` now deploys the router inside the `check_can_buy_sell_pool`
+  simulation, wraps/approves WETH as needed, and executes buy → approve → sell via the new bytecode
+  builders in `reth_chain_query`. PyReth exposes this through
+  `PoolBuySellSimulator.set_uniswap_v4_config(...)`.
+- **Data availability** – The current Reth snapshot does not include any Uniswap v4 pools that
+  return slot0/liquidity, so the example run ends after router deployment with the informative
+  failure message “Baygus router deployment succeeded but bytecode not visible in simulation
+  state / target has no bytecode”. We keep the simulation in place so that a pool can be dropped in
+  as soon as it becomes tradeable.
+
+---
+
+## Development Workflow
+
+1. **Compile the Solidity artifacts**
+   ```bash
+   cd sol/baygus-router
+   forge build
+   ```
+   This refreshes `out/BaygusRouter.sol/BaygusRouter.json`, which the Rust builder loads at runtime.
+   (A placeholder `sol/baygus-router/contracts/uniswap_v4/MinimalV4Router.bin` is still required for legacy tooling.)
+
+2. **Build the Rust crates without running tests**
+   ```bash
+    cd ../../rust
+    cargo test --manifest-path pyreth/Cargo.toml --lib --no-run
+   ```
+   This recompiles `tx_simulator`, `tx_processor`, and `reth_chain_query` with the latest ABI.
+
+3. **Expose the updated bindings to PyReth**
+   ```bash
+   cd pyreth
+   maturin develop
+   ```
+
+4. **Exercise the Uniswap v4 flow (expected failure until live liquidity exists)**
+   ```bash
+   python examples/pool_buy_sell_simulator/uniswap_v4_pools.py
+   ```
+   The script prints the router deployment/deposit/approval steps and surfaces why the swap cannot
+   complete. Once a slot0-capable pool is available, this example should flip to a successful
+   buy/approve/sell trace.

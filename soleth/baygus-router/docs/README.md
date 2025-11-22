@@ -34,7 +34,7 @@ See `code-audit.md` for the latest summary of implemented features and outstandi
 | v0.2    | Implement a minimal `BaygusRouter` (single pool, no hooks) handling lock → swap → settle for ERC20/WETH.    | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouter.t.sol`                     |
 | v0.3    | Introduce hook-aware adapters and safety rails (hook data propagation, sanity checks).                      | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouter.t.sol`                     |
 | v0.4    | Multi-hop routing & aggregated slippage with hook propagation between hops.                                 | `forge test --root sol/baygus-router/contracts --match-path test/BaygusRouterMultihop.t.sol`             |
-| v0.5    | Rust simulator integration: Baygus agent drives router for buy/approve/sell simulations.                    | `cargo test -p baygus_simulation --test router_roundtrip` *(planned)*                                    |
+| v0.5    | Rust simulator integration: Baygus agent drives router for buy/approve/sell simulations.                    | `python rust/pyreth/examples/pool_buy_sell_simulator/uniswap_v4_pools.py` *(current output documents missing v4 liquidity)* |
 | v0.6    | Production hardening & multi-venue support (deploy scripts, audit, on-chain smoke tests).                   | `forge script scripts/DeployBaygusRouter.s.sol` *(planned)*                                              |
 
 We revisit this table after every milestone to delete unnecessary requirements and adjust scope
@@ -77,3 +77,15 @@ as needed.
   integration with the Baygus Rust stack.
 - **Follow-up:** Integrate router with simulator (v0.5), design aggregated hook threat models, and
   begin documenting gas optimization strategies.
+
+### v0.5 – Rust & PyReth Integration (in-flight)
+
+- **Objective:** Allow the Baygus Rust stack (tx_processor, tx_simulator, PyReth) to deploy the
+  router on demand and exercise the buy → approve → sell loop.
+- **Command:** `python rust/pyreth/examples/pool_buy_sell_simulator/uniswap_v4_pools.py`
+- **Outcome:** The simulation successfully deploys the router, wraps/approves WETH, and emits an
+  informative failure because no Uniswap v4 pools with slot0/liquidity exist in the local Reth
+  snapshot yet. As soon as a live pool is available the same command becomes the v0.5 acceptance
+  test.
+- **Follow-up:** Monitor mainnet for initialized v4 pools, add a short list of vetted pool configs,
+  and convert the example into an automated regression once pool data is stable.

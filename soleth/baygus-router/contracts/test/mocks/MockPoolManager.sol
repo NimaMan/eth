@@ -11,6 +11,9 @@ contract MockPoolManager {
     BalanceDelta[] private _deltaQueue;
     uint256 private _deltaCursor;
 
+    address private _syncedCurrency;
+    uint256 private _syncedReserves;
+
     struct SettleCall {
         address currency;
         uint256 amount;
@@ -46,7 +49,7 @@ contract MockPoolManager {
     function lock(bytes calldata data) external returns (bytes memory) {
         if (router == address(0)) revert RouterNotSet();
         if (msg.sender != router) revert UnauthorizedCaller();
-        return ILockCallback(router).lockAcquired(data);
+        return ILockCallback(router).unlockCallback(data);
     }
 
     function swap(
@@ -66,11 +69,29 @@ contract MockPoolManager {
         }
     }
 
-    function settle(address currency, uint256 amount) external payable {
+    function settle(address currency) external payable returns (uint256) {
         if (msg.sender != router) revert UnauthorizedCaller();
-        _settleHistory.push(
-            SettleCall({currency: currency, amount: amount, isNative: msg.value > 0})
-        );
+        uint256 amount;
+        bool isNative;
+        if (currency == address(0)) {
+            amount = msg.value;
+            isNative = true;
+        } else {
+            uint256 balance = _balanceOf(currency);
+            amount = balance - _syncedReserves;
+            isNative = false;
+        }
+
+        _settleHistory.push(SettleCall({currency: currency, amount: amount, isNative: isNative}));
+        _syncedCurrency = address(0);
+        _syncedReserves = 0;
+
+        return amount;
+    }
+
+    function settleFor(address recipient) external payable returns (uint256) {
+        recipient;
+        return this.settle{value: msg.value}(address(0));
     }
 
     function take(address currency, address recipient, uint256 amount) external {
@@ -100,6 +121,13 @@ contract MockPoolManager {
 
     function getTakeCall(uint256 index) external view returns (TakeCall memory) {
         return _takeHistory[index];
+    }
+
+    function _balanceOf(address currency) internal view returns (uint256) {
+        if (currency == address(0)) {
+            return address(this).balance;
+        }
+        return MockERC20(currency).balanceOf(address(this));
     }
 
     receive() external payable {}

@@ -8,6 +8,8 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
 contract BaygusRouterMultihopTest is TestBase {
+    uint256 constant CMD_V4_SWAP = 0x01;
+
     function _deployEnvironment()
         internal
         returns (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC)
@@ -26,7 +28,13 @@ contract BaygusRouterMultihopTest is TestBase {
     }
 
     function _poolKey(address c0, address c1) internal pure returns (PoolKey memory) {
-        return PoolKey({currency0: c0, currency1: c1, fee: 1_000, tickSpacing: 1});
+        return PoolKey({
+            currency0: c0,
+            currency1: c1,
+            fee: 1_000,
+            tickSpacing: 1,
+            hooks: address(0)
+        });
     }
 
     function _params() internal pure returns (SwapParams memory) {
@@ -67,19 +75,25 @@ contract BaygusRouterMultihopTest is TestBase {
             minAmount1: 0
         });
 
-        BalanceDelta memory finalDelta = router.swapExactInputPath(
-            BaygusRouter.MultiHopParams({
-                hops: hops,
-                recipient: address(this),
-                finalMinAmount0: int128(int256(600 ether)),
-                finalMinAmount1: 0
-            })
+        bytes memory innerPayload = abi.encode(
+            address(this),
+            address(this),
+            int128(int256(600 ether)),
+            int128(0),
+            hops
         );
+        bytes memory input = abi.encode(uint8(1), innerPayload);
+        
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
+        router.execute(commands, inputs);
 
         assertEq(tokenA.balanceOf(address(this)), 1_000_000 ether - 500 ether, "tokenA spent");
         assertEq(tokenC.balanceOf(address(this)), 600 ether, "tokenC received");
         assertEq(tokenB.balanceOf(address(router)), 0, "no residual tokenB");
-        assertEq(uint256(int256(finalDelta.amount0)), 600 ether, "final delta amount0");
+        // Cannot assert finalDelta directly as execute returns void, but balances confirm correctness.
         assertEq(pool.settleHistoryLength(), 2, "two settle calls");
         assertEq(pool.takeHistoryLength(), 2, "two take calls");
     }
@@ -116,14 +130,23 @@ contract BaygusRouterMultihopTest is TestBase {
             minAmount1: 0
         });
 
+        bytes memory innerPayload = abi.encode(
+            address(this),
+            address(this),
+            int128(int256(600 ether)),
+            int128(0),
+            hops
+        );
+        bytes memory input = abi.encode(uint8(1), innerPayload);
+        
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
         bytes memory callData = abi.encodeWithSelector(
-            BaygusRouter.swapExactInputPath.selector,
-            BaygusRouter.MultiHopParams({
-                hops: hops,
-                recipient: address(this),
-                finalMinAmount0: int128(int256(600 ether)),
-                finalMinAmount1: 0
-            })
+            BaygusRouter.execute.selector,
+            commands,
+            inputs
         );
 
         (bool success, bytes memory returndata) = address(router).call(callData);

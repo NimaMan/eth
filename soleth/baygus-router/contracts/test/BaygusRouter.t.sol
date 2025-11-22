@@ -9,6 +9,8 @@ import {MockHookAdapter} from "./mocks/MockHookAdapter.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
 contract BaygusRouterTest is TestBase {
+    uint256 constant CMD_V4_SWAP = 0x01;
+
     function _deployEnvironment()
         internal
         returns (BaygusRouter router, MockPoolManager pool, MockERC20 token, MockERC20 weth)
@@ -25,7 +27,13 @@ contract BaygusRouterTest is TestBase {
     }
 
     function _poolKey(address token, address weth) internal pure returns (PoolKey memory) {
-        return PoolKey({currency0: token, currency1: weth, fee: 1_000, tickSpacing: 1});
+        return PoolKey({
+            currency0: token,
+            currency1: weth,
+            fee: 1_000,
+            tickSpacing: 1,
+            hooks: address(0)
+        });
     }
 
     function _params(bool zeroForOne) internal pure returns (SwapParams memory) {
@@ -67,7 +75,12 @@ contract BaygusRouterTest is TestBase {
             address(this)
         );
 
-        BalanceDelta memory delta = router.swapExactInputSingle(req);
+        bytes memory input = abi.encode(uint8(0), abi.encode(req, address(this)));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
+        router.execute(commands, inputs);
 
         assertEq(token.balanceOf(address(this)), preToken + 1500 ether, "token out mismatch");
         assertEq(weth.balanceOf(address(this)), preWethTrader - 500 ether, "weth debit mismatch");
@@ -84,9 +97,6 @@ contract BaygusRouterTest is TestBase {
         assertEq(takeCall.currency, address(token), "take currency");
         assertEq(takeCall.recipient, address(this), "take recipient");
         assertEq(takeCall.amount, 1500 ether, "take amount");
-
-        assertEq(uint256(int256(delta.amount0)), 1500 ether, "delta amount0");
-        assertEq(uint256(int256(-delta.amount1)), 500 ether, "delta amount1");
     }
 
     function testSwapExactInputSingle_SellsToken() external {
@@ -109,7 +119,12 @@ contract BaygusRouterTest is TestBase {
             address(this)
         );
 
-        BalanceDelta memory delta = router.swapExactInputSingle(req);
+        bytes memory input = abi.encode(uint8(0), abi.encode(req, address(this)));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
+        router.execute(commands, inputs);
 
         assertEq(token.balanceOf(address(this)), preTokenTrader - 250 ether, "token debit mismatch");
         assertEq(token.balanceOf(address(pool)), preTokenPool + 250 ether, "pool token credit");
@@ -127,9 +142,6 @@ contract BaygusRouterTest is TestBase {
         assertEq(takeCall.currency, address(weth), "take currency sell");
         assertEq(takeCall.recipient, address(this), "take recipient sell");
         assertEq(takeCall.amount, 200 ether, "take amount sell");
-
-        assertEq(uint256(int256(-delta.amount0)), 250 ether, "delta amount0 sell");
-        assertEq(uint256(int256(delta.amount1)), 200 ether, "delta amount1 sell");
     }
 
     function testSwapExactInputSingle_WithHookAdapter() external {
@@ -152,7 +164,12 @@ contract BaygusRouterTest is TestBase {
         req.hookData = hookData;
         req.hookAdapter = address(hook);
 
-        router.swapExactInputSingle(req);
+        bytes memory input = abi.encode(uint8(0), abi.encode(req, address(this)));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
+        router.execute(commands, inputs);
 
         assertTrue(hook.beforeCalled(), "before hook not invoked");
         assertTrue(hook.afterCalled(), "after hook not invoked");
@@ -179,9 +196,15 @@ contract BaygusRouterTest is TestBase {
         );
         req.minAmount0 = int128(int256(100 ether));
 
+        bytes memory input = abi.encode(uint8(0), abi.encode(req, address(this)));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = input;
+        bytes memory commands = abi.encodePacked(uint8(CMD_V4_SWAP));
+
         bytes memory callData = abi.encodeWithSelector(
-            BaygusRouter.swapExactInputSingle.selector,
-            req
+            BaygusRouter.execute.selector,
+            commands,
+            inputs
         );
         (bool success, ) = address(router).call(callData);
         assertTrue(!success, "expected slippage revert");
