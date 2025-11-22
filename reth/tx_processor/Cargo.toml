@@ -53,6 +53,14 @@ path = "examples/provider/fetch_processed_tx.rs"
 name = "buy_swap_uniswap_v4"
 path = "examples/simulation/buy_swap_uniswap_v4.rs"
 
+[[example]]
+name = "buy_swap_uniswap_v2"
+path = "examples/simulation/buy_swap_uniswap_v2.rs"
+
+[[example]]
+name = "buy_sell_simulator"
+path = "examples/baygus_router/buy_sell_simulator.rs"
+
 
 # Pool analysis examples
 [[example]]
