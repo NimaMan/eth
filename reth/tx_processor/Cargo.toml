@@ -81,6 +81,10 @@ path = "examples/baygus_router/cross_protocol_chaining.rs"
 name = "rescue_sweep"
 path = "examples/baygus_router/rescue_sweep.rs"
 
+[[example]]
+name = "flash_loan_arb"
+path = "examples/baygus_router/flash_loan_arb.rs"
+
 
 # Pool analysis examples
 [[example]]
