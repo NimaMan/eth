@@ -6,7 +6,7 @@ import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
-import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP} from "./types/SharedTypes.sol";
+import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP, CMD_SWEEP, CMD_BALANCER_FLASH_LOAN} from "./types/SharedTypes.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IBalancerVault} from "./interfaces/IBalancerVault.sol";
 
@@ -101,7 +101,7 @@ contract BaygusRouter is ILockCallback {
         _entered = false;
     }
 
-    function _dispatch(uint256 command, bytes calldata input) internal {
+    function _dispatch(uint256 command, bytes memory input) internal {
         if (command == CMD_V4_SWAP) {
             _v4Swap(input);
         } else if (command == CMD_V2_SWAP) {
@@ -114,12 +114,16 @@ contract BaygusRouter is ILockCallback {
             _curveSwap(input);
         } else if (command == CMD_BALANCER_SWAP) {
             _balancerSwap(input);
+        } else if (command == CMD_SWEEP) {
+            _sweep(input);
+        } else if (command == CMD_BALANCER_FLASH_LOAN) {
+            _balancerFlashLoan(input);
         } else {
             revert("Invalid command");
         }
     }
 
-    function _v4Swap(bytes calldata input) internal {
+    function _v4Swap(bytes memory input) internal {
         // Existing V4 logic logic moved here, decoding input to determine single or multi-hop
         // For now, we assume the input encodes the operation type (single/multi) and the params.
         // This requires a slight adjustment to how we encode the V4 payload.
@@ -136,7 +140,7 @@ contract BaygusRouter is ILockCallback {
         // The existing logic returned delta. Here we might consume it or settle it.
     }
 
-    function _v2Swap(bytes calldata input, address router) internal {
+    function _v2Swap(bytes memory input, address router) internal {
         (
             uint256 amountIn,
             uint256 amountOutMin,
@@ -179,7 +183,7 @@ contract BaygusRouter is ILockCallback {
         }
     }
 
-    function _v3Swap(bytes calldata input) internal {
+    function _v3Swap(bytes memory input) internal {
         (ISwapRouter.ExactInputSingleParams memory params, bool payerIsUser) = abi.decode(input, (ISwapRouter.ExactInputSingleParams, bool));
         
         // Transfer tokenIn from user to router
@@ -209,7 +213,7 @@ contract BaygusRouter is ILockCallback {
         }
     }
 
-    function _curveSwap(bytes calldata input) internal {
+    function _curveSwap(bytes memory input) internal {
         (
             address pool,
             address tokenIn,
@@ -274,7 +278,7 @@ contract BaygusRouter is ILockCallback {
         }
     }
 
-    function _balancerSwap(bytes calldata input) internal {
+    function _balancerSwap(bytes memory input) internal {
         (
             bytes32 poolId,
             address assetIn,
@@ -317,6 +321,54 @@ contract BaygusRouter is ILockCallback {
             limit,
             block.timestamp
         );
+    }
+
+    function _balancerFlashLoan(bytes memory input) internal {
+        (address[] memory tokens, uint256[] memory amounts, bytes memory userData) = abi.decode(input, (address[], uint256[], bytes));
+        IBalancerVault(BALANCER_VAULT).flashLoan(address(this), tokens, amounts, userData);
+    }
+
+    function receiveFlashLoan(
+        address[] memory tokens,
+        uint256[] memory amounts,
+        uint256[] memory feeAmounts,
+        bytes memory userData
+    ) external {
+        if (msg.sender != BALANCER_VAULT) revert UnauthorizedPoolManager();
+
+        (bytes memory commands, bytes[] memory inputs) = abi.decode(userData, (bytes, bytes[]));
+        
+        for (uint256 i = 0; i < commands.length; i++) {
+            _dispatch(uint8(commands[i]), inputs[i]);
+        }
+
+        // Repay
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            uint256 amountToRepay = amounts[i] + feeAmounts[i];
+            IERC20(tokens[i]).transfer(BALANCER_VAULT, amountToRepay);
+        }
+    }
+
+    function _sweep(bytes memory input) internal {
+        (address token, address recipient, uint256 amountMinimum) = abi.decode(input, (address, address, uint256));
+        
+        uint256 balance;
+        if (token == address(0)) {
+            balance = address(this).balance;
+            if (balance > 0) {
+                (bool success, ) = payable(recipient).call{value: balance}("");
+                require(success, "Sweep: ETH transfer failed");
+            }
+        } else {
+            balance = IERC20(token).balanceOf(address(this));
+            if (balance > 0) {
+                IERC20(token).transfer(recipient, balance);
+            }
+        }
+        
+        if (balance < amountMinimum) {
+            revert("Sweep: Insufficient balance");
+        }
     }
 
     // Keep existing functions for backward compatibility during refactor if needed,
@@ -470,7 +522,8 @@ contract BaygusRouter is ILockCallback {
             bool ok;
             if (payer == address(this)) {
                 ok = IERC20(currency).transfer(poolManager, amount);
-            } else {
+            }
+            else {
                 ok = IERC20(currency).transferFrom(payer, poolManager, amount);
             }
             if (!ok) revert ERC20TransferFailed();
