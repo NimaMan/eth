@@ -4,8 +4,10 @@ pragma solidity ^0.8.26;
 import {ILockCallback} from "./interfaces/ILockCallback.sol";
 import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
+import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
-import {PoolKey, SwapParams, BalanceDelta} from "./types/SharedTypes.sol";
+import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP} from "./types/SharedTypes.sol";
+import {ICurvePool} from "./interfaces/ICurvePool.sol";
 
 /// @title BaygusRouter
 /// @notice Router used by the Baygus execution agent: performs Uniswap v4 PoolManager lock →
@@ -14,6 +16,8 @@ import {PoolKey, SwapParams, BalanceDelta} from "./types/SharedTypes.sol";
 ///      support and additional venue adapters.
 contract BaygusRouter is ILockCallback {
     address public immutable poolManager;
+    address private constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
+    address private constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
 
     bool private _entered;
     uint256 private _nativeBuffer;
@@ -78,10 +82,6 @@ contract BaygusRouter is ILockCallback {
         poolManager = poolManager_;
     }
 
-    // Command constants
-    uint256 private constant CMD_V4_SWAP = 0x01;
-    uint256 private constant CMD_V2_SWAP = 0x02;
-
     function execute(bytes calldata commands, bytes[] calldata inputs) external payable {
         if (_entered) revert RouterReentrant();
         _entered = true;
@@ -103,7 +103,13 @@ contract BaygusRouter is ILockCallback {
         if (command == CMD_V4_SWAP) {
             _v4Swap(input);
         } else if (command == CMD_V2_SWAP) {
-            _v2Swap(input);
+            _v2Swap(input, UNISWAP_V2_ROUTER);
+        } else if (command == CMD_V3_SWAP) {
+            _v3Swap(input);
+        } else if (command == CMD_SUSHISWAP) {
+            _v2Swap(input, SUSHISWAP_ROUTER);
+        } else if (command == CMD_CURVE_SWAP) {
+            _curveSwap(input);
         } else {
             revert("Invalid command");
         }
@@ -126,7 +132,7 @@ contract BaygusRouter is ILockCallback {
         // The existing logic returned delta. Here we might consume it or settle it.
     }
 
-    function _v2Swap(bytes calldata input) internal {
+    function _v2Swap(bytes calldata input, address router) internal {
         (
             uint256 amountIn,
             uint256 amountOutMin,
@@ -137,14 +143,12 @@ contract BaygusRouter is ILockCallback {
         // Transfer tokens from user to router
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
-        // Approve V2 Router
-        // Note: In production, use a constant or look up via mapping
-        address v2Router = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D; 
-        IERC20(path[0]).approve(v2Router, amountIn);
+        // Approve V2/Sushi Router
+        IERC20(path[0]).approve(router, amountIn);
 
         // Execute Swap
         // Using low-level call to avoid interface dependency for now
-        (bool success, bytes memory returndata) = v2Router.call(
+        (bool success, bytes memory returndata) = router.call(
             abi.encodeWithSignature(
                 "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
                 amountIn,
@@ -163,6 +167,89 @@ contract BaygusRouter is ILockCallback {
             } else {
                 revert("V2 Swap Failed");
             }
+        }
+    }
+
+    function _v3Swap(bytes calldata input) internal {
+        ISwapRouter.ExactInputSingleParams memory params = abi.decode(input, (ISwapRouter.ExactInputSingleParams));
+        
+        // Transfer tokenIn from user to router
+        IERC20(params.tokenIn).transferFrom(msg.sender, address(this), params.amountIn);
+        
+        // Approve V3 Router
+        address v3Router = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
+        IERC20(params.tokenIn).approve(v3Router, params.amountIn);
+        
+        // Execute Swap
+        try ISwapRouter(v3Router).exactInputSingle(params) returns (uint256 amountOut) {
+            // Success
+            amountOut;
+        } catch (bytes memory reason) {
+             if (reason.length > 0) {
+                assembly {
+                    let returndata_size := mload(reason)
+                    revert(add(32, reason), returndata_size)
+                }
+            } else {
+                revert("V3 Swap Failed");
+            }
+        }
+    }
+
+    function _curveSwap(bytes calldata input) internal {
+        (
+            address pool,
+            address tokenIn,
+            address tokenOut,
+            address recipient,
+            int128 i,
+            int128 j,
+            uint256 dx,
+            uint256 min_dy,
+            bool useUnderlying
+        ) = abi.decode(input, (address, address, address, address, int128, int128, uint256, uint256, bool));
+
+        // Transfer From
+        (bool success, bytes memory data) = tokenIn.call(
+            abi.encodeWithSelector(IERC20.transferFrom.selector, msg.sender, address(this), dx)
+        );
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "Curve: TransferFrom failed");
+
+        // Approve
+        (success, data) = tokenIn.call(
+            abi.encodeWithSelector(IERC20.approve.selector, pool, dx)
+        );
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "Curve: Approve failed");
+
+        uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
+
+        // Exchange
+        if (useUnderlying) {
+             (success, data) = pool.call(
+                abi.encodeWithSignature("exchange_underlying(int128,int128,uint256,uint256)", i, j, dx, min_dy)
+            );
+        } else {
+             (success, data) = pool.call(
+                abi.encodeWithSignature("exchange(int128,int128,uint256,uint256)", i, j, dx, min_dy)
+            );
+        }
+        
+        if (!success) {
+             if (data.length > 0) {
+                assembly {
+                    let returndata_size := mload(data)
+                    revert(add(32, data), returndata_size)
+                }
+            } else {
+                revert("Curve: Exchange failed");
+            }
+        }
+
+        uint256 balanceAfter = IERC20(tokenOut).balanceOf(address(this));
+        uint256 amountOut = balanceAfter - balanceBefore;
+
+        if (amountOut > 0) {
+            IERC20(tokenOut).transfer(recipient, amountOut);
         }
     }
 
