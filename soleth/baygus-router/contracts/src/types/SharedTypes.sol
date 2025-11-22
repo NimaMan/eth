@@ -26,4 +26,5 @@ uint256 constant CMD_V2_SWAP = 0x02;
 uint256 constant CMD_V3_SWAP = 0x03;
 uint256 constant CMD_SUSHISWAP = 0x04;
 uint256 constant CMD_CURVE_SWAP = 0x05;
+uint256 constant CMD_BALANCER_SWAP = 0x06;
 // Add more commands as needed

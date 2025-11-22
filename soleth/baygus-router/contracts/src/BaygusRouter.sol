@@ -6,8 +6,9 @@ import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
-import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP} from "./types/SharedTypes.sol";
+import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP} from "./types/SharedTypes.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
+import {IBalancerVault} from "./interfaces/IBalancerVault.sol";
 
 /// @title BaygusRouter
 /// @notice Router used by the Baygus execution agent: performs Uniswap v4 PoolManager lock →
@@ -18,6 +19,7 @@ contract BaygusRouter is ILockCallback {
     address public immutable poolManager;
     address private constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
+    address private constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
 
     bool private _entered;
     uint256 private _nativeBuffer;
@@ -110,6 +112,8 @@ contract BaygusRouter is ILockCallback {
             _v2Swap(input, SUSHISWAP_ROUTER);
         } else if (command == CMD_CURVE_SWAP) {
             _curveSwap(input);
+        } else if (command == CMD_BALANCER_SWAP) {
+            _balancerSwap(input);
         } else {
             revert("Invalid command");
         }
@@ -251,6 +255,46 @@ contract BaygusRouter is ILockCallback {
         if (amountOut > 0) {
             IERC20(tokenOut).transfer(recipient, amountOut);
         }
+    }
+
+    function _balancerSwap(bytes calldata input) internal {
+        (
+            bytes32 poolId,
+            address assetIn,
+            address assetOut,
+            address recipient,
+            uint256 amount,
+            uint256 limit
+        ) = abi.decode(input, (bytes32, address, address, address, uint256, uint256));
+
+        // Transfer From
+        IERC20(assetIn).transferFrom(msg.sender, address(this), amount);
+
+        // Approve Vault
+        IERC20(assetIn).approve(BALANCER_VAULT, amount);
+
+        IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap({
+            poolId: poolId,
+            kind: IBalancerVault.SwapKind.GIVEN_IN,
+            assetIn: assetIn,
+            assetOut: assetOut,
+            amount: amount,
+            userData: ""
+        });
+
+        IBalancerVault.FundManagement memory funds = IBalancerVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(recipient),
+            toInternalBalance: false
+        });
+
+        IBalancerVault(BALANCER_VAULT).swap(
+            singleSwap,
+            funds,
+            limit,
+            block.timestamp
+        );
     }
 
     // Keep existing functions for backward compatibility during refactor if needed,
