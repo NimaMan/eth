@@ -69,6 +69,10 @@ path = "examples/baygus_router/buy_sell_sushiswap.rs"
 name = "buy_sell_curve"
 path = "examples/baygus_router/buy_sell_curve.rs"
 
+[[example]]
+name = "buy_sell_balancer"
+path = "examples/baygus_router/buy_sell_balancer.rs"
+
 
 # Pool analysis examples
 [[example]]
