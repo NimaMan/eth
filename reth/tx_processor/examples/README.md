@@ -115,7 +115,7 @@ let processed_tx = provider.process_transaction_by_hash(tx_hash).await?;
 ```rust
 // Intended SimulationChain usage
 let simulator = TxSimulator::new(RETH_DB_PATH)?;
-let mut chain = simulator.start_simulation_chain(None, None).await?;
+let mut chain = simulator.start_simulation_chain(None).await?;
 let results = chain.step_multiple(transactions).await?;
 ```
 

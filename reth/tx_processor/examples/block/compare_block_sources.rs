@@ -44,11 +44,11 @@ async fn main() -> Result<()> {
         block_number, rpc_url
     );
 
-    let db_raw = fetcher.fetch_db_block(block_number, true).await?;
+    let db_raw = fetcher.fetch_db_block(block_number).await?;
     let db_processed = block_processor.process_raw_block(db_raw.clone()).await?;
 
     let rpc_raw = fetcher
-        .fetch_rpc_block_by_hash(db_raw.header.hash, block_number, true)
+        .fetch_rpc_block_by_hash(db_raw.header.hash, block_number)
         .await?;
     let rpc_processed = block_processor.process_raw_block(rpc_raw.clone()).await?;
 

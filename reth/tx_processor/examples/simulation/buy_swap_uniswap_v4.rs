@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     println!("Router address  : {router_address}");
 
     let mut chain = simulator
-        .start_simulation_chain(Some(resolved_block), None)
+        .start_simulation_chain(Some(resolved_block))
         .await?;
 
     let mut step_index = 0u64;

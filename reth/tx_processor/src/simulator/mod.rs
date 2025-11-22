@@ -2,16 +2,10 @@ pub mod buy_swap_simulator;
 pub mod cross_venue_buy_approve_sell;
 pub mod pool_buy_sell_simulator;
 pub mod sell_swap_simulator;
-pub mod signed_tx_builder;
 pub mod types;
 /// TX Simulator integration module for TxProcessor
 ///
 /// Contains tx_simulator support functionality for the tx_processor core
-pub mod unsigned_tx_builder;
-
-pub use signed_tx_builder::SignedTxBuilder;
-pub use unsigned_tx_builder::UnsignedTxBuilder;
-
 // Re-export the main components for convenience
 pub use pool_buy_sell_simulator::check_can_buy_sell_pool;
 pub use types::{

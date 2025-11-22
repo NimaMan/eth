@@ -1,7 +1,6 @@
 use crate::tx_processor::data_models::ProcessedTransaction;
 /// Type definitions for trading viability analysis
 use alloy_primitives::{Address, B256, U256};
-use reth_primitives::SealedHeader;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_GAS_LIMIT_NO_PRIOR: u64 = 5_000_000;
@@ -31,7 +30,6 @@ pub struct PoolBuySellParameters {
     pub denom_decimals: u8,
     pub block_delay: u64,
     pub token_decimals: u8,
-    pub block_header: Option<SealedHeader>,
     pub uniswap_v4_config: Option<UniswapV4PoolConfig>,
 }
 
@@ -75,7 +73,6 @@ impl Default for PoolBuySellParameters {
             denom_decimals: 0,
             block_delay: 0,
             token_decimals: 0,
-            block_header: None,
             uniswap_v4_config: None,
         }
     }
@@ -151,11 +148,6 @@ impl PoolBuySellParameters {
 
     pub fn with_max_priority_fee_per_gas(mut self, max_priority: u128) -> Self {
         self.max_priority_fee_per_gas = Some(max_priority);
-        self
-    }
-
-    pub fn with_block_header(mut self, block_header: SealedHeader) -> Self {
-        self.block_header = Some(block_header);
         self
     }
 

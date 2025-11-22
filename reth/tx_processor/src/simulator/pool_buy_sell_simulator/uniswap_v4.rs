@@ -3,8 +3,7 @@ use std::sync::Arc;
 use alloy_eips::eip2930::AccessListItem;
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
-use reth_primitives::SealedHeader;
-use reth_provider::{AccountReader, HeaderProvider};
+use reth_provider::AccountReader;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
 use super::balance_deltas::{
@@ -51,28 +50,12 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 
     let block_number = config.block_number.unwrap_or(simulator.get_latest_block()?);
 
-    let (mut chain, base_fee) = match config.block_header.clone() {
-        Some(block_header) => {
-            let base_fee = block_header
-                .header()
-                .base_fee_per_gas
-                .map(|fee| fee as u128);
-            let chain = simulator
-                .start_simulation_chain(None, Some(block_header))
-                .await?;
-            (chain, base_fee)
-        }
-        None => {
-            let provider = simulator.provider_factory().provider()?;
-            let header = provider
-                .header_by_number(block_number)?
-                .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-            let base_fee = header.base_fee_per_gas.map(|fee| fee as u128);
-            let sealed = SealedHeader::seal_slow(header);
-            let chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
-            (chain, base_fee)
-        }
-    };
+    let header = simulator
+        .block_context_loader()
+        .load_block_header(block_number, None)
+        .await?;
+    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
+    let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
 
     let provider = simulator.provider_factory().provider()?;
     let deployer_nonce = provider
@@ -137,6 +120,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             })
             .collect();
         let max_fee_per_blob_gas = prior_tx
+            .fees
             .max_fee_per_blob_gas
             .and_then(|v| u128::try_from(v).ok());
 

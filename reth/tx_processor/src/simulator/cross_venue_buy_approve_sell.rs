@@ -41,7 +41,7 @@ pub async fn simulate_cross_venue_buy_approve_sell(
     block: u64,
 ) -> Result<CrossVenueArbResult> {
     // Start a simulation chain at the target block so state persists across steps
-    let mut chain = simulator.start_simulation_chain(Some(block), None).await?;
+    let mut chain = simulator.start_simulation_chain(Some(block)).await?;
 
     // Slippage and deadline
     let slippage_bps = 50u32; // 0.5%

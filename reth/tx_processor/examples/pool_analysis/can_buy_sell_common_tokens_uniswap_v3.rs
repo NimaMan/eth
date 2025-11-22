@@ -311,7 +311,7 @@ async fn ensure_v3_pool_exists(
 
     let view_data = encode_get_pool_call(token.token_address, token.denom_address, token.fee_tier);
     let response = simulator
-        .simulate_view_function(UNISWAP_V3_FACTORY, view_data, Some(block_number), None)
+        .simulate_view_function(UNISWAP_V3_FACTORY, view_data, Some(block_number))
         .await?;
 
     if !response.success || response.output.len() < 32 {

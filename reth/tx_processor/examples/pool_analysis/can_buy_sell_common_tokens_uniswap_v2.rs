@@ -618,12 +618,7 @@ async fn diagnose_v2_pool(
         data.extend_from_slice(&[0u8; 12]);
         data.extend_from_slice(token_address.as_slice());
         simulator
-            .simulate_view_function(
-                factory,
-                alloy_primitives::Bytes::from(data),
-                Some(block),
-                None,
-            )
+            .simulate_view_function(factory, alloy_primitives::Bytes::from(data), Some(block))
             .await
             .ok()
     };
@@ -719,7 +714,7 @@ async fn call_pool_view(
 ) -> Option<ViewFunctionResult> {
     let data = alloy_primitives::Bytes::from(selector.to_vec());
     simulator
-        .simulate_view_function(pool, data, Some(block), None)
+        .simulate_view_function(pool, data, Some(block))
         .await
         .ok()
 }

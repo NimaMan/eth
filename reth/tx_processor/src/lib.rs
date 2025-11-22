@@ -20,6 +20,7 @@ pub mod block_processor;
 pub mod live_pipeline;
 pub mod processed_tx_provider;
 pub mod simulator;
+pub mod tx_builder;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
@@ -39,6 +40,7 @@ pub use simulator::{
     OptionalSetupBuyApproveSellResult, PoolBuySellParameters, PoolBuySellSimulationResult,
     PoolType, SellSwapResult,
 };
+pub use tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 
 // Convenience facade: simulate and return ProcessedTransaction directly
 use alloy_primitives::B256;

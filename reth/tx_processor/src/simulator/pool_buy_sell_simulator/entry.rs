@@ -1,8 +1,6 @@
 use crate::tx_processor::TxProcessor;
 use alloy_primitives::{Address, I256, U256};
 use eyre::{eyre, Result, WrapErr};
-use reth_primitives::SealedHeader;
-use reth_provider::HeaderProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
@@ -18,7 +16,7 @@ use super::results::create_failed_result;
 use super::uniswap_v4::check_can_buy_sell_uniswap_v4;
 use super::validation::validate_pool_registration;
 use crate::simulator::types::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
-use crate::simulator::unsigned_tx_builder::UnsignedTxBuilder;
+use crate::tx_builder::UnsignedTxBuilder;
 use crate::tx_processor::data_models::ProcessedTransaction;
 use crate::tx_processor::tax_calculator::{
     calculate_buy_tax_from_processed_transaction, calculate_sell_tax_from_processed_transaction,
@@ -34,18 +32,6 @@ pub async fn check_can_buy_sell_pool(
     tx_processor: Arc<TxProcessor>,
     config: PoolBuySellParameters,
 ) -> Result<PoolBuySellSimulationResult> {
-    let latest_available_block = simulator.get_latest_block()?;
-
-    if let Some(explicit_block) = config.block_number {
-        if latest_available_block < explicit_block {
-            return Err(eyre!(
-                "State for block {} not yet available (latest persisted block {})",
-                explicit_block,
-                latest_available_block
-            ));
-        }
-    }
-
     if config.token_decimals == 0 {
         return Err(eyre!("token_decimals must be provided (non-zero)"));
     }
@@ -80,7 +66,7 @@ pub async fn check_can_buy_sell_pool(
 
     let block_number = match config.block_number {
         Some(b) => b,
-        None => latest_available_block,
+        None => simulator.get_latest_block()?,
     };
 
     let route = match config.pool_type {
@@ -117,28 +103,12 @@ pub async fn check_can_buy_sell_pool(
         }
     };
 
-    let (mut chain, base_fee) = match config.block_header.clone() {
-        Some(block_header) => {
-            let base_fee = block_header
-                .header()
-                .base_fee_per_gas
-                .map(|fee| fee as u128);
-            let chain = simulator
-                .start_simulation_chain(None, Some(block_header))
-                .await?;
-            (chain, base_fee)
-        }
-        None => {
-            let provider = simulator.provider_factory().provider()?;
-            let header = provider
-                .header_by_number(block_number)?
-                .ok_or_else(|| eyre::eyre!("No header for block {}", block_number))?;
-            let base_fee = header.base_fee_per_gas.map(|fee| fee as u128);
-            let sealed = SealedHeader::seal_slow(header);
-            let chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
-            (chain, base_fee)
-        }
-    };
+    let header = simulator
+        .block_context_loader()
+        .load_block_header(block_number, None)
+        .await?;
+    let base_fee = header.header().base_fee_per_gas.map(|fee| fee as u128);
+    let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
     let mut prior_tx_results: Vec<ProcessedTransaction> =
         Vec::with_capacity(config.prior_txs.len());
 
@@ -498,12 +468,7 @@ pub async fn check_can_buy_sell_pool(
         } else {
             requested_sell_block
         };
-        let provider = simulator.provider_factory().provider()?;
-        let header = provider
-            .header_by_number(sell_block)?
-            .ok_or_else(|| eyre!("No header for block {}", sell_block))?;
-        let sealed = SealedHeader::seal_slow(header);
-        chain = simulator.start_simulation_chain(None, Some(sealed)).await?;
+        chain = simulator.start_simulation_chain(Some(sell_block)).await?;
         if let Some(denom_tx) = denom_approve_tx_for_delay.clone() {
             chain.step_with_trace(denom_tx).await.map_err(|err| {
                 let context = "while reapplying denom approve before delayed sell".to_string();

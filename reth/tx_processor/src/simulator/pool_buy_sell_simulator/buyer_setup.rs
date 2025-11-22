@@ -166,7 +166,7 @@ async fn prefund_denom_via_weth(
 
     let reserves_call = Bytes::from(GET_RESERVES_SELECTOR.to_vec());
     let reserve_response = simulator
-        .simulate_view_function(pair_address, reserves_call, Some(block_number), None)
+        .simulate_view_function(pair_address, reserves_call, Some(block_number))
         .await
         .map_err(|err| eyre!("failed to fetch reserves for pair {pair_address:#x}: {err}"))?;
 

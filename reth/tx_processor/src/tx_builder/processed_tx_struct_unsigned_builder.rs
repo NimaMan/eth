@@ -58,6 +58,7 @@ impl UnsignedTxBuilder {
             })
             .collect();
         let max_fee_per_blob_gas = ptx
+            .fees
             .max_fee_per_blob_gas
             .and_then(|v| u128::try_from(v).ok());
 

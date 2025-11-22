@@ -100,12 +100,9 @@ impl BlockProcessor {
     pub async fn process_block_with_options(
         &self,
         block_number: u64,
-        include_traces: bool,
+        _include_traces: bool,
     ) -> Result<ProcessedBlock> {
-        let raw = self
-            .fetcher
-            .fetch_db_block(block_number, include_traces)
-            .await?;
+        let raw = self.fetcher.fetch_db_block(block_number).await?;
         self.process_raw_block(raw).await
     }
 
@@ -119,11 +116,11 @@ impl BlockProcessor {
         &self,
         block_hash: B256,
         block_number: u64,
-        include_traces: bool,
+        _include_traces: bool,
     ) -> Result<ProcessedBlock> {
         let raw = self
             .fetcher
-            .fetch_rpc_block_by_hash(block_hash, block_number, include_traces)
+            .fetch_rpc_block_by_hash(block_hash, block_number)
             .await?;
         self.process_raw_block(raw).await
     }
@@ -221,6 +218,7 @@ impl BlockProcessor {
             .collect();
         let blob_versioned_hashes = metadata.blob_versioned_hashes.clone();
         let max_fee_per_blob_gas = metadata.max_fee_per_blob_gas.clone();
+        let blob_gas_used = receipt.blob_gas_used;
         let signed_authorizations = metadata.signed_authorizations.clone();
 
         let mut processed_tx = self
@@ -246,7 +244,7 @@ impl BlockProcessor {
                 access_list,
                 blob_versioned_hashes,
                 max_fee_per_blob_gas,
-                None,
+                blob_gas_used,
                 signed_authorizations,
                 None,
             )
