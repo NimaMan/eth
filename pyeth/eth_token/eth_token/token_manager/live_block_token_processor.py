@@ -57,8 +57,7 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                  warmup_blocks: int = 1000,
                  logger=None,
                  add_pnl_to_db: bool = False):
-        logger = logger or get_logger(name="LiveBlockTokenProcessor", log_folder="tokens_live")
-        super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)
+        super().__init__(logger=logger, add_pnl_to_db=add_pnl_to_db)  
         # Initialize subscriber with our callback and block_token_processor
         self.block_subscriber = RedisBlockSubscriber(
             callback=self.process_block_live,
@@ -79,7 +78,6 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         self._monitor_task = None
         self._watcher_task = None
         self.token_snapshot_publisher = LiveDataPublisher()
-        self.metrics_logger = metrics_logger
         self._published_token_addresses = set()
 
     async def _on_task_done(self, name: str, task: asyncio.Task):
@@ -108,16 +106,15 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         """Process incoming blocks"""
         if self._is_shutting_down:
             return
-        block_number = processed_block_result.get("block_number")
         try:
             self.latest_processed_block = self.process_block_tokens(
                 processed_block_result,
-                block_number=block_number,
+                block_number=processed_block_result["block_number"],
             )
             self.block_processed_event.set() # Signal block processed            
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing live block: {e}", exc_info=True)
-            
+    
     async def _schedule_pnl_writes_for_updated_tokens(self, current_block: int):
         """Schedules PnL writes for tokens updated in the current block."""
         if not (self.add_pnl_to_db and self.live_tokens_cache.pnl_writer):

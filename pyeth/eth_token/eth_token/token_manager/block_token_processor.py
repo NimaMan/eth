@@ -36,6 +36,7 @@ from eth_data.blockchain.block_processor import BlockProcessor
 class BlockTokenProcessor:
     def __init__(self, logger=None, add_pnl_to_db: bool = False):
         self.logger = logger
+        self.metadata_logger = get_logger(name="TokenMetadataReplay", log_folder="tokens_live")
         # Token tracking
         self.add_pnl_to_db = add_pnl_to_db
         self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
@@ -44,6 +45,7 @@ class BlockTokenProcessor:
         self.latest_processed_block = 0
         self.start_block = None  # Track the first block we process
         self.token_chain_fetcher = TokenChainDataFetcher()
+        self._chain_query = self.token_chain_fetcher.chain_query
         self.is_live_mode = False
 
     def process_block_tokens(self, process_block_result, block_number) -> int:
@@ -87,16 +89,17 @@ class BlockTokenProcessor:
             return False, None, None
 
         try:
-            metadata_block = block_number
+            simulation_block = block_number
             pending_transactions = None
             if self.is_live_mode:
-                metadata_block = block_number - 1
+                simulation_block = block_number - 1
                 pending_transactions = [transaction]
 
             token_metadata = self.token_chain_fetcher.get_token_metadata(
                 contract_address,
-                metadata_block,
+                simulation_block,
                 pending_transactions=pending_transactions,
+                gas_block_number=block_number,
             )
             if token_metadata is None:
                 return False, None, None
