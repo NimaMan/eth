@@ -54,12 +54,20 @@ name = "buy_swap_uniswap_v4"
 path = "examples/simulation/buy_swap_uniswap_v4.rs"
 
 [[example]]
-name = "buy_swap_uniswap_v2"
-path = "examples/simulation/buy_swap_uniswap_v2.rs"
-
-[[example]]
 name = "buy_sell_simulator"
 path = "examples/baygus_router/buy_sell_simulator.rs"
+
+[[example]]
+name = "buy_sell_uniswap_v3"
+path = "examples/baygus_router/buy_sell_uniswap_v3.rs"
+
+[[example]]
+name = "buy_sell_sushiswap"
+path = "examples/baygus_router/buy_sell_sushiswap.rs"
+
+[[example]]
+name = "buy_sell_curve"
+path = "examples/baygus_router/buy_sell_curve.rs"
 
 
 # Pool analysis examples
