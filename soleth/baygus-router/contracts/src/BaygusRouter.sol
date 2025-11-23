@@ -430,35 +430,67 @@ contract BaygusRouter is ILockCallback {
         Hop[] memory hops
     ) internal returns (BalanceDelta memory finalDelta) {
         address currentSender = initiator;
+        address[] memory currencies = new address[](hops.length * 2);
+        int256[] memory netAmounts = new int256[](hops.length * 2);
+        address[] memory netPayers = new address[](hops.length * 2);
+        address[] memory netRecipients = new address[](hops.length * 2);
+        uint256 netCount;
+
         for (uint256 i = 0; i < hops.length; ++i) {
-            Hop memory hop = hops[i];
-
-            SwapContext memory context = SwapContext({
-                sender: currentSender,
-                recipient: i + 1 == hops.length ? finalRecipient : address(this),
-                key: hop.key,
-                params: hop.params,
-                hookData: hop.hookData,
-                hookAdapter: hop.hookAdapter,
-                minAmount0: hop.minAmount0,
-                minAmount1: hop.minAmount1
-            });
-
-            _invokeBeforeSwap(context);
             BalanceDelta memory delta;
-            try IPoolManager(poolManager).swap(context.key, context.params, context.hookData) returns (
-                BalanceDelta memory hopDelta
-            ) {
-                delta = hopDelta;
-            } catch (bytes memory reason) {
-                if (reason.length == 0) revert();
-                assembly {
-                    revert(add(reason, 0x20), mload(reason))
+            {
+                Hop memory hop = hops[i];
+                address recipient = i + 1 == hops.length ? finalRecipient : address(this);
+
+                SwapContext memory context = SwapContext({
+                    sender: currentSender,
+                    recipient: recipient,
+                    key: hop.key,
+                    params: hop.params,
+                    hookData: hop.hookData,
+                    hookAdapter: hop.hookAdapter,
+                    minAmount0: hop.minAmount0,
+                    minAmount1: hop.minAmount1
+                });
+
+                _invokeBeforeSwap(context);
+                try IPoolManager(poolManager).swap(context.key, context.params, context.hookData) returns (
+                    BalanceDelta memory hopDelta
+                ) {
+                    delta = hopDelta;
+                } catch (bytes memory reason) {
+                    if (reason.length == 0) revert();
+                    assembly {
+                        revert(add(reason, 0x20), mload(reason))
+                    }
                 }
+
+                netCount = _accumulateNet(
+                    currencies,
+                    netAmounts,
+                    netPayers,
+                    netRecipients,
+                    netCount,
+                    context.sender,
+                    context.recipient,
+                    context.key.currency0,
+                    delta.amount0
+                );
+                netCount = _accumulateNet(
+                    currencies,
+                    netAmounts,
+                    netPayers,
+                    netRecipients,
+                    netCount,
+                    context.sender,
+                    context.recipient,
+                    context.key.currency1,
+                    delta.amount1
+                );
+
+                _validateDelta(context, delta);
+                _invokeAfterSwap(context, delta);
             }
-            _handleSettlement(context, delta);
-            _validateDelta(context, delta);
-            _invokeAfterSwap(context, delta);
 
             currentSender = address(this);
             finalDelta = delta;
@@ -469,6 +501,20 @@ contract BaygusRouter is ILockCallback {
         }
         if (finalMinAmount1 != 0 && finalDelta.amount1 > finalMinAmount1) {
             revert SlippageCheckFailed(3, finalDelta.amount1, finalMinAmount1);
+        }
+
+        for (uint256 i = 0; i < netCount; ) {
+            int256 netAmount = netAmounts[i];
+            if (netAmount > 0) {
+                address payer = netPayers[i];
+                if (payer == address(0)) payer = initiator;
+                _settleCurrency(payer, currencies[i], uint256(netAmount));
+            } else if (netAmount < 0) {
+                address recipient = netRecipients[i];
+                if (recipient == address(0)) recipient = finalRecipient;
+                _takeCurrency(recipient, currencies[i], uint256(-netAmount));
+            }
+            unchecked { ++i; }
         }
 
         return finalDelta;
@@ -566,6 +612,40 @@ contract BaygusRouter is ILockCallback {
         if (IERC20(token).allowance(address(this), spender) < amount) {
             token.safeApprove(spender, type(uint256).max);
         }
+    }
+
+    function _accumulateNet(
+        address[] memory currencies,
+        int256[] memory netAmounts,
+        address[] memory payers,
+        address[] memory recipients,
+        uint256 count,
+        address payer,
+        address recipient,
+        address currency,
+        int128 delta
+    ) private pure returns (uint256) {
+        if (delta == 0) return count;
+        for (uint256 i = 0; i < count; ) {
+            if (currencies[i] == currency) {
+                netAmounts[i] += int256(delta);
+                if (delta > 0 && payers[i] == address(0)) {
+                    payers[i] = payer;
+                } else if (delta < 0 && recipients[i] == address(0)) {
+                    recipients[i] = recipient;
+                }
+                return count;
+            }
+            unchecked { ++i; }
+        }
+        currencies[count] = currency;
+        netAmounts[count] = int256(delta);
+        if (delta > 0) {
+            payers[count] = payer;
+        } else {
+            recipients[count] = recipient;
+        }
+        return count + 1;
     }
 
     receive() external payable {}
