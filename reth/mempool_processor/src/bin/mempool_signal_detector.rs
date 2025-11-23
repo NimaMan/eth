@@ -463,9 +463,11 @@ async fn main() -> Result<()> {
     // Create simulation log path for direct simulation result logging
     use std::io::Write;
     let simulation_log_path = Arc::new(run_dir.join("simulation_results.log"));
+    let simulation_error_log_path = Arc::new(run_dir.join("simulation_errors.log"));
 
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
+    let mut last_report_total = 0u64;
     let start_time = Instant::now();
 
     // Main processing loop
@@ -607,6 +609,13 @@ async fn main() -> Result<()> {
         // Process simulation queue
         let simulation_results = simulation_manager.process_queue().await;
         for result in simulation_results {
+            let tx_hash = format!("{:?}", result.request.tx_hash);
+            let category = match &result.request.category {
+                TransactionCategory::ContractCreation { .. } => "ContractCreation",
+                TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
+                _ => "Other",
+            };
+
             // Log simulation result to dedicated file
             if let Ok(mut file) = std::fs::OpenOptions::new()
                 .create(false)
@@ -614,12 +623,6 @@ async fn main() -> Result<()> {
                 .open(simulation_log_path.as_ref())
             {
                 let timestamp = chrono::Local::now();
-                let tx_hash = format!("{:?}", result.request.tx_hash);
-                let category = match &result.request.category {
-                    TransactionCategory::ContractCreation { .. } => "ContractCreation",
-                    TransactionCategory::CreatorTransaction { .. } => "CreatorTransaction",
-                    _ => "Other",
-                };
 
                 if let Some(ref error) = result.error {
                     writeln!(
@@ -662,7 +665,22 @@ async fn main() -> Result<()> {
             if let Some(ref error) = result.error {
                 metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
                 if !error.contains("No pools found for token") {
-                    warn!("Simulation error: {}", error);
+                    if let Ok(mut file) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(simulation_error_log_path.as_ref())
+                    {
+                        let timestamp = chrono::Local::now();
+                        writeln!(
+                            file,
+                            "[{}] ERROR | {} | {} | {}",
+                            timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                            tx_hash,
+                            category,
+                            error
+                        )
+                        .ok();
+                    }
                 }
             } else {
                 metrics
@@ -675,8 +693,24 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Periodic reporting (only refresh cache stats now)
+        // Periodic reporting
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
+            let interval_secs = last_report.elapsed().as_secs_f64().max(0.001);
+            let total = metrics.total_processed.load(Ordering::Relaxed);
+            let delta = total.saturating_sub(last_report_total);
+            let rate = delta as f64 / interval_secs;
+            let sims = metrics.simulations_completed.load(Ordering::Relaxed);
+            let sim_errs = metrics.simulation_errors.load(Ordering::Relaxed);
+            let te = metrics.trading_enabled_signals.load(Ordering::Relaxed);
+            let lr = metrics.liquidity_removal_signals.load(Ordering::Relaxed);
+            let hp = metrics.honeypot_signals.load(Ordering::Relaxed);
+            let tc = metrics.tax_change_signals.load(Ordering::Relaxed);
+            info!(
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims ok/err: {}/{} | Signals TE:{} LR:{} HP:{} TC:{}",
+                total, delta, rate, sims, sim_errs, te, lr, hp, tc
+            );
+            last_report_total = total;
+
             let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
             match mempool_simulator.latest_simulation_block().await {
                 Ok(latest_block) => {
