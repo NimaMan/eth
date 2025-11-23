@@ -29,4 +29,5 @@ uint256 constant CMD_CURVE_SWAP = 0x05;
 uint256 constant CMD_BALANCER_SWAP = 0x06;
 uint256 constant CMD_SWEEP = 0x07;
 uint256 constant CMD_BALANCER_FLASH_LOAN = 0x08;
+uint256 constant CMD_PERMIT2_TRANSFER_FROM = 0x09;
 // Add more commands as needed

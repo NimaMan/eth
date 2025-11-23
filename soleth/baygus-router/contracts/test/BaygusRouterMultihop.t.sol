@@ -50,10 +50,15 @@ contract BaygusRouterMultihopTest is TestBase {
             MockERC20 tokenC
         ) = _deployEnvironment();
 
-        // Hop 1: spend TokenA, receive TokenB
-        pool.queueDelta(int128(int256(800 ether)), int128(int256(-500 ether)));
-        // Hop 2: spend TokenB, receive TokenC
-        pool.queueDelta(int128(int256(600 ether)), int128(int256(-800 ether)));
+        // Hop 1: A -> B.
+        // PoolKey(B, A).
+        // Pay 500 A (+), Receive 800 B (-).
+        pool.queueDelta(int128(int256(-800 ether)), int128(int256(500 ether)));
+        
+        // Hop 2: B -> C.
+        // PoolKey(C, B).
+        // Pay 800 B (+), Receive 600 C (-).
+        pool.queueDelta(int128(int256(-600 ether)), int128(int256(800 ether)));
 
         tokenA.approve(address(router), type(uint256).max);
 
@@ -75,10 +80,12 @@ contract BaygusRouterMultihopTest is TestBase {
             minAmount1: 0
         });
 
+        // Final amounts are checked against Hop 2 output (C).
+        // We expect 600 C.
         bytes memory innerPayload = abi.encode(
             address(this),
             address(this),
-            int128(int256(600 ether)),
+            int128(int256(-600 ether)), // minAmount0 (C)
             int128(0),
             hops
         );
@@ -107,8 +114,11 @@ contract BaygusRouterMultihopTest is TestBase {
             MockERC20 tokenC
         ) = _deployEnvironment();
 
-        pool.queueDelta(int128(int256(800 ether)), int128(int256(-500 ether)));
-        pool.queueDelta(int128(int256(500 ether)), int128(int256(-800 ether)));
+        // Hop 1: Pay 500 A, Receive 800 B.
+        pool.queueDelta(int128(int256(-800 ether)), int128(int256(500 ether)));
+        
+        // Hop 2: Pay 800 B, Receive 500 C.
+        pool.queueDelta(int128(int256(-500 ether)), int128(int256(800 ether)));
 
         tokenA.approve(address(router), type(uint256).max);
 
@@ -130,10 +140,13 @@ contract BaygusRouterMultihopTest is TestBase {
             minAmount1: 0
         });
 
+        // We expect at least 600 C (-600).
+        // We receive 500 C (-500).
+        // -500 > -600. Revert.
         bytes memory innerPayload = abi.encode(
             address(this),
             address(this),
-            int128(int256(600 ether)),
+            int128(int256(-600 ether)),
             int128(0),
             hops
         );

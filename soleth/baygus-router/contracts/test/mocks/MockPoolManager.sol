@@ -46,7 +46,7 @@ contract MockPoolManager {
         _deltaQueue.push(BalanceDelta({amount0: amount0, amount1: amount1}));
     }
 
-    function lock(bytes calldata data) external returns (bytes memory) {
+    function unlock(bytes calldata data) external returns (bytes memory) {
         if (router == address(0)) revert RouterNotSet();
         if (msg.sender != router) revert UnauthorizedCaller();
         return ILockCallback(router).unlockCallback(data);

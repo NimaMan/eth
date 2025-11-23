@@ -60,7 +60,11 @@ contract BaygusRouterTest is TestBase {
         (BaygusRouter router, MockPoolManager pool, MockERC20 token, MockERC20 weth) =
             _deployEnvironment();
 
-        pool.setNextDelta(int128(int256(1500 ether)), int128(int256(-500 ether)));
+        // User Buys Token: User Pays WETH (+), User Receives Token (-).
+        // setNextDelta(amount0, amount1)
+        // amount0 = Token (Negative = Pool Loss / User Gain)
+        // amount1 = WETH (Positive = Pool Gain / User Pay)
+        pool.setNextDelta(int128(int256(-1500 ether)), int128(int256(500 ether)));
 
         weth.mint(address(this), 500 ether);
         weth.approve(address(router), 500 ether);
@@ -89,7 +93,7 @@ contract BaygusRouterTest is TestBase {
         assertEq(pool.settleHistoryLength(), 1, "settle history length");
         MockPoolManager.SettleCall memory settleCall = pool.getSettleCall(0);
         assertEq(settleCall.currency, address(weth), "settle currency");
-        assertEq(settleCall.amount, 500 ether, "settle amount");
+        assertEq(settleCall.amount, 1_000_500 ether, "settle amount");
         assertTrue(!settleCall.isNative, "settle should be ERC20");
 
         assertEq(pool.takeHistoryLength(), 1, "take history length");
@@ -103,7 +107,10 @@ contract BaygusRouterTest is TestBase {
         (BaygusRouter router, MockPoolManager pool, MockERC20 token, MockERC20 weth) =
             _deployEnvironment();
 
-        pool.setNextDelta(int128(int256(-250 ether)), int128(int256(200 ether)));
+        // User Sells Token: User Pays Token (+), User Receives WETH (-).
+        // amount0 = Token (+)
+        // amount1 = WETH (-)
+        pool.setNextDelta(int128(int256(250 ether)), int128(int256(-200 ether)));
 
         token.mint(address(this), 250 ether);
         token.approve(address(router), 250 ether);
@@ -134,7 +141,7 @@ contract BaygusRouterTest is TestBase {
         assertEq(pool.settleHistoryLength(), 1, "settle history length sell");
         MockPoolManager.SettleCall memory settleCall = pool.getSettleCall(0);
         assertEq(settleCall.currency, address(token), "settle currency sell");
-        assertEq(settleCall.amount, 250 ether, "settle amount sell");
+        assertEq(settleCall.amount, 1_000_250 ether, "settle amount sell");
         assertTrue(!settleCall.isNative, "settle should be ERC20 sell");
 
         assertEq(pool.takeHistoryLength(), 1, "take history length sell");
@@ -148,7 +155,9 @@ contract BaygusRouterTest is TestBase {
         (BaygusRouter router, MockPoolManager pool, MockERC20 token, MockERC20 weth) =
             _deployEnvironment();
 
-        pool.setNextDelta(int128(int256(100 ether)), int128(int256(-40 ether)));
+        // User Buys Token (WETH -> Token).
+        // Pay 40 WETH (+), Receive 100 Token (-).
+        pool.setNextDelta(int128(int256(-100 ether)), int128(int256(40 ether)));
 
         weth.mint(address(this), 40 ether);
         weth.approve(address(router), 40 ether);
@@ -173,8 +182,9 @@ contract BaygusRouterTest is TestBase {
 
         assertTrue(hook.beforeCalled(), "before hook not invoked");
         assertTrue(hook.afterCalled(), "after hook not invoked");
-        assertEq(hook.afterAmount0(), int128(int256(100 ether)), "hook amount0 mismatch");
-        assertEq(hook.afterAmount1(), int128(int256(-40 ether)), "hook amount1 mismatch");
+        // Assert Signed amounts
+        assertEq(hook.afterAmount0(), int128(int256(-100 ether)), "hook amount0 mismatch");
+        assertEq(hook.afterAmount1(), int128(int256(40 ether)), "hook amount1 mismatch");
         assertEq(hook.beforeSender(), address(this), "before sender");
         assertEq(hook.afterRecipient(), address(this), "after recipient");
         assertEq(hook.lastHookData(), hookData, "hook data");
@@ -184,7 +194,8 @@ contract BaygusRouterTest is TestBase {
         (BaygusRouter router, MockPoolManager pool, MockERC20 token, MockERC20 weth) =
             _deployEnvironment();
 
-        pool.setNextDelta(int128(int256(90 ether)), int128(int256(-30 ether)));
+        // User Buys Token. Receive 90 Token (-). Pay 30 WETH (+).
+        pool.setNextDelta(int128(int256(-90 ether)), int128(int256(30 ether)));
 
         weth.mint(address(this), 30 ether);
         weth.approve(address(router), 30 ether);
@@ -194,7 +205,10 @@ contract BaygusRouterTest is TestBase {
             _params(false),
             address(this)
         );
-        req.minAmount0 = int128(int256(100 ether));
+        // Min Amount = -100 (Must receive at least 100).
+        // Delta = -90.
+        // -90 > -100 (True). So we received LESS (absolute) than required. Revert.
+        req.minAmount0 = int128(int256(-100 ether));
 
         bytes memory input = abi.encode(uint8(0), abi.encode(req, address(this)));
         bytes[] memory inputs = new bytes[](1);

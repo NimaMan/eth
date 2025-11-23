@@ -6,11 +6,12 @@ import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
-import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP, CMD_SWEEP, CMD_BALANCER_FLASH_LOAN} from "./types/SharedTypes.sol";
+import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP, CMD_SWEEP, CMD_BALANCER_FLASH_LOAN, CMD_PERMIT2_TRANSFER_FROM} from "./types/SharedTypes.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 import {InvalidCommand, V2SwapFailed, V3SwapFailed, CurveSwapFailed, CurveApproveFailed, CurveTransferFromFailed, SweepInsufficientBalance, ETHTransferFailed} from "./types/Errors.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IBalancerVault} from "./interfaces/IBalancerVault.sol";
+import {IPermit2} from "./interfaces/IPermit2.sol";
 
 /// @title BaygusRouter
 /// @notice Router used by the Baygus execution agent: performs Uniswap v4 PoolManager lock →
@@ -24,9 +25,12 @@ contract BaygusRouter is ILockCallback {
     address private constant UNISWAP_V2_ROUTER = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     address private constant SUSHISWAP_ROUTER = 0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F;
     address private constant BALANCER_VAULT = 0xBA12222222228d8Ba445958a75a0704d566BF2C8;
+    address private constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+    address private constant UNISWAP_V3_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564; 
 
-    bool private _entered;
-    uint256 private _nativeBuffer;
+    // Transient storage slots
+    uint256 private constant TSLOT_ENTERED = 0;
+    uint256 private constant TSLOT_NATIVE_BUFFER = 1;
 
     struct SwapExactInputSingleParams {
         PoolKey key;
@@ -89,10 +93,16 @@ contract BaygusRouter is ILockCallback {
     }
 
     function execute(bytes calldata commands, bytes[] calldata inputs) external payable {
-        if (_entered) revert RouterReentrant();
-        _entered = true;
-        uint256 previousNative = _nativeBuffer;
-        _nativeBuffer = msg.value;
+        uint256 entered;
+        assembly { entered := tload(TSLOT_ENTERED) }
+        if (entered == 1) revert RouterReentrant();
+        
+        assembly { tstore(TSLOT_ENTERED, 1) }
+        
+        uint256 previousNative;
+        assembly { previousNative := tload(TSLOT_NATIVE_BUFFER) }
+        
+        assembly { tstore(TSLOT_NATIVE_BUFFER, callvalue()) }
 
         for (uint256 i = 0; i < commands.length; i++) {
             uint256 command = uint8(commands[i]);
@@ -100,9 +110,14 @@ contract BaygusRouter is ILockCallback {
             _dispatch(command, input);
         }
 
-        if (_nativeBuffer != 0) revert NativeNotFullyConsumed();
-        _nativeBuffer = previousNative;
-        _entered = false;
+        uint256 remainingNative;
+        assembly { remainingNative := tload(TSLOT_NATIVE_BUFFER) }
+        if (remainingNative != 0) revert NativeNotFullyConsumed();
+        
+        assembly {
+            tstore(TSLOT_NATIVE_BUFFER, previousNative)
+            tstore(TSLOT_ENTERED, 0)
+        }
     }
 
     function _dispatch(uint256 command, bytes memory input) internal {
@@ -122,6 +137,8 @@ contract BaygusRouter is ILockCallback {
             _sweep(input);
         } else if (command == CMD_BALANCER_FLASH_LOAN) {
             _balancerFlashLoan(input);
+        } else if (command == CMD_PERMIT2_TRANSFER_FROM) {
+            _permit2TransferFrom(input);
         } else {
             revert InvalidCommand();
         }
@@ -191,11 +208,10 @@ contract BaygusRouter is ILockCallback {
         }
         
         // Approve V3 Router
-        address v3Router = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
-        _approveIfNecessary(params.tokenIn, v3Router, params.amountIn);
+        _approveIfNecessary(params.tokenIn, UNISWAP_V3_ROUTER, params.amountIn);
         
         // Execute Swap
-        try ISwapRouter(v3Router).exactInputSingle(params) returns (uint256 amountOut) {
+        try ISwapRouter(UNISWAP_V3_ROUTER).exactInputSingle(params) returns (uint256 amountOut) {
             // Success
             amountOut;
         } catch {
@@ -345,6 +361,21 @@ contract BaygusRouter is ILockCallback {
         }
     }
 
+    function _permit2TransferFrom(bytes memory input) internal {
+        (
+            IPermit2.SignatureTransferDetails memory transferDetails,
+            address owner,
+            bytes memory signature
+        ) = abi.decode(input, (IPermit2.SignatureTransferDetails, address, bytes));
+        
+        IPermit2(PERMIT2).permitTransferFrom(
+            transferDetails,
+            owner,
+            signature,
+            transferDetails.amount // The amount to transfer, used as 'value' param
+        );
+    }
+
     // Keep existing functions for backward compatibility during refactor if needed,
     // but preferably we switch to execute.
     // For now, I will comment out the old external functions or repurpose them.
@@ -459,10 +490,10 @@ contract BaygusRouter is ILockCallback {
             finalDelta = delta;
         }
 
-        if (finalMinAmount0 != 0 && finalDelta.amount0 < finalMinAmount0) {
+        if (finalMinAmount0 != 0 && finalDelta.amount0 > finalMinAmount0) {
             revert SlippageCheckFailed(2, finalDelta.amount0, finalMinAmount0);
         }
-        if (finalMinAmount1 != 0 && finalDelta.amount1 < finalMinAmount1) {
+        if (finalMinAmount1 != 0 && finalDelta.amount1 > finalMinAmount1) {
             revert SlippageCheckFailed(3, finalDelta.amount1, finalMinAmount1);
         }
 
@@ -489,8 +520,13 @@ contract BaygusRouter is ILockCallback {
         IPoolManager manager = IPoolManager(poolManager);
 
         if (currency == address(0)) {
-            if (_nativeBuffer < amount) revert InsufficientNativeLiquidity();
-            _nativeBuffer -= amount;
+            uint256 currentBuffer;
+            assembly { currentBuffer := tload(TSLOT_NATIVE_BUFFER) }
+            
+            if (currentBuffer < amount) revert InsufficientNativeLiquidity();
+            
+            assembly { tstore(TSLOT_NATIVE_BUFFER, sub(currentBuffer, amount)) }
+            
             manager.settle{value: amount}(address(0));
         } else {
             bool ok;
@@ -535,10 +571,15 @@ contract BaygusRouter is ILockCallback {
     }
 
     function _validateDelta(SwapContext memory context, BalanceDelta memory delta) internal pure {
-        if (context.minAmount0 != 0 && delta.amount0 < context.minAmount0) {
+        // In V4, user gain is negative, user pay is positive.
+        // If minAmount is negative (minimum output), we want delta <= minAmount (e.g. -150 <= -100).
+        // If delta > minAmount (e.g. -90 > -100), it means we received less (absolute), so revert.
+        // If minAmount is positive (max input), we want delta <= minAmount (e.g. 90 <= 100).
+        // If delta > minAmount (e.g. 110 > 100), we paid too much, so revert.
+        if (context.minAmount0 != 0 && delta.amount0 > context.minAmount0) {
             revert SlippageCheckFailed(0, delta.amount0, context.minAmount0);
         }
-        if (context.minAmount1 != 0 && delta.amount1 < context.minAmount1) {
+        if (context.minAmount1 != 0 && delta.amount1 > context.minAmount1) {
             revert SlippageCheckFailed(1, delta.amount1, context.minAmount1);
         }
     }
