@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{
     trading_status_detector::TradingStatusChange, LiquidityDetector, LpApprovalDetector, Signal,
-    StablecoinDetector, TaxDetector, TaxSignalType, TradingStatusDetector,
+    TaxDetector, TaxSignalType, TradingStatusDetector,
 };
 
 /// Configuration for signal detection
@@ -43,12 +43,12 @@ impl Default for SignalManagerConfig {
 pub struct SignalManager {
     _config: SignalManagerConfig,
     liquidity_detector: LiquidityDetector,
-    _stablecoin_detector: StablecoinDetector,
     trading_status_detector: TradingStatusDetector,
     tax_signal_detector: TaxDetector,
     lp_approval_detector: LpApprovalDetector,
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
+    error_log_path: PathBuf,
     publisher: Option<Arc<Mutex<SignalPublisher>>>,
     total_signals_emitted: u64,
 }
@@ -66,6 +66,7 @@ impl SignalManager {
         let simulation_results_log_path = config.log_dir.join("simulation_results.log");
         let tax_log_path = config.log_dir.join("tax_signals.log");
         let signal_log_path = config.log_dir.join("signal_manager.log");
+        let error_log_path = config.log_dir.join("signal_errors.log");
 
         // Create the signal manager log file with header
         if let Ok(mut file) = OpenOptions::new()
@@ -78,11 +79,21 @@ impl SignalManager {
             writeln!(file, "# Format: [timestamp] activity_type | details").ok();
             writeln!(file, "# ================================================").ok();
         }
+        // Create error log file
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&error_log_path)
+        {
+            writeln!(file, "# Signal Manager Errors/Warnings").ok();
+            writeln!(file, "# Format: [timestamp] level | details").ok();
+            writeln!(file, "# ==================================").ok();
+        }
 
         Self {
             _config: config.clone(),
             liquidity_detector: LiquidityDetector::new(),
-            _stablecoin_detector: StablecoinDetector::new(),
             trading_status_detector: TradingStatusDetector::with_log_path(
                 simulation_results_log_path,
             ),
@@ -93,6 +104,7 @@ impl SignalManager {
             lp_approval_detector: LpApprovalDetector::new(&config.log_dir),
             token_cache: None,
             signal_log_path,
+            error_log_path,
             publisher: None,
             total_signals_emitted: 0,
         }
@@ -124,6 +136,24 @@ impl SignalManager {
                 "[{}] {} | {}",
                 timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                 activity_type,
+                details
+            )
+            .ok();
+        }
+    }
+
+    fn log_error(&self, level: &str, details: &str) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.error_log_path)
+        {
+            let timestamp = chrono::Local::now();
+            writeln!(
+                file,
+                "[{}] {} | {}",
+                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                level,
                 details
             )
             .ok();
@@ -213,37 +243,12 @@ impl SignalManager {
     /// - Generates signals specific to the (token, pool) pair
     /// - Pool address and type are extracted from the result
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
-        info!(
-            "📨 Signal Manager: Received simulation result for TX {}",
-            result.request.tx.hash
-        );
         if let Some(ref err) = result.error {
             if !err.contains("No pools found for token") {
-                info!("  Simulation error: {}", err);
+                self.log_error("ERROR", &format!("{} | {}", result.request.tx.hash, err));
+                warn!("Signal manager error for {}: {}", result.request.tx.hash, err);
             }
-        } else {
-            info!("  Simulation succeeded");
         }
-        if let Some(ref bs) = result.buy_sell_result() {
-            info!(
-                "  Buy/Sell result: can_buy={}, can_sell={}",
-                bs.can_buy, bs.can_sell
-            );
-        }
-
-        // Log to signal_manager.log
-        let error_msg = if let Some(ref err) = result.error {
-            // Check if it's an expected informational message
-            if err.contains("Contract creation simulation not implemented") {
-                format!("Warning: {}", err)
-            } else if err.contains("No pools found for token") {
-                format!("Info: {}", err)
-            } else {
-                format!("Error: {}", err)
-            }
-        } else {
-            "Success".to_string()
-        };
 
         // Skip logging for contract creation transactions to reduce noise
         if !matches!(
@@ -252,22 +257,7 @@ impl SignalManager {
         ) {
             // Compact per‑TX header
             self.log_activity("TX", &result.request.tx.hash);
-            let buysell_status = if let Some(ref bs) = result.buy_sell_result() {
-                format!(
-                    "SimulationRan(can_buy:{}, can_sell:{})",
-                    bs.can_buy, bs.can_sell
-                )
-            } else {
-                "NoSimulation".to_string()
-            };
-
-            self.log_activity(
-                "RECEIVED",
-                &format!(
-                    "Category: {:?} | {} | BuySell: {}",
-                    result.request.category, error_msg, buysell_status
-                ),
-            );
+            self.log_activity("RECEIVED", &format!("Category: {:?}", result.request.category));
         }
 
         // Log creator token info if this is a creator transaction
@@ -497,11 +487,32 @@ impl SignalManager {
                 crate::tx_router::TransactionCategory::ContractCreation { .. }
             ) {
                 if let Some(ref buy_sell) = result.buy_sell_result() {
+                    let buy_tax = buy_sell
+                        .buy_tax
+                        .map(|v| format!("{:.1}%", v))
+                        .unwrap_or_else(|| {
+                            buy_sell
+                                .buy_tax_error
+                                .as_ref()
+                                .map(|e| format!("ERR: {}", e))
+                                .unwrap_or_else(|| "unknown".to_string())
+                        });
+                    let sell_tax = buy_sell
+                        .sell_tax
+                        .map(|v| format!("{:.1}%", v))
+                        .unwrap_or_else(|| {
+                            buy_sell
+                                .sell_tax_error
+                                .as_ref()
+                                .map(|e| format!("ERR: {}", e))
+                                .unwrap_or_else(|| "unknown".to_string())
+                        });
+
                     self.log_activity(
                         "TRADING_STATUS",
                         &format!(
-                            "No change | Can Buy: {} | Can Sell: {}",
-                            buy_sell.can_buy, buy_sell.can_sell
+                            "No change | Can Buy: {} | Can Sell: {} | buy_tax: {} | sell_tax: {}",
+                            buy_sell.can_buy, buy_sell.can_sell, buy_tax, sell_tax
                         ),
                     );
                 } else {
