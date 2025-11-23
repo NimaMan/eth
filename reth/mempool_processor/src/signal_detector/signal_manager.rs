@@ -49,6 +49,7 @@ pub struct SignalManager {
     token_cache: Option<Arc<TokenTrackingCache>>,
     signal_log_path: PathBuf,
     error_log_path: PathBuf,
+    sim_error_log_path: PathBuf,
     publisher: Option<Arc<Mutex<SignalPublisher>>>,
     total_signals_emitted: u64,
 }
@@ -67,6 +68,7 @@ impl SignalManager {
         let tax_log_path = config.log_dir.join("tax_signals.log");
         let signal_log_path = config.log_dir.join("signal_manager.log");
         let error_log_path = config.log_dir.join("signal_errors.log");
+        let sim_error_log_path = config.log_dir.join("simulation_errors.log");
 
         // Create the signal manager log file with header
         if let Ok(mut file) = OpenOptions::new()
@@ -90,6 +92,17 @@ impl SignalManager {
             writeln!(file, "# Format: [timestamp] level | details").ok();
             writeln!(file, "# ==================================").ok();
         }
+        // Create simulation error log file
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&sim_error_log_path)
+        {
+            writeln!(file, "# Simulation Errors/Warnings").ok();
+            writeln!(file, "# Format: [timestamp] level | details").ok();
+            writeln!(file, "# ==================================").ok();
+        }
 
         Self {
             _config: config.clone(),
@@ -105,6 +118,7 @@ impl SignalManager {
             token_cache: None,
             signal_log_path,
             error_log_path,
+            sim_error_log_path,
             publisher: None,
             total_signals_emitted: 0,
         }
@@ -147,6 +161,24 @@ impl SignalManager {
             .create(true)
             .append(true)
             .open(&self.error_log_path)
+        {
+            let timestamp = chrono::Local::now();
+            writeln!(
+                file,
+                "[{}] {} | {}",
+                timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                level,
+                details
+            )
+            .ok();
+        }
+    }
+
+    fn log_sim_error(&self, level: &str, details: &str) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.sim_error_log_path)
         {
             let timestamp = chrono::Local::now();
             writeln!(
@@ -245,6 +277,7 @@ impl SignalManager {
     pub async fn process_simulation_result(&mut self, result: &SimulationResult) -> Vec<Signal> {
         if let Some(ref err) = result.error {
             if !err.contains("No pools found for token") {
+                self.log_sim_error("ERROR", &format!("{} | {}", result.request.tx.hash, err));
                 self.log_error("ERROR", &format!("{} | {}", result.request.tx.hash, err));
                 warn!("Signal manager error for {}: {}", result.request.tx.hash, err);
             }
