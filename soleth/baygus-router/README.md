@@ -86,6 +86,29 @@ v0.6) and `docs/code-audit.md` for the current feature audit and gaps.
 - Extend the Foundry project to cover multi-hop scenarios and document integration points for the
   Baygus Rust stack.
 
+## Audit Findings & Optimization Roadmap (Nov 2025)
+
+Following the audit by the Gemini CLI Agent (Grade: B), the following architectural improvements are prioritized to reach production readiness.
+
+### 1. Flash Accounting for Multi-Hop (High Impact)
+**Issue:** The current `_executeMultiHop` logic settles funds after *every* hop. This treats V4 like V2, negating the gas benefits of the singleton design where intermediate balances should net to zero inside the PoolManager without external transfers.
+**Proposed Solution:**
+- Refactor `_executeMultiHop` to chain swaps without calling `_handleSettlement` on intermediates.
+- Only perform `settle` (for input debt) and `take` (for final output) at the very end of the `unlockCallback`.
+- Use the `BalanceDelta` returned by the PoolManager to track net debt/credit.
+
+### 2. Optimizing Token Approvals (Medium Impact)
+**Issue:** `_approveIfNecessary` checks allowance via `STATICCALL` before every legacy swap, incurring unnecessary gas overhead (~100-2600 gas).
+**Proposed Solution:**
+- **Trusted Routers:** Use "Infinite Approval" (max `uint256`) for known routers (Uniswap V2/V3, Balancer Vault) during contract deployment or lazily once.
+- **Permit2:** Leverage Permit2 for user-to-router transfers to skip the router-side approval check entirely where supported.
+
+### 3. Unified Error Handling (Low Impact)
+**Issue:** `SafeTransferLib` relies on string errors (e.g., "ETH_TRANSFER_FAILED"), while the main contract uses gas-efficient Custom Errors.
+**Proposed Solution:**
+- Modify `SafeTransferLib` to throw custom errors (e.g., `error ETHTransferFailed()`) instead of strings.
+- Standardize all router errors in `Errors.sol`.
+
 ---
 
 ## Current Status (2025-10-20)

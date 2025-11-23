@@ -169,7 +169,7 @@ contract BaygusRouter is ILockCallback {
 
         _approveIfNecessary(path[0], router, amountIn);
 
-        (bool success, ) = router.call(
+        (bool success, bytes memory data) = router.call(
             abi.encodeWithSignature(
                 "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
                 amountIn,
@@ -180,7 +180,8 @@ contract BaygusRouter is ILockCallback {
             )
         );
         if (!success) {
-            revert V2SwapFailed();
+            if (data.length == 0) revert V2SwapFailed();
+            assembly { revert(add(data, 0x20), mload(data)) }
         }
     }
 
@@ -195,8 +196,9 @@ contract BaygusRouter is ILockCallback {
         
         try ISwapRouter(UNISWAP_V3_ROUTER).exactInputSingle(params) returns (uint256 amountOut) {
             amountOut;
-        } catch {
-             revert V3SwapFailed();
+        } catch (bytes memory reason) {
+             if (reason.length == 0) revert V3SwapFailed();
+             assembly { revert(add(reason, 0x20), mload(reason)) }
         }
     }
 
@@ -222,18 +224,20 @@ contract BaygusRouter is ILockCallback {
         uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
 
         bool success;
+        bytes memory data;
         if (useUnderlying) {
-             (success, ) = pool.call(
+             (success, data) = pool.call(
                 abi.encodeWithSignature("exchange_underlying(int128,int128,uint256,uint256)", i, j, dx, min_dy)
             );
         } else {
-             (success, ) = pool.call(
+             (success, data) = pool.call(
                 abi.encodeWithSignature("exchange(int128,int128,uint256,uint256)", i, j, dx, min_dy)
             );
         }
         
         if (!success) {
-             revert CurveSwapFailed();
+             if (data.length == 0) revert CurveSwapFailed();
+             assembly { revert(add(data, 0x20), mload(data)) }
         }
 
         uint256 balanceAfter = IERC20(tokenOut).balanceOf(address(this));
