@@ -665,6 +665,10 @@ async fn main() -> Result<()> {
             if let Some(ref error) = result.error {
                 metrics.simulation_errors.fetch_add(1, Ordering::Relaxed);
                 if !error.contains("No pools found for token") {
+                    let block_str = match mempool_simulator.latest_simulation_block().await {
+                        Ok(b) => b.to_string(),
+                        Err(_) => "unknown".to_string(),
+                    };
                     if let Ok(mut file) = OpenOptions::new()
                         .create(true)
                         .append(true)
@@ -673,10 +677,11 @@ async fn main() -> Result<()> {
                         let timestamp = chrono::Local::now();
                         writeln!(
                             file,
-                            "[{}] ERROR | {} | {} | {}",
+                            "[{}] ERROR | {} | {} | block={} | {}",
                             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
                             tx_hash,
                             category,
+                            block_str,
                             error
                         )
                         .ok();
