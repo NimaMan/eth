@@ -6,7 +6,7 @@ import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
-import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP, CMD_SWEEP, CMD_BALANCER_FLASH_LOAN, CMD_PERMIT2_TRANSFER_FROM} from "./types/SharedTypes.sol";
+import {PoolKey, SwapParams, BalanceDelta, CMD_V4_SWAP, CMD_V2_SWAP, CMD_V3_SWAP, CMD_SUSHISWAP, CMD_CURVE_SWAP, CMD_BALANCER_SWAP, CMD_SWEEP, CMD_BALANCER_FLASH_LOAN, CMD_PERMIT2_TRANSFER_FROM, CMD_TRANSFER_FROM} from "./types/SharedTypes.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 import {InvalidCommand, V2SwapFailed, V3SwapFailed, CurveSwapFailed, CurveApproveFailed, CurveTransferFromFailed, SweepInsufficientBalance, ETHTransferFailed} from "./types/Errors.sol";
 import {ICurvePool} from "./interfaces/ICurvePool.sol";
@@ -139,26 +139,20 @@ contract BaygusRouter is ILockCallback {
             _balancerFlashLoan(input);
         } else if (command == CMD_PERMIT2_TRANSFER_FROM) {
             _permit2TransferFrom(input);
+        } else if (command == CMD_TRANSFER_FROM) {
+            _transferFrom(input);
         } else {
             revert InvalidCommand();
         }
     }
 
+    function _transferFrom(bytes memory input) internal {
+        (address token, uint256 amount) = abi.decode(input, (address, uint256));
+        token.safeTransferFrom(msg.sender, address(this), amount);
+    }
+
     function _v4Swap(bytes memory input) internal {
-        // Existing V4 logic logic moved here, decoding input to determine single or multi-hop
-        // For now, we assume the input encodes the operation type (single/multi) and the params.
-        // This requires a slight adjustment to how we encode the V4 payload.
-        // Let's reuse the existing encoding structure: (uint8 op, bytes memory payload)
-        
-        // However, since we are inside the router, we need to call `unlock` on the PoolManager.
-        // The `unlockCallback` will be called back.
-        
-        // To keep state context, we can pass the input directly to the callback via the data.
-        // Or we can optimize. For V4, we need the callback.
-        
-        bytes memory response = IPoolManager(poolManager).unlock(input);
-        // We can decode response if needed, but typically we check slippage inside the callback or after.
-        // The existing logic returned delta. Here we might consume it or settle it.
+        IPoolManager(poolManager).unlock(input);
     }
 
     function _v2Swap(bytes memory input, address router) internal {
@@ -166,22 +160,15 @@ contract BaygusRouter is ILockCallback {
             uint256 amountIn,
             uint256 amountOutMin,
             address[] memory path,
-            address recipient,
-            bool payerIsUser
-        ) = abi.decode(input, (uint256, uint256, address[], address, bool));
+            address recipient
+        ) = abi.decode(input, (uint256, uint256, address[], address));
 
-        // Transfer tokens from user to router if payer is user
-        if (payerIsUser) {
-            path[0].safeTransferFrom(msg.sender, address(this), amountIn);
-        } else if (amountIn == 0) {
+        if (amountIn == 0) {
             amountIn = IERC20(path[0]).balanceOf(address(this));
         }
 
-        // Approve V2/Sushi Router
         _approveIfNecessary(path[0], router, amountIn);
 
-        // Execute Swap
-        // Using low-level call to avoid interface dependency for now
         (bool success, ) = router.call(
             abi.encodeWithSignature(
                 "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)",
@@ -198,21 +185,15 @@ contract BaygusRouter is ILockCallback {
     }
 
     function _v3Swap(bytes memory input) internal {
-        (ISwapRouter.ExactInputSingleParams memory params, bool payerIsUser) = abi.decode(input, (ISwapRouter.ExactInputSingleParams, bool));
+        ISwapRouter.ExactInputSingleParams memory params = abi.decode(input, (ISwapRouter.ExactInputSingleParams));
         
-        // Transfer tokenIn from user to router
-        if (payerIsUser) {
-            params.tokenIn.safeTransferFrom(msg.sender, address(this), params.amountIn);
-        } else if (params.amountIn == 0) {
+        if (params.amountIn == 0) {
             params.amountIn = IERC20(params.tokenIn).balanceOf(address(this));
         }
         
-        // Approve V3 Router
         _approveIfNecessary(params.tokenIn, UNISWAP_V3_ROUTER, params.amountIn);
         
-        // Execute Swap
         try ISwapRouter(UNISWAP_V3_ROUTER).exactInputSingle(params) returns (uint256 amountOut) {
-            // Success
             amountOut;
         } catch {
              revert V3SwapFailed();
@@ -229,23 +210,17 @@ contract BaygusRouter is ILockCallback {
             int128 j,
             uint256 dx,
             uint256 min_dy,
-            bool useUnderlying,
-            bool payerIsUser
-        ) = abi.decode(input, (address, address, address, address, int128, int128, uint256, uint256, bool, bool));
+            bool useUnderlying
+        ) = abi.decode(input, (address, address, address, address, int128, int128, uint256, uint256, bool));
 
-        // Transfer From
-        if (payerIsUser) {
-            tokenIn.safeTransferFrom(msg.sender, address(this), dx);
-        } else if (dx == 0) {
+        if (dx == 0) {
             dx = IERC20(tokenIn).balanceOf(address(this));
         }
 
-        // Approve
         _approveIfNecessary(tokenIn, pool, dx);
 
         uint256 balanceBefore = IERC20(tokenOut).balanceOf(address(this));
 
-        // Exchange
         bool success;
         if (useUnderlying) {
              (success, ) = pool.call(
@@ -276,18 +251,13 @@ contract BaygusRouter is ILockCallback {
             address assetOut,
             address recipient,
             uint256 amount,
-            uint256 limit,
-            bool payerIsUser
-        ) = abi.decode(input, (bytes32, address, address, address, uint256, uint256, bool));
+            uint256 limit
+        ) = abi.decode(input, (bytes32, address, address, address, uint256, uint256));
 
-        // Transfer From
-        if (payerIsUser) {
-            assetIn.safeTransferFrom(msg.sender, address(this), amount);
-        } else if (amount == 0) {
+        if (amount == 0) {
             amount = IERC20(assetIn).balanceOf(address(this));
         }
 
-        // Approve Vault
         _approveIfNecessary(assetIn, BALANCER_VAULT, amount);
 
         IBalancerVault.SingleSwap memory singleSwap = IBalancerVault.SingleSwap({
