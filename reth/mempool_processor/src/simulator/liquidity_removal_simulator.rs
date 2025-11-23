@@ -4,17 +4,80 @@
 /// `ProcessedTransaction.address_balance_changes`.
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{Address, U256};
-use eyre::Result;
+use eyre::{eyre, Result};
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::RethQueryProvider;
-use reth_primitives::SealedHeader;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio::time::{sleep, Duration};
 use tracing::{error, warn};
+use once_cell::sync::{Lazy, OnceCell};
+use tx_processor::processed_tx_provider::ProcessedTxProvider;
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
-use tx_processor::{process_unsigned_tx, process_unsigned_tx_with_header, ProcessedTransaction};
+use tx_processor::ProcessedTransaction;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
+
+struct SimRequest {
+    simulator: Arc<TxSimulator>,
+    unsigned_tx: UnsignedTransaction,
+    resolved_block: u64,
+    responder: oneshot::Sender<Result<ProcessedTransaction>>,
+}
+
+struct SimWorker {
+    sender: UnboundedSender<SimRequest>,
+}
+
+static SIM_PROVIDER: Lazy<OnceCell<Arc<ProcessedTxProvider>>> = Lazy::new(OnceCell::new);
+static SIM_WORKER: Lazy<SimWorker> = Lazy::new(|| {
+    // Dedicated runtime for tx_processor simulations (multi-thread to allow block_in_place)
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("failed to build simulation runtime");
+
+    let handle = runtime.handle().clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SimRequest>();
+
+    // Move runtime into a dedicated thread to keep it alive
+    std::thread::spawn(move || {
+        // Keep runtime running until channel closes
+        runtime.block_on(async move {
+            while let Some(req) = rx.recv().await {
+                let SimRequest {
+                    simulator,
+                    unsigned_tx,
+                    resolved_block,
+                    responder,
+                } = req;
+
+                // Lazily initialize and reuse a single provider to avoid per-call runtime drops.
+                let provider = match SIM_PROVIDER.get_or_try_init(|| {
+                    ProcessedTxProvider::with_simulator(simulator.clone()).map(Arc::new)
+                }) {
+                    Ok(p) => p.clone(),
+                    Err(err) => {
+                        let _ = responder.send(Err(err));
+                        continue;
+                    }
+                };
+
+                let fut_provider = provider.clone();
+                let fut = async move {
+                    fut_provider
+                        .process_transaction_from_unsigned_tx(unsigned_tx, Some(resolved_block))
+                        .await
+                };
+                let res = handle.spawn(fut).await.unwrap_or_else(|e| Err(eyre::eyre!("{}", e)));
+                let _ = responder.send(res);
+            }
+        });
+    });
+
+    SimWorker { sender: tx }
+});
 
 #[derive(Debug, Clone)]
 pub struct LiquidityRemovalResult {
@@ -60,10 +123,9 @@ impl LiquidityRemovalSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
         tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
-        self.simulate_removal_internal(unsigned_tx, block_number, block_header, false, tx_hash)
+        self.simulate_removal_internal(unsigned_tx, block_number, false, tx_hash)
             .await
     }
 
@@ -74,36 +136,23 @@ impl LiquidityRemovalSimulator {
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
         tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
-        self.simulate_removal_internal(
-            unsigned_tx,
-            block_number,
-            block_header,
-            retry_on_missing_header,
-            tx_hash,
-        )
-        .await
+        self.simulate_removal_internal(unsigned_tx, block_number, retry_on_missing_header, tx_hash)
+            .await
     }
 
     async fn simulate_removal_internal(
         &self,
         unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
         tx_hash: Option<&str>,
     ) -> Result<LiquidityRemovalResult> {
         // 1) Process tx with full trace + deltas
         let processed = match self
-            .process_with_optional_retry(
-                unsigned_tx.clone(),
-                block_number,
-                block_header.clone(),
-                retry_on_missing_header,
-            )
+            .process_with_optional_retry(unsigned_tx.clone(), block_number, retry_on_missing_header)
             .await
         {
             Ok(p) => p,
@@ -333,34 +382,44 @@ impl LiquidityRemovalSimulator {
         &self,
         mut unsigned_tx: UnsignedTransaction,
         block_number: Option<u64>,
-        block_header: Option<SealedHeader>,
         retry_on_missing_header: bool,
     ) -> Result<ProcessedTransaction> {
         const MAX_RETRIES: usize = 5;
         const RETRY_DELAY_MS: u64 = 150;
 
         let mut attempt = 0usize;
-        let target_block_number = block_header
-            .as_ref()
-            .map(|header| header.number)
-            .or(block_number);
-        let header_base_fee = block_header
-            .as_ref()
-            .and_then(|header| header.header().base_fee_per_gas)
-            .map(|fee| fee as u128);
+        let resolved_block = match block_number {
+            Some(number) => number,
+            None => self.simulator.get_latest_block()?,
+        };
+        let mut header_base_fee: Option<u128> = None;
         let mut adjusted_for_base_fee = false;
 
         loop {
-            let result = if let Some(header) = block_header.clone() {
-                process_unsigned_tx_with_header(&self.simulator, unsigned_tx.clone(), header).await
-            } else {
-                process_unsigned_tx(&self.simulator, unsigned_tx.clone(), target_block_number).await
-            };
+            let result = Self::process_unsigned_tx_blocking(
+                self.simulator.clone(),
+                unsigned_tx.clone(),
+                resolved_block,
+            )
+            .await;
 
             match result {
                 Ok(processed) => return Ok(processed),
                 Err(err) => {
                     if !adjusted_for_base_fee && Self::is_base_fee_error(&err) {
+                        if header_base_fee.is_none() {
+                            match self.resolve_base_fee(resolved_block).await {
+                                Ok(fee) => header_base_fee = fee,
+                                Err(load_err) => {
+                                    warn!(
+                                        "Failed to resolve base fee for block {} while repricing: {}",
+                                        resolved_block,
+                                        load_err
+                                    );
+                                }
+                            }
+                        }
+
                         if let Some(base_fee) = header_base_fee {
                             if Self::adjust_for_base_fee(&mut unsigned_tx, base_fee) {
                                 adjusted_for_base_fee = true;
@@ -373,7 +432,7 @@ impl LiquidityRemovalSimulator {
                             }
                         } else {
                             warn!(
-                                "Base fee validation error but no header base fee available; unable to reprice"
+                                "Base fee validation error but no resolved base fee available; unable to reprice"
                             );
                         }
                     }
@@ -393,6 +452,15 @@ impl LiquidityRemovalSimulator {
                 }
             }
         }
+    }
+
+    async fn resolve_base_fee(&self, block_number: u64) -> Result<Option<u128>> {
+        let header = self
+            .simulator
+            .block_context_loader()
+            .load_block_header(block_number, None)
+            .await?;
+        Ok(header.header().base_fee_per_gas.map(|fee| fee as u128))
     }
 
     fn is_missing_header_error(err: &eyre::Report) -> bool {
@@ -446,7 +514,7 @@ impl LiquidityRemovalSimulator {
                 unsigned_tx.max_priority_fee_per_gas = Some(priority);
             }
 
-            changed
+            return changed;
         } else {
             let required_price = base_fee.saturating_add(DEFAULT_PRIORITY_FEE);
             let current_price = unsigned_tx.gas_price.unwrap_or(0);
@@ -454,8 +522,30 @@ impl LiquidityRemovalSimulator {
                 return false;
             }
             unsigned_tx.gas_price = Some(required_price);
-            true
+            return true;
         }
+    }
+
+    async fn process_unsigned_tx_blocking(
+        simulator: Arc<TxSimulator>,
+        unsigned_tx: UnsignedTransaction,
+        resolved_block: u64,
+    ) -> Result<ProcessedTransaction> {
+        let (tx, rx) = oneshot::channel();
+        let req = SimRequest {
+            simulator,
+            unsigned_tx,
+            resolved_block,
+            responder: tx,
+        };
+
+        // Send to dedicated simulation runtime
+        if let Err(e) = SIM_WORKER.sender.send(req) {
+            return Err(eyre!("simulation worker channel closed: {}", e));
+        }
+
+        rx.await
+            .map_err(|e| eyre!("simulation worker dropped response: {}", e))?
     }
 
     fn parse_nonce_mismatch(err: &eyre::Report) -> Option<u64> {

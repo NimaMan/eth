@@ -2,12 +2,12 @@ use ethers::types::U256;
 use eyre::{eyre, Result};
 use hex;
 use serde_json::{json, Value};
+use std::os::unix::net::UnixStream as StdUnixStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::net::UnixStream;
+use std::time::{Duration, Instant};
+use tokio::net::UnixStream as TokioUnixStream;
 use tokio::sync::{mpsc, Mutex, RwLock};
-use tokio::time::{timeout, Duration};
 use tracing::{error, info, warn};
 
 use super::MempoolTransaction;
@@ -46,17 +46,29 @@ impl MempoolFetcherIPCClient {
     }
 
     pub async fn start(&self) -> Result<()> {
-        // Add timeout to connection attempt (5 seconds)
-        let stream = match timeout(
-            Duration::from_secs(5),
-            UnixStream::connect(&self.socket_path),
-        )
-        .await
-        {
-            Ok(Ok(stream)) => stream,
-            Ok(Err(e)) => return Err(eyre!("Failed to connect to IPC socket: {}", e)),
-            Err(_) => return Err(eyre!("IPC connection timed out after 5 seconds")),
+        info!("IPC start: attempting connect to {}", self.socket_path);
+        // Manual retry with std sockets to avoid any timer driver issues
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let std_stream = loop {
+            match StdUnixStream::connect(&self.socket_path) {
+                Ok(stream) => break stream,
+                Err(err) => {
+                    if Instant::now() >= deadline {
+                        return Err(eyre!(
+                            "Failed to connect to IPC socket within 5s: {}",
+                            err
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
         };
+        std_stream
+            .set_nonblocking(true)
+            .map_err(|e| eyre!("Failed to set IPC socket nonblocking: {}", e))?;
+        let stream = TokioUnixStream::from_std(std_stream)
+            .map_err(|e| eyre!("Failed to convert IPC socket to async: {}", e))?;
+        info!("IPC start: connected to {}", self.socket_path);
 
         // Subscribe with correct parameters
         let subscribe = json!({
@@ -74,6 +86,7 @@ impl MempoolFetcherIPCClient {
         let mut socket = socket;
         socket.write_all(format!("{}\n", subscribe).as_bytes())?;
         socket.flush()?;
+        info!("IPC start: subscription sent");
 
         // Quick check for subscription response
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -87,13 +100,13 @@ impl MempoolFetcherIPCClient {
                 info!("Subscription active");
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                info!("No subscription response yet");
+                info!("IPC start: no subscription response yet (will continue)");
             }
             Err(e) => return Err(e.into()),
         }
 
         // Convert back to async
-        let stream = UnixStream::from_std(socket)?;
+        let stream = TokioUnixStream::from_std(socket)?;
 
         // Start monitoring with ultra-fast detection
         let tx_sender = self.tx_sender.clone();
@@ -110,7 +123,7 @@ impl MempoolFetcherIPCClient {
     }
 
     async fn monitor_nonblocking(
-        stream: UnixStream,
+        stream: TokioUnixStream,
         tx_sender: mpsc::Sender<MempoolTransaction>,
         stats: Arc<RwLock<Stats>>,
         queue_size: Arc<AtomicUsize>,
