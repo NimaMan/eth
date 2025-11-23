@@ -671,17 +671,17 @@ async fn main() -> Result<()> {
                     };
                     if let Ok(mut file) = OpenOptions::new()
                         .create(true)
-                        .append(true)
-                        .open(simulation_error_log_path.as_ref())
+                            .append(true)
+                            .open(simulation_error_log_path.as_ref())
                     {
                         let timestamp = chrono::Local::now();
                         writeln!(
                             file,
-                            "[{}] ERROR | {} | {} | block={} | {}",
+                            "[{}] ERROR | block={} | {} | {} | {}",
                             timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                            block_str,
                             tx_hash,
                             category,
-                            block_str,
                             error
                         )
                         .ok();
