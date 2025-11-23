@@ -15,6 +15,28 @@ it can support other venues (v2/v3 style factories, hook-heavy pools, hybrid AMM
 3. Keep the architecture adapter-driven so new venues/slippage policies can slot in without
    rewriting the core.
 
+## Gas Optimization Principles
+
+As a high-frequency execution component, the Baygus Router adheres to strict gas optimization standards. All contributors should apply the following principles when modifying the codebase:
+
+1.  **Transient Storage (EIP-1153):**
+    *   **Mandate:** Use `tstore`/`tload` for all state that does not need to persist beyond the transaction (e.g., reentrancy guards, native ETH buffers).
+    *   **Impact:** Saves ~20,000+ gas per transaction by avoiding expensive `SSTORE` operations.
+
+2.  **Data Location & Types:**
+    *   **Calldata:** Prefer `calldata` over `memory` for read-only array arguments to avoid copying costs.
+    *   **Custom Errors:** Use `error Name()` instead of `require(cond, "String")`. Strings bloat bytecode and execution cost.
+    *   **Storage Packing:** Order storage variables to pack into 32-byte words (e.g., `uint128` next to `uint128`) to minimize slot usage.
+
+3.  **Execution Logic:**
+    *   **Cache Reads:** Read storage variables into stack variables once if accessed multiple times.
+    *   **Unchecked Arithmetic:** Use `unchecked { ... }` for incrementing loop counters or operations where overflow is logic-impossible.
+    *   **Short-Circuiting:** Place cheaper checks before expensive ones in boolean expressions.
+
+4.  **Advanced Techniques:**
+    *   **Access Lists (EIP-2930):** Utilize access lists for complex multi-hop transactions to convert "cold" reads (~2100 gas) into "warm" reads (~100 gas).
+    *   **Permit2:** Prefer signature-based approvals (Permit2) over separate `approve` transactions to bundle authorization with execution.
+
 ## Initial Objectives
 
 1. **Understand existing production routers**  
