@@ -161,9 +161,9 @@ impl TradingStatusDetector {
 
         // Check if trading works (both buy and sell)
         if !buy_sell.can_buy || !buy_sell.can_sell {
-            debug!(
-                "Token {} pool {} - Trading not working: can_buy={}, can_sell={}",
-                token_address, pool_address, buy_sell.can_buy, buy_sell.can_sell
+            info!(
+                "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): can_buy={} can_sell={}",
+                token_address, pool_address, tx_hash, buy_sell.can_buy, buy_sell.can_sell
             );
             return None;
         }
@@ -173,9 +173,9 @@ impl TradingStatusDetector {
         // IMPORTANT: If tax calculation fails (None), we cannot generate a TRADING_ENABLED signal
         match buy_tax {
             Some(buy_t) if buy_t > self.tax_threshold => {
-                debug!(
-                    "Token {} pool {} - Buy tax too high: {:.1}%",
-                    token_address, pool_address, buy_t
+                info!(
+                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): buy tax {:.1}% exceeds threshold {:.1}%",
+                    token_address, pool_address, tx_hash, buy_t, self.tax_threshold
                 );
                 return None;
             }
@@ -186,8 +186,10 @@ impl TradingStatusDetector {
                     .as_ref()
                     .map(|e| format!(": {}", e))
                     .unwrap_or_default();
-                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: buy tax calculation failed{}", 
-                      token_address, pool_address, error_detail);
+                warn!(
+                    "INVALID_SIMULATION_RESULTS: Token {} pool {} (tx {}) - Cannot generate TRADING_ENABLED signal: buy tax calculation failed{}",
+                    token_address, pool_address, tx_hash, error_detail
+                );
                 return None;
             }
             Some(buy_t) => {
@@ -200,9 +202,9 @@ impl TradingStatusDetector {
 
         match sell_tax {
             Some(sell_t) if sell_t > self.tax_threshold => {
-                debug!(
-                    "Token {} pool {} - Sell tax too high: {:.1}%",
-                    token_address, pool_address, sell_t
+                info!(
+                    "⚠️ TradingEnabled skipped for token {} pool {} (tx {}): sell tax {:.1}% exceeds threshold {:.1}%",
+                    token_address, pool_address, tx_hash, sell_t, self.tax_threshold
                 );
                 return None;
             }
@@ -213,8 +215,10 @@ impl TradingStatusDetector {
                     .as_ref()
                     .map(|e| format!(": {}", e))
                     .unwrap_or_default();
-                warn!("INVALID_SIMULATION_RESULTS: Token {} pool {} - Cannot generate TRADING_ENABLED signal: sell tax calculation failed{}", 
-                      token_address, pool_address, error_detail);
+                warn!(
+                    "INVALID_SIMULATION_RESULTS: Token {} pool {} (tx {}) - Cannot generate TRADING_ENABLED signal: sell tax calculation failed{}",
+                    token_address, pool_address, tx_hash, error_detail
+                );
                 return None;
             }
             Some(sell_t) => {
@@ -230,9 +234,9 @@ impl TradingStatusDetector {
         {
             let mut emitted = self.emitted_trading_pairs.lock().await;
             if emitted.contains(&pair_key) {
-                debug!(
-                    "Token {} pool {} - Trading enabled signal already emitted earlier",
-                    token_address, pool_address
+                info!(
+                    "ℹ️ TradingEnabled dedupe: token {} pool {} (tx {}) already emitted earlier in this run",
+                    token_address, pool_address, tx_hash
                 );
                 return None;
             }

@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::warn;
+use tracing::{error, warn};
 use tx_processor::ProcessedTransaction;
 
 /// Manager for transaction simulations
@@ -69,13 +69,8 @@ impl SimulationManager {
 
         let pending_sequences = PendingSequences::new();
 
-        let head_cache_for_task = mempool_simulator.head_cache();
         let tx_simulator_for_task = mempool_simulator.get_tx_simulator();
-        let _ = spawn_block_pruner(
-            head_cache_for_task,
-            tx_simulator_for_task,
-            pending_sequences.clone(),
-        );
+        let _ = spawn_block_pruner(tx_simulator_for_task, pending_sequences.clone());
 
         Self {
             mempool_simulator,
@@ -174,19 +169,19 @@ impl SimulationManager {
         retry_on_missing_header: bool,
     ) -> EyreResult<ProcessedTransaction> {
         let unsigned_tx = mempool_tx_to_unsigned_tx(&request.tx)?;
-        let snapshot = self.mempool_simulator.head_cache().latest_snapshot().await;
-        let (block_number, block_header) = match snapshot {
-            Some(snap) => (Some(snap.number), Some(snap.header.clone())),
-            None => (None, None),
+        let block_number = match self.mempool_simulator.latest_simulation_block().await {
+            Ok(number) => Some(number),
+            Err(err) => {
+                error!(
+                    "Failed to resolve simulation block for liquidity removal: {}",
+                    err
+                );
+                None
+            }
         };
 
         self.liquidity_removal_simulator
-            .process_with_optional_retry(
-                unsigned_tx,
-                block_number,
-                block_header,
-                retry_on_missing_header,
-            )
+            .process_with_optional_retry(unsigned_tx, block_number, retry_on_missing_header)
             .await
     }
 

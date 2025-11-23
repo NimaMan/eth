@@ -1,7 +1,6 @@
 pub mod liquidity_detector;
 pub mod lp_approval_detector;
 pub mod signal_manager;
-pub mod stablecoin_detector;
 pub mod tax_signal_detector;
 pub mod trading_status_detector;
 /// Signal Detectors Module - Per-Pool Signal Generation
@@ -29,7 +28,6 @@ pub use liquidity_detector::{
 };
 pub use lp_approval_detector::{LpApprovalDetector, LpApprovalSignal};
 pub use signal_manager::{SignalManager, SignalManagerConfig};
-pub use stablecoin_detector::{StablecoinActivityType, StablecoinDetector, StablecoinSignal};
 pub use tax_signal_detector::{TaxDetector, TaxSignal, TaxSignalType};
 pub use trading_status_detector::{TradingStatusDetector, TradingStatusSignal};
 pub use types::{

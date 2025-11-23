@@ -62,7 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create log directory if it doesn't exist
     let log_dir = PathBuf::from(mempool_processor::config::DEFAULT_LOG_DIR);
     std::fs::create_dir_all(&log_dir)?;
-    let log_path = log_dir.join(format!("instant_fetch_{}tx_{}.csv", args.tx_count, timestamp));
+    let log_path = log_dir.join(format!(
+        "instant_fetch_{}tx_{}.csv",
+        args.tx_count, timestamp
+    ));
     let mut log_file = File::create(&log_path)?;
     writeln!(log_file, "fetch_num,batch_size,fetch_time_us,queue_wait_us,tx_detection_ns_min,tx_detection_ns_max,tx_detection_ns_avg,tx_hashes")?;
 
@@ -322,7 +325,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     info!("\n📁 Log saved to: {}", log_path.display());
-    info!("📁 Transaction hashes saved to: {}", hash_log_path.display());
+    info!(
+        "📁 Transaction hashes saved to: {}",
+        hash_log_path.display()
+    );
     info!("\n🔍 To verify on Etherscan, check: https://etherscan.io/tx/[HASH]");
 
     Ok(())

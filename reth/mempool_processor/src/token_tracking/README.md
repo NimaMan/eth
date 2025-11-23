@@ -57,8 +57,8 @@ if let Some(pool) = cache.pools.get_pool(&pool_addr).await {
 
 ### Performance Issues
 1. **Excessive Cloning**: `get_token()` returns cloned TokenInfo (>1KB per call)
-2. **O(n) Searches**: `get_pools_for_token()` loads ALL 100K pools then filters
-3. **Lock Contention**: Repeated lock acquisition in loops
+2. **Lock Contention**: Repeated per-entry locking when expanding creator/pool views
+3. **Staging Gap**: Newly created tokens with <0.1 ETH liquidity are dropped before we can simulate their first liquidity add (TradingEnabled delay)
 4. **Memory Waste**: No limit on tokens HashMap (could grow unbounded)
 
 ### Data Consistency Issues
@@ -127,11 +127,13 @@ use mempool_processor::token_tracking::token_parameter_extraction::fetch_token_m
 use reth_chain_query::provider::RethQueryProvider;
 
 async fn describe_token(provider: &RethQueryProvider, token: Address) {
-    if let Ok(meta) = fetch_token_metadata(provider, token, None).await {
+    if let Ok(Some(meta)) = fetch_token_metadata(provider, token, None).await {
         tracing::info!(
             "Token {} ({}): decimals={} total_supply={}",
             meta.name, meta.symbol, meta.decimals, meta.total_supply
         );
+    } else {
+        tracing::info!("{token:?} is not an ERC-20 bytecode deployment");
     }
 }
 ```
@@ -145,7 +147,13 @@ async fn describe_token(provider: &RethQueryProvider, token: Address) {
 ### Cache Limits
 - **Pools**: 100,000 max (LRU eviction)
 - **Tokens**: Unlimited (PROBLEM - should be bounded)
-- **ETH Threshold**: 0.1 ETH (pools below this are ignored)
+- **Denom Thresholds**: Pools must clear the per-denomination liquidity thresholds defined in `eth_token/erc20_token/config/scam_thresholds.py` (fallback: 0.1 ETH when no mapping exists).
+
+### Scam Handling
+- Python flags pools with `pool.is_scam=true`; Rust now removes those pools from the active/high-liquidity indexes while keeping the token entry so trading-enabled detection still triggers on future liquidity.
+- We maintain a `scam_pools` set in `TokenTrackingCache` so the router and simulators skip scam pools without evicting fresh deployments.
+- `token.total_liquidity` excludes scam pools and only counts pools that clear the configured denomination thresholds, preventing zero-liquidity tokens from being dropped when other pools are flagged.
+
 
 ## Testing
 
@@ -224,3 +232,78 @@ Batch updates would continue to hold the write lock once, refreshing both primar
 - `is_creator()` in <1µs, `get_token()` in <5µs, `get_pools_for_token()` in <10µs.
 
 Work on this redesign lives behind feature branches; keep the current API stable until the new cache is production-ready.
+
+## Proposed Cache Redesign
+
+### Goals
+1. **Zero-delay signal readiness** – keep creator transactions routable as soon as a deployment is observed even if the pool has not accumulated liquidity yet.
+2. **Pool-specific scam isolation** – drop rugged pools while keeping healthy pools and trading history for the same token.
+3. **Predictable memory footprint** – bounded caches with explicit eviction policy.
+4. **One-pass lookups** – eliminate repeated locking/cloning on the hot path (routing + simulation).
+
+### Entities & Lifecycle
+| Entity | States | Notes |
+|--------|--------|-------|
+| `TokenEntry` | `Pending`, `Active` | `Pending`: deployment seen but no viable pool yet (zero-liquidity stage). `Active`: at least one pool promoted (≥ threshold) or manually forced. |
+| `PoolEntry` | `Pending`, `Active`, `Scam`, `Evicted` | `Pending`: exists but below liquidity threshold. `Active`: routed to simulators. `Scam`: marked by Python, excluded from routing. `Evicted`: removed during cache pressure. |
+
+### Indexes
+- `token_map`: token → `TokenEntry`
+- `pool_map`: pool → `PoolEntry`
+- `token_to_pools`: token → `HashSet<pool>` (includes pending & scam metadata)
+- `creator_to_tokens`: creator/owner/tax-setter → `HashSet<token>`
+- `scam_pools`: fast filter so routing/simulation ignores rugged pools without touching the token
+- `pending_tokens`: queue for staging zero-liquidity deployments with TTL/backoff
+
+All updates keep the indexes in sync inside `batch_update`.
+
+### Update Flow
+1. **Initial load** – hydrate the cache from Python’s REQ endpoint (baseline state).
+2. **Realtime update** – per block diff:
+   - Promote token from `Pending` → `Active` once any pool crosses the liquidity threshold or the simulator explicitly promotes it.
+   - Record zero-liquidity pools in `Pending` instead of discarding them so the first add-liquidity helper can still be simulated.
+   - When Python flags `pool.is_scam`, move the pool to the scam set, drop it from `active_pools` / `high_liquidity_pools`, and keep the token entry intact.
+3. **Eviction policy** – preferentially evict (1) scam pools already surfaced to the user, (2) stale pending entries past TTL, (3) least-recently-used active pools/tokens.
+
+### Hot-Path APIs
+- `is_creator(addr)` → O(1) check (bitset / HashSet).
+- `get_token_for_creator(addr)` → cheap lookup returning `Arc<TokenEntry>` without cloning.
+- `get_pools_for_token(token)` → iterator over *active, non-scam* pools (pending/scam pools accessible via explicit APIs).
+- `schedule_pool_promotion(pool)` → simulator hook to promote a pending pool after a successful buy/sell probe.
+
+### Scam Handling
+- Python remains the source of truth for scam detection.
+- Rust stores scam pools in `scam_pools`, ensuring they are excluded from routing yet the token itself stays live.
+- `token.total_liquidity` only counts non-scam pools so fresh deployments are not evicted when an older pool rugs.
+
+### Next Steps
+1. Implement pending-token/pool staging with TTL.
+2. Rework cache APIs to expose iterators instead of cloning vectors.
+3. Add simulator → cache promotion hook.
+4. Add metrics covering token/pool state transitions (pending → active → scam).
+
+### Token & Pool Status Alignment
+
+Python currently emits `TokenStatusEnum` with the following lifecycle: `CREATION` → `PAIR_CREATION` → `TRADING_ENABLED`, plus terminal states `INACTIVE_SCAM` / `INACTIVE_OTHER`. Rust should mirror this with a strongly-typed enum (e.g. `TokenState::{Creation, PendingLiquidity, ActiveTrading, ScamInactive, OtherInactive}`) so both runtimes speak the same vocabulary.
+
+For pools we will introduce a dedicated `PoolState` aligned to Python’s pool events:
+- `Discovered`: contract deployed, zero liquidity.
+- `LiquidityDeposited`: liquidity added but trading not yet verified.
+- `Active`: buy/sell simulation succeeded (trading enabled).
+- `Scam`: flagged by Python (`pool.is_scam`) or local detection (drain > threshold).
+- `Evicted`: removed from cache after TTL / eviction policy.
+
+State transitions originate from Python updates; Rust can promote a pool to `Active` after a successful simulator probe (`schedule_pool_promotion`). When Rust detects a scam event (liquidity drain), it applies `PoolState::Scam` and persists the information back to Python’s writer so the warehouse stays consistent.
+
+This shared status model ensures:
+1. **Deterministic routing** – `CreatorTransaction` detection uses `TokenState` to decide whether to schedule buy/sell simulations.
+2. **Consistent pruning** – only pools in `PoolState::Scam` are removed from the routing indexes; tokens remain available for future liquidity recovery.
+3. **Unified telemetry** – both Python logs and Rust metrics can report token/pool state transitions using the same enum values.
+
+Implementation outline:
+- Define `TokenState` and `PoolState` enums in Rust mirroring `TokenStatusEnum` and the proposed pool lifecycle.
+- Update ZMQ payloads to include explicit `pool_state` alongside existing fields.
+- Adjust Python’s `TokenStatusWriter` to persist per-pool state and to publish state changes promptly (creation, liquidity add, scam).
+- Modify Rust’s `TokenTrackingCache` to store these enums and expose them through lightweight getters for routing (`get_active_pools`, `get_pending_pools`, etc.).
+
+Coordinating the enum definitions between the repos (shared schema or protobuf) prevents future drift and simplifies cross-language analytics.

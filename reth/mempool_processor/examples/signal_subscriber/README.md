@@ -25,7 +25,6 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 - Tax detection signals (current format)
 - Liquidity removal signals
 - Trading enabled signals  
-- Stablecoin signals
 - LP approval signals
 - JSON-formatted signals (future)
 

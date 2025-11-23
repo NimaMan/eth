@@ -1,4 +1,3 @@
-pub mod canonical_head_cache;
 /// Mempool Processor Library
 ///
 /// High-performance Ethereum mempool monitoring and transaction analysis system.

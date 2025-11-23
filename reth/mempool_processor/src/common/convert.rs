@@ -1,7 +1,8 @@
 // Conversion utilities for transforming between different transaction representations
 
 use crate::mempool_fetcher::MempoolTransaction;
-use alloy_primitives::{Address, Bytes as AlloyBytes, U256 as AlloyU256};
+use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
+use alloy_primitives::{Address, Bytes as AlloyBytes, B256, U256 as AlloyU256};
 use ethers::types::{Bytes, Transaction as EthersTransaction, U256};
 use eyre::{eyre, Result};
 use serde_json::Value;
@@ -109,6 +110,56 @@ pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<UnsignedTransaction> {
             }
         };
 
+    let access_list = ipc_tx
+        .get("accessList")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|entry| {
+                    let address = entry
+                        .get("address")
+                        .and_then(|v| v.as_str())
+                        .and_then(|addr| addr.parse::<Address>().ok())?;
+                    let storage_keys = entry
+                        .get("storageKeys")
+                        .and_then(|v| v.as_array())
+                        .map(|keys| {
+                            keys.iter()
+                                .filter_map(|key| key.as_str())
+                                .filter_map(|key| key.parse::<B256>().ok())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    Some(AccessListItem {
+                        address,
+                        storage_keys,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let blob_versioned_hashes = ipc_tx
+        .get("blobVersionedHashes")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .filter_map(|hash| hash.parse::<B256>().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let max_fee_per_blob_gas = ipc_tx
+        .get("maxFeePerBlobGas")
+        .and_then(|v| v.as_str())
+        .and_then(|s| {
+            let trimmed = s.strip_prefix("0x").unwrap_or(s);
+            u128::from_str_radix(trimmed, 16).ok()
+        });
+
     Ok(UnsignedTransaction {
         from: ipc_tx["from"]
             .as_str()
@@ -135,6 +186,10 @@ pub fn ipc_to_call_request(ipc_tx: &Value) -> Result<UnsignedTransaction> {
             .as_str()
             .and_then(|s| s.strip_prefix("0x"))
             .and_then(|s| u64::from_str_radix(s, 16).ok()),
+        access_list,
+        blob_versioned_hashes,
+        max_fee_per_blob_gas,
+        signed_authorizations: Vec::<SignedAuthorization>::new(),
     })
 }
 

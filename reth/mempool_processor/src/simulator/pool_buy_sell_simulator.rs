@@ -13,7 +13,6 @@ use eyre::Result;
 use std::sync::Arc;
 
 // Import from tx_processor
-use reth_primitives::SealedHeader;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
     check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
@@ -29,6 +28,8 @@ pub struct PoolBuySellSimulator {
     tx_processor: Arc<TxProcessor>,
     default_buyer_address: Address,
     default_test_amount: U256,
+    default_denom_address: Address,
+    default_denom_decimals: u8,
 }
 
 impl PoolBuySellSimulator {
@@ -42,13 +43,20 @@ impl PoolBuySellSimulator {
             0x0C, 0x96, 0xc6, 0x02, 0xb1, 0xb3, 0x32, 0xB8, 0xAB, 0x20, 0x93, 0xE5, 0xd7, 0x2D,
             0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
         ]);
-        let default_test_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
+        let default_test_amount = U256::from(1_000_000_000_000_000_000u128); // 1 unit of denom
+        let default_denom_address = Address::from([
+            0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+            0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+        ]);
+        let default_denom_decimals = 18;
 
         Ok(Self {
             tx_simulator,
             tx_processor,
             default_buyer_address,
             default_test_amount,
+            default_denom_address,
+            default_denom_decimals,
         })
     }
 
@@ -60,12 +68,18 @@ impl PoolBuySellSimulator {
     ) -> Result<Self> {
         let tx_simulator = Arc::new(TxSimulator::new(reth_datadir)?);
         let tx_processor = Arc::new(TxProcessor::new());
+        let default_denom_address = Address::from([
+            0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+            0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+        ]);
 
         Ok(Self {
             tx_simulator,
             tx_processor,
             default_buyer_address: buyer_address,
             default_test_amount: test_amount,
+            default_denom_address,
+            default_denom_decimals: 18,
         })
     }
 
@@ -79,12 +93,18 @@ impl PoolBuySellSimulator {
             0x80, 0x4a, 0x24, 0xbd, 0x56, 0x89,
         ]);
         let default_test_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
+        let default_denom_address = Address::from([
+            0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+            0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+        ]);
 
         Ok(Self {
             tx_simulator,
             tx_processor,
             default_buyer_address,
             default_test_amount,
+            default_denom_address,
+            default_denom_decimals: 18,
         })
     }
 
@@ -95,12 +115,18 @@ impl PoolBuySellSimulator {
         test_amount: U256,
     ) -> Result<Self> {
         let tx_processor = Arc::new(TxProcessor::new());
+        let default_denom_address = Address::from([
+            0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
+            0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
+        ]);
 
         Ok(Self {
             tx_simulator,
             tx_processor,
             default_buyer_address: buyer_address,
             default_test_amount: test_amount,
+            default_denom_address,
+            default_denom_decimals: 18,
         })
     }
 
@@ -112,7 +138,6 @@ impl PoolBuySellSimulator {
         pool_type: PoolType,
         block_number: Option<u64>,
         token_decimals: u8,
-        block_header: Option<SealedHeader>,
     ) -> Result<PoolBuySellSimulationResult> {
         let config = PoolBuySellParameters {
             token_address,
@@ -128,14 +153,15 @@ impl PoolBuySellSimulator {
             approve_gas_limit: 200_000,
             sell_gas_limit: 500_000,
             prior_txs: Vec::new(),
-            block_delay: 0,
             slippage_tolerance: 5.0,
             weth_address: Address::from([
                 0xC0, 0x2a, 0xaA, 0x39, 0xb2, 0x23, 0xFE, 0x8D, 0x0A, 0x0e, 0x5C, 0x4F, 0x27, 0xeA,
                 0xD9, 0x08, 0x3C, 0x75, 0x6C, 0xc2,
             ]),
+            denom_address: self.default_denom_address,
+            denom_decimals: self.default_denom_decimals,
+            block_delay: 0,
             token_decimals,
-            block_header,
             uniswap_v4_config: None,
         };
 
@@ -166,6 +192,14 @@ impl PoolBuySellSimulator {
     /// Get the default test amount
     pub fn get_test_amount(&self) -> U256 {
         self.default_test_amount
+    }
+
+    pub fn get_default_denom_address(&self) -> Address {
+        self.default_denom_address
+    }
+
+    pub fn get_default_denom_decimals(&self) -> u8 {
+        self.default_denom_decimals
     }
 }
 

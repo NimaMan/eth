@@ -54,13 +54,15 @@ def main() -> None:
     reth = pyreth.PyReth()
     tx_processor = reth.tx_processor()
     simulator = reth.pool_buy_sell_simulator()
+    chain_query = reth.chain_query()
 
     prior_processed = tx_processor.process_transaction_from_hash_with_simulation(args.prior_tx)
     print(f"Prior tx block: {prior_processed.block_number}")
     print(f"Prior tx status: {prior_processed.status}")
     print()
 
-    config = pyreth.PoolBuySellParameters.with_buy_amount(args.buy_amount_eth)
+    decimals = chain_query.get_token_decimals(args.token, args.block)
+    config = pyreth.PoolBuySellParameters.with_denom_amount(args.buy_amount_eth, decimals, 18)
     config.block_number = args.block
     config.set_prior_tx_from_processed(prior_processed)
 

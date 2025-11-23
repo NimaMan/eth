@@ -35,10 +35,15 @@ impl SimulationManager {
             }
         };
 
-        let snapshot = self.mempool_simulator.head_cache().latest_snapshot().await;
-        let (block_number, block_header) = match snapshot {
-            Some(snap) => (Some(snap.number), Some(snap.header.clone())),
-            None => (None, None),
+        let block_number = match self.mempool_simulator.latest_simulation_block().await {
+            Ok(number) => Some(number),
+            Err(err) => {
+                error!(
+                    "Failed to resolve target block for liquidity removal simulation: {}",
+                    err
+                );
+                None
+            }
         };
 
         let sim_start = std::time::Instant::now();
@@ -48,7 +53,6 @@ impl SimulationManager {
             .simulate_removal_with_retry(
                 call_request,
                 block_number,
-                block_header,
                 true,
                 Some(request.tx.hash.as_str()),
             )

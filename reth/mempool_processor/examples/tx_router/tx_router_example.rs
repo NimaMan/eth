@@ -1,5 +1,9 @@
 use chrono::Utc;
 use eyre::Result;
+use mempool_processor::config::{
+    DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
+    DEFAULT_TOKEN_CACHE_PUB_ENDPOINT, DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
+};
 use mempool_processor::function_detector::FunctionDetector;
 /// Transaction Router with Token Cache Example
 ///
@@ -58,7 +62,7 @@ async fn main() -> Result<()> {
 
     // Initialize token tracker to get cache from Python publisher
     info!("📊 Initializing token tracker to receive pool/creator data...");
-    let mut token_tracker = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
+    let mut token_tracker = build_token_subscriber(0.1); // 0.1 ETH threshold
     let token_cache = token_tracker.get_cache();
 
     // Start listening for token updates in background
@@ -474,4 +478,28 @@ async fn main() -> Result<()> {
     info!("\n📁 Full log written to: {}", log_path.display());
 
     Ok(())
+}
+
+fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
+    let pub_endpoint = std::env::var("TOKEN_CACHE_PUB_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string());
+    let rep_endpoint = std::env::var("TOKEN_CACHE_REP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string());
+    let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
+        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string());
+    let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
+        .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
+
+    println!(
+        "Token snapshot sources: redis={}, pub={}, rep={}",
+        redis_url, pub_endpoint, rep_endpoint
+    );
+
+    TokenTrackingSubscriber::with_sources(
+        threshold,
+        &pub_endpoint,
+        &rep_endpoint,
+        &redis_url,
+        &redis_prefix,
+    )
 }

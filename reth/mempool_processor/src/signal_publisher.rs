@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
 use chrono::Utc;
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -100,7 +100,22 @@ impl SignalPublisher {
         zmq_socket.set_sndhwm(10000)?;
         zmq_socket.set_linger(0)?;
         info!("Binding ZMQ socket to {}...", config.zmq_endpoint);
-        zmq_socket.bind(&config.zmq_endpoint)?;
+        if let Err(err) = zmq_socket.bind(&config.zmq_endpoint) {
+            if err.to_string().contains("Address already in use") {
+                return Err(eyre!(
+                    "ZMQ endpoint {} is already in use. Another signal publisher may be running. \
+                     Stop the previous process or change `zmq.signal_endpoint` in the config. ({})",
+                    config.zmq_endpoint,
+                    err
+                ));
+            } else {
+                return Err(eyre!(
+                    "Failed to bind ZMQ endpoint {}: {}",
+                    config.zmq_endpoint,
+                    err
+                ));
+            }
+        }
         info!("📡 ZMQ publisher bound to {}", config.zmq_endpoint);
 
         // Give ZMQ time to establish the socket (slow joiner problem)

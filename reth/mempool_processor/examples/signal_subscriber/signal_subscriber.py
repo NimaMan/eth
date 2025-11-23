@@ -28,11 +28,10 @@ class SignalSubscriber:
         self.running = True
         self.stats = {
             "total": 0,
-            "liquidity": 0, 
+            "liquidity": 0,
             "trading": 0,
             "tax": 0,
-            "stablecoin": 0,
-            "lp_approval": 0
+            "lp_approval": 0,
         }
         
     def connect(self):
@@ -98,9 +97,6 @@ class SignalSubscriber:
         elif "TRADING" in message:
             self.stats["trading"] += 1
             signal_type = "TRADING"
-        elif "STABLECOIN" in message:
-            self.stats["stablecoin"] += 1
-            signal_type = "STABLECOIN"
         elif "LP_APPROVAL" in message:
             self.stats["lp_approval"] += 1
             signal_type = "LP_APPROVAL"
@@ -147,7 +143,6 @@ class SignalSubscriber:
         print(f"   Tax signals: {self.stats['tax']}")
         print(f"   Liquidity signals: {self.stats['liquidity']}")
         print(f"   Trading signals: {self.stats['trading']}")
-        print(f"   Stablecoin signals: {self.stats['stablecoin']}")
         print(f"   LP Approval signals: {self.stats['lp_approval']}")
         
         if self.socket:

@@ -49,7 +49,6 @@ src/
 │   ├── tax_detector.rs                # Tax calculation & honeypot detection
 │   ├── trading_status_detector.rs     # Trading enabled detection  
 │   ├── liquidity_detector.rs          # Pool drain detection
-│   ├── stablecoin_detector.rs         # Stablecoin activity
 │   ├── lp_approval_detector.rs        # LP approval tracking
 │   └── types.rs                       # Signal type definitions
 ├── token_tracking/                    # Token state management (ACTIVE)

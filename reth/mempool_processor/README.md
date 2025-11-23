@@ -27,6 +27,14 @@ To achieve that we:
 Everything else in this repository (function detection, simulators, caches) is
 in service of that control loop.
 
+## Environment
+
+Live block headers and processed transactions are sourced from a Redis instance
+whose URL is provided via `LIVE_BLOCKCHAIN_DATA_REDIS_URL` (defaults to
+`redis://localhost:6379/0`). Export this variable before launching the Python
+publishers and Rust consumers so every component shares the same live chain
+feed.
+
 ## 🚧 Next Steps (Live Scam Response)
 
 ### 1. Tip-State Mirror (block feed ➜ in-memory cache)
@@ -62,7 +70,7 @@ in service of that control loop.
 
 ## ✅ Implementation Status & Known Gaps
 
-- **Live head snapshots in place**: `CanonicalHeadCache::spawn_head_listener` is wired into the service. Mempool simulations pull the latest `SealedHeader` from that subscription before falling back to MDBX, so gas/base-fee data now reflects the freshest canonical tip.
+- **Live head snapshots in place**: the `TxSimulator` itself now hydrates headers/state via the shared `LiveChainCache`. Simulations transparently replay ahead-of-MDBX blocks without wiring a separate canonical head tracker.
 - **Only the latest header is cached**: we currently overwrite the snapshot on every new head. If callers need `tip-1`, we must extend the cache (for example, keep a short deque) because the previous header is not retained yet.
 - **Contract-creation flow still stubbed**: `SimulationManager` warns and exits early for deployments. There is no deterministic address derivation, helper replay, or post-deploy per-pool viability check.
 - **State-change extraction missing**: `simulate_mempool_tx_with_state_changes` returns an empty map; integrating the richer `tx_processor` diffs is still a TODO.
@@ -415,7 +423,6 @@ Per‑pool simulation (CreatorTransaction)
 │  • TaxDetector                → HighTax / Honeypot signals                        │
 │  • TradingStatusDetector      → TradingEnabled signals                            │
 │  • LiquidityDetector          → Pool drain / scam detections                      │
-│  • StablecoinDetector         → Stablecoin events                                 │
 │  • LpApprovalDetector         → LP approvals (direct path or from results)       │
 │  → Publishes every signal via SignalPublisher                                     │
 └──────────────────────────────────────────────────────────────────────────────────┘

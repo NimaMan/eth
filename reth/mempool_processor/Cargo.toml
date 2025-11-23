@@ -188,10 +188,6 @@ name = "full_pipeline_signal_detection"
 path = "examples/signal_detector/full_signal_detection_pipeline.rs"
 
 [[example]]
-name = "test_liquidity_removal_detection"
-path = "examples/signal_detector/test_liquidity_removal_detection.rs"
-
-[[example]]
 name = "export_all_tokens_from_cache_to_csv"
 path = "examples/token_tracking/export_all_tokens_from_cache_to_csv.rs"
 

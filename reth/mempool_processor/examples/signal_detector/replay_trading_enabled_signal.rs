@@ -27,10 +27,10 @@ use std::time::Instant;
 use tokio::runtime::Builder;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
-use tx_processor::process_unsigned_tx_with_header;
 use tx_processor::simulator::types::{
     PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
+use tx_processor::tx_processor::TxProcessor;
 use tx_processor::ProcessedTransaction;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
@@ -117,10 +117,21 @@ async fn run(args: Args) -> Result<()> {
         .context("failed to initialise PoolBuySellSimulator (is the database accessible?)")?;
 
     info!("📘 Loading canonical header for block {}", args.block);
-    let sealed_header = load_sealed_header(&tx_simulator, args.block)?;
 
-    let (prior_txs, tx_datas) =
-        load_helper_transactions(provider.clone(), &tx_simulator, &sealed_header, &args).await?;
+    let mut chain = tx_simulator
+        .start_simulation_chain(Some(args.block))
+        .await
+        .context("failed to initialize sequential simulator")?;
+    let tx_processor = TxProcessor::new();
+
+    let (prior_txs, tx_datas) = load_helper_transactions(
+        provider.clone(),
+        &mut chain,
+        &tx_processor,
+        args.block,
+        &args,
+    )
+    .await?;
 
     if prior_txs.is_empty() {
         return Err(eyre!("no helper transactions available to replay"));
@@ -130,15 +141,19 @@ async fn run(args: Args) -> Result<()> {
         .with_context(|| format!("invalid token address {}", args.token))?;
     let pool_address = AlloyAddress::from_str(&args.pool)
         .with_context(|| format!("invalid pool address {}", args.pool))?;
+    let weth_address = AlloyAddress::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+        .context("invalid WETH address literal")?;
 
     let decimals = fetch_token_decimals_or_metadata(&provider, token_address, args.block).await?;
 
     let mut params = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2);
     params.prior_txs = prior_txs;
     params.block_number = Some(args.block);
-    params.block_header = Some(sealed_header.clone());
     params.token_decimals = decimals;
     params.test_amount = U256::from(10_000_000_000_000_000u64); // 0.01 ETH probe
+    params.weth_address = weth_address;
+    params.denom_address = weth_address;
+    params.denom_decimals = 18;
 
     info!("🚦 Running buy/approve/sell viability probe");
     let pool_result = pool_simulator
@@ -194,8 +209,9 @@ async fn run(args: Args) -> Result<()> {
 
 async fn load_helper_transactions(
     provider: Arc<RethQueryProvider>,
-    tx_simulator: &Arc<TxSimulator>,
-    sealed_header: &SealedHeader,
+    chain: &mut tx_simulator::UnsignedTxChainSimulation,
+    tx_processor: &TxProcessor,
+    block_number: u64,
     args: &Args,
 ) -> Result<(Vec<ProcessedTransaction>, Vec<TransactionData>)> {
     let mut hash_inputs = args.hashes.clone();
@@ -239,10 +255,20 @@ async fn load_helper_transactions(
             .with_context(|| format!("failed to load transaction {}", hash_hex))?;
 
         let unsigned_tx = transaction_to_unsigned(&tx_data)?;
-        let processed =
-            process_unsigned_tx_with_header(tx_simulator, unsigned_tx, sealed_header.clone())
-                .await
-                .with_context(|| format!("failed to replay {}", hash_hex))?;
+        let full_result = chain
+            .step_with_trace(unsigned_tx.clone())
+            .await
+            .with_context(|| format!("failed to replay {}", hash_hex))?;
+
+        let processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &unsigned_tx,
+                &full_result,
+                block_number,
+                prior_txs.len() as u64,
+            )
+            .await
+            .with_context(|| format!("failed to process {}", hash_hex))?;
 
         log_processed_transaction(&tx_data, &processed);
         prior_txs.push(processed);
@@ -337,7 +363,11 @@ fn transaction_to_unsigned(tx: &TransactionData) -> Result<UnsignedTransaction> 
         } else {
             Some(tx.input.clone())
         },
-        nonce: None,
+        nonce: Some(tx.nonce),
+        access_list: Vec::new(),
+        blob_versioned_hashes: Vec::new(),
+        max_fee_per_blob_gas: None,
+        signed_authorizations: Vec::new(),
     })
 }
 
@@ -381,12 +411,16 @@ async fn fetch_token_decimals_or_metadata(
             .unwrap_or_else(|| "latest".to_string());
 
         match fetch_token_metadata(provider, token_address, context).await {
-            Ok(meta) => {
+            Ok(Some(meta)) => {
                 info!(
                     "ℹ️ Token metadata ({label}): symbol={} decimals={}",
                     meta.symbol, meta.decimals
                 );
                 return Ok(meta.decimals);
+            }
+            Ok(None) => {
+                warn!("Token metadata lookup ({label}) indicates non-ERC20 bytecode");
+                errors.push(format!("metadata {label}: non-erc20"));
             }
             Err(err) => {
                 warn!("Token metadata lookup ({label}) failed: {err}");

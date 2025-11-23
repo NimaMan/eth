@@ -322,7 +322,6 @@ impl SimulationManager {
                 denom_decimals,
                 block_delay: 0,
                 token_decimals,
-                block_header: None,
                 uniswap_v4_config: None,
             };
 

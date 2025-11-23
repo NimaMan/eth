@@ -1,7 +1,7 @@
 use clap::Parser;
 use eyre::Result;
-use std::path::Path;
-use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 /// Mempool Signal Detector Service
@@ -42,7 +42,6 @@ use ethers::types::H256;
 use hex;
 use mempool_processor::{
     arrival_recorder::{ArrivalRecorderConfig, MempoolArrivalRecorder},
-    canonical_head_cache::CanonicalHeadCache,
     config::MempoolProcessorConfig,
     function_detector::CreatorFunctionType,
     function_detector::FunctionDetector,
@@ -51,8 +50,9 @@ use mempool_processor::{
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     simulator::{MempoolSimulator, SimulationManager, SimulationType, TxSimulationJob},
     token_tracking::TokenTrackingSubscriber,
-    tx_router::{TransactionCategory, TransactionRouter},
+    tx_router::{SimulationPriority, TransactionCategory, TransactionRouter},
 };
+use tx_simulator::LiveChainCache;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -221,7 +221,7 @@ impl ServiceMetrics {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -302,9 +302,23 @@ async fn main() -> Result<()> {
     info!("  Batch Size: {}", args.batch_size);
     info!("  Simulation Workers: {}", sim_workers);
 
-    // Shared canonical head cache updated by the subscription task
-    let head_cache = Arc::new(CanonicalHeadCache::new());
     info!("  Report Interval: {}s", cfg_report_interval);
+    let live_chain_cache = match LiveChainCache::new(&base_config.simulation.live_data_redis_url) {
+        Ok(cache) => {
+            info!(
+                "  Live data Redis: {}",
+                base_config.simulation.live_data_redis_url
+            );
+            Some(cache)
+        }
+        Err(err) => {
+            warn!(
+                "Live chain cache unavailable ({}); simulations will use MDBX-only context",
+                err
+            );
+            None
+        }
+    };
     info!("================================");
 
     // Initialize metrics
@@ -316,8 +330,14 @@ async fn main() -> Result<()> {
 
     // 1. Token tracking subscriber
     info!("📊 Starting token tracking subscriber...");
-    let mut token_subscriber = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
-    token_subscriber.set_head_cache(head_cache.clone());
+    let source_cfg = &base_config.token_cache_source;
+    let mut token_subscriber = TokenTrackingSubscriber::with_sources(
+        source_cfg.eth_threshold,
+        &source_cfg.zmq_pub_endpoint,
+        &source_cfg.zmq_rep_endpoint,
+        &source_cfg.redis_url,
+        &source_cfg.redis_token_prefix,
+    );
     let token_cache = token_subscriber.get_cache();
 
     // Start token subscriber in background
@@ -329,7 +349,8 @@ async fn main() -> Result<()> {
 
     // Wait for initial cache population
     info!("⏳ Waiting for token cache population...");
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    std::thread::sleep(Duration::from_secs(3));
+    info!("🔁 Warmup wait complete; reading token cache stats...");
 
     let initial_pools = token_cache.get_pool_count().await;
     let initial_creators = token_cache.get_creator_count().await;
@@ -366,29 +387,8 @@ async fn main() -> Result<()> {
 
     // 5. Mempool Simulator (single database connection)
     info!("🧪 Initializing mempool simulator...");
-    let mempool_simulator = Arc::new(MempoolSimulator::new(
-        &cfg_reth_db_path,
-        head_cache.clone(),
-    )?);
+    let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path, live_chain_cache)?);
     info!("✅ Mempool simulator initialized");
-
-    info!("🔄 Starting canonical head listener...");
-    let header_task = head_cache.spawn_head_listener(cfg_ipc_path.clone());
-    info!("⏳ Waiting for canonical head snapshot...");
-    match head_cache
-        .wait_for_latest_block_number(Duration::from_secs(10))
-        .await
-    {
-        Ok(initial_block) => {
-            info!("✅ Canonical head detected at block {}", initial_block);
-        }
-        Err(err) => {
-            warn!(
-                "Canonical head subscription has not yielded a block number yet: {}",
-                err
-            );
-        }
-    }
 
     // Initialize arrival recorder only after simulator (to reuse provider)
     let index_dir = Path::new(&cfg_reth_db_path).join("reth_index");
@@ -421,9 +421,12 @@ async fn main() -> Result<()> {
     info!("📡 Initializing signal publisher...");
     let signals_dir = run_dir.join("signals");
     std::fs::create_dir_all(&signals_dir)?;
-    let token_cache_log = run_dir.join("token_cache_updates.log");
-    token_cache.set_log_path(token_cache_log).await;
-    let publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    let external_data_log_path = run_dir.join("external_data_updates.log");
+    token_cache
+        .set_log_path(external_data_log_path.clone())
+        .await;
+    let mut publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
+    publisher_config.zmq_endpoint = base_config.zmq.signal_endpoint.clone();
     let db_enabled = publisher_config.enable_database;
     let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
     info!(
@@ -441,7 +444,7 @@ async fn main() -> Result<()> {
         tax_detection: config.tax_detection.clone(),
     };
     let simulation_manager = SimulationManager::new(
-        mempool_simulator,
+        mempool_simulator.clone(),
         token_cache.clone(),
         signal_config.clone(),
         signal_publisher.clone(),
@@ -541,6 +544,20 @@ async fn main() -> Result<()> {
                     simulation_manager
                         .detect_lp_approval(&tx, &classification.category)
                         .await;
+
+                    // Schedule a follow-up buy/sell check once liquidity lands on-chain.
+                    let followup_job = TxSimulationJob {
+                        tx: tx.clone(),
+                        category: classification.category.clone(),
+                        priority: SimulationPriority::High,
+                        simulation_type: SimulationType::BuySellOnly,
+                        tx_hash: H256::from_slice(
+                            hex::decode(&tx.hash.trim_start_matches("0x"))
+                                .unwrap_or_default()
+                                .as_slice(),
+                        ),
+                    };
+                    simulation_manager.schedule_buy_sell_follow_up(followup_job);
                 }
                 continue;
             }
@@ -660,10 +677,22 @@ async fn main() -> Result<()> {
 
         // Periodic reporting (only refresh cache stats now)
         if last_report.elapsed() > Duration::from_secs(cfg_report_interval) {
-            if let Some(latest_block) = head_cache.latest_block_number().await {
-                info!("📡 Latest canonical block observed: {}", latest_block);
-            } else {
-                warn!("📡 Latest canonical block unavailable (head subscription not primed)");
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            match mempool_simulator.latest_simulation_block().await {
+                Ok(latest_block) => {
+                    let line = format!(
+                        "[{}]  INFO 📡 Latest simulation block target: {}",
+                        timestamp, latest_block
+                    );
+                    append_line_to_file(&external_data_log_path, &line);
+                }
+                Err(err) => {
+                    let line = format!(
+                        "[{}]  WARN 📡 Unable to determine latest simulation block: {}",
+                        timestamp, err
+                    );
+                    append_line_to_file(&external_data_log_path, &line);
+                }
             }
             // Touch cache metrics to maintain interval cadence alongside head tracking.
             let _ = token_cache.get_pool_count().await;
@@ -692,7 +721,6 @@ async fn main() -> Result<()> {
     // Shutdown components
     drop(signal_publisher);
     drop(simulation_manager);
-    header_task.abort();
     subscriber_handle.abort();
 
     info!("✅ Mempool signal detector shutdown complete");
@@ -739,4 +767,22 @@ fn setup_shutdown_handler() -> Arc<AtomicBool> {
     });
 
     shutdown
+}
+
+fn append_line_to_file(path: &Path, line: &str) {
+    if let Err(err) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| {
+            use std::io::Write;
+            writeln!(file, "{}", line)
+        })
+    {
+        warn!(
+            "Failed to write external update log at {}: {}",
+            path.display(),
+            err
+        );
+    }
 }

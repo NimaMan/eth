@@ -26,9 +26,6 @@ pub struct SimulationManager {
 
     // Configuration
     max_concurrent_simulations: usize,
-
-    // Statistics
-    stats: Arc<Mutex<ManagerStats>>,
 }
 ```
 
@@ -36,7 +33,6 @@ pub struct SimulationManager {
 - Manages a priority queue and runs simulations concurrently
 - For CreatorTransaction, simulates EACH pool independently and sends a result per pool to SignalManager
 - For other categories, sends a single SimulationResult to SignalManager
-- Tracks simulation statistics
 - Consumes transaction classifications from `TransactionRouter` and token/pool ownership context from the Python tracking service so only brand-new deployers need additional probing.
 
 #### 2. MempoolSimulator
@@ -163,19 +159,25 @@ High-level `simulate_request` flow:
 - Creator launches often execute *multiple* helper calls (contract creation → openTrading → router call) in the same block. When we only replay an individual helper, the sandbox misses the earlier state changes.  
   The simulation manager maintains a short per-creator/token history of processed transactions and injects them as the `prior_txs` sequence for each pool probe. This keeps the queue bounded while ensuring launch helpers are faithfully reproduced.
 
+#### Reth pending-block execution vs. our live replay
+
+- Reth’s pending-block builder pulls the full state at `parent.hash()` via `history_by_block_hash`, wraps it with `State::builder().with_bundle_update()`, then runs each mempool candidate through `builder.execute_transaction(tx)` before finishing the block. The `BundleState` keeps all intra-block writes (factory deployments, approvals, mints) staged so later transactions execute against the exact same view miners will use.
+- Our live pipeline only records helpers that we explicitly simulate. Factory deployments and same-block approvals are often classified as `requires_simulation = false`, so they never populate `pending_sequences`. When the follow-on add-liquidity helper runs we replay a truncated sequence (just nonce 2 in block 23676355) and the router `transferFrom` fails because the pair contract and allowance were never materialised in the sandbox.
+- Historical replays succeed because the canonical DB already contains the full block; by the time we simulate the add-liquidity tx the pair contract, allowances, and reserves are present in state just like Reth’s `BundleState`.
+- Action item: either ingest the missing helpers into `pending_sequences` (simulate or at least snapshot them) or rebuild the sequence from canonical data before probing. Until then, any launch that spreads deployment/approval/liquidity across the same block can produce `TransferHelper::TRANSFER_FROM_FAILED` in live mode even though the chain accepted the transaction.
+
 ### 3. SignalManager Processing
 
 The SignalManager receives the SimulationResult and:
 
 1. **Extracts key values**:
    - `buy_tax`, `sell_tax`, `can_buy`, `can_sell` from BuySellResult
-   - State changes for liquidity and stablecoin detection
+   - State changes for liquidity detection
 
 2. **Runs detectors**:
    - **TaxDetector**: Calculates taxes from state changes, detects honeypots/high taxes
    - **TradingStatusDetector**: Emits TradingEnabled if can_buy && can_sell
    - **LiquidityDetector**: Checks for pool drains using TokenTrackingCache
-   - **StablecoinDetector**: Tracks USDT/USDC mints/burns
 
 3. **Returns signals** as `Vec<Signal>`:
    - TradingEnabled
@@ -246,11 +248,8 @@ The SignalManager receives the SimulationResult and:
 
 ### SimulationManager Creation
 ```rust
-let head_manager = Arc::new(CanonicalHeadCache::new());
-let mempool_simulator = Arc::new(MempoolSimulator::new(&reth_db_path, head_manager.clone())?);
-// Start the canonical head listener so simulations always have fresh headers
-let _head_task = head_manager.spawn_head_listener(ipc_path);
-head_manager.wait_for_latest_header(Duration::from_secs(10)).await?;
+let live_cache = tx_simulator::LiveChainCache::new("redis://127.0.0.1:6379/0")?;
+let mempool_simulator = Arc::new(MempoolSimulator::new(&reth_db_path, Some(live_cache))?);
 let publisher = Arc::new(tokio::sync::Mutex::new(SignalPublisher::new(cfg).await?));
 let simulation_manager = SimulationManager::new(
     mempool_simulator,

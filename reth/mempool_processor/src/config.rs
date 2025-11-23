@@ -14,9 +14,18 @@ pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/.local/share/reth/mainnet/re
 pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the repository.
 pub const DEFAULT_LOG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/logs");
+pub const DEFAULT_TOKEN_CACHE_PUB_ENDPOINT: &str = "tcp://127.0.0.1:5557";
+pub const DEFAULT_TOKEN_CACHE_REP_ENDPOINT: &str = "tcp://127.0.0.1:5558";
+pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
+pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "token:snapshot:";
 
 fn default_simulation_workers() -> usize {
     DEFAULT_SIM_WORKERS
+}
+
+fn default_live_data_redis_url() -> String {
+    std::env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL")
+        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
 }
 
 /// Main configuration structure
@@ -45,6 +54,10 @@ pub struct MempoolProcessorConfig {
 
     /// Logging settings
     pub logging: LoggingConfig,
+
+    /// Token cache source settings
+    #[serde(default)]
+    pub token_cache_source: TokenCacheSourceConfig,
 }
 
 /// IPC connection configuration
@@ -163,6 +176,10 @@ pub struct SimulationConfig {
 
     /// Minimum value for simulation (in ETH)
     pub min_value_eth: f64,
+
+    /// Redis URL used to hydrate live chain data for ahead-of-MDBX simulations
+    #[serde(default = "default_live_data_redis_url")]
+    pub live_data_redis_url: String,
 }
 
 /// Database configuration
@@ -201,6 +218,33 @@ pub struct ZmqConfig {
 
     /// Linger period (ms)
     pub linger: i32,
+}
+
+/// Live token cache source configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenCacheSourceConfig {
+    /// Minimum ETH threshold used by cache heuristics
+    pub eth_threshold: f64,
+    /// ZMQ PUB endpoint for token update notifications
+    pub zmq_pub_endpoint: String,
+    /// ZMQ REP endpoint for token cache queries
+    pub zmq_rep_endpoint: String,
+    /// Redis URL hosting live token snapshots
+    pub redis_url: String,
+    /// Key prefix for token snapshots
+    pub redis_token_prefix: String,
+}
+
+impl Default for TokenCacheSourceConfig {
+    fn default() -> Self {
+        Self {
+            eth_threshold: 0.1,
+            zmq_pub_endpoint: DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string(),
+            zmq_rep_endpoint: DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string(),
+            redis_url: DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string(),
+            redis_token_prefix: DEFAULT_REDIS_TOKEN_PREFIX.to_string(),
+        }
+    }
 }
 
 /// Logging configuration
@@ -263,6 +307,7 @@ impl Default for MempoolProcessorConfig {
                 max_queue_size: 1000,
                 skip_simple_transfers: true,
                 min_value_eth: 0.01,
+                live_data_redis_url: DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string(),
             },
 
             database: DatabaseConfig {
@@ -287,6 +332,7 @@ impl Default for MempoolProcessorConfig {
                 level: "info".to_string(),
                 metrics_interval: Duration::from_secs(60),
             },
+            token_cache_source: TokenCacheSourceConfig::default(),
         }
     }
 }
@@ -325,9 +371,43 @@ impl MempoolProcessorConfig {
             }
         }
 
+        if let Ok(url) = std::env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL") {
+            config.simulation.live_data_redis_url = url;
+        }
+
+        if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_SIGNAL_ENDPOINT") {
+            config.zmq.signal_endpoint = endpoint;
+        }
+
+        if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_ALERT_ENDPOINT") {
+            config.zmq.alert_endpoint = endpoint;
+        }
+
         if let Ok(url) = std::env::var("MEMPOOL_DATABASE_URL") {
             config.database.url = Some(url);
             config.database.enabled = true;
+        }
+
+        if let Ok(redis_url) = std::env::var("MEMPOOL_TOKEN_CACHE_REDIS_URL") {
+            config.token_cache_source.redis_url = redis_url;
+        }
+
+        if let Ok(prefix) = std::env::var("MEMPOOL_TOKEN_CACHE_REDIS_PREFIX") {
+            config.token_cache_source.redis_token_prefix = prefix;
+        }
+
+        if let Ok(pub_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT") {
+            config.token_cache_source.zmq_pub_endpoint = pub_endpoint;
+        }
+
+        if let Ok(rep_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_REP_ENDPOINT") {
+            config.token_cache_source.zmq_rep_endpoint = rep_endpoint;
+        }
+
+        if let Ok(threshold) = std::env::var("MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD") {
+            if let Ok(val) = threshold.parse::<f64>() {
+                config.token_cache_source.eth_threshold = val;
+            }
         }
 
         // Honeypot threshold removed - now determined by can't sell condition

@@ -18,8 +18,8 @@ pub async fn fetch_token_metadata(
     provider: &RethQueryProvider,
     token: Address,
     block: Option<u64>,
-) -> Result<TokenMetadata> {
-    provider.get_token_metadata(token, block, None).await
+) -> Result<Option<TokenMetadata>> {
+    provider.get_token_metadata(token, block, &[], block).await
 }
 
 /// Fetch the token's decimals at an optional historical block.
@@ -28,7 +28,7 @@ pub async fn fetch_token_decimals(
     token: Address,
     block: Option<u64>,
 ) -> Result<u8> {
-    provider.get_token_decimals(token, block, None).await
+    provider.get_token_decimals(token, block).await
 }
 
 /// Fetch the token's symbol at an optional historical block.
@@ -37,7 +37,7 @@ pub async fn fetch_token_symbol(
     token: Address,
     block: Option<u64>,
 ) -> Result<String> {
-    provider.get_token_symbol(token, block, None).await
+    provider.get_token_symbol(token, block).await
 }
 
 /// Fetch the token's name at an optional historical block.
@@ -46,7 +46,7 @@ pub async fn fetch_token_name(
     token: Address,
     block: Option<u64>,
 ) -> Result<String> {
-    provider.get_token_name(token, block, None).await
+    provider.get_token_name(token, block).await
 }
 
 /// Fetch the token's total supply at an optional historical block.
@@ -55,5 +55,5 @@ pub async fn fetch_token_total_supply(
     token: Address,
     block: Option<u64>,
 ) -> Result<U256> {
-    provider.get_token_total_supply(token, block, None).await
+    provider.get_token_total_supply(token, block).await
 }

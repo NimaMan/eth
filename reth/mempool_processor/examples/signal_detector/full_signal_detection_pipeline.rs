@@ -23,7 +23,10 @@ use tracing::{info, warn};
 // Mempool processor imports
 use alloy_primitives::{Address, U256};
 use mempool_processor::{
-    canonical_head_cache::CanonicalHeadCache,
+    config::{
+        DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
+        DEFAULT_TOKEN_CACHE_PUB_ENDPOINT, DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
+    },
     function_detector::FunctionDetector,
     mempool_fetcher::{MempoolFetcherIPCClient, MempoolTransaction},
     simulator::MempoolSimulator,
@@ -101,6 +104,30 @@ struct ManagerStats {
     buy_sell_tests: u64,
     avg_simulation_time_ms: f64,
     max_simulation_time_ms: f64,
+}
+
+fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
+    let pub_endpoint = std::env::var("TOKEN_CACHE_PUB_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string());
+    let rep_endpoint = std::env::var("TOKEN_CACHE_REP_ENDPOINT")
+        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string());
+    let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
+        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string());
+    let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
+        .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
+
+    println!(
+        "Token snapshot sources: redis={}, pub={}, rep={}",
+        redis_url, pub_endpoint, rep_endpoint
+    );
+
+    TokenTrackingSubscriber::with_sources(
+        threshold,
+        &pub_endpoint,
+        &rep_endpoint,
+        &redis_url,
+        &redis_prefix,
+    )
 }
 
 impl SimplifiedSimulationManager {
@@ -305,11 +332,15 @@ impl SimplifiedSimulationManager {
                     // Run pool buy/sell simulation
                     let buyer_address =
                         Address::from_str("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689").unwrap();
+                    let weth_address =
+                        Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap();
                     let mut config =
                         PoolBuySellParameters::new(token_addr, pool_addr, PoolType::UniswapV2)
                             .with_token_decimals(token_decimals)
                             .with_buyer(buyer_address)
-                            .with_test_amount(U256::from(10_000_000_000_000_000u64));
+                            .with_test_amount(U256::from(10_000_000_000_000_000u64))
+                            .with_denom_address(weth_address)
+                            .with_denom_decimals(18);
                     config.gas_price = Some(30_000_000_000u128);
                     config.buy_gas_limit = 500_000;
                     config.approve_gas_limit = 200_000;
@@ -411,7 +442,7 @@ async fn main() -> Result<()> {
 
     // Initialize token tracking subscriber
     info!("\n📦 Initializing token tracking subscriber...");
-    let mut token_subscriber = TokenTrackingSubscriber::new(0.1); // 0.1 ETH threshold
+    let mut token_subscriber = build_token_subscriber(0.1); // 0.1 ETH threshold
     let token_cache = token_subscriber.get_cache();
 
     // Start subscriber in background
@@ -454,8 +485,6 @@ async fn main() -> Result<()> {
     // Initialize components
     info!("\n🔧 Initializing pipeline components...");
 
-    let head_cache = Arc::new(CanonicalHeadCache::new());
-
     // IPC client
     let ipc_client = MempoolFetcherIPCClient::new(Some(&args.ipc_path))?;
     ipc_client.start().await?;
@@ -470,16 +499,8 @@ async fn main() -> Result<()> {
     info!("✅ Transaction router initialized");
 
     // Initialize unified simulator with custom config
-    let simulator = Arc::new(MempoolSimulator::new(
-        &args.reth_db_path,
-        head_cache.clone(),
-    )?);
+    let simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path, None)?);
     info!("✅ MempoolSimulator initialized (no database lock issues!)");
-
-    let header_task = head_cache.spawn_head_listener(args.ipc_path.clone());
-    head_cache
-        .wait_for_latest_header(Duration::from_secs(10))
-        .await?;
 
     // Get latest block
     let latest_block = simulator.get_latest_block()?;
@@ -754,8 +775,6 @@ async fn main() -> Result<()> {
     info!("📄 Results saved to: {}", log_path.display());
     info!("🔍 This test ran WITHOUT signal detection");
     info!("   Use this log to debug simulation issues");
-
-    header_task.abort();
 
     Ok(())
 }

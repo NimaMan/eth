@@ -197,36 +197,33 @@ async fn run_example(args: Args) -> Result<()> {
 
     info!("ℹ️ Fetching token metadata for {}", args.token);
     let decimals = match fetch_token_metadata(&provider, token_address, Some(args.block)).await {
-        Ok(meta) => {
+        Ok(Some(meta)) => {
             info!(
                 "  token metadata loaded: symbol={} decimals={}",
                 meta.symbol, meta.decimals
             );
             meta.decimals
         }
+        Ok(None) => {
+            warn!("  token metadata indicates non-ERC20 contract. Falling back to decimals() probe.");
+            fetch_token_decimals(&provider, token_address, Some(args.block))
+                .await
+                .with_context(|| "failed to determine token decimals via fallback decimals() probe")
+        }
         Err(meta_err) => {
             warn!(
                 "  token metadata lookup failed: {}. Falling back to decimals() probe.",
                 meta_err
             );
-            match fetch_token_decimals(&provider, token_address, Some(args.block)).await {
-                Ok(dec) => {
-                    info!("  decimals() probe succeeded: {}", dec);
-                    dec
-                }
-                Err(dec_err) => {
-                    return Err(eyre!(
-                        "failed to determine token decimals via metadata() and decimals(): {meta_err}; {dec_err}"
-                    ));
-                }
-            }
+            fetch_token_decimals(&provider, token_address, Some(args.block))
+                .await
+                .with_context(|| format!("failed after metadata() error: {meta_err}"))
         }
-    };
+    }?;
 
     let mut params = PoolBuySellParameters::new(token_address, pool_address, PoolType::UniswapV2);
     params.prior_txs = prior_txs.clone();
     params.block_number = Some(args.block);
-    params.block_header = Some(sealed_header.clone());
     params.token_decimals = decimals;
     params.test_amount = U256::from(10_000_000_000_000_000u64); // 0.01 ETH probe
 

@@ -1,6 +1,9 @@
 use std::time::Instant;
 
+use alloy_primitives::keccak256;
+use alloy_primitives::Address;
 use reth_chain_query::{provider::RethQueryProvider, to_checksum_address};
+use rlp::RlpStream;
 use tracing::info;
 
 use crate::{
@@ -49,6 +52,10 @@ impl SimulationManager {
                 .contract_creation_events
                 .first()
                 .map(|evt| evt.contract_address)
+                .or_else(|| {
+                    // Fallback: derive from sender + nonce when receipt/event is missing
+                    derive_contract_address(processed.from_address, processed.nonce)
+                })
         });
 
         let Some(contract_address) = contract_address else {
@@ -71,12 +78,18 @@ impl SimulationManager {
 
         match RethQueryProvider::with_simulator(self.mempool_simulator.get_tx_simulator()) {
             Ok(provider) => match fetch_token_metadata(&provider, contract_address, None).await {
-                Ok(metadata) => {
+                Ok(Some(metadata)) => {
                     result.debug_info = Some(format!(
                         "Tracked new deployment {} (symbol: {}, decimals: {})",
                         to_checksum_address(&contract_address),
                         metadata.symbol,
                         metadata.decimals
+                    ));
+                }
+                Ok(None) => {
+                    result.debug_info = Some(format!(
+                        "Tracked new deployment {} (non-ERC20 bytecode)",
+                        to_checksum_address(&contract_address)
                     ));
                 }
                 Err(err) => {
@@ -104,4 +117,14 @@ impl SimulationManager {
 
         result
     }
+}
+
+/// Derive a contract address from sender + nonce (Create opcode rules).
+fn derive_contract_address(sender: Address, nonce: u64) -> Option<Address> {
+    let mut stream = RlpStream::new_list(2);
+    stream.append(&sender.as_slice());
+    stream.append(&nonce);
+    let hash = keccak256(stream.out());
+    // Last 20 bytes
+    Some(Address::from_slice(&hash[12..]))
 }

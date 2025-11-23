@@ -7,6 +7,8 @@
 // 4. Serde compatibility with Python
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// Type alias for Ethereum addresses (checksummed hex strings)
 pub type Address = String;
@@ -81,6 +83,26 @@ pub struct Token {
     pub total_liquidity: f64,
 }
 
+/// Lifecycle states shared with Python publisher
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PoolLifecycle {
+    Discovered,
+    #[serde(alias = "SEEDED")]
+    LiquidityDeposited,
+    Active,
+    Scam,
+    Evicted,
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for PoolLifecycle {
+    fn default() -> Self {
+        PoolLifecycle::Unknown
+    }
+}
+
 /// Complete pool information - single source of truth
 #[derive(Debug, Clone, Deserialize)]
 pub struct Pool {
@@ -119,6 +141,19 @@ pub struct Pool {
     // LP token approval tracking (V2 pools only)
     #[serde(default)]
     pub lp_tokens_approved_percentage: Option<f64>,
+
+    // Lifecycle tracking
+    #[serde(default)]
+    pub lifecycle: PoolLifecycle,
+
+    #[serde(default)]
+    pub control_addresses: Vec<Address>,
+
+    #[serde(default)]
+    pub can_buy: bool,
+
+    #[serde(default)]
+    pub can_sell: bool,
 
     // System metadata (not from Python)
     #[serde(skip, default = "std::time::Instant::now")]
@@ -159,7 +194,7 @@ pub struct TokenUpdate {
     pub token_count: usize,
     pub block_number: BlockNumber,
     pub timestamp: f64,
-    pub data: std::collections::HashMap<Address, TokenWithPools>,
+    pub data: HashMap<Address, TokenWithPools>,
 }
 
 /// Token with embedded pools (as sent by Python)
@@ -170,7 +205,7 @@ pub struct TokenWithPools {
     pub token: Token,
 
     // Pools mapped by address
-    pub pools: std::collections::HashMap<Address, Pool>,
+    pub pools: HashMap<Address, Pool>,
 }
 
 /// Cache configuration
@@ -278,7 +313,7 @@ pub struct PoolUpdatesMessage {
     pub pool_count: usize,
     pub block_number: BlockNumber,
     pub timestamp: f64,
-    pub data: std::collections::HashMap<Address, PoolUpdate>,
+    pub data: HashMap<Address, PoolUpdate>,
 }
 
 /// Token creator information
@@ -304,7 +339,7 @@ pub struct TokenCreatorMessage {
 pub struct TokenCreatorsMessage {
     pub message_type: String,
     pub creator_count: usize,
-    pub data: std::collections::HashMap<Address, TokenCreator>,
+    pub data: HashMap<Address, TokenCreator>,
 }
 
 /// Token-centric updates message (new format)
@@ -315,7 +350,8 @@ pub struct TokenUpdatesMessage {
     pub token_count: usize,
     pub block_number: BlockNumber,
     pub timestamp: f64,
-    pub data: std::collections::HashMap<Address, TokenWithPools>,
+    #[serde(default)]
+    pub data: Value,
 }
 
 /// Response to token query requests
@@ -324,7 +360,7 @@ pub struct TokenQueryResponse {
     pub status: String,
     pub count: Option<usize>,
     pub error: Option<String>,
-    pub data: Option<std::collections::HashMap<Address, TokenWithPools>>,
+    pub data: Option<Value>,
 }
 
 /// Creator state information (unused but kept for compatibility)
@@ -333,4 +369,40 @@ pub struct TokenCreatorState {
     pub address: Address,
     pub block_number: BlockNumber,
     pub timestamp: f64,
+}
+
+pub enum TokenUpdatePayload {
+    TokenMap(HashMap<Address, TokenWithPools>),
+    Addresses(Vec<String>),
+    Empty,
+}
+
+impl TokenUpdatesMessage {
+    pub fn into_snapshot_map(self) -> TokenUpdatePayload {
+        match self.data {
+            Value::Object(map) => {
+                let value = Value::Object(map);
+                match serde_json::from_value::<HashMap<Address, TokenWithPools>>(value) {
+                    Ok(parsed) if !parsed.is_empty() => TokenUpdatePayload::TokenMap(parsed),
+                    Ok(_) => TokenUpdatePayload::Empty,
+                    Err(err) => {
+                        tracing::warn!("Failed to parse token snapshot payload: {}", err);
+                        TokenUpdatePayload::Empty
+                    }
+                }
+            }
+            Value::Array(arr) => {
+                let addresses: Vec<String> = arr
+                    .into_iter()
+                    .filter_map(|val| val.as_str().map(|s| s.to_string()))
+                    .collect();
+                if addresses.is_empty() {
+                    TokenUpdatePayload::Empty
+                } else {
+                    TokenUpdatePayload::Addresses(addresses)
+                }
+            }
+            _ => TokenUpdatePayload::Empty,
+        }
+    }
 }

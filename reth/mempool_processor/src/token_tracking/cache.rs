@@ -16,7 +16,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub use super::types::{Address, CacheConfig, Pool, Token, TokenUpdate, TokenWithPools};
+use super::thresholds::threshold_for_symbol;
+pub use super::types::{
+    Address, CacheConfig, Pool, PoolLifecycle, Token, TokenUpdate, TokenWithPools,
+};
 
 /// High-performance token tracking cache with bounded memory
 #[derive(Clone)]
@@ -34,6 +37,7 @@ pub struct TokenTrackingCache {
     active_creators: Arc<RwLock<HashSet<Address>>>,
     active_pools: Arc<RwLock<HashSet<Address>>>,
     high_liquidity_pools: Arc<RwLock<HashSet<Address>>>,
+    scam_pools: Arc<RwLock<HashSet<Address>>>,
 
     // Configuration
     config: CacheConfig,
@@ -55,6 +59,7 @@ impl TokenTrackingCache {
             active_creators: Arc::new(RwLock::new(HashSet::new())),
             active_pools: Arc::new(RwLock::new(HashSet::new())),
             high_liquidity_pools: Arc::new(RwLock::new(HashSet::new())),
+            scam_pools: Arc::new(RwLock::new(HashSet::new())),
             config,
             log_path: Arc::new(RwLock::new(None)),
         }
@@ -192,6 +197,7 @@ impl TokenTrackingCache {
         let mut active_creators = self.active_creators.write().await;
         let mut active_pools = self.active_pools.write().await;
         let mut high_liquidity_pools = self.high_liquidity_pools.write().await;
+        let mut scam_pools = self.scam_pools.write().await;
 
         // Process each token and its pools
         for (token_addr, token_with_pools) in data {
@@ -199,7 +205,12 @@ impl TokenTrackingCache {
             let pools = token_with_pools.pools;
 
             // Calculate cached values
-            token.total_liquidity = pools.values().map(|p| p.eth_reserve).sum();
+            token.total_liquidity = pools
+                .values()
+                .filter(|pool| !pool.is_scam)
+                .filter(|pool| pool_is_viable(pool, self.config.eth_threshold))
+                .map(|p| p.eth_reserve)
+                .sum();
 
             // Update token
             let token_arc = Arc::new(token.clone());
@@ -234,6 +245,9 @@ impl TokenTrackingCache {
             if let Some(old_pools) = token_to_pools.get(&token_addr) {
                 for old_pool in old_pools {
                     pool_to_token.remove(old_pool);
+                    active_pools.remove(old_pool);
+                    high_liquidity_pools.remove(old_pool);
+                    scam_pools.remove(old_pool);
                 }
             }
 
@@ -242,6 +256,16 @@ impl TokenTrackingCache {
             for (pool_addr, mut pool) in pools {
                 // Ensure token_address is set
                 pool.token_address = token_addr.clone();
+
+                if pool.is_scam {
+                    pool_to_token.remove(&pool_addr);
+                    active_pools.remove(&pool_addr);
+                    high_liquidity_pools.remove(&pool_addr);
+                    scam_pools.insert(pool_addr.clone());
+                    continue;
+                } else {
+                    scam_pools.remove(&pool_addr);
+                }
 
                 let pool_arc = Arc::new(pool.clone());
                 pools_cache.put(pool_addr.clone(), pool_arc);
@@ -252,9 +276,24 @@ impl TokenTrackingCache {
                 pool_to_token.insert(pool_addr.clone(), token_addr.clone());
                 active_pools.insert(pool_addr.clone());
 
+                for control_addr in &pool.control_addresses {
+                    if control_addr.is_empty() {
+                        continue;
+                    }
+                    active_creators.insert(control_addr.clone());
+                    creator_to_tokens
+                        .entry(control_addr.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(token_addr.clone());
+                }
+
                 // Track high liquidity pools
-                if pool.eth_reserve >= self.config.eth_threshold {
-                    high_liquidity_pools.insert(pool_addr);
+                let threshold = pool_liquidity_threshold(&pool, self.config.eth_threshold);
+                if pool_is_viable(&pool, self.config.eth_threshold) && pool.eth_reserve >= threshold
+                {
+                    high_liquidity_pools.insert(pool_addr.clone());
+                } else {
+                    high_liquidity_pools.remove(&pool_addr);
                 }
             }
 
@@ -340,6 +379,39 @@ pub struct UpdateResult {
     pub creators_added: usize,
 }
 
+fn pool_is_viable(pool: &Pool, fallback_eth_threshold: f64) -> bool {
+    match pool.lifecycle {
+        PoolLifecycle::LiquidityDeposited | PoolLifecycle::Active => true,
+        PoolLifecycle::Scam | PoolLifecycle::Evicted => false,
+        PoolLifecycle::Discovered | PoolLifecycle::Unknown => {
+            pool.eth_reserve >= pool_liquidity_threshold(pool, fallback_eth_threshold)
+        }
+    }
+}
+
+fn pool_liquidity_threshold(pool: &Pool, fallback_eth_threshold: f64) -> f64 {
+    let symbol = pool.denom_currency.trim();
+    if !symbol.is_empty() {
+        if let Some(threshold) = threshold_for_symbol(symbol) {
+            return threshold;
+        }
+
+        if symbol.eq_ignore_ascii_case("ETH") {
+            return fallback_eth_threshold;
+        }
+    }
+
+    // Treat the zero address as native ETH in V4 pools
+    if pool
+        .denom_address
+        .eq_ignore_ascii_case("0x0000000000000000000000000000000000000000")
+    {
+        return fallback_eth_threshold;
+    }
+
+    fallback_eth_threshold
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +463,11 @@ mod tests {
             last_updated_time: 1234567900.0,
             is_scam: false,
             scam_label: None,
+            lp_tokens_approved_percentage: None,
+            lifecycle: PoolLifecycle::Active,
+            control_addresses: Vec::new(),
+            can_buy: true,
+            can_sell: true,
             received_at: std::time::Instant::now(),
         };
 
