@@ -7,8 +7,11 @@ use reth_chain_query::tx_builders::uniswap_v4::{
     build_token_approval_tx,
     build_weth_deposit_tx,
     compute_contract_address,
+    pad_address,
+    pad_u256,
+    CMD_TRANSFER_FROM,
 };
-use reth_provider::AccountReader;
+use reth_provider::AccountExtReader;
 use std::sync::Arc;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::UnsignedTransaction;
@@ -58,7 +61,12 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
+    let account = provider.basic_accounts(vec![buyer_address])?
+        .into_iter()
+        .find(|(addr, _)| addr == &buyer_address)
+        .map(|(_, acc_opt)| acc_opt)
+        .flatten()
+        .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
     let mut chain = simulator
@@ -126,9 +134,23 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         limit
     );
     
-    let commands_buy = Bytes::from(vec![0x06]); // CMD_BALANCER_SWAP
-    let inputs_buy = vec![Bytes::from(input_buy)];
-    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy);
+    // Commands and Inputs for execute
+    let mut commands_buy_vec = Vec::new();
+    let mut inputs_buy_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for WETH
+    let mut transfer_in_input = Vec::new();
+    transfer_in_input.extend_from_slice(&pad_address(weth_address));
+    transfer_in_input.extend_from_slice(&pad_u256(amount_in));
+    commands_buy_vec.push(CMD_TRANSFER_FROM);
+    inputs_buy_vec.push(Bytes::from(transfer_in_input));
+
+    // 2. Add Balancer Swap command and input
+    commands_buy_vec.push(0x06); // CMD_BALANCER_SWAP
+    inputs_buy_vec.push(Bytes::from(input_buy));
+    
+    let commands_buy = Bytes::from(commands_buy_vec);
+    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy_vec);
 
     let mut buy_tx = UnsignedTransaction {
         from: Some(buyer_address),
@@ -200,9 +222,23 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         tokens_received,
         limit
     );
-    let commands_sell = Bytes::from(vec![0x06]); // CMD_BALANCER_SWAP
-    let inputs_sell = vec![Bytes::from(input_sell)];
-    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell);
+
+    let mut commands_sell_vec = Vec::new();
+    let mut inputs_sell_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for BAL
+    let mut transfer_out_input = Vec::new();
+    transfer_out_input.extend_from_slice(&pad_address(bal_address));
+    transfer_out_input.extend_from_slice(&pad_u256(tokens_received));
+    commands_sell_vec.push(CMD_TRANSFER_FROM);
+    inputs_sell_vec.push(Bytes::from(transfer_out_input));
+
+    // 2. Add Balancer Swap command and input
+    commands_sell_vec.push(0x06); // CMD_BALANCER_SWAP
+    inputs_sell_vec.push(Bytes::from(input_sell));
+
+    let commands_sell = Bytes::from(commands_sell_vec);
+    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell_vec);
 
     let mut sell_tx = UnsignedTransaction {
         from: Some(buyer_address),

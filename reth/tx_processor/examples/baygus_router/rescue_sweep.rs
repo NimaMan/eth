@@ -4,7 +4,7 @@ use reth_chain_query::common_addresses::{uniswap_v2_tokens};
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
-    build_weth_deposit_tx, compute_contract_address,
+    build_weth_deposit_tx, compute_contract_address, pad_address, pad_u256,
 };
 use reth_provider::AccountReader;
 use std::sync::Arc;
@@ -107,8 +107,23 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     let path_buy = vec![weth_address, usdc_address];
     let input_buy = encode_v2_swap_params(amount_in, U256::ZERO, &path_buy, buyer_address, true);
-    let commands_buy = Bytes::from(vec![0x02]); // V2_SWAP
-    let inputs_buy = vec![Bytes::from(input_buy)]; // payerIsUser already encoded
+    // Prepend CMD_TRANSFER_FROM to fund the router with WETH before swapping.
+    let mut commands_buy_vec = Vec::new();
+    let mut inputs_buy_vec = Vec::new();
+
+    // CMD_TRANSFER_FROM (0x0a)
+    let mut transfer_input = Vec::new();
+    transfer_input.extend_from_slice(&pad_address(weth_address));
+    transfer_input.extend_from_slice(&pad_u256(amount_in));
+    commands_buy_vec.push(0x0a);
+    inputs_buy_vec.push(Bytes::from(transfer_input));
+
+    // CMD_V2_SWAP (0x02)
+    commands_buy_vec.push(0x02);
+    inputs_buy_vec.push(Bytes::from(input_buy));
+
+    let commands_buy = Bytes::from(commands_buy_vec);
+    let inputs_buy = inputs_buy_vec;
     let execute_calldata_buy = encode_execute(commands_buy, inputs_buy);
 
     let mut buy_tx = UnsignedTransaction {

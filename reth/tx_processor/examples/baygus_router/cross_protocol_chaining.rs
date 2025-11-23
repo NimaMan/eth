@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::Result;
-use reth_chain_query::common_addresses::{uniswap_v2_tokens, uniswap_v3_tokens, sushiswap_tokens};
+use reth_chain_query::common_addresses::uniswap_v3_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx,
@@ -8,6 +8,9 @@ use reth_chain_query::tx_builders::uniswap_v4::{
     build_token_approval_tx,
     build_weth_deposit_tx,
     compute_contract_address,
+    pad_address,
+    pad_u256,
+    CMD_TRANSFER_FROM,
 };
 use reth_provider::AccountReader;
 use std::sync::Arc;
@@ -115,59 +118,92 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // 6. Execute Chained Swap
-    // Command 1: V3_SWAP (WETH -> USDC). Recipient = Router (address(this)). Payer = User (true).
-    // Command 2: SUSHISWAP (USDC -> WETH). Recipient = User. Payer = Router (false).
+    // Command 0: TRANSFER_FROM (User -> Router) WETH amount_in
+    // Command 1: V3_SWAP (WETH -> USDC). Recipient = Router (address(this)), spends router balance.
+    // Command 2: SUSHISWAP (USDC -> WETH). Recipient = User, spends router balance (amountIn=0 means "use balance").
 
     // Encoding Command 1 (Uni V3)
     // Input: (ExactInputSingleParams, bool payerIsUser)
     // Params: tokenIn=WETH, tokenOut=USDC, fee=500, recipient=Router, amountIn=1ETH, ...
     let deadline = U256::from(1999999999u64);
-    let params_v3 = encode_v3_swap_params(
+    let input_v3 = encode_v3_swap_params(
         weth_address,
         usdc_address,
         fee_tier,
-        router_address, // Recipient is Router!
+        router_address, // route output to router for the chained hop
         deadline,
         amount_in,
         U256::ZERO,
         U256::ZERO
     );
-    let input_v3 = encode_with_bool(params_v3, true); // payerIsUser = true
 
-    // Encoding Command 2 (Sushi)
-    // Input: (amountIn=0???, amountOutMin=0, path=[USDC, WETH], recipient=User, bool payerIsUser)
-    // ISSUE: We don't know the exact amount of USDC received from V3 yet because it's atomic.
-    // The current router implementation requires explicit `amountIn`.
-    // To support chaining dynamically, the router needs to support "use balance" or we must predict amount.
-    // For this simulation, since we decode `amountIn` in `_v2Swap`, if we pass 0, it will try to approve 0.
-    // BUT `_v2Swap` does `approve(router, amountIn)`.
-    // If we want to use the *entire* balance, we need a way to signal "use balance of tokenIn".
-    // Common pattern: `amountIn = type(uint256).max` means "balanceOf(this)".
-    // Or we modify `_v2Swap` to handle a magic value or simply check balance if `!payerIsUser`.
+    // 3. Sushi Swap (USDC -> WETH) -> User (amountIn=0 uses router balance)
+    let path_sushi = vec![usdc_address, weth_address];
+    let input_sushi = encode_v2_swap_params(U256::ZERO, U256::ZERO, &path_sushi, buyer_address);
+
+    // Build commands/inputs
+    let mut commands_vec = Vec::new();
+    let mut inputs_vec = Vec::new();
+
+    // CMD_TRANSFER_FROM: move WETH from user to router
+    let mut transfer_input = Vec::new();
+    transfer_input.extend_from_slice(&pad_address(weth_address));
+    transfer_input.extend_from_slice(&pad_u256(amount_in));
+    commands_vec.push(CMD_TRANSFER_FROM);
+    inputs_vec.push(Bytes::from(transfer_input));
+
+    // CMD_V3_SWAP = 0x03
+    commands_vec.push(0x03);
+    inputs_vec.push(Bytes::from(input_v3));
+
+    // CMD_SUSHISWAP = 0x04
+    commands_vec.push(0x04);
+    inputs_vec.push(Bytes::from(input_sushi));
+
+    let commands = Bytes::from(commands_vec);
+    let inputs = inputs_vec;
+    let execute_calldata = encode_execute(commands, inputs);
+
+    // Build Transaction
+    let mut tx = UnsignedTransaction {
+        from: Some(buyer_address),
+        to: Some(router_address),
+        gas: Some(8_000_000), // Higher gas for multi-hop
+        value: Some(U256::ZERO),
+        data: Some(execute_calldata),
+        nonce: Some(deployer_nonce + step_index),
+        ..Default::default()
+    };
+    apply_simple_gas_policy(&mut tx);
+
+    // Execute
+    let result = chain.step_with_trace(tx.clone()).await?;
+    let processed = tx_processor.process_transaction_from_simulation_result(&tx, &result, latest_block, step_index).await?;
+
+    println!(
+        "[{}] Router Execute (Chain V3->Sushi): {} (hash {:#x})",
+        step_index + 1,
+        if result.success { "✅ success" } else { "❌ failed" },
+        processed.hash
+    );
+
+    if !result.success {
+        if let Some(reason) = result.revert_reason.as_deref() {
+            println!("⚠️ Revert reason: {reason}");
+        }
+        return Ok(());
+    }
+
+    // Check results
+    // We started with 1 WETH. We should get WETH back.
+    let weth_received = extract_incoming_amount(&processed, buyer_address, weth_address);
+    println!("WETH Returned: {} WETH", format_wei(weth_received));
     
-    // Let's update the Router logic to handle `amountIn == 0` (or max) when `!payerIsUser` as "use full balance".
-    // For now, let's simulate "User -> Router -> User" in two separate txs to verify logic first?
-    // No, the goal is chaining.
-    // I will assume for now I have to predict the amount OR update router.
-    // Let's update `BaygusRouter` `_v2Swap` (and others) to read balance if `amountIn == 0` and `!payerIsUser`.
-    
-    // Wait, I can't update Router mid-simulation script writing.
-    // I should have updated Router logic for dynamic amounts.
-    // But let's see if I can cheat by predicting the output?
-    // No, that's hard.
-    // I will proceed to update `BaygusRouter.sol` first to support dynamic amounts before finishing this script. 
-    
-    return Ok(());
+    debug_log_balance_change("Buyer after Chain", &processed, buyer_address, weth_address, usdc_address);
+
+    Ok(())
 }
 
-fn encode_with_bool(mut data: Vec<u8>, flag: bool) -> Vec<u8> {
-    // bool is encoded as uint256 (32 bytes) 0 or 1
-    data.extend_from_slice(&[0u8; 31]);
-    data.extend_from_slice(&[if flag { 1 } else { 0 }]);
-    data
-}
-
-// ... (Copy existing encoders and helpers) ...
 fn encode_v3_swap_params(
     token_in: Address,
     token_out: Address,
@@ -190,8 +226,151 @@ fn encode_v3_swap_params(
     data
 }
 
+fn encode_v2_swap_params(
+    amount_in: U256,
+    amount_out_min: U256,
+    path: &[Address],
+    recipient: Address,
+) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(&amount_in.to_be_bytes::<32>());
+    data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
+    // path offset = 5 words * 32 bytes = 160
+    data.extend_from_slice(&U256::from(160).to_be_bytes::<32>());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
+    // deadline (uint256)
+    data.extend_from_slice(&U256::from(1999999999u64).to_be_bytes::<32>());
+
+    // path array
+    data.extend_from_slice(&U256::from(path.len()).to_be_bytes::<32>());
+    for addr in path {
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(addr.as_slice());
+    }
+    data
+}
+
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
     if tx.gas.is_none() { tx.gas = Some(5_000_000); }
     if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
     if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+}
+
+fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
+    let selector = [0x24, 0x85, 0x6b, 0xc3];
+    let mut data = selector.to_vec();
+    data.extend_from_slice(&U256::from(64).to_be_bytes::<32>());
+    let padded_commands_len = (commands.len() + 31) / 32 * 32;
+    let inputs_offset = 64 + 32 + padded_commands_len;
+    data.extend_from_slice(&U256::from(inputs_offset).to_be_bytes::<32>());
+    data.extend_from_slice(&U256::from(commands.len()).to_be_bytes::<32>());
+    data.extend_from_slice(&commands);
+    let padding = padded_commands_len - commands.len();
+    data.extend_from_slice(&vec![0u8; padding]);
+    data.extend_from_slice(&U256::from(inputs.len()).to_be_bytes::<32>());
+    let mut body_offset = inputs.len() * 32;
+    let mut bodies = Vec::new();
+    for input in &inputs {
+        data.extend_from_slice(&U256::from(body_offset).to_be_bytes::<32>());
+        let mut body = Vec::new();
+        body.extend_from_slice(&U256::from(input.len()).to_be_bytes::<32>());
+        body.extend_from_slice(input);
+        let p = (input.len() + 31) / 32 * 32 - input.len();
+        body.extend_from_slice(&vec![0u8; p]);
+        bodies.push(body);
+        body_offset += 32 + input.len() + p;
+    }
+    for body in bodies { data.extend_from_slice(&body); }
+    Bytes::from(data)
+}
+
+fn format_wei(wei: U256) -> String {
+    format_amount(wei, 18)
+}
+
+fn format_amount(amount: U256, decimals: u8) -> String {
+    if amount.is_zero() { return "0".to_string(); }
+    let digits = amount.to_string();
+    let decimals = decimals as usize;
+    if decimals == 0 { return digits; }
+    if digits.len() <= decimals {
+        let padded = format!("{:0>width$}", digits, width = decimals + 1);
+        let (whole, frac) = padded.split_at(padded.len() - decimals);
+        format!("{}.{}", whole, frac.trim_end_matches('0'))
+    } else {
+        let (whole, frac) = digits.split_at(digits.len() - decimals);
+        format!("{}.{}", whole, frac.trim_end_matches('0'))
+    }
+}
+
+fn extract_incoming_amount(
+    processed_tx: &tx_processor::tx_processor::data_models::ProcessedTransaction,
+    account: Address,
+    token: Address,
+) -> U256 {
+    use tx_processor::tx_processor::address_balance_change_calculator::get_token_symbol;
+    if let Some(changes) = processed_tx.address_balance_changes.get(&account) {
+        // Check WETH (ERC20) movements
+        let key = to_checksum_address(&token);
+        if let Some(movement) = changes.movements.tokens.get(&key) {
+             let total_in: U256 = movement.incoming.values().fold(U256::ZERO, |acc, v| acc + *v);
+             if total_in > U256::ZERO { return total_in; }
+        }
+        
+        // Also check if it's tracked as currency (e.g. ETH)
+        if let Some(symbol) = get_token_symbol(&token) {
+             if let Some(movement) = changes.movements.currencies.get(symbol) {
+                 // Currency movements might be U256 or I256? 
+                 // Usually movements are absolute amounts (U256).
+                 let total_in: U256 = movement.incoming.values().fold(U256::ZERO, |acc, v| acc + *v);
+                 if total_in > U256::ZERO { return total_in; }
+             }
+        }
+    }
+    U256::ZERO
+}
+
+fn debug_log_balance_change(
+    label: &str,
+    processed_tx: &tx_processor::tx_processor::data_models::ProcessedTransaction,
+    address: Address,
+    weth_address: Address,
+    usdc_address: Address,
+) {
+    use std::collections::HashMap;
+    use tx_processor::tx_processor::address_balance_change_calculator::get_token_symbol;
+
+    println!("\n--- {} Balance Changes ---", label);
+    if let Some(changes) = processed_tx.address_balance_changes.get(&address) {
+        let mut currency_changes: HashMap<String, I256> = HashMap::new();
+        for (sym, amount) in &changes.currency_net {
+            currency_changes.insert(sym.clone(), *amount);
+        }
+        for (addr_key, amount) in &changes.token_net {
+            if let Ok(addr) = addr_key.parse::<Address>() {
+                if addr == weth_address {
+                    currency_changes.insert("mWETH".to_string(), *amount);
+                } else if addr == usdc_address {
+                    currency_changes.insert("mUSDC".to_string(), *amount);
+                } else if let Some(sym) = get_token_symbol(&addr) {
+                    currency_changes.insert(sym.to_string(), *amount);
+                } else {
+                    currency_changes.insert(format!("Token({:?})", addr), *amount);
+                }
+            }
+        }
+        for (currency, amount) in currency_changes {
+            let sign = if amount > I256::ZERO { "+" } else if amount < I256::ZERO { "-" } else { "" };
+            let display_amount = if currency == "ETH" || currency == "WETH" || currency == "mWETH" {
+                format_wei(amount.unsigned_abs())
+            } else {
+                format_amount(amount.unsigned_abs(), 6)
+            };
+            println!("  {}: {}{}", currency, sign, display_amount);
+        }
+    } else {
+        println!("  No changes recorded for {}", address);
+    }
+    println!("--------------------------");
 }

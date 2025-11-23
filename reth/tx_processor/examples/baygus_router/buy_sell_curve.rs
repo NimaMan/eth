@@ -1,20 +1,22 @@
 use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::Result;
-use reth_chain_query::common_addresses::{curve_pools, uniswap_v2_tokens};
+use reth_chain_query::common_addresses::uniswap_v2_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx,
     build_mock_pool_manager_deploy_tx,
     build_token_approval_tx,
+    build_weth_deposit_tx,
     compute_contract_address,
+    pad_address,
+    pad_u256,
+    CMD_TRANSFER_FROM,
 };
-use reth_provider::AccountReader;
+use reth_provider::AccountExtReader;
 use std::sync::Arc;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::UnsignedTransaction;
 use tx_simulator::TxSimulator;
-
-const TEST_AMOUNT_USDC: u128 = 1_000_000_000; // 1000 USDC
 
 fn main() -> Result<()> {
     // 1. Setup Simulator (Synchronous)
@@ -68,7 +70,12 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
+    let account = provider.basic_accounts(vec![buyer_address])?
+        .into_iter()
+        .find(|(addr, _)| addr == &buyer_address)
+        .map(|(_, acc_opt)| acc_opt)
+        .flatten()
+        .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
     let mut chain = simulator
@@ -113,7 +120,6 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     // But we need to deposit WETH first.
     
     // A. Deposit WETH
-    use reth_chain_query::tx_builders::uniswap_v4::build_weth_deposit_tx;
     let deposit_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
     let mut deposit_tx = build_weth_deposit_tx(buyer_address, weth_address, deposit_amount);
     deposit_tx.nonce = Some(deployer_nonce + step_index);
@@ -129,17 +135,35 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // C. Swap WETH -> USDC (V2)
+    // Removed: use reth_chain_query::tx_builders::uniswap_v4::CMD_V2_SWAP;
+
     let path_v2 = vec![weth_address, usdc_address];
-    let input_v2 = encode_v2_swap_params(deposit_amount, U256::ZERO, &path_v2, buyer_address);
-    let commands_v2 = Bytes::from(vec![0x02]);
-    let inputs_v2 = vec![Bytes::from(input_v2)];
-    let execute_v2 = encode_execute(commands_v2, inputs_v2);
+    let input_v2_swap_params = encode_v2_swap_params(deposit_amount, U256::ZERO, &path_v2, buyer_address);
+    
+    // Commands and Inputs for execute
+    let mut commands_v2_vec = Vec::new();
+    let mut inputs_v2_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for WETH
+    let mut transfer_in_input = Vec::new();
+    transfer_in_input.extend_from_slice(&pad_address(weth_address));
+    transfer_in_input.extend_from_slice(&pad_u256(deposit_amount));
+    commands_v2_vec.push(CMD_TRANSFER_FROM);
+    inputs_v2_vec.push(Bytes::from(transfer_in_input));
+
+    // 2. Add V2 Swap command and input
+    commands_v2_vec.push(0x02); // CMD_V2_SWAP
+    inputs_v2_vec.push(Bytes::from(input_v2_swap_params));
+
+    let commands_v2 = Bytes::from(commands_v2_vec);
+    let execute_v2 = encode_execute(commands_v2, inputs_v2_vec);
+
     let mut v2_tx = UnsignedTransaction {
         from: Some(buyer_address),
         to: Some(router_address),
         gas: Some(5_000_000),
         value: Some(U256::ZERO),
-        data: Some(execute_v2), // Fix var name
+        data: Some(execute_v2),
         nonce: Some(deployer_nonce + step_index),
         ..Default::default()
     };
@@ -183,9 +207,22 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         false // useUnderlying? 3pool exchange is usually sufficient? 3pool has `exchange`.
     );
     // CMD_CURVE_SWAP = 0x05
-    let commands_curve = Bytes::from(vec![0x05]);
-    let inputs_curve = vec![Bytes::from(input_curve)];
-    let execute_curve_calldata = encode_execute(commands_curve, inputs_curve);
+    let mut commands_curve_vec = Vec::new();
+    let mut inputs_curve_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for USDC
+    let mut transfer_in_curve_input = Vec::new();
+    transfer_in_curve_input.extend_from_slice(&pad_address(usdc_address));
+    transfer_in_curve_input.extend_from_slice(&pad_u256(dx));
+    commands_curve_vec.push(CMD_TRANSFER_FROM);
+    inputs_curve_vec.push(Bytes::from(transfer_in_curve_input));
+
+    // 2. Add Curve Swap command and input
+    commands_curve_vec.push(0x05); // CMD_CURVE_SWAP
+    inputs_curve_vec.push(Bytes::from(input_curve));
+
+    let commands_curve = Bytes::from(commands_curve_vec);
+    let execute_curve_calldata = encode_execute(commands_curve, inputs_curve_vec);
 
     let mut curve_tx = UnsignedTransaction {
         from: Some(buyer_address),

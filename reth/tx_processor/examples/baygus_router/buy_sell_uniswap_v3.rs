@@ -8,8 +8,11 @@ use reth_chain_query::tx_builders::uniswap_v4::{
     build_token_approval_tx,
     build_weth_deposit_tx,
     compute_contract_address,
+    pad_address,
+    pad_u256,
+    CMD_TRANSFER_FROM,
 };
-use reth_provider::AccountReader;
+use reth_provider::AccountExtReader;
 use std::sync::Arc;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::UnsignedTransaction;
@@ -59,7 +62,12 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
+    let account = provider.basic_accounts(vec![buyer_address])?
+        .into_iter()
+        .find(|(addr, _)| addr == &buyer_address)
+        .map(|(_, acc_opt)| acc_opt)
+        .flatten()
+        .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
     let mut chain = simulator
@@ -117,10 +125,21 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // 6. Execute Buy (WETH -> USDC)
-    // Command: V3_SWAP (0x03)
-    // Input: ExactInputSingleParams(tokenIn, tokenOut, fee, recipient, deadline, amountIn, amountOutMin, sqrtPriceLimitX96)
     let deadline = U256::from(1999999999u64);
-    let input_buy = encode_v3_swap_params(
+
+    // Commands and Inputs for execute
+    let mut commands_buy_vec = Vec::new();
+    let mut inputs_buy_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for WETH
+    let mut transfer_in_input = Vec::new();
+    transfer_in_input.extend_from_slice(&pad_address(weth_address));
+    transfer_in_input.extend_from_slice(&pad_u256(amount_in));
+    commands_buy_vec.push(CMD_TRANSFER_FROM);
+    inputs_buy_vec.push(Bytes::from(transfer_in_input));
+
+    // 2. Add V3 Swap command and input
+    let input_buy_v3_swap = encode_v3_swap_params(
         weth_address,
         usdc_address,
         fee_tier,
@@ -130,10 +149,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         U256::ZERO, // amountOutMin
         U256::ZERO  // sqrtPriceLimitX96
     );
+    commands_buy_vec.push(0x03); // CMD_V3_SWAP
+    inputs_buy_vec.push(Bytes::from(input_buy_v3_swap));
     
-    let commands_buy = Bytes::from(vec![0x03]); // V3_SWAP
-    let inputs_buy = vec![Bytes::from(input_buy)];
-    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy);
+    let commands_buy = Bytes::from(commands_buy_vec);
+    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy_vec);
 
     let mut buy_tx = UnsignedTransaction {
         from: Some(buyer_address),
@@ -190,7 +210,18 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // 8. Execute Sell (USDC -> WETH)
-    let input_sell = encode_v3_swap_params(
+    let mut commands_sell_vec = Vec::new();
+    let mut inputs_sell_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for USDC
+    let mut transfer_out_input = Vec::new();
+    transfer_out_input.extend_from_slice(&pad_address(usdc_address));
+    transfer_out_input.extend_from_slice(&pad_u256(tokens_received));
+    commands_sell_vec.push(CMD_TRANSFER_FROM);
+    inputs_sell_vec.push(Bytes::from(transfer_out_input));
+
+    // 2. Add V3 Swap command and input
+    let input_sell_v3_swap = encode_v3_swap_params(
         usdc_address,
         weth_address,
         fee_tier,
@@ -200,9 +231,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         U256::ZERO,
         U256::ZERO
     );
-    let commands_sell = Bytes::from(vec![0x03]); // V3_SWAP
-    let inputs_sell = vec![Bytes::from(input_sell)];
-    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell);
+    commands_sell_vec.push(0x03); // CMD_V3_SWAP
+    inputs_sell_vec.push(Bytes::from(input_sell_v3_swap));
+
+    let commands_sell = Bytes::from(commands_sell_vec);
+    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell_vec);
 
     let mut sell_tx = UnsignedTransaction {
         from: Some(buyer_address),

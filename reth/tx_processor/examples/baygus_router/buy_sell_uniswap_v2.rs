@@ -8,8 +8,11 @@ use reth_chain_query::tx_builders::uniswap_v4::{
     build_token_approval_tx,
     build_weth_deposit_tx,
     compute_contract_address,
+    pad_address,
+    pad_u256,
+    CMD_TRANSFER_FROM,
 };
-use reth_provider::AccountReader;
+use reth_provider::AccountExtReader; 
 use std::sync::Arc;
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::UnsignedTransaction;
@@ -61,7 +64,12 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
+    let account = provider.basic_accounts(vec![buyer_address])? // Pass a vector of addresses
+        .into_iter()
+        .find(|(addr, _)| addr == &buyer_address) // Find the tuple for buyer_address
+        .map(|(_, acc_opt)| acc_opt) // Extract the Option<Account>
+        .flatten() // Flatten Option<Option<Account>> to Option<Account>
+        .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
     let mut chain = simulator
@@ -123,13 +131,24 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     use alloy_primitives::Bytes;
 
-    // Manual ABI encoding for the V2 input tuple: (uint256 amountIn, uint256 amountOutMin, address[] path, address recipient)
-    let input_buy = encode_v2_swap_params(amount_in, amount_out_min, &path_buy, buyer_address);
+    // Commands and Inputs for execute
+    let mut commands_buy_vec = Vec::new();
+    let mut inputs_buy_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for WETH
+    let mut transfer_in_input = Vec::new();
+    transfer_in_input.extend_from_slice(&pad_address(weth_address));
+    transfer_in_input.extend_from_slice(&pad_u256(amount_in));
+    commands_buy_vec.push(CMD_TRANSFER_FROM);
+    inputs_buy_vec.push(Bytes::from(transfer_in_input));
+
+    // 2. Add V2 Swap command and input
+    let input_buy_v2_swap = encode_v2_swap_params(amount_in, amount_out_min, &path_buy, buyer_address);
+    commands_buy_vec.push(0x02); // CMD_V2_SWAP (V2_SWAP is 0x02 in SharedTypes.sol)
+    inputs_buy_vec.push(Bytes::from(input_buy_v2_swap));
     
-    // execute(bytes commands, bytes[] inputs)
-    let commands_buy = Bytes::from(vec![0x02]); // V2_SWAP
-    let inputs_buy = vec![Bytes::from(input_buy)];
-    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy);
+    let commands_buy = Bytes::from(commands_buy_vec);
+    let execute_calldata_buy = encode_execute(commands_buy, inputs_buy_vec);
 
     let mut buy_tx = UnsignedTransaction {
         from: Some(buyer_address),
@@ -194,10 +213,24 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     // 8. Execute Sell (USDC -> WETH)
     let path_sell = vec![usdc_address, weth_address];
-    let input_sell = encode_v2_swap_params(tokens_received, U256::ZERO, &path_sell, buyer_address);
-    let commands_sell = Bytes::from(vec![0x02]); // V2_SWAP
-    let inputs_sell = vec![Bytes::from(input_sell)];
-    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell);
+
+    let mut commands_sell_vec = Vec::new();
+    let mut inputs_sell_vec = Vec::new();
+
+    // 1. Prepend CMD_TRANSFER_FROM for USDC
+    let mut transfer_out_input = Vec::new();
+    transfer_out_input.extend_from_slice(&pad_address(usdc_address));
+    transfer_out_input.extend_from_slice(&pad_u256(tokens_received));
+    commands_sell_vec.push(CMD_TRANSFER_FROM);
+    inputs_sell_vec.push(Bytes::from(transfer_out_input));
+
+    // 2. Add V2 Swap command and input
+    let input_sell_v2_swap = encode_v2_swap_params(tokens_received, U256::ZERO, &path_sell, buyer_address);
+    commands_sell_vec.push(0x02); // CMD_V2_SWAP
+    inputs_sell_vec.push(Bytes::from(input_sell_v2_swap));
+
+    let commands_sell = Bytes::from(commands_sell_vec);
+    let execute_calldata_sell = encode_execute(commands_sell, inputs_sell_vec);
 
     let mut sell_tx = UnsignedTransaction {
         from: Some(buyer_address),
@@ -236,7 +269,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     let weth_received = extract_positive_amount(&sell_processed, buyer_address, weth_address);
     println!("WETH Received   : {} WETH", format_wei(weth_received));
-
+    
     debug_log_balance_change("Buyer after Sell", &sell_processed, buyer_address, weth_address, usdc_address);
 
     println!("\nFull Balance Changes:");
