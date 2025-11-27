@@ -170,11 +170,10 @@ class BlockProcessor:
                     f"{block_number}->{len(processed_transactions)}|{num_failed_txs} in {end_time - start_time:.2f}s"
                 )
 
-            address_index = self._build_address_index(processed_transactions)
+            #address_index = self._build_address_index(processed_transactions)
             result = ProcessedBlockResult(
                 transactions=processed_transactions,
                 block_header=block_header,
-                address_index=address_index or None,
             )
             return result
         except Exception as e:
@@ -202,36 +201,6 @@ class BlockProcessor:
                     self.logger.error(f"{__name__} Error processing block {block_number}: {str(e)}", exc_info=True)
 
         return results
-
-    async def process_blocks_in_batch(self, block_numbers: list[int]) -> Dict[int, ProcessedBlockResult]:
-        """Process a batch of blocks"""
-        try:
-            start_time = time.perf_counter()
-            blocks = await self.block_fetcher.fetch_blocks_batch(block_numbers[0], block_numbers[-1])
-            processed_results: Dict[int, ProcessedBlockResult] = {}
-            for block_number, block_data in blocks.items():
-                transactions = block_data['transactions']
-                block_timestamp = block_data['timestamp']
-                    
-                processed_txs = await self.tx_batch_processor.process_block_transactions(
-                    block_number=block_number,
-                    transactions=transactions,
-                    block_timestamp=block_timestamp
-                )
-                header = self._extract_block_header(block_data)
-                processed_results[block_number] = ProcessedBlockResult(
-                    transactions=processed_txs,
-                    block_header=header,
-                )
-
-            end_time = time.perf_counter()
-            if self.logger is not None:
-                self.logger.info(f"Processed {len(block_numbers)} blocks in batch in {end_time - start_time:.4f} seconds")
-            return processed_results
-        except Exception as e:
-            if self.logger is not None:
-                self.logger.error(f"{__name__} Error processing blocks in batch: {str(e)}", exc_info=True)
-            raise
 
     async def close(self):
         """Close all aiohttp sessions and other resources"""
