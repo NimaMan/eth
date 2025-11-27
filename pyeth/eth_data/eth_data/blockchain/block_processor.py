@@ -219,11 +219,9 @@ class BlockProcessor:
                     block_timestamp=block_timestamp
                 )
                 header = self._extract_block_header(block_data)
-                address_index = self._build_address_index(processed_txs)
                 processed_results[block_number] = ProcessedBlockResult(
                     transactions=processed_txs,
                     block_header=header,
-                    address_index=address_index or None,
                 )
 
             end_time = time.perf_counter()
@@ -246,47 +244,9 @@ class BlockProcessor:
         """Return a mapping of unique addresses to the transactions they touched."""
         index: Dict[str, List[object]] = defaultdict(list)
         for tx in processed_transactions:
-            addresses = self._extract_tx_addresses(tx)
+            addresses = tx.unique_addresses
             if not addresses:
                 continue
             for address in addresses:
                 index[address].append(tx)
         return dict(index)
-
-    def _extract_tx_addresses(self, tx: object) -> Set[str]:
-        addresses = getattr(tx, "unique_addresses", None)
-        if addresses is None and isinstance(tx, dict):
-            addresses = tx.get("unique_addresses")
-        normalized = self._normalize_address_set(addresses)
-        if normalized:
-            return normalized
-
-        fallback: Set[str] = set()
-        from_address = self._get_tx_field(tx, "from_address")
-        to_address = self._get_tx_field(tx, "to_address")
-        if from_address:
-            fallback.add(from_address)
-        if to_address:
-            fallback.add(to_address)
-        return fallback
-
-    @staticmethod
-    def _normalize_address_set(addresses: Optional[Iterable[Any]]) -> Set[str]:
-        normalized: Set[str] = set()
-        if not addresses:
-            return normalized
-        for address in addresses:
-            if not address:
-                continue
-            normalized.add(address)
-        return normalized
-
-    @staticmethod
-    def _get_tx_field(tx: object, field: str) -> Optional[Any]:
-        value = getattr(tx, field, None)
-        if value is not None:
-            return value
-        if isinstance(tx, dict):
-            return tx.get(field)
-        return None
-    
