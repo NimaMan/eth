@@ -104,7 +104,8 @@ Error Handling:
 """
 
 import time
-from typing import Any, Dict, Optional
+from collections import defaultdict
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from tqdm import tqdm
 from web3 import Web3
@@ -169,9 +170,11 @@ class BlockProcessor:
                     f"{block_number}->{len(processed_transactions)}|{num_failed_txs} in {end_time - start_time:.2f}s"
                 )
 
+            address_index = self._build_address_index(processed_transactions)
             result = ProcessedBlockResult(
                 transactions=processed_transactions,
                 block_header=block_header,
+                address_index=address_index or None,
             )
             return result
         except Exception as e:
@@ -216,9 +219,11 @@ class BlockProcessor:
                     block_timestamp=block_timestamp
                 )
                 header = self._extract_block_header(block_data)
+                address_index = self._build_address_index(processed_txs)
                 processed_results[block_number] = ProcessedBlockResult(
                     transactions=processed_txs,
                     block_header=header,
+                    address_index=address_index or None,
                 )
 
             end_time = time.perf_counter()
@@ -236,4 +241,52 @@ class BlockProcessor:
         await self.block_fetcher.close()    
         if self.logger:
             self.logger.info("BlockProcessor core resources cleaned up (fetcher, batch processor)")
+
+    def _build_address_index(self, processed_transactions: Iterable[object]) -> Dict[str, List[object]]:
+        """Return a mapping of unique addresses to the transactions they touched."""
+        index: Dict[str, List[object]] = defaultdict(list)
+        for tx in processed_transactions:
+            addresses = self._extract_tx_addresses(tx)
+            if not addresses:
+                continue
+            for address in addresses:
+                index[address].append(tx)
+        return dict(index)
+
+    def _extract_tx_addresses(self, tx: object) -> Set[str]:
+        addresses = getattr(tx, "unique_addresses", None)
+        if addresses is None and isinstance(tx, dict):
+            addresses = tx.get("unique_addresses")
+        normalized = self._normalize_address_set(addresses)
+        if normalized:
+            return normalized
+
+        fallback: Set[str] = set()
+        from_address = self._get_tx_field(tx, "from_address")
+        to_address = self._get_tx_field(tx, "to_address")
+        if from_address:
+            fallback.add(from_address)
+        if to_address:
+            fallback.add(to_address)
+        return fallback
+
+    @staticmethod
+    def _normalize_address_set(addresses: Optional[Iterable[Any]]) -> Set[str]:
+        normalized: Set[str] = set()
+        if not addresses:
+            return normalized
+        for address in addresses:
+            if not address:
+                continue
+            normalized.add(address)
+        return normalized
+
+    @staticmethod
+    def _get_tx_field(tx: object, field: str) -> Optional[Any]:
+        value = getattr(tx, field, None)
+        if value is not None:
+            return value
+        if isinstance(tx, dict):
+            return tx.get(field)
+        return None
     

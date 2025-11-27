@@ -45,6 +45,9 @@ class PyrethClient:
             self._chain_query = self._pyreth.chain_query()
         return self._chain_query
 
+    def tx_processor(self):
+        return self._pyreth.tx_processor()
+
     def processed_tx_provider(self):
         if self._processed_tx_provider is None:
             self._processed_tx_provider = self._pyreth.processed_tx_provider()
@@ -61,10 +64,11 @@ class PyrethClient:
         return self._pool_buy_sell_simulator
 
     def address_indexer(self, *, read_only: bool = False):
+        """Return the address index handle."""
         key = bool(read_only)
         if key not in self._address_indexers:
             if key:
-                self._address_indexers[key] = pyreth.AddressTxIndexer(read_only=True)
+                self._address_indexers[key] = pyreth.AddressTxIndexFetcher()
             else:
                 self._address_indexers[key] = pyreth.AddressTxIndexer()
         return self._address_indexers[key]

@@ -25,11 +25,16 @@ class RedisSignalPublisher:
 
 
 class RedisSignalSubscriber:
-    def __init__(self, redis_url: str = "redis://localhost:6379/0") -> None:
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379/0",
+        logger: Optional[Any] = None,
+    ) -> None:
         self._redis_url = redis_url
         self._redis: Optional[aioredis.Redis] = None
         self._pubsub: Optional[aioredis.client.PubSub] = None
         self._listener_task: Optional[asyncio.Task] = None
+        self._logger = logger
 
     async def _ensure_pubsub(self) -> aioredis.client.PubSub:
         if self._redis is None:
@@ -48,15 +53,26 @@ class RedisSignalSubscriber:
 
         async def _listener() -> None:
             while True:
-                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if message is None:
-                    await asyncio.sleep(0)
-                    continue
                 try:
-                    data = json.loads(message["data"])
-                except json.JSONDecodeError:
-                    data = {"raw": message["data"]}
-                await handler(message["channel"], data)
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    if message is None:
+                        await asyncio.sleep(0)
+                        continue
+                    try:
+                        data = json.loads(message["data"])
+                    except json.JSONDecodeError:
+                        data = {"raw": message["data"]}
+                    await handler(message["channel"], data)
+                except asyncio.CancelledError:
+                    # Normal shutdown path
+                    raise
+                except Exception as exc:
+                    if self._logger:
+                        self._logger.error(
+                            "RedisSignalSubscriber listener failed: %s", exc, exc_info=True
+                        )
+                    # Break so the caller can decide whether to restart/exit
+                    break
 
         self._listener_task = asyncio.create_task(_listener())
 
@@ -70,8 +86,17 @@ class RedisSignalSubscriber:
     async def close(self) -> None:
         if self._listener_task:
             self._listener_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            try:
                 await self._listener_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                if self._logger:
+                    self._logger.error(
+                        "RedisSignalSubscriber listener exited with error during close: %s",
+                        exc,
+                        exc_info=True,
+                    )
         if self._pubsub:
             await self._pubsub.close()
         if self._redis:
