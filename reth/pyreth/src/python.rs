@@ -10,12 +10,13 @@ use pyo3::prelude::*;
 use crate::agents::envs::eth15m_env::{
     PyEth15mFeeds, PyEth15mObservation, PyPolymarketTarget, PyWindowRecord,
 };
+use crate::cex_reader::{PyCexPriceFeeder, PyCexPriceUpdate};
 use crate::chain_query::common_addresses::register as register_common_addresses;
 use crate::chain_query::function_signatures::register as register_function_signatures;
 use crate::chain_query::{
-    PyAccount, PyAddressTransactionRef, PyAddressTxIndexer, PyBalanceChange, PyBalanceChanges,
-    PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo, PyPortfolio, PyTokenMetadata,
-    PyTransactionData,
+    PyAccount, PyAddressTransactionRef, PyAddressTxIndexFetcher, PyAddressTxIndexer,
+    PyBalanceChange, PyBalanceChanges, PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo,
+    PyPortfolio, PyTokenMetadata, PyTransactionData,
 };
 use crate::dex::register as register_dex;
 use crate::price_reader::{PyEthPriceClient, PyPriceData};
@@ -56,6 +57,7 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyTokenMetadata>()?;
     m.add_class::<PyPoolLiquidityInfo>()?;
     m.add_class::<PyAddressTxIndexer>()?;
+    m.add_class::<PyAddressTxIndexFetcher>()?;
     m.add_class::<PyAddressTransactionRef>()?;
     m.add_class::<PyTransactionData>()?;
 
@@ -71,6 +73,10 @@ pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // Price reader classes (core only - dex_reader, cex_reader, arbitrage disabled)
     m.add_class::<PyEthPriceClient>()?;
     m.add_class::<PyPriceData>()?;
+
+    // CEX Price Feeder
+    m.add_class::<PyCexPriceFeeder>()?;
+    m.add_class::<PyCexPriceUpdate>()?;
 
     // Processed transaction provider classes
     m.add_class::<PyProcessedTxProvider>()?;
