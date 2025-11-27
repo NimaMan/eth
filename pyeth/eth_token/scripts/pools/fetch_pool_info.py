@@ -5,7 +5,30 @@ Requires: local Reth DB for PyReth, or will fall back to Web3 for pool discovery
 """
 
 from pprint import pprint
+from typing import Any, Dict
+
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
+
+FIELDS = [
+    "protocol",
+    "pool",
+    "token0",
+    "token1",
+    "token0_decimals",
+    "token1_decimals",
+    "reserve0_raw",
+    "reserve1_raw",
+    "reserve0_scaled",
+    "reserve1_scaled",
+    "liquidity",
+    "tick",
+    "price_1e18",
+    "block_number",
+]
+
+
+def _info_to_dict(info: Any) -> Dict[str, Any]:
+    return {field: getattr(info, field) for field in FIELDS}
 
 
 def main():
@@ -15,22 +38,13 @@ def main():
     v3_pool = "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
 
     print("\n=== Uniswap V2 (USDC/WETH) ===")
-    info_v2 = fetcher.discover_v2_pool(v2_pool)
-    print("[discover_v2_pool]")
-    pprint(info_v2)
-    print("[get_v2_liquidity]")
-    liq_v2 = fetcher.get_v2_liquidity(v2_pool)
-    pprint(liq_v2)
+    liq_v2 = fetcher.get_uniswap_v2_liquidity(v2_pool)
+    pprint(_info_to_dict(liq_v2))
 
     print("\n=== Uniswap V3 (USDC/WETH 0.3%) ===")
-    info_v3 = fetcher.discover_v3_pool(v3_pool)
-    print("[discover_v3_pool]")
-    pprint(info_v3)
-    print("[get_v3_liquidity]")
-    liq_v3 = fetcher.get_v3_liquidity(v3_pool, fee_tier=3000)
-    pprint(liq_v3)
+    liq_v3 = fetcher.get_uniswap_v3_liquidity(v3_pool, fee_tier=3000)
+    pprint(_info_to_dict(liq_v3))
 
 
 if __name__ == "__main__":
     main()
-

@@ -23,7 +23,7 @@ Responsibilities
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional, List
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from tqdm import tqdm
 
 from eth_token.erc20_token.erc20_token import ERC20Token
@@ -36,8 +36,6 @@ from eth_data.blockchain.block_processor import BlockProcessor
 class BlockTokenProcessor:
     def __init__(self, logger=None, add_pnl_to_db: bool = False):
         self.logger = logger
-        self.metadata_logger = get_logger(name="TokenMetadataReplay", log_folder="tokens_live")
-        # Token tracking
         self.add_pnl_to_db = add_pnl_to_db
         self.live_tokens_cache = LiveTokensCache(logger=self.logger, add_pnl_to_db=add_pnl_to_db)
         self.updated_tokens: Dict[str, ERC20Token] = {}
@@ -93,7 +91,11 @@ class BlockTokenProcessor:
             pending_transactions = None
             if self.is_live_mode:
                 simulation_block = block_number - 1
-                pending_transactions = [transaction]
+                # Only replay same-sender txs up to this tx_index; including later ones causes nonce-too-high in PyReth.
+                pending_transactions = self._collect_address_transactions(
+                    transaction.get("from_address"),
+                    max_tx_index=transaction.get("tx_index"),
+                )
 
             token_metadata = self.token_chain_fetcher.get_token_metadata(
                 contract_address,
@@ -170,6 +172,28 @@ class BlockTokenProcessor:
         if hasattr(tx, "__dict__"):
             return dict(vars(tx))
         raise TypeError(f"Unsupported transaction type: {type(tx)!r}")
+
+    def _index_transaction(self, transaction: Dict[str, Any]) -> None:
+        self._address_tx_index = defaultdict(list)
+        addresses = set(transaction.get("unique_addresses") or [])
+        for addr in addresses:
+            self._address_tx_index[addr].append(transaction)
+
+    def _collect_address_transactions(
+        self,
+        address: Optional[str],
+        max_tx_index: Optional[int] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        txs = self._address_tx_index.get(address)
+        if not txs:
+            return None
+        filtered: List[Dict[str, Any]] = []
+        if max_tx_index is not None:
+            for tx in txs:
+                if tx.get("tx_index") > max_tx_index:
+                    continue
+            filtered.append(tx)
+        return filtered or None
 
 
 class HistoricalBlockTokenProcessor:

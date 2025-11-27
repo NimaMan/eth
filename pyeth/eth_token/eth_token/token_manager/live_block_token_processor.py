@@ -44,8 +44,9 @@ Historical (Warm-up) -> Live Transition:
 """
 
 import asyncio
+from typing import Any, Dict
 from eth_data.live_data_registry import LiveDataPublisher
-from eth_token.erc20_token.token_snapshot import TokenSnapshot
+from eth_token.erc20_token.token_snapshot import build_token_snapshot_map
 from eth_token.token_manager.redis_block_subscriber import RedisBlockSubscriber
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
@@ -135,14 +136,29 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
             except Exception as gather_err:
                   self.logger.error(f"Error gathering PnL write tasks via cache for block {current_block}: {gather_err}", exc_info=True)
 
-    async def _publish_token_snapshots(self, block_number: int, updated_tokens: dict):
-        """Serialize updated tokens and persist their snapshots to Redis."""
-        if not updated_tokens:
-            return
+    async def _publish_token_snapshots(self, block_number: int, updated_tokens: dict) -> Dict[str, Dict[str, Any]]:
+        """
+        Serialize updated tokens and persist their snapshots to Redis.
 
-        async def _write_snapshot(token_address, token_obj):
+        Returns a dict mapping token_address -> serialized snapshot for reuse
+        by downstream publishers (so we don't re-serialize the same data twice).
+        """
+        if not updated_tokens:
+            return {}
+
+        snapshot_payloads = build_token_snapshot_map(
+            updated_tokens,
+            on_error=lambda addr, exc: self.logger.error(
+                "Failed to serialize token snapshot for %s at block %s: %s",
+                addr,
+                block_number,
+                exc,
+                exc_info=True,
+            ),
+        )
+
+        async def _write_snapshot(token_address, snapshot):
             try:
-                snapshot = TokenSnapshot.from_token(token_obj).json_ready_dict()
                 await self.token_snapshot_publisher.publish_token(token_address, snapshot)
                 self._published_token_addresses.add(token_address)
             except Exception as exc:
@@ -155,9 +171,10 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 )
 
         await asyncio.gather(
-            *[_write_snapshot(addr, token) for addr, token in updated_tokens.items()],
+            *[_write_snapshot(addr, snapshot) for addr, snapshot in snapshot_payloads.items()],
             return_exceptions=True,
         )
+        return snapshot_payloads
 
     async def _monitor_token_updates(self):
         """Monitor for token updates using event notification"""
@@ -166,11 +183,16 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 # Wait for block processing to complete
                 await self.block_processed_event.wait()
                 current_block = self.latest_processed_block
-                self.logger.info(f"Processing block {current_block}({len(self.updated_tokens)} tokens)")
+                # Log after a block has finished processing to avoid confusion with pre-processing
+                self.logger.info(f"Processed block {current_block} ({len(self.updated_tokens)} tokens)")
                 if self.updated_tokens:
                     updated_snapshot_tokens = dict(self.updated_tokens)
-                    await self._publish_token_snapshots(current_block, updated_snapshot_tokens)
-                    await self.unprocessed_token_updates.put((current_block, updated_snapshot_tokens))
+                    snapshot_payloads = await self._publish_token_snapshots(
+                        current_block, updated_snapshot_tokens
+                    )
+                    await self.unprocessed_token_updates.put(
+                        (current_block, updated_snapshot_tokens, snapshot_payloads)
+                    )
                     self.new_updates_event.set()
                 # Clear the event for next block
                 self.block_processed_event.clear()

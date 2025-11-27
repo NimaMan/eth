@@ -1,6 +1,6 @@
 """TokenChainDataFetcher: lightweight PyReth-backed token metadata helper."""
 
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from eth_data.pyreth_client import PyrethClient
 
 
@@ -59,10 +59,20 @@ class TokenChainDataFetcher:
         self,
         token_address: str,
         block_number: Optional[int] = None,
-        pending_tx_hashes: Optional[List[str]] = None,
+        pending_transactions: Optional[List[Dict[str, Any]]] = None,
+        gas_block_number: Optional[int] = None,
     ):
+        """
+        Fetch token metadata (name, symbol, decimals, supply) from the blockchain.
+        
+        If pending_transactions are provided (list of dicts), they are converted to
+        UnsignedTransactions and replayed on top of the block state before querying metadata.
+        This is essential for fetching metadata of newly created tokens within the same block
+        or for handling intra-block state dependencies (e.g. funding -> deployment).
+        """
         return self._chain_query.get_token_metadata(
             token_address,
             block_number,
-            pending_tx_hashes or None,
+            pending_transactions or None,
+            gas_block_number,
         )

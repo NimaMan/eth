@@ -172,16 +172,14 @@ class UniswapV3Pool(BasePool):
         denom_address = self.denom_address or self.pool_buy_sell_config.denom_address
         config.denom_address = denom_address
         config.block_number = int(transaction['block_number']) - 1
-        config.set_prior_transactions(self.latest_block_control_address_txs_list)
-        if transaction.get('previous_block_header'):
-            config.set_block_header(transaction['previous_block_header'])
-
+        prior_transactions = self.latest_block_control_address_txs_list
         result = self.pool_buy_sell_simulator.check_uniswap_v3_pool(
-                self.token_address,
-                self.pool_address,
-                int(self.fee_tier),
-                config,
-            )
+            self.token_address,
+            self.pool_address,
+            int(self.fee_tier),
+            config,
+            prior_transactions or None,
+        )
         
         if result.can_buy and not self.can_buy:
             self.state.can_buy = self.can_buy = True
