@@ -45,26 +45,30 @@ class BlockTokenProcessor:
         self.token_chain_fetcher = TokenChainDataFetcher()
         self._chain_query = self.token_chain_fetcher.chain_query
         self.is_live_mode = False
+        # Per-block sender -> tx list index used for intra-block pending simulation
+        self._address_tx_index = defaultdict(list)
 
     def process_block_tokens(self, process_block_result, block_number) -> int:
         """Process a single block's transactions sequentially."""
         block_tx_list = process_block_result.get('transactions')
         self.updated_tokens.clear() # Clear the updated tokens cache
+        self._address_tx_index.clear() # Reset per-block address index so pending replay never leaks across blocks
+        
+        # Ensure transactions mutate token state in canonical block order
         for tx in block_tx_list:
             tx_data = self._ensure_tx_dict(tx)
-            # Ensure transactions mutate token state in canonical block order
-            self._process_transaction(tx_data, block_number)                        
+            self._index_transaction(tx_data) # Index after processing so later txs can replay earlier same-sender txs
+            self._process_transaction(tx_data, block_number)
+            
         # Set start_block on first block processed
         if self.start_block is None:
             self.start_block = block_number
 
-        
         self.processed_blocks[block_number] = True # Mark the block as processed
         return block_number
 
     def _process_transaction(self, transaction: Dict, block_number: int):
         """Process a single transaction and update relevant tokens"""
-        transaction = self._ensure_tx_dict(transaction)
         try:
             # Handle contract creation
             is_token_creation, token_metadata, contract_address = self._is_token_creation(
@@ -87,19 +91,13 @@ class BlockTokenProcessor:
             return False, None, None
 
         try:
-            simulation_block = block_number
-            pending_transactions = None
-            if self.is_live_mode:
-                simulation_block = block_number - 1
-                # Only replay same-sender txs up to this tx_index; including later ones causes nonce-too-high in PyReth.
-                pending_transactions = self._collect_address_transactions(
-                    transaction.get("from_address"),
-                    max_tx_index=transaction.get("tx_index"),
-                )
-
+            # Replay earlier same-sender txs in this block for metadata hydration.
+            pending_transactions = self._collect_address_transactions(transaction.get("from_address"))
+            pending_transactions = sorted(pending_transactions, key=lambda x: x["tx_index"])
+            simulation_block = block_number - 1
             token_metadata = self.token_chain_fetcher.get_token_metadata(
                 contract_address,
-                simulation_block,
+                block_number = simulation_block,
                 pending_transactions=pending_transactions,
                 gas_block_number=block_number,
             )
@@ -174,26 +172,28 @@ class BlockTokenProcessor:
         raise TypeError(f"Unsupported transaction type: {type(tx)!r}")
 
     def _index_transaction(self, transaction: Dict[str, Any]) -> None:
-        self._address_tx_index = defaultdict(list)
         addresses = set(transaction.get("unique_addresses") or [])
         for addr in addresses:
             self._address_tx_index[addr].append(transaction)
 
-    def _collect_address_transactions(
-        self,
-        address: Optional[str],
-        max_tx_index: Optional[int] = None,
-    ) -> Optional[List[Dict[str, Any]]]:
-        txs = self._address_tx_index.get(address)
+    def _collect_address_transactions(self, address: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+        # Collect the tx of address and all other addresses present in its txs 
+        txs = list(self._address_tx_index.get(address))
         if not txs:
             return None
-        filtered: List[Dict[str, Any]] = []
-        if max_tx_index is not None:
-            for tx in txs:
-                if tx.get("tx_index") > max_tx_index:
-                    continue
-            filtered.append(tx)
-        return filtered or None
+        from_addresses = set([tx["from_address"] for tx in txs])
+        tx_hahaes = set([tx["hash"] for tx in txs])
+        for from_address in from_addresses:
+            if from_address == address:
+                continue
+            other_address_txs = self._collect_address_transactions(from_address)
+            for other_tx in other_address_txs:
+                if other_tx["hash"] not in tx_hahaes:
+                    txs.append(other_tx)
+                    tx_hahaes.add(other_tx["hash"])
+        
+        return txs
+
 
 
 class HistoricalBlockTokenProcessor:
