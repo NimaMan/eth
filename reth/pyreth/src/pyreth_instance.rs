@@ -11,7 +11,6 @@ use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::TxSimulator;
 
 use super::chain_query::PyChainQuery;
-use super::price_reader::PyEthPriceClient;
 use super::provider::PyProcessedTxProvider;
 use super::simulator::PyPoolBuySellSimulator;
 use super::simulator::PySimulator;
@@ -108,12 +107,6 @@ impl PyRethInstance {
         let processor = Arc::new(TxProcessor::new());
 
         PyPoolBuySellSimulator::from_shared(self.simulator.clone(), processor)
-    }
-
-    /// Get a price client that uses the shared database
-    pub fn price_client(&self) -> PyEthPriceClient {
-        // Use the simulator's provider_factory directly
-        PyEthPriceClient::from_simulator(self.simulator.clone())
     }
 
     /// Check if database is open

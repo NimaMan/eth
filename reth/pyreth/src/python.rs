@@ -7,10 +7,6 @@
 /// - Transaction building (TxBuilder)
 use pyo3::prelude::*;
 
-use crate::agents::envs::eth15m_env::{
-    PyEth15mFeeds, PyEth15mObservation, PyPolymarketTarget, PyWindowRecord,
-};
-use crate::cex_reader::{PyCexPriceFeeder, PyCexPriceUpdate};
 use crate::chain_query::common_addresses::register as register_common_addresses;
 use crate::chain_query::function_signatures::register as register_function_signatures;
 use crate::chain_query::{
@@ -19,7 +15,6 @@ use crate::chain_query::{
     PyPortfolio, PyTokenMetadata, PyTransactionData,
 };
 use crate::dex::register as register_dex;
-use crate::price_reader::{PyEthPriceClient, PyPriceData};
 use crate::provider::{
     PyAddressProcessedTxProvider, PyProcessedBlock, PyProcessedTxProvider,
     PyTokenProcessedTxProvider,
@@ -70,25 +65,11 @@ pub fn pyreth_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPoolBuySellSimulationResult>()?;
     m.add_class::<PyPoolBuySellParameters>()?;
 
-    // Price reader classes (core only - dex_reader, cex_reader, arbitrage disabled)
-    m.add_class::<PyEthPriceClient>()?;
-    m.add_class::<PyPriceData>()?;
-
-    // CEX Price Feeder
-    m.add_class::<PyCexPriceFeeder>()?;
-    m.add_class::<PyCexPriceUpdate>()?;
-
-    // Processed transaction provider classes
+    // Transaction processor classes
     m.add_class::<PyProcessedTxProvider>()?;
     m.add_class::<PyAddressProcessedTxProvider>()?;
     m.add_class::<PyTokenProcessedTxProvider>()?;
     m.add_class::<PyProcessedBlock>()?;
-
-    // ETH15m data bindings
-    m.add_class::<PyEth15mFeeds>()?;
-    m.add_class::<PyEth15mObservation>()?;
-    m.add_class::<PyWindowRecord>()?;
-    m.add_class::<PyPolymarketTarget>()?;
 
     // Common addresses utilities
     register_common_addresses(m)?;
