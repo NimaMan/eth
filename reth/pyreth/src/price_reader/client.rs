@@ -451,11 +451,11 @@ impl PyEthPriceClient {
 
     /// Get comprehensive ETH prices from all protocols and stablecoins
     fn get_all_eth_prices(&self, py: Python) -> PyResult<PyObject> {
-        let main_dict = PyDict::new(py);
-        let eth_dict = PyDict::new(py);
+        let main_dict = PyDict::new_bound(py);
+        let eth_dict = PyDict::new_bound(py);
 
         // USDC prices
-        let usdc_dict = PyDict::new(py);
+        let usdc_dict = PyDict::new_bound(py);
 
         if self.inner.uniswap_v2.is_some() {
             match self.get_eth_price(py, "UniswapV2", "USDC") {
@@ -499,7 +499,7 @@ impl PyEthPriceClient {
         }
 
         // USDT prices
-        let usdt_dict = PyDict::new(py);
+        let usdt_dict = PyDict::new_bound(py);
 
         if self.inner.uniswap_v3.is_some() {
             match self.get_eth_price(py, "UniswapV3", "USDT") {
@@ -536,7 +536,7 @@ impl PyEthPriceClient {
         }
 
         // DAI prices
-        let dai_dict = PyDict::new(py);
+        let dai_dict = PyDict::new_bound(py);
 
         if self.inner.sushiswap.is_some() {
             match self.get_eth_price(py, "SushiSwap", "DAI") {
@@ -558,7 +558,7 @@ impl PyEthPriceClient {
 
     /// Get available protocol-stablecoin combinations
     fn get_available_sources(&self, py: Python) -> PyResult<PyObject> {
-        let sources_dict = PyDict::new(py);
+        let sources_dict = PyDict::new_bound(py);
 
         let mut usdc_protocols = Vec::new();
         let mut usdt_protocols = Vec::new();
@@ -692,18 +692,16 @@ impl PyEthPriceClient {
         let pool_usdt = compute_uniswap_v2_pool(weth, usdt);
         let (usdc_t0, _usdc_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block), None)
-                        .await
-                })
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block)).await })
             })
             .unwrap_or((usdc, weth));
         let (usdt_t0, _usdt_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block), None)
-                        .await
-                })
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block)).await })
             })
             .unwrap_or((usdt, weth));
 
@@ -763,7 +761,7 @@ impl PyEthPriceClient {
             };
             let usdt_p = v2.compute_price_from_reserves(r0t, r1t, dec0t, dec1t, base_is_t0t);
 
-            let row = PyDict::new(py);
+            let row = PyDict::new_bound(py);
             row.set_item("timestamp", ts)?;
             row.set_item("block", b)?;
             row.set_item("chainlink_eth_usd", cl_p)?;
@@ -835,18 +833,16 @@ impl PyEthPriceClient {
         let pool_usdt = compute_uniswap_v2_pool(weth, usdt);
         let (usdc_t0, _usdc_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block), None)
-                        .await
-                })
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdc, Some(latest_block)).await })
             })
             .unwrap_or((usdc, weth));
         let (usdt_t0, _usdt_t1) = py
             .allow_threads(|| {
-                tokio::runtime::Runtime::new().unwrap().block_on(async {
-                    rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block), None)
-                        .await
-                })
+                tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(async { rqp.uni_v2_get_tokens(pool_usdt, Some(latest_block)).await })
             })
             .unwrap_or((usdt, weth));
 
@@ -884,7 +880,7 @@ impl PyEthPriceClient {
             };
             let usdt_p = v2.compute_price_from_reserves(r0t, r1t, dec0t, dec1t, base_is_t0t);
 
-            let row = PyDict::new(py);
+            let row = PyDict::new_bound(py);
             row.set_item("block", b)?;
             row.set_item("timestamp", ts)?;
             row.set_item("chainlink_eth_usd", cl_p)?;

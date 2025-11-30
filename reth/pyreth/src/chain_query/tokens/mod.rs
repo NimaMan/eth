@@ -9,7 +9,7 @@
 //! - get_token_symbol(token, block=None) -> str
 //! - get_token_name(token, block=None) -> str
 //! - get_token_total_supply(token, block=None) -> str
-//! - get_token_metadata(token, block=None) -> TokenMetadata
+//! - get_token_metadata(token, block=None) -> Optional[TokenMetadata]
 
 use pyo3::prelude::*;
 

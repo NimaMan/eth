@@ -3,11 +3,13 @@ pub mod address_indexer;
 pub mod addresses;
 pub mod amm;
 pub mod chain_query;
+pub mod common_addresses;
+pub mod function_signatures;
 pub mod tokens;
 pub mod utils;
 
 // Re-export primary types for convenient importing from crate::python::chain_query
-pub use address_indexer::PyAddressTxIndexer;
+pub use address_indexer::{PyAddressTxIndexFetcher, PyAddressTxIndexer};
 pub use amm::PyPoolLiquidityInfo;
 pub use chain_query::{
     PyAccount, PyAddressTransactionRef, PyBalanceChange, PyBalanceChanges, PyChainQuery,

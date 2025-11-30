@@ -9,7 +9,6 @@ mod real {
     use pyo3::types::PyDict;
     use pyo3::FromPyObject;
     use std::collections::HashMap;
-    use std::str::FromStr;
     use tokio::runtime::Runtime;
 
     fn default_reth_datadir() -> String {
@@ -45,12 +44,12 @@ mod real {
     }
 
     fn price_map_to_dict(py: Python<'_>, map: HashMap<String, PriceData>) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         for (key, price) in map {
             let py_price = Py::new(py, PyPriceData::from_rust_data(price, py)?)?;
             dict.set_item(key, py_price)?;
         }
-        Ok(dict.into())
+        Ok(dict.unbind())
     }
 
     fn price_to_py(py: Python<'_>, price: PriceData) -> PyResult<Py<PyPriceData>> {

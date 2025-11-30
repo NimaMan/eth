@@ -7,9 +7,7 @@ without needing RPC calls - directly from the Reth database.
 """
 
 import pyreth
-import sys
-sys.path.append('/home/nima/code/crypto/py')
-from eth_data.chain_utils.common_addresses.stablecoin_addresses import STABLECOINS_ADDRESS_BY_NAME as STABLECOINS
+from eth_data.chain_utils.common_addresses import STABLECOINS_ADDRESS_BY_NAME as STABLECOINS
 
 def main():
     # Initialize ChainQuery

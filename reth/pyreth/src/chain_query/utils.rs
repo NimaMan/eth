@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, B256};
 use chrono::{DateTime, Utc};
 use pyo3::prelude::*;
-use reth_chain_query::time_utils::BlockTimeConverter;
+use reth_chain_query::BlockTimeConverter;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::runtime::Runtime;

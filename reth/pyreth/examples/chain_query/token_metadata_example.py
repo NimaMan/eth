@@ -20,6 +20,9 @@ def main():
     decimals = query.get_token_decimals(token)
     total_supply = query.get_token_total_supply(token)
     meta = query.get_token_metadata(token, None)
+    if meta is None:
+        print(f"{token} is not an ERC-20 contract.")
+        return
 
     print(f"Name: {name}")
     print(f"Symbol: {symbol}")

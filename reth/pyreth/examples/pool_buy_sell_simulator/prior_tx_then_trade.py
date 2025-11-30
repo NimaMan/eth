@@ -24,6 +24,8 @@ Usage:
 import os
 import pyreth
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
 
 def main():
     # Defaults: USDC/WETH Uniswap V2
@@ -40,13 +42,13 @@ def main():
     reth = pyreth.PyReth()
     sim = reth.pool_buy_sell_simulator()
     txp = reth.tx_processor()
+    query = reth.chain_query()
 
     # Base config
-    cfg = pyreth.PoolBuySellParameters()
-    cfg.test_amount_eth = 0.01
-    # USDC has 6 decimals
-    if token.lower() == "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48":
-        cfg.token_decimals = 6
+    decimals = query.get_token_decimals(token, None)
+    cfg = pyreth.PoolBuySellParameters(decimals, WETH_DECIMALS)
+    cfg.denom_address = WETH_ADDRESS
+    cfg.denom_amount = 0.01
 
     # Option A: real prior tx (processed)
     prior_hash = os.environ.get("PRIOR_TX_HASH")
@@ -95,4 +97,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

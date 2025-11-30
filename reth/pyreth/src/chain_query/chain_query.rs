@@ -74,7 +74,7 @@ impl PyPortfolio {
     /// Get token balances as a dictionary
     fn token_balances(&self, py: Python) -> PyResult<PyObject> {
         // This will be populated by the actual Portfolio data
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         Ok(dict.into())
     }
 }
@@ -111,7 +111,7 @@ pub struct PyBalanceChanges {
 impl PyBalanceChanges {
     /// Get token changes as a dictionary
     fn token_changes(&self, py: Python) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         Ok(dict.into())
     }
 }
@@ -132,7 +132,7 @@ pub struct PyCompleteBalances {
 impl PyCompleteBalances {
     /// Get token balances as a dictionary
     fn token_balances(&self, py: Python) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         Ok(dict.into())
     }
 }
@@ -582,7 +582,7 @@ impl PyChainQuery {
             .block_on(async move { provider.batch_check_contracts(addrs, block).await })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         for (addr, is_contract) in results {
             let addr_str = format!("0x{}", hex::encode(addr));
             dict.set_item(addr_str, is_contract)?;
@@ -805,7 +805,7 @@ impl PyChainQuery {
 
         let mut out = Vec::with_capacity(v.len().min(max_results));
         for info in v.into_iter().take(max_results) {
-            let d = PyDict::new(py);
+            let d = PyDict::new_bound(py);
             d.set_item("pool_id", format!("0x{:x}", info.pool_id))?;
             d.set_item(
                 "pool_address",
@@ -866,15 +866,17 @@ impl PyChainQuery {
     }
 
     /// Get complete token metadata in a single call
-    #[pyo3(signature = (token, block_number=None, pending_transactions=None))]
+    #[pyo3(signature = (token, block_number=None, pending_transactions=None, gas_block_number=None))]
     fn get_token_metadata(
         &self,
         token: &str,
         block_number: Option<u64>,
-        pending_transactions: Option<&PyAny>,
+        pending_transactions: Option<&Bound<'_, PyAny>>,
+        gas_block_number: Option<u64>,
     ) -> PyResult<Option<super::tokens::PyTokenMetadata>> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
+        let resolved_gas_block = gas_block_number.or(block_number);
         let pending_unsigneds: Vec<UnsignedTransaction> = if let Some(iterable) =
             pending_transactions
         {
@@ -896,15 +898,14 @@ impl PyChainQuery {
         let meta = self
             .runtime
             .block_on(async move {
-                if pending_unsigneds.is_empty() {
-                    provider
-                        .get_token_metadata(token_addr, block_number, &[])
-                        .await
+                let pending_slice = if pending_unsigneds.is_empty() {
+                    &[]
                 } else {
-                    provider
-                        .get_token_metadata(token_addr, block_number, pending_unsigneds.as_slice())
-                        .await
-                }
+                    pending_unsigneds.as_slice()
+                };
+                provider
+                    .get_token_metadata(token_addr, block_number, pending_slice, resolved_gas_block)
+                    .await
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
@@ -915,6 +916,67 @@ impl PyChainQuery {
             decimals: inner.decimals,
             total_supply: inner.total_supply.to_string(),
         }))
+    }
+
+    /// Estimate gas price based on recent block activity.
+    ///
+    /// Args:
+    ///     percentile: Priority fee percentile (0.0 to 1.0). Default 0.5 (median).
+    ///     block_number: Optional block to check. Default latest.
+    ///
+    /// Returns:
+    ///     Estimated gas price (base_fee + priority_fee) in wei as string.
+    #[pyo3(signature = (percentile=None, block_number=None))]
+    fn estimate_gas_price(&self, percentile: Option<f64>, block_number: Option<u64>) -> PyResult<String> {
+        let block = block_number.unwrap_or(self.get_latest_block()?);
+        let p = percentile.unwrap_or(0.5).clamp(0.0, 1.0);
+
+        let provider = self.provider.clone();
+        let (base_fee, priority_fees) = self
+            .runtime
+            .block_on(async move {
+                // This is synchronous in reth_chain_query but wrapping in block_on for consistency
+                 Ok::<_, eyre::Error>(provider.get_priority_fee_stats(block)?)
+            })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+
+        let priority_fee = if priority_fees.is_empty() {
+            0
+        } else {
+            let idx = ((priority_fees.len() as f64 * p) as usize).min(priority_fees.len() - 1);
+            priority_fees[idx]
+        };
+
+        let total_fee = base_fee + priority_fee;
+        Ok(total_fee.to_string())
+    }
+
+    /// Estimate total transaction cost.
+    ///
+    /// Args:
+    ///     gas_limit: Gas limit for the transaction.
+    ///     priority: "low" (10%), "normal" (50%), "high" (90%), "urgent" (99%). Default "normal".
+    ///     block_number: Optional block number. Default latest.
+    ///
+    /// Returns:
+    ///     Estimated cost in wei as string.
+    #[pyo3(signature = (gas_limit, priority="normal", block_number=None))]
+    fn estimate_tx_cost(&self, gas_limit: u64, priority: &str, block_number: Option<u64>) -> PyResult<String> {
+        let percentile = match priority {
+            "low" => 0.10,
+            "normal" => 0.50,
+            "high" => 0.90,
+            "urgent" => 0.99,
+            _ => 0.50,
+        };
+
+        let price_str = self.estimate_gas_price(Some(percentile), block_number)?;
+        let price: u128 = price_str.parse().map_err(|_| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid gas price calculated")
+        })?;
+
+        let total_cost = price * gas_limit as u128;
+        Ok(total_cost.to_string())
     }
 }
 

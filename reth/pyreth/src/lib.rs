@@ -4,7 +4,9 @@
 /// Starting minimal with just simulation, will add other components incrementally.
 // Core Rust modules exposed to Python bindings
 pub mod agents;
+pub mod cex_reader;
 pub mod chain_query;
+pub mod dex;
 pub mod header_utils;
 pub mod price_reader;
 pub mod provider;

@@ -1,4 +1,3 @@
-use crate::header_utils::parse_sealed_header_from_json;
 use crate::tx_processor::processed_tx_bridge::{
     processed_transaction_from_py_dict, processed_transaction_from_py_object,
     processed_transactions_from_py_iterable,
@@ -10,7 +9,6 @@ use alloy_primitives::{Address, B256};
 /// Provides Python interface for pool trading viability analysis and simulation
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyList, PyTuple};
-use reth_primitives::SealedHeader;
 use std::{str::FromStr, sync::Arc};
 use tx_processor::simulator::types::{
     UniswapV4PoolConfig, DEFAULT_APPROVE_GAS_LIMIT, DEFAULT_BUY_GAS_LIMIT, DEFAULT_SELL_GAS_LIMIT,
@@ -137,7 +135,6 @@ pub struct PyPoolBuySellParameters {
     pub denom_decimals: u8,
     pub token_decimals: u8,
     pub(crate) prior_txs: Vec<RustProcessedTransaction>,
-    pub(crate) block_header: Option<SealedHeader>,
     pub(crate) uniswap_v4_config: Option<UniswapV4PoolConfig>,
 }
 
@@ -161,7 +158,6 @@ impl PyPoolBuySellParameters {
             denom_decimals: denom_decimals,
             token_decimals,
             prior_txs: Vec::new(),
-            block_header: None,
             uniswap_v4_config: None,
         }
     }
@@ -349,7 +345,7 @@ impl PyPoolBuySellParameters {
     }
 
     #[pyo3(signature = (prior_dict))]
-    fn set_prior_tx_from_dict(&mut self, prior_dict: &PyAny) -> PyResult<()> {
+    fn set_prior_tx_from_dict(&mut self, prior_dict: &Bound<'_, PyAny>) -> PyResult<()> {
         let processed = processed_transaction_from_py_dict(prior_dict)?;
         self.set_prior_sequence(vec![processed]);
         Ok(())
@@ -358,7 +354,7 @@ impl PyPoolBuySellParameters {
     /// Accept a prior transaction represented as either the Python ProcessedTransaction
     /// dataclass, a PyProcessedTransaction, or a plain dictionary matching the schema.
     #[pyo3(signature = (prior_tx))]
-    fn set_prior_processed_transaction(&mut self, prior_tx: &PyAny) -> PyResult<()> {
+    fn set_prior_processed_transaction(&mut self, prior_tx: &Bound<'_, PyAny>) -> PyResult<()> {
         if prior_tx.is_instance_of::<PyList>() || prior_tx.is_instance_of::<PyTuple>() {
             let transactions = processed_transactions_from_py_iterable(prior_tx)?;
             self.set_prior_sequence(transactions);
@@ -370,17 +366,9 @@ impl PyPoolBuySellParameters {
     }
 
     #[pyo3(signature = (prior_iterable))]
-    fn set_prior_transactions(&mut self, prior_iterable: &PyAny) -> PyResult<()> {
+    fn set_prior_transactions(&mut self, prior_iterable: &Bound<'_, PyAny>) -> PyResult<()> {
         let transactions = processed_transactions_from_py_iterable(prior_iterable)?;
         self.set_prior_sequence(transactions);
-        Ok(())
-    }
-
-    fn set_block_header(&mut self, header_json: &str) -> PyResult<()> {
-        let sealed = parse_sealed_header_from_json(header_json).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid block header: {e}"))
-        })?;
-        self.block_header = Some(sealed);
         Ok(())
     }
 
@@ -502,7 +490,6 @@ impl PyPoolBuySellParameters {
             denom_decimals: self.denom_decimals,
             block_delay: self.block_delay,
             token_decimals: self.token_decimals,
-            block_header: self.block_header.clone(),
             uniswap_v4_config: v4_config,
         })
     }
@@ -564,15 +551,25 @@ impl PyPoolBuySellSimulator {
     ///
     /// Returns:
     ///     PoolBuySellSimulationResult with trading analysis
-    #[pyo3(signature = (token_address, pool_address, config=None))]
+    #[pyo3(signature = (token_address, pool_address, config=None, prior_transactions=None))]
     fn check_uniswap_v2_pool(
         &self,
         _py: Python,
         token_address: &str,
         pool_address: &str,
         config: Option<&PyPoolBuySellParameters>,
+        prior_transactions: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyPoolBuySellSimulationResult> {
-        self.check_pool_internal(token_address, pool_address, PoolType::UniswapV2, config)
+        let extra_priors = prior_transactions
+            .map(processed_transactions_from_py_iterable)
+            .transpose()?;
+        self.check_pool_internal(
+            token_address,
+            pool_address,
+            PoolType::UniswapV2,
+            config,
+            extra_priors,
+        )
     }
 
     /// Check if pool allows buying and selling tokens for Uniswap V3
@@ -585,7 +582,7 @@ impl PyPoolBuySellSimulator {
     ///
     /// Returns:
     ///     PoolBuySellSimulationResult with trading analysis
-    #[pyo3(signature = (token_address, pool_address, fee_tier, config=None))]
+    #[pyo3(signature = (token_address, pool_address, fee_tier, config=None, prior_transactions=None))]
     fn check_uniswap_v3_pool(
         &self,
         _py: Python,
@@ -593,12 +590,17 @@ impl PyPoolBuySellSimulator {
         pool_address: &str,
         fee_tier: u32,
         config: Option<&PyPoolBuySellParameters>,
+        prior_transactions: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyPoolBuySellSimulationResult> {
+        let extra_priors = prior_transactions
+            .map(processed_transactions_from_py_iterable)
+            .transpose()?;
         self.check_pool_internal(
             token_address,
             pool_address,
             PoolType::UniswapV3 { fee_tier },
             config,
+            extra_priors,
         )
     }
 
@@ -611,22 +613,32 @@ impl PyPoolBuySellSimulator {
     ///
     /// Returns:
     ///     PoolBuySellSimulationResult with trading analysis
-    #[pyo3(signature = (token_address, pool_address, config=None))]
+    #[pyo3(signature = (token_address, pool_address, config=None, prior_transactions=None))]
     fn check_sushiswap_pool(
         &self,
         _py: Python,
         token_address: &str,
         pool_address: &str,
         config: Option<&PyPoolBuySellParameters>,
+        prior_transactions: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyPoolBuySellSimulationResult> {
-        self.check_pool_internal(token_address, pool_address, PoolType::SushiSwap, config)
+        let extra_priors = prior_transactions
+            .map(processed_transactions_from_py_iterable)
+            .transpose()?;
+        self.check_pool_internal(
+            token_address,
+            pool_address,
+            PoolType::SushiSwap,
+            config,
+            extra_priors,
+        )
     }
 
     /// Check if pool allows buying and selling tokens for Uniswap V4
     ///
     /// Note: V4 uses a PoolManager + PoolId architecture and requires Router/Lock integration.
     /// This method returns a well-formed failure result indicating that v4 is not supported yet.
-    #[pyo3(signature = (token_address, pool_manager_address, _pool_id_hex, config=None))]
+    #[pyo3(signature = (token_address, pool_manager_address, _pool_id_hex, config=None, prior_transactions=None))]
     fn check_uniswap_v4_pool(
         &self,
         _py: Python,
@@ -634,14 +646,35 @@ impl PyPoolBuySellSimulator {
         pool_manager_address: &str,
         _pool_id_hex: &str,
         config: Option<&PyPoolBuySellParameters>,
+        prior_transactions: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyPoolBuySellSimulationResult> {
+        let extra_priors = prior_transactions
+            .map(processed_transactions_from_py_iterable)
+            .transpose()?;
         // For now, route through generic handler with PoolType::UniswapV4 and pool_address=pool_manager
         self.check_pool_internal(
             token_address,
             pool_manager_address,
             PoolType::UniswapV4,
             config,
+            extra_priors,
         )
+    }
+
+    /// Get simulator information
+    fn get_info(&self, py: Python) -> PyResult<Py<pyo3::types::PyDict>> {
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("version", "0.2.0")?;
+        dict.set_item("type", "PoolBuySellSimulator")?;
+        dict.set_item("default_buy_amount", "0.01 ETH")?;
+        dict.set_item("supports_uniswap_v2", true)?;
+        dict.set_item("supports_uniswap_v3", true)?;
+        dict.set_item("supports_tax_calculation", true)?;
+        Ok(dict.unbind())
+    }
+
+    fn __repr__(&self) -> String {
+        "PoolBuySellSimulator(type='viability_check', version='0.2.0')".to_string()
     }
 }
 
@@ -653,6 +686,7 @@ impl PyPoolBuySellSimulator {
         pool_address: &str,
         pool_type: PoolType,
         config: Option<&PyPoolBuySellParameters>,
+        extra_prior_transactions: Option<Vec<RustProcessedTransaction>>,
     ) -> PyResult<PyPoolBuySellSimulationResult> {
         let token_addr =
             Address::from_str(token_address.trim_start_matches("0x")).map_err(|e| {
@@ -671,7 +705,10 @@ impl PyPoolBuySellSimulator {
                 "PoolBuySellParameters must be provided; token_decimals is required",
             )
         })?;
-        let rust_config = cfg.to_rust_config(token_addr, pool_addr, pool_type)?;
+        let mut rust_config = cfg.to_rust_config(token_addr, pool_addr, pool_type)?;
+        if let Some(mut extra) = extra_prior_transactions {
+            rust_config.prior_txs.append(&mut extra);
+        }
 
         let simulator = self.simulator.clone();
         let processor = self.processor.clone();
@@ -689,21 +726,5 @@ impl PyPoolBuySellSimulator {
             })?;
 
         Ok(PyPoolBuySellSimulationResult::from_rust_result(result))
-    }
-
-    /// Get simulator information
-    fn get_info(&self, py: Python) -> PyResult<Py<pyo3::types::PyDict>> {
-        let dict = pyo3::types::PyDict::new(py);
-        dict.set_item("version", "0.2.0")?;
-        dict.set_item("type", "PoolBuySellSimulator")?;
-        dict.set_item("default_buy_amount", "0.01 ETH")?;
-        dict.set_item("supports_uniswap_v2", true)?;
-        dict.set_item("supports_uniswap_v3", true)?;
-        dict.set_item("supports_tax_calculation", true)?;
-        Ok(dict.into())
-    }
-
-    fn __repr__(&self) -> String {
-        "PoolBuySellSimulator(type='viability_check', version='0.2.0')".to_string()
     }
 }

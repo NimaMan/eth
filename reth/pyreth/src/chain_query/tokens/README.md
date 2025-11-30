@@ -11,7 +11,7 @@ What’s exposed to Python (via pyreth.ChainQuery)
 - get_token_symbol(token: str, block: Optional[int]) -> str
 - get_token_name(token: str, block: Optional[int]) -> str
 - get_token_total_supply(token: str, block: Optional[int]) -> str (U256 as decimal string)
-- get_token_metadata(token: str, block: Optional[int]) -> TokenMetadata
+- get_token_metadata(token: str, block: Optional[int]) -> Optional[TokenMetadata]
 
 Data class
 ----------

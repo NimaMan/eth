@@ -1,6 +1,6 @@
 [package]
 name = "pyreth"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["PyReth Team"]
 description = "Python bindings for Reth-based Ethereum tools"
@@ -13,7 +13,7 @@ name = "pyreth"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["prices"]
 prices = ["eth_prices", "eth_env"]
 
 [dependencies]
@@ -26,8 +26,8 @@ eth_env = { path = "../eth_env", optional = true }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
 
 # Python bindings
-pyo3 = { version = "0.20", features = ["extension-module", "abi3-py39"] }
-pyo3-asyncio = { version = "0.20", features = ["tokio-runtime"] }
+pyo3 = { version = "0.21", features = ["extension-module", "abi3-py39"] }
+pyo3-asyncio = { package = "pyo3-asyncio-0-21", version = "0.21", features = ["tokio-runtime"] }
 
 # Async runtime
 tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }

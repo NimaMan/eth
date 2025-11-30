@@ -35,7 +35,7 @@ use crate::tx_processor::py_tx_processor::PyTxProcessor;
 /// Initialize the Python module
 #[pymodule]
 #[pyo3(name = "pyreth")]
-pub fn pyreth_module(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+pub fn pyreth_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Main singleton instance for shared database connection
     m.add_class::<PyRethInstance>()?;
 

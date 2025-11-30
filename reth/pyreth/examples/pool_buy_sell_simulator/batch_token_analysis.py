@@ -17,6 +17,9 @@ from datetime import datetime
 from typing import List, Dict, Any
 
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
+
 # Common tokens to analyze
 TOKENS_TO_ANALYZE = [
     # Format: (symbol, token_address, pool_address, pool_type, decimals)
@@ -60,10 +63,10 @@ def analyze_token(simulator, symbol: str, token: str, pool: str,
     start_time = time.time()
     
     try:
-        # Create config with token decimals
-        config = pyreth.PoolBuySellParameters()
-        config.test_amount_eth = 0.01  # Small amount for testing
-        config.token_decimals = decimals
+        # Create config with token/denom decimals
+        config = pyreth.PoolBuySellParameters(decimals, WETH_DECIMALS)
+        config.denom_address = WETH_ADDRESS
+        config.denom_amount = 0.01  # Small amount for testing
         
         # Check based on pool type
         if pool_type == "V2":

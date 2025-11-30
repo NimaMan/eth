@@ -1,6 +1,8 @@
 from textwrap import dedent
 import pyreth  # noqa: E402
 
+WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+WETH_DECIMALS = 18
 
 TOKEN = "0x21eFcF554CB113DC23F5767409c780716D08b2ef"
 POOL = "0x8aeaa7aC75fB24A9841d38A437d34e19954F261b"
@@ -23,8 +25,10 @@ def main() -> None:
 
     reth = pyreth.PyReth()
     simulator = reth.pool_buy_sell_simulator()
+    decimals = reth.chain_query().get_token_decimals(TOKEN, None)
 
-    config = pyreth.PoolBuySellParameters.with_buy_amount(0.01)
+    config = pyreth.PoolBuySellParameters.with_denom_amount(0.01, decimals, WETH_DECIMALS)
+    config.denom_address = WETH_ADDRESS
     config.block_number = BLOCK
 
     result = simulator.check_uniswap_v2_pool(

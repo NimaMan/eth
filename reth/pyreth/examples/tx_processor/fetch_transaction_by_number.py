@@ -9,8 +9,6 @@ Environment:
     PYRETH_DATADIR            Override the Reth datadir (default ~/.local/share/reth/mainnet).
 """
 
-from __future__ import annotations
-
 import argparse
 from typing import Any
 

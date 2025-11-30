@@ -86,7 +86,7 @@ impl PySimulator {
     ///     PySimulationResult: Basic simulation result with success/gas/error info
     pub fn simulate_transaction(
         &self,
-        transaction: &PyDict,
+        transaction: &Bound<'_, PyDict>,
         block_number: Option<u64>,
     ) -> PyResult<PySimulationResult> {
         // Convert Python dict to UnsignedTransaction
@@ -96,7 +96,7 @@ impl PySimulator {
         let result = self
             .runtime
             .block_on(async move {
-                let mut chain = simulator.start_simulation_chain(block_number, None).await?;
+                let mut chain = simulator.start_simulation_chain(block_number).await?;
                 chain.step(unsigned_tx).await
             })
             .map_err(|e| {
@@ -139,7 +139,7 @@ impl PySimulator {
         nonce: Option<u64>,
     ) -> PyResult<Py<PyDict>> {
         Python::with_gil(|py| {
-            let tx_dict = PyDict::new(py);
+            let tx_dict = PyDict::new_bound(py);
 
             // Required fields
             tx_dict.set_item("from", from_address)?;
@@ -168,7 +168,7 @@ impl PySimulator {
                 tx_dict.set_item("nonce", n)?;
             }
 
-            Ok(tx_dict.into())
+            Ok(tx_dict.unbind())
         })
     }
 
@@ -186,7 +186,7 @@ impl PySimulator {
 }
 
 /// Convert Python dict to UnsignedTransaction
-fn dict_to_unsigned_transaction(tx_dict: &PyDict) -> PyResult<UnsignedTransaction> {
+fn dict_to_unsigned_transaction(tx_dict: &Bound<'_, PyDict>) -> PyResult<UnsignedTransaction> {
     let from = tx_dict
         .get_item("from")?
         .map(|v| v.extract::<String>())

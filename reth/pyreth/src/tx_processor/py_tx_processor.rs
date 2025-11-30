@@ -487,13 +487,13 @@ impl PyTxProcessor {
         });
 
         // Build result dictionary
-        let result_dict = PyDict::new(py);
-        let success_list = PyList::empty(py);
-        let failed_list = PyList::empty(py);
+        let result_dict = PyDict::new_bound(py);
+        let success_list = PyList::empty_bound(py);
+        let failed_list = PyList::empty_bound(py);
 
         // Add parse errors to failed list
         for (idx, hash, error) in parse_errors {
-            let error_dict = PyDict::new(py);
+            let error_dict = PyDict::new_bound(py);
             error_dict.set_item("index", idx)?;
             error_dict.set_item("hash", hash)?;
             error_dict.set_item("error", format!("Parse error: {}", error))?;
@@ -504,7 +504,7 @@ impl PyTxProcessor {
         for (idx, hash, result) in results {
             match result {
                 Ok(ptx) => {
-                    let success_dict = PyDict::new(py);
+                    let success_dict = PyDict::new_bound(py);
                     success_dict.set_item("index", idx)?;
                     success_dict.set_item("hash", hash)?;
                     success_dict.set_item(
@@ -514,7 +514,7 @@ impl PyTxProcessor {
                     success_list.append(success_dict)?;
                 }
                 Err(e) => {
-                    let error_dict = PyDict::new(py);
+                    let error_dict = PyDict::new_bound(py);
                     error_dict.set_item("index", idx)?;
                     error_dict.set_item("hash", hash)?;
                     error_dict.set_item("error", e.to_string())?;
@@ -523,13 +523,13 @@ impl PyTxProcessor {
             }
         }
 
-        result_dict.set_item("success", success_list)?;
-        result_dict.set_item("failed", failed_list)?;
+        result_dict.set_item("success", &success_list)?;
+        result_dict.set_item("failed", &failed_list)?;
         result_dict.set_item("total", tx_hashes.len())?;
         result_dict.set_item("successful", success_list.len())?;
         result_dict.set_item("failed_count", failed_list.len())?;
 
-        Ok(result_dict.into())
+        Ok(result_dict.unbind())
     }
 
     /// Process transactions for a specific address
@@ -609,14 +609,14 @@ impl PyTxProcessor {
 
     /// Get processor statistics
     fn get_stats(&self, py: Python) -> PyResult<Py<pyo3::types::PyDict>> {
-        let dict = pyo3::types::PyDict::new(py);
+        let dict = pyo3::types::PyDict::new_bound(py);
         dict.set_item("version", "0.1.0")?;
         dict.set_item("backend", "Rust tx_processor")?;
         dict.set_item("performance", "10-40x faster than Python")?;
         dict.set_item("cpu_count", num_cpus::get())?;
         dict.set_item("default_workers", 4.min(num_cpus::get()))?;
         dict.set_item("max_workers", 8)?;
-        Ok(dict.into())
+        Ok(dict.unbind())
     }
 
     fn __repr__(&self) -> String {

@@ -60,19 +60,19 @@ impl PyPriceData {
 
     /// Parse PriceSource enum into structured Python dictionary
     fn parse_price_source(source: &PriceSource, py: Python) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
 
         match source {
-            PriceSource::Amm(data) => Self::parse_amm_source(py, data, dict)?,
-            PriceSource::Oracle(data) => Self::parse_oracle_source(py, data, dict)?,
-            PriceSource::Aggregator(data) => Self::parse_aggregator_source(py, data, dict)?,
-            PriceSource::Simulation(data) => Self::parse_simulation_source(py, data, dict)?,
+            PriceSource::Amm(data) => Self::parse_amm_source(py, data, &dict)?,
+            PriceSource::Oracle(data) => Self::parse_oracle_source(py, data, &dict)?,
+            PriceSource::Aggregator(data) => Self::parse_aggregator_source(py, data, &dict)?,
+            PriceSource::Simulation(data) => Self::parse_simulation_source(py, data, &dict)?,
         }
 
         Ok(dict.into())
     }
 
-    fn parse_amm_source(py: Python, data: &AmmPriceSource, dict: &PyDict) -> PyResult<()> {
+    fn parse_amm_source(py: Python, data: &AmmPriceSource, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         dict.set_item("protocol", data.protocol.as_str())?;
         dict.set_item("price_id", data.price_id.to_string())?;
         dict.set_item(
@@ -92,7 +92,7 @@ impl PyPriceData {
         Ok(())
     }
 
-    fn parse_oracle_source(_: Python, data: &OraclePriceSource, dict: &PyDict) -> PyResult<()> {
+    fn parse_oracle_source(_: Python, data: &OraclePriceSource, dict: &Bound<'_, PyDict>) -> PyResult<()> {
         dict.set_item("protocol", data.price_id.protocol.as_str())?;
         dict.set_item("price_id", data.price_id.to_string())?;
         dict.set_item(
@@ -114,7 +114,7 @@ impl PyPriceData {
     fn parse_aggregator_source(
         py: Python,
         data: &AggregatorPriceSource,
-        dict: &PyDict,
+        dict: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
         dict.set_item("protocol", data.protocol.as_str())?;
         dict.set_item("routes", data.routes.clone())?;
@@ -136,7 +136,7 @@ impl PyPriceData {
     fn parse_simulation_source(
         py: Python,
         data: &SimulationPriceSource,
-        dict: &PyDict,
+        dict: &Bound<'_, PyDict>,
     ) -> PyResult<()> {
         dict.set_item("protocol", data.price_id.protocol.as_str())?;
         dict.set_item("price_id", data.price_id.to_string())?;
@@ -157,7 +157,7 @@ impl PyPriceData {
     }
 
     fn token_to_dict(py: Python, token: &Token) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         dict.set_item(
             "address",
             format!("0x{}", hex::encode(token.address.as_slice())),
@@ -168,7 +168,7 @@ impl PyPriceData {
     }
 
     fn liquidity_to_dict(py: Python, data: &LiquidityMetrics) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         dict.set_item("raw_liquidity", data.raw_liquidity.to_string())?;
         dict.set_item("liquidity_tier", data.liquidity_tier)?;
         dict.set_item("significance_multiplier", data.significance_multiplier)?;
@@ -267,7 +267,7 @@ impl PyPriceData {
 
     /// Convert to dictionary with structured source info
     fn to_dict(&self, py: Python) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
         dict.set_item("pair", &self.pair)?;
         dict.set_item("price", self.price)?;
         dict.set_item("price_numerator", &self.price_numerator)?;

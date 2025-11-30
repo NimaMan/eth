@@ -4,14 +4,9 @@ This script compares the latest block reported by the RPC endpoint against the
 latest block whose transaction indices are available in the Reth index. Use it
 to confirm whether the MDBX data is in sync with the node you're querying.
 """
-
-from __future__ import annotations
-
 import os
 from typing import Optional
-
 from web3 import Web3
-
 import pyreth
 
 RPC_URL = os.environ.get("PYRETH_RPC_URL", "http://127.0.0.1:8545")

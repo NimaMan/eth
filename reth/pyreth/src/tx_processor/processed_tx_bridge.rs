@@ -7,7 +7,7 @@ use tx_processor::ProcessedTransaction as RustProcessedTransaction;
 
 /// Extract a Rust `ProcessedTransaction` from any Python object that represents it.
 pub(crate) fn processed_transaction_from_py_object(
-    prior: &PyAny,
+    prior: &Bound<'_, PyAny>,
 ) -> PyResult<RustProcessedTransaction> {
     if let Ok(py_processed) = prior.extract::<PyRef<PyProcessedTransaction>>() {
         return Ok(py_processed.to_processed_transaction());
@@ -15,15 +15,15 @@ pub(crate) fn processed_transaction_from_py_object(
 
     // Dataclass instance → convert via dataclasses.asdict
     if prior.hasattr("__dataclass_fields__")? {
-        let dataclasses = prior.py().import("dataclasses")?;
+        let dataclasses = prior.py().import_bound("dataclasses")?;
         let dict_obj = dataclasses.call_method1("asdict", (prior,))?;
-        return processed_transaction_from_mapping(dict_obj);
+        return processed_transaction_from_mapping(&dict_obj);
     }
 
     // Objects exposing to_dict()
     if prior.hasattr("to_dict")? {
         let dict_obj = prior.call_method0("to_dict")?;
-        return processed_transaction_from_mapping(dict_obj);
+        return processed_transaction_from_mapping(&dict_obj);
     }
 
     // Raw mapping/dict
@@ -32,13 +32,13 @@ pub(crate) fn processed_transaction_from_py_object(
 
 /// Convert a Python mapping/dict into a Rust `ProcessedTransaction`.
 pub(crate) fn processed_transaction_from_py_dict(
-    prior_dict: &PyAny,
+    prior_dict: &Bound<'_, PyAny>,
 ) -> PyResult<RustProcessedTransaction> {
     processed_transaction_from_mapping(prior_dict)
 }
 
 pub(crate) fn processed_transactions_from_py_iterable(
-    prior_iterable: &PyAny,
+    prior_iterable: &Bound<'_, PyAny>,
 ) -> PyResult<Vec<RustProcessedTransaction>> {
     if prior_iterable.is_none() {
         return Ok(Vec::new());
@@ -59,16 +59,16 @@ pub(crate) fn processed_transactions_from_py_iterable(
     let mut transactions = Vec::new();
     for item in iter {
         let obj = item?;
-        transactions.push(processed_transaction_from_py_object(obj)?);
+        transactions.push(processed_transaction_from_py_object(&obj)?);
     }
     Ok(transactions)
 }
 
-fn processed_transaction_from_mapping(obj: &PyAny) -> PyResult<RustProcessedTransaction> {
+fn processed_transaction_from_mapping(obj: &Bound<'_, PyAny>) -> PyResult<RustProcessedTransaction> {
     let py = obj.py();
     let owned_dict = to_owned_dict(py, obj)?;
     let mut path = Vec::new();
-    let map = py_dict_to_json_map(owned_dict.as_ref(py), &mut path)?;
+    let map = py_dict_to_json_map(owned_dict.bind(py), &mut path)?;
     let json_value = Value::Object(map.clone());
     let json_string = serde_json::to_string(&json_value).map_err(|err| {
         PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -89,20 +89,20 @@ fn processed_transaction_from_mapping(obj: &PyAny) -> PyResult<RustProcessedTran
     }
 }
 
-fn to_owned_dict(py: Python<'_>, obj: &PyAny) -> PyResult<Py<PyDict>> {
+fn to_owned_dict(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     if let Ok(dict) = obj.downcast::<PyDict>() {
-        return Ok(dict.into_py(py));
+        return Ok(dict.clone().unbind());
     }
 
     if obj.hasattr("__dataclass_fields__")? {
-        let dataclasses = py.import("dataclasses")?;
+        let dataclasses = py.import_bound("dataclasses")?;
         let dict_obj = dataclasses.call_method1("asdict", (obj,))?;
-        return to_owned_dict(py, dict_obj);
+        return to_owned_dict(py, &dict_obj);
     }
 
     if obj.hasattr("to_dict")? {
         let dict_obj = obj.call_method0("to_dict")?;
-        return to_owned_dict(py, dict_obj);
+        return to_owned_dict(py, &dict_obj);
     }
 
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -110,19 +110,19 @@ fn to_owned_dict(py: Python<'_>, obj: &PyAny) -> PyResult<Py<PyDict>> {
     ))
 }
 
-fn py_dict_to_json_map(dict: &PyDict, path: &mut Vec<String>) -> PyResult<Map<String, Value>> {
+fn py_dict_to_json_map(dict: &Bound<'_, PyDict>, path: &mut Vec<String>) -> PyResult<Map<String, Value>> {
     let mut result = Map::with_capacity(dict.len());
     for (key_obj, value_obj) in dict {
         let key: String = key_obj.extract()?;
         path.push(key.clone());
-        let value = py_any_to_json(value_obj, path)?;
+        let value = py_any_to_json(&value_obj, path)?;
         path.pop();
         result.insert(key, value);
     }
     Ok(result)
 }
 
-fn py_any_to_json(obj: &PyAny, path: &mut Vec<String>) -> PyResult<Value> {
+fn py_any_to_json(obj: &Bound<'_, PyAny>, path: &mut Vec<String>) -> PyResult<Value> {
     if obj.is_none() {
         return Ok(Value::Null);
     }
@@ -145,7 +145,7 @@ fn py_any_to_json(obj: &PyAny, path: &mut Vec<String>) -> PyResult<Value> {
     }
 
     if obj.is_instance_of::<PyString>() {
-        let s = obj.downcast::<PyString>()?.to_str()?.to_owned();
+        let s = obj.extract::<String>()?;
         if matches!(path.last(), Some(key) if key == "input") {
             return hex_string_to_array(&s).ok_or_else(|| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -172,7 +172,7 @@ fn py_any_to_json(obj: &PyAny, path: &mut Vec<String>) -> PyResult<Value> {
         let mut values = Vec::with_capacity(list.len());
         for (idx, item) in list.iter().enumerate() {
             path.push(format!("[{idx}]"));
-            values.push(py_any_to_json(item, path)?);
+            values.push(py_any_to_json(&item, path)?);
             path.pop();
         }
         return Ok(Value::Array(values));
@@ -183,7 +183,7 @@ fn py_any_to_json(obj: &PyAny, path: &mut Vec<String>) -> PyResult<Value> {
         let mut values = Vec::with_capacity(tuple.len());
         for (idx, item) in tuple.iter().enumerate() {
             path.push(format!("[{idx}]"));
-            values.push(py_any_to_json(item, path)?);
+            values.push(py_any_to_json(&item, path)?);
             path.pop();
         }
         return Ok(Value::Array(values));
@@ -202,7 +202,7 @@ fn py_any_to_json(obj: &PyAny, path: &mut Vec<String>) -> PyResult<Value> {
     ))
 }
 
-fn py_long_to_value(long: &PyLong) -> PyResult<Value> {
+fn py_long_to_value(long: &Bound<'_, PyLong>) -> PyResult<Value> {
     if let Ok(value) = long.extract::<i64>() {
         return Ok(Value::Number(Number::from(value)));
     }
@@ -210,7 +210,7 @@ fn py_long_to_value(long: &PyLong) -> PyResult<Value> {
         return Ok(Value::Number(Number::from(value)));
     }
 
-    let decimal = long.str()?.to_str()?.to_owned();
+    let decimal = long.str()?.extract::<String>()?;
     if decimal.starts_with('-') {
         return Ok(Value::String(decimal));
     }

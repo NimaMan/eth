@@ -7,7 +7,6 @@ use alloy_primitives::U256;
 use pyo3::prelude::*;
 use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::{PoolLiquidityInfo, RethQueryProvider};
-use reth_primitives::SealedHeader;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
@@ -59,15 +58,9 @@ pub fn get_pool_liquidity(
     provider: Arc<RethQueryProvider>,
     route: AmmSwapRoute,
     block: Option<u64>,
-    header: Option<SealedHeader>,
 ) -> PyResult<PyPoolLiquidityInfo> {
-    let header_clone = header.clone();
     let info = runtime
-        .block_on(async move {
-            provider
-                .get_route_liquidity(&route, block, header_clone)
-                .await
-        })
+        .block_on(async move { provider.get_route_liquidity(&route, block).await })
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
     let PoolLiquidityInfo {
         protocol,
