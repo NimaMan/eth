@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "src/core_types",
+    "src/eth_db_fetcher",
+    "src/fundflownetwork",
+    "src/fundflownetwork_py"
+]
+
+[workspace.dependencies]
+# Core Ethereum - matching tx_processor versions
+alloy-primitives = { version = "1.1.2", default-features = false, features = ["serde", "std"] }
+ethers = { version = "2.0", default-features = false, features = ["rustls", "ws"] }
+hex = "0.4"
+
+
+# Async
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+
+# Database  
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Performance
+dashmap = "6.0"
+lru = "0.12"
+
+# CLI
+clap = { version = "4.0", features = ["derive", "env"] }
+
+# Testing
+tokio-test = "0.4"

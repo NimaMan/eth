@@ -1,0 +1,24 @@
+[package]
+name = "qarqa-eth-db-fetcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Database
+sqlx = { workspace = true }
+tokio = { workspace = true }
+
+# Core types
+alloy-primitives = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+eyre = "0.6"
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+dotenv = "0.15"
