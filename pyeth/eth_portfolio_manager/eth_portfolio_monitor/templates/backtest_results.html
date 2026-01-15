@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest Results{% endblock %}
+
+{% block head %}
+<style>
+    #strategy-selection-table tbody tr.selected {
+        background-color: #e2f0ff !important;
+        font-weight: bold;
+    }
+    #strategy-selection-table tbody tr {
+        cursor: pointer;
+    }
+    #strategy-selection-table tbody tr:hover {
+        background-color: #f8f9fc;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Strategy Selection -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Strategy Selection</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="strategy-selection-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Strategy Name</th>
+                            <th>Parameters</th>
+                            <th>Block Range</th>
+                            <th>Created At</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Strategy Info -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Strategy Details</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 mb-2">
+                    <p><strong>Start Time:</strong> <span id="strategy-start-time">-</span></p>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <p><strong>End Time:</strong> <span id="strategy-end-time">-</span></p>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <p><strong>Total Trades:</strong> <span id="strategy-total-trades">-</span></p>
+                </div>
+                <div class="col-md-3 mb-2">
+                    <p><strong>Success Rate:</strong> <span id="strategy-success-rate">-</span>%</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Portfolio Stats Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Portfolio Performance</h6>
+        </div>
+        <div class="card-body">
+            <!-- Currency metrics will be inserted here -->
+            <div id="currency-metrics-container"></div>
+
+            <!-- Position Counts Row -->
+            <div class="row mt-4">
+                <!-- Init Positions -->
+                <div class="col-xl-3 col-md-3 mb-4">
+                    <div class="card border-left-primary shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                        Init State Tokens
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="init-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Buy Positions -->
+                <div class="col-xl-3 col-md-3 mb-4">
+                    <div class="card border-left-success shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                        Buy State Tokens
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="buy-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sell Positions -->
+                <div class="col-xl-3 col-md-3 mb-4">
+                    <div class="card border-left-warning shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                        Sell State Tokens
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="sell-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Scammed Positions -->
+                <div class="col-xl-3 col-md-3 mb-4">
+                    <div class="card border-left-danger shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                                        Scammed Tokens
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                        <span id="scam-count">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Tables -->
+        <!-- Sell State Tokens Table -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-warning">Sell State Tokens</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="sell-positions-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th>Symbol</th>
+                                <th>Age (blocks)</th>
+                                <th>Age (hours)</th>
+                                <th>State</th>
+                                <th>Current Value</th>
+                                <th>Current XPrice</th>
+                                <th>Realized P/L</th>
+                                <th>Unrealized P/L</th>
+                                <th>Greys</th>
+                                <th>Greens</th>
+                                <th>Scam Prob</th>
+                                <th>Currency</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    <!-- Buy State Tokens Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-success">Buy State Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="buy-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Currency</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scammed Tokens Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-danger">Scammed Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="scam-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Currency</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Init State Tokens Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Init State Tokens</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="init-positions-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Symbol</th>
+                            <th>Age (blocks)</th>
+                            <th>Age (hours)</th>
+                            <th>State</th>
+                            <th>Current Value</th>
+                            <th>Current XPrice</th>
+                            <th>Realized P/L</th>
+                            <th>Unrealized P/L</th>
+                            <th>Greys</th>
+                            <th>Greens</th>
+                            <th>Scam Prob</th>
+                            <th>Currency</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+   
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/backtest_results.js') }}"></script>
+{% endblock %} 

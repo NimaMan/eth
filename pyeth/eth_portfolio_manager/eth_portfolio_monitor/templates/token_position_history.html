@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Strategy Selection -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Strategy Selection</h6>
+        </div>
+        <div class="card-body">
+            <select id="strategy-select" class="form-control">
+                <option value="">Select Strategy...</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Token List Table -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Token Positions</h6>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered" id="token-list-table" width="100%" cellspacing="0">
+                    <thead>
+                        <tr>
+                            <th>Creation Time</th>
+                            <th>Symbol</th>
+                            <th>Address</th>
+                            <th>Age (blocks)</th>
+                            <th>ROI</th>
+                            <th>Total Profit</th>
+                            <th>State</th>
+                            <th>Current Price Ratio</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Static Data Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Token Information</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <div class="token-info d-flex align-items-center mb-2">
+                        <h4 id="token-symbol" class="mb-0 mr-2 font-weight-bold">-</h4>
+                        <span class="mr-2">:</span>
+                        <a id="token-address-link" href="#" target="_blank" class="text-break text-primary">-</a>
+                    </div>
+                    <div>
+                        <span id="token-currency" class="badge badge-secondary">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4">
+                    <p><strong>Entry Price:</strong> <span id="entry-price">-</span></p>
+                    <p><strong>Exit Price:</strong> <span id="exit-price">-</span></p>
+                    <p><strong>Purchase Value:</strong> <span id="purchase-value">-</span></p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>Creation Block:</strong> <span id="creation-block">-</span></p>
+                    <p><strong>Trading Enabled:</strong> <span id="trading-enabled-block">-</span></p>
+                    <p><strong>Entry Block:</strong> <span id="entry-block">-</span></p>
+                    <p><strong>Exit Block:</strong> <span id="exit-block">-</span></p>
+                </div>
+                <div class="col-md-4">
+                    <p><strong>Entry Fee:</strong> <span id="entry-fee">-</span></p>
+                    <p><strong>Exit Fee:</strong> <span id="exit-fee">-</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latest Snapshot Card -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <h6 class="m-0 font-weight-bold text-primary">Current Position Status</h6>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <!-- Column 1: Current Block, Age (blocks), Age (hours) -->
+                <div class="col-md-3">
+                    <p><strong>Current Block:</strong> <span id="current-block">-</span></p>
+                    <p><strong>Age (blocks):</strong> <span id="token-age-blocks">-</span></p>
+                    <p><strong>Age (hours):</strong> <span id="token-age-hours">-</span></p>
+                </div>
+                <!-- Column 2: Position State, Current Value, ROI -->
+                <div class="col-md-3">
+                    <p><strong>Position State:</strong> <span id="position-state">-</span></p>
+                    <p><strong>Current Price:</strong> <span id="current-price">-</span></p>
+                    <p><strong>Current Value:</strong> <span id="current-value">-</span></p>
+                    <p><strong>ROI:</strong> <span id="roi">-</span></p>
+                </div>
+                <!-- Column 3: Quantity, Realized P/L, Unrealized P/L -->
+                <div class="col-md-3">
+                    <p><strong>Quantity:</strong> <span id="position-quantity">-</span></p>
+                    <p><strong>Realized P/L:</strong> <span id="realized-profit">-</span></p>
+                    <p><strong>Unrealized P/L:</strong> <span id="unrealized-profit">-</span></p>
+                </div>
+                <!-- Column 4: Green Holders, Bribers, Bribe Amount -->
+                <div class="col-md-3">
+                    <p><strong>Green Holders:</strong> <span id="scam-info-greens">-</span></p>
+                    <p><strong>Bribers:</strong> <span id="scam-info-bribers">-</span></p>
+                    <p><strong>Bribe Amount:</strong> <span id="scam-info-bribe-amount">-</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Position Details (initially hidden) -->
+    <div id="position-details" style="display: none;">
+        <!-- Token Scam Information Card -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Scam Information</h6>
+                <div class="dropdown no-arrow">
+                    <a class="dropdown-toggle" href="#" role="button" id="dropdownMenuLink"
+                        data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Scam Probability:</strong> <span id="scam-info-probability">-</span></p>
+                        <p><strong>Grey Holders:</strong> <span id="scam-info-greys">-</span></p>
+                        
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Scam Reason:</strong></p>
+                        <div class="scam-reason-container" style="max-height: 120px; overflow-y: auto; border: 1px solid #e3e6f0; border-radius: 4px; padding: 10px; background-color: #f8f9fc;">
+                            <p id="scam-info-reason" style="margin-bottom: 0;">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Position History Table -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Token Position History</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="position-table" width="100%" cellspacing="0">
+                        <thead>
+                            <tr>
+                                <th>Block</th>
+                                <th>State</th>
+                                <th>Current Value</th>
+                                <th>Current Price Ratio</th>
+                                <th>Age (blocks)</th>
+                                <th>Age (hours)</th>
+                                <th>Scam Prob</th>
+                                <th>Greys</th>
+                                <th>Greens</th>
+                                <th>Bribe Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Position History Chart -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Price History</h6>
+            </div>
+            <div class="card-body">
+                <div id="priceChart" style="height: 400px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Add utils.js before token_position_history.js -->
+<script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+<script src="{{ url_for('static', filename='js/token_position_history.js') }}"></script>
+{% endblock %}
