@@ -1,0 +1,19 @@
+# MCP Server Requirements
+# For Ethereum Transaction Investigation Server
+
+# MCP SDK (when available)
+# mcp-sdk>=0.1.0
+
+# Core dependencies (should already be installed in qw environment)
+web3>=6.0.0
+sqlalchemy>=2.0
+asyncio-mqtt
+pydantic>=2.0
+python-json-logger
+
+# Database
+asyncpg
+psycopg2-binary
+
+# Utilities
+python-dotenv

@@ -1,0 +1,17 @@
+[Unit]
+Description=Transaction Validation Service
+After=network.target
+
+[Service]
+Type=simple
+User=nima
+Group=nima
+WorkingDirectory=/home/nima/code/crypto/py/eth_data/scripts/provide_tx_service
+Environment="PATH=/home/nima/miniconda3/envs/qw/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/nima/code/crypto/py/eth_data"
+ExecStart=/home/nima/miniconda3/envs/qw/bin/python validation_service.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

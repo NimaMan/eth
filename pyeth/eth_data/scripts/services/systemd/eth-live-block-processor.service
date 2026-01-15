@@ -1,0 +1,45 @@
+[Unit]
+Description=Ethereum Live Block Processor Service (eth_data)
+After=network.target postgresql.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=nima
+Group=nima
+
+# Environment variables for the 'qw' Conda environment
+Environment="PATH=/home/nima/miniconda3/envs/qw/bin:/home/nima/miniconda3/condabin:/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/snap/bin:/usr/local/go/bin:/home/nima/.foundry/bin"
+Environment="CONDA_PREFIX=/home/nima/miniconda3/envs/qw"
+Environment="PYTHONPATH=/home/nima/code/crypto/py/eth_data"
+
+# Database configuration
+Environment="DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db"
+
+# RabbitMQ configuration for message queue
+Environment="RABBITMQ_URL=amqp://guest:guest@127.0.0.1/"
+
+# Logging configuration
+Environment="LOG_LEVEL=INFO"
+Environment="PYTHONUNBUFFERED=1"
+
+# Use the Python interpreter from the 'qw' Conda environment
+ExecStart=/home/nima/miniconda3/envs/qw/bin/python /home/nima/code/crypto/py/eth_data/scripts/process_blocks_live.py
+
+# Working directory
+WorkingDirectory=/home/nima/code/crypto/py/eth_data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits (optional)
+# Limit memory usage to prevent runaway processes
+MemoryLimit=4G
+# Nice level for CPU priority (lower = higher priority)
+Nice=0
+
+[Install]
+WantedBy=multi-user.target

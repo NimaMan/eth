@@ -1,0 +1,190 @@
+'''
+Logger Module Documentation Objective:
+The primary objective of this logger module is to provide a centralized and consistent logging mechanism for the entire `eth_data` project. It aims to:
+
+1. Create a standardized logging format across all modules.
+2. Allow for easy integration of logging in any part of the project.
+3. Ensure that all logs are stored in a predefined location for easy access and analysis.
+4. Implement log rotation to prevent log explosion (max 50MB per file with 5 backups).
+5. Delete empty log files when the program exits.
+
+'''
+import os
+from datetime import datetime
+import logging
+from logging.handlers import RotatingFileHandler
+import atexit
+from typing import Optional
+
+
+# Default log directory; can be customized as needed
+ETH_LOG_DIR = os.getenv('ETH_LOG_DIR', '/home/nima/code/crypto/eth/logs')
+# Track all created log files
+_log_files = set()
+_SKIP_CLEANUP_FOLDERS = set()
+_SKIP_CLEANUP_KEYWORDS = {"live_block_processor"}
+_MIN_LINES_TO_KEEP = max(1, int(os.getenv("ETH_LOG_MIN_LINES", "2")))
+
+
+def _should_skip_cleanup(log_path: str) -> bool:
+    """
+    Skip deleting logs that belong to certain folders (e.g. long-running services).
+    """
+    try:
+        rel_path = os.path.relpath(log_path, ETH_LOG_DIR)
+    except ValueError:
+        # Path outside ETH_LOG_DIR – never skip
+        return False
+
+    parts = rel_path.split(os.sep)
+    if parts and parts[0] in _SKIP_CLEANUP_FOLDERS:
+        return True
+
+    filename = parts[-1] if parts else rel_path
+    lowercase_path = filename.lower()
+    for keyword in _SKIP_CLEANUP_KEYWORDS:
+        if keyword in lowercase_path:
+            return True
+
+    return False
+
+
+def register_skip_cleanup_folder(folder_name: str) -> None:
+    """
+    Allow external packages to retain logs in specific top-level folders.
+    """
+    if folder_name:
+        _SKIP_CLEANUP_FOLDERS.add(folder_name)
+
+
+def register_skip_cleanup_keyword(keyword: str) -> None:
+    """
+    Allow code to exclude files whose names contain `keyword`.
+    """
+    if keyword:
+        _SKIP_CLEANUP_KEYWORDS.add(keyword.lower())
+
+
+def _should_remove_file(path: str) -> bool:
+    try:
+        with open(path, "r") as f:
+            line_count = sum(1 for _ in f)
+        return line_count < _MIN_LINES_TO_KEEP
+    except OSError:
+        return False
+
+
+def _remove_if_needed(path: str) -> None:
+    if _should_skip_cleanup(path):
+        return
+    if not os.path.exists(path):
+        return
+    if _should_remove_file(path):
+        try:
+            os.remove(path)
+            print(f"Removed log file: {path}")
+        except OSError as exc:
+            print(f"Error deleting log file {path}: {exc}")
+
+
+def get_logger(
+    name="block_processor",
+    log_folder="block_processor",
+    base_log_dir=None,
+    log_level=logging.INFO,
+    max_bytes=50*1024*1024,
+    backup_count=5,
+    console_output=False,
+    formatter: Optional[logging.Formatter] = None,
+    timestamp_format: str = "%Y%m%d_%H%M%S",
+):
+    """
+    Initializes and returns a logger with the specified name and rotation capability.
+    
+    Args:
+        name (str): Name of the logger. Defaults to "block_processor" if not provided.
+        log_folder (str): Subfolder name within the base log directory
+        base_log_dir (str): Override the base log directory. If None, uses ETH_LOG_DIR
+        log_level: Logging level (default: INFO)
+        max_bytes: Maximum size of each log file (default: 50MB)
+        backup_count: Number of backup files to keep (default: 5)
+        console_output: Whether to output logs to console (default: False)
+        formatter: Optional custom formatter for handlers
+        timestamp_format: Datetime format used when naming the log file
+        
+    Returns:
+        logging.Logger: Configured logger instance.
+    """
+    if base_log_dir is None:
+        if log_folder is None:
+            base_log_dir = os.path.join(ETH_LOG_DIR, name)
+        else:
+            base_log_dir = os.path.join(ETH_LOG_DIR, log_folder)
+        # Create the log directory if it doesn't exist
+        os.makedirs(base_log_dir, exist_ok=True)
+    
+    # Create a standardized logger name
+    logger = logging.getLogger(name)
+    
+    # Prevent adding multiple handlers to the same logger
+    if logger.handlers:
+        logger.handlers.clear()
+        
+    logger.setLevel(log_level)
+
+    # Simplified format without the logger name
+    formatter = formatter or logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Add timestamp to the log file name
+    timestamp = datetime.now().strftime(timestamp_format)
+    log_file_path = os.path.join(base_log_dir, f"{name}_{timestamp}.log")
+    
+    # Track the log file
+    _log_files.add(log_file_path)
+    
+    # Use RotatingFileHandler instead of FileHandler to prevent log explosion
+    file_handler = RotatingFileHandler(
+        log_file_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Add console handler for immediate feedback only if requested
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+    return logger
+
+
+def cleanup_empty_logs():
+    """
+    Delete log files that are empty or contain fewer than two lines.
+    Scans both tracked files and the entire log directory structure.
+    """
+    # First clean up tracked files
+    for log_file in list(_log_files):
+        try:
+            _remove_if_needed(log_file)
+        except Exception as e:
+            print(f"Error cleaning up tracked log file {log_file}: {str(e)}")
+    
+    # Then scan the entire log directory to catch any untracked log files
+    try:
+        for root, _, files in os.walk(ETH_LOG_DIR):
+            for file in files:
+                if file.endswith('.log'):
+                    log_file_path = os.path.join(root, file)
+                    try:
+                        _remove_if_needed(log_file_path)
+                    except Exception as e:
+                        print(f"Error cleaning up untracked log file {log_file_path}: {str(e)}")
+    except Exception as e:
+        print(f"Error scanning log directory: {str(e)}")
+
+
+# Register cleanup function to run at exit
+atexit.register(cleanup_empty_logs)
