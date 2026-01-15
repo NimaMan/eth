@@ -211,4 +211,4 @@ DATABASE_URL="postgresql://..." BATCH_SIZE=5000 cargo run --example calculate_pn
 This module is used by:
 - **fundflownetwork** - For building transaction graphs and fund flow analysis
 - **pyreth** - Python bindings for accessing PostgreSQL data
-- **qarqa_analytics** - Analytics and insights generation
+- **tx_fund_flow_analytics** - Analytics and insights generation

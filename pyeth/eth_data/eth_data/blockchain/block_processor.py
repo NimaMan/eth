@@ -114,8 +114,8 @@ from .block_data_models import BlockHeader, ProcessedBlockResult
 from eth_data.blockchain.block_fetcher import BlockFetcher
 from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
-#from baygus.qarqa.ethereum_today.etfs.etf_analyzer import BlockLevelETFAnalyzer
-#from baygus.qarqa.ethereum_today.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
+#from baygus.tx_fund_flow.ethereum_today.etfs.etf_analyzer import BlockLevelETFAnalyzer
+#from baygus.tx_fund_flow.ethereum_today.stablecoins.stablecoin_analyzer import BlockLevelStablecoinAnalyzer
 
 
 class BlockProcessor:

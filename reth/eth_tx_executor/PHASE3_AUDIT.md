@@ -2,12 +2,12 @@
 
 ## Executive Summary
 
-This audit covers the Phase 3 implementation of ETH Kartal's risk management and MEV protection system. ETH Kartal serves as the **execution module** responsible for transaction execution with protective measures. Analysis and assessment capabilities are handled by the separate **qarqa module**.
+This audit covers the Phase 3 implementation of ETH Kartal's risk management and MEV protection system. ETH Kartal serves as the **execution module** responsible for transaction execution with protective measures. Analysis and assessment capabilities are handled by the separate **tx_fund_flow module**.
 
 ## Module Scope Clarification
 
 **ETH Kartal (Executor)**: Transaction execution, MEV protection, basic risk limits, circuit breakers
-**Qarqa (Analyzer)**: Market impact modeling, Monte Carlo simulations, advanced risk metrics, complex assessments
+**tx_fund_flow (Analyzer)**: Market impact modeling, Monte Carlo simulations, advanced risk metrics, complex assessments
 
 ## Critical Findings
 
@@ -68,7 +68,7 @@ This audit covers the Phase 3 implementation of ETH Kartal's risk management and
 **Weaknesses:**
 - Hard daily reset at midnight (exploitable)
 - No persistent storage of statistics
-- Limited to basic threshold checks (complex risk analysis belongs in qarqa)
+- Limited to basic threshold checks (complex risk analysis belongs in tx_fund_flow)
 
 ### Circuit Breaker (`src/risk/circuit_breaker.rs`)
 **Strengths:**
@@ -88,7 +88,7 @@ This audit covers the Phase 3 implementation of ETH Kartal's risk management and
 - Gas cost estimation
 
 **Weaknesses:**
-- Simple execution modeling only (complex market analysis belongs in qarqa)
+- Simple execution modeling only (complex market analysis belongs in tx_fund_flow)
 - Fixed recovery percentages
 - No state persistence
 
@@ -126,8 +126,8 @@ This audit covers the Phase 3 implementation of ETH Kartal's risk management and
 4. Implement transaction replay protection
 5. Add nonce management for rapid execution
 
-### Features for Qarqa Module (Analysis/Assessment)
-The following advanced features should be implemented in the qarqa module:
+### Features for tx_fund_flow Module (Analysis/Assessment)
+The following advanced features should be implemented in the tx_fund_flow module:
 1. Monte Carlo risk simulations
 2. Complex market impact modeling
 3. Portfolio optimization algorithms
@@ -144,4 +144,4 @@ The following advanced features should be implemented in the qarqa module:
 
 ## Conclusion
 
-ETH Kartal as an execution module provides essential protective transaction capabilities but requires hardening before production use. Priority should be given to state persistence, input validation, and transaction reliability. Complex risk analysis and market modeling should be delegated to the qarqa module for proper separation of concerns.
+ETH Kartal as an execution module provides essential protective transaction capabilities but requires hardening before production use. Priority should be given to state persistence, input validation, and transaction reliability. Complex risk analysis and market modeling should be delegated to the tx_fund_flow module for proper separation of concerns.

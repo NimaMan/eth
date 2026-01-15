@@ -150,7 +150,7 @@ txs = provider.get_processed_transactions_from_tx_hashes(hashes)
 
 Provides transaction data for fund flow analysis:
 ```python
-# Used by qarqa for network building
+# Used by tx_fund_flow for network building
 transactions = provider.fetch_address_processed_transactions(address)
 network = FundFlowNetworkBuilder.build_from_transactions(transactions)
 ```
@@ -335,6 +335,6 @@ sudo ./migrate_service.sh
 ## Related Modules
 
 - **eth_token**: Token discovery and management
-- **qarqa**: Fund flow network analysis
+- **tx_fund_flow**: Fund flow network analysis
 - **baygus**: Web interface for data visualization
-- **kara_qarqa**: Content generation and alerts
+- **kara_tx_fund_flow**: Content generation and alerts

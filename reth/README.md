@@ -19,7 +19,7 @@ tx_simulator  [core EVM + DB access]
   └─→ tx_processor              [direct simulation inputs]
 
 Side integrations
-  • qarqa  ⇐  { tx_processor, reth_chain_query }  [fund‑flow analytics]
+  • tx_fund_flow  ⇐  { tx_processor, reth_chain_query }  [fund‑flow analytics]
   • eth_tx_executor (eth_kartal)  ⇐  mempool_processor alerts; uses RPC as needed
   • reth (vendored upstream for docs/examples; crates pinned to v1.7.0)
 ```
@@ -63,7 +63,7 @@ flowchart LR
   end
 
   subgraph Analytics
-    QARQA["qarqa"]:::analytics
+    TX_FUND_FLOW["tx_fund_flow"]:::analytics
   end
 
   subgraph Bindings
@@ -106,8 +106,8 @@ flowchart LR
   ETHP --> PY
   ETHL --> PY
 
-  TXP --> QARQA
-  RCQ --> QARQA
+  TXP --> TX_FUND_FLOW
+  RCQ --> TX_FUND_FLOW
 
   MEMP -. trades/alerts .-> EXEC
   EXEC -. uses .-> RPC
@@ -141,7 +141,7 @@ Typed Queries + Builders
         └────────→ eth_prices ───────────┘
 
 Bindings: pyreth ⇐ {tx_simulator, reth_chain_query, tx_processor, eth_prices, eth_env}
-Analytics: qarqa ⇐ {reth_chain_query, tx_processor}
+Analytics: tx_fund_flow ⇐ {reth_chain_query, tx_processor}
 Indexes: reth_chain_query ⇢ PostgreSQL (optional)
 Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trades/alerts
 ```
@@ -158,14 +158,14 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 ### reth_chain_query
 - Purpose: Fast, typed blockchain queries on top of `tx_simulator` plus AMM calldata builders. Adds entity-centric indexes and PostgreSQL helpers.
 - Depends on: `tx_simulator`, Reth provider/db crates
-- Used by: `tx_processor`, `eth_prices`, `eth_env`, `mempool_processor`, `pyreth`, `qarqa`
+- Used by: `tx_processor`, `eth_prices`, `eth_env`, `mempool_processor`, `pyreth`, `tx_fund_flow`
 - Key: `ChainQuery` (balances, storage, tx/blocks), `tx_builders` (Uniswap v2/v3 routes)
 - Docs: `rust/reth_chain_query/README.md`, `rust/reth_chain_query/src/tx_builders/README.md`
 
 ### tx_processor
 - Purpose: Convert raw/simulated transactions to rich `ProcessedTransaction` objects: decoded logs, internal calls, address balance deltas, and tax calculations. Orchestrates “buy → approve → sell” viability checks via builders from `reth_chain_query` and simulation via `tx_simulator`.
 - Depends on: `tx_simulator`, `reth_chain_query`, Reth crates
-- Used by: `mempool_processor`, `eth_prices` (buy-sim utilities), `pyreth`, `qarqa`
+- Used by: `mempool_processor`, `eth_prices` (buy-sim utilities), `pyreth`, `tx_fund_flow`
 - Key: `ProcessedTxProvider`, `TxProcessor`, `tax_calculator`
 - Docs: `rust/tx_processor/README.md`
 
@@ -195,11 +195,11 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Used by: Python analytics & services
 - Docs: `rust/pyreth/README.md`, `rust/pyreth/src/python/tx_processor/README.md`
 
-### qarqa
+### tx_fund_flow
 - Purpose: Fund-flow network analytics. Consumes `ProcessedTransaction` from `tx_processor` and uses `reth_chain_query` for DB-backed queries. Focuses on network construction, ranking, and interactive analysis.
 - Depends on: `tx_processor`, `reth_chain_query` (path deps in subcrates)
 - Used by: Research/analytics
-- Docs: `rust/qarqa/README.md`, `rust/qarqa/src/fundflownetwork/README.md`
+- Docs: `rust/tx_fund_flow/README.md`, `rust/tx_fund_flow/src/fundflownetwork/README.md`
 
 ### eth_tx_executor (eth_kartal)
 - Purpose: Execution utilities and transaction ranking system for protective or automated actions (keystore mgmt, gas optimization, risk checks, alert processing).
@@ -217,7 +217,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Prices: `eth_prices` reads AMM/oracle state directly; for strategy testing it can call into `tx_simulator`/`tx_processor` for buy-sim flows.
 - Realtime: `mempool_processor` classifies mempool txs, simulates effects, computes taxes/tradability, and emits signals.
 - Python: `pyreth` provides a single-process, shared-handle entry to all of the above with consistent schemas.
-- Analytics/Execution: `qarqa` builds fund-flow networks; `eth_tx_executor` focuses on response/automation.
+- Analytics/Execution: `tx_fund_flow` builds fund-flow networks; `eth_tx_executor` focuses on response/automation.
 
 ## Prerequisites
 - Reth node with local DB: `~/.local/share/reth/mainnet` (default). Stop the node when doing heavy simulation to avoid MDBX locks.
@@ -262,7 +262,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Python bindings: `pyreth`
   - Thin pyo3 wrappers; no business logic. Ensure Rust↔Python `ProcessedTransaction` schema compatibility
 
-- Analytics: `qarqa`
+- Analytics: `tx_fund_flow`
   - Fund-flow network building/analysis using `ProcessedTransaction` + DB queries from `reth_chain_query`
   - No simulation or decoding logic duplication
 
@@ -286,7 +286,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - `eth_prices`: per-protocol price parity tests and aggregated stats sanity
 - `mempool_processor`: detector decisions on curated tx sets; end-to-end timing assertions
 - `pyreth`: schema fidelity tests against Python dataclasses; round-trip conversions
-- `qarqa`: network construction integrity and metrics on sample datasets
+- `tx_fund_flow`: network construction integrity and metrics on sample datasets
 
 ## Adding New Functionality (Examples)
 
