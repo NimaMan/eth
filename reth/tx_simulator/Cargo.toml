@@ -1,0 +1,149 @@
+[package]
+name = "tx_simulator"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+# Core
+tokio = { version = "1", features = ["full"] }
+eyre = "0.6"
+tracing = "0.1"
+futures = "0.3"
+
+# Ethereum types
+alloy-primitives = { version = "1.3.1", features = ["rlp"] }
+alloy-rlp = "0.3"
+alloy-rpc-types-trace = "1.0.27"
+alloy-rpc-types-eth = "1.0.27"
+alloy-consensus = "1.0.27"
+alloy-eips = "1.0.27"
+hex = "0.4"
+
+# Reth dependencies - using GitHub references
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+
+# REVM - aligned with Reth v1.8.2 toolchain
+revm = { version = "30.0.0", default-features = false, features = ["std"] }
+revm-inspectors = "0.30.0"
+
+# For serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_bytes = "0.11"
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+bincode = "1.3"
+ethers = { version = "2.0.7", default-features = false, features = ["rustls"] }
+once_cell = "1.18"
+reqwest = { version = "0.12", features = ["json"] }
+
+# For RPC benchmarking
+jsonrpsee = { version = "0.24", features = ["http-client"] }
+
+[dev-dependencies]
+alloy-rlp = "0.3"
+secrecy = "0.8"
+tempfile = "3.10"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+chrono = "0.4"
+reth_chain_query = { path = "../reth_chain_query" }
+
+# Examples
+
+# General single-transaction examples
+[[example]]
+name = "verify_database_setup"
+path = "examples/general/verify_database_setup.rs"
+
+[[example]]
+name = "unsigned_transaction_example"
+path = "examples/general/unsigned_transaction_example.rs"
+
+[[example]]
+name = "contract_method_simulation"
+path = "examples/general/contract_method_simulation.rs"
+
+[[example]]
+name = "contract_method_simulation_weth_total_supply"
+path = "examples/general/contract_method_simulation_weth_total_supply.rs"
+
+[[example]]
+name = "trace_extraction_example"
+path = "examples/general/trace_extraction_example.rs"
+
+# Sequential examples
+[[example]]
+name = "buy_approve_then_sell_usdc"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_usdc.rs"
+
+[[example]]
+name = "buy_approve_then_sell_pepe"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_pepe.rs"
+
+[[example]]
+name = "buy_approve_then_sell_floki"
+path = "examples/sequential/specific_tokens/buy_approve_then_sell_floki.rs"
+
+[[example]]
+name = "sequential_eth_transfers_with_state_persistence"
+path = "examples/sequential/sequential_eth_transfers_with_state_persistence.rs"
+
+[[example]]
+name = "auto_nonce_management_example"
+path = "examples/sequential/auto_nonce_management_example.rs"
+
+[[example]]
+name = "mev_sandwich_bundle_example"
+path = "examples/revert/mev_sandwich_bundle_example.rs"
+
+# Performance examples
+[[example]]
+name = "rpc_vs_direct_simulation_benchmark"
+path = "examples/performance/rpc_vs_direct_simulation_benchmark.rs"
+
+[[example]]
+name = "inspector_fusing_test"
+path = "examples/performance/inspector_fusing_test.rs"
+
+# Additional single-transaction examples
+[[example]]
+name = "timeout_handling_example"
+path = "examples/general/timeout_handling_example.rs"
+
+[[example]]
+name = "revert_reason_decoder_example"
+path = "examples/revert/revert_reason_decoder_example.rs"
+
+[[example]]
+name = "uniswap_v2_swap_pre_liquidity"
+path = "examples/revert/uniswap_v2_swap_pre_liquidity.rs"
+
+# Block simulation examples
+[[example]]
+name = "trace_block_transactions"
+path = "examples/block/trace_block_transactions.rs"
+
+[[example]]
+name = "verify_block_trace_rpc_equivalence"
+path = "examples/block/verify_block_trace_rpc_equivalence.rs"
+
+# Chain data loader diagnostics
+[[example]]
+name = "live_block_replay_window"
+path = "examples/block_context/live_block_replay_window.rs"
+
+[[example]]
+name = "compare_live_headers"
+path = "examples/block_context/compare_live_headers.rs"
+
+# Tx builder examples
+[[example]]
+name = "signed_bundle_simulation"
+path = "examples/tx_builders/signed_bundle_simulation.rs"
