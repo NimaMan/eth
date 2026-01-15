@@ -1,0 +1,879 @@
+// signal_engine/function_detector.rs
+//
+// Simple function signature detector that categorizes transactions
+// based on their function selectors (4-byte signatures)
+
+use crate::token_tracking::TokenTrackingCache;
+use alloy_primitives::Address as AlloyAddress;
+use chrono::Utc;
+use hex;
+use lazy_static::lazy_static;
+use reth_chain_query::to_checksum_address;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tracing::{error, info, warn};
+use zmq::{Context, Socket};
+// (duplicates removed)
+use futures;
+
+/// Types of functions called by creators
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreatorFunctionType {
+    TaxModification,
+    TradingControl,
+    OwnershipChange,
+    LiquidityAddition,     // Adding liquidity to pool
+    LiquidityRemoval,      // Removing liquidity from pool
+    LiquidityPoolApproval, // LP token approval to router (rug pull setup)
+    MaxWalletLimit,
+    Other(String),
+}
+
+/// Function detection result with category
+#[derive(Debug, Clone)]
+pub struct FunctionDetectionResult {
+    pub function_name: String,
+    pub function_type: CreatorFunctionType,
+    pub selector: String,
+}
+
+lazy_static! {
+    /// Log directory path - initialized once at startup
+    static ref LOG_DIR: PathBuf = {
+        // Check if log directory is provided via environment variable
+        if let Ok(dir) = std::env::var("FUNCTION_DETECTOR_LOG_DIR") {
+            PathBuf::from(dir)
+        } else {
+            // Fallback to default with timestamp
+            let timestamp = Utc::now().format("%Y-%m-%d_%H-%M-%S");
+            let base_dir = PathBuf::from(crate::config::DEFAULT_LOG_DIR);
+            let dir = base_dir.join(format!("signal_detector_{}", timestamp));
+            std::fs::create_dir_all(&dir).expect("Failed to create log directory");
+            dir
+        }
+    };
+
+    /// Liquidity removal log file
+    static ref LIQUIDITY_REMOVAL_LOG: Mutex<std::fs::File> = {
+        let log_path = LOG_DIR.join("liquidity_removals.log");
+        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .expect("Failed to open liquidity removal log file");
+
+        Mutex::new(file)
+    };
+
+    /// Trading enabled log file
+    static ref TRADING_ENABLED_LOG: Mutex<std::fs::File> = {
+        let log_path = LOG_DIR.join("trading_enabled.log");
+        std::fs::create_dir_all(&*LOG_DIR).ok(); // Ensure directory exists
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_path)
+            .expect("Failed to open trading enabled log file");
+
+        Mutex::new(file)
+    };
+
+
+
+
+
+    /// Global statistics
+    static ref FUNCTION_STATS: Mutex<FunctionStats> = Mutex::new(FunctionStats::default());
+
+    /// ZMQ Publisher for signals (legacy path)
+    static ref ZMQ_PUBLISHER: Mutex<Option<Socket>> = {
+        let enabled = std::env::var("FUNCTION_DETECTOR_ENABLE_ZMQ")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if !enabled {
+            info!(
+                "Function detector ZMQ publisher disabled (set FUNCTION_DETECTOR_ENABLE_ZMQ=1 to enable)"
+            );
+            return Mutex::new(None);
+        }
+
+        match Context::new().socket(zmq::PUB) {
+            Ok(socket) => {
+                let _ = socket.set_sndhwm(10000);
+                let _ = socket.set_linger(0);
+
+                match socket.bind("tcp://127.0.0.1:5556") {
+                    Ok(_) => {
+                        info!("✅ Function detector ZMQ publisher bound to tcp://127.0.0.1:5556");
+                        Mutex::new(Some(socket))
+                    }
+                    Err(e) => {
+                        error!("Failed to bind function detector ZMQ publisher: {}", e);
+                        Mutex::new(None)
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to create function detector ZMQ socket: {}", e);
+                Mutex::new(None)
+            }
+        }
+    };
+}
+
+#[derive(Debug, Default)]
+pub struct FunctionStats {
+    pub total_checked: u64,
+    pub liquidity_removals: u64,
+    pub trading_enabled: u64,
+    pub swaps: u64,
+    pub other_functions: u64,
+}
+
+/// Signal alert for eth_kartal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignalAlert {
+    pub alert_type: String,
+    pub function_name: String,
+    pub tx_hash: String,
+    pub from_address: String,
+    pub to_address: String,
+    pub value: String,
+    pub gas_price: String,
+    pub selector: String,
+    pub timestamp: String,
+    pub detection_latency_us: u64,
+}
+
+/// Function detector that categorizes transactions by their function signatures
+pub struct FunctionDetector {
+    liquidity_removal: LiquidityRemovalDetector,
+    trading_enabled: TradingEnabledDetector,
+    swap: SwapDetector,
+    token_cache: Option<Arc<TokenTrackingCache>>,
+}
+
+impl FunctionDetector {
+    pub fn new() -> Self {
+        Self::new_with_cache(None)
+    }
+
+    pub fn new_with_cache(token_cache: Option<Arc<TokenTrackingCache>>) -> Self {
+        info!("🔍 Function detector initialized");
+        info!("📁 Log directory: {}", LOG_DIR.display());
+
+        // Startup information now only goes to stdout/main log via tracing
+        info!("==========================================");
+        info!("🚀 Starting Mempool Signal Detection Service");
+        info!("⚡ Using non-blocking IPC for sub-millisecond latency");
+        info!("🔍 Function detector initialized");
+        info!("📁 Log directory: {}", LOG_DIR.display());
+        info!("🎯 Starting main processing loop...");
+        info!("==========================================");
+
+        Self {
+            liquidity_removal: LiquidityRemovalDetector::new(),
+            trading_enabled: TradingEnabledDetector::new(),
+            swap: SwapDetector::new(),
+            token_cache,
+        }
+    }
+
+    /// Check if transaction is a liquidity removal (simplified)
+    pub fn is_liquidity_removal(&self, input_data: &[u8]) -> Option<&'static str> {
+        if input_data.len() >= 4 {
+            self.liquidity_removal.detect(&input_data[0..4])
+        } else {
+            None
+        }
+    }
+
+    /// Detect function for a transaction and return the function name if interesting
+    pub fn detect_function(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+    ) -> Option<String> {
+        if tx.input.len() < 4 {
+            return None;
+        }
+
+        let selector = &tx.input[0..4];
+
+        // Check liquidity removal
+        if let Some(function_name) = self.liquidity_removal.detect(selector) {
+            return Some(function_name.to_string());
+        }
+
+        // Check trading enabled
+        if let Some(function_name) = self.trading_enabled.detect(selector) {
+            return Some(function_name.to_string());
+        }
+
+        // Check swaps
+        if let Some(function_name) = self.swap.detect(selector) {
+            return Some(function_name.to_string());
+        }
+
+        None
+    }
+
+    /// Detect all function types in the transaction
+    pub fn detect_from_ipc(&self, ipc_tx: &crate::mempool_fetcher::MempoolTransaction) {
+        // Use pre-parsed fields directly
+        if ipc_tx.input.is_empty() {
+            return;
+        }
+
+        let tx_hash = &ipc_tx.hash;
+        let from = to_checksum_address(&AlloyAddress::from_slice(&ipc_tx.from));
+        let to = ipc_tx
+            .to
+            .as_ref()
+            .map(|addr| to_checksum_address(&AlloyAddress::from_slice(addr)))
+            .unwrap_or_else(|| "contract_creation".to_string());
+        let value = format!("0x{:x}", ipc_tx.value);
+        let gas_price = format!("0x{:x}", ipc_tx.gas_price.unwrap_or_default());
+
+        self.detect_all(tx_hash, &from, &to, &value, &gas_price, &ipc_tx.input);
+    }
+
+    /// Process batch of transactions and return with function information and categories
+    pub fn detect_batch(
+        &self,
+        mut transactions: Vec<crate::mempool_fetcher::MempoolTransaction>,
+    ) -> Vec<crate::mempool_fetcher::MempoolTransaction> {
+        for tx in transactions.iter_mut() {
+            let mut functions = Vec::new();
+
+            // Skip if no input data
+            if tx.input.len() < 4 {
+                tx.functions = functions;
+                continue;
+            }
+
+            let selector = &tx.input[0..4];
+            let selector_hex = hex::encode(selector);
+
+            // Detect function and categorize it
+            let detection_result = self.detect_and_categorize(tx, selector, &selector_hex);
+
+            if let Some(result) = detection_result {
+                functions.push(result.function_name.clone());
+                // Store the function type for router to use
+                tx.function_category = Some(result.function_type);
+            }
+
+            // Still call the existing detection for logging and ZMQ publishing
+            self.detect_from_ipc(&tx);
+
+            tx.functions = functions;
+        }
+
+        transactions
+    }
+
+    /// Detect and categorize a function call
+    fn detect_and_categorize(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+        selector: &[u8],
+        selector_hex: &str,
+    ) -> Option<FunctionDetectionResult> {
+        // Check if this is a simple ETH transfer (no input data or empty input)
+        if tx.input.is_empty() || tx.input.len() < 4 {
+            return Some(FunctionDetectionResult {
+                function_name: "eth_transfer".to_string(),
+                function_type: CreatorFunctionType::Other("eth_transfer".to_string()),
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check for approve function first - needs special handling for LP tokens
+        if selector == &hex_to_bytes("095ea7b3") {
+            let approve_type = self.classify_approve(tx);
+            return Some(FunctionDetectionResult {
+                function_name: "approve".to_string(),
+                function_type: approve_type,
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check liquidity removal functions
+        if let Some(function_name) = self.liquidity_removal.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::LiquidityRemoval,
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check trading enabled functions
+        if let Some(function_name) = self.trading_enabled.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::TradingControl,
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check swap functions
+        if let Some(function_name) = self.swap.detect(selector) {
+            return Some(FunctionDetectionResult {
+                function_name: function_name.to_string(),
+                function_type: CreatorFunctionType::Other(function_name.to_string()),
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Check for other known functions by name mapping
+        if let Some(function_type) = self.map_function_name_to_type(selector_hex) {
+            return Some(FunctionDetectionResult {
+                function_name: format!("unknown_{}", selector_hex),
+                function_type,
+                selector: selector_hex.to_string(),
+            });
+        }
+
+        // Unknown function
+        Some(FunctionDetectionResult {
+            function_name: format!("unknown_{}", selector_hex),
+            function_type: CreatorFunctionType::Other(selector_hex.to_string()),
+            selector: selector_hex.to_string(),
+        })
+    }
+
+    /// Map function selectors to types based on known signatures
+    fn map_function_name_to_type(&self, selector_hex: &str) -> Option<CreatorFunctionType> {
+        match selector_hex {
+            // Tax modification functions
+            "715018a6" | "70a08231" => Some(CreatorFunctionType::TaxModification),
+
+            // Trading control functions
+            "8a8c523c" | "c9567bf9" => Some(CreatorFunctionType::TradingControl),
+
+            // Ownership functions
+            "f2fde38b" | "8da5cb5b" => Some(CreatorFunctionType::OwnershipChange),
+
+            // Liquidity additions
+            "e8e33700" | "f305d719" => Some(CreatorFunctionType::LiquidityAddition),
+
+            // Max wallet/tx limits
+            "a9059cbb" => Some(CreatorFunctionType::MaxWalletLimit),
+
+            _ => None,
+        }
+    }
+
+    /// Classify approve() calls - determine if it's LP token approval for rug pull
+    fn classify_approve(
+        &self,
+        tx: &crate::mempool_fetcher::MempoolTransaction,
+    ) -> CreatorFunctionType {
+        // Check if we have enough data for approve(address,uint256)
+        if tx.input.len() < 68 {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+
+        // Extract spender address from input data (bytes 4-36)
+        let spender_bytes = &tx.input[16..36]; // Skip 12 bytes of padding
+        let spender_hex = hex::encode(spender_bytes);
+
+        // Known DEX routers that handle liquidity removal
+        const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
+        const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+
+        // Check if spender is a known router
+        let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
+            || spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+
+        // Only check pool if router is being approved
+        if !is_router_approval {
+            return CreatorFunctionType::Other("approve".to_string());
+        }
+
+        // Check if the approve is being called on an LP token contract
+        if let Some(to_bytes) = &tx.to {
+            let to_addr = to_checksum_address(&AlloyAddress::from_slice(to_bytes));
+
+            // Check if the 'to' address is a pool (LP token)
+            if let Some(ref cache) = self.token_cache {
+                let is_pool = futures::executor::block_on(cache.is_pool(&to_addr));
+
+                if is_pool {
+                    // Anyone approving router to spend LP tokens = liquidity removal preparation
+                    return CreatorFunctionType::LiquidityPoolApproval;
+                }
+            }
+        }
+
+        // Regular approval (not LP token or not to router)
+        CreatorFunctionType::Other("approve".to_string())
+    }
+
+    /// Internal function to detect all function types with extracted details
+    fn detect_all(
+        &self,
+        tx_hash: &str,
+        from: &str,
+        to: &str,
+        value: &str,
+        gas_price: &str,
+        input_data: &[u8],
+    ) {
+        if input_data.len() < 4 {
+            return;
+        }
+
+        let selector_bytes = &input_data[0..4];
+        let mut stats = match FUNCTION_STATS.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                error!("Failed to acquire function stats lock: {}", e);
+                return;
+            }
+        };
+        stats.total_checked += 1;
+
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+
+        // Check liquidity removal first
+        if let Some(function_name) = self.liquidity_removal.detect(selector_bytes) {
+            stats.liquidity_removals += 1;
+            info!("💧 LIQUIDITY REMOVAL: {} in tx {}", function_name, tx_hash);
+
+            // Create signal alert - only encode to hex when needed for external publishing
+            let selector_hex = format!(
+                "{:02x}{:02x}{:02x}{:02x}",
+                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]
+            );
+            let signal = SignalAlert {
+                alert_type: "liquidity_removal".to_string(),
+                function_name: function_name.to_string(),
+                tx_hash: tx_hash.to_string(),
+                from_address: from.to_string(),
+                to_address: to.to_string(),
+                value: value.to_string(),
+                gas_price: gas_price.to_string(),
+                selector: selector_hex.clone(),
+                timestamp: timestamp.to_string(),
+                detection_latency_us: 0, // Will be set by receiver
+            };
+
+            // Publish via ZMQ
+            self.publish_signal(&signal);
+
+            // Log to liquidity removal file with full transaction details
+            if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
+                let _ = writeln!(
+                    log_file,
+                    "[{}] TX: {} | From: {} | To: {} | Value: {} | GasPrice: {} | Function: {} | Selector: {}",
+                    timestamp,
+                    tx_hash,
+                    from,
+                    to,
+                    value,
+                    gas_price,
+                    function_name,
+                    selector_hex
+                );
+                let _ = log_file.flush();
+            }
+            return;
+        }
+
+        // Check trading enabled
+        if let Some(function_name) = self.trading_enabled.detect(selector_bytes) {
+            stats.trading_enabled += 1;
+            info!("🎯 TRADING ENABLED: {} in tx {}", function_name, tx_hash);
+
+            // Try to get the actual token address from creator cache
+            let token_address = if let Some(ref cache) = self.token_cache {
+                // Use tokio runtime to run async function
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        cache
+                            .get_token_for_creator(&from.to_string())
+                            .await
+                            .map(|token_info| token_info.address.clone())
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Use found token address or fall back to 'to' address or empty
+            let token_addr = token_address.unwrap_or_else(|| {
+                if to != "contract_creation" {
+                    to.to_string()
+                } else {
+                    String::new()
+                }
+            });
+
+            // Create signal alert - only encode to hex when needed for external publishing
+            let selector_hex = format!(
+                "{:02x}{:02x}{:02x}{:02x}",
+                selector_bytes[0], selector_bytes[1], selector_bytes[2], selector_bytes[3]
+            );
+            let signal = SignalAlert {
+                alert_type: "trading_enabled".to_string(),
+                function_name: function_name.to_string(),
+                tx_hash: tx_hash.to_string(),
+                from_address: from.to_string(),
+                to_address: to.to_string(),
+                value: value.to_string(),
+                gas_price: gas_price.to_string(),
+                selector: selector_hex.clone(),
+                timestamp: timestamp.to_string(),
+                detection_latency_us: 0, // Will be set by receiver
+            };
+
+            // Publish via ZMQ
+            self.publish_signal(&signal);
+
+            // Log to trading enabled file with pattern-friendly format including token address
+            if let Ok(mut log_file) = TRADING_ENABLED_LOG.lock() {
+                let _ = writeln!(
+                    log_file,
+                    "[{}] {} | {} | {} | {}",
+                    timestamp, function_name, token_addr, from, tx_hash
+                );
+                let _ = log_file.flush();
+            }
+            return;
+        }
+
+        // Check swaps - we count them but don't log/alert
+        if let Some(_function_name) = self.swap.detect(selector_bytes) {
+            stats.swaps += 1;
+            return;
+        }
+
+        // Check for approve function - log if it's an LP token approval
+        // Note: Classification already done in detect_and_categorize, this is just for logging
+        if selector_bytes == &hex_to_bytes("095ea7b3") {
+            // Check if this was classified as an LP approval
+            // We need to check the same way as classify_approve does
+            if input_data.len() >= 68 {
+                // Extract spender address from input data
+                let spender_bytes = &input_data[16..36];
+                let spender_hex = hex::encode(spender_bytes);
+
+                // Check if spender is a known router
+                const UNISWAP_V2_ROUTER: &str = "7a250d5630b4cf539739df2c5dacb4c659f2488d";
+                const SUSHISWAP_ROUTER: &str = "d9e1ce17f2641f24ae83637ab66a2cca9c378b9f";
+
+                let is_router_approval = spender_hex.eq_ignore_ascii_case(UNISWAP_V2_ROUTER)
+                    || spender_hex.eq_ignore_ascii_case(SUSHISWAP_ROUTER);
+
+                if is_router_approval {
+                    // Check if the 'to' address is a pool
+                    let is_lp_approval = if let Some(ref cache) = self.token_cache {
+                        tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current()
+                                .block_on(async { cache.is_pool(&to.to_string()).await })
+                        })
+                    } else {
+                        false
+                    };
+
+                    if is_lp_approval {
+                        // This is an LP token approval - critical signal!
+                        stats.liquidity_removals += 1; // Count as liquidity removal preparation
+                        info!(
+                            "🚨 LP TOKEN APPROVAL: Preparing for liquidity removal in tx {}",
+                            tx_hash
+                        );
+
+                        // Create critical signal alert
+                        let selector_hex = format!(
+                            "{:02x}{:02x}{:02x}{:02x}",
+                            selector_bytes[0],
+                            selector_bytes[1],
+                            selector_bytes[2],
+                            selector_bytes[3]
+                        );
+                        let signal = SignalAlert {
+                            alert_type: "lp_token_approval".to_string(),
+                            function_name: "approve (LP Token)".to_string(),
+                            tx_hash: tx_hash.to_string(),
+                            from_address: from.to_string(),
+                            to_address: to.to_string(),
+                            value: value.to_string(),
+                            gas_price: gas_price.to_string(),
+                            selector: selector_hex.clone(),
+                            timestamp: timestamp.to_string(),
+                            detection_latency_us: 0,
+                        };
+
+                        // Publish via ZMQ
+                        self.publish_signal(&signal);
+
+                        // Log to liquidity removal file as preparation
+                        if let Ok(mut log_file) = LIQUIDITY_REMOVAL_LOG.lock() {
+                            let _ = writeln!(
+                                log_file,
+                                "[{}] LP APPROVAL TX: {} | From: {} | LP Pair: {} | Value: {} | GasPrice: {} | Function: approve (LP Token) | Selector: {}",
+                                timestamp,
+                                tx_hash,
+                                from,
+                                to,
+                                value,
+                                gas_price,
+                                selector_hex
+                            );
+                            let _ = log_file.flush();
+                        }
+                        return;
+                    }
+                }
+            }
+            // Regular token approval - just count
+            stats.other_functions += 1;
+            return;
+        }
+
+        // All other functions - just count them
+        stats.other_functions += 1;
+    }
+
+    /// Get the log directory path
+    pub fn get_log_dir(&self) -> &std::path::Path {
+        &*LOG_DIR
+    }
+
+    /// Get statistics
+    pub fn get_stats(&self) -> FunctionStats {
+        match FUNCTION_STATS.lock() {
+            Ok(guard) => guard.clone(),
+            Err(e) => {
+                error!("Failed to acquire function stats lock: {}", e);
+                FunctionStats::default()
+            }
+        }
+    }
+
+    /// Publish signal via ZMQ
+    fn publish_signal(&self, signal: &SignalAlert) {
+        if let Ok(publisher) = ZMQ_PUBLISHER.lock() {
+            if let Some(ref socket) = *publisher {
+                match serde_json::to_string(signal) {
+                    Ok(json) => {
+                        match socket.send(&json, zmq::DONTWAIT) {
+                            Ok(_) => {
+                                // Signal published successfully
+                            }
+                            Err(zmq::Error::EAGAIN) => {
+                                warn!("ZMQ publisher buffer full, signal dropped");
+                            }
+                            Err(e) => {
+                                error!("Failed to publish signal: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to serialize signal: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Log periodic statistics summary
+    pub fn log_stats_summary(&self) {
+        let stats = self.get_stats();
+
+        info!("📊 Function Detection Statistics:");
+        info!("   Total transactions checked: {}", stats.total_checked);
+        info!("   Liquidity removals: {}", stats.liquidity_removals);
+        info!("   Trading enabled: {}", stats.trading_enabled);
+        info!("   Swaps: {}", stats.swaps);
+        info!("   Other functions: {}", stats.other_functions);
+    }
+}
+
+/// Detector for liquidity removal functions
+struct LiquidityRemovalDetector {
+    signatures: HashMap<[u8; 4], &'static str>,
+}
+
+impl LiquidityRemovalDetector {
+    fn new() -> Self {
+        let mut signatures = HashMap::new();
+
+        // Uniswap V2 Router
+        signatures.insert(hex_to_bytes("02751cec"), "removeLiquidityETH");
+        signatures.insert(hex_to_bytes("baa2abde"), "removeLiquidity");
+        signatures.insert(
+            hex_to_bytes("af2979eb"),
+            "removeLiquidityETHSupportingFeeOnTransferTokens",
+        );
+        signatures.insert(hex_to_bytes("5b0d5984"), "removeLiquidityETHWithPermit");
+        signatures.insert(
+            hex_to_bytes("ded9382a"),
+            "removeLiquidityETHWithPermitSupportingFeeOnTransferTokens",
+        );
+
+        // Uniswap V3 Position Manager
+        signatures.insert(hex_to_bytes("0c49ccbe"), "decreaseLiquidity");
+
+        // Balancer
+        signatures.insert(hex_to_bytes("8bdb3913"), "exitPool");
+
+        // Curve
+        signatures.insert(hex_to_bytes("1a4d01d2"), "remove_liquidity");
+        signatures.insert(hex_to_bytes("517a55a3"), "remove_liquidity_one_coin");
+        signatures.insert(hex_to_bytes("5b36389c"), "remove_liquidity_imbalance");
+
+        // SushiSwap (same as Uniswap V2)
+        // PancakeSwap (same as Uniswap V2)
+
+        Self { signatures }
+    }
+
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
+    }
+}
+
+/// Helper function to convert hex string to 4-byte array at compile time
+const fn hex_to_bytes(hex: &'static str) -> [u8; 4] {
+    let bytes = hex.as_bytes();
+    let mut result = [0u8; 4];
+    let mut i = 0;
+    while i < 4 {
+        let high = hex_char_to_byte(bytes[i * 2]);
+        let low = hex_char_to_byte(bytes[i * 2 + 1]);
+        result[i] = (high << 4) | low;
+        i += 1;
+    }
+    result
+}
+
+const fn hex_char_to_byte(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => 0,
+    }
+}
+
+/// Detector for trading enabled functions
+struct TradingEnabledDetector {
+    signatures: HashMap<[u8; 4], &'static str>,
+}
+
+impl TradingEnabledDetector {
+    fn new() -> Self {
+        let mut signatures = HashMap::new();
+
+        // Confirmed trading enabled functions
+        signatures.insert(hex_to_bytes("8a8c523c"), "enableTrading"); // ✓ Confirmed
+        signatures.insert(hex_to_bytes("c9567bf9"), "openTrading"); // ✓ Confirmed
+        signatures.insert(hex_to_bytes("8ee88c53"), "enableTrading");
+        signatures.insert(hex_to_bytes("fb201b1d"), "startTrading");
+
+        // Trading disable/pause functions
+        signatures.insert(hex_to_bytes("1c8387fa"), "pauseTrading");
+        signatures.insert(hex_to_bytes("0fb5a6ec"), "disableTrading");
+
+        Self { signatures }
+    }
+
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
+    }
+}
+
+/// Detector for swap functions
+struct SwapDetector {
+    signatures: HashMap<[u8; 4], &'static str>,
+}
+
+impl SwapDetector {
+    fn new() -> Self {
+        let mut signatures = HashMap::new();
+
+        // Uniswap V2/V3 and forks
+        signatures.insert(hex_to_bytes("38ed1739"), "swapExactTokensForTokens");
+        signatures.insert(hex_to_bytes("8803dbee"), "swapTokensForExactTokens");
+        signatures.insert(hex_to_bytes("7ff36ab5"), "swapExactETHForTokens");
+        signatures.insert(hex_to_bytes("4a25d94a"), "swapTokensForExactETH");
+        signatures.insert(hex_to_bytes("18cbafe5"), "swapExactTokensForETH");
+        signatures.insert(hex_to_bytes("fb3bdb41"), "swapETHForExactTokens");
+        signatures.insert(
+            hex_to_bytes("791ac947"),
+            "swapExactTokensForETHSupportingFeeOnTransferTokens",
+        );
+        signatures.insert(
+            hex_to_bytes("b6f9de95"),
+            "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        );
+
+        // Uniswap V3
+        signatures.insert(hex_to_bytes("414bf389"), "exactInputSingle");
+        signatures.insert(hex_to_bytes("db3e2198"), "exactOutputSingle");
+        signatures.insert(hex_to_bytes("c04b8d59"), "exactInput");
+        signatures.insert(hex_to_bytes("f28c0498"), "exactOutput");
+
+        // 1inch
+        signatures.insert(hex_to_bytes("2e95b6c8"), "swap");
+        signatures.insert(hex_to_bytes("7c025200"), "swap_1inch_v2");
+        signatures.insert(hex_to_bytes("e449022e"), "uniswapV3Swap");
+
+        // 0x Protocol
+        signatures.insert(hex_to_bytes("d9627aa4"), "sellToUniswap");
+        signatures.insert(hex_to_bytes("3598d8ab"), "sellToLiquidityProvider");
+
+        // Curve
+        signatures.insert(hex_to_bytes("3df02124"), "exchange");
+        signatures.insert(hex_to_bytes("5b41b908"), "exchange_underlying");
+
+        // Balancer
+        signatures.insert(hex_to_bytes("52bbbe29"), "swap_balancer");
+        signatures.insert(hex_to_bytes("945bcec9"), "batchSwap");
+
+        Self { signatures }
+    }
+
+    fn detect(&self, selector: &[u8]) -> Option<&'static str> {
+        if selector.len() >= 4 {
+            let mut key = [0u8; 4];
+            key.copy_from_slice(&selector[0..4]);
+            self.signatures.get(&key).copied()
+        } else {
+            None
+        }
+    }
+}
+
+impl Clone for FunctionStats {
+    fn clone(&self) -> Self {
+        Self {
+            total_checked: self.total_checked,
+            liquidity_removals: self.liquidity_removals,
+            trading_enabled: self.trading_enabled,
+            swaps: self.swaps,
+            other_functions: self.other_functions,
+        }
+    }
+}

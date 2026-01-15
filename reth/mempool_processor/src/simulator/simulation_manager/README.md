@@ -1,0 +1,132 @@
+# Simulation Manager
+
+The simulation manager is the bridge between **canonical context** (blocks that
+have already been mined and analysed by the Python data pipeline) and **live
+mempool activity** (creator transactions that might toggle trading or taxes
+before anyone else notices). Its only job is to take the contextual data the
+token tracker shares with us, re-simulate the mempool transactions against the
+latest canonical snapshot, and emit structured `SimulationResult`s that the
+signal detectors can reason about.
+
+## Data Sources
+
+| Source | What it contributes | Where it is consumed |
+| --- | --- | --- |
+| Python token-tracking publisher | Latest pool inventory, per-token metadata, liquidity snapshots derived from mined blocks | `TokenTrackingCache` (injected into `SimulationManager`) |
+| Canonical head listener | `SealedHeader` + DB view for the most recent block | `MempoolSimulator`, `LiquidityRemovalSimulator` |
+| Mempool fetcher | Raw transactions plus routing metadata (function detection, category, priority) | `RequestQueue` / flow modules |
+
+By the time a transaction enters the simulation path we already know **which
+token/pool it touches** (from the cache) and **why we care** (router category).
+The manager’s responsibility is to enrich that transaction with a replay
+sequence, run the appropriate simulator(s), and update the caches when the
+result materially changes the token’s state.
+
+## Directory Layout
+
+```
+simulation_manager/
+├── block_pruner.rs          # Background task that evicts stale replay sequences
+├── contract_creation_flow.rs# Handles deployments + metadata lookups
+├── creator_buy_sell_flow.rs # Orchestrates creator tx replay, pool viability probes, signals
+├── liquidity_removal_flow.rs# Dedicated path for LP decrease/remove functions
+├── logging.rs               # Formatting helpers shared across flows
+├── manager.rs               # Wiring: owns simulators, cache handles, queue, signal manager
+├── mod.rs                   # Module exports
+├── pending_sequences.rs     # Stores helper chains keyed by (creator, token)
+├── pool_buy_sell_flow.rs    # Token/pool resolution + buy/sell simulator glue
+├── request_queue.rs         # Async queue + statistics
+├── types.rs                 # Simulation job/result types shared with the rest of the crate
+```
+
+## Core Responsibilities
+
+1. **Keep helper sequences fresh**  
+   `pending_sequences` records the processed transactions that ran just before a
+   creator tx. This is what allows buy/sell probes to re-use already-seen state
+   (approvals, routing setup, etc.) even before the Python side publishes the
+   next mined block snapshot.
+
+2. **Simulate creator activity per pool**  
+   Every creator transaction is run through the mempool simulator and then
+   replayed through `pool_buy_sell_flow` to test each relevant pool reported by
+   the token tracker (WETH/token, USDC/token, …). This is how we observe the
+   *effect* that an in-flight transaction would have on the pools we plan to
+   trade against.
+
+3. **Track new deployments until the Python cache catches up**  
+   `contract_creation_flow` processes deployment transactions, tries to resolve
+   the contract address, and records the processed tx under `(creator, token)`.
+   When the Python publisher later emits definitive pool information for that
+   token we already have the creator context on our side.
+
+4. **Surface liquidity threats immediately**  
+   Liquidity removal signals (decrease/remove) are handled in their own flow so
+   they can run even when buy/sell probes are skipped. These simulations look
+   purely at the effect on reserves and are routed to the signal manager without
+   touching the creator replay queue.
+
+5. **Feed downstream detectors**  
+   Every flow ultimately builds a `SimulationResult` and passes it to
+   `SignalManager`. The detectors compare the result with the cached “last known”
+   token state to decide whether to emit `TradingEnabled`, `HighTax`, or
+   `LiquidityRemoval` signals. This is where the objective of “buy immediately
+   on trading-enabled, sell immediately on scammy behaviour” becomes actionable.
+
+## Control Flow Overview
+
+```
+TxSimulationJob
+   │
+   ├─ request_queue.submit()                 (enforces back-pressure / stats)
+   └─ process_queue() ─┐
+                       ▼
+                 simulate_request()
+                       │
+       ┌───────────────┴────────────────────┐
+       │                                    │
+ContractCreation flow               CreatorTransaction flow
+       │                                    │
+ record pending sequences         run liquidity removal flow (if relevant)
+ metadata lookup via Reth         build replay chain + buy/sell tests
+ emit audit debug info            send per-pool SimulationResults to SignalManager
+```
+
+## How This Supports Our Objective
+
+1. **“Get the latest pool/token info from mined tx”**  
+   We deliberately treat the Python publisher as the authoritative source for
+   canonical pool inventory. The manager never tries to reconstruct pools from
+   scratch; it only consumes the cache and keeps short-term helper sequences so
+   we can act *before* the next Python snapshot arrives.
+
+2. **“Watch new mempool tx and see their effect on the tokens we track”**  
+   Creator transactions go through `creator_buy_sell_flow`, guaranteeing both
+   the base transaction and the derived buy/sell probes are simulated at the tip
+   snapshot. That means we know whether trading is enabled (or taxes changed)
+   without waiting for the blockchain to mine a block.
+
+3. **“Buy on trading enabled, sell on scams”**  
+   The SimulationManager itself does not execute trades, but it produces the
+   precise signals (`TradingEnabled`, `HighTax`, `LiquidityRemoval`) that the
+   trading handlers listen to. Because each signal includes the relevant pool,
+   token, and tax numbers, downstream strategies can execute the buy/sell
+   playbooks immediately.
+
+## Extending the Module
+
+- **Adding another flow** (e.g., anti-bot protection) should follow the same
+  pattern: create `xyz_flow.rs`, expose a method on `SimulationManager`, and
+  call it from `simulate_request`.
+- **Token cache integration** lives entirely in the manager. If the Python side
+  starts publishing more metadata (DEX version, fee tiers, etc.), extend the
+  cache and flow structs but keep simulators ignorant—they should continue to
+  accept resolved pool/token addresses.
+- **Telemetry** hooks belong near `request_queue` (ingress stats) and inside the
+  flow modules (per outcome). This keeps the manager focused on orchestration
+  rather than logging minutiae.
+
+Keeping these boundaries clear ensures the simulations remain aligned with our
+trading goals: canonical data from the Python pipeline defines *what exists*,
+mempool simulations predict *what will change*, and signals tell the trading
+layer when to act.
