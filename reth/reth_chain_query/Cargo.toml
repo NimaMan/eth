@@ -1,0 +1,160 @@
+[package]
+name = "reth_chain_query"
+version = "0.2.0"
+edition = "2021"
+authors = ["Nima"]
+description = "Direct blockchain state queries using Reth database"
+license = "MIT"
+
+[dependencies]
+# Core dependencies
+alloy-primitives = "1.0.0"
+alloy-consensus = "1.0.0"
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+hex-literal = "0.4"
+hex = "0.4"
+futures = "0.3"
+ethers = { version = "2", default-features = false, features = ["ipc"] }
+
+# Transaction simulator for database access
+tx_simulator = { path = "../tx_simulator" }
+
+# Reth dependencies for provider types
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-db-models = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-stages-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-prune-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-db-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-storage-api = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+
+# PostgreSQL support
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "chrono", "bigdecimal"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+# For ABI encoding/decoding
+alloy-rlp = "0.3"
+alloy-provider = "1.0"
+alloy-transport = "1.0"
+alloy-eips = "1.0"
+once_cell = "1.21.3"
+parking_lot = "0.12"
+lru = "0.12"
+clap = { version = "4.5", features = ["derive"] }
+color-eyre = "0.6"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls", "stream"] }
+eventsource-stream = "0.2"
+tokio-stream = "0.1"
+
+# For RPC verification examples
+jsonrpsee = { version = "0.24", features = ["http-client", "ws-client"] }
+alloy-rpc-types-trace = "1.0"
+
+# Address State examples
+[[example]]
+name = "balances"
+path = "examples/address_state/balances.rs"
+
+[[example]]
+name = "batch_operations"
+path = "examples/address_state/batch_operations.rs"
+
+[[example]]
+name = "balance_changes"
+path = "examples/address_state/balance_changes.rs"
+
+[[example]]
+name = "historical_analysis"
+path = "examples/address_state/historical_analysis.rs"
+
+# Address tx blocks example
+[[example]]
+name = "account_history_blocks"
+path = "examples/address_state/account_history_blocks.rs"
+
+# Transaction examples
+[[example]]
+name = "fetch_transaction_data_receipts_and_traces"
+path = "examples/transactions/fetch_transaction_data_receipts_and_traces.rs"
+
+[[example]]
+name = "fetch_transaction_by_number"
+path = "examples/transactions/fetch_transaction_by_number.rs"
+
+[[example]]
+name = "verify_receipts_rpc_equivalence"
+path = "examples/transactions/verify_receipts_rpc_equivalence.rs"
+
+[[example]]
+name = "verify_block_receipts_rpc_equivalence"
+path = "examples/block/verify_block_receipts_rpc_equivalence.rs"
+
+[[example]]
+name = "stablecoin_total_supply"
+path = "examples/entities/stablecoin_total_supply.rs"
+
+# Token examples
+[[example]]
+name = "token_inspection"
+path = "examples/tokens/token_inspection.rs"
+
+[[example]]
+name = "token_blocks"
+path = "examples/tokens/token_blocks.rs"
+
+[dev-dependencies]
+tokio-test = "0.4"
+hex = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
+# DeFi examples
+[[example]]
+name = "verify_dex_pool_computation"
+path = "examples/defi/verify_dex_pool_computation.rs"
+
+[[example]]
+name = "verify_block_rpc_equivalence"
+path = "examples/block/verify_block_rpc_equivalence.rs"
+
+[[example]]
+name = "liquidity_readers"
+path = "examples/defi/liquidity_readers.rs"
+[[example]]
+name = "liquidity_with_header"
+path = "examples/defi/liquidity_with_header.rs"
+[[example]]
+name = "tx_arrival_index_smoke"
+path = "examples/reth_index/tx_arrival_index_smoke.rs"
+
+[[example]]
+name = "delete_tx_arrival"
+path = "examples/reth_index/delete_tx_arrival.rs"
+
+[[example]]
+name = "list_tx_arrivals"
+path = "examples/reth_index/list_tx_arrivals.rs"
+
+[[example]]
+name = "write_arrival_for_hash"
+path = "examples/reth_index/write_arrival_for_hash.rs"
+
+[[example]]
+name = "live_head_latency"
+path = "examples/live_chain/head_latency.rs"
+
+[[example]]
+name = "live_head_sample"
+path = "examples/live_chain/head_sample.rs"
+
+[[example]]
+name = "live_head_channel_comparison"
+path = "examples/live_chain/head_channel_comparison.rs"
