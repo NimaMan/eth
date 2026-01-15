@@ -1,0 +1,57 @@
+{
+  "transaction": {
+    "hash": "0x6910a3065065c447ee2791126ddfce55e65ace265e30c05d52e386b37e7233c9",
+    "block": 23583177,
+    "timestamp_utc": "2025-10-15T12:45:11Z",
+    "from": "0xAcCceF0943977179EE97BC92DB62c246Ed5341Eb",
+    "to_router": "0x00000000000044a361Ae3cAc094c9D1b14Eece97",
+    "pool_manager": "0x000000000004444C5DC75cB358380d2E3de08a90",
+    "gas": {
+      "max_fee_per_gas_gwei": 1.557829725,
+      "max_priority_fee_per_gas_gwei": 1.0,
+      "effective_gas_price_gwei": 1.509493541,
+      "gas_used": 139540,
+      "fee_paid_eth": 0.00021063472871114
+    }
+  },
+  "assets": {
+    "token_in": {
+      "symbol": "MOONSTR",
+      "address": "0x0d2e14153A21f3940D5686E44A0F9F7E57c2567A",
+      "decimals": 18,
+      "amount": "200000"
+    },
+    "eth_out_total": "0.009448927793110755",
+    "eth_transfers": [
+      {
+        "from": "PoolManager",
+        "to": "0xAcCceF0943977179EE97BC92DB62c246Ed5341Eb",
+        "amount_eth": "0.009448927793110755",
+        "purpose": "Trader proceeds"
+      },
+      {
+        "from": "PoolManager",
+        "to": "0x213F0db3352c3C3D1Fc0A71F3272eF59292A36844",
+        "amount_eth": "0.001049880865901195",
+        "purpose": "Intermediate settlement account"
+      },
+      {
+        "from": "0x213F0db3352c3C3D1Fc0A71F3272eF59292A36844",
+        "to": "0xd17f4c39CBb9f07d59ab09c674Aa4cab8284A9c5",
+        "amount_eth": "0.000209976173180239",
+        "purpose": "Fee recipient"
+      },
+      {
+        "from": "0x213F0db3352c3C3D1Fc0A71F3272eF59292A36844",
+        "to": "0x7bf4C3Eaf404F075e8c4B56B24534aBeF7848778",
+        "amount_eth": "0.000839904692720956",
+        "purpose": "Fee recipient"
+      }
+    ]
+  },
+  "notes": [
+    "Transaction executed through a bespoke Uniswap v4 router at 0x00000000000044a361Ae3cAc094c9D1b14Eece97.",
+    "PoolManager lock orchestrated the swap; router distributed ETH proceeds to trader and fee recipients.",
+    "This snapshot is derived from Etherscan logs captured on 2025-10-16."
+  ]
+}
