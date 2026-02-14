@@ -15,13 +15,9 @@ pub enum BundleResult {
         effective_gas_price: U256,
     },
     /// Bundle was not included (may retry)
-    NotIncluded {
-        reason: BundleNotIncludedReason,
-    },
+    NotIncluded { reason: BundleNotIncludedReason },
     /// Bundle submission failed
-    Failed {
-        error: String,
-    },
+    Failed { error: String },
 }
 
 /// Reasons why bundle was not included

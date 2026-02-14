@@ -6,7 +6,6 @@ edition   = "2021"
 [dependencies]
 
 # Real-time JSON-RPC/WebSocket/IPC client
-ethers          = { version = "2.0", features = ["ws", "ipc"] }
 tokio           = { version = "1.37", features = ["full"] }
 tokio-stream    = "0.1"
 tracing         = "0.1"
@@ -58,9 +57,9 @@ alloy-rpc-client = { version = "1.0.32" }
 
 # Reth dependencies for database access
 # Reth ExEx dependencies (optional, for direct integration)
-reth-exex = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
-reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
-reth-node-core = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
+reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
+reth-node-core = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
 
 bytes           = "1.5"
 ethereum-types  = "0.14"
@@ -123,7 +122,7 @@ revm-inspectors = "0.29.2"
 jsonrpsee = { version = "0.24", features = ["http-client"] }
 
 # Database support
-sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
 rust_decimal = { version = "1.0", features = ["serde-float"] }
 reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
 

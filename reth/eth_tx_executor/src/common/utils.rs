@@ -1,5 +1,5 @@
 //! Common utility functions used throughout the system
-//! 
+//!
 //! Provides helper functions for common operations like formatting,
 //! conversions, and calculations.
 
@@ -33,13 +33,13 @@ pub fn calculate_price_impact(
     if reserve_in.is_zero() || reserve_out.is_zero() {
         return 100.0; // Max impact if no reserves
     }
-    
+
     // Spot price before swap
     let spot_price_before = reserve_out.as_u128() as f64 / reserve_in.as_u128() as f64;
-    
+
     // Effective price of swap
     let effective_price = amount_out.as_u128() as f64 / amount_in.as_u128() as f64;
-    
+
     // Price impact percentage
     ((spot_price_before - effective_price) / spot_price_before * 100.0).abs()
 }
@@ -89,13 +89,12 @@ pub fn calculate_tx_cost(gas_limit: U256, gas_price: U256) -> U256 {
 /// Truncate address for display
 pub fn truncate_address(address: Address) -> String {
     let addr_str = format!("{:?}", address);
-    format!("{}...{}", &addr_str[..6], &addr_str[addr_str.len()-4..])
+    format!("{}...{}", &addr_str[..6], &addr_str[addr_str.len() - 4..])
 }
 
 /// Parse ether string to U256
 pub fn parse_ether_safe(value: &str) -> Result<U256, String> {
-    ethers::utils::parse_ether(value)
-        .map_err(|e| format!("Invalid ether value '{}': {}", value, e))
+    ethers::utils::parse_ether(value).map_err(|e| format!("Invalid ether value '{}': {}", value, e))
 }
 
 /// Calculate percentage
@@ -138,7 +137,7 @@ where
     E: std::fmt::Display,
 {
     let mut delay = base_delay_ms;
-    
+
     for attempt in 0..max_retries {
         match operation().await {
             Ok(result) => return Ok(result),
@@ -156,7 +155,7 @@ where
             Err(e) => return Err(e),
         }
     }
-    
+
     unreachable!()
 }
 
@@ -175,25 +174,25 @@ pub fn u256_approx_eq(a: U256, b: U256, tolerance_bps: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_format_wei_to_eth() {
         let wei = ethers::utils::parse_ether("1.23456789").unwrap();
         assert_eq!(format_wei_to_eth(wei, 2), "1.23");
         assert_eq!(format_wei_to_eth(wei, 4), "1.2345");
     }
-    
+
     #[test]
     fn test_calculate_price_impact() {
         let amount_in = U256::from(1000);
         let amount_out = U256::from(900);
         let reserve_in = U256::from(100_000);
         let reserve_out = U256::from(100_000);
-        
+
         let impact = calculate_price_impact(amount_in, amount_out, reserve_in, reserve_out);
         assert!((impact - 10.0).abs() < 0.1); // ~10% impact
     }
-    
+
     #[test]
     fn test_apply_slippage() {
         let amount = U256::from(1000);

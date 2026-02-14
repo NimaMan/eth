@@ -5,7 +5,7 @@ use ethers::types::transaction::eip2718::TypedTransaction;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, instrument};
 
-use super::types::{BundleRequest, BundleConfig};
+use super::types::{BundleConfig, BundleRequest};
 
 /// Bundle of transactions to submit atomically
 #[derive(Debug, Clone)]
@@ -28,7 +28,8 @@ impl Bundle {
     /// Convert to RPC request format
     pub fn to_request(&self) -> BundleRequest {
         BundleRequest {
-            txs: self.transactions
+            txs: self
+                .transactions
                 .iter()
                 .map(|tx| format!("0x{}", hex::encode(tx)))
                 .collect(),
@@ -42,7 +43,7 @@ impl Bundle {
             },
         }
     }
-    
+
     /// Calculate bundle hash for tracking
     pub fn hash(&self) -> H256 {
         let mut data = Vec::new();
@@ -75,12 +76,12 @@ impl BundleBuilder {
             min_timestamp: None,
             max_timestamp: None,
             reverting_tx_hashes: Vec::new(),
-            tip_percentage: 0.01, // 1% default
+            tip_percentage: 0.01,                                  // 1% default
             min_tip: ethers::utils::parse_ether("0.001").unwrap(), // 0.001 ETH min
             revert_protection: true,
         }
     }
-    
+
     /// Create builder from config
     pub fn from_config(config: &BundleConfig) -> Self {
         Self {
@@ -94,37 +95,37 @@ impl BundleBuilder {
             revert_protection: config.revert_protection,
         }
     }
-    
+
     /// Add signed transaction to bundle
     pub fn add_transaction(mut self, signed_tx: Bytes) -> Self {
         self.transactions.push(signed_tx);
         self
     }
-    
+
     /// Add multiple signed transactions
     pub fn add_transactions(mut self, signed_txs: Vec<Bytes>) -> Self {
         self.transactions.extend(signed_txs);
         self
     }
-    
+
     /// Set target block number
     pub fn block_number(mut self, block: u64) -> Self {
         self.block_number = Some(block);
         self
     }
-    
+
     /// Set minimum timestamp
     pub fn min_timestamp(mut self, timestamp: u64) -> Self {
         self.min_timestamp = Some(timestamp);
         self
     }
-    
+
     /// Set maximum timestamp  
     pub fn max_timestamp(mut self, timestamp: u64) -> Self {
         self.max_timestamp = Some(timestamp);
         self
     }
-    
+
     /// Set time window (current time + window)
     pub fn time_window(mut self, seconds: u64) -> Self {
         let now = SystemTime::now()
@@ -135,7 +136,7 @@ impl BundleBuilder {
         self.max_timestamp = Some(now + seconds);
         self
     }
-    
+
     /// Add transaction that must not revert
     pub fn protect_transaction(mut self, tx_hash: H256) -> Self {
         if self.revert_protection {
@@ -143,40 +144,39 @@ impl BundleBuilder {
         }
         self
     }
-    
+
     /// Set tip percentage
     pub fn tip_percentage(mut self, percentage: f64) -> Self {
         self.tip_percentage = percentage;
         self
     }
-    
+
     /// Disable revert protection
     pub fn allow_reverts(mut self) -> Self {
         self.revert_protection = false;
         self.reverting_tx_hashes.clear();
         self
     }
-    
+
     /// Build the bundle
     #[instrument(skip(self))]
     pub fn build(self) -> Result<Bundle, Box<dyn std::error::Error>> {
         if self.transactions.is_empty() {
             return Err("Bundle must contain at least one transaction".into());
         }
-        
-        let block_number = self.block_number
-            .ok_or("Block number must be specified")?;
-        
+
+        let block_number = self.block_number.ok_or("Block number must be specified")?;
+
         // Calculate tip based on transaction values
         let tip_amount = self.calculate_tip_amount();
-        
+
         debug!(
             "Built bundle with {} transactions for block {}, tip: {}",
             self.transactions.len(),
             block_number,
             ethers::utils::format_ether(tip_amount)
         );
-        
+
         Ok(Bundle {
             transactions: self.transactions,
             block_number,
@@ -186,7 +186,7 @@ impl BundleBuilder {
             tip_amount,
         })
     }
-    
+
     /// Calculate appropriate tip amount
     fn calculate_tip_amount(&self) -> U256 {
         // In production, analyze transaction values to determine tip
@@ -215,7 +215,7 @@ pub async fn sign_for_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_bundle_builder() {
         let bundle = BundleBuilder::new()
@@ -225,13 +225,13 @@ mod tests {
             .tip_percentage(0.02) // 2%
             .build()
             .unwrap();
-        
+
         assert_eq!(bundle.transactions.len(), 1);
         assert_eq!(bundle.block_number, 12345);
         assert!(bundle.min_timestamp.is_some());
         assert!(bundle.max_timestamp.is_some());
     }
-    
+
     #[test]
     fn test_bundle_to_request() {
         let bundle = Bundle {
@@ -242,7 +242,7 @@ mod tests {
             reverting_tx_hashes: vec![],
             tip_amount: U256::from(1000),
         };
-        
+
         let request = bundle.to_request();
         assert_eq!(request.txs.len(), 1);
         assert_eq!(request.txs[0], "0xaabbcc");

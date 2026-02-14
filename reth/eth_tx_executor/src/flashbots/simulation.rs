@@ -4,7 +4,7 @@ use ethers::prelude::*;
 use std::sync::Arc;
 use tracing::{debug, instrument};
 
-use super::types::{SimulationResult, TransactionResult, StateDiff};
+use super::types::{SimulationResult, StateDiff, TransactionResult};
 
 /// Bundle simulator for testing execution before submission
 pub struct BundleSimulator {
@@ -16,7 +16,7 @@ impl BundleSimulator {
     pub fn new(provider: Arc<Provider<Http>>) -> Self {
         Self { provider }
     }
-    
+
     /// Simulate bundle execution locally
     #[instrument(skip(self, transactions))]
     pub async fn simulate_bundle(
@@ -25,13 +25,13 @@ impl BundleSimulator {
         block_number: u64,
     ) -> Result<SimulationResult, Box<dyn std::error::Error>> {
         debug!("Simulating bundle with {} transactions", transactions.len());
-        
+
         // In production, this would use eth_callBundle or similar
         // For now, we'll do basic validation
-        
+
         let mut total_gas = U256::zero();
         let mut results = Vec::new();
-        
+
         for (i, tx_bytes) in transactions.iter().enumerate() {
             // Decode transaction to check basic validity
             match self.validate_transaction(tx_bytes).await {
@@ -58,11 +58,11 @@ impl BundleSimulator {
                 }
             }
         }
-        
+
         // Calculate approximate fees
         let gas_price = self.provider.get_gas_price().await?;
         let gas_fees = total_gas * gas_price;
-        
+
         Ok(SimulationResult {
             success: true,
             error: None,
@@ -74,7 +74,7 @@ impl BundleSimulator {
             results,
         })
     }
-    
+
     /// Validate individual transaction
     async fn validate_transaction(
         &self,
@@ -84,11 +84,11 @@ impl BundleSimulator {
         if tx_bytes.len() < 100 {
             return Err("Transaction too short".into());
         }
-        
+
         // Estimate gas usage (simplified)
         Ok(U256::from(200_000)) // Typical swap gas
     }
-    
+
     /// Simulate state changes from bundle
     pub async fn simulate_state_changes(
         &self,
@@ -98,13 +98,9 @@ impl BundleSimulator {
         // In production, would trace state changes
         Ok(vec![])
     }
-    
+
     /// Check if bundle would be profitable
-    pub fn calculate_profitability(
-        &self,
-        simulation: &SimulationResult,
-        tip_amount: U256,
-    ) -> U256 {
+    pub fn calculate_profitability(&self, simulation: &SimulationResult, tip_amount: U256) -> U256 {
         // Simple calculation - revenue minus costs
         if simulation.coinbase_diff > tip_amount {
             simulation.coinbase_diff - tip_amount
@@ -117,15 +113,15 @@ impl BundleSimulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_simulation_basic() {
         let provider = Provider::<Http>::try_from("http://localhost:8545").unwrap();
         let simulator = BundleSimulator::new(Arc::new(provider));
-        
+
         let tx_bytes = Bytes::from(vec![0; 200]); // Dummy transaction
         let result = simulator.simulate_bundle(&[tx_bytes], 12345).await;
-        
+
         // Should succeed with dummy data
         assert!(result.is_ok());
     }

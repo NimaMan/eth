@@ -286,6 +286,11 @@ impl<'a> BlockTracer<'a> {
                 result: GethTrace::JS(js),
                 tx_hash,
             },
+            // Handle any new tracer types added in future alloy versions
+            other => TraceResult::Success {
+                result: other,
+                tx_hash,
+            },
         };
 
         Ok(trace_result)

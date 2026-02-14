@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, warn, error, instrument};
+use tracing::{error, info, instrument, warn};
 
 use super::bundle::Bundle;
 use super::signer::BundleSigner;
@@ -37,7 +37,7 @@ impl RelayEndpoint {
             RelayEndpoint::Custom { url, .. } => url,
         }
     }
-    
+
     /// Get relay name for logging
     pub fn name(&self) -> &str {
         match self {
@@ -93,17 +93,15 @@ impl FlashbotsClient {
         config: FlashbotsConfig,
         provider: Arc<Provider<Http>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let http_client = Client::builder()
-            .timeout(config.timeout)
-            .build()?;
-        
+        let http_client = Client::builder().timeout(config.timeout).build()?;
+
         Ok(Self {
             config,
             http_client,
             provider,
         })
     }
-    
+
     /// Submit bundle to relays
     #[instrument(skip(self, bundle))]
     pub async fn submit_bundle(
@@ -115,14 +113,16 @@ impl FlashbotsClient {
             bundle.transactions.len(),
             bundle.block_number
         );
-        
+
         // Simulate bundle first if enabled
         if self.config.simulate_before_submit {
             match self.simulate_bundle(&bundle).await {
                 Ok(sim_result) if !sim_result.success => {
                     error!("Bundle simulation failed: {:?}", sim_result.error);
                     return Ok(BundleResult::Failed {
-                        error: sim_result.error.unwrap_or_else(|| "Simulation failed".to_string()),
+                        error: sim_result
+                            .error
+                            .unwrap_or_else(|| "Simulation failed".to_string()),
                     });
                 }
                 Ok(sim_result) => {
@@ -137,10 +137,10 @@ impl FlashbotsClient {
                 }
             }
         }
-        
+
         // Submit to all configured relays
         let mut submission_results = Vec::new();
-        
+
         for relay in &self.config.relay_endpoints {
             match self.submit_to_relay(&bundle, relay).await {
                 Ok(bundle_hash) => {
@@ -153,28 +153,29 @@ impl FlashbotsClient {
                 }
             }
         }
-        
+
         // Check if any submission succeeded
         let successful_submissions: Vec<_> = submission_results
             .iter()
             .filter_map(|(name, result)| result.as_ref().ok().map(|hash| (*name, *hash)))
             .collect();
-        
+
         if successful_submissions.is_empty() {
             return Ok(BundleResult::Failed {
                 error: "Failed to submit to any relay".to_string(),
             });
         }
-        
+
         info!(
             "Bundle submitted to {} relays successfully",
             successful_submissions.len()
         );
-        
+
         // Wait for inclusion
-        self.wait_for_inclusion(bundle.block_number, successful_submissions).await
+        self.wait_for_inclusion(bundle.block_number, successful_submissions)
+            .await
     }
-    
+
     /// Submit bundle to specific relay
     async fn submit_to_relay(
         &self,
@@ -182,49 +183,43 @@ impl FlashbotsClient {
         relay: &RelayEndpoint,
     ) -> Result<H256, Box<dyn std::error::Error>> {
         let bundle_request = bundle.to_request();
-        
+
         // Sign bundle for Flashbots authentication
         let signature = self.config.signer.sign_bundle(&bundle_request)?;
-        
-        let request_body = FlashbotsRequest::new(
-            "eth_sendBundle",
-            vec![bundle_request],
-        );
-        
-        let mut request = self.http_client
-            .post(relay.url())
-            .json(&request_body);
-        
+
+        let request_body = FlashbotsRequest::new("eth_sendBundle", vec![bundle_request]);
+
+        let mut request = self.http_client.post(relay.url()).json(&request_body);
+
         // Add authentication headers
         match relay {
             RelayEndpoint::Flashbots => {
-                request = request
-                    .header("X-Flashbots-Signature", format!("{}:{}", self.config.signer.address(), signature));
+                request = request.header(
+                    "X-Flashbots-Signature",
+                    format!("{}:{}", self.config.signer.address(), signature),
+                );
             }
             RelayEndpoint::BloXroute { auth_token } => {
-                request = request
-                    .header("Authorization", format!("Bearer {}", auth_token));
+                request = request.header("Authorization", format!("Bearer {}", auth_token));
             }
             _ => {}
         }
-        
+
         let response = request.send().await?;
         let response_text = response.text().await?;
-        
+
         // Parse response
-        let flashbots_response: FlashbotsResponse<BundleStats> = 
+        let flashbots_response: FlashbotsResponse<BundleStats> =
             serde_json::from_str(&response_text)?;
-        
+
         match flashbots_response.data {
-            FlashbotsResponseData::Success { result } => {
-                Ok(result.bundle_hash)
-            }
+            FlashbotsResponseData::Success { result } => Ok(result.bundle_hash),
             FlashbotsResponseData::Error { error } => {
                 Err(format!("Relay error {}: {}", error.code, error.message).into())
             }
         }
     }
-    
+
     /// Simulate bundle execution
     async fn simulate_bundle(
         &self,
@@ -232,7 +227,7 @@ impl FlashbotsClient {
     ) -> Result<SimulationResult, Box<dyn std::error::Error>> {
         let bundle_request = bundle.to_request();
         let signature = self.config.signer.sign_bundle(&bundle_request)?;
-        
+
         let request_body = FlashbotsRequest::new(
             "eth_callBundle",
             json!({
@@ -241,18 +236,22 @@ impl FlashbotsClient {
                 "stateBlockNumber": "latest",
             }),
         );
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .post("https://relay.flashbots.net")
-            .header("X-Flashbots-Signature", format!("{}:{}", self.config.signer.address(), signature))
+            .header(
+                "X-Flashbots-Signature",
+                format!("{}:{}", self.config.signer.address(), signature),
+            )
             .json(&request_body)
             .send()
             .await?;
-        
+
         let response_text = response.text().await?;
-        let flashbots_response: FlashbotsResponse<SimulationResult> = 
+        let flashbots_response: FlashbotsResponse<SimulationResult> =
             serde_json::from_str(&response_text)?;
-        
+
         match flashbots_response.data {
             FlashbotsResponseData::Success { result } => Ok(result),
             FlashbotsResponseData::Error { error } => {
@@ -260,7 +259,7 @@ impl FlashbotsClient {
             }
         }
     }
-    
+
     /// Wait for bundle inclusion in target block
     async fn wait_for_inclusion(
         &self,
@@ -269,7 +268,7 @@ impl FlashbotsClient {
     ) -> Result<BundleResult, Box<dyn std::error::Error>> {
         let start_time = std::time::Instant::now();
         let timeout = Duration::from_secs(30); // Wait up to 30 seconds
-        
+
         loop {
             // Check if timeout reached
             if start_time.elapsed() > timeout {
@@ -277,32 +276,33 @@ impl FlashbotsClient {
                     reason: BundleNotIncludedReason::BlockNotMined,
                 });
             }
-            
+
             // Get current block
             let current_block = self.provider.get_block_number().await?;
-            
+
             if current_block.as_u64() >= target_block {
                 // Block has been mined, check if bundle was included
-                let block = self.provider
+                let block = self
+                    .provider
                     .get_block_with_txs(target_block)
                     .await?
                     .ok_or("Block not found")?;
-                
+
                 // Check if any of our transactions are in the block
                 // In production, would check all bundle transactions
                 let _tx_hashes: Vec<H256> = block.transactions.iter().map(|tx| tx.hash()).collect();
-                
+
                 // For now, assume not included
                 return Ok(BundleResult::NotIncluded {
                     reason: BundleNotIncludedReason::Outbid,
                 });
             }
-            
+
             // Wait before checking again
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
-    
+
     /// Get bundle status from relay
     pub async fn get_bundle_status(
         &self,
@@ -315,20 +315,24 @@ impl FlashbotsClient {
                 "bundleHash": bundle_hash,
             }),
         );
-        
+
         let signature = self.config.signer.sign_message(bundle_hash.as_bytes())?;
-        
-        let response = self.http_client
+
+        let response = self
+            .http_client
             .post(relay.url())
-            .header("X-Flashbots-Signature", format!("{}:{}", self.config.signer.address(), signature))
+            .header(
+                "X-Flashbots-Signature",
+                format!("{}:{}", self.config.signer.address(), signature),
+            )
             .json(&request_body)
             .send()
             .await?;
-        
+
         let response_text = response.text().await?;
-        let flashbots_response: FlashbotsResponse<BundleStatus> = 
+        let flashbots_response: FlashbotsResponse<BundleStatus> =
             serde_json::from_str(&response_text)?;
-        
+
         match flashbots_response.data {
             FlashbotsResponseData::Success { result } => Ok(result),
             FlashbotsResponseData::Error { error } => {
@@ -341,13 +345,13 @@ impl FlashbotsClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_relay_endpoints() {
         let flashbots = RelayEndpoint::Flashbots;
         assert_eq!(flashbots.url(), "https://relay.flashbots.net");
         assert_eq!(flashbots.name(), "Flashbots");
-        
+
         let custom = RelayEndpoint::Custom {
             url: "https://custom.relay".to_string(),
             name: "CustomRelay".to_string(),

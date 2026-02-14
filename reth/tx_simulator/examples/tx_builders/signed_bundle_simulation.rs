@@ -8,13 +8,11 @@
 //! This example showcases how the tx_builders helpers can be paired with the
 //! simulator to verify complex transaction chains before broadcasting.
 
+use alloy_consensus::{SignableTransaction, TxKind, TxLegacy};
+use alloy_primitives::{utils::parse_ether, B256};
 use alloy_primitives::{Address as AlloyAddress, U256 as AlloyU256};
-use alloy_rlp::Decodable;
-use ethers::prelude::*;
-use ethers::types::Bytes as EthersBytes;
-use ethers::utils::parse_units;
 use reth_chain_query::dex::compute_sushiswap_pool;
-use reth_primitives::TransactionSigned;
+use reth_primitives::{recover_signer_unchecked, sign_message, Transaction, TransactionSigned};
 use std::env;
 use tx_simulator::tx_builders::{
     amm_swap_route::AmmSwapRoute, build_approve_for_route, build_buy_swap_with_min_out,
@@ -42,41 +40,35 @@ async fn main() -> eyre::Result<()> {
 
     // Wallet used purely for simulation (never broadcast!)
     let pk = env::var("KARTAL_KILIT").expect("Set KARTAL_KILIT to a dev private key");
+    let signer_secret = parse_private_key(&pk)?;
     let chain_id: u64 = env::var("ETH_KARTAL_CHAIN_ID")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
-    let wallet: LocalWallet = pk.parse::<LocalWallet>()?.with_chain_id(chain_id);
-    let owner = wallet.address();
+    let owner = private_key_to_address(signer_secret)?;
     println!("Wallet: {:?}", owner);
 
     // Addresses/constants
-    let weth: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+    let weth: AlloyAddress = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
         .parse()
         .unwrap();
-    let usdc: Address = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    let usdc: AlloyAddress = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
         .parse()
         .unwrap();
-    let uni_v2_usdc_weth: Address = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
+    let uni_v2_usdc_weth: AlloyAddress = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
         .parse()
         .unwrap();
-    let sushi_v2_usdc_weth: Address = alloy_to_ethers_addr(compute_sushiswap_pool(
-        ethers_to_alloy_addr(weth),
-        ethers_to_alloy_addr(usdc),
-    ));
+    let sushi_v2_usdc_weth: AlloyAddress = compute_sushiswap_pool(weth, usdc);
     let uni_route = AmmSwapRoute::UniswapV2 {
-        pool: ethers_to_alloy_addr(uni_v2_usdc_weth),
+        pool: uni_v2_usdc_weth,
     };
     let sushi_route = AmmSwapRoute::SushiswapV2 {
-        pool: ethers_to_alloy_addr(sushi_v2_usdc_weth),
+        pool: sushi_v2_usdc_weth,
     };
 
     // Trade params
-    let amount_in_eth: U256 = parse_units(
-        env::var("TRADE_AMOUNT_ETH").unwrap_or_else(|_| "0.01".into()),
-        "ether",
-    )?
-    .into();
+    let amount_in_eth =
+        parse_ether(&env::var("TRADE_AMOUNT_ETH").unwrap_or_else(|_| "0.01".into()))?;
 
     let latest_block = simulator.get_latest_block()?;
     let base_fee_wei = simulator
@@ -87,45 +79,43 @@ async fn main() -> eyre::Result<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
     let env_gas_gwei: Option<u64> = env::var("GAS_PRICE_GWEI").ok().and_then(|v| v.parse().ok());
-    let computed_gas =
-        U256::from(base_fee_wei) + U256::from(tip_gwei) * U256::from(1_000_000_000u64);
-    let gas_price = match env_gas_gwei {
-        Some(g) => U256::from(g) * U256::from(1_000_000_000u64),
+    let computed_gas = base_fee_wei + (tip_gwei as u128) * 1_000_000_000u128;
+    let gas_price_wei: u128 = match env_gas_gwei {
+        Some(g) => (g as u128) * 1_000_000_000u128,
         None => computed_gas,
     };
     println!(
         "Block {} base_fee: {} wei | chosen gas_price: {} wei",
-        latest_block, base_fee_wei, gas_price
+        latest_block, base_fee_wei, gas_price_wei
     );
-    let gas_approve = U256::from(120_000);
-    let gas_swap = U256::from(300_000);
+    let gas_approve: u64 = 120_000;
+    let gas_swap: u64 = 300_000;
 
     // Create sim chain and get starting nonce
     let mut chain: SignedTxChainSimulation = simulator.start_signed_chain(None)?;
-    let mut nonce = chain.nonce_of(ethers_to_alloy_addr(owner))?;
+    let mut nonce = chain.nonce_of(owner)?;
 
     // Record ETH balance before buy
-    let eth_before = chain.eth_balance_of_on_fork(ethers_to_alloy_addr(owner))?;
+    let eth_before = chain.eth_balance_of_on_fork(owner)?;
 
     // Build and sign BUY (ETH->USDC)
-    let buy_unsigned = build_buy_swap_with_min_out(
+    let mut buy_unsigned = build_buy_swap_with_min_out(
         &uni_route,
-        ethers_to_alloy_addr(owner),
-        ethers_to_alloy_addr(usdc),
-        ethers_to_alloy_u256(amount_in_eth),
+        owner,
+        usdc,
+        amount_in_eth,
         AlloyU256::ZERO,
         u64::MAX,
     );
-    let mut buy_typed = unsigned_to_typed(buy_unsigned, owner);
-    buy_typed.set_gas(gas_swap);
-    buy_typed.set_gas_price(gas_price);
-    buy_typed.set_nonce(U256::from(nonce));
-    let signed_buy = sign_typed(&wallet, &buy_typed)?;
+    buy_unsigned.from = Some(owner);
+    buy_unsigned.gas = Some(gas_swap);
+    buy_unsigned.gas_price = Some(gas_price_wei);
+    buy_unsigned.nonce = Some(nonce);
+    let signed_buy = sign_unsigned_legacy(signer_secret, chain_id, buy_unsigned)?;
 
     let r1 = chain.step(&signed_buy)?;
-    let usdc_after_buy =
-        chain.erc20_balance_of_on_fork(ethers_to_alloy_addr(usdc), ethers_to_alloy_addr(owner))?;
-    let eth_after_buy = chain.eth_balance_of_on_fork(ethers_to_alloy_addr(owner))?;
+    let usdc_after_buy = chain.erc20_balance_of_on_fork(usdc, owner)?;
+    let eth_after_buy = chain.eth_balance_of_on_fork(owner)?;
     println!(
         "Buy success: {} | gas_used: {} | USDC after buy: {} | ETH before: {} | ETH after buy: {}",
         r1.success, r1.gas_used, usdc_after_buy, eth_before, eth_after_buy
@@ -133,17 +123,12 @@ async fn main() -> eyre::Result<()> {
 
     // Approve MAX for Sushi router
     nonce += 1;
-    let approve_unsigned = build_approve_for_route(
-        &sushi_route,
-        ethers_to_alloy_addr(owner),
-        ethers_to_alloy_addr(usdc),
-        AlloyU256::MAX,
-    );
-    let mut approve_typed = unsigned_to_typed(approve_unsigned, owner);
-    approve_typed.set_gas(gas_approve);
-    approve_typed.set_gas_price(gas_price);
-    approve_typed.set_nonce(U256::from(nonce));
-    let signed_approve = sign_typed(&wallet, &approve_typed)?;
+    let mut approve_unsigned = build_approve_for_route(&sushi_route, owner, usdc, AlloyU256::MAX);
+    approve_unsigned.from = Some(owner);
+    approve_unsigned.gas = Some(gas_approve);
+    approve_unsigned.gas_price = Some(gas_price_wei);
+    approve_unsigned.nonce = Some(nonce);
+    let signed_approve = sign_unsigned_legacy(signer_secret, chain_id, approve_unsigned)?;
     let r2 = chain.step(&signed_approve)?;
     println!(
         "Approve success: {} | gas_used: {}",
@@ -152,23 +137,22 @@ async fn main() -> eyre::Result<()> {
 
     // Sell USDC -> ETH on Sushi V2
     nonce += 1;
-    let sell_unsigned = build_sell_swap_with_min_out(
+    let mut sell_unsigned = build_sell_swap_with_min_out(
         &sushi_route,
-        ethers_to_alloy_addr(owner),
-        ethers_to_alloy_addr(usdc),
+        owner,
+        usdc,
         usdc_after_buy,
         AlloyU256::ZERO,
         u64::MAX,
     );
-    let mut sell_typed = unsigned_to_typed(sell_unsigned, owner);
-    sell_typed.set_gas(gas_swap);
-    sell_typed.set_gas_price(gas_price);
-    sell_typed.set_nonce(U256::from(nonce));
-    let signed_sell = sign_typed(&wallet, &sell_typed)?;
+    sell_unsigned.from = Some(owner);
+    sell_unsigned.gas = Some(gas_swap);
+    sell_unsigned.gas_price = Some(gas_price_wei);
+    sell_unsigned.nonce = Some(nonce);
+    let signed_sell = sign_unsigned_legacy(signer_secret, chain_id, sell_unsigned)?;
     let r3 = chain.step(&signed_sell)?;
-    let usdc_after_sell =
-        chain.erc20_balance_of_on_fork(ethers_to_alloy_addr(usdc), ethers_to_alloy_addr(owner))?;
-    let eth_after_sell = chain.eth_balance_of_on_fork(ethers_to_alloy_addr(owner))?;
+    let usdc_after_sell = chain.erc20_balance_of_on_fork(usdc, owner)?;
+    let eth_after_sell = chain.eth_balance_of_on_fork(owner)?;
     println!(
         "Sell success: {} | gas_used: {} | USDC after sell: {} | ETH after sell: {}",
         r3.success, r3.gas_used, usdc_after_sell, eth_after_sell
@@ -177,45 +161,55 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-fn unsigned_to_typed(
+fn parse_private_key(raw: &str) -> eyre::Result<B256> {
+    let key = raw.trim().trim_start_matches("0x");
+    format!("0x{key}")
+        .parse::<B256>()
+        .map_err(|e| eyre::eyre!("invalid KARTAL_KILIT hex private key: {}", e))
+}
+
+fn private_key_to_address(secret: B256) -> eyre::Result<AlloyAddress> {
+    let probe = B256::from([1u8; 32]);
+    let sig = sign_message(secret, probe)
+        .map_err(|e| eyre::eyre!("failed to derive address from private key: {}", e))?;
+    recover_signer_unchecked(&sig, probe)
+        .map_err(|e| eyre::eyre!("failed to recover address from signature: {}", e))
+}
+
+fn sign_unsigned_legacy(
+    signer_secret: B256,
+    chain_id: u64,
     unsigned: tx_simulator::UnsignedTransaction,
-    from: ethers::types::Address,
-) -> ethers::types::transaction::eip2718::TypedTransaction {
-    let mut tx: ethers::types::transaction::eip2718::TypedTransaction =
-        (ethers::types::TransactionRequest::new().from(from)).into();
-    if let Some(to) = unsigned.to {
-        tx.set_to(ethers::types::NameOrAddress::Address(alloy_to_ethers_addr(
-            to,
-        )));
-    }
-    if let Some(gas) = unsigned.gas {
-        tx.set_gas(U256::from(gas));
-    }
-    if let Some(value) = unsigned.value {
-        tx.set_value(ethers::types::U256::from_dec_str(&value.to_string()).unwrap());
-    }
-    if let Some(data) = unsigned.data {
-        tx.set_data(EthersBytes::from(data.as_ref().to_vec()));
-    }
-    tx
-}
-
-fn sign_typed(
-    wallet: &LocalWallet,
-    typed: &ethers::types::transaction::eip2718::TypedTransaction,
 ) -> eyre::Result<TransactionSigned> {
-    let sig = futures::executor::block_on(wallet.sign_transaction(typed))?;
-    let raw = typed.rlp_signed(&sig);
-    let mut slice = raw.as_ref();
-    Ok(TransactionSigned::decode(&mut slice).map_err(|e| eyre::eyre!("decode failed: {}", e))?)
-}
+    if unsigned.max_fee_per_gas.is_some()
+        || unsigned.max_priority_fee_per_gas.is_some()
+        || !unsigned.access_list.is_empty()
+        || !unsigned.blob_versioned_hashes.is_empty()
+        || unsigned.max_fee_per_blob_gas.is_some()
+        || !unsigned.signed_authorizations.is_empty()
+    {
+        return Err(eyre::eyre!(
+            "this example signs legacy transactions only (gas_price path)"
+        ));
+    }
 
-fn alloy_to_ethers_addr(a: AlloyAddress) -> ethers::types::Address {
-    ethers::types::Address::from_slice(a.as_slice())
-}
-fn ethers_to_alloy_addr(a: ethers::types::Address) -> AlloyAddress {
-    AlloyAddress::from_slice(a.as_bytes())
-}
-fn ethers_to_alloy_u256(u: ethers::types::U256) -> AlloyU256 {
-    AlloyU256::from_str_radix(&u.to_string(), 10).unwrap_or_default()
+    let tx = Transaction::Legacy(TxLegacy {
+        chain_id: Some(chain_id),
+        nonce: unsigned
+            .nonce
+            .ok_or_else(|| eyre::eyre!("missing nonce on unsigned transaction"))?,
+        gas_price: unsigned
+            .gas_price
+            .ok_or_else(|| eyre::eyre!("missing gas_price on unsigned transaction"))?,
+        gas_limit: unsigned
+            .gas
+            .ok_or_else(|| eyre::eyre!("missing gas limit on unsigned transaction"))?,
+        to: unsigned.to.map(TxKind::Call).unwrap_or(TxKind::Create),
+        value: unsigned.value.unwrap_or_default(),
+        input: unsigned.data.unwrap_or_default(),
+    });
+
+    let signature = sign_message(signer_secret, tx.signature_hash())
+        .map_err(|e| eyre::eyre!("failed to sign transaction: {}", e))?;
+    Ok(TransactionSigned::new_unhashed(tx, signature))
 }

@@ -1,6 +1,5 @@
 use alloy_primitives::{Address as AlloyAddress, B256, U256};
 use clap::Parser;
-use ethers::types::{H256, U256 as EthersU256};
 use eyre::{eyre, Context, Result};
 use mempool_processor::function_detector::CreatorFunctionType;
 use mempool_processor::mempool_fetcher::MempoolTransaction;
@@ -292,13 +291,13 @@ fn build_simulation_job(
         from: tx.from.as_slice().to_vec(),
         to: tx.to.map(|addr| addr.as_slice().to_vec()),
         input: tx.input.to_vec(),
-        value: EthersU256::from_dec_str(&tx.value.to_string())?,
-        gas_price: Some(EthersU256::from_dec_str(&tx.gas_price.to_string())?),
+        value: tx.value,
+        gas_price: Some(tx.gas_price),
         functions: vec!["trading_control".to_string()],
         function_category: Some(CreatorFunctionType::TradingControl),
     };
 
-    let tx_hash = H256::from_slice(tx.hash.as_slice());
+    let tx_hash = tx.hash;
 
     Ok(TxSimulationJob {
         tx: mempool_tx,

@@ -1,4 +1,3 @@
-use ethers::providers::{Http, Middleware, Provider};
 /// Verify that we only receive NEW transactions entering the mempool
 ///
 /// This test will:
@@ -22,11 +21,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Verifying that we only receive NEW transactions...");
 
     // First, get some existing transactions from mempool
-    let provider = Provider::<Http>::try_from("http://localhost:8545")?;
-
-    // Get current mempool content
+    let rpc_client = reqwest::Client::new();
     info!("Getting current mempool transactions...");
-    let mempool_content: serde_json::Value = provider.request("txpool_content", ()).await?;
+    let rpc_response = rpc_client
+        .post("http://localhost:8545")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "txpool_content",
+            "params": [],
+            "id": 1
+        }))
+        .send()
+        .await?
+        .error_for_status()?;
+    let rpc_body: serde_json::Value = rpc_response.json().await?;
+    let mempool_content = rpc_body.get("result").cloned().unwrap_or_default();
 
     // Extract some transaction hashes from existing mempool
     let mut existing_hashes = HashSet::new();

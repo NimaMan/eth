@@ -1,5 +1,4 @@
 use chrono::Local;
-use ethers::providers::{Http, Provider};
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use std::fs::File;
 use std::io::Write;

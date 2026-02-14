@@ -1,7 +1,9 @@
 use clap::Parser;
 use eyre::Result;
+use alloy_primitives::B256;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 /// Mempool Signal Detector Service
@@ -37,9 +39,17 @@ impl tracing_subscriber::fmt::time::FormatTime for LocalTimeFormatter {
     }
 }
 
+fn parse_tx_hash_or_zero(hash: &str) -> B256 {
+    let trimmed = hash.trim();
+    let normalized = if trimmed.starts_with("0x") {
+        trimmed.to_string()
+    } else {
+        format!("0x{trimmed}")
+    };
+    B256::from_str(&normalized).unwrap_or(B256::ZERO)
+}
+
 // Mempool processor imports
-use ethers::types::H256;
-use hex;
 use mempool_processor::{
     arrival_recorder::{ArrivalRecorderConfig, MempoolArrivalRecorder},
     config::MempoolProcessorConfig,
@@ -553,11 +563,7 @@ async fn main() -> Result<()> {
                         category: classification.category.clone(),
                         priority: SimulationPriority::High,
                         simulation_type: SimulationType::BuySellOnly,
-                        tx_hash: H256::from_slice(
-                            hex::decode(&tx.hash.trim_start_matches("0x"))
-                                .unwrap_or_default()
-                                .as_slice(),
-                        ),
+                        tx_hash: parse_tx_hash_or_zero(&tx.hash),
                     };
                     simulation_manager.schedule_buy_sell_follow_up(followup_job);
                 }
@@ -578,11 +584,7 @@ async fn main() -> Result<()> {
                     }
                     _ => SimulationType::TransactionOnly,
                 },
-                tx_hash: H256::from_slice(
-                    hex::decode(&tx.hash.trim_start_matches("0x"))
-                        .unwrap_or_default()
-                        .as_slice(),
-                ),
+                tx_hash: parse_tx_hash_or_zero(&tx.hash),
             };
 
             // Submit for simulation (signal detection happens internally)

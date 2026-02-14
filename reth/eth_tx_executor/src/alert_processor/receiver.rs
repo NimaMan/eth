@@ -2,13 +2,13 @@
 //!
 //! Receives execution alerts via ZMQ for ultra-low latency
 
-use tokio::sync::mpsc;
-use tracing::{info, warn, error, debug};
-use zmq::Context;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
+use zmq::Context;
 
 use super::types::Alert;
 use super::validation::{AlertValidator, SignedMessage};
@@ -34,8 +34,10 @@ impl Default for ReceiverConfig {
             endpoint: "tcp://localhost:5559".to_string(),
             timeout_ms: 1000, // Reduced from 5000ms for lower latency
             reconnect_delay: Duration::from_secs(1), // Faster reconnect
-            hmac_secret: std::env::var("KARTAL_HMAC_SECRET").unwrap_or_else(|_| "default-dev-secret".to_string()),
-            database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgresql://localhost/eth_db".to_string()),
+            hmac_secret: std::env::var("KARTAL_HMAC_SECRET")
+                .unwrap_or_else(|_| "default-dev-secret".to_string()),
+            database_url: std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgresql://localhost/eth_db".to_string()),
         }
     }
 }
@@ -50,34 +52,34 @@ pub struct AlertReceiver {
 impl AlertReceiver {
     /// Create new alert receiver
     pub fn new(config: ReceiverConfig, tx: mpsc::Sender<Alert>) -> Self {
-        Self { 
-            config, 
+        Self {
+            config,
             tx,
             shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
-    
+
     /// Run the receiver loop
     pub async fn run(&self) {
         let config = self.config.clone();
         let tx = self.tx.clone();
         let shutdown = self.shutdown.clone();
-        
+
         // Run ZMQ in dedicated thread for performance
         thread::spawn(move || {
             if let Err(e) = Self::zmq_loop(config, tx, shutdown) {
                 error!("ZMQ receiver error: {}", e);
             }
         });
-        
+
         // Keep async task alive until shutdown
         while !self.shutdown.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
-        
+
         info!("Alert receiver shutting down");
     }
-    
+
     /// ZMQ receive loop
     fn zmq_loop(
         config: ReceiverConfig,
@@ -85,46 +87,50 @@ impl AlertReceiver {
         shutdown: Arc<AtomicBool>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let ctx = Context::new();
-        
+
         while !shutdown.load(Ordering::Relaxed) {
             info!("Connecting to alert endpoint: {}", config.endpoint);
-            
+
             let subscriber = ctx.socket(zmq::SUB)?;
             subscriber.set_rcvtimeo(config.timeout_ms)?;
             subscriber.set_linger(0)?; // Don't wait on close
             subscriber.connect(&config.endpoint)?;
             subscriber.set_subscribe(b"")?; // Subscribe to all messages
-            
+
             info!("Connected to alert stream");
-            
+
             while !shutdown.load(Ordering::Relaxed) {
                 match subscriber.recv_msg(0) {
                     Ok(msg) => {
                         let data = msg.as_str().unwrap_or("");
                         debug!("Received alert data: {} bytes", data.len());
-                        
+
                         // Parse signed message
                         match SignedMessage::from_zmq_message(data) {
                             Ok(signed_msg) => {
                                 // Validate HMAC signature
                                 let validator = AlertValidator::new(&config.hmac_secret);
-                                match validator.validate_alert(&signed_msg.payload, &signed_msg.signature) {
+                                match validator
+                                    .validate_alert(&signed_msg.payload, &signed_msg.signature)
+                                {
                                     Ok(alert) => {
-                                info!("Alert received: {} for token {}", 
-                                    alert.id, alert.token_address);
-                                
-                                // Send alert to executor
-                                match tx.try_send(alert) {
-                                    Ok(_) => debug!("Alert sent successfully"),
-                                    Err(mpsc::error::TrySendError::Full(_)) => {
-                                        warn!("Alert channel full, dropping alert");
-                                    }
-                                    Err(mpsc::error::TrySendError::Closed(_)) => {
-                                        error!("Alert channel closed, shutting down");
-                                        shutdown.store(true, Ordering::Relaxed);
-                                        break;
-                                    }
-                                }
+                                        info!(
+                                            "Alert received: {} for token {}",
+                                            alert.id, alert.token_address
+                                        );
+
+                                        // Send alert to executor
+                                        match tx.try_send(alert) {
+                                            Ok(_) => debug!("Alert sent successfully"),
+                                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                                warn!("Alert channel full, dropping alert");
+                                            }
+                                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                                error!("Alert channel closed, shutting down");
+                                                shutdown.store(true, Ordering::Relaxed);
+                                                break;
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         warn!("Alert validation failed: {}", e);
@@ -148,21 +154,21 @@ impl AlertReceiver {
                     }
                 }
             }
-            
+
             warn!("Disconnected, reconnecting in {:?}", config.reconnect_delay);
             thread::sleep(config.reconnect_delay);
         }
-        
+
         info!("ZMQ receiver loop terminated");
         Ok(())
     }
-    
+
     /// Signal shutdown
     pub fn shutdown(&self) {
         info!("Shutdown requested for alert receiver");
         self.shutdown.store(true, Ordering::Relaxed);
     }
-    
+
     /// Check if shutdown was requested
     pub fn is_shutting_down(&self) -> bool {
         self.shutdown.load(Ordering::Relaxed)
@@ -173,7 +179,7 @@ impl AlertReceiver {
 mod tests {
     use super::*;
     use crate::alert_processor::{Action, ExecutionParams, Priority};
-    
+
     #[test]
     fn test_alert_parsing() {
         let json = r#"{
@@ -190,18 +196,18 @@ mod tests {
                 "priority": "High"
             }
         }"#;
-        
+
         let alert: Alert = serde_json::from_str(json).unwrap();
         assert_eq!(alert.id, "test-123");
         assert_eq!(alert.timestamp, 1234567890);
     }
-    
+
     #[tokio::test]
     async fn test_receiver_creation() {
         let (tx, _rx) = mpsc::channel(10);
         let config = ReceiverConfig::default();
         let receiver = AlertReceiver::new(config, tx);
-        
+
         // Verify receiver was created
         assert_eq!(receiver.config.timeout_ms, 1000);
     }

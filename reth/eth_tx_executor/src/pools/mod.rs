@@ -1,11 +1,11 @@
 //! Pool abstraction layer for multiple DEX protocols
-//! 
+//!
 //! Provides a unified interface for executing swaps across different pool types
 //! while maintaining protocol-specific optimizations.
 
+use async_trait::async_trait;
 use ethers::prelude::*;
 use ethers::types::transaction::eip2718::TypedTransaction;
-use async_trait::async_trait;
 use std::sync::Arc;
 
 pub mod uniswap_v2;
@@ -84,25 +84,25 @@ pub struct UniswapV3Info {
 pub trait Pool: Send + Sync {
     /// Get the pool's address
     fn address(&self) -> Address;
-    
+
     /// Get the pool's protocol name
     fn protocol(&self) -> &'static str;
-    
+
     /// Check if pool supports a token pair
     async fn supports_pair(&self, token_a: Address, token_b: Address) -> PoolResult<bool>;
-    
+
     /// Get current reserves for the pool
     async fn get_reserves(&self) -> PoolResult<(U256, U256)>;
-    
+
     /// Calculate output amount for a given input
     async fn get_amount_out(&self, amount_in: U256, token_in: Address) -> PoolResult<U256>;
-    
+
     /// Build swap transaction
     async fn build_swap_tx(&self, params: SwapParams) -> PoolResult<TypedTransaction>;
-    
+
     /// Execute swap transaction
     async fn execute_swap(&self, params: SwapParams) -> PoolResult<SwapResult>;
-    
+
     /// Estimate gas for swap
     async fn estimate_gas(&self, params: SwapParams) -> PoolResult<U256>;
 }
@@ -117,7 +117,7 @@ impl PoolFactory {
     pub fn new(provider: Arc<Provider<Http>>) -> Self {
         Self { provider }
     }
-    
+
     /// Create a pool instance for a given address
     pub async fn create_pool(&self, address: Address) -> PoolResult<Box<dyn Pool>> {
         // For now, assume all pools are Uniswap V2
@@ -127,7 +127,7 @@ impl PoolFactory {
             self.provider.clone(),
         )))
     }
-    
+
     /// Find best pool for a token pair across all protocols
     pub async fn find_best_pool(
         &self,
@@ -136,27 +136,24 @@ impl PoolFactory {
     ) -> PoolResult<Box<dyn Pool>> {
         // For now, return Uniswap V2 pool
         // Future: check multiple protocols and return best liquidity
-        let pool = uniswap_v2::UniswapV2Pool::from_tokens(
-            token_a,
-            token_b,
-            self.provider.clone(),
-        ).await?;
-        
+        let pool =
+            uniswap_v2::UniswapV2Pool::from_tokens(token_a, token_b, self.provider.clone()).await?;
+
         Ok(Box::new(pool))
     }
-    
+
     /// Get pool information
     pub async fn get_pool_info(&self, pool_address: &Address) -> PoolResult<PoolInfo> {
         // For now, assume Uniswap V2
         // Future: detect pool type dynamically
         let pool = uniswap_v2::UniswapV2Pool::new(*pool_address, self.provider.clone());
-        
+
         // Get reserves from pool contract
         // This is a simplified version - real implementation would call the contract
         Ok(PoolInfo::UniswapV2(UniswapV2Info {
             pool_address: *pool_address,
-            token0: Address::zero(), // Would be fetched from contract
-            token1: Address::zero(), // Would be fetched from contract
+            token0: Address::zero(),       // Would be fetched from contract
+            token1: Address::zero(),       // Would be fetched from contract
             reserve0: U256::from(1000000), // Mock data
             reserve1: U256::from(2000000), // Mock data
             total_supply: U256::from(1000000), // Mock data

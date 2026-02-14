@@ -1,5 +1,4 @@
-use alloy_primitives::Address;
-use ethers::types::H256;
+use alloy_primitives::{Address, B256};
 use tx_processor::PoolBuySellSimulationResult;
 
 use crate::mempool_fetcher::MempoolTransaction;
@@ -24,7 +23,7 @@ pub struct TxSimulationJob {
     pub category: TransactionCategory,
     pub priority: SimulationPriority,
     pub simulation_type: SimulationType,
-    pub tx_hash: H256,
+    pub tx_hash: B256,
 }
 
 /// Result of simulation.

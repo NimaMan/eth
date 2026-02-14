@@ -1,6 +1,5 @@
 use chrono::Local;
 use clap::Parser;
-use ethers::types::H256;
 use eyre::Result;
 use hex;
 use std::fs::{create_dir_all, OpenOptions};
@@ -21,7 +20,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 // Mempool processor imports
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use mempool_processor::{
     config::{
         DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
@@ -128,6 +127,16 @@ fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
         &redis_url,
         &redis_prefix,
     )
+}
+
+fn parse_tx_hash_or_zero(hash: &str) -> B256 {
+    let trimmed = hash.trim();
+    let normalized = if trimmed.starts_with("0x") {
+        trimmed.to_string()
+    } else {
+        format!("0x{trimmed}")
+    };
+    B256::from_str(&normalized).unwrap_or(B256::ZERO)
 }
 
 impl SimplifiedSimulationManager {
@@ -576,11 +585,7 @@ async fn main() -> Result<()> {
                     _ => SimulationPriority::Low,
                 },
                 simulation_type: SimulationType::TransactionWithBuySell,
-                tx_hash: H256::from_slice(
-                    hex::decode(&tx.hash.trim_start_matches("0x"))
-                        .unwrap_or_default()
-                        .as_slice(),
-                ),
+                tx_hash: parse_tx_hash_or_zero(&tx.hash),
             };
 
             // 4. Submit for simulation with more details

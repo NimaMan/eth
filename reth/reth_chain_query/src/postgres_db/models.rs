@@ -3,10 +3,10 @@
 /// Rust structs matching the eth_db PostgreSQL schema for Ethereum PnL analysis.
 /// These models represent aggregated on-chain data for efficient querying.
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{postgres::PgRow, FromRow, Row};
 
 /// Address with aggregated metrics across all trades
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddressMetrics {
     pub address_id: i64,
     pub address: String,
@@ -41,7 +41,7 @@ pub struct AddressMetrics {
 }
 
 /// Aggregated trades between address and token
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trade {
     pub id: i32,
     pub address_id: i64,
@@ -73,7 +73,7 @@ pub struct Trade {
 }
 
 /// Token metadata with scam detection
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Token {
     pub contract_address: String,
     pub creator_address_id: Option<i64>,
@@ -84,7 +84,7 @@ pub struct Token {
 }
 
 /// Pool information across DEX protocols
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pool {
     pub id: i32,
     pub pool_address: Option<String>,
@@ -107,7 +107,7 @@ pub struct Pool {
 }
 
 /// Transaction record
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     pub tx_hash: String,
     pub block_number: Option<i32>,
@@ -118,7 +118,7 @@ pub struct Transaction {
 }
 
 /// Transaction participant record (from tx_participants table)
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxParticipant {
     pub tx_hash: String,
     pub address_id: i64,
@@ -148,7 +148,7 @@ pub struct TransactionWithParticipants {
 }
 
 /// Block metadata
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub block_number: i32,
     pub block_timestamp: Option<i32>,
@@ -166,7 +166,7 @@ pub struct TopAddressResult {
 }
 
 /// Query result for PnL analysis
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PnLAnalysis {
     pub address: String,
     pub token_address: String,
@@ -177,3 +177,130 @@ pub struct PnLAnalysis {
     pub roi_percentage: f64,
     pub num_trades: i32,
 }
+
+macro_rules! impl_from_row {
+    ($ty:ty, [$( $field:ident ),+ $(,)?]) => {
+        impl<'r> FromRow<'r, PgRow> for $ty {
+            fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+                Ok(Self {
+                    $( $field: row.try_get(stringify!($field))?, )+
+                })
+            }
+        }
+    };
+}
+
+impl_from_row!(
+    AddressMetrics,
+    [
+        address_id,
+        address,
+        is_contract,
+        total_erc20_tx,
+        total_erc20_trades,
+        scam_ratio,
+        total_profit,
+        total_volume,
+        first_seen,
+        last_seen,
+        total_tx_fee,
+        degree_centrality,
+        betweenness_centrality,
+        total_denom_balance,
+        total_realized_profit,
+        mean_received_spent_ratio,
+        median_received_spent_ratio,
+        avg_bribe_amount,
+        total_bribe_amount,
+        name,
+        entity_category,
+        cluster_label
+    ]
+);
+
+impl_from_row!(
+    Trade,
+    [
+        id,
+        address_id,
+        token_address,
+        currency,
+        entry_block,
+        latest_block,
+        total_denom_spent,
+        total_denom_received,
+        denom_received_spent_ratio,
+        bribe_amount,
+        tx_fee,
+        realized_profit,
+        unrealized_profit,
+        num_buys,
+        num_sells,
+        token_holdings_ratio,
+        token_sell_buy_ratio,
+        agg_denom_balance,
+        agg_token_balance
+    ]
+);
+
+impl_from_row!(
+    Token,
+    [
+        contract_address,
+        creator_address_id,
+        is_scam,
+        scam_label,
+        creation_tx,
+        trading_enabled_tx
+    ]
+);
+
+impl_from_row!(
+    Pool,
+    [
+        id,
+        pool_address,
+        pool_id,
+        pool_type,
+        token_address,
+        pair_token_address,
+        fee_tier,
+        is_scam,
+        scam_label,
+        scam_block,
+        scam_tx_hash,
+        trading_enabled,
+        trading_enabled_block,
+        trading_enabled_tx
+    ]
+);
+
+impl_from_row!(
+    Transaction,
+    [
+        tx_hash,
+        block_number,
+        from_address_id,
+        to_address_id,
+        value,
+        status
+    ]
+);
+
+impl_from_row!(TxParticipant, [tx_hash, address_id]);
+
+impl_from_row!(Block, [block_number, block_timestamp]);
+
+impl_from_row!(
+    PnLAnalysis,
+    [
+        address,
+        token_address,
+        total_spent,
+        total_received,
+        realized_profit,
+        unrealized_profit,
+        roi_percentage,
+        num_trades
+    ]
+);

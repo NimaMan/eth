@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use ethers::types::U256;
+use alloy_primitives::U256;
 use serde_json::Value;
 
 use crate::function_detector::CreatorFunctionType;

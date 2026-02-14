@@ -2,12 +2,11 @@ use crate::config::TaxDetectionConfig;
 use crate::signal_publisher::SignalPublisher;
 use crate::simulator::SimulationResult;
 use crate::token_tracking::TokenTrackingCache;
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 use reth_chain_query::to_checksum_address;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
@@ -292,11 +291,11 @@ impl SignalManager {
         } = &result.request.category
         {
             if let Some(ref token_cache) = self.token_cache {
-                // Get all tokens created by this creator - need to checksum the address
-                let checksummed_creator = ethers::utils::to_checksum(
-                    &ethers::types::Address::from_str(creator).unwrap_or_default(),
-                    None,
-                );
+                // Get all tokens created by this creator.
+                let checksummed_creator = creator
+                    .parse::<Address>()
+                    .map(|address| to_checksum_address(&address))
+                    .unwrap_or_else(|_| creator.clone());
                 let creator_tokens = token_cache
                     .get_tokens_by_creator(&checksummed_creator)
                     .await;

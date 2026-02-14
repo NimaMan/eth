@@ -5,7 +5,7 @@
 use crate::postgres_db::connection::PostgresDB;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::{query, query_as, Row};
+use sqlx::{postgres::PgRow, query, query_as, FromRow, Row};
 
 /// Main function to populate addresses from trades
 pub async fn populate_addresses_from_trades(
@@ -250,13 +250,25 @@ pub struct PopulationResult {
 }
 
 /// Address needing update
-#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AddressForUpdate {
     pub address_id: i64,
     pub address: String,
     pub trade_count: i64,
     pub latest_trade_block: Option<i32>,
     pub last_updated_block: Option<i32>,
+}
+
+impl<'r> FromRow<'r, PgRow> for AddressForUpdate {
+    fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            address_id: row.try_get("address_id")?,
+            address: row.try_get("address")?,
+            trade_count: row.try_get("trade_count")?,
+            latest_trade_block: row.try_get("latest_trade_block")?,
+            last_updated_block: row.try_get("last_updated_block")?,
+        })
+    }
 }
 
 /// Population statistics

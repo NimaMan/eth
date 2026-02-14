@@ -2,29 +2,27 @@
 //!
 //! Shows how TradeLogger writes trading activity to the database
 
+use chrono;
 use eth_kartal::{
-    alert_processor::{Alert, Action, ExecutionParams, Priority},
-    db_writers::{TradeLogger, TradeEvent},
-    tx_executor::{ExecutionResult, ExecutionMetrics},
+    alert_processor::{Action, Alert, ExecutionParams, Priority},
+    db_writers::{TradeEvent, TradeLogger},
     risk::RiskDecision,
+    tx_executor::{ExecutionMetrics, ExecutionResult},
 };
 use ethers::prelude::*;
-use chrono;
 use std::env;
 use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup logging
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     println!("=== Trade Logger Demo ===\n");
 
     // Get database URL from environment
     let database_url = env::var("DATABASE_URL").ok();
-    
+
     if database_url.is_none() {
         println!("⚠️  No DATABASE_URL set, running in log-only mode");
         println!("   Set DATABASE_URL to enable database writes\n");
@@ -34,10 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create wallet address for demo
     let wallet_address = "0xb340c40dB8d07d6751172B07ECfB0aEe8bF7245c".parse::<Address>()?;
-    
+
     // Create trade logger
     let logger = TradeLogger::new(database_url.as_deref(), wallet_address).await?;
-    println!("✅ Trade logger initialized for wallet: {}\n", wallet_address);
+    println!(
+        "✅ Trade logger initialized for wallet: {}\n",
+        wallet_address
+    );
 
     // Demo 1: Log alert received
     println!("📋 Demo 1: Alert Received");
@@ -49,12 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n📋 Demo 2: Risk Decision - Allow");
     let risk_allow = RiskDecision::Allow;
     let trade_amount = U256::from((0.01 * 1e18) as u128);
-    logger.log_risk_decision(
-        signal_id,
-        &alert.id,
-        &risk_allow,
-        trade_amount,
-    ).await;
+    logger
+        .log_risk_decision(signal_id, &alert.id, &risk_allow, trade_amount)
+        .await;
 
     // Demo 3: Log risk decision - Block
     println!("\n📋 Demo 3: Risk Decision - Block");
@@ -62,26 +60,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reason: "Gas cost too high: 15% of trade value".to_string(),
     };
     let signal_id_2 = Uuid::new_v4();
-    logger.log_risk_decision(
-        signal_id_2,
-        "high-gas-alert",
-        &risk_block,
-        trade_amount,
-    ).await;
+    logger
+        .log_risk_decision(signal_id_2, "high-gas-alert", &risk_block, trade_amount)
+        .await;
 
     // Demo 4: Log transaction submission
     println!("\n📋 Demo 4: Transaction Submitted");
     let tx_hash = H256::random();
     let nonce = U256::from(42);
     let gas_price = U256::from(50_000_000_000u128); // 50 gwei
-    logger.log_tx_submitted(
-        signal_id,
-        &alert.id,
-        tx_hash,
-        nonce,
-        gas_price,
-        "Public",
-    ).await;
+    logger
+        .log_tx_submitted(signal_id, &alert.id, tx_hash, nonce, gas_price, "Public")
+        .await;
     println!("   TX Hash: {:?}", tx_hash);
 
     // Demo 5: Log successful execution
@@ -101,7 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_ms: 103,
         },
     };
-    logger.log_execution_result(signal_id, &alert.id, &result).await;
+    logger
+        .log_execution_result(signal_id, &alert.id, &result)
+        .await;
 
     // Demo 6: Log failed execution
     println!("\n📋 Demo 6: Execution Failure");
@@ -121,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
     let signal_id_3 = Uuid::new_v4();
-    logger.log_execution_result(signal_id_3, "failed-alert", &failed_result).await;
+    logger
+        .log_execution_result(signal_id_3, "failed-alert", &failed_result)
+        .await;
 
     // Demo 7: Get wallet statistics
     println!("\n📋 Demo 7: Wallet Statistics");
@@ -136,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Demo 8: Custom events
     println!("\n📋 Demo 8: Custom Trade Events");
-    
+
     // Transaction confirmed event
     let confirmed_event = TradeEvent::TxConfirmed {
         alert_id: alert.id.clone(),
@@ -156,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logger.log_event(failed_event).await;
 
     println!("\n✅ Trade logger demo complete!");
-    
+
     if database_url.is_some() {
         println!("\n📊 Check your database for the logged entries:");
         println!("   - trade_signals table for alerts");
@@ -170,14 +164,18 @@ fn create_demo_alert() -> Alert {
     Alert {
         id: "demo-alert-001".to_string(),
         timestamp: chrono::Utc::now().timestamp() as u64,
-        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse().unwrap(), // USDC
-        pool_address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc".parse().unwrap(), // USDC/WETH V2
+        token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+            .parse()
+            .unwrap(), // USDC
+        pool_address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"
+            .parse()
+            .unwrap(), // USDC/WETH V2
         action: Action::Buy,
         params: ExecutionParams {
             amount: U256::from((0.01 * 1e18) as u128), // 0.01 ETH
-            slippage: 0.02, // 2%
+            slippage: 0.02,                            // 2%
             max_gas_price: Some(U256::from(100_000_000_000u128)), // 100 gwei
-            deadline_seconds: 300, // 5 minutes
+            deadline_seconds: 300,                     // 5 minutes
             priority: Priority::Normal,
         },
     }

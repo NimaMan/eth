@@ -1,9 +1,8 @@
 use std::{collections::HashMap, path::PathBuf, process::Command};
 
 use alloy_primitives::Address;
+use alloy_provider::{Provider, ProviderBuilder};
 use clap::Parser;
-use ethers::providers::{Http, Middleware, Provider};
-use ethers::types::BlockId;
 use eyre::{bail, Result};
 use reth_chain_query::common_addresses::validators::FEE_RECIPIENT_LIST;
 use reth_chain_query::to_checksum_address;
@@ -36,7 +35,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "http://localhost:8545".to_string());
 
     println!("Connecting to {}", rpc_url);
-    let provider = Provider::<Http>::try_from(rpc_url.clone())?;
+    let provider = ProviderBuilder::new().connect_http(rpc_url.parse()?);
 
     let latest = provider.get_block_number().await?.as_u64();
     if latest == 0 {
@@ -57,16 +56,13 @@ async fn main() -> Result<()> {
         for block_num in (batch_start..=number).rev() {
             let provider = provider.clone();
             handles.push(tokio::spawn(async move {
-                provider.get_block(BlockId::Number(block_num.into())).await
+                provider.get_block_by_number(block_num.into()).await
             }));
         }
 
         for handle in handles {
             if let Ok(Ok(Some(block))) = handle.await {
-                if let Some(author) = block.author {
-                    let alloy_addr = Address::from_slice(author.as_bytes());
-                    *counts.entry(alloy_addr).or_default() += 1;
-                }
+                *counts.entry(block.header.beneficiary).or_default() += 1;
             }
         }
 

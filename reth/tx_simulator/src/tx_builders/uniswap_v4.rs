@@ -1,6 +1,4 @@
 use alloy_primitives::{Address, Bytes, I256, U256};
-use ethers::types::Address as EthersAddress;
-use ethers::utils::get_contract_address;
 use eyre::{eyre, Result};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -977,7 +975,5 @@ fn pad_bytes(data: &[u8]) -> Vec<u8> {
 
 /// Compute the CREATE contract address for the deployer + nonce pair.
 pub fn compute_contract_address(deployer: Address, nonce: u64) -> Address {
-    let deployer_eth = EthersAddress::from_slice(deployer.as_slice());
-    let contract = get_contract_address(deployer_eth, ethers::types::U256::from(nonce));
-    Address::from_slice(contract.as_bytes())
+    deployer.create(nonce)
 }

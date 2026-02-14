@@ -4,13 +4,13 @@
 
 use crate::alert_processor::Alert;
 use crate::risk::RiskDecision;
-use crate::tx_executor::{ExecutionResult, ExecutionMetrics};
-use ethers::types::{H256, U256, Address};
-use serde::{Serialize, Deserialize};
+use crate::tx_executor::{ExecutionMetrics, ExecutionResult};
+use ethers::types::{Address, H256, U256};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::sync::Arc;
-use tracing::{info, error, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 /// Trade event types for logging
@@ -21,7 +21,7 @@ pub enum TradeEvent {
         alert: Alert,
         received_at: chrono::DateTime<chrono::Utc>,
     },
-    
+
     /// Risk decision made
     RiskDecision {
         alert_id: String,
@@ -30,7 +30,7 @@ pub enum TradeEvent {
         final_amount: U256,
         reason: Option<String>,
     },
-    
+
     /// Transaction submitted
     TxSubmitted {
         alert_id: String,
@@ -39,7 +39,7 @@ pub enum TradeEvent {
         gas_price: U256,
         execution_path: String,
     },
-    
+
     /// Transaction confirmed
     TxConfirmed {
         alert_id: String,
@@ -47,7 +47,7 @@ pub enum TradeEvent {
         block_number: u64,
         gas_used: U256,
     },
-    
+
     /// Transaction failed
     TxFailed {
         alert_id: String,
@@ -65,43 +65,39 @@ pub struct TradeLogger {
 
 impl TradeLogger {
     /// Create new trade logger
-    pub async fn new(database_url: Option<&str>, wallet_address: Address) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        database_url: Option<&str>,
+        wallet_address: Address,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let pool = if let Some(url) = database_url {
-            let pool = PgPoolOptions::new()
-                .max_connections(5)
-                .connect(url)
-                .await?;
-            
+            let pool = PgPoolOptions::new().max_connections(5).connect(url).await?;
+
             info!("Trade logger connected to database");
             Some(Arc::new(pool))
         } else {
             warn!("Trade logger running without database connection");
             None
         };
-        
+
         Ok(Self {
             pool,
             wallet_address,
         })
     }
-    
+
     /// Log alert received
     pub async fn log_alert_received(&self, alert: &Alert) -> Uuid {
         let signal_id = Uuid::new_v4();
-        
+
         info!(
             "📨 Alert received: {} | Token: {} | Action: {:?} | Amount: {} | Priority: {:?}",
-            alert.id,
-            alert.token_address,
-            alert.action,
-            alert.params.amount,
-            alert.params.priority
+            alert.id, alert.token_address, alert.action, alert.params.amount, alert.params.priority
         );
-        
+
         if let Some(pool) = &self.pool {
             let action_str = format!("{:?}", alert.action).to_uppercase();
             let priority_str = format!("{:?}", alert.params.priority).to_uppercase();
-            
+
             let result = sqlx::query(
                 r#"
                 INSERT INTO trade_signals (
@@ -116,7 +112,7 @@ impl TradeLogger {
                     $6, $7, $8, $9, 
                     to_timestamp($10), 'PENDING', NOW()
                 )
-                "#
+                "#,
             )
             .bind(signal_id)
             .bind(&alert.id)
@@ -130,18 +126,18 @@ impl TradeLogger {
             .bind(alert.timestamp as i64 + alert.params.deadline_seconds as i64)
             .execute(pool.as_ref())
             .await;
-            
+
             if let Err(e) = result {
                 error!("Failed to log alert to database: {}", e);
             }
         }
-        
+
         signal_id
     }
-    
+
     /// Log risk decision
     pub async fn log_risk_decision(
-        &self, 
+        &self,
         signal_id: Uuid,
         alert_id: &str,
         decision: &RiskDecision,
@@ -149,15 +145,14 @@ impl TradeLogger {
     ) {
         let (decision_str, final_amount, reason) = match decision {
             RiskDecision::Allow => ("ALLOW", original_amount, None),
-            RiskDecision::Block { reason } => 
-                ("BLOCK", U256::zero(), Some(reason.clone())),
+            RiskDecision::Block { reason } => ("BLOCK", U256::zero(), Some(reason.clone())),
         };
-        
+
         info!(
             "⚖️ Risk decision: {} | Alert: {} | Original: {} | Final: {} | Reason: {:?}",
             decision_str, alert_id, original_amount, final_amount, reason
         );
-        
+
         if let Some(pool) = &self.pool {
             let risk_details = json!({
                 "decision": decision_str,
@@ -165,7 +160,7 @@ impl TradeLogger {
                 "final_amount": final_amount.to_string(),
                 "reason": reason,
             });
-            
+
             let result = sqlx::query(
                 r#"
                 UPDATE trade_signals 
@@ -174,20 +169,20 @@ impl TradeLogger {
                     amount_tokens = $2,
                     updated_at = NOW()
                 WHERE signal_id = $3
-                "#
+                "#,
             )
             .bind(risk_details)
             .bind(final_amount.to_string())
             .bind(signal_id)
             .execute(pool.as_ref())
             .await;
-            
+
             if let Err(e) = result {
                 error!("Failed to log risk decision: {}", e);
             }
         }
     }
-    
+
     /// Log transaction submission
     pub async fn log_tx_submitted(
         &self,
@@ -202,7 +197,7 @@ impl TradeLogger {
             "📤 Transaction submitted: {} | Alert: {} | Nonce: {} | Gas: {} | Path: {}",
             tx_hash, alert_id, nonce, gas_price, execution_path
         );
-        
+
         if let Some(pool) = &self.pool {
             // Update signal status
             let _ = sqlx::query(
@@ -214,13 +209,13 @@ impl TradeLogger {
                     submission_timestamp = NOW(),
                     updated_at = NOW()
                 WHERE signal_id = $2
-                "#
+                "#,
             )
             .bind(format!("{:?}", tx_hash))
             .bind(signal_id)
             .execute(pool.as_ref())
             .await;
-            
+
             // Create execution record
             let _ = sqlx::query(
                 r#"
@@ -230,7 +225,7 @@ impl TradeLogger {
                 ) VALUES (
                     gen_random_uuid(), $1, 1, $2, $3, $4, $5, NOW()
                 )
-                "#
+                "#,
             )
             .bind(signal_id)
             .bind(format!("{:?}", tx_hash))
@@ -241,7 +236,7 @@ impl TradeLogger {
             .await;
         }
     }
-    
+
     /// Log execution result
     pub async fn log_execution_result(
         &self,
@@ -252,13 +247,18 @@ impl TradeLogger {
         if result.success {
             info!(
                 "✅ Execution successful: {} | Alert: {} | Latency: {}ms",
-                result.tx_hash.unwrap_or_default(), alert_id, result.metrics.total_ms
+                result.tx_hash.unwrap_or_default(),
+                alert_id,
+                result.metrics.total_ms
             );
-            
+
             // Log detailed metrics
             info!("  📊 Performance breakdown:");
             info!("    • Alert→Start: {}ms", result.metrics.alert_to_start_ms);
-            info!("    • Position check: {}ms", result.metrics.position_check_ms);
+            info!(
+                "    • Position check: {}ms",
+                result.metrics.position_check_ms
+            );
             info!("    • Gas ranking: {}ms", result.metrics.gas_ranking_ms);
             info!("    • Price quote: {}ms", result.metrics.price_quote_ms);
             info!("    • TX build: {}ms", result.metrics.tx_build_ms);
@@ -266,13 +266,18 @@ impl TradeLogger {
         } else {
             error!(
                 "❌ Execution failed: Alert: {} | Error: {}",
-                alert_id, result.error.as_ref().unwrap_or(&"Unknown".to_string())
+                alert_id,
+                result.error.as_ref().unwrap_or(&"Unknown".to_string())
             );
         }
-        
+
         if let Some(pool) = &self.pool {
-            let status = if result.success { "CONFIRMED" } else { "FAILED" };
-            
+            let status = if result.success {
+                "CONFIRMED"
+            } else {
+                "FAILED"
+            };
+
             // Update signal status
             let _ = sqlx::query(
                 r#"
@@ -283,7 +288,7 @@ impl TradeLogger {
                     confirmation_timestamp = CASE WHEN $3 THEN NOW() ELSE NULL END,
                     updated_at = NOW()
                 WHERE signal_id = $4
-                "#
+                "#,
             )
             .bind(status)
             .bind(result.error.as_deref())
@@ -291,7 +296,7 @@ impl TradeLogger {
             .bind(signal_id)
             .execute(pool.as_ref())
             .await;
-            
+
             // Update execution with metrics
             if let Some(tx_hash) = result.tx_hash {
                 let _ = sqlx::query(
@@ -308,7 +313,7 @@ impl TradeLogger {
                         total_execution_ms = $8,
                         error_details = $9
                     WHERE tx_hash = $10
-                    "#
+                    "#,
                 )
                 .bind(result.success)
                 .bind(result.metrics.alert_to_start_ms as i32)
@@ -325,28 +330,42 @@ impl TradeLogger {
             }
         }
     }
-    
+
     /// Log custom event
     pub async fn log_event(&self, event: TradeEvent) {
         match &event {
             TradeEvent::AlertReceived { alert, received_at } => {
                 info!("📨 Event: Alert {} received at {}", alert.id, received_at);
             }
-            TradeEvent::RiskDecision { alert_id, decision, .. } => {
+            TradeEvent::RiskDecision {
+                alert_id, decision, ..
+            } => {
                 info!("⚖️ Event: Risk {} for alert {}", decision, alert_id);
             }
             TradeEvent::TxSubmitted { tx_hash, .. } => {
                 info!("📤 Event: Transaction {} submitted", tx_hash);
             }
-            TradeEvent::TxConfirmed { tx_hash, block_number, .. } => {
-                info!("✅ Event: Transaction {} confirmed in block {}", tx_hash, block_number);
+            TradeEvent::TxConfirmed {
+                tx_hash,
+                block_number,
+                ..
+            } => {
+                info!(
+                    "✅ Event: Transaction {} confirmed in block {}",
+                    tx_hash, block_number
+                );
             }
-            TradeEvent::TxFailed { alert_id, error, .. } => {
-                error!("❌ Event: Transaction failed for alert {}: {}", alert_id, error);
+            TradeEvent::TxFailed {
+                alert_id, error, ..
+            } => {
+                error!(
+                    "❌ Event: Transaction failed for alert {}: {}",
+                    alert_id, error
+                );
             }
         }
     }
-    
+
     /// Get wallet statistics
     pub async fn get_wallet_stats(&self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         if let Some(pool) = &self.pool {
@@ -362,14 +381,14 @@ impl TradeLogger {
                 FROM trade_signals 
                 WHERE wallet_id = (SELECT wallet_id FROM wallets WHERE address = $1 LIMIT 1)
                 AND signal_timestamp > NOW() - INTERVAL '24 hours'
-                "#
+                "#,
             )
             .bind(format!("{:?}", self.wallet_address))
             .fetch_one(pool.as_ref())
             .await?;
-            
+
             let (total_signals, successful, failed, avg_execution_time) = row;
-            
+
             Ok(json!({
                 "24h_stats": {
                     "total_trades": total_signals.unwrap_or(0),

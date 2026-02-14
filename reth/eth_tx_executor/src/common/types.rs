@@ -1,5 +1,5 @@
 //! Common type definitions used throughout the eth_kartal system
-//! 
+//!
 //! Provides type aliases and common structures to ensure consistency
 //! across all modules.
 
@@ -114,7 +114,7 @@ impl PerformanceMetrics {
     pub fn meets_targets(&self) -> bool {
         self.total_ms < 200 // Sub-200ms target
     }
-    
+
     /// Get a summary of the slowest operation
     pub fn slowest_operation(&self) -> (&'static str, u64) {
         let operations = [
@@ -125,8 +125,9 @@ impl PerformanceMetrics {
             ("tx_build", self.tx_build_ms),
             ("tx_submit", self.tx_submit_ms),
         ];
-        
-        operations.into_iter()
+
+        operations
+            .into_iter()
             .max_by_key(|(_, time)| *time)
             .unwrap_or(("unknown", 0))
     }
@@ -138,18 +139,11 @@ pub enum TransactionStatus {
     /// Transaction is pending in mempool
     Pending,
     /// Transaction was included in a block
-    Confirmed {
-        block_number: u64,
-        block_hash: H256,
-    },
+    Confirmed { block_number: u64, block_hash: H256 },
     /// Transaction failed or was dropped
-    Failed {
-        reason: String,
-    },
+    Failed { reason: String },
     /// Transaction was replaced by another
-    Replaced {
-        new_tx_hash: TxHash,
-    },
+    Replaced { new_tx_hash: TxHash },
 }
 
 /// Standard slippage tolerances
@@ -167,7 +161,7 @@ pub mod slippage {
 /// Gas limit constants
 pub mod gas_limits {
     use ethers::types::U256;
-    
+
     /// Standard ERC20 transfer
     pub const ERC20_TRANSFER: u64 = 65_000;
     /// Uniswap V2 swap
@@ -176,7 +170,7 @@ pub mod gas_limits {
     pub const UNISWAP_V3_SWAP: u64 = 200_000;
     /// Safe high gas limit for complex operations
     pub const SAFE_HIGH: u64 = 300_000;
-    
+
     /// Convert to U256
     pub fn as_u256(limit: u64) -> U256 {
         U256::from(limit)

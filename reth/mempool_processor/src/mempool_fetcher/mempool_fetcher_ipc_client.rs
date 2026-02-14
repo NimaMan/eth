@@ -1,4 +1,4 @@
-use ethers::types::U256;
+use alloy_primitives::U256;
 use eyre::{eyre, Result};
 use hex;
 use serde_json::{json, Value};
