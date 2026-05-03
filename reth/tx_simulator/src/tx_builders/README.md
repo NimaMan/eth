@@ -1,14 +1,16 @@
-Tx Builders — AMM v2/v3 Calldata Constructors
+Tx Builders — AMM and Router Calldata Constructors
 
 Purpose
 - Stateless builders that construct unsigned transactions for AMM interactions:
   - V2/Sushi: swapExactETHForTokens, swapExactTokensForETH, approve
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
+  - BaygusRouter: typed `execute(bytes,bytes[])` command plans
 - No chain reads here; callers must supply addresses and parameters.
 
 Entrypoints
 - `amm/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
 - `amm/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, `build_token_to_token_swap_v3(_with_min_out)`, `build_approve_v3`
+- `baygus_router.rs`: `BaygusExecutePlan`, command encoders, and `build_baygus_execute_tx`
 - `mod.rs`:
   - Route-aware dispatchers: `build_buy_swap`, `build_sell_swap`, `build_approve_for_route`
   - Token→Token: `build_token_to_token_swap(_with_min_out)`
@@ -25,6 +27,7 @@ Usage
   - Strategy/training environments to generate unsigned txs for simulation
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
+- Baygus command examples should use `BaygusExecutePlan` instead of hand-encoding ABI payloads.
 
 Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.

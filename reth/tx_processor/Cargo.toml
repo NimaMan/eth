@@ -53,6 +53,10 @@ path = "examples/provider/fetch_processed_tx.rs"
 name = "buy_swap_uniswap_v4"
 path = "examples/simulation/buy_swap_uniswap_v4.rs"
 
+[[example]]
+name = "baygus_execute_plan"
+path = "examples/baygus_router/baygus_execute_plan.rs"
+
 # Pool analysis examples
 [[example]]
 name = "erc20_pool_tax_demo"
