@@ -3,3 +3,5 @@ src = "src"
 test = "test"
 libs = ["lib"]
 solc_version = "0.8.26"
+out = "../out"
+cache_path = "../cache"

@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::{
     fs,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use crate::UnsignedTransaction;
@@ -172,6 +173,41 @@ pub struct UniswapV4BaygusSingleHopCall {
     pub params: UniswapV4BaygusMultiHopParams,
     pub eth_value: U256,
     pub orientation: UniswapV4SwapOrientation,
+}
+
+#[derive(Debug, Clone)]
+pub struct BaygusRouterAdapterConfig {
+    pub uniswap_v2_router: Address,
+    pub sushiswap_router: Address,
+    pub uniswap_v3_router: Address,
+    pub balancer_vault: Address,
+    pub permit2: Address,
+}
+
+fn parse_mainnet_address(value: &str, label: &str) -> Result<Address> {
+    Address::from_str(value).map_err(|err| eyre!("invalid {label} address {value}: {err}"))
+}
+
+pub fn default_baygus_adapter_config() -> Result<BaygusRouterAdapterConfig> {
+    Ok(BaygusRouterAdapterConfig {
+        uniswap_v2_router: parse_mainnet_address(
+            "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+            "Uniswap V2 router",
+        )?,
+        sushiswap_router: parse_mainnet_address(
+            "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
+            "SushiSwap router",
+        )?,
+        uniswap_v3_router: parse_mainnet_address(
+            "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+            "Uniswap V3 router",
+        )?,
+        balancer_vault: parse_mainnet_address(
+            "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
+            "Balancer vault",
+        )?,
+        permit2: parse_mainnet_address("0x000000000022D473030F116dDEE9F6B43aC78BA3", "Permit2")?,
+    })
 }
 
 /// Load the minimal Uniswap v4 router bytecode for deployment.
@@ -449,8 +485,25 @@ pub fn build_baygus_router_deploy_tx(
     deployer: Address,
     pool_manager: Address,
 ) -> Result<UnsignedTransaction> {
+    build_baygus_router_deploy_tx_with_adapters(
+        deployer,
+        pool_manager,
+        &default_baygus_adapter_config()?,
+    )
+}
+
+pub fn build_baygus_router_deploy_tx_with_adapters(
+    deployer: Address,
+    pool_manager: Address,
+    adapters: &BaygusRouterAdapterConfig,
+) -> Result<UnsignedTransaction> {
     let mut data = baygus_router_bytecode()?;
     data.extend_from_slice(&pad_address(pool_manager));
+    data.extend_from_slice(&pad_address(adapters.uniswap_v2_router));
+    data.extend_from_slice(&pad_address(adapters.sushiswap_router));
+    data.extend_from_slice(&pad_address(adapters.uniswap_v3_router));
+    data.extend_from_slice(&pad_address(adapters.balancer_vault));
+    data.extend_from_slice(&pad_address(adapters.permit2));
 
     Ok(UnsignedTransaction {
         from: Some(deployer),

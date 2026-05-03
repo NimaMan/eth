@@ -20,15 +20,21 @@ struct BalanceDelta {
     int128 amount1;
 }
 
-// Universal Router Commands
-uint256 constant CMD_V4_SWAP = 0x01;
-uint256 constant CMD_V2_SWAP = 0x02;
-uint256 constant CMD_V3_SWAP = 0x03;
-uint256 constant CMD_SUSHISWAP = 0x04;
-uint256 constant CMD_CURVE_SWAP = 0x05;
-uint256 constant CMD_BALANCER_SWAP = 0x06;
-uint256 constant CMD_SWEEP = 0x07;
-uint256 constant CMD_BALANCER_FLASH_LOAN = 0x08;
-uint256 constant CMD_PERMIT2_TRANSFER_FROM = 0x09;
-uint256 constant CMD_TRANSFER_FROM = 0x0a;
-// Add more commands as needed
+struct AdapterConfig {
+    address uniswapV2Router;
+    address sushiswapRouter;
+    address uniswapV3Router;
+    address balancerVault;
+    address permit2;
+}
+
+uint8 constant CMD_V4_SWAP = 0x01;
+uint8 constant CMD_V2_SWAP = 0x02;
+uint8 constant CMD_V3_SWAP = 0x03;
+uint8 constant CMD_SUSHISWAP = 0x04;
+uint8 constant CMD_CURVE_SWAP = 0x05;
+uint8 constant CMD_BALANCER_SWAP = 0x06;
+uint8 constant CMD_SWEEP = 0x07;
+uint8 constant CMD_BALANCER_FLASH_LOAN = 0x08;
+uint8 constant CMD_PERMIT2_TRANSFER_FROM = 0x09;
+uint8 constant CMD_TRANSFER_FROM = 0x0a;

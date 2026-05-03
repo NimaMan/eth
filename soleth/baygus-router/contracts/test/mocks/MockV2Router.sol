@@ -11,20 +11,14 @@ contract MockV2Router {
         address recipient,
         uint256 deadline
     ) external returns (uint256[] memory amounts) {
-        // Transfer tokens from msg.sender (BaygusRouter) to this contract
-        // In real V2, it transfers to Pair. Here we just take it to simulate consumption.
-        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
-        
-        // Mock return
+        deadline;
+        require(IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn), "V2 input transfer");
+
+        uint256 amountOut = amountOutMin == 0 ? amountIn : amountOutMin;
+        require(IERC20(path[path.length - 1]).transfer(recipient, amountOut), "V2 output transfer");
+
         amounts = new uint256[](path.length);
-        amounts[path.length - 1] = amountOutMin; 
-        
-        // Mint/Transfer output to recipient (simulate swap)
-        // For simplicity, we just assume we have output token or mint it if it's MockERC20
-        // But MockERC20 mint is external. 
-        // Let's just transfer if we have balance, or fail. 
-        // To make it easier, we won't actually send output tokens unless pre-funded.
-        // We just verify the input transfer happened.
-        return amounts;
+        amounts[0] = amountIn;
+        amounts[path.length - 1] = amountOut;
     }
 }

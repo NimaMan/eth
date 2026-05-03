@@ -23,4 +23,8 @@ contract TestBase {
     function assertTrue(bool condition, string memory message) internal pure {
         if (!condition) revert AssertionFailed(message);
     }
+
+    function assertFalse(bool condition, string memory message) internal pure {
+        if (condition) revert AssertionFailed(message);
+    }
 }

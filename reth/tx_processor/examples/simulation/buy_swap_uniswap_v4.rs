@@ -2,7 +2,7 @@ use alloy_primitives::{Address, I256, U256};
 use eyre::Result;
 use reth_chain_query::common_addresses::uniswap_v4_pools;
 use reth_chain_query::to_checksum_address;
-use reth_chain_query::tx_builders::amm::uniswap_v4::{
+use reth_chain_query::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
     build_baygus_single_hop_exact_input_call, build_router_deploy_tx,
     build_swap_exact_input_single_tx, build_token_approval_tx, build_weth_deposit_tx,
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         build_baygus_router_deploy_tx(buyer_address, pool.pool_manager)
     } else {
         build_router_deploy_tx(buyer_address, pool.pool_manager, weth_address)
-    };
+    }?;
     apply_simple_gas_policy(&mut deploy_tx);
     let deploy_result = chain.step_with_trace(deploy_tx.clone()).await?;
     let router_code_before = chain.account_has_code(router_address)?;
@@ -210,7 +210,7 @@ async fn main() -> Result<()> {
         )?
     };
     apply_simple_gas_policy(&mut buy_tx);
-    if let Some(data) = &buy_tx.data {
+    if let Some(data) = buy_tx.data.as_ref() {
         println!(
             "buy calldata ({} bytes): 0x{}",
             data.len(),

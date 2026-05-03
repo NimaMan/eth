@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
         nonce: None,                                        // Let simulator determine
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     };
 
     // Use NEW simulation approach that leverages proper flow:

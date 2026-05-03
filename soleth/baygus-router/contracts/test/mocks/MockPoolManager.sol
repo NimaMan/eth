@@ -8,11 +8,10 @@ import {MockERC20} from "./MockERC20.sol";
 contract MockPoolManager {
     address public router;
 
-    BalanceDelta[] private _deltaQueue;
-    uint256 private _deltaCursor;
+    BalanceDelta[] private _deltas;
+    uint256 private _cursor;
 
-    address private _syncedCurrency;
-    uint256 private _syncedReserves;
+    mapping(address => uint256) public syncedBalance;
 
     struct SettleCall {
         address currency;
@@ -26,8 +25,8 @@ contract MockPoolManager {
         uint256 amount;
     }
 
-    SettleCall[] private _settleHistory;
-    TakeCall[] private _takeHistory;
+    SettleCall[] private _settles;
+    TakeCall[] private _takes;
 
     error RouterNotSet();
     error UnauthorizedCaller();
@@ -36,14 +35,18 @@ contract MockPoolManager {
         router = router_;
     }
 
+    function sync(address currency) external {
+        syncedBalance[currency] = _balanceOf(currency);
+    }
+
     function setNextDelta(int128 amount0, int128 amount1) external {
-        delete _deltaQueue;
-        _deltaCursor = 0;
-        _deltaQueue.push(BalanceDelta({amount0: amount0, amount1: amount1}));
+        delete _deltas;
+        _cursor = 0;
+        _deltas.push(BalanceDelta({amount0: amount0, amount1: amount1}));
     }
 
     function queueDelta(int128 amount0, int128 amount1) external {
-        _deltaQueue.push(BalanceDelta({amount0: amount0, amount1: amount1}));
+        _deltas.push(BalanceDelta({amount0: amount0, amount1: amount1}));
     }
 
     function unlock(bytes calldata data) external returns (bytes memory) {
@@ -52,81 +55,69 @@ contract MockPoolManager {
         return ILockCallback(router).unlockCallback(data);
     }
 
-    function swap(
-        PoolKey calldata key,
-        SwapParams calldata params,
-        bytes calldata data
-    ) external returns (BalanceDelta memory delta) {
+    function swap(PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        external
+        returns (BalanceDelta memory delta)
+    {
         if (msg.sender != router) revert UnauthorizedCaller();
         key;
         params;
-        data;
-        if (_deltaCursor < _deltaQueue.length) {
-            delta = _deltaQueue[_deltaCursor];
-            _deltaCursor++;
-        } else if (_deltaQueue.length != 0) {
-            delta = _deltaQueue[_deltaQueue.length - 1];
+        hookData;
+
+        if (_cursor < _deltas.length) {
+            delta = _deltas[_cursor];
+            unchecked {
+                ++_cursor;
+            }
         }
     }
 
-    function settle(address currency) external payable returns (uint256) {
+    function settle(address currency) external payable returns (uint256 amount) {
         if (msg.sender != router) revert UnauthorizedCaller();
-        uint256 amount;
-        bool isNative;
-        if (currency == address(0)) {
-            amount = msg.value;
-            isNative = true;
-        } else {
-            uint256 balance = _balanceOf(currency);
-            amount = balance - _syncedReserves;
-            isNative = false;
-        }
 
-        _settleHistory.push(SettleCall({currency: currency, amount: amount, isNative: isNative}));
-        _syncedCurrency = address(0);
-        _syncedReserves = 0;
-
-        return amount;
+        bool isNative = currency == address(0);
+        uint256 balance = isNative ? msg.value + syncedBalance[currency] : _balanceOf(currency);
+        amount = isNative ? msg.value : balance - syncedBalance[currency];
+        syncedBalance[currency] = isNative ? syncedBalance[currency] + amount : balance;
+        _settles.push(SettleCall({currency: currency, amount: amount, isNative: isNative}));
     }
 
-    function settleFor(address recipient) external payable returns (uint256) {
+    function settleFor(address recipient) external payable returns (uint256 amount) {
         recipient;
-        return this.settle{value: msg.value}(address(0));
+        amount = this.settle{value: msg.value}(address(0));
     }
 
     function take(address currency, address recipient, uint256 amount) external {
         if (msg.sender != router) revert UnauthorizedCaller();
-        _takeHistory.push(TakeCall({currency: currency, recipient: recipient, amount: amount}));
-
-        if (amount == 0) return;
+        _takes.push(TakeCall({currency: currency, recipient: recipient, amount: amount}));
 
         if (currency == address(0)) {
             payable(recipient).transfer(amount);
+            syncedBalance[currency] = address(this).balance;
         } else {
-            MockERC20(currency).transfer(recipient, amount);
+            require(MockERC20(currency).transfer(recipient, amount), "take transfer");
+            syncedBalance[currency] = MockERC20(currency).balanceOf(address(this));
         }
     }
 
     function settleHistoryLength() external view returns (uint256) {
-        return _settleHistory.length;
+        return _settles.length;
     }
 
     function takeHistoryLength() external view returns (uint256) {
-        return _takeHistory.length;
+        return _takes.length;
     }
 
     function getSettleCall(uint256 index) external view returns (SettleCall memory) {
-        return _settleHistory[index];
+        return _settles[index];
     }
 
     function getTakeCall(uint256 index) external view returns (TakeCall memory) {
-        return _takeHistory[index];
+        return _takes[index];
     }
 
     function _balanceOf(address currency) internal view returns (uint256) {
-        if (currency == address(0)) {
-            return address(this).balance;
-        }
+        if (currency == address(0)) return address(this).balance;
         return MockERC20(currency).balanceOf(address(this));
     }
 

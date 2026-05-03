@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf, process::Command};
 
 use alloy_primitives::Address;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use clap::Parser;
 use eyre::{bail, Result};
 use reth_chain_query::common_addresses::validators::FEE_RECIPIENT_LIST;
@@ -37,7 +38,7 @@ async fn main() -> Result<()> {
     println!("Connecting to {}", rpc_url);
     let provider = ProviderBuilder::new().connect_http(rpc_url.parse()?);
 
-    let latest = provider.get_block_number().await?.as_u64();
+    let latest = provider.get_block_number().await?;
     if latest == 0 {
         println!("RPC returned block height 0; aborting");
         return Ok(());
@@ -56,7 +57,9 @@ async fn main() -> Result<()> {
         for block_num in (batch_start..=number).rev() {
             let provider = provider.clone();
             handles.push(tokio::spawn(async move {
-                provider.get_block_by_number(block_num.into()).await
+                provider
+                    .get_block_by_number(BlockNumberOrTag::Number(block_num))
+                    .await
             }));
         }
 
