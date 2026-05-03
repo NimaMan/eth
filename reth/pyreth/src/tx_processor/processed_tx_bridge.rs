@@ -64,7 +64,9 @@ pub(crate) fn processed_transactions_from_py_iterable(
     Ok(transactions)
 }
 
-fn processed_transaction_from_mapping(obj: &Bound<'_, PyAny>) -> PyResult<RustProcessedTransaction> {
+fn processed_transaction_from_mapping(
+    obj: &Bound<'_, PyAny>,
+) -> PyResult<RustProcessedTransaction> {
     let py = obj.py();
     let owned_dict = to_owned_dict(py, obj)?;
     let mut path = Vec::new();
@@ -110,7 +112,10 @@ fn to_owned_dict(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>>
     ))
 }
 
-fn py_dict_to_json_map(dict: &Bound<'_, PyDict>, path: &mut Vec<String>) -> PyResult<Map<String, Value>> {
+fn py_dict_to_json_map(
+    dict: &Bound<'_, PyDict>,
+    path: &mut Vec<String>,
+) -> PyResult<Map<String, Value>> {
     let mut result = Map::with_capacity(dict.len());
     for (key_obj, value_obj) in dict {
         let key: String = key_obj.extract()?;

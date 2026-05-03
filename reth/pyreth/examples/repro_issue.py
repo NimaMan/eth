@@ -42,7 +42,6 @@ try:
     metadata2 = q.get_token_metadata(
         ptx2.contract_address,  # 0x6E6c09f045f1DdFC05e5cdfA78E441f3AD85a900
         ptx2.block_number - 1,  # 23841212
-        None,
         [ptx2.to_dict()],
     )
     print("Metadata result:", metadata2)

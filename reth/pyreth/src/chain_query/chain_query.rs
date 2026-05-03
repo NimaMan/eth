@@ -29,8 +29,6 @@ use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::BlockTimeConverter;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
 use tokio::runtime::Runtime;
-use tx_processor::tx_builder::UnsignedTxBuilder;
-use tx_simulator::UnsignedTransaction;
 
 /// Python wrapper for Account information
 #[pyclass(name = "Account")]
@@ -876,35 +874,23 @@ impl PyChainQuery {
     ) -> PyResult<Option<super::tokens::PyTokenMetadata>> {
         let token_addr = super::utils::parse_address(token)?;
         let provider = self.provider.clone();
-        let resolved_gas_block = gas_block_number.or(block_number);
-        let pending_unsigneds: Vec<UnsignedTransaction> = if let Some(iterable) =
-            pending_transactions
-        {
+        let metadata_block = block_number.or(gas_block_number);
+        let pending_tx_hashes: Vec<RB256> = if let Some(iterable) = pending_transactions {
             let processed = processed_transactions_from_py_iterable(iterable)?;
-            processed
-                .into_iter()
-                .map(|ptx| {
-                    let mut unsigned = UnsignedTxBuilder::build_unsigned_from_processed_tx(&ptx);
-                    unsigned.nonce = Some(ptx.nonce);
-                    if unsigned.gas.is_none() && ptx.fees.gas_limit > 0 {
-                        unsigned.gas = Some(ptx.fees.gas_limit);
-                    }
-                    unsigned
-                })
-                .collect()
+            processed.into_iter().map(|ptx| ptx.hash).collect()
         } else {
             Vec::new()
         };
         let meta = self
             .runtime
             .block_on(async move {
-                let pending_slice = if pending_unsigneds.is_empty() {
-                    &[]
+                let pending_hashes = if pending_tx_hashes.is_empty() {
+                    None
                 } else {
-                    pending_unsigneds.as_slice()
+                    Some(pending_tx_hashes)
                 };
                 provider
-                    .get_token_metadata(token_addr, block_number, pending_slice, resolved_gas_block)
+                    .get_token_metadata(token_addr, metadata_block, pending_hashes)
                     .await
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
@@ -927,7 +913,11 @@ impl PyChainQuery {
     /// Returns:
     ///     Estimated gas price (base_fee + priority_fee) in wei as string.
     #[pyo3(signature = (percentile=None, block_number=None))]
-    fn estimate_gas_price(&self, percentile: Option<f64>, block_number: Option<u64>) -> PyResult<String> {
+    fn estimate_gas_price(
+        &self,
+        percentile: Option<f64>,
+        block_number: Option<u64>,
+    ) -> PyResult<String> {
         let block = block_number.unwrap_or(self.get_latest_block()?);
         let p = percentile.unwrap_or(0.5).clamp(0.0, 1.0);
 
@@ -935,8 +925,19 @@ impl PyChainQuery {
         let (base_fee, priority_fees) = self
             .runtime
             .block_on(async move {
-                // This is synchronous in reth_chain_query but wrapping in block_on for consistency
-                 Ok::<_, eyre::Error>(provider.get_priority_fee_stats(block)?)
+                let block_txs = provider.get_block_transactions(block).await?;
+                let base_fee = block_txs.base_fee_per_gas.unwrap_or_default() as u128;
+                let mut priority_fees = block_txs
+                    .transactions
+                    .iter()
+                    .map(|tx| {
+                        let gas_price: u128 =
+                            tx.tx_metadata.gas_price.try_into().unwrap_or(u128::MAX);
+                        gas_price.saturating_sub(base_fee)
+                    })
+                    .collect::<Vec<_>>();
+                priority_fees.sort_unstable();
+                Ok::<_, eyre::Error>((base_fee, priority_fees))
             })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
@@ -961,7 +962,12 @@ impl PyChainQuery {
     /// Returns:
     ///     Estimated cost in wei as string.
     #[pyo3(signature = (gas_limit, priority="normal", block_number=None))]
-    fn estimate_tx_cost(&self, gas_limit: u64, priority: &str, block_number: Option<u64>) -> PyResult<String> {
+    fn estimate_tx_cost(
+        &self,
+        gas_limit: u64,
+        priority: &str,
+        block_number: Option<u64>,
+    ) -> PyResult<String> {
         let percentile = match priority {
             "low" => 0.10,
             "normal" => 0.50,

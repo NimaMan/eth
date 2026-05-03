@@ -3,7 +3,7 @@ import sys
 import os
 
 # Prioritize local release build for development verification
-local_lib_path = "/home/nima/storage/samsung8tb/code/crypto/eth/reth/target/release"
+local_lib_path = "/home/nima/code/crypto/blockchains/eth/reth/target/release"
 if os.path.exists(local_lib_path):
     sys.path.insert(0, local_lib_path)
 
