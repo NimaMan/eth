@@ -11,7 +11,8 @@ async fn main() -> Result<()> {
     println!("Testing tx_simulator - pure simulation library\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
 
     // Get latest block
     let latest_block = simulator.get_latest_block()?;

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=load-config.sh
+. "$SCRIPT_DIR/load-config.sh"
+
 ETH_NODE_ROOT=${ETH_NODE_ROOT:-/home/nima/storage/samsung8tb/ethereum}
 BIN_DIR="$ETH_NODE_ROOT/bin"
 DOWNLOAD_DIR="$ETH_NODE_ROOT/downloads"

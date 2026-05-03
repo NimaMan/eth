@@ -15,7 +15,8 @@ async fn main() -> Result<()> {
     println!("=====================================\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
 
     // Create a sequence of simple ETH transfers (read-only simulations)
     let test_address = address!("f977814e90da44bfa03b6295a0616a897441acec"); // Binance 8

@@ -52,7 +52,7 @@ Quick Checks
 - Signed chain demo: rust/tx_simulator/examples/sequential/buy_approve_sell_signed_chain_uniswap_v2.rs:1
 
 Setup Notes
-- Reth DB default: `~/.local/share/reth/mainnet`. Ensure it is synced and canonicalized to the block heights you simulate.
+- Reth DB default: resolved from `RETH_DATADIR`, then `RETH_DB_PATH`, then `../../config.env` (`/home/nima/storage/samsung8tb/ethereum/reth` by default). Ensure it is synced and canonicalized to the block heights you simulate.
 - Safe for concurrent use: We operate read‑only on MDBX; writes happen in an in‑memory overlay.
 
 Scope

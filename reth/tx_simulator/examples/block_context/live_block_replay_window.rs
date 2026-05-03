@@ -2,6 +2,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use eyre::{bail, eyre, Result};
 use std::{env, process, str::FromStr};
 use tx_simulator::{
+    config::repo,
     contract_method_simulator::{
         decode_string_from_contract_output, decode_uint256_from_contract_output,
         decode_uint8_from_contract_output, encode_contract_read_call_no_args,
@@ -9,8 +10,6 @@ use tx_simulator::{
     LiveChainCache, LiveChainCacheBuilder, TxSimulator,
 };
 
-const DEFAULT_RETH_DIR: &str = "/home/nima/.local/share/reth/mainnet";
-const DEFAULT_REDIS_URL: &str = "redis://localhost:6379/0";
 const DEFAULT_TOKEN: &str = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"; // USDC
 
 const TOTAL_SUPPLY_SELECTOR: [u8; 4] = [0x18, 0x16, 0x0d, 0xdd];
@@ -229,11 +228,8 @@ async fn call_string(
 
 impl Config {
     fn from_args() -> Result<Self> {
-        let mut reth_datadir = env::var("RETH_DATADIR")
-            .or_else(|_| env::var("RETH_DB_PATH"))
-            .unwrap_or_else(|_| DEFAULT_RETH_DIR.to_string());
-        let mut redis_url = env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL")
-            .unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
+        let mut reth_datadir = repo::reth_datadir()?;
+        let mut redis_url = repo::live_data_redis_url()?;
         let mut window = 3u64;
         let mut token = DEFAULT_TOKEN.to_string();
 
@@ -307,7 +303,9 @@ fn ordinal_label(window: u64) -> String {
 fn print_usage() {
     println!("Usage: cargo run --example live_block_replay_window -- [--reth <PATH>] [--redis-url <URL>] [--window <N>] [--token <ADDRESS>]");
     println!(
-        "Defaults: reth datadir from RETH_DATADIR or {}, redis {}, window 3, token USDC",
-        DEFAULT_RETH_DIR, DEFAULT_REDIS_URL
+        "Defaults: reth datadir {}, redis {}, window 3, token USDC",
+        repo::reth_datadir().unwrap_or_else(|_| repo::DEFAULT_RETH_DATADIR.to_string()),
+        repo::live_data_redis_url()
+            .unwrap_or_else(|_| repo::DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
     );
 }

@@ -8,10 +8,11 @@
 //! This example showcases how the tx_builders helpers can be paired with the
 //! simulator to verify complex transaction chains before broadcasting.
 
-use alloy_consensus::{SignableTransaction, TxKind, TxLegacy};
-use alloy_primitives::{utils::parse_ether, B256};
-use alloy_primitives::{Address as AlloyAddress, U256 as AlloyU256};
-use reth_chain_query::dex::compute_sushiswap_pool;
+use alloy_consensus::{SignableTransaction, TxLegacy};
+use alloy_primitives::U256 as AlloyU256;
+use alloy_primitives::{
+    address, keccak256, utils::parse_ether, Address as AlloyAddress, TxKind, B256,
+};
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::crypto::secp256k1::{recover_signer_unchecked, sign_message};
 use std::env;
@@ -21,17 +22,18 @@ use tx_simulator::tx_builders::{
 };
 use tx_simulator::{SignedTxChainSimulation, TxSimulator};
 
+const SUSHISWAP_FACTORY: AlloyAddress = address!("C0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac");
+const SUSHISWAP_INIT_CODE_HASH: [u8; 32] = [
+    0xe1, 0x8a, 0x34, 0xeb, 0x0e, 0x04, 0xb0, 0x4f, 0x7a, 0x0a, 0xc2, 0x9a, 0x6e, 0x80, 0x74, 0x8d,
+    0xca, 0x96, 0x31, 0x9b, 0x42, 0xc5, 0x4d, 0x67, 0x9c, 0xb8, 0x21, 0xdc, 0xa9, 0x0c, 0x63, 0x03,
+];
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
-    // Reth DB path is either provided via env or defaults to ~/.local/share/reth/mainnet
-    let reth_db = env::var("RETH_DB_PATH").unwrap_or_else(|_| {
-        format!(
-            "{}/.local/share/reth/mainnet",
-            std::env::var("HOME").unwrap_or_else(|_| "/home/nima".into())
-        )
-    });
+    // Reth DB path is resolved from env overrides or the workspace config.
+    let reth_db = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_db)?;
     println!(
         "Reth DB: {} | latest block {}",
@@ -213,4 +215,38 @@ fn sign_unsigned_legacy(
     let signature = sign_message(signer_secret, tx.signature_hash())
         .map_err(|e| eyre::eyre!("failed to sign transaction: {}", e))?;
     Ok(TransactionSigned::new_unhashed(tx, signature))
+}
+
+fn compute_sushiswap_pool(token_a: AlloyAddress, token_b: AlloyAddress) -> AlloyAddress {
+    let (token0, token1) = sort_tokens(token_a, token_b);
+    compute_create2_address(SUSHISWAP_FACTORY, token0, token1, SUSHISWAP_INIT_CODE_HASH)
+}
+
+fn sort_tokens(token_a: AlloyAddress, token_b: AlloyAddress) -> (AlloyAddress, AlloyAddress) {
+    if token_a < token_b {
+        (token_a, token_b)
+    } else {
+        (token_b, token_a)
+    }
+}
+
+fn compute_create2_address(
+    factory: AlloyAddress,
+    token0: AlloyAddress,
+    token1: AlloyAddress,
+    init_code_hash: [u8; 32],
+) -> AlloyAddress {
+    let mut salt_input = Vec::with_capacity(40);
+    salt_input.extend_from_slice(token0.as_slice());
+    salt_input.extend_from_slice(token1.as_slice());
+    let salt = keccak256(&salt_input);
+
+    let mut input = Vec::with_capacity(85);
+    input.push(0xff);
+    input.extend_from_slice(factory.as_slice());
+    input.extend_from_slice(salt.as_slice());
+    input.extend_from_slice(&init_code_hash);
+
+    let hash = keccak256(&input);
+    AlloyAddress::from_slice(&hash[12..])
 }

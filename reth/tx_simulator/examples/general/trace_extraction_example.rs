@@ -11,8 +11,8 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize simulator
-    let reth_datadir = "/home/nima/.local/share/reth/mainnet";
-    let simulator = TxSimulator::new(reth_datadir)?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
 
     // Get latest block for testing
     let latest_block = simulator.get_latest_block()?;

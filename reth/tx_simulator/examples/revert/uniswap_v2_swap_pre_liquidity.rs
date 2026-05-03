@@ -15,9 +15,7 @@ async fn main() -> Result<()> {
     println!("🔍 Uniswap V2 swap before pool deployment");
     println!("=========================================\n");
 
-    let reth_datadir = std::env::var("RETH_DATADIR")
-        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_datadir)?;
     println!("Using block: {}", BLOCK_BEFORE_LIQUIDITY);
 

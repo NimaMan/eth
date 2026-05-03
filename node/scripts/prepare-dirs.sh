@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=load-config.sh
+. "$SCRIPT_DIR/load-config.sh"
+
 ETH_NODE_ROOT=${ETH_NODE_ROOT:-/home/nima/storage/samsung8tb/ethereum}
 LIGHTHOUSE_DATADIR=${LIGHTHOUSE_DATADIR:-/home/nima/.lighthouse}
 JWT_PATH=${JWT_PATH:-$ETH_NODE_ROOT/jwt/jwt.hex}

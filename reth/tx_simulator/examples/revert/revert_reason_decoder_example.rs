@@ -11,9 +11,7 @@ async fn main() -> Result<()> {
     println!("🔍 Testing Revert Decoder");
     println!("=========================\n");
 
-    let reth_datadir = std::env::var("RETH_DATADIR")
-        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_datadir)?;
     let latest_block = simulator.get_latest_block()?;
     println!("Using block: {}\n", latest_block);

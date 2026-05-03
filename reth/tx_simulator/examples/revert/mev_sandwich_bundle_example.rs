@@ -41,7 +41,8 @@ async fn main() -> Result<()> {
     println!("================================================\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
 
     // MEV bot address (using address with funds)
     let mev_bot = address!("0C96c602b1b332B8AB2093E5d72D804a24bd5689");

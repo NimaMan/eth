@@ -36,7 +36,8 @@ Signed chain:
 - block_context/live_block_replay_window.rs: Inspect the live Redis cache window and replay metadata/state for a recent block
 
 ## Running
-- Ensure a synced Reth DB is available (default: `~/.local/share/reth/mainnet`).
+- Ensure a synced Reth DB is available. Examples resolve it from `RETH_DATADIR`,
+  then `RETH_DB_PATH`, then the repository-level `../../config.env`.
 - Run any example: `cargo run --example <name>`
 - Use `--release` for better performance on heavy workloads.
 

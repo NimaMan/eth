@@ -33,7 +33,8 @@ async fn main() -> Result<()> {
     println!("====================================\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
     println!("✅ Simulator initialized");
 
     // Token addresses

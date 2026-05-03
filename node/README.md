@@ -10,6 +10,7 @@ downloaded binaries, logs, and secrets stay outside the repo on the 8 TB SSD.
 - Node type: full/pruned Reth node, not archive
 - Service manager: user systemd
 - Runtime root: `/home/nima/storage/samsung8tb/ethereum`
+- Shared config: `../config.env`
 - Lighthouse datadir: `/home/nima/.lighthouse`
 - JWT secret: `/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex`
 
@@ -27,6 +28,7 @@ Do not remove the mount point; keep it as the stable Lighthouse datadir.
 | `scripts/prepare-dirs.sh` | Creates runtime directories and a shared JWT secret outside the repo. |
 | `scripts/install-user-services.sh` | Links the checked-in unit files into `~/.config/systemd/user`. |
 | `scripts/healthcheck.sh` | Checks local Reth and Lighthouse RPC/health endpoints. |
+| `scripts/load-config.sh` | Sources the repository-level `config.env` for node scripts. |
 
 ## Ports
 

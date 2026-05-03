@@ -43,7 +43,7 @@ impl TxSimulator {
     /// Create new simulator with direct database access
     ///
     /// # Arguments
-    /// * `reth_datadir` - Path to Reth data directory (e.g., `/home/user/.local/share/reth/mainnet`)
+    /// * `reth_datadir` - Path to Reth data directory (e.g., `/home/nima/storage/samsung8tb/ethereum/reth`)
     ///
     /// # Returns
     /// * `Result<Self>` - New simulator instance or error

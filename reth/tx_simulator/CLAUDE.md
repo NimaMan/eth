@@ -6,7 +6,7 @@ The `tx_simulator` is a **modular, high-performance Ethereum transaction simulat
 
 ## Core Purpose
 
-- **Direct state access**: Reads directly from Reth's MDBX database files (`/home/user/.local/share/reth/mainnet`)
+- **Direct state access**: Reads directly from Reth's MDBX database files (resolved from `RETH_DATADIR`, `RETH_DB_PATH`, or the repository-level `config.env`)
 - **Multiple simulation types**: Signed transactions, unsigned calls, view functions, sequential processing
 - **Pure simulation focus**: Returns raw CallFrame traces and basic results (success, gas, revert reason)
 - **Parallel processing**: Concurrent simulation of thousands of transactions

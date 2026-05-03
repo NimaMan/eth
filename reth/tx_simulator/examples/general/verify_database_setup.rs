@@ -12,8 +12,8 @@ async fn main() -> Result<()> {
 
     // Test 1: Initialize simulator
     println!("\n📋 Test 1: Simulator Initialization");
-    let reth_datadir = "/home/nima/.local/share/reth/mainnet";
-    let simulator = match TxSimulator::new(reth_datadir) {
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = match TxSimulator::new(&reth_datadir) {
         Ok(sim) => {
             println!("✅ Simulator initialized successfully");
             sim

@@ -23,8 +23,8 @@ async fn main() -> Result<()> {
     println!("=============================================================\n");
 
     // Initialize simulator
-    let reth_db_path = "/home/nima/.local/share/reth/mainnet";
-    let simulator = TxSimulator::new(reth_db_path)?;
+    let reth_db_path = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_db_path)?;
     println!("✅ Simulator initialized");
 
     // Get latest block or use a specific one

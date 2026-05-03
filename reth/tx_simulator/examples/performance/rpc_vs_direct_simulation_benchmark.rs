@@ -32,7 +32,8 @@ async fn main() -> Result<()> {
 
     // Initialize Direct Reth simulator
     let start = Instant::now();
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
     let init_time = start.elapsed();
     info!("\n✅ Direct Reth initialized in {:?}", init_time);
 

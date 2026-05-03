@@ -14,8 +14,6 @@ use eyre::Result;
 use std::str::FromStr;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
-const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
-
 // Well-known contract addresses
 const USDC_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"; // USDC token
 const USDT_ADDRESS: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7"; // USDT token
@@ -32,7 +30,8 @@ async fn main() -> Result<()> {
     println!("Showing actual simulation results only.\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new(RETH_DB_PATH)?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
     println!("✅ Simulator initialized");
 
     // Get latest block

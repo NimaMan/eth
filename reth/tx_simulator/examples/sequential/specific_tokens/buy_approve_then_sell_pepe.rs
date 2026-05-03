@@ -14,8 +14,6 @@ use eyre::Result;
 use std::str::FromStr;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
-const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
-
 // Contract addresses
 const PEPE_ADDRESS: &str = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"; // PEPE token (18 decimals)
 const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"; // Wrapped ETH
@@ -31,7 +29,8 @@ async fn main() -> Result<()> {
     println!("Using PEPE token with 18 decimals\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new(RETH_DB_PATH)?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
     println!("✅ Simulator initialized");
 
     // Get latest block

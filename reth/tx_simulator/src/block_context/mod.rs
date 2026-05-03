@@ -12,10 +12,10 @@ pub mod live_data_registry;
 /// override is provided.
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 
-/// Resolve the Redis URL from `LIVE_BLOCKCHAIN_DATA_REDIS_URL`, falling back to
+/// Resolve the Redis URL from env/config, falling back to
 /// [`DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL`] when unset.
 pub fn resolve_live_data_redis_url() -> String {
-    std::env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL")
+    crate::config::repo::live_data_redis_url()
         .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
 }
 

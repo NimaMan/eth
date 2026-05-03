@@ -4,8 +4,6 @@ use eyre::Result;
 use std::str::FromStr;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
-const RETH_DB_PATH: &str = "/home/nima/.local/share/reth/mainnet";
-
 // Contract addresses
 const FLOKI_ADDRESS: &str = "0xcf0C122c6b73ff809C693DB761e7BaeBe62b6a2E"; // FLOKI token (9 decimals)
 const WETH_ADDRESS: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"; // Wrapped ETH
@@ -38,7 +36,8 @@ async fn main() -> Result<()> {
     println!("Using FLOKI token with 9 decimals\n");
 
     // Initialize simulator
-    let simulator = TxSimulator::new(RETH_DB_PATH)?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
     println!("✅ Simulator initialized");
 
     // Use latest block to avoid pruned state issues
