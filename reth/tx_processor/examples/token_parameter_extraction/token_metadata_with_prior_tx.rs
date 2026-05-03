@@ -5,9 +5,7 @@ use reth_chain_query::RethQueryProvider;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use tx_processor::{
-    ProcessedTransaction, ProcessedTxProvider, TxSimulator, UnsignedTransaction, UnsignedTxBuilder,
-};
+use tx_processor::{ProcessedTransaction, ProcessedTxProvider, TxSimulator};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -79,25 +77,16 @@ async fn async_main(
     println!("   Contract address: {contract_address:?}");
     println!("   Metadata block  : {}", metadata_block);
 
-    let mut pending_tx = UnsignedTxBuilder::build_unsigned_from_processed_tx(&processed_tx);
-    if pending_tx.nonce.is_none() {
-        pending_tx.nonce = Some(processed_tx.nonce);
-    }
-    println!(
-        "Pending fee fields: gas_price={:?}, max_fee_per_gas={:?}, max_priority_fee={:?}",
-        pending_tx.gas_price, pending_tx.max_fee_per_gas, pending_tx.max_priority_fee_per_gas
-    );
-
     print_fee_diagnostics(&query_provider, &processed_tx, metadata_block).await?;
 
-    let pending: Vec<UnsignedTransaction> = vec![pending_tx];
+    let pending_hashes = vec![processed_tx.hash];
     println!(
         "▶️  Replaying {} pending transaction(s) before metadata call",
-        pending.len()
+        pending_hashes.len()
     );
 
     let metadata = query_provider
-        .get_token_metadata(contract_address, Some(metadata_block), &pending)
+        .get_token_metadata(contract_address, Some(metadata_block), Some(pending_hashes))
         .await?;
 
     match metadata {

@@ -1,9 +1,6 @@
 use clap::Parser;
 use eyre::{eyre, Result};
-use reth_chain_query::{
-    common_addresses::DENOM_ADDRESSES,
-    RethQueryProvider,
-};
+use reth_chain_query::{common_addresses::DENOM_ADDRESSES, RethQueryProvider};
 use std::sync::Arc;
 
 #[derive(Debug, Parser)]
@@ -19,7 +16,8 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let datadir = std::env::var("RETH_DATADIR").unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
+    let datadir = std::env::var("RETH_DATADIR")
+        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
 
     let provider = Arc::new(RethQueryProvider::new(&datadir)?);
     let block = args.block;
@@ -33,7 +31,7 @@ fn main() -> Result<()> {
         );
         for (address, symbol) in DENOM_ADDRESSES.iter() {
             let meta = task_provider
-                .get_token_metadata(*address, block, &[])
+                .get_token_metadata(*address, block, None)
                 .await
                 .map_err(|err| eyre!("metadata fetch failed for {symbol} ({address:?}): {err}"))?;
 
@@ -41,11 +39,7 @@ fn main() -> Result<()> {
                 Some(token) => {
                     println!(
                         "{} ({address:?}): name={}, symbol={}, decimals={}, total_supply={}",
-                        symbol,
-                        token.name,
-                        token.symbol,
-                        token.decimals,
-                        token.total_supply
+                        symbol, token.name, token.symbol, token.decimals, token.total_supply
                     );
                 }
                 None => {
