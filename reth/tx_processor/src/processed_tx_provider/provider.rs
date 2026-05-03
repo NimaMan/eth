@@ -11,6 +11,7 @@ use super::core::initialization::create_provider_factory;
 /// - CallDataBuilder for building CallRequest from DB data
 /// - Direct Reth database access via TransactionLoader
 use crate::block_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock};
+use crate::processed_tx_provider::core::provider_factory::TxProcessorProviderFactory;
 use crate::tx_processor::data_models::{
     ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
 };
@@ -23,7 +24,7 @@ use alloy_primitives::{keccak256, Address, B256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::{Result, WrapErr};
 use reth_chain_query::ChainQuery;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::TransactionsProvider;
 use rlp::RlpStream;
 use std::sync::Arc;
@@ -36,12 +37,7 @@ pub struct ProcessedTxProvider {
     pub decoder: LogDecoder,
     pub classifier: TransactionClassifier,
     pub transaction_loader: Option<TransactionLoader>,
-    pub provider_factory: reth_provider::ProviderFactory<
-        reth_node_types::NodeTypesWithDBAdapter<
-            reth_node_ethereum::EthereumNode,
-            std::sync::Arc<reth_db::DatabaseEnv>,
-        >,
-    >,
+    pub provider_factory: TxProcessorProviderFactory,
     pub chain_query: Arc<ChainQuery>,
     tx_processor: TxProcessor,
     block_processor: BlockProcessor,
@@ -150,27 +146,12 @@ impl ProcessedTxProvider {
 
     /// Create ProcessedTxProvider with an existing provider factory
     /// This is useful when sharing a database connection across multiple components
-    pub fn with_provider_factory(
-        provider_factory: reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                std::sync::Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    ) -> Result<Self> {
+    pub fn with_provider_factory(provider_factory: TxProcessorProviderFactory) -> Result<Self> {
         let simulator = TxSimulator::with_provider_factory(provider_factory.clone())?;
         Self::build(simulator, provider_factory)
     }
 
-    fn build(
-        simulator: TxSimulator,
-        provider_factory: reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                std::sync::Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    ) -> Result<Self> {
+    fn build(simulator: TxSimulator, provider_factory: TxProcessorProviderFactory) -> Result<Self> {
         let decoder = LogDecoder::new();
         let classifier = TransactionClassifier::new();
         let transaction_loader =
@@ -427,16 +408,7 @@ impl ProcessedTxProvider {
     }
 
     /// Get the shared provider factory (for use by other components that need DB access)
-    pub fn provider_factory(
-        &self,
-    ) -> Arc<
-        reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    > {
+    pub fn provider_factory(&self) -> Arc<TxProcessorProviderFactory> {
         Arc::new(self.provider_factory.clone())
     }
 

@@ -186,7 +186,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 
     if !router_exists_on_chain && !router_exists_in_chain {
         let mut deploy_tx =
-            build_baygus_router_deploy_tx(config.buyer_address, v4_cfg.pool_manager);
+            build_baygus_router_deploy_tx(config.buyer_address, v4_cfg.pool_manager)?;
         apply_fee_policy(&mut deploy_tx, &config, base_fee);
         let deploy_result = chain
             .step_with_trace(deploy_tx.clone())

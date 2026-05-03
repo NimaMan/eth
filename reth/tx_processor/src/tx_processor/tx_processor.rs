@@ -363,9 +363,6 @@ impl TxProcessor {
         block_number: u64,
         tx_index: u64,
     ) -> Result<ProcessedTransaction> {
-        // Generate synthetic transaction hash for simulation
-        let tx_hash = B256::random();
-
         // Extract transaction parameters from UnsignedTransaction
         let from = unsigned_tx.from.unwrap_or(Address::ZERO);
         let to = unsigned_tx.to;
@@ -375,6 +372,17 @@ impl TxProcessor {
             .as_ref()
             .map(|d| d.to_vec())
             .unwrap_or_default();
+
+        let mut synthetic_hash_input = Vec::new();
+        synthetic_hash_input.extend_from_slice(&block_number.to_be_bytes());
+        synthetic_hash_input.extend_from_slice(&tx_index.to_be_bytes());
+        synthetic_hash_input.extend_from_slice(from.as_slice());
+        if let Some(to) = to {
+            synthetic_hash_input.extend_from_slice(to.as_slice());
+        }
+        synthetic_hash_input.extend_from_slice(&input);
+        let tx_hash = alloy_primitives::keccak256(synthetic_hash_input);
+
         let max_fee_per_gas = unsigned_tx.max_fee_per_gas.map(|fee| U256::from(fee));
         let max_priority_fee_per_gas = unsigned_tx
             .max_priority_fee_per_gas

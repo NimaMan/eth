@@ -54,8 +54,8 @@ name = "buy_swap_uniswap_v4"
 path = "examples/simulation/buy_swap_uniswap_v4.rs"
 
 [[example]]
-name = "buy_sell_simulator"
-path = "examples/baygus_router/buy_sell_simulator.rs"
+name = "buy_sell_uniswap_v2"
+path = "examples/baygus_router/buy_sell_uniswap_v2.rs"
 
 [[example]]
 name = "buy_sell_uniswap_v3"
@@ -145,8 +145,8 @@ hex = "0.4"
 hex-literal = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5", features = ["derive"] }
-alloy-primitives = "1.1.2"
-alloy-eips = "1.0.38"
+alloy-primitives = { version = "1.5.7", features = ["rlp"] }
+alloy-eips = "2.0.4"
 rlp = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -157,23 +157,19 @@ lazy_static = "1.5"
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Basic Alloy dependencies for examples
-alloy-consensus = "1.0.0"
+alloy-consensus = "2.0.4"
 
 # Add jsonrpsee for RPC calls
 jsonrpsee = { version = "0.24", features = ["client", "ws-client", "http-client"] }
 
 # Add alloy-rpc-types-trace for CallLogFrame
-alloy-rpc-types-trace = "1.0"
+alloy-rpc-types-trace = "2.0.4"
 
 # Add reth_chain_query for direct database access
 reth_chain_query = { path = "../reth_chain_query" }
 
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
+reth-provider = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" }
+reth-primitives-traits = { version = "0.3.1", features = ["secp256k1"] }
 
 [dev-dependencies]
 rand = "0.8"

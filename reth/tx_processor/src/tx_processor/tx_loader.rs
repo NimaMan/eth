@@ -1,51 +1,29 @@
-use alloy_consensus::Transaction as _;
-use alloy_consensus::{
-    transaction::{SignerRecoverable, TxType},
-    EthereumTxEnvelope, TxEip4844, Typed2718,
+use crate::processed_tx_provider::core::{
+    initialization::create_provider_factory, provider_factory::TxProcessorProviderFactory,
 };
+use alloy_consensus::Transaction as _;
+use alloy_consensus::{transaction::TxType, Typed2718};
 use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Log as AlloyLog, B256, U256};
 use eyre::Result;
-use reth_chainspec::ChainSpecBuilder;
-use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
-use reth_node_ethereum::EthereumNode;
-use reth_node_types::NodeTypesWithDBAdapter;
+use reth_primitives_traits::SignerRecoverable;
 /// Transaction Loader - Fetches transaction data from Reth DB
 ///
 /// This module provides transaction loading that fetches data from Reth's database
-use reth_provider::{
-    providers::StaticFileProvider, BlockReader, ProviderFactory, ReceiptProvider,
-    TransactionsProvider,
-};
-use std::{cmp, path::Path, sync::Arc};
+use reth_provider::{BlockReader, ReceiptProvider, TransactionsProvider};
+use std::cmp;
+use tx_simulator::SignedTransaction;
 
 /// Transaction Loader that fetches from Reth database
 #[derive(Clone)]
 pub struct TransactionLoader {
-    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+    provider_factory: TxProcessorProviderFactory,
 }
 
 impl TransactionLoader {
     /// Create a new transaction loader
     pub fn new(reth_datadir: &str) -> Result<Self> {
-        // Initialize database like reth_tx_simulator does
-        let db_path = Path::new(reth_datadir).join("db");
-        let static_files_path = Path::new(reth_datadir).join("static_files");
-
-        let db = Arc::new(open_db_read_only(
-            &db_path,
-            DatabaseArguments::new(ClientVersion::default()),
-        )?);
-
-        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
-
-        let provider_factory =
-            ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
-                db.clone(),
-                chain_spec.clone(),
-                StaticFileProvider::read_only(static_files_path, false)?, // Don't watch files - Reth is already watching
-            );
-
+        let provider_factory = create_provider_factory(reth_datadir)?;
         Ok(Self { provider_factory })
     }
 
@@ -53,7 +31,7 @@ impl TransactionLoader {
     pub fn load_signed_transaction_envelope_by_hash(
         &self,
         tx_hash: B256,
-    ) -> Result<EthereumTxEnvelope<TxEip4844>> {
+    ) -> Result<SignedTransaction> {
         let provider = self.provider_factory.provider()?;
         let (tx, _meta) = provider
             .transaction_by_hash_with_meta(tx_hash)?
@@ -63,9 +41,7 @@ impl TransactionLoader {
 
     /// Create a new transaction loader with an existing provider factory
     /// This is useful when sharing a database connection across multiple components
-    pub fn with_provider_factory(
-        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-    ) -> Result<Self> {
+    pub fn with_provider_factory(provider_factory: TxProcessorProviderFactory) -> Result<Self> {
         Ok(Self { provider_factory })
     }
 

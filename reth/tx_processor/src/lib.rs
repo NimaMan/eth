@@ -45,7 +45,7 @@ pub use tx_builder::{SignedTxBuilder, UnsignedTxBuilder};
 // Convenience facade: simulate and return ProcessedTransaction directly
 use alloy_primitives::B256;
 use eyre::Result;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 
 /// Simulate an unsigned transaction at a block (or latest) and return a fully processed transaction.
 pub async fn process_unsigned_tx(
