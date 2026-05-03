@@ -11,7 +11,7 @@
 //!     -- --tx 0xa6e069cb77a177d7adadf23bfd6fa043a7430e321dc8f0f2d2b45d7ce57f6239 \
 //!     --datadir ~/.local/share/reth/mainnet
 
-use alloy_primitives::{I256, B256};
+use alloy_primitives::{B256, I256};
 use clap::Parser;
 use eyre::Result;
 use mempool_processor::simulator::liquidity_removal_simulator::LiquidityRemovalSimulator;
@@ -56,8 +56,11 @@ async fn main() -> Result<()> {
 
     // Core simulator + providers
     let simulator = Arc::new(TxSimulator::new(&datadir)?);
-    let processed_provider = ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
-    let processed = processed_provider.process_transaction_by_hash(tx_hash).await?;
+    let processed_provider =
+        ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?;
+    let processed = processed_provider
+        .process_transaction_by_hash(tx_hash)
+        .await?;
 
     let unsigned = UnsignedTxBuilder::build_unsigned_from_processed_tx(&processed);
     let sim_block = processed.block_number.saturating_sub(1);

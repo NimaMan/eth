@@ -122,7 +122,10 @@ impl TokenTrackingSubscriber {
         let response_str = match requester.recv_string(0) {
             Ok(Ok(s)) => Some(s),
             Ok(Err(e)) => {
-                warn!("ZMQ string conversion error: {:?} (continuing with Redis fallback)", e);
+                warn!(
+                    "ZMQ string conversion error: {:?} (continuing with Redis fallback)",
+                    e
+                );
                 None
             }
             Err(e) => {
@@ -162,9 +165,8 @@ impl TokenTrackingSubscriber {
                         self.fetch_and_apply_snapshots(&addr_list, 0, "initial_load", 0.0)
                             .await;
                     } else if data_value.is_object() {
-                        match serde_json::from_value::<HashMap<Address, TokenWithPools>>(
-                            data_value,
-                        ) {
+                        match serde_json::from_value::<HashMap<Address, TokenWithPools>>(data_value)
+                        {
                             Ok(token_data) => {
                                 let update = types::TokenUpdate {
                                     message_type: "initial_load".to_string(),
@@ -512,9 +514,6 @@ mod basic_tests {
             .await
             .expect("token cached");
         assert_eq!(token.address, token_address);
-        assert!(cache
-            .get_pool(&pool_address.to_string())
-            .await
-            .is_some());
+        assert!(cache.get_pool(&pool_address.to_string()).await.is_some());
     }
 }

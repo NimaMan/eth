@@ -5,6 +5,7 @@
 use crate::token_tracking::TokenTrackingCache;
 use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
+use once_cell::sync::{Lazy, OnceCell};
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::RethQueryProvider;
 use std::collections::HashMap;
@@ -12,7 +13,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tokio::time::{sleep, Duration};
 use tracing::{error, warn};
-use once_cell::sync::{Lazy, OnceCell};
 use tx_processor::processed_tx_provider::ProcessedTxProvider;
 use tx_processor::tx_processor::data_models::AddressBalanceChange;
 use tx_processor::ProcessedTransaction;
@@ -70,7 +70,10 @@ static SIM_WORKER: Lazy<SimWorker> = Lazy::new(|| {
                         .process_transaction_from_unsigned_tx(unsigned_tx, Some(resolved_block))
                         .await
                 };
-                let res = handle.spawn(fut).await.unwrap_or_else(|e| Err(eyre::eyre!("{}", e)));
+                let res = handle
+                    .spawn(fut)
+                    .await
+                    .unwrap_or_else(|e| Err(eyre::eyre!("{}", e)));
                 let _ = responder.send(res);
             }
         });

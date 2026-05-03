@@ -54,10 +54,7 @@ impl MempoolFetcherIPCClient {
                 Ok(stream) => break stream,
                 Err(err) => {
                     if Instant::now() >= deadline {
-                        return Err(eyre!(
-                            "Failed to connect to IPC socket within 5s: {}",
-                            err
-                        ));
+                        return Err(eyre!("Failed to connect to IPC socket within 5s: {}", err));
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }

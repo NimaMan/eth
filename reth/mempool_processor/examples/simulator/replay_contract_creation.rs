@@ -12,13 +12,13 @@
 use alloy_primitives::{keccak256, Address, B256};
 use clap::Parser;
 use eyre::Result;
+use mempool_processor::token_tracking::token_parameter_extraction::fetch_token_metadata;
 use reth_chain_query::{provider::RethQueryProvider, to_checksum_address};
 use rlp::RlpStream;
 use std::str::FromStr;
 use std::sync::Arc;
 use tx_processor::processed_tx_provider::ProcessedTxProvider;
 use tx_processor::UnsignedTxBuilder;
-use mempool_processor::token_tracking::token_parameter_extraction::fetch_token_metadata;
 use tx_simulator::TxSimulator;
 
 #[derive(Parser, Debug)]
@@ -59,12 +59,14 @@ async fn main() -> Result<()> {
 
     // Core providers
     let simulator = Arc::new(TxSimulator::new(&datadir)?);
-    let processed_provider = Arc::new(
-        ProcessedTxProvider::with_provider_factory(simulator.provider_factory().clone())?,
-    );
+    let processed_provider = Arc::new(ProcessedTxProvider::with_provider_factory(
+        simulator.provider_factory().clone(),
+    )?);
 
     // Fetch processed transaction from DB + partial replay
-    let processed = processed_provider.process_transaction_by_hash(tx_hash).await?;
+    let processed = processed_provider
+        .process_transaction_by_hash(tx_hash)
+        .await?;
     // Rebuild unsigned tx as the pipeline would
     let unsigned = UnsignedTxBuilder::build_unsigned_from_processed_tx(&processed);
     let sim_block = processed.block_number.saturating_sub(1);
@@ -75,13 +77,24 @@ async fn main() -> Result<()> {
     // Resolve contract address
     let contract_addr = replayed
         .contract_address
-        .or_else(|| replayed.contract_creation_events.first().map(|e| e.contract_address))
+        .or_else(|| {
+            replayed
+                .contract_creation_events
+                .first()
+                .map(|e| e.contract_address)
+        })
         .unwrap_or_else(|| derive_contract_address(replayed.from_address, replayed.nonce));
 
     println!("Sim block:   {} (pre-state)", sim_block);
-    println!("From:        {}", to_checksum_address(&replayed.from_address));
+    println!(
+        "From:        {}",
+        to_checksum_address(&replayed.from_address)
+    );
     println!("Nonce:       {}", replayed.nonce);
-    println!("To:          {:?}", replayed.to_address.map(|a| to_checksum_address(&a)));
+    println!(
+        "To:          {:?}",
+        replayed.to_address.map(|a| to_checksum_address(&a))
+    );
     println!("Contract:    {}", to_checksum_address(&contract_addr));
     println!(
         "Events:      {:?}",

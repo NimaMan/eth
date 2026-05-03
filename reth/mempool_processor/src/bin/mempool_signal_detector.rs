@@ -1,6 +1,6 @@
+use alloy_primitives::B256;
 use clap::Parser;
 use eyre::Result;
-use alloy_primitives::B256;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -673,8 +673,8 @@ async fn main() -> Result<()> {
                     };
                     if let Ok(mut file) = OpenOptions::new()
                         .create(true)
-                            .append(true)
-                            .open(simulation_error_log_path.as_ref())
+                        .append(true)
+                        .open(simulation_error_log_path.as_ref())
                     {
                         let timestamp = chrono::Local::now();
                         writeln!(

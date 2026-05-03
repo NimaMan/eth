@@ -278,7 +278,10 @@ impl SignalManager {
         ) {
             // Compact per‑TX header (written only to signal_manager.log, not console)
             self.log_activity("TX", &result.request.tx.hash);
-            self.log_activity("RECEIVED", &format!("Category: {:?}", result.request.category));
+            self.log_activity(
+                "RECEIVED",
+                &format!("Category: {:?}", result.request.category),
+            );
         }
 
         // Log creator token info if this is a creator transaction
