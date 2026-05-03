@@ -3,14 +3,8 @@ use eyre::Result;
 use reth_chain_query::common_addresses::uniswap_v3_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx,
-    build_mock_pool_manager_deploy_tx,
-    build_token_approval_tx,
-    build_weth_deposit_tx,
-    compute_contract_address,
-    pad_address,
-    pad_u256,
-    CMD_TRANSFER_FROM,
+    build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
+    build_weth_deposit_tx, compute_contract_address, pad_address, pad_u256, CMD_TRANSFER_FROM,
 };
 use reth_provider::AccountReader;
 use std::sync::Arc;
@@ -35,9 +29,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -65,9 +57,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -85,16 +75,23 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     // 4. Target:
     // Hop 1: Uniswap V3: WETH -> USDC (Fee 500)
     // Hop 2: SushiSwap: USDC -> WETH
-    
+
     let tokens_v3 = uniswap_v3_tokens();
-    let usdc_info = tokens_v3.iter().find(|t| t.symbol == "USDC" && t.fee_tier == 500).unwrap();
-    
+    let usdc_info = tokens_v3
+        .iter()
+        .find(|t| t.symbol == "USDC" && t.fee_tier == 500)
+        .unwrap();
+
     let weth_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?;
     let usdc_address = usdc_info.token_address;
     let amount_in = U256::from(TEST_AMOUNT_WEI);
@@ -107,11 +104,16 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     deposit_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut deposit_tx);
     let deposit_result = chain.step_with_trace(deposit_tx.clone()).await?;
-    println!("[{}] WETH Deposit: {}", step_index + 1, if deposit_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] WETH Deposit: {}",
+        step_index + 1,
+        if deposit_result.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // 5. Approve Router for WETH
-    let mut approve_tx = build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
+    let mut approve_tx =
+        build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
     approve_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_tx);
     chain.step_with_trace(approve_tx.clone()).await?;
@@ -134,7 +136,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         deadline,
         amount_in,
         U256::ZERO,
-        U256::ZERO
+        U256::ZERO,
     );
 
     // 3. Sushi Swap (USDC -> WETH) -> User (amountIn=0 uses router balance)
@@ -178,12 +180,18 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     // Execute
     let result = chain.step_with_trace(tx.clone()).await?;
-    let processed = tx_processor.process_transaction_from_simulation_result(&tx, &result, latest_block, step_index).await?;
+    let processed = tx_processor
+        .process_transaction_from_simulation_result(&tx, &result, latest_block, step_index)
+        .await?;
 
     println!(
         "[{}] Router Execute (Chain V3->Sushi): {} (hash {:#x})",
         step_index + 1,
-        if result.success { "✅ success" } else { "❌ failed" },
+        if result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         processed.hash
     );
 
@@ -198,8 +206,14 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     // We started with 1 WETH. We should get WETH back.
     let weth_received = extract_incoming_amount(&processed, buyer_address, weth_address);
     println!("WETH Returned: {} WETH", format_wei(weth_received));
-    
-    debug_log_balance_change("Buyer after Chain", &processed, buyer_address, weth_address, usdc_address);
+
+    debug_log_balance_change(
+        "Buyer after Chain",
+        &processed,
+        buyer_address,
+        weth_address,
+        usdc_address,
+    );
 
     Ok(())
 }
@@ -215,10 +229,14 @@ fn encode_v3_swap_params(
     sqrt_price_limit_x96: U256,
 ) -> Vec<u8> {
     let mut data = Vec::new();
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_in.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_out.as_slice());
-    data.extend_from_slice(&[0u8; 28]); data.extend_from_slice(&fee.to_be_bytes());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_in.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_out.as_slice());
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&fee.to_be_bytes());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
     data.extend_from_slice(&deadline.to_be_bytes::<32>());
     data.extend_from_slice(&amount_in.to_be_bytes::<32>());
     data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
@@ -252,9 +270,15 @@ fn encode_v2_swap_params(
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }
 
 fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
@@ -281,7 +305,9 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    for body in bodies { data.extend_from_slice(&body); }
+    for body in bodies {
+        data.extend_from_slice(&body);
+    }
     Bytes::from(data)
 }
 
@@ -290,10 +316,14 @@ fn format_wei(wei: U256) -> String {
 }
 
 fn format_amount(amount: U256, decimals: u8) -> String {
-    if amount.is_zero() { return "0".to_string(); }
+    if amount.is_zero() {
+        return "0".to_string();
+    }
     let digits = amount.to_string();
     let decimals = decimals as usize;
-    if decimals == 0 { return digits; }
+    if decimals == 0 {
+        return digits;
+    }
     if digits.len() <= decimals {
         let padded = format!("{:0>width$}", digits, width = decimals + 1);
         let (whole, frac) = padded.split_at(padded.len() - decimals);
@@ -314,18 +344,28 @@ fn extract_incoming_amount(
         // Check WETH (ERC20) movements
         let key = to_checksum_address(&token);
         if let Some(movement) = changes.movements.tokens.get(&key) {
-             let total_in: U256 = movement.incoming.values().fold(U256::ZERO, |acc, v| acc + *v);
-             if total_in > U256::ZERO { return total_in; }
+            let total_in: U256 = movement
+                .incoming
+                .values()
+                .fold(U256::ZERO, |acc, v| acc + *v);
+            if total_in > U256::ZERO {
+                return total_in;
+            }
         }
-        
+
         // Also check if it's tracked as currency (e.g. ETH)
         if let Some(symbol) = get_token_symbol(&token) {
-             if let Some(movement) = changes.movements.currencies.get(symbol) {
-                 // Currency movements might be U256 or I256? 
-                 // Usually movements are absolute amounts (U256).
-                 let total_in: U256 = movement.incoming.values().fold(U256::ZERO, |acc, v| acc + *v);
-                 if total_in > U256::ZERO { return total_in; }
-             }
+            if let Some(movement) = changes.movements.currencies.get(symbol) {
+                // Currency movements might be U256 or I256?
+                // Usually movements are absolute amounts (U256).
+                let total_in: U256 = movement
+                    .incoming
+                    .values()
+                    .fold(U256::ZERO, |acc, v| acc + *v);
+                if total_in > U256::ZERO {
+                    return total_in;
+                }
+            }
         }
     }
     U256::ZERO
@@ -361,7 +401,13 @@ fn debug_log_balance_change(
             }
         }
         for (currency, amount) in currency_changes {
-            let sign = if amount > I256::ZERO { "+" } else if amount < I256::ZERO { "-" } else { "" };
+            let sign = if amount > I256::ZERO {
+                "+"
+            } else if amount < I256::ZERO {
+                "-"
+            } else {
+                ""
+            };
             let display_amount = if currency == "ETH" || currency == "WETH" || currency == "mWETH" {
                 format_wei(amount.unsigned_abs())
             } else {

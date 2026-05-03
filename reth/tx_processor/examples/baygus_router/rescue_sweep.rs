@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::Result;
-use reth_chain_query::common_addresses::{uniswap_v2_tokens};
+use reth_chain_query::common_addresses::uniswap_v2_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
     build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
@@ -29,9 +29,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -59,9 +57,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -79,7 +75,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     // 4. Scenario: Accidental Token Transfer to Router
@@ -99,7 +99,8 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // 5. Swap WETH -> USDC (V2) via Router (to get USDC)
-    let mut approve_tx = build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
+    let mut approve_tx =
+        build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
     approve_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_tx);
     chain.step_with_trace(approve_tx.clone()).await?;
@@ -137,7 +138,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     };
     apply_simple_gas_policy(&mut buy_tx);
     let buy_res = chain.step_with_trace(buy_tx.clone()).await?;
-    println!("[{}] Buy V2: {}", step_index, if buy_res.success { "✅" } else { "❌" });
+    println!(
+        "[{}] Buy V2: {}",
+        step_index,
+        if buy_res.success { "✅" } else { "❌" }
+    );
     if !buy_res.success {
         if let Some(reason) = buy_res.revert_reason.as_deref() {
             println!("⚠️ Buy Revert: {reason}");
@@ -145,7 +150,9 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         return Ok(());
     }
 
-    let buy_processed = tx_processor.process_transaction_from_simulation_result(&buy_tx, &buy_res, latest_block, step_index).await?;
+    let buy_processed = tx_processor
+        .process_transaction_from_simulation_result(&buy_tx, &buy_res, latest_block, step_index)
+        .await?;
     let usdc_balance = extract_positive_amount(&buy_processed, buyer_address, usdc_address);
     println!("Buyer has {} USDC", format_amount(usdc_balance, 6));
     step_index += 1;
@@ -157,11 +164,15 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     // 6. Accidental Transfer: User sends USDC to Router directly (ERC20 transfer)
     // We construct a raw ERC20 transfer transaction
-    let transfer_calldata = Bytes::from([
-        &hex::decode("a9059cbb").unwrap()[..], // transfer(address,uint256)
-        &[0u8; 12], &router_address.as_slice(),
-        &usdc_balance.to_be_bytes::<32>(),
-    ].concat());
+    let transfer_calldata = Bytes::from(
+        [
+            &hex::decode("a9059cbb").unwrap()[..], // transfer(address,uint256)
+            &[0u8; 12],
+            &router_address.as_slice(),
+            &usdc_balance.to_be_bytes::<32>(),
+        ]
+        .concat(),
+    );
 
     let mut accidental_tx = UnsignedTransaction {
         from: Some(buyer_address),
@@ -173,9 +184,13 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         ..Default::default()
     };
     apply_simple_gas_policy(&mut accidental_tx);
-    
+
     let acc_res = chain.step_with_trace(accidental_tx.clone()).await?;
-    println!("[{}] Accidental Transfer to Router: {}", step_index + 1, if acc_res.success { "✅" } else { "❌" });
+    println!(
+        "[{}] Accidental Transfer to Router: {}",
+        step_index + 1,
+        if acc_res.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // Verify Router has USDC
@@ -201,12 +216,18 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut sweep_tx);
 
     let sweep_res = chain.step_with_trace(sweep_tx.clone()).await?;
-    let sweep_processed = tx_processor.process_transaction_from_simulation_result(&sweep_tx, &sweep_res, latest_block, step_index).await?;
+    let sweep_processed = tx_processor
+        .process_transaction_from_simulation_result(&sweep_tx, &sweep_res, latest_block, step_index)
+        .await?;
 
     println!(
         "[{}] Router Execute (Sweep): {} (hash {:#x})",
         step_index + 1,
-        if sweep_res.success { "✅ success" } else { "❌ failed" },
+        if sweep_res.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         sweep_processed.hash
     );
 
@@ -214,13 +235,19 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(reason) = sweep_res.revert_reason.as_deref() {
             println!("⚠️ Revert reason: {reason}");
         }
-        return Ok(())
+        return Ok(());
     }
 
     let recovered = extract_positive_amount(&sweep_processed, buyer_address, usdc_address);
     println!("Recovered: {} USDC", format_amount(recovered, 6));
-    
-    debug_log_balance_change("Buyer after Sweep", &sweep_processed, buyer_address, weth_address, usdc_address);
+
+    debug_log_balance_change(
+        "Buyer after Sweep",
+        &sweep_processed,
+        buyer_address,
+        weth_address,
+        usdc_address,
+    );
 
     Ok(())
 }
@@ -231,27 +258,29 @@ fn encode_v2_swap_params(
     amount_out_min: U256,
     path: &[Address],
     recipient: Address,
-    payer_is_user: bool
+    payer_is_user: bool,
 ) -> Vec<u8> {
     let mut data = Vec::new();
     // Head
     data.extend_from_slice(&amount_in.to_be_bytes::<32>()); // 0
     data.extend_from_slice(&amount_out_min.to_be_bytes::<32>()); // 32
-    
+
     let path_offset = U256::from(160); // 5 * 32 = 160 (amountIn, min, offset, recipient, bool)
     data.extend_from_slice(&path_offset.to_be_bytes::<32>()); // 64
-    
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice()); // 96
-    
+
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice()); // 96
+
     // bool payerIsUser at 128
     data.extend_from_slice(&[0u8; 31]);
     data.extend_from_slice(&[if payer_is_user { 1 } else { 0 }]); // 128
-    
+
     // Body (Path) starts at 160
     let path_len = U256::from(path.len());
     data.extend_from_slice(&path_len.to_be_bytes::<32>());
     for addr in path {
-        data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(addr.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(addr.as_slice());
     }
     data
 }
@@ -259,8 +288,10 @@ fn encode_v2_swap_params(
 fn encode_sweep_params(token: Address, recipient: Address, amount_min: U256) -> Vec<u8> {
     // (address token, address recipient, uint256 amountMinimum)
     let mut data = Vec::new();
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
     data.extend_from_slice(&amount_min.to_be_bytes::<32>());
     data
 }
@@ -289,14 +320,22 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    for body in bodies { data.extend_from_slice(&body); }
+    for body in bodies {
+        data.extend_from_slice(&body);
+    }
     Bytes::from(data)
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }
 
 fn format_wei(wei: U256) -> String {
@@ -304,10 +343,14 @@ fn format_wei(wei: U256) -> String {
 }
 
 fn format_amount(amount: U256, decimals: u8) -> String {
-    if amount.is_zero() { return "0".to_string(); }
+    if amount.is_zero() {
+        return "0".to_string();
+    }
     let digits = amount.to_string();
     let decimals = decimals as usize;
-    if decimals == 0 { return digits; }
+    if decimals == 0 {
+        return digits;
+    }
     if digits.len() <= decimals {
         let padded = format!("{:0>width$}", digits, width = decimals + 1);
         let (whole, frac) = padded.split_at(padded.len() - decimals);
@@ -327,12 +370,16 @@ fn extract_positive_amount(
     if let Some(changes) = processed_tx.address_balance_changes.get(&account) {
         if let Some(symbol) = get_token_symbol(&token) {
             if let Some(&amount) = changes.currency_net.get(symbol) {
-                if amount > I256::ZERO { return amount.unsigned_abs(); }
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
+                }
             }
         }
         let key = to_checksum_address(&token);
         if let Some(&amount) = changes.token_net.get(&key) {
-            if amount > I256::ZERO { return amount.unsigned_abs(); }
+            if amount > I256::ZERO {
+                return amount.unsigned_abs();
+            }
         }
     }
     U256::ZERO
@@ -368,7 +415,13 @@ fn debug_log_balance_change(
             }
         }
         for (currency, amount) in currency_changes {
-            let sign = if amount > I256::ZERO { "+" } else if amount < I256::ZERO { "-" } else { "" };
+            let sign = if amount > I256::ZERO {
+                "+"
+            } else if amount < I256::ZERO {
+                "-"
+            } else {
+                ""
+            };
             let display_amount = if currency == "ETH" || currency == "WETH" || currency == "mWETH" {
                 format_wei(amount.unsigned_abs())
             } else {

@@ -1,9 +1,7 @@
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx,
-    build_mock_pool_manager_deploy_tx,
-    build_weth_deposit_tx,
+    build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_weth_deposit_tx,
     compute_contract_address,
 };
 use reth_provider::AccountReader;
@@ -29,9 +27,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -59,9 +55,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     let account = provider.basic_account(&buyer_address)?.unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -79,7 +73,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     let weth_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?;
@@ -93,11 +91,15 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     chain.step_with_trace(deposit_tx.clone()).await?;
     step_index += 1;
 
-    let transfer_calldata = Bytes::from([
-        &hex::decode("a9059cbb").unwrap()[..],
-        &[0u8; 12], &router_address.as_slice(),
-        &dust_amount.to_be_bytes::<32>(),
-    ].concat());
+    let transfer_calldata = Bytes::from(
+        [
+            &hex::decode("a9059cbb").unwrap()[..],
+            &[0u8; 12],
+            &router_address.as_slice(),
+            &dust_amount.to_be_bytes::<32>(),
+        ]
+        .concat(),
+    );
     let mut fund_tx = UnsignedTransaction {
         from: Some(buyer_address),
         to: Some(weth_address),
@@ -140,12 +142,18 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut tx);
 
     let result = chain.step_with_trace(tx.clone()).await?;
-    let processed = tx_processor.process_transaction_from_simulation_result(&tx, &result, latest_block, step_index).await?;
+    let processed = tx_processor
+        .process_transaction_from_simulation_result(&tx, &result, latest_block, step_index)
+        .await?;
 
     println!(
         "[{}].Router Execute (Flash Loan): {} (hash {:#x})",
         step_index + 1,
-        if result.success { "✅ success" } else { "❌ failed" },
+        if result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         processed.hash
     );
 
@@ -153,7 +161,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(reason) = result.revert_reason.as_deref() {
             println!("⚠️ Revert reason: {reason}");
         }
-        return Ok(())
+        return Ok(());
     }
 
     println!("Logs count: {}", result.logs.len());
@@ -184,7 +192,8 @@ fn encode_flash_loan_params(tokens: Vec<Address>, amounts: Vec<U256>, user_data:
 
     data.extend_from_slice(&U256::from(tokens.len()).to_be_bytes::<32>());
     for t in tokens {
-        data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(t.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(t.as_slice());
     }
 
     data.extend_from_slice(&U256::from(amounts.len()).to_be_bytes::<32>());
@@ -224,12 +233,20 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    for body in bodies { data.extend_from_slice(&body); }
+    for body in bodies {
+        data.extend_from_slice(&body);
+    }
     Bytes::from(data)
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }

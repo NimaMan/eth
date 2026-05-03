@@ -1,15 +1,9 @@
-use alloy_primitives::{Address, Bytes, I256, U256, FixedBytes};
+use alloy_primitives::{Address, Bytes, FixedBytes, I256, U256};
 use eyre::Result;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx,
-    build_mock_pool_manager_deploy_tx,
-    build_token_approval_tx,
-    build_weth_deposit_tx,
-    compute_contract_address,
-    pad_address,
-    pad_u256,
-    CMD_TRANSFER_FROM,
+    build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
+    build_weth_deposit_tx, compute_contract_address, pad_address, pad_u256, CMD_TRANSFER_FROM,
 };
 use reth_provider::AccountExtReader;
 use std::sync::Arc;
@@ -34,9 +28,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -61,7 +53,8 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_accounts(vec![buyer_address])?
+    let account = provider
+        .basic_accounts(vec![buyer_address])?
         .into_iter()
         .find(|(addr, _)| addr == &buyer_address)
         .map(|(_, acc_opt)| acc_opt)
@@ -69,9 +62,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -81,7 +72,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut mock_pm_deploy_tx);
     chain.step_with_trace(mock_pm_deploy_tx.clone()).await?;
     let mock_pm_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Mock PoolManager deployed at {}", step_index + 1, mock_pm_address);
+    println!(
+        "[{}] Mock PoolManager deployed at {}",
+        step_index + 1,
+        mock_pm_address
+    );
     step_index += 1;
 
     // Deploy Baygus Router
@@ -90,35 +85,51 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     // 4. Target Real Balancer V2 Pool (80/20 BAL/WETH)
     // Pool ID: 0x5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014
     let pool_id_hex = "5c6ee304399dbdb9c8ef030ab642b10820db8f56000200000000000000000014";
     let pool_id: FixedBytes<32> = pool_id_hex.parse()?;
-    
+
     let weth_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?;
     let bal_address: Address = "0xba100000625a3754423978a60c9317c58a424e3D".parse()?;
-    
+
     let amount_in = U256::from(TEST_AMOUNT_WEI);
 
-    println!("Swapping {} WETH for BAL on Balancer V2 (80/20 Pool)", format_wei(amount_in));
+    println!(
+        "Swapping {} WETH for BAL on Balancer V2 (80/20 Pool)",
+        format_wei(amount_in)
+    );
 
     // 4.5 Deposit WETH
     let mut deposit_tx = build_weth_deposit_tx(buyer_address, weth_address, amount_in);
     deposit_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut deposit_tx);
     let deposit_result = chain.step_with_trace(deposit_tx.clone()).await?;
-    println!("[{}] WETH Deposit: {}", step_index + 1, if deposit_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] WETH Deposit: {}",
+        step_index + 1,
+        if deposit_result.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // 5. Approve Router to spend WETH
-    let mut approve_tx = build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
+    let mut approve_tx =
+        build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
     approve_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_tx);
     let approve_result = chain.step_with_trace(approve_tx.clone()).await?;
-    println!("[{}] WETH Approval: {}", step_index + 1, if approve_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] WETH Approval: {}",
+        step_index + 1,
+        if approve_result.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // 6. Execute Buy (WETH -> BAL)
@@ -131,9 +142,9 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         bal_address,
         buyer_address,
         amount_in,
-        limit
+        limit,
     );
-    
+
     // Commands and Inputs for execute
     let mut commands_buy_vec = Vec::new();
     let mut inputs_buy_vec = Vec::new();
@@ -148,7 +159,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     // 2. Add Balancer Swap command and input
     commands_buy_vec.push(0x06); // CMD_BALANCER_SWAP
     inputs_buy_vec.push(Bytes::from(input_buy));
-    
+
     let commands_buy = Bytes::from(commands_buy_vec);
     let execute_calldata_buy = encode_execute(commands_buy, inputs_buy_vec);
 
@@ -165,18 +176,17 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
     let buy_processed = tx_processor
-        .process_transaction_from_simulation_result(
-            &buy_tx,
-            &buy_result,
-            latest_block,
-            step_index,
-        )
+        .process_transaction_from_simulation_result(&buy_tx, &buy_result, latest_block, step_index)
         .await?;
 
     println!(
         "[{}] Router Execute (Buy Balancer): {} (hash {:#x})",
         step_index + 1,
-        if buy_result.success { "✅ success" } else { "❌ failed" },
+        if buy_result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         buy_processed.hash
     );
 
@@ -187,8 +197,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(ctx) = buy_result.revert_context {
             println!(
                 "Revert context   : target {} (calldata {} bytes)",
-                ctx.target,
-                ctx.calldata_len
+                ctx.target, ctx.calldata_len
             );
         }
         return Ok(());
@@ -197,8 +206,17 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     // Check received BAL amount
     let tokens_received = extract_positive_amount(&buy_processed, buyer_address, bal_address);
-    println!("Tokens Received : {} BAL", format_amount(tokens_received, 18));
-    debug_log_balance_change("Buyer after Buy", &buy_processed, buyer_address, weth_address, bal_address);
+    println!(
+        "Tokens Received : {} BAL",
+        format_amount(tokens_received, 18)
+    );
+    debug_log_balance_change(
+        "Buyer after Buy",
+        &buy_processed,
+        buyer_address,
+        weth_address,
+        bal_address,
+    );
 
     if tokens_received.is_zero() {
         println!("⚠️ No tokens received, skipping sell.");
@@ -206,11 +224,20 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     }
 
     // 7. Approve Router to spend BAL
-    let mut approve_bal_tx = build_token_approval_tx(buyer_address, bal_address, router_address, tokens_received);
+    let mut approve_bal_tx =
+        build_token_approval_tx(buyer_address, bal_address, router_address, tokens_received);
     approve_bal_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_bal_tx);
     let approve_bal_result = chain.step_with_trace(approve_bal_tx.clone()).await?;
-    println!("[{}] BAL Approval: {}", step_index + 1, if approve_bal_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] BAL Approval: {}",
+        step_index + 1,
+        if approve_bal_result.success {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
     step_index += 1;
 
     // 8. Execute Sell (BAL -> WETH)
@@ -220,7 +247,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         weth_address,
         buyer_address,
         tokens_received,
-        limit
+        limit,
     );
 
     let mut commands_sell_vec = Vec::new();
@@ -264,7 +291,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!(
         "[{}] Router Execute (Sell Balancer): {} (hash {:#x})",
         step_index + 1,
-        if sell_result.success { "✅ success" } else { "❌ failed" },
+        if sell_result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         sell_processed.hash
     );
 
@@ -278,7 +309,13 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     let weth_received = extract_positive_amount(&sell_processed, buyer_address, weth_address);
     println!("WETH Received   : {} WETH", format_wei(weth_received));
 
-    debug_log_balance_change("Buyer after Sell", &sell_processed, buyer_address, weth_address, bal_address);
+    debug_log_balance_change(
+        "Buyer after Sell",
+        &sell_processed,
+        buyer_address,
+        weth_address,
+        bal_address,
+    );
 
     Ok(())
 }
@@ -294,9 +331,12 @@ fn encode_balancer_swap_params(
     // (bytes32 poolId, address assetIn, address assetOut, address recipient, uint256 amount, uint256 limit)
     let mut data = Vec::new();
     data.extend_from_slice(pool_id.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(asset_in.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(asset_out.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(asset_in.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(asset_out.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     data.extend_from_slice(&limit.to_be_bytes::<32>());
     data
@@ -326,14 +366,22 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    for body in bodies { data.extend_from_slice(&body); }
+    for body in bodies {
+        data.extend_from_slice(&body);
+    }
     Bytes::from(data)
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }
 
 fn format_wei(wei: U256) -> String {
@@ -341,10 +389,14 @@ fn format_wei(wei: U256) -> String {
 }
 
 fn format_amount(amount: U256, decimals: u8) -> String {
-    if amount.is_zero() { return "0".to_string(); }
+    if amount.is_zero() {
+        return "0".to_string();
+    }
     let digits = amount.to_string();
     let decimals = decimals as usize;
-    if decimals == 0 { return digits; }
+    if decimals == 0 {
+        return digits;
+    }
     if digits.len() <= decimals {
         let padded = format!("{:0>width$}", digits, width = decimals + 1);
         let (whole, frac) = padded.split_at(padded.len() - decimals);
@@ -364,12 +416,16 @@ fn extract_positive_amount(
     if let Some(changes) = processed_tx.address_balance_changes.get(&account) {
         if let Some(symbol) = get_token_symbol(&token) {
             if let Some(&amount) = changes.currency_net.get(symbol) {
-                if amount > I256::ZERO { return amount.unsigned_abs(); }
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
+                }
             }
         }
         let key = to_checksum_address(&token);
         if let Some(&amount) = changes.token_net.get(&key) {
-            if amount > I256::ZERO { return amount.unsigned_abs(); }
+            if amount > I256::ZERO {
+                return amount.unsigned_abs();
+            }
         }
     }
     U256::ZERO
@@ -405,7 +461,13 @@ fn debug_log_balance_change(
             }
         }
         for (currency, amount) in currency_changes {
-            let sign = if amount > I256::ZERO { "+" } else if amount < I256::ZERO { "-" } else { "" };
+            let sign = if amount > I256::ZERO {
+                "+"
+            } else if amount < I256::ZERO {
+                "-"
+            } else {
+                ""
+            };
             let display_amount = if currency == "ETH" || currency == "WETH" || currency == "mWETH" {
                 format_wei(amount.unsigned_abs())
             } else {

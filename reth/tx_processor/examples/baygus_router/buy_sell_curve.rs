@@ -3,14 +3,8 @@ use eyre::Result;
 use reth_chain_query::common_addresses::uniswap_v2_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx,
-    build_mock_pool_manager_deploy_tx,
-    build_token_approval_tx,
-    build_weth_deposit_tx,
-    compute_contract_address,
-    pad_address,
-    pad_u256,
-    CMD_TRANSFER_FROM,
+    build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
+    build_weth_deposit_tx, compute_contract_address, pad_address, pad_u256, CMD_TRANSFER_FROM,
 };
 use reth_provider::AccountExtReader;
 use std::sync::Arc;
@@ -33,9 +27,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -65,12 +57,13 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     // Actually, easier to just pick an address that has USDC.
     // Let's try `0x77134cbC06cB00b66F4c7e623D5fdBF6777635aa` (some random whale from etherscan) or standard binance.
     // But to keep it consistent, let's use `0x0c96...` and buy USDC with ETH via V2 first (setup step).
-    
+
     let buyer_address: Address = "0x0c96c602b1b332b8ab2093e5d72d804a24bd5689".parse()?;
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_accounts(vec![buyer_address])?
+    let account = provider
+        .basic_accounts(vec![buyer_address])?
         .into_iter()
         .find(|(addr, _)| addr == &buyer_address)
         .map(|(_, acc_opt)| acc_opt)
@@ -78,9 +71,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -98,7 +89,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     // 4. Prepare Tokens
@@ -115,10 +110,10 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Acquiring USDC via V2...");
     // ... (omitted setup steps similar to other example, assuming user has ETH)
     // I'll just do a quick V2 swap here to fund USDC.
-    // Approve router for WETH? No, we can do ETH -> USDC via V2 Router directly? 
+    // Approve router for WETH? No, we can do ETH -> USDC via V2 Router directly?
     // Or use BaygusRouter V2 Swap (ETH -> WETH -> USDC).
     // But we need to deposit WETH first.
-    
+
     // A. Deposit WETH
     let deposit_amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
     let mut deposit_tx = build_weth_deposit_tx(buyer_address, weth_address, deposit_amount);
@@ -128,7 +123,8 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     step_index += 1;
 
     // B. Approve Router for WETH
-    let mut approve_weth_tx = build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
+    let mut approve_weth_tx =
+        build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
     approve_weth_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_weth_tx);
     chain.step_with_trace(approve_weth_tx).await?;
@@ -138,8 +134,9 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     // Removed: use reth_chain_query::tx_builders::uniswap_v4::CMD_V2_SWAP;
 
     let path_v2 = vec![weth_address, usdc_address];
-    let input_v2_swap_params = encode_v2_swap_params(deposit_amount, U256::ZERO, &path_v2, buyer_address);
-    
+    let input_v2_swap_params =
+        encode_v2_swap_params(deposit_amount, U256::ZERO, &path_v2, buyer_address);
+
     // Commands and Inputs for execute
     let mut commands_v2_vec = Vec::new();
     let mut inputs_v2_vec = Vec::new();
@@ -168,14 +165,16 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         ..Default::default()
     };
     apply_simple_gas_policy(&mut v2_tx);
-    
+
     let v2_res = chain.step_with_trace(v2_tx.clone()).await?;
     if !v2_res.success {
         println!("Setup V2 Swap Failed: {:?}", v2_res.revert_reason);
-        return Ok(())
+        return Ok(());
     }
     step_index += 1;
-    let v2_processed = tx_processor.process_transaction_from_simulation_result(&v2_tx, &v2_res, latest_block, step_index).await?;
+    let v2_processed = tx_processor
+        .process_transaction_from_simulation_result(&v2_tx, &v2_res, latest_block, step_index)
+        .await?;
     let usdc_received = extract_positive_amount(&v2_processed, buyer_address, usdc_address);
     println!("Acquired {} USDC", format_amount(usdc_received, 6));
 
@@ -190,7 +189,8 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     let min_dy = U256::ZERO;
 
     // Approve Router for USDC
-    let mut approve_usdc_tx = build_token_approval_tx(buyer_address, usdc_address, router_address, dx);
+    let mut approve_usdc_tx =
+        build_token_approval_tx(buyer_address, usdc_address, router_address, dx);
     approve_usdc_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_usdc_tx);
     chain.step_with_trace(approve_usdc_tx).await?;
@@ -203,8 +203,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         usdc_address,
         dai_address,
         buyer_address,
-        i, j, dx, min_dy,
-        false // useUnderlying? 3pool exchange is usually sufficient? 3pool has `exchange`.
+        i,
+        j,
+        dx,
+        min_dy,
+        false, // useUnderlying? 3pool exchange is usually sufficient? 3pool has `exchange`.
     );
     // CMD_CURVE_SWAP = 0x05
     let mut commands_curve_vec = Vec::new();
@@ -236,12 +239,23 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut curve_tx);
 
     let curve_result = chain.step_with_trace(curve_tx.clone()).await?;
-    let curve_processed = tx_processor.process_transaction_from_simulation_result(&curve_tx, &curve_result, latest_block, step_index).await?;
+    let curve_processed = tx_processor
+        .process_transaction_from_simulation_result(
+            &curve_tx,
+            &curve_result,
+            latest_block,
+            step_index,
+        )
+        .await?;
 
     println!(
         "[{}] Router Execute (Curve USDC->DAI): {} (hash {:#x})",
         step_index + 1,
-        if curve_result.success { "✅ success" } else { "❌ failed" },
+        if curve_result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         curve_processed.hash
     );
 
@@ -249,29 +263,42 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(reason) = curve_result.revert_reason.as_deref() {
             println!("⚠️ Revert reason: {reason}");
         }
-        return Ok(())
+        return Ok(());
     }
 
     let dai_received = extract_positive_amount(&curve_processed, buyer_address, dai_address);
     println!("DAI Received    : {} DAI", format_amount(dai_received, 18));
-    
-    debug_log_balance_change("Buyer after Curve Swap", &curve_processed, buyer_address, weth_address, usdc_address);
+
+    debug_log_balance_change(
+        "Buyer after Curve Swap",
+        &curve_processed,
+        buyer_address,
+        weth_address,
+        usdc_address,
+    );
 
     Ok(())
 }
 
 // Encoders
-fn encode_v2_swap_params(amount_in: U256, amount_out_min: U256, path: &[Address], recipient: Address) -> Vec<u8> {
+fn encode_v2_swap_params(
+    amount_in: U256,
+    amount_out_min: U256,
+    path: &[Address],
+    recipient: Address,
+) -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&amount_in.to_be_bytes::<32>());
     data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
     let path_offset = U256::from(128);
     data.extend_from_slice(&path_offset.to_be_bytes::<32>());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
     let path_len = U256::from(path.len());
     data.extend_from_slice(&path_len.to_be_bytes::<32>());
     for addr in path {
-        data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(addr.as_slice());
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(addr.as_slice());
     }
     data
 }
@@ -285,28 +312,32 @@ fn encode_curve_swap_params(
     j: i128,
     dx: U256,
     min_dy: U256,
-    use_underlying: bool
+    use_underlying: bool,
 ) -> Vec<u8> {
     // (address, address, address, address, int128, int128, uint256, uint256, bool)
     // All static except bool is padded to 32 bytes.
     let mut data = Vec::new();
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(pool.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_in.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_out.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
-    
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(pool.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_in.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_out.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
+
     // int128 padded to 32 bytes (int256)
     // i128 to i256 conversion
     // Positive i/j:
     data.extend_from_slice(&pad_i128(i));
     data.extend_from_slice(&pad_i128(j));
-    
+
     data.extend_from_slice(&dx.to_be_bytes::<32>());
     data.extend_from_slice(&min_dy.to_be_bytes::<32>());
-    
+
     data.extend_from_slice(&[0u8; 31]);
     data.extend_from_slice(&[if use_underlying { 1 } else { 0 }]);
-    
+
     data
 }
 
@@ -346,14 +377,22 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    for body in bodies { data.extend_from_slice(&body); }
+    for body in bodies {
+        data.extend_from_slice(&body);
+    }
     Bytes::from(data)
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }
 
 fn format_wei(wei: U256) -> String {
@@ -361,10 +400,14 @@ fn format_wei(wei: U256) -> String {
 }
 
 fn format_amount(amount: U256, decimals: u8) -> String {
-    if amount.is_zero() { return "0".to_string(); }
+    if amount.is_zero() {
+        return "0".to_string();
+    }
     let digits = amount.to_string();
     let decimals = decimals as usize;
-    if decimals == 0 { return digits; }
+    if decimals == 0 {
+        return digits;
+    }
     if digits.len() <= decimals {
         let padded = format!("{:0>width$}", digits, width = decimals + 1);
         let (whole, frac) = padded.split_at(padded.len() - decimals);
@@ -384,12 +427,16 @@ fn extract_positive_amount(
     if let Some(changes) = processed_tx.address_balance_changes.get(&account) {
         if let Some(symbol) = get_token_symbol(&token) {
             if let Some(&amount) = changes.currency_net.get(symbol) {
-                if amount > I256::ZERO { return amount.unsigned_abs(); }
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
+                }
             }
         }
         let key = to_checksum_address(&token);
         if let Some(&amount) = changes.token_net.get(&key) {
-            if amount > I256::ZERO { return amount.unsigned_abs(); }
+            if amount > I256::ZERO {
+                return amount.unsigned_abs();
+            }
         }
     }
     U256::ZERO
@@ -425,7 +472,13 @@ fn debug_log_balance_change(
             }
         }
         for (currency, amount) in currency_changes {
-            let sign = if amount > I256::ZERO { "+" } else if amount < I256::ZERO { "-" } else { "" };
+            let sign = if amount > I256::ZERO {
+                "+"
+            } else if amount < I256::ZERO {
+                "-"
+            } else {
+                ""
+            };
             let display_amount = if currency == "ETH" || currency == "WETH" || currency == "mWETH" {
                 format_wei(amount.unsigned_abs())
             } else {

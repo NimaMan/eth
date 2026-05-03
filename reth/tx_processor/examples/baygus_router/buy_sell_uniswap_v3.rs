@@ -3,14 +3,8 @@ use eyre::Result;
 use reth_chain_query::common_addresses::uniswap_v3_tokens;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx,
-    build_mock_pool_manager_deploy_tx,
-    build_token_approval_tx,
-    build_weth_deposit_tx,
-    compute_contract_address,
-    pad_address,
-    pad_u256,
-    CMD_TRANSFER_FROM,
+    build_baygus_router_deploy_tx, build_mock_pool_manager_deploy_tx, build_token_approval_tx,
+    build_weth_deposit_tx, compute_contract_address, pad_address, pad_u256, CMD_TRANSFER_FROM,
 };
 use reth_provider::AccountExtReader;
 use std::sync::Arc;
@@ -35,9 +29,7 @@ fn main() -> Result<()> {
 
     // Spawn the simulation logic as a separate Tokio task
     let simulator_clone = simulator.clone();
-    let handle = rt.spawn(async move {
-        run_simulation(simulator_clone).await
-    });
+    let handle = rt.spawn(async move { run_simulation(simulator_clone).await });
 
     // Block on the handle to await the result of the spawned task
     let simulation_result = rt.block_on(handle)?;
@@ -62,7 +54,8 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!("Buyer address: {:?}", buyer_address);
 
     let provider = simulator.provider_factory().provider()?;
-    let account = provider.basic_accounts(vec![buyer_address])?
+    let account = provider
+        .basic_accounts(vec![buyer_address])?
         .into_iter()
         .find(|(addr, _)| addr == &buyer_address)
         .map(|(_, acc_opt)| acc_opt)
@@ -70,9 +63,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         .unwrap_or_default();
     let deployer_nonce = account.nonce;
 
-    let mut chain = simulator
-        .start_simulation_chain(Some(latest_block))
-        .await?;
+    let mut chain = simulator.start_simulation_chain(Some(latest_block)).await?;
 
     let mut step_index = 0u64;
 
@@ -82,7 +73,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut mock_pm_deploy_tx);
     chain.step_with_trace(mock_pm_deploy_tx.clone()).await?;
     let mock_pm_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Mock PoolManager deployed at {}", step_index + 1, mock_pm_address);
+    println!(
+        "[{}] Mock PoolManager deployed at {}",
+        step_index + 1,
+        mock_pm_address
+    );
     step_index += 1;
 
     // Deploy Baygus Router
@@ -91,7 +86,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     apply_simple_gas_policy(&mut deploy_tx);
     chain.step_with_trace(deploy_tx.clone()).await?;
     let router_address = compute_contract_address(buyer_address, deployer_nonce + step_index);
-    println!("[{}] Baygus Router deployed at {}", step_index + 1, router_address);
+    println!(
+        "[{}] Baygus Router deployed at {}",
+        step_index + 1,
+        router_address
+    );
     step_index += 1;
 
     // 4. Target Real V3 Pool (USDC/WETH 0.05% - Fee 500)
@@ -100,28 +99,41 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         .iter()
         .find(|t| t.symbol == "USDC" && t.fee_tier == 500)
         .ok_or_else(|| eyre::eyre!("USDC V3 pool not found"))?;
-    
+
     let weth_address: Address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?;
     let usdc_address = token_info.token_address;
     let amount_in = U256::from(TEST_AMOUNT_WEI);
     let fee_tier = token_info.fee_tier; // 500
 
-    println!("Swapping {} WETH for USDC on Uniswap V3 (Fee {})", format_wei(amount_in), fee_tier);
+    println!(
+        "Swapping {} WETH for USDC on Uniswap V3 (Fee {})",
+        format_wei(amount_in),
+        fee_tier
+    );
 
     // 4.5 Deposit WETH
     let mut deposit_tx = build_weth_deposit_tx(buyer_address, weth_address, amount_in);
     deposit_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut deposit_tx);
     let deposit_result = chain.step_with_trace(deposit_tx.clone()).await?;
-    println!("[{}] WETH Deposit: {}", step_index + 1, if deposit_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] WETH Deposit: {}",
+        step_index + 1,
+        if deposit_result.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // 5. Approve Router to spend WETH
-    let mut approve_tx = build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
+    let mut approve_tx =
+        build_token_approval_tx(buyer_address, weth_address, router_address, U256::MAX);
     approve_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_tx);
     let approve_result = chain.step_with_trace(approve_tx.clone()).await?;
-    println!("[{}] WETH Approval: {}", step_index + 1, if approve_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] WETH Approval: {}",
+        step_index + 1,
+        if approve_result.success { "✅" } else { "❌" }
+    );
     step_index += 1;
 
     // 6. Execute Buy (WETH -> USDC)
@@ -147,11 +159,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         deadline,
         amount_in,
         U256::ZERO, // amountOutMin
-        U256::ZERO  // sqrtPriceLimitX96
+        U256::ZERO, // sqrtPriceLimitX96
     );
     commands_buy_vec.push(0x03); // CMD_V3_SWAP
     inputs_buy_vec.push(Bytes::from(input_buy_v3_swap));
-    
+
     let commands_buy = Bytes::from(commands_buy_vec);
     let execute_calldata_buy = encode_execute(commands_buy, inputs_buy_vec);
 
@@ -168,18 +180,17 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
 
     let buy_result = chain.step_with_trace(buy_tx.clone()).await?;
     let buy_processed = tx_processor
-        .process_transaction_from_simulation_result(
-            &buy_tx,
-            &buy_result,
-            latest_block,
-            step_index,
-        )
+        .process_transaction_from_simulation_result(&buy_tx, &buy_result, latest_block, step_index)
         .await?;
 
     println!(
         "[{}] Router Execute (Buy V3): {} (hash {:#x})",
         step_index + 1,
-        if buy_result.success { "✅ success" } else { "❌ failed" },
+        if buy_result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         buy_processed.hash
     );
 
@@ -187,26 +198,44 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(reason) = buy_result.revert_reason.as_deref() {
             println!("⚠️ Revert reason: {reason}");
         }
-        return Ok(())
+        return Ok(());
     }
     step_index += 1;
 
     // Check received USDC amount
     let tokens_received = extract_positive_amount(&buy_processed, buyer_address, usdc_address);
-    println!("Tokens Received : {} USDC", format_amount(tokens_received, 6));
-    debug_log_balance_change("Buyer after Buy", &buy_processed, buyer_address, weth_address, usdc_address);
-    
+    println!(
+        "Tokens Received : {} USDC",
+        format_amount(tokens_received, 6)
+    );
+    debug_log_balance_change(
+        "Buyer after Buy",
+        &buy_processed,
+        buyer_address,
+        weth_address,
+        usdc_address,
+    );
+
     if tokens_received.is_zero() {
         println!("⚠️ No tokens received, skipping sell.");
-        return Ok(())
+        return Ok(());
     }
 
     // 7. Approve Router to spend USDC
-    let mut approve_usdc_tx = build_token_approval_tx(buyer_address, usdc_address, router_address, tokens_received);
+    let mut approve_usdc_tx =
+        build_token_approval_tx(buyer_address, usdc_address, router_address, tokens_received);
     approve_usdc_tx.nonce = Some(deployer_nonce + step_index);
     apply_simple_gas_policy(&mut approve_usdc_tx);
     let approve_usdc_result = chain.step_with_trace(approve_usdc_tx.clone()).await?;
-    println!("[{}] USDC Approval: {}", step_index + 1, if approve_usdc_result.success { "✅" } else { "❌" });
+    println!(
+        "[{}] USDC Approval: {}",
+        step_index + 1,
+        if approve_usdc_result.success {
+            "✅"
+        } else {
+            "❌"
+        }
+    );
     step_index += 1;
 
     // 8. Execute Sell (USDC -> WETH)
@@ -229,7 +258,7 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         deadline,
         tokens_received,
         U256::ZERO,
-        U256::ZERO
+        U256::ZERO,
     );
     commands_sell_vec.push(0x03); // CMD_V3_SWAP
     inputs_sell_vec.push(Bytes::from(input_sell_v3_swap));
@@ -261,7 +290,11 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
     println!(
         "[{}] Router Execute (Sell V3): {} (hash {:#x})",
         step_index + 1,
-        if sell_result.success { "✅ success" } else { "❌ failed" },
+        if sell_result.success {
+            "✅ success"
+        } else {
+            "❌ failed"
+        },
         sell_processed.hash
     );
 
@@ -269,13 +302,19 @@ async fn run_simulation(simulator: Arc<TxSimulator>) -> Result<()> {
         if let Some(reason) = sell_result.revert_reason.as_deref() {
             println!("⚠️ Revert reason: {reason}");
         }
-        return Ok(())
+        return Ok(());
     }
 
     let weth_received = extract_positive_amount(&sell_processed, buyer_address, weth_address);
     println!("WETH Received   : {} WETH", format_wei(weth_received));
-    
-    debug_log_balance_change("Buyer after Sell", &sell_processed, buyer_address, weth_address, usdc_address);
+
+    debug_log_balance_change(
+        "Buyer after Sell",
+        &sell_processed,
+        buyer_address,
+        weth_address,
+        usdc_address,
+    );
 
     Ok(())
 }
@@ -348,39 +387,43 @@ fn encode_v3_swap_params(
     //     uint160 sqrtPriceLimitX96;
     // }
     // All static size except struct itself which is just 8 words packed
-    
+
     let mut data = Vec::new();
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_in.as_slice());
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(token_out.as_slice());
-    data.extend_from_slice(&[0u8; 28]); data.extend_from_slice(&fee.to_be_bytes()); // uint24
-    data.extend_from_slice(&[0u8; 12]); data.extend_from_slice(recipient.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_in.as_slice());
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(token_out.as_slice());
+    data.extend_from_slice(&[0u8; 28]);
+    data.extend_from_slice(&fee.to_be_bytes()); // uint24
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(recipient.as_slice());
     data.extend_from_slice(&deadline.to_be_bytes::<32>());
     data.extend_from_slice(&amount_in.to_be_bytes::<32>());
     data.extend_from_slice(&amount_out_min.to_be_bytes::<32>());
     data.extend_from_slice(&sqrt_price_limit_x96.to_be_bytes::<32>()); // uint160 but in 32 bytes
-    
+
     data
 }
 
 fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
     let selector = [0x24, 0x85, 0x6b, 0xc3];
     let mut data = selector.to_vec();
-    
+
     data.extend_from_slice(&U256::from(64).to_be_bytes::<32>());
     let padded_commands_len = (commands.len() + 31) / 32 * 32;
     let inputs_offset = 64 + 32 + padded_commands_len;
     data.extend_from_slice(&U256::from(inputs_offset).to_be_bytes::<32>());
-    
+
     data.extend_from_slice(&U256::from(commands.len()).to_be_bytes::<32>());
     data.extend_from_slice(&commands);
     let padding = padded_commands_len - commands.len();
     data.extend_from_slice(&vec![0u8; padding]);
-    
+
     data.extend_from_slice(&U256::from(inputs.len()).to_be_bytes::<32>());
-    
+
     let mut body_offset = inputs.len() * 32;
     let mut bodies = Vec::new();
-    
+
     for input in &inputs {
         data.extend_from_slice(&U256::from(body_offset).to_be_bytes::<32>());
         let mut body = Vec::new();
@@ -391,18 +434,24 @@ fn encode_execute(commands: Bytes, inputs: Vec<Bytes>) -> Bytes {
         bodies.push(body);
         body_offset += 32 + input.len() + p;
     }
-    
+
     for body in bodies {
         data.extend_from_slice(&body);
     }
-    
+
     Bytes::from(data)
 }
 
 fn apply_simple_gas_policy(tx: &mut UnsignedTransaction) {
-    if tx.gas.is_none() { tx.gas = Some(5_000_000); }
-    if tx.max_fee_per_gas.is_none() { tx.max_fee_per_gas = Some(50_000_000_000); }
-    if tx.max_priority_fee_per_gas.is_none() { tx.max_priority_fee_per_gas = Some(1_000_000_000); }
+    if tx.gas.is_none() {
+        tx.gas = Some(5_000_000);
+    }
+    if tx.max_fee_per_gas.is_none() {
+        tx.max_fee_per_gas = Some(50_000_000_000);
+    }
+    if tx.max_priority_fee_per_gas.is_none() {
+        tx.max_priority_fee_per_gas = Some(1_000_000_000);
+    }
 }
 
 fn format_wei(wei: U256) -> String {
@@ -410,11 +459,15 @@ fn format_wei(wei: U256) -> String {
 }
 
 fn format_amount(amount: U256, decimals: u8) -> String {
-    if amount.is_zero() { return "0".to_string(); }
+    if amount.is_zero() {
+        return "0".to_string();
+    }
     let digits = amount.to_string();
     let decimals = decimals as usize;
-    if decimals == 0 { return digits; }
-    
+    if decimals == 0 {
+        return digits;
+    }
+
     if digits.len() <= decimals {
         let padded = format!("{:0>width$}", digits, width = decimals + 1);
         let (whole, frac) = padded.split_at(padded.len() - decimals);
@@ -434,12 +487,16 @@ fn extract_positive_amount(
     if let Some(changes) = processed_tx.address_balance_changes.get(&account) {
         if let Some(symbol) = get_token_symbol(&token) {
             if let Some(&amount) = changes.currency_net.get(symbol) {
-                if amount > I256::ZERO { return amount.unsigned_abs(); }
+                if amount > I256::ZERO {
+                    return amount.unsigned_abs();
+                }
             }
         }
         let key = to_checksum_address(&token);
         if let Some(&amount) = changes.token_net.get(&key) {
-            if amount > I256::ZERO { return amount.unsigned_abs(); }
+            if amount > I256::ZERO {
+                return amount.unsigned_abs();
+            }
         }
     }
     U256::ZERO
