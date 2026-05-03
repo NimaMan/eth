@@ -19,7 +19,7 @@ pub async fn fetch_token_metadata(
     token: Address,
     block: Option<u64>,
 ) -> Result<Option<TokenMetadata>> {
-    provider.get_token_metadata(token, block, &[], block).await
+    provider.get_token_metadata(token, block, None).await
 }
 
 /// Fetch the token's decimals at an optional historical block.

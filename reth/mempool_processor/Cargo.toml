@@ -42,24 +42,18 @@ ctrlc           = "3.4"
 # Async trait support
 async-trait     = "0.1"
 
-# Transaction simulation with REVM - align with Reth v1.7.0 toolchain
-revm            = { version = "29.0.0", default-features = false, features = ["std", "alloydb", "asyncdb"] }
-revm-primitives = { version = "20.2.1", default-features = false, features = ["std", "serde"] }
-revm-context    = { version = "9.0.2", default-features = false, features = ["optional_no_base_fee"] }
-revm-database   = { version = "7.0.5", default-features = false }
-
-# Alloy dependencies (for revm_tx_simulator_lib interaction)
-alloy-eips      = { version = "1.0.32", default-features = false }
-alloy-provider  = { version = "1.0.32", default-features = false, features = ["reqwest", "ws"] }
-alloy-network   = { version = "1.0.32" }
-alloy-rpc-client = { version = "1.0.32" }
+# Alloy dependencies for transaction decoding and RPC clients.
+alloy-eips      = "2.0.4"
+alloy-provider  = { version = "1.0.38", default-features = false, features = ["reqwest", "ws"] }
+alloy-network   = { version = "1.0.38" }
+alloy-rpc-client = { version = "1.0.38" }
 
 
 # Reth dependencies for database access
 # Reth ExEx dependencies (optional, for direct integration)
-reth-exex = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
-reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
-reth-node-core = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
+reth-transaction-pool = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
+reth-node-core = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
 
 bytes           = "1.5"
 ethereum-types  = "0.14"
@@ -92,28 +86,12 @@ tokio-tungstenite = "0.20"
 tx_processor = { path = "../tx_processor" }
 tx_simulator = { path = "../tx_simulator" }
 reth_chain_query = { path = "../reth_chain_query" }
-# Reth dependencies - using GitHub references to match tx_simulator
-reth-provider = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-chainspec = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-revm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-evm = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-node-types = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-db = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-primitives = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2" }
-
 # Alloy dependencies for transaction decoding
-alloy-primitives = { version = "1.0.32", features = ["rlp"] }
+alloy-primitives = { version = "1.5.7", features = ["rlp"] }
 alloy-rlp = "0.3"
-# alloy-eips already defined above from crates.io
-alloy-consensus = { version = "1.0.32" }
-alloy-sol-types = { version = "1.0.32" }
-alloy-rpc-types = { version = "1.0.32" }
-
-# REVM for Direct Reth simulation
-# Note: Using existing revm 29.0.0 from above
-revm-inspectors = "0.29.2"
+alloy-consensus = "2.0.4"
+alloy-sol-types = "1.5.7"
+alloy-rpc-types = "1.0.38"
 
 # Direct Reth simulator
 # Removed - replaced by reth_tx_simulator
@@ -124,7 +102,7 @@ jsonrpsee = { version = "0.24", features = ["http-client"] }
 # Database support
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres", "chrono", "bigdecimal"] }
 rust_decimal = { version = "1.0", features = ["serde-float"] }
-reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", tag = "v1.8.2", optional = true }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth.git", branch = "main", optional = true }
 
 [lib]
 name = "mempool_processor"
