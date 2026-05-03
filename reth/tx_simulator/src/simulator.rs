@@ -13,20 +13,26 @@ use tokio::{runtime::Runtime, task};
 use tracing::warn;
 
 // Core Reth imports
-use reth_chainspec::{ChainSpecBuilder, ChainSpecProvider};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
-use reth_node_ethereum::{EthEvmConfig, EthereumNode};
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::SealedHeader;
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_evm_ethereum::EthEvmConfig;
+use reth_node_types::{AnyNodeTypes, NodeTypesWithDBAdapter};
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{
-    providers::StaticFileProvider, BlockNumReader, ProviderFactory, StateProvider,
+    providers::{RocksDBProvider, StaticFileProvider},
+    BlockNumReader, EthStorage, ProviderFactory, StateProviderBox,
 };
+
+type EthereumProviderTypes = AnyNodeTypes<EthPrimitives, ChainSpec, EthStorage, EthEngineTypes>;
+type EthereumProviderFactory =
+    ProviderFactory<NodeTypesWithDBAdapter<EthereumProviderTypes, Arc<DatabaseEnv>>>;
 
 /// Transaction Simulator with direct database access
 #[derive(Clone)]
 pub struct TxSimulator {
-    pub(crate) provider_factory:
-        ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+    pub(crate) provider_factory: EthereumProviderFactory,
     pub(crate) evm_config: EthEvmConfig,
     pub(crate) defaults: SimulationDefaults,
     pub(crate) live_chain_cache: Option<Arc<LiveChainCache>>,
@@ -54,12 +60,13 @@ impl TxSimulator {
 
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
 
-        let provider_factory =
-            ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
-                db.clone(),
-                chain_spec.clone(),
-                StaticFileProvider::read_only(static_files_path, false)?,
-            );
+        let provider_factory = EthereumProviderFactory::new(
+            db.clone(),
+            chain_spec.clone(),
+            StaticFileProvider::read_only(static_files_path)?,
+            RocksDBProvider::builder(datadir.join("rocksdb")).build()?,
+            reth_tasks::Runtime::test(),
+        )?;
 
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
@@ -81,9 +88,7 @@ impl TxSimulator {
     /// Create new simulator with an existing provider factory
     ///
     /// This is useful when you want to share a database connection across multiple components
-    pub fn with_provider_factory(
-        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-    ) -> Result<Self> {
+    pub fn with_provider_factory(provider_factory: EthereumProviderFactory) -> Result<Self> {
         let chain_spec = provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
 
@@ -131,9 +136,7 @@ impl TxSimulator {
     }
 
     /// Get the provider factory for direct database access
-    pub fn provider_factory(
-        &self,
-    ) -> &ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>> {
+    pub fn provider_factory(&self) -> &EthereumProviderFactory {
         &self.provider_factory
     }
 
@@ -167,7 +170,7 @@ impl TxSimulator {
 
     /// Get chain state at a specific block
     /// Returns a StateProvider that gives access to all blockchain state at that block
-    pub fn get_chain_state_at_block(&self, block_number: u64) -> Result<Box<dyn StateProvider>> {
+    pub fn get_chain_state_at_block(&self, block_number: u64) -> Result<StateProviderBox> {
         let context = self.load_block_context_blocking(block_number, None)?;
         match context.state {
             BlockStateProvider::Historical(state) => Ok(state),

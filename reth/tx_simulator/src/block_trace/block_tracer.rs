@@ -9,9 +9,9 @@ use alloy_rpc_types_trace::geth::{
 /// RPC method, but with direct database access for massive performance improvements.
 use eyre::Result;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::{SealedHeader, TransactionSigned};
-use reth_primitives_traits::SignerRecoverable;
-use reth_provider::{BlockHashReader, BlockReader, TransactionsProvider};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::{Recovered, SealedHeader, SignerRecoverable};
+use reth_provider::{BlockHashReader, BlockReader, StateProviderBox, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -211,13 +211,12 @@ impl<'a> BlockTracer<'a> {
         simulator: &TxSimulator,
         tx: &TransactionSigned,
         sender: Address,
-        db: &mut CacheDB<StateProviderDatabase<Box<dyn reth_provider::StateProvider>>>,
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         block_header: &SealedHeader,
         opts: &GethDebugTracingOptions,
         tx_hash: Option<B256>,
         _tx_index: usize,
     ) -> Result<TraceResult> {
-        use reth_primitives::Recovered;
 
         // Create recovered transaction
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
@@ -247,7 +246,7 @@ impl<'a> BlockTracer<'a> {
         // Build the trace from the inspector
         let call_frame = inspector
             .into_geth_builder()
-            .geth_call_traces(CallConfig::default(), res.result.gas_used());
+            .geth_call_traces(CallConfig::default(), res.result.tx_gas_used());
 
         // Wrap in GethTrace
         let trace = GethTrace::CallTracer(call_frame);
@@ -301,10 +300,9 @@ impl<'a> BlockTracer<'a> {
         simulator: &TxSimulator,
         tx: &TransactionSigned,
         sender: Address,
-        db: &mut CacheDB<StateProviderDatabase<Box<dyn reth_provider::StateProvider>>>,
+        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         block_header: &SealedHeader,
     ) -> Result<()> {
-        use reth_primitives::Recovered;
 
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
         let evm_env = simulator

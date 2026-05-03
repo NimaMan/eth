@@ -12,7 +12,8 @@ use alloy_consensus::{SignableTransaction, TxKind, TxLegacy};
 use alloy_primitives::{utils::parse_ether, B256};
 use alloy_primitives::{Address as AlloyAddress, U256 as AlloyU256};
 use reth_chain_query::dex::compute_sushiswap_pool;
-use reth_primitives::{recover_signer_unchecked, sign_message, Transaction, TransactionSigned};
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_primitives_traits::crypto::secp256k1::{recover_signer_unchecked, sign_message};
 use std::env;
 use tx_simulator::tx_builders::{
     amm_swap_route::AmmSwapRoute, build_approve_for_route, build_buy_swap_with_min_out,

@@ -16,7 +16,7 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_revm::primitives::KECCAK_EMPTY;
 use reth_revm::Database;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -243,7 +243,7 @@ impl UnsignedTxChainSimulation {
         self.inspector = self.inspector.take().map(|insp| insp.fused());
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_data = res.result.output().cloned();
         let mut revert_reason =
             decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());

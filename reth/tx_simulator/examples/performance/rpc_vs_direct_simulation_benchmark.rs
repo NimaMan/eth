@@ -19,7 +19,7 @@ use alloy_rlp::Decodable;
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::http_client::HttpClientBuilder;
 use jsonrpsee::rpc_params;
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use serde_json::{json, Value};
 
 #[tokio::main]

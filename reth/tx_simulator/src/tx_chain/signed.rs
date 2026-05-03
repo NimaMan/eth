@@ -14,8 +14,9 @@ use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
 use reth_evm::{ConfigureEvm, Evm, EvmEnvFor, TxEnvFor};
-use reth_node_ethereum::EthEvmConfig;
-use reth_primitives::{Recovered, SealedHeader, TransactionSigned};
+use reth_evm_ethereum::EthEvmConfig;
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::{Recovered, SealedHeader};
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
@@ -67,7 +68,7 @@ impl SignedTxChainSimulation {
         self.inspector = self.inspector.take().map(|insp| insp.fused());
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_reason = Self::revert_reason_from(success, res.result.output());
 
         Ok(SimulationResult {
@@ -98,7 +99,7 @@ impl SignedTxChainSimulation {
         let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_reason = Self::revert_reason_from(success, res.result.output());
         let call_frame = inspector
             .with_transaction_gas_limit(gas_limit)

@@ -33,8 +33,8 @@ use tokio::task;
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::geth::{CallConfig, GethDefaultTracingOptions};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::SealedHeader;
-use reth_provider::StateProvider;
+use reth_primitives_traits::SealedHeader;
+use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::primitives::KECCAK_EMPTY;
@@ -43,7 +43,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 /// Forked state for sequential transaction simulation
 pub(crate) struct ForkedState {
-    pub db: CacheDB<StateProviderDatabase<Box<dyn StateProvider>>>,
+    pub db: CacheDB<StateProviderDatabase<StateProviderBox>>,
     pub block_number: u64,
     pub block_header: SealedHeader,
     pub nonces: HashMap<Address, u64>,
@@ -235,7 +235,7 @@ impl TxSimulator {
         let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let raw_output = res.result.output().cloned();
         let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
         let revert_context = if success { None } else { initial_context };
@@ -326,7 +326,7 @@ impl TxSimulator {
         }
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_data = res.result.output().cloned();
         let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
         let revert_context = if success { None } else { initial_context };
@@ -399,7 +399,7 @@ impl TxSimulator {
         forked_state.db.commit(res.state);
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_data = res.result.output().cloned();
         let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
         let revert_context = if success { None } else { initial_context };

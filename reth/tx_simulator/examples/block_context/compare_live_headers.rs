@@ -1,6 +1,6 @@
 use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use serde_json::{json, Value};
 use tx_simulator::block_context::{live_chain_cache::LiveChainCache, resolve_live_data_redis_url};
 use tx_simulator::header_utils::parse_sealed_header_from_json;

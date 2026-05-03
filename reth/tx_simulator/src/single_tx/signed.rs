@@ -12,14 +12,15 @@ use eyre::Result;
 use tokio::task;
 
 // Type alias for consistent naming style with UnsignedTransaction
-pub type SignedTransaction = reth_primitives::TransactionSigned;
+pub type SignedTransaction = reth_ethereum_primitives::TransactionSigned;
 
 // Reth imports
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::{Recovered, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::Recovered;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
@@ -203,7 +204,7 @@ impl TxSimulator {
         let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let revert_reason = Self::signed_revert_reason(success, res.result.output());
 
         let simulation = SimulationResult {

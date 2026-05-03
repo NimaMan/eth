@@ -8,7 +8,7 @@ use crate::{
 };
 use eyre::Result;
 use futures::future::join_all;
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;

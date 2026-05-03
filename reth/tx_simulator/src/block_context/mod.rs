@@ -29,7 +29,7 @@ use crate::{
     TxSimulator,
 };
 use eyre::{eyre, Result};
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{HeaderProvider, StateProviderBox};
 use serde_json::Value;
 use std::sync::Arc;

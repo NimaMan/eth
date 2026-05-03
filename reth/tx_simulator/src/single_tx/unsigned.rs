@@ -24,7 +24,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame, GethDefaultTracingOptions, StructLog};
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
@@ -417,7 +417,7 @@ impl TxSimulator {
         let emitted_logs = res.result.logs().to_vec();
 
         let success = res.result.is_success();
-        let gas_used = res.result.gas_used();
+        let gas_used = res.result.tx_gas_used();
         let raw_output = res.result.output().cloned();
         let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
         let revert_context = if success {
