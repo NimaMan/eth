@@ -1,6 +1,6 @@
 # Reth Workspace Overview
 
-High-performance, Reth-powered Ethereum tooling built as a set of focused Rust crates. The workspace covers direct chain queries, fast EVM simulation, rich transaction processing, live mempool signal detection, price readers, execution utilities, Python bindings, and fund-flow analytics.
+High-performance, Reth-powered Ethereum tooling built as a set of focused Rust crates. The workspace covers direct chain queries, fast EVM simulation, rich transaction processing, live mempool signal detection, execution utilities, Python bindings, and fund-flow analytics.
 
 ## Architecture
 
@@ -14,7 +14,6 @@ tx_simulator  [core EVM + DB access]
   │     ├─→ tx_processor          [decode, traces, balance deltas]
   │     │     └─→ mempool_processor    [realtime signals → ZMQ]
   │     ├─→ eth_prices             [AMM/oracle price readers]
-  │     │     └─→ eth_env              [simulation environments]
   │     └─→ pyreth                  [Python bindings]
   └─→ tx_processor              [direct simulation inputs]
 
@@ -59,7 +58,6 @@ flowchart LR
 
   subgraph Pricing
     ETHP["eth_prices"]:::pricing
-    ETHL["eth_env"]:::pricing
   end
 
   subgraph Analytics
@@ -89,10 +87,6 @@ flowchart LR
   TXS --> ETHP
   TXP -. buy-sim .-> ETHP
 
-  ETHP --> ETHL
-  RCQ --> ETHL
-  TXP --> ETHL
-
   TXP --> MEMP
   RCQ --> MEMP
   TXS --> MEMP
@@ -104,7 +98,6 @@ flowchart LR
   RCQ --> PY
   TXP --> PY
   ETHP --> PY
-  ETHL --> PY
 
   TXP --> TX_FUND_FLOW
   RCQ --> TX_FUND_FLOW
@@ -136,11 +129,11 @@ Core Execution
     ↓
 Typed Queries + Builders
   reth_chain_query ──→ tx_processor ──→ mempool_processor ──→ ZMQ
-        │                 │  └─→ eth_prices ─→ eth_env
+        │                 │  └─→ eth_prices
         │                 └──────────────┐
         └────────→ eth_prices ───────────┘
 
-Bindings: pyreth ⇐ {tx_simulator, reth_chain_query, tx_processor, eth_prices, eth_env}
+Bindings: pyreth ⇐ {tx_simulator, reth_chain_query, tx_processor, eth_prices}
 Analytics: tx_fund_flow ⇐ {reth_chain_query, tx_processor}
 Indexes: reth_chain_query ⇢ PostgreSQL (optional)
 Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trades/alerts
@@ -158,7 +151,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 ### reth_chain_query
 - Purpose: Fast, typed blockchain queries on top of `tx_simulator` plus AMM calldata builders. Adds entity-centric indexes and PostgreSQL helpers.
 - Depends on: `tx_simulator`, Reth provider/db crates
-- Used by: `tx_processor`, `eth_prices`, `eth_env`, `mempool_processor`, `pyreth`, `tx_fund_flow`
+- Used by: `tx_processor`, `eth_prices`, `mempool_processor`, `pyreth`, `tx_fund_flow`
 - Key: `ChainQuery` (balances, storage, tx/blocks), `tx_builders` (Uniswap v2/v3 routes)
 - Docs: `rust/reth_chain_query/README.md`, `rust/reth_chain_query/src/tx_builders/README.md`
 
@@ -172,7 +165,7 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 ### eth_prices
 - Purpose: Zero-latency price readers that query AMMs (Uniswap V2/V3, Sushi, Curve, Balancer, PancakeV3, Dodo, Fraxswap) and Chainlink, directly from Reth DB. Includes aggregated reader and arbitrage helpers.
 - Depends on: `reth_chain_query`, `tx_simulator`, `tx_processor` (for buy-sim paths)
-- Used by: `eth_env`, `pyreth`
+- Used by: `pyreth`
 - Key: `price_readers/*`, `AggregatedPriceReader`
 - Docs: `rust/eth_prices/README.md`
 
@@ -183,15 +176,9 @@ Execution: eth_tx_executor (eth_kartal) uses RPC (aux/verify) and consumes trade
 - Key: `MempoolFetcherIPCClient`, `FunctionDetector`, `TransactionRouter`, `SimulationManager`, `SignalManager`
 - Docs: `rust/mempool_processor/README.md`, plus `src/signal_detector/README.md`, `src/bin/README.md`
 
-### eth_env
-- Purpose: Deterministic environments (starting with ETH 15-minute forecasts) built on top of `eth_prices` + Reth snapshots. Emits feature-rich observations and reward hooks for supervised/RL training, with bindings exposed via `pyreth`.
-- Depends on: `eth_prices`, `reth_chain_query`
-- Used by: `pyreth`
-- Docs: `rust/eth_env/README.md`
-
 ### pyreth
 - Purpose: Python bindings that expose `ChainQuery`, `TxProcessor`, `TxSimulator`, price readers, and selected simulators to Python with a stable `ProcessedTransaction` schema.
-- Depends on: `tx_simulator`, `tx_processor`, `reth_chain_query`, `eth_prices`, `eth_env`
+- Depends on: `tx_simulator`, `tx_processor`, `reth_chain_query`, `eth_prices`
 - Used by: Python analytics & services
 - Docs: `rust/pyreth/README.md`, `rust/pyreth/src/python/tx_processor/README.md`
 

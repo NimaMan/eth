@@ -22,7 +22,7 @@ Permit Plan (V3)
 
 Usage
 - Builders are used by:
-  - RL env (`eth_env`) to generate unsigned txs for simulation
+  - Strategy/training environments to generate unsigned txs for simulation
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
 
