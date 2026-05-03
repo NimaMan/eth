@@ -16,8 +16,6 @@ use mempool_processor::token_tracking::TokenTrackingCache;
 use mempool_processor::tx_router::{SimulationPriority, TransactionCategory};
 use reth_chain_query::provider::{RethQueryProvider, TransactionData};
 use reth_chain_query::to_checksum_address;
-use reth_primitives::SealedHeader;
-use reth_provider::HeaderProvider;
 use serde_json::json;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -314,20 +312,6 @@ fn build_simulation_job(
         simulation_type: SimulationType::TransactionWithBuySell,
         tx_hash,
     })
-}
-
-fn load_sealed_header(simulator: &TxSimulator, block_number: u64) -> Result<SealedHeader> {
-    let provider = simulator
-        .provider_factory()
-        .provider()
-        .context("failed to acquire provider")?;
-
-    let header = provider
-        .header_by_number(block_number)?
-        .ok_or_else(|| eyre::eyre!("header for block {} not found", block_number))?;
-
-    let hash = header.hash_slow();
-    Ok(SealedHeader::new(header, hash))
 }
 
 fn parse_hash(hash_hex: &str) -> Result<B256> {

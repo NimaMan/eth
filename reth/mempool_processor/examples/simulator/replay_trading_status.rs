@@ -33,21 +33,19 @@ use std::sync::Arc;
 use alloy_primitives::{Address as AlloyAddress, B256, U256};
 use clap::Parser;
 use eyre::{eyre, Context, Result};
+use mempool_processor::simulator::pool_buy_sell_simulator::PoolBuySellSimulator;
 use mempool_processor::token_tracking::token_parameter_extraction::{
     fetch_token_decimals, fetch_token_metadata,
 };
-use mempool_processor::simulator::pool_buy_sell_simulator::PoolBuySellSimulator;
 use reth_chain_query::provider::{RethQueryProvider, TransactionData};
 use reth_chain_query::to_checksum_address;
-use reth_primitives::SealedHeader;
-use reth_provider::HeaderProvider;
 use tokio::runtime::Runtime;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
-use tx_processor::process_unsigned_tx_with_header;
 use tx_processor::simulator::types::{
     PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
 };
+use tx_processor::tx_processor::TxProcessor;
 use tx_processor::ProcessedTransaction;
 use tx_simulator::{TxSimulator, UnsignedTransaction};
 
@@ -137,8 +135,15 @@ async fn run_example(args: Args) -> Result<()> {
     let pool_simulator = PoolBuySellSimulator::with_tx_simulator(tx_simulator.clone())
         .context("failed to initialise PoolBuySellSimulator (is the database accessible?)")?;
 
-    info!("📘 Loading canonical header for block {}", args.block);
-    let sealed_header = load_sealed_header(&tx_simulator, args.block)?;
+    info!(
+        "📘 Initialising sequential simulation at block {}",
+        args.block
+    );
+    let mut chain = tx_simulator
+        .start_simulation_chain(Some(args.block))
+        .await
+        .context("failed to initialize sequential simulator")?;
+    let tx_processor = TxProcessor::new();
 
     // Determine the sequence of helper transactions.
     let mut hash_inputs = args.hashes.clone();
@@ -180,10 +185,19 @@ async fn run_example(args: Args) -> Result<()> {
             .with_context(|| format!("failed to load transaction {}", hash_hex))?;
 
         let unsigned_tx = transaction_to_unsigned(&tx_data)?;
-        let processed =
-            process_unsigned_tx_with_header(&tx_simulator, unsigned_tx, sealed_header.clone())
-                .await
-                .with_context(|| format!("failed to replay {}", hash_hex))?;
+        let full_result = chain
+            .step_with_trace(unsigned_tx.clone())
+            .await
+            .with_context(|| format!("failed to replay {}", hash_hex))?;
+        let processed = tx_processor
+            .process_transaction_from_simulation_result(
+                &unsigned_tx,
+                &full_result,
+                args.block,
+                prior_txs.len() as u64,
+            )
+            .await
+            .with_context(|| format!("failed to process {}", hash_hex))?;
 
         log_processed_transaction(&tx_data, &processed);
         prior_txs.push(processed);
@@ -205,7 +219,9 @@ async fn run_example(args: Args) -> Result<()> {
             meta.decimals
         }
         Ok(None) => {
-            warn!("  token metadata indicates non-ERC20 contract. Falling back to decimals() probe.");
+            warn!(
+                "  token metadata indicates non-ERC20 contract. Falling back to decimals() probe."
+            );
             fetch_token_decimals(&provider, token_address, Some(args.block))
                 .await
                 .with_context(|| "failed to determine token decimals via fallback decimals() probe")
@@ -236,20 +252,6 @@ async fn run_example(args: Args) -> Result<()> {
     log_pool_result(&sim_result);
 
     Ok(())
-}
-
-fn load_sealed_header(simulator: &TxSimulator, block_number: u64) -> Result<SealedHeader> {
-    let provider = simulator
-        .provider_factory()
-        .provider()
-        .context("failed to acquire provider")?;
-
-    let header = provider
-        .header_by_number(block_number)?
-        .ok_or_else(|| eyre::eyre!("header for block {} not found", block_number))?;
-
-    let hash = header.hash_slow();
-    Ok(SealedHeader::new(header, hash))
 }
 
 fn parse_hash(hash_hex: &str) -> Result<B256> {
@@ -285,6 +287,10 @@ fn transaction_to_unsigned(tx: &TransactionData) -> Result<UnsignedTransaction> 
             Some(tx.input.clone())
         },
         nonce: None, // allow the simulator to derive the canonical nonce
+        access_list: Vec::new(),
+        blob_versioned_hashes: Vec::new(),
+        max_fee_per_blob_gas: None,
+        signed_authorizations: Vec::new(),
     })
 }
 
