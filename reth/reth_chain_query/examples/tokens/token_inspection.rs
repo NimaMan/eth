@@ -1,5 +1,4 @@
 use alloy_primitives::{utils::format_units, Address, U256};
-use eyre::eyre;
 /// Token inspection example
 ///
 /// Pulls together metadata, supply, holder balances, historical context, and
@@ -7,15 +6,14 @@ use eyre::eyre;
 ///
 /// Run with: `cargo run --example token_inspection -- token=0x... block=12345`
 use reth_chain_query::{Result, RethQueryProvider};
-use reth_primitives::SealedHeader;
-use reth_provider::HeaderProvider;
 use std::{env, str::FromStr};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("=== Token Inspection ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     let (token_arg, block_arg) = parse_args();
 
@@ -132,16 +130,14 @@ async fn main() -> Result<()> {
     println!("Current Block:    {}", current_block);
 
     let earlier_block = current_block.saturating_sub(100_000); // ~2 weeks ago
-    let earlier_header = load_sealed_header(&provider, Some(earlier_block))?;
-    let current_header = load_sealed_header(&provider, block_override)?;
 
     match provider
-        .get_token_total_supply(token_address, Some(earlier_block), earlier_header.clone())
+        .get_token_total_supply(token_address, Some(earlier_block))
         .await
     {
         Ok(earlier_supply) => {
             let current_supply = provider
-                .get_token_total_supply(token_address, block_override, current_header.clone())
+                .get_token_total_supply(token_address, block_override)
                 .await?;
             let supply_change = if current_supply > earlier_supply {
                 let diff = current_supply - earlier_supply;

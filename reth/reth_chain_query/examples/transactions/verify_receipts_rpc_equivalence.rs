@@ -1,4 +1,3 @@
-use alloy_primitives::{B256, U256};
 use reth_chain_query::provider::BlockTransactionOptions;
 /// Verify Receipt RPC Equivalence
 ///
@@ -7,7 +6,6 @@ use reth_chain_query::provider::BlockTransactionOptions;
 ///
 /// Run with: cargo run --example verify_receipts_rpc_equivalence
 use reth_chain_query::{Result, RethQueryProvider};
-use std::str::FromStr;
 use std::time::Instant;
 
 // For RPC calls
@@ -22,7 +20,8 @@ async fn main() -> Result<()> {
     println!("=========================================\n");
 
     // Initialize our provider
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
     println!("✅ Database provider initialized");
 
     // Initialize RPC client

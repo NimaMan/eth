@@ -47,7 +47,8 @@ async fn main() -> Result<()> {
     let provider = if let Some(path) = datadir {
         RethQueryProvider::new(&path)?
     } else {
-        RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?
+        let path = tx_simulator::config::repo::reth_datadir()?;
+        RethQueryProvider::new(&path)?
     };
 
     println!("🔍 Looking up transaction {}", tx_number);

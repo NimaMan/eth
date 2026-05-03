@@ -1,4 +1,4 @@
-use alloy_primitives::{utils::format_ether, Address, B256, U256};
+use alloy_primitives::{utils::format_ether, B256, U256};
 /// Fetch transaction data, receipts, and execution traces
 ///
 /// This example demonstrates comprehensive transaction data retrieval:
@@ -17,7 +17,8 @@ use std::str::FromStr;
 async fn main() -> Result<()> {
     println!("=== Transaction Lookup and Receipts ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     // === Find Transaction by Hash ===
     println!("1. Transaction Lookup");

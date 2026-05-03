@@ -1,26 +1,19 @@
+use crate::provider::RethProviderFactory;
 use crate::reth_index::database::RethIndexDB;
 use alloy_primitives::B256;
 use eyre::Result;
-use reth_db::DatabaseEnv;
-use reth_node_ethereum::EthereumNode;
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_provider::{ProviderFactory, TransactionsProvider};
+use reth_provider::TransactionsProvider;
 use std::sync::Arc;
 
 /// High-level writer that resolves tx hashes to txumbers and writes arrival times (ms)
 /// to the mempool_tx_arrival_times table in a single batch.
 pub struct MempoolArrivalWriter {
     db: Arc<RethIndexDB>,
-    provider_factory: Arc<ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>,
+    provider_factory: Arc<RethProviderFactory>,
 }
 
 impl MempoolArrivalWriter {
-    pub fn new(
-        db: Arc<RethIndexDB>,
-        provider_factory: Arc<
-            ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        >,
-    ) -> Self {
+    pub fn new(db: Arc<RethIndexDB>, provider_factory: Arc<RethProviderFactory>) -> Self {
         Self {
             db,
             provider_factory,

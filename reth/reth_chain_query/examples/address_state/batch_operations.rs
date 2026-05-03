@@ -32,7 +32,8 @@ const TOKENS: &[(&str, &str)] = &[
 async fn main() -> Result<()> {
     println!("=== Batch Operations Examples ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     // === 1. Batch ETH Balances ===
     println!("1. Batch ETH Balance Query");

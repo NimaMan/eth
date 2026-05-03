@@ -92,7 +92,7 @@ fn test_uniswap_v2_pools(weth: Address, usdc: Address, usdt: Address, dai: Addre
     print_verification("USDC/USDT", known_usdc_usdt, computed_usdc_usdt);
 }
 
-fn test_uniswap_v3_pools(weth: Address, usdc: Address, usdt: Address, dai: Address) {
+fn test_uniswap_v3_pools(weth: Address, usdc: Address, usdt: Address, _dai: Address) {
     // Known Uniswap V3 pool addresses
     // WETH/USDC pools at different fee tiers
     let known_weth_usdc_500 = address!("88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"); // 0.05%
@@ -104,7 +104,7 @@ fn test_uniswap_v3_pools(weth: Address, usdc: Address, usdt: Address, dai: Addre
 
     // USDC/USDT pools
     let known_usdc_usdt_100 = address!("3416cF6C708Da44DB2624D63ea0AAef7113527C6"); // 0.01%
-    let known_usdc_usdt_500 = address!("EEa0E9f5b321E72C7f9810F7D08B93c8316cF8F1"); // 0.05% (might be different)
+    let _known_usdc_usdt_500 = address!("EEa0E9f5b321E72C7f9810F7D08B93c8316cF8F1"); // 0.05% (might be different)
 
     // Compute pool addresses
     let computed_weth_usdc_500 = compute_uniswap_v3_pool(weth, usdc, 500);
@@ -196,8 +196,8 @@ async fn test_dynamic_pool_discovery(
     steth: Address,
     wbtc: Address,
 ) -> Result<()> {
-    // Initialize simulator - use default database path
-    let simulator = TxSimulator::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let simulator = TxSimulator::new(&reth_datadir)?;
 
     println!("🌀 Testing Curve Pool Discovery:");
 

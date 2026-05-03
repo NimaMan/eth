@@ -30,8 +30,7 @@ fn parse_hex_u64(value: &Value) -> Option<u64> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let reth_datadir = env::var("RETH_DATADIR")
-        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
     let rpc_url = env::var("RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:8545".to_string());
 
     let provider = RethQueryProvider::new(&reth_datadir)?;

@@ -207,8 +207,6 @@ impl RethQueryProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_batch_operations_compile() {
         // This just verifies the batch operations compile correctly

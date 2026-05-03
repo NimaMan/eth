@@ -51,7 +51,8 @@ const TOKENS: &[(&str, &str, u8, u64)] = &[
 async fn main() -> Result<()> {
     println!("=== Historical Balance Analysis ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
     let latest_block = provider.get_latest_block()?;
 
     // === 1. ETH Balance Through History ===

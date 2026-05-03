@@ -23,7 +23,8 @@ const TOKENS: &[(&str, &str, u8)] = &[
 async fn main() -> Result<()> {
     println!("=== Balance Change Tracking ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
     let latest_block = provider.get_latest_block()?;
 
     // === 1. Single Address Balance Changes ===
@@ -158,7 +159,7 @@ async fn main() -> Result<()> {
 
     let mut previous_balance = None;
 
-    for (i, &block) in checkpoints.iter().enumerate() {
+    for &block in &checkpoints {
         let account = provider.get_account(address, Some(block)).await?;
         let balance = account.balance;
 

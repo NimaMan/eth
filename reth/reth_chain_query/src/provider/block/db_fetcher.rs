@@ -12,7 +12,7 @@ use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
 use eyre::Result;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
-use reth_primitives::Recovered;
+use reth_primitives_traits::Recovered;
 use reth_provider::{
     BlockBodyIndicesProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
 };

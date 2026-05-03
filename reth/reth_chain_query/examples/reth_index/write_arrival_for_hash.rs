@@ -23,9 +23,10 @@ fn now_ms() -> u64 {
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let reth_datadir = args
-        .next()
-        .unwrap_or_else(|| "/home/nima/.local/share/reth/mainnet".to_string());
+    let reth_datadir = match args.next() {
+        Some(path) => path,
+        None => tx_simulator::config::repo::reth_datadir()?,
+    };
     let index_dir = args
         .next()
         .unwrap_or_else(|| format!("{}/reth_index", reth_datadir));

@@ -1,6 +1,12 @@
 use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
+use reth_chainspec::ChainSpec;
+use reth_db::DatabaseEnv;
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_node_types::{AnyNodeTypes, NodeTypesWithDBAdapter};
 use reth_provider::BlockReader;
+use reth_provider::{EthStorage, ProviderFactory};
 /// RethQueryProvider - Central provider for all blockchain queries
 ///
 /// This provider wraps Reth's database access and provides a unified interface
@@ -11,6 +17,10 @@ use tx_simulator::TxSimulator;
 
 // Import our modules
 use crate::reth_index::RethIndexDB;
+
+type EthereumProviderTypes = AnyNodeTypes<EthPrimitives, ChainSpec, EthStorage, EthEngineTypes>;
+pub type RethProviderFactory =
+    ProviderFactory<NodeTypesWithDBAdapter<EthereumProviderTypes, Arc<DatabaseEnv>>>;
 
 // Re-export submodules
 mod address_index;
@@ -35,14 +45,7 @@ pub struct RethQueryProvider {
     tx_simulator: Arc<TxSimulator>,
 
     /// Provider factory for direct database access
-    provider_factory: Arc<
-        reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    >,
+    provider_factory: Arc<RethProviderFactory>,
 
     /// Optional RPC provider for trace data (temporary until local tracing)
     rpc_provider: Option<Arc<dyn std::any::Any + Send + Sync>>,
@@ -78,16 +81,7 @@ impl RethQueryProvider {
     }
 
     /// Create with an existing provider factory
-    pub fn with_provider_factory(
-        provider_factory: Arc<
-            reth_provider::ProviderFactory<
-                reth_node_types::NodeTypesWithDBAdapter<
-                    reth_node_ethereum::EthereumNode,
-                    Arc<reth_db::DatabaseEnv>,
-                >,
-            >,
-        >,
-    ) -> Result<Self> {
+    pub fn with_provider_factory(provider_factory: Arc<RethProviderFactory>) -> Result<Self> {
         let simulator = Arc::new(TxSimulator::with_provider_factory(
             (*provider_factory).clone(),
         )?);
@@ -120,16 +114,7 @@ impl RethQueryProvider {
     }
 
     /// Get the provider factory for direct database access
-    pub fn provider_factory(
-        &self,
-    ) -> &Arc<
-        reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    > {
+    pub fn provider_factory(&self) -> &Arc<RethProviderFactory> {
         &self.provider_factory
     }
 
@@ -298,18 +283,7 @@ impl RethQueryProvider {
 /// This uses RethQueryProvider::new under the hood to ensure we initialize the
 /// TxSimulator and internal caches in a consistent way, then returns a clone of
 /// the underlying ProviderFactory for components that only need the factory.
-pub fn provider_factory_from_datadir(
-    reth_datadir: &str,
-) -> Result<
-    Arc<
-        reth_provider::ProviderFactory<
-            reth_node_types::NodeTypesWithDBAdapter<
-                reth_node_ethereum::EthereumNode,
-                Arc<reth_db::DatabaseEnv>,
-            >,
-        >,
-    >,
-> {
+pub fn provider_factory_from_datadir(reth_datadir: &str) -> Result<Arc<RethProviderFactory>> {
     let rqp = RethQueryProvider::new(reth_datadir)?;
     Ok(rqp.provider_factory().clone())
 }

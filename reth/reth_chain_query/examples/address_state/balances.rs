@@ -24,7 +24,8 @@ const DAI: &str = "6B175474E89094C44Da98b954EedeAC495271d0F";
 async fn main() -> Result<()> {
     println!("=== ETH and Token Balance Queries ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     // === ETH Balances ===
     println!("1. ETH Balances");

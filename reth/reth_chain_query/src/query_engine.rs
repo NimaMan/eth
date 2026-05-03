@@ -27,7 +27,7 @@ impl ChainQuery {
     /// Create a new ChainQuery instance
     ///
     /// # Arguments
-    /// * `reth_datadir` - Path to Reth data directory (e.g., "/home/user/.local/share/reth/mainnet")
+    /// * `reth_datadir` - Path to Reth data directory (e.g., `/home/nima/storage/samsung8tb/ethereum/reth`)
     pub fn new(reth_datadir: &str) -> Result<Self> {
         let simulator = Arc::new(TxSimulator::new(reth_datadir)?);
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));

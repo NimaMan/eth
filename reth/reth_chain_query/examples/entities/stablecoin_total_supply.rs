@@ -1,4 +1,4 @@
-use alloy_primitives::{utils::format_units, Address, U256};
+use alloy_primitives::{utils::format_units, Address};
 /// Stablecoin total supply analysis
 ///
 /// This example queries total supply for major stablecoins and calculates
@@ -12,7 +12,8 @@ use std::str::FromStr;
 async fn main() -> Result<()> {
     println!("=== Stablecoin Total Supply Analysis ===\n");
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     // Major stablecoins with their decimals
     let stablecoins = vec![

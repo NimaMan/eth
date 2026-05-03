@@ -1,7 +1,8 @@
 use alloy_primitives::B256;
 
 use crate::provider::{StateChanges, TransactionMetadata, TransactionReceipt, TransactionTrace};
-use reth_primitives::{transaction::TransactionSigned, Recovered};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::Recovered;
 
 /// Complete block with all transactions
 #[derive(Debug, Clone)]

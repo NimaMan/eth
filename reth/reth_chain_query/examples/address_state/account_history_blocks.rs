@@ -20,8 +20,8 @@ async fn main() -> Result<()> {
     // Address to analyze
     let addr = Address::from_str("0x2348e8a3a21dbe64ace84853d7b4b696e8a1fc27")?;
 
-    // Open provider against your local reth datadir
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     let latest = provider.get_latest_block()?;
 

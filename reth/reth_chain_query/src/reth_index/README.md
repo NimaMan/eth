@@ -296,7 +296,7 @@ This design ensures our analytics database is always a few milliseconds behind r
 Single MDBX environment with multiple named databases (tables), each serving a specific analytics purpose. Located alongside reth's database for optimal performance.
 
 ```
-/home/nima/.local/share/reth/mainnet/
+/home/nima/storage/samsung8tb/ethereum/reth/
 ├── db/                        # Reth's blockchain database
 └── reth_index/                # RethIndex database
     ├── data.mdb              # Main data file (~100GB)

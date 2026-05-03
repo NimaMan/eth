@@ -162,7 +162,7 @@ impl RethIndexDB {
     /// Fetch all transaction numbers associated with `address`.
     pub fn get_transactions(&self, address: Address) -> Result<Vec<Txumber>> {
         let tx: Transaction<RO> = self.env.begin_ro_txn()?;
-        let mut cursor = tx.cursor(&self.address_index_dbi)?;
+        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
 
         let mut txs = Vec::new();
         let key = AddressIndex::encode_key(address);
@@ -190,7 +190,7 @@ impl RethIndexDB {
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(&self.address_index_dbi)?;
+        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
         let total = self.append_entries_with_cursor(&mut cursor, entries)?;
         tx.commit()?;
         Ok(total)
@@ -206,7 +206,7 @@ impl RethIndexDB {
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(&self.address_index_dbi)?;
+        let mut cursor = tx.cursor(self.address_index_dbi.dbi())?;
         let mut per_block = Vec::with_capacity(blocks.len());
 
         for entries in blocks {
@@ -316,7 +316,7 @@ impl RethIndexDB {
     /// Count entries in the arrival table (for diagnostics).
     pub fn count_tx_arrivals(&self) -> Result<u64> {
         let tx: Transaction<RO> = self.env.begin_ro_txn()?;
-        let cursor = tx.cursor(&self.tx_arrival_dbi)?;
+        let cursor = tx.cursor(self.tx_arrival_dbi.dbi())?;
         let mut count = 0u64;
         for entry in cursor.into_iter::<[u8; 8], [u8; 8]>() {
             entry?;

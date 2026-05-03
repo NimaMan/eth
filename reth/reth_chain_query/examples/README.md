@@ -155,7 +155,7 @@ To ensure comprehensive module testing and demonstrate all capabilities, conside
 
 ## Requirements
 
-- Local Reth node with synced database at `/home/nima/.local/share/reth/mainnet`
+- Local Reth node with synced database from `RETH_DATADIR` in `/home/nima/code/crypto/blockchains/eth/config.env`
 - Rust toolchain installed
 - Database must not be actively used by Reth node (read-only access)
 

@@ -9,16 +9,11 @@
 use alloy_primitives::address;
 use eyre::{eyre, Result};
 use reth_chain_query::{AmmSwapRoute, RethQueryProvider};
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::HeaderProvider;
 
-fn default_reth_db() -> String {
-    std::env::var("RETH_DB_PATH").unwrap_or_else(|_| {
-        format!(
-            "{}/.local/share/reth/mainnet",
-            std::env::var("HOME").unwrap_or_else(|_| "/home/nima".into())
-        )
-    })
+fn default_reth_db() -> Result<String> {
+    tx_simulator::config::repo::reth_datadir()
 }
 
 fn fetch_sealed_header(provider: &RethQueryProvider, block: u64) -> Result<SealedHeader> {
@@ -36,7 +31,7 @@ async fn main() -> Result<()> {
     println!("📦 Liquidity snapshot with cached block header");
     println!("{}", "=".repeat(72));
 
-    let reth_db = default_reth_db();
+    let reth_db = default_reth_db()?;
     let provider = RethQueryProvider::new(&reth_db)?;
     let latest_block = provider.get_latest_block()?;
     println!("Reth DB: {reth_db}");

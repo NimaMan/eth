@@ -7,13 +7,8 @@ use alloy_primitives::address;
 use eyre::Result;
 use reth_chain_query::{Address, AmmSwapRoute, RethQueryProvider, B256};
 
-fn default_reth_db() -> String {
-    std::env::var("RETH_DB_PATH").unwrap_or_else(|_| {
-        format!(
-            "{}/.local/share/reth/mainnet",
-            std::env::var("HOME").unwrap_or_else(|_| "/home/nima".into())
-        )
-    })
+fn default_reth_db() -> Result<String> {
+    tx_simulator::config::repo::reth_datadir()
 }
 
 #[tokio::main]
@@ -23,7 +18,7 @@ async fn main() -> Result<()> {
     println!("🔎 Liquidity Readers Smoke Test");
     println!("{}", "=".repeat(60));
 
-    let reth_db = default_reth_db();
+    let reth_db = default_reth_db()?;
     let provider = RethQueryProvider::new(&reth_db)?;
     println!(
         "Reth DB: {} | latest {}",

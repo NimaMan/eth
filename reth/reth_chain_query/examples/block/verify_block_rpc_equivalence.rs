@@ -7,8 +7,10 @@ use std::{env, sync::Arc};
 /// cargo run --example block/verify_block_rpc_equivalence -- <block_number?>
 #[tokio::main]
 async fn main() -> Result<()> {
-    let datadir =
-        env::var("RETH_DATA_DIR").unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".into());
+    let datadir = match env::var("RETH_DATA_DIR") {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => tx_simulator::config::repo::reth_datadir()?,
+    };
     let rpc_url = env::var("EXECUTION_RPC").unwrap_or_else(|_| "http://127.0.0.1:8545".into());
     let args: Vec<String> = env::args().collect();
 

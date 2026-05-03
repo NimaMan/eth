@@ -20,7 +20,7 @@ use super::{
 
 impl RethQueryProvider {
     fn extract_dynamic_fee_fields(
-        tx: &reth_primitives::TransactionSigned,
+        tx: &reth_ethereum_primitives::TransactionSigned,
     ) -> (Option<U256>, Option<U256>) {
         let tx_type = tx.tx_type();
         let max_fee = tx.max_fee_per_gas();
@@ -35,7 +35,10 @@ impl RethQueryProvider {
     // === Private Helper Methods ===
 
     /// Private helper to get raw transaction by number
-    fn get_raw_tx_by_number(&self, tx_number: u64) -> Result<reth_primitives::TransactionSigned> {
+    fn get_raw_tx_by_number(
+        &self,
+        tx_number: u64,
+    ) -> Result<reth_ethereum_primitives::TransactionSigned> {
         let provider = self.provider_factory.provider()?;
         provider
             .transaction_by_id(tx_number)?
@@ -46,7 +49,7 @@ impl RethQueryProvider {
     fn get_raw_tx_with_metadata(
         &self,
         tx_hash: B256,
-    ) -> Result<(reth_primitives::TransactionSigned, TransactionMeta)> {
+    ) -> Result<(reth_ethereum_primitives::TransactionSigned, TransactionMeta)> {
         let provider = self.provider_factory.provider()?;
         provider
             .transaction_by_hash_with_meta(tx_hash)?

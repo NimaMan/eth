@@ -14,12 +14,11 @@ use std::str::FromStr;
 async fn main() -> Result<()> {
     println!("=== Reth Chain Query Quickstart ===\n");
 
-    // Path to your Reth data directory
-    let reth_datadir = "/home/nima/.local/share/reth/mainnet";
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
 
     // Initialize the provider
     println!("Initializing RethQueryProvider...");
-    let provider = RethQueryProvider::new(reth_datadir)?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
 
     // Optional: Add RPC endpoint for trace data
     // let provider = RethQueryProvider::new(reth_datadir)?

@@ -18,7 +18,8 @@ async fn main() -> Result<()> {
     let used_default = token_arg.eq_ignore_ascii_case(default_token);
     let token = Address::from_str(&token_arg)?;
 
-    let provider = RethQueryProvider::new("/home/nima/.local/share/reth/mainnet")?;
+    let reth_datadir = tx_simulator::config::repo::reth_datadir()?;
+    let provider = RethQueryProvider::new(&reth_datadir)?;
     let latest = provider.get_latest_block()?;
 
     let start_block = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
