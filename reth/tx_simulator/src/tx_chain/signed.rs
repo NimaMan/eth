@@ -13,9 +13,9 @@ use crate::{
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::Result;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm, EvmEnvFor, TxEnvFor};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Recovered, SealedHeader};
 use reth_revm::{Database, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -211,7 +211,7 @@ impl SignedTxChainSimulation {
             .simulator
             .evm_config
             .evm_env(&block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
 
         let recovered = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
         let tx_env = self.simulator.evm_config.tx_env(&recovered);

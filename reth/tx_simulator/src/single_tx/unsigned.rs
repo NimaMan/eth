@@ -398,7 +398,7 @@ impl TxSimulator {
         let evm_env = simulator
             .evm_config
             .evm_env(&header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let base_fee = header.base_fee_per_gas.map(|v| v as u128);
         let tx_env = simulator.create_tx_env(
             &unsigned_tx,

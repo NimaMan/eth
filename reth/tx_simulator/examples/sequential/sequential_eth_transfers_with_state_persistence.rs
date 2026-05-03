@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(30_000_000_000), // 30 gwei
             max_priority_fee_per_gas: Some(1_000_000_000), // 1 gwei
             nonce: None,                           // Will be auto-detected
+            ..Default::default()
         },
         // Transaction 2: Another transfer (builds on tx1's state)
         UnsignedTransaction {
@@ -67,6 +68,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(30_000_000_000),
             max_priority_fee_per_gas: Some(1_000_000_000),
             nonce: None, // Will auto-increment from tx1
+            ..Default::default()
         },
         // Transaction 3: Final transfer
         UnsignedTransaction {
@@ -79,6 +81,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(30_000_000_000),
             max_priority_fee_per_gas: Some(1_000_000_000),
             nonce: None, // Will auto-increment from tx2
+            ..Default::default()
         },
     ];
 
@@ -142,6 +145,7 @@ async fn main() -> Result<()> {
         max_fee_per_gas: Some(30_000_000_000),
         max_priority_fee_per_gas: Some(1_000_000_000),
         nonce: None,
+        ..Default::default()
     };
 
     match simulator

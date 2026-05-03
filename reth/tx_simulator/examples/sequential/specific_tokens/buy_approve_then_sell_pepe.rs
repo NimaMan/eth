@@ -194,6 +194,7 @@ fn create_buy_pepe_transaction(buyer: Address, eth_amount: U256) -> UnsignedTran
         nonce: None,                     // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -224,6 +225,7 @@ fn create_approve_transaction(
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -269,5 +271,6 @@ fn create_sell_pepe_transaction(seller: Address, pepe_amount: U256) -> UnsignedT
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }

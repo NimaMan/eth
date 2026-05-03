@@ -34,10 +34,7 @@ fn encode_dynamic_address_array(path: &[Address]) -> Vec<u8> {
     );
     let mut encoded = Vec::with_capacity(32 + path.len() * 32);
 
-    let mut length_word = [0u8; 32];
-    let len_u32: u32 = path.len().try_into().expect("path length exceeds u32");
-    length_word[28..32].copy_from_slice(&len_u32.to_be_bytes());
-    encoded.extend_from_slice(&length_word);
+    encoded.extend_from_slice(&U256::from(path.len() as u64).to_be_bytes::<32>());
 
     for address in path {
         encoded.extend_from_slice(&[0u8; 12]);

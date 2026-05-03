@@ -199,7 +199,7 @@ impl UnsignedTxChainSimulation {
             .simulator
             .evm_config
             .evm_env(&block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
 
         let initial_context = if let Some(target) = unsigned_tx.to {

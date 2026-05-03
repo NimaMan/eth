@@ -122,6 +122,37 @@ pub mod repo {
             .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
             .unwrap_or(value)
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parses_config_env_values() {
+            let values = parse_env_config(
+                r#"
+                # shared config
+                RETH_DATADIR=/mnt/eth/reth
+                JWT_PATH="/mnt/eth/jwt.hex"
+                LIVE_BLOCKCHAIN_DATA_REDIS_URL='redis://127.0.0.1:6379/0'
+                "#,
+            )
+            .expect("config should parse");
+
+            assert_eq!(values["RETH_DATADIR"], "/mnt/eth/reth");
+            assert_eq!(values["JWT_PATH"], "/mnt/eth/jwt.hex");
+            assert_eq!(
+                values["LIVE_BLOCKCHAIN_DATA_REDIS_URL"],
+                "redis://127.0.0.1:6379/0"
+            );
+        }
+
+        #[test]
+        fn rejects_invalid_config_lines() {
+            let err = parse_env_config("RETH_DATADIR").expect_err("line without '=' is invalid");
+            assert!(err.to_string().contains("missing '='"));
+        }
+    }
 }
 
 pub mod view_call {

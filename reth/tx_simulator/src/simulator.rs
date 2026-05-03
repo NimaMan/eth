@@ -181,12 +181,6 @@ impl TxSimulator {
         }
     }
 
-    // === Block Simulation Methods (temporarily disabled) ===
-
-    // Block simulation methods are temporarily disabled until the module is fixed
-    // with proper revm imports and SystemCaller implementation.
-    // These will be re-enabled once compilation issues are resolved.
-
     /// Get block metadata (timestamp, gas_limit, gas_used, base_fee)
     pub fn get_block_metadata(&self, block_number: u64) -> Result<(u64, u64, u64, Option<u128>)> {
         let context = self.load_block_context_blocking(block_number, None)?;

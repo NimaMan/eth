@@ -53,7 +53,7 @@ tx_simulator/
 ### Key Architectural Benefits
 
 1. **Separation of Concerns**: Each simulation type has its own module
-2. **Clean Dependencies**: No circular dependencies (unlike reth_tx_simulator ↔ reth_chain_query)
+2. **Clean Dependencies**: No circular dependencies between simulation and query crates
 3. **Type Organization**: All types centralized in `types.rs`
 4. **Focused Functionality**: Each module has a single responsibility
 5. **Better Maintainability**: Easier to understand and modify

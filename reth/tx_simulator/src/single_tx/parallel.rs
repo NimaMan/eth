@@ -77,7 +77,15 @@ impl TxSimulator {
 
             async move {
                 // Acquire permit for concurrency control
-                let _permit = sem.acquire().await.unwrap();
+                let _permit = match sem.acquire().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        return (
+                            hash,
+                            Err(eyre::eyre!("parallel simulation semaphore closed")),
+                        );
+                    }
+                };
 
                 // Simulate with optional timeout
                 let result = match timeout_duration {
@@ -120,7 +128,11 @@ impl TxSimulator {
         }
 
         let duration = start.elapsed();
-        let avg_time_per_tx = duration / total as u32;
+        let avg_time_per_tx = if total == 0 {
+            Duration::ZERO
+        } else {
+            duration / total as u32
+        };
 
         Ok(ParallelTxSimulationResult {
             total,
@@ -169,7 +181,12 @@ impl TxSimulator {
 
             async move {
                 // Acquire permit for concurrency control
-                let _permit = sem.acquire().await.unwrap();
+                let _permit = match sem.acquire().await {
+                    Ok(permit) => permit,
+                    Err(_) => {
+                        return (id, Err(eyre::eyre!("parallel simulation semaphore closed")));
+                    }
+                };
 
                 // Simulate with optional timeout at the chosen block and nonce fixing
                 let result = match timeout_duration {
@@ -212,7 +229,11 @@ impl TxSimulator {
         }
 
         let duration = start.elapsed();
-        let avg_time_per_tx = duration / total as u32;
+        let avg_time_per_tx = if total == 0 {
+            Duration::ZERO
+        } else {
+            duration / total as u32
+        };
 
         Ok(ParallelTxSimulationResult {
             total,

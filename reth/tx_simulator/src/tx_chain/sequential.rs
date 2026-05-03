@@ -197,7 +197,7 @@ impl TxSimulator {
         let evm_env = self
             .evm_config
             .evm_env(&block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre!("failed to build EVM env: {}", err))?;
 
         // Get base fee for gas price adjustment
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
@@ -287,7 +287,7 @@ impl TxSimulator {
         let evm_env = self
             .evm_config
             .evm_env(&block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre!("failed to build EVM env: {}", err))?;
 
         // Get base fee for gas price adjustment
         let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
@@ -342,82 +342,6 @@ impl TxSimulator {
             revert_context,
             cumulative_gas_used: gas_used,
             updated_nonces,
-        })
-    }
-
-    /// Simulate a transaction on a forked state (legacy method without inspector fusing)
-    #[allow(dead_code)]
-    pub(crate) fn simulate_on_fork(
-        &self,
-        forked_state: &mut ForkedState,
-        transaction: UnsignedTransaction,
-    ) -> Result<SequentialTransactionResult> {
-        let block_header = forked_state.block_header.clone();
-
-        // Create tracer
-        let unsigned_tx_config = TracingInspectorConfig::default_geth().set_record_logs(true);
-        let mut inspector = TracingInspector::new(unsigned_tx_config);
-
-        // Setup EVM environment
-        let evm_env = self
-            .evm_config
-            .evm_env(&block_header)
-            .expect("failed to build EVM env");
-
-        // Get base fee for gas price adjustment
-        let base_fee = block_header.base_fee_per_gas.map(|v| v as u128);
-
-        let initial_context = if let Some(target) = transaction.to {
-            let has_code = fork_state_has_code(forked_state, target)?;
-            Some(RevertContext {
-                target,
-                has_code,
-                calldata_len: transaction.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            })
-        } else {
-            None
-        };
-
-        // Create transaction environment
-        let tx_env = self.create_tx_env_from_unsigned_tx(
-            &transaction,
-            evm_env.block_env.gas_limit as u128,
-            base_fee,
-            &mut forked_state.db,
-        )?;
-        let gas_limit = tx_env.gas_limit;
-
-        // Execute transaction
-        let mut evm = self.evm_config.evm_with_env_and_inspector(
-            &mut forked_state.db,
-            evm_env,
-            &mut inspector,
-        );
-        let res = evm.transact(tx_env)?;
-
-        // Commit state changes to forked state
-        forked_state.db.commit(res.state);
-
-        let success = res.result.is_success();
-        let gas_used = res.result.tx_gas_used();
-        let revert_data = res.result.output().cloned();
-        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
-        let revert_context = if success { None } else { initial_context };
-
-        // Extract unsigned_tx trace (not used in this method)
-        let _call_frame = inspector
-            .with_transaction_gas_limit(gas_limit)
-            .into_geth_builder()
-            .geth_call_traces(CallConfig::default().with_log(), gas_used);
-
-        Ok(SequentialTransactionResult {
-            transaction_index: 0, // Will be set by unsigned_txer
-            success,
-            gas_used,
-            revert_reason,
-            revert_context,
-            cumulative_gas_used: 0, // Will be set by unsigned_txer
-            updated_nonces: forked_state.nonces.clone(),
         })
     }
 

@@ -217,6 +217,7 @@ fn create_buy_token_transaction(
         nonce: None,                     // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -247,6 +248,7 @@ fn create_approve_transaction(
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -296,5 +298,6 @@ fn create_sell_token_transaction(
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }

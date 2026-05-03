@@ -14,7 +14,7 @@ use tx_simulator::CallFrame;
 /// - 20-400x faster than RPC due to direct database access
 ///
 /// Note: This is SIMULATION - we're re-executing transactions to generate traces,
-/// not just fetching existing data. For data retrieval, use reth_chain_query.
+/// not just fetching existing data.
 use tx_simulator::TxSimulator;
 
 #[tokio::main]

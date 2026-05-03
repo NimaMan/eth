@@ -67,6 +67,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(50_000_000_000), // High priority
             max_priority_fee_per_gas: Some(10_000_000_000),
             nonce: None,
+            ..Default::default()
         },
         // 2. VICTIM TRANSACTION: User's swap
         UnsignedTransaction {
@@ -79,6 +80,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(30_000_000_000), // Normal priority
             max_priority_fee_per_gas: Some(2_000_000_000),
             nonce: None,
+            ..Default::default()
         },
         // 3. BACKRUN: MEV bot sells token after victim
         UnsignedTransaction {
@@ -91,6 +93,7 @@ async fn main() -> Result<()> {
             max_fee_per_gas: Some(50_000_000_000), // High priority
             max_priority_fee_per_gas: Some(10_000_000_000),
             nonce: Some(1), // Second transaction from MEV bot
+            ..Default::default()
         },
     ];
 

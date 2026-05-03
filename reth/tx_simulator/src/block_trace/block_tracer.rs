@@ -8,8 +8,8 @@ use alloy_rpc_types_trace::geth::{
 /// This module implements block-level tracing that matches Reth's debug_traceBlockByNumber
 /// RPC method, but with direct database access for massive performance improvements.
 use eyre::Result;
-use reth_evm::{ConfigureEvm, Evm};
 use reth_ethereum_primitives::TransactionSigned;
+use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::{Recovered, SealedHeader, SignerRecoverable};
 use reth_provider::{BlockHashReader, BlockReader, StateProviderBox, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -217,7 +217,6 @@ impl<'a> BlockTracer<'a> {
         tx_hash: Option<B256>,
         _tx_index: usize,
     ) -> Result<TraceResult> {
-
         // Create recovered transaction
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
 
@@ -225,7 +224,7 @@ impl<'a> BlockTracer<'a> {
         let evm_env = simulator
             .evm_config
             .evm_env(block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
 
         // Create transaction environment from recovered transaction
         let tx_env = simulator.evm_config.tx_env(&recovered);
@@ -303,12 +302,11 @@ impl<'a> BlockTracer<'a> {
         db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
         block_header: &SealedHeader,
     ) -> Result<()> {
-
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
         let evm_env = simulator
             .evm_config
             .evm_env(block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
         let tx_env = simulator.evm_config.tx_env(&recovered);
 
         let mut evm = simulator.evm_config.evm_with_env(&mut *db, evm_env);

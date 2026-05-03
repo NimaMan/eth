@@ -7,7 +7,7 @@ This directory contains examples for **simulating** transactions at the block le
 These examples are for **SIMULATION** - re-executing transactions to generate traces and analyze behavior. They are NOT for fetching existing blockchain data.
 
 - **For simulation** (what would happen?): Use `tx_simulator` (this library)
-- **For data retrieval** (what already happened?): Use `reth_chain_query`
+- **For data retrieval** (what already happened?): Use a dedicated query/data-access crate
 
 ## Examples
 
@@ -46,7 +46,7 @@ cargo run --example trace_block_transactions
 - Can simulate hypothetical transactions
 - Useful for: debugging, analysis, MEV research
 
-**Data Retrieval** (reth_chain_query):
+**Data Retrieval**:
 - Fetches existing receipts, logs, and state
 - Reads what was already recorded on-chain
 - No execution, just database lookups

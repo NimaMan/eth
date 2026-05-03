@@ -1,25 +1,18 @@
 use alloy_primitives::{Address, Bytes, I256, U256};
 use eyre::{eyre, Result};
-use once_cell::sync::Lazy;
 use serde::Deserialize;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::UnsignedTransaction;
 
-/// Bytecode for the MinimalV4Router contract stored at
-/// `sol/baygus-router/contracts/uniswap_v4/MinimalV4Router.bin`.
-const ROUTER_BYTECODE_HEX: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../soleth/baygus-router/contracts/uniswap_v4/MinimalV4Router.bin"
-));
-
-static ROUTER_BYTECODE: Lazy<Vec<u8>> = Lazy::new(|| {
-    hex::decode(ROUTER_BYTECODE_HEX.trim()).expect("Invalid MinimalV4Router bytecode hex")
-});
-
-const BAYGUS_ROUTER_ARTIFACT_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../soleth/baygus-router/out/BaygusRouter.sol/BaygusRouter.json"
-));
+const MINIMAL_ROUTER_BYTECODE_RELATIVE_PATH: &str = "contracts/uniswap_v4/MinimalV4Router.bin";
+const BAYGUS_ROUTER_ARTIFACT_RELATIVE_PATH: &str = "out/BaygusRouter.sol/BaygusRouter.json";
+const MOCK_POOL_MANAGER_ARTIFACT_RELATIVE_PATH: &str =
+    "out/MockPoolManager.sol/MockPoolManager.json";
+const MOCK_ERC20_ARTIFACT_RELATIVE_PATH: &str = "out/MockERC20.sol/MockERC20.json";
 
 #[derive(Debug, Deserialize)]
 struct FoundryBytecode {
@@ -37,44 +30,65 @@ impl FoundryArtifact {
     }
 }
 
-static BAYGUS_ROUTER_BYTECODE: Lazy<Vec<u8>> = Lazy::new(|| {
-    let artifact: FoundryArtifact = serde_json::from_str(BAYGUS_ROUTER_ARTIFACT_JSON)
-        .expect("failed to parse BaygusRouter artifact JSON");
-    let object = artifact.object_hex();
-    hex::decode(object).expect("invalid BaygusRouter bytecode hex")
-});
+/// Repository-local Baygus router artifact root under `soleth`.
+pub fn soleth_baygus_router_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("soleth/baygus-router")
+}
 
-const MOCK_POOL_MANAGER_ARTIFACT_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../soleth/baygus-router/out/MockPoolManager.sol/MockPoolManager.json"
-));
+pub fn minimal_router_bytecode_path() -> PathBuf {
+    soleth_baygus_router_dir().join(MINIMAL_ROUTER_BYTECODE_RELATIVE_PATH)
+}
 
-static MOCK_POOL_MANAGER_BYTECODE: Lazy<Vec<u8>> = Lazy::new(|| {
-    let artifact: FoundryArtifact = serde_json::from_str(MOCK_POOL_MANAGER_ARTIFACT_JSON)
-        .expect("failed to parse MockPoolManager artifact JSON");
-    let object = artifact.object_hex();
-    hex::decode(object).expect("invalid MockPoolManager bytecode hex")
-});
+pub fn baygus_router_artifact_path() -> PathBuf {
+    soleth_baygus_router_dir().join(BAYGUS_ROUTER_ARTIFACT_RELATIVE_PATH)
+}
 
-const MOCK_ERC20_ARTIFACT_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../soleth/baygus-router/out/MockERC20.sol/MockERC20.json"
-));
+pub fn mock_pool_manager_artifact_path() -> PathBuf {
+    soleth_baygus_router_dir().join(MOCK_POOL_MANAGER_ARTIFACT_RELATIVE_PATH)
+}
 
-static MOCK_ERC20_BYTECODE: Lazy<Vec<u8>> = Lazy::new(|| {
-    let artifact: FoundryArtifact = serde_json::from_str(MOCK_ERC20_ARTIFACT_JSON)
-        .expect("failed to parse MockERC20 artifact JSON");
-    let object = artifact.object_hex();
-    hex::decode(object).expect("invalid MockERC20 bytecode hex")
-});
+pub fn mock_erc20_artifact_path() -> PathBuf {
+    soleth_baygus_router_dir().join(MOCK_ERC20_ARTIFACT_RELATIVE_PATH)
+}
+
+fn decode_hex_bytecode(hex_value: &str, label: &str) -> Result<Vec<u8>> {
+    let trimmed = hex_value.trim().trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Err(eyre!("{label} bytecode is empty"));
+    }
+
+    hex::decode(trimmed).map_err(|err| eyre!("invalid {label} bytecode hex: {err}"))
+}
+
+fn read_raw_bytecode_file(path: &Path, label: &str) -> Result<Vec<u8>> {
+    let contents = fs::read_to_string(path).map_err(|err| {
+        eyre!(
+            "failed to read {label} bytecode from {}: {err}; build or restore soleth/baygus-router artifacts first",
+            path.display()
+        )
+    })?;
+    decode_hex_bytecode(&contents, label)
+}
+
+fn read_foundry_artifact_bytecode(path: &Path, label: &str) -> Result<Vec<u8>> {
+    let contents = fs::read_to_string(path).map_err(|err| {
+        eyre!(
+            "failed to read {label} artifact from {}: {err}; build or restore soleth/baygus-router artifacts first",
+            path.display()
+        )
+    })?;
+    let artifact: FoundryArtifact = serde_json::from_str(&contents)
+        .map_err(|err| eyre!("failed to parse {label} artifact {}: {err}", path.display()))?;
+    decode_hex_bytecode(artifact.object_hex(), label)
+}
 
 /// Minimum sqrt price ratio supported by Uniswap v4 pools (in Q64.96 format).
-static MIN_SQRT_RATIO_X96: Lazy<U256> = Lazy::new(|| U256::from(4_295_128_739u64));
+const MIN_SQRT_RATIO_X96: U256 = U256::from_limbs([4_295_128_739, 0, 0, 0]);
 /// Maximum sqrt price ratio supported by Uniswap v4 pools (in Q64.96 format).
-static MAX_SQRT_RATIO_X96: Lazy<U256> = Lazy::new(|| {
-    U256::from_str_radix("1461446703485210103287273052203988822378723970342", 10)
-        .expect("invalid MAX_SQRT_RATIO constant")
-});
+const MAX_SQRT_RATIO_X96: U256 =
+    U256::from_limbs([0x5d951d5263988d26, 0xefd1fc6a50648849, 0xfffd8963, 0]);
 
 /// Canonical WETH deposit selector.
 const WETH_DEPOSIT_SELECTOR: [u8; 4] = [0xd0, 0xe3, 0x0d, 0xb0];
@@ -160,24 +174,24 @@ pub struct UniswapV4BaygusSingleHopCall {
     pub orientation: UniswapV4SwapOrientation,
 }
 
-/// Return a fresh copy of the router bytecode for deployment.
-pub fn router_bytecode() -> Vec<u8> {
-    ROUTER_BYTECODE.clone()
+/// Load the minimal Uniswap v4 router bytecode for deployment.
+pub fn router_bytecode() -> Result<Vec<u8>> {
+    read_raw_bytecode_file(&minimal_router_bytecode_path(), "MinimalV4Router")
 }
 
-/// Return a fresh copy of the MockPoolManager bytecode for deployment.
-pub fn mock_pool_manager_bytecode() -> Vec<u8> {
-    MOCK_POOL_MANAGER_BYTECODE.clone()
+/// Load the MockPoolManager bytecode for deployment.
+pub fn mock_pool_manager_bytecode() -> Result<Vec<u8>> {
+    read_foundry_artifact_bytecode(&mock_pool_manager_artifact_path(), "MockPoolManager")
 }
 
-/// Return a fresh copy of the MockERC20 bytecode for deployment.
-pub fn mock_erc20_bytecode() -> Vec<u8> {
-    MOCK_ERC20_BYTECODE.clone()
+/// Load the MockERC20 bytecode for deployment.
+pub fn mock_erc20_bytecode() -> Result<Vec<u8>> {
+    read_foundry_artifact_bytecode(&mock_erc20_artifact_path(), "MockERC20")
 }
 
 /// Build the unsigned transaction that deploys the MockPoolManager.
-pub fn build_mock_pool_manager_deploy_tx(deployer: Address) -> UnsignedTransaction {
-    UnsignedTransaction {
+pub fn build_mock_pool_manager_deploy_tx(deployer: Address) -> Result<UnsignedTransaction> {
+    Ok(UnsignedTransaction {
         from: Some(deployer),
         to: None,
         gas: Some(3_000_000),
@@ -185,10 +199,10 @@ pub fn build_mock_pool_manager_deploy_tx(deployer: Address) -> UnsignedTransacti
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
         value: Some(U256::ZERO),
-        data: Some(Bytes::from(mock_pool_manager_bytecode())),
+        data: Some(Bytes::from(mock_pool_manager_bytecode()?)),
         nonce: None,
         ..Default::default()
-    }
+    })
 }
 
 /// Build the unsigned transaction that deploys the MockERC20.
@@ -198,35 +212,35 @@ pub fn build_mock_erc20_deploy_tx(
     name: &str,
     symbol: &str,
     decimals: u8,
-) -> UnsignedTransaction {
+) -> Result<UnsignedTransaction> {
     // Manual encoding of string/uint8 params
     // HEAD: Offset(name), Offset(symbol), decimals (padded)
     // TAIL: Name len+bytes, Symbol len+bytes
-    let mut data = mock_erc20_bytecode();
-    
+    let mut data = mock_erc20_bytecode()?;
+
     let mut args = Vec::new();
     let name_bytes = name.as_bytes();
     let symbol_bytes = symbol.as_bytes();
-    
+
     // Offsets
     let name_offset = 3 * 32; // name_off, symbol_off, decimals
     let symbol_offset = name_offset + ((name_bytes.len() + 31) / 32 * 32) + 32;
-    
+
     args.extend_from_slice(&pad_u64(name_offset as u64));
     args.extend_from_slice(&pad_u64(symbol_offset as u64));
     args.extend_from_slice(&pad_u64(decimals as u64)); // u8 padded to 32 bytes
-    
+
     // Name
     args.extend_from_slice(&pad_u64(name_bytes.len() as u64));
     args.extend_from_slice(&pad_bytes(name_bytes));
-    
+
     // Symbol
     args.extend_from_slice(&pad_u64(symbol_bytes.len() as u64));
     args.extend_from_slice(&pad_bytes(symbol_bytes));
-    
+
     data.extend_from_slice(&args);
 
-    UnsignedTransaction {
+    Ok(UnsignedTransaction {
         from: Some(deployer),
         to: None,
         gas: Some(3_000_000),
@@ -237,7 +251,7 @@ pub fn build_mock_erc20_deploy_tx(
         data: Some(Bytes::from(data)),
         nonce: None,
         ..Default::default()
-    }
+    })
 }
 
 /// Build transaction to call `mint(address,uint256)` on MockERC20.
@@ -345,11 +359,11 @@ pub fn build_router_deploy_tx(
     deployer: Address,
     pool_manager: Address,
     weth: Address,
-) -> UnsignedTransaction {
-    let mut data = router_bytecode();
+) -> Result<UnsignedTransaction> {
+    let mut data = router_bytecode()?;
     data.extend_from_slice(&encode_constructor_args(pool_manager, weth));
 
-    UnsignedTransaction {
+    Ok(UnsignedTransaction {
         from: Some(deployer),
         to: None,
         gas: Some(3_000_000),
@@ -360,7 +374,7 @@ pub fn build_router_deploy_tx(
         data: Some(Bytes::from(data)),
         nonce: None,
         ..Default::default()
-    }
+    })
 }
 
 /// Build a WETH deposit transaction (`deposit() payable`).
@@ -425,20 +439,20 @@ pub fn build_token_approval_tx(
     }
 }
 
-/// Return a fresh copy of the Baygus router bytecode for deployment.
-pub fn baygus_router_bytecode() -> Vec<u8> {
-    BAYGUS_ROUTER_BYTECODE.clone()
+/// Load the Baygus router bytecode for deployment.
+pub fn baygus_router_bytecode() -> Result<Vec<u8>> {
+    read_foundry_artifact_bytecode(&baygus_router_artifact_path(), "BaygusRouter")
 }
 
 /// Build the unsigned transaction that deploys the Baygus multi-hop router.
 pub fn build_baygus_router_deploy_tx(
     deployer: Address,
     pool_manager: Address,
-) -> UnsignedTransaction {
-    let mut data = baygus_router_bytecode();
+) -> Result<UnsignedTransaction> {
+    let mut data = baygus_router_bytecode()?;
     data.extend_from_slice(&pad_address(pool_manager));
 
-    UnsignedTransaction {
+    Ok(UnsignedTransaction {
         from: Some(deployer),
         to: None,
         gas: Some(5_500_000),
@@ -449,7 +463,7 @@ pub fn build_baygus_router_deploy_tx(
         data: Some(Bytes::from(data)),
         nonce: None,
         ..Default::default()
-    }
+    })
 }
 
 /// Build a `swapExactInputPath` Baygus router transaction for one or more Uniswap v4 hops.
@@ -679,7 +693,7 @@ fn encode_baygus_swap_exact_input_single(
     // minAmount1: 1 word
     // Total Head: 13 words
     const HEAD_WORDS: usize = 13;
-    
+
     let mut data = Vec::with_capacity(4 + HEAD_WORDS * 32);
     data.extend_from_slice(&BAYGUS_SWAP_EXACT_INPUT_SINGLE_SELECTOR);
 
@@ -701,20 +715,20 @@ fn encode_baygus_swap_exact_input_single(
     data.extend_from_slice(&pad_u256(params.sqrt_price_limit_x96));
     // recipient
     data.extend_from_slice(&pad_address(recipient));
-    
+
     // offset to hookData (relative to start of struct)
     // The struct head size is 13 words.
     data.extend_from_slice(&pad_u64((HEAD_WORDS * 32) as u64));
-    
+
     // hookAdapter, minAmount0, minAmount1
     data.extend_from_slice(&pad_address(hook_adapter));
     data.extend_from_slice(&pad_i128(min_amount0));
     data.extend_from_slice(&pad_i128(min_amount1));
-    
+
     // Tail: hookData length + bytes
     data.extend_from_slice(&pad_u128(hook_data.len() as u128));
     data.extend_from_slice(&pad_bytes(hook_data));
-    
+
     Ok(Bytes::from(data))
 }
 
@@ -919,9 +933,9 @@ fn pad_i32(value: i32) -> [u8; 32] {
 
 fn default_sqrt_price_limit(zero_for_one: bool) -> U256 {
     if zero_for_one {
-        MIN_SQRT_RATIO_X96.clone() + U256::from(1u8)
+        MIN_SQRT_RATIO_X96 + U256::from(1u8)
     } else {
-        MAX_SQRT_RATIO_X96.clone() - U256::from(1u8)
+        MAX_SQRT_RATIO_X96 - U256::from(1u8)
     }
 }
 
@@ -976,4 +990,80 @@ fn pad_bytes(data: &[u8]) -> Vec<u8> {
 /// Compute the CREATE contract address for the deployer + nonce pair.
 pub fn compute_contract_address(deployer: Address, nonce: u64) -> Address {
     deployer.create(nonce)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn decodes_hex_bytecode_with_optional_prefix() {
+        assert_eq!(
+            decode_hex_bytecode("0x60016002", "test").expect("prefixed hex should decode"),
+            vec![0x60, 0x01, 0x60, 0x02]
+        );
+        assert_eq!(
+            decode_hex_bytecode("6003", "test").expect("raw hex should decode"),
+            vec![0x60, 0x03]
+        );
+    }
+
+    #[test]
+    fn reads_foundry_artifact_bytecode_from_runtime_path() {
+        let dir = tempdir().expect("tempdir");
+        let artifact_path = dir.path().join("Artifact.json");
+        fs::write(&artifact_path, r#"{"bytecode":{"object":"0x60016002"}}"#)
+            .expect("write artifact");
+
+        let bytecode = read_foundry_artifact_bytecode(&artifact_path, "TestArtifact")
+            .expect("artifact bytecode");
+
+        assert_eq!(bytecode, vec![0x60, 0x01, 0x60, 0x02]);
+    }
+
+    #[test]
+    fn default_artifact_paths_point_at_soleth() {
+        assert!(minimal_router_bytecode_path()
+            .ends_with("soleth/baygus-router/contracts/uniswap_v4/MinimalV4Router.bin"));
+        assert!(baygus_router_artifact_path()
+            .ends_with("soleth/baygus-router/out/BaygusRouter.sol/BaygusRouter.json"));
+        assert!(mock_pool_manager_artifact_path()
+            .ends_with("soleth/baygus-router/out/MockPoolManager.sol/MockPoolManager.json"));
+        assert!(mock_erc20_artifact_path()
+            .ends_with("soleth/baygus-router/out/MockERC20.sol/MockERC20.json"));
+    }
+
+    #[test]
+    fn infers_v4_swap_orientation_from_input() {
+        let token0 = Address::from([0x11; 20]);
+        let token1 = Address::from([0x22; 20]);
+        let key = UniswapV4PoolKey {
+            currency0: token0,
+            currency1: token1,
+            fee: 3_000,
+            tick_spacing: 60,
+            hooks: Address::ZERO,
+        };
+
+        let zero_for_one = infer_orientation_from_input(&key, token0).expect("token0 input");
+        assert!(zero_for_one.zero_for_one);
+        assert_eq!(zero_for_one.output_currency, token1);
+
+        let one_for_zero = infer_orientation_from_input(&key, token1).expect("token1 input");
+        assert!(!one_for_zero.zero_for_one);
+        assert_eq!(one_for_zero.output_currency, token0);
+    }
+
+    #[test]
+    fn default_sqrt_price_limits_stay_inside_uniswap_v4_bounds() {
+        assert_eq!(
+            default_sqrt_price_limit(true),
+            MIN_SQRT_RATIO_X96 + U256::from(1u8)
+        );
+        assert_eq!(
+            default_sqrt_price_limit(false),
+            MAX_SQRT_RATIO_X96 - U256::from(1u8)
+        );
+    }
 }

@@ -18,8 +18,8 @@ pub type SignedTransaction = reth_ethereum_primitives::TransactionSigned;
 use alloy_consensus::transaction::SignerRecoverable;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_trace::geth::{CallConfig, CallFrame};
-use reth_evm::{ConfigureEvm, Evm};
 use reth_ethereum_primitives::TransactionSigned;
+use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::Recovered;
 use reth_revm::database::StateProviderDatabase;
 use reth_revm::db::CacheDB;
@@ -188,7 +188,7 @@ impl TxSimulator {
         let evm_env = simulator
             .evm_config
             .evm_env(&block_header)
-            .expect("failed to build EVM env");
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
 
         let recovered_tx = Recovered::new_unchecked(tx.clone(), tx.recover_signer()?);
         let tx_env = simulator.evm_config.tx_env(&recovered_tx);

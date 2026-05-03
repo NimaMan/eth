@@ -49,6 +49,7 @@ async fn main() -> Result<()> {
         nonce: Some(0), // Deliberately wrong nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     };
 
     // First attempt - the simulator will automatically adapt the nonce

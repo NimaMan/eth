@@ -123,6 +123,7 @@ async fn execute_floki_trading_workflow(
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     };
 
     let balance_result = chain.step_with_trace(balance_call).await?;
@@ -387,6 +388,7 @@ fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTra
         nonce: None,                     // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -417,6 +419,7 @@ fn create_approve_transaction(
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -439,6 +442,7 @@ fn create_balance_check_transaction(owner: Address, token: Address) -> UnsignedT
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
 
@@ -484,5 +488,6 @@ fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> Unsigne
         nonce: None,
         max_fee_per_gas: None,
         max_priority_fee_per_gas: None,
+        ..Default::default()
     }
 }
