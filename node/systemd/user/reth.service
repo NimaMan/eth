@@ -1,0 +1,31 @@
+[Unit]
+Description=Ethereum Reth execution client
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nima
+ExecStart=/home/nima/storage/samsung8tb/ethereum/bin/reth node \
+  --chain mainnet \
+  --full \
+  --datadir /home/nima/storage/samsung8tb/ethereum/reth \
+  --authrpc.addr 127.0.0.1 \
+  --authrpc.port 8551 \
+  --authrpc.jwtsecret /home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex \
+  --http \
+  --http.addr 127.0.0.1 \
+  --http.port 8545 \
+  --http.api eth,net,web3,debug,trace,txpool,rpc,reth \
+  --ws \
+  --ws.addr 127.0.0.1 \
+  --ws.port 8546 \
+  --ws.api eth,net,web3,debug,trace,txpool,rpc,reth \
+  --ipcpath /home/nima/storage/samsung8tb/ethereum/reth/reth.ipc \
+  --metrics 127.0.0.1:9001
+Restart=always
+RestartSec=5
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=default.target

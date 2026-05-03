@@ -1,160 +1,103 @@
-# Ethereum Node (Reth + Lighthouse)
+# Ethereum Node Deployment
 
-This is the local runbook for the Ethereum node stack on this host:
-- Execution layer: Reth (archive/full)
-- Consensus layer: Lighthouse (beacon)
-- Managed via systemd services
+Deploy-only files for the local Ethereum mainnet node live here. Runtime data,
+downloaded binaries, logs, and secrets stay outside the repo on the 8 TB SSD.
 
-## Repo location
-`/home/nima/code/crypto/blockchains/eth/node`
+## Current Profile
 
-## Components and paths
-Execution (Reth):
-- Binary: `/home/nima/reth/target/release/reth`
-- Systemd unit: `/etc/systemd/system/reth.service`
-- Config file referenced by systemd: `/home/nima/reth/reth.toml` (via override)
-- Engine API JWT: `/home/nima/lighthouse/jwt.hex`
-- Reth logs: `/home/nima/.cache/reth/logs/mainnet/reth.log`
+- Execution client: Reth
+- Consensus client: Lighthouse beacon node
+- Node type: full/pruned Reth node, not archive
+- Service manager: user systemd
+- Runtime root: `/home/nima/storage/samsung8tb/ethereum`
+- Lighthouse datadir: `/home/nima/.lighthouse`
+- JWT secret: `/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex`
 
-Consensus (Lighthouse):
-- Binary: `/home/linuxbrew/.linuxbrew/bin/lighthouse` (brew-managed)
-- Systemd unit: `/etc/systemd/system/lighthouse-beacon.service`
-- Datadir (default): `/home/nima/.lighthouse`
-- Engine API JWT: `/home/nima/lighthouse/jwt.hex`
+The `/home/nima/.lighthouse` path is a bind mount to
+`/home/nima/storage/samsung8tb/lighthouse`, so it already lives on the 8 TB SSD.
+Do not remove the mount point; keep it as the stable Lighthouse datadir.
+
+## Files
+
+| Path | Purpose |
+|------|---------|
+| `systemd/user/reth.service` | User-systemd unit for the Reth execution client. |
+| `systemd/user/lighthouse-beacon.service` | User-systemd unit for the Lighthouse beacon node. |
+| `scripts/install-latest-clients.sh` | Downloads latest GitHub release binaries and verifies SHA-256 digests. |
+| `scripts/prepare-dirs.sh` | Creates runtime directories and a shared JWT secret outside the repo. |
+| `scripts/install-user-services.sh` | Links the checked-in unit files into `~/.config/systemd/user`. |
+| `scripts/healthcheck.sh` | Checks local Reth and Lighthouse RPC/health endpoints. |
 
 ## Ports
+
 Reth:
+
 - HTTP RPC: `127.0.0.1:8545`
-- WS RPC: `127.0.0.1:8546`
+- WebSocket RPC: `127.0.0.1:8546`
 - Engine API: `127.0.0.1:8551`
+- P2P: `30303/tcp` and `30303/udp`
+- Prometheus metrics: `127.0.0.1:9001`
 
 Lighthouse:
+
 - HTTP API: `127.0.0.1:5052`
-- P2P: `9020/tcp` and `9020/udp`
+- Prometheus metrics: `127.0.0.1:5054`
+- P2P: `9000/tcp`, `9000/udp`, and QUIC on `9001/udp`
 
-## Systemd unit summaries (current)
-Reth (`/etc/systemd/system/reth.service`):
-```
-ExecStart=/home/nima/reth/target/release/reth node \
-    --config /home/nima/reth/reth-archive.toml \
-    --full \
-    --authrpc.jwtsecret /home/nima/lighthouse/jwt.hex \
-    --authrpc.addr 127.0.0.1 \
-    --authrpc.port 8551 \
-    --http \
-    --ws \
-    --http.addr 127.0.0.1 \
-    --http.port 8545 \
-    --ws.addr 127.0.0.1 \
-    --ws.port 8546 \
-    --rpc-max-connections 429496729 \
-    --http.api admin,debug,eth,net,trace,txpool,web3,rpc \
-    --ws.api admin,debug,eth,net,trace,txpool,web3,rpc
+## Bootstrap
+
+From this directory:
+
+```bash
+./scripts/prepare-dirs.sh
+./scripts/install-latest-clients.sh
+./scripts/install-user-services.sh
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start reth.service
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user start lighthouse-beacon.service
 ```
 
-Lighthouse (`/etc/systemd/system/lighthouse-beacon.service`):
-```
-ExecStart=/home/linuxbrew/.linuxbrew/bin/lighthouse bn \
-    --network mainnet \
-    --execution-endpoint http://localhost:8551 \
-    --execution-jwt /home/nima/lighthouse/jwt.hex \
-    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
-    --http \
-    --http-address 127.0.0.1 \
-    --http-port 5052 \
-    --port 9020 \
-    --discovery-port 9020
+The service files are linked from this repo into user systemd, so edits here are
+picked up after:
+
+```bash
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user daemon-reload
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user restart reth.service lighthouse-beacon.service
 ```
 
-## Start / stop
-```
-# Stop
-sudo systemctl stop lighthouse-beacon.service
-sudo systemctl stop reth.service
+## Validation
 
-# Start (EL first, then CL)
-sudo systemctl start reth.service
-sudo systemctl start lighthouse-beacon.service
+```bash
+./scripts/healthcheck.sh
+
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status reth.service
+XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user status lighthouse-beacon.service
 ```
 
-## Status and logs
-```
-# Service status
-systemctl status reth.service
-systemctl status lighthouse-beacon.service
+Follow logs:
 
-# Follow logs
-journalctl -u reth.service -f
-journalctl -u lighthouse-beacon.service -f
+```bash
+XDG_RUNTIME_DIR=/run/user/$(id -u) journalctl --user -u reth.service -f
+XDG_RUNTIME_DIR=/run/user/$(id -u) journalctl --user -u lighthouse-beacon.service -f
 ```
 
-## Sync checks
-Execution layer:
-```
-curl -s http://127.0.0.1:8545 -H 'Content-Type: application/json' \
+Reth sync state:
+
+```bash
+curl -s http://127.0.0.1:8545 \
+  -H 'content-type: application/json' \
   --data '{"jsonrpc":"2.0","id":1,"method":"eth_syncing","params":[]}'
-
-curl -s http://127.0.0.1:8545 -H 'Content-Type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
 ```
 
-Consensus layer:
-```
+Lighthouse sync state:
+
+```bash
 curl -s http://127.0.0.1:5052/eth/v1/node/syncing
-curl -s http://127.0.0.1:5052/eth/v1/beacon/headers/head
 ```
 
-## Upgrade workflow (summary)
-Reth (stable tag):
-```
-sudo systemctl stop reth.service
+## Operating Notes
 
-git -C /home/nima/reth fetch --tags
-# Example: pin to v1.9.3 stable
-git -C /home/nima/reth checkout v1.9.3
-cargo build --release --manifest-path /home/nima/reth/Cargo.toml
-
-sudo systemctl start reth.service
-/home/nima/reth/target/release/reth --version
-```
-
-Lighthouse (brew-managed):
-```
-brew update
-brew upgrade lighthouse
-/home/linuxbrew/.linuxbrew/bin/lighthouse --version
-```
-
-Restart order after upgrades:
-```
-sudo systemctl restart reth.service
-sudo systemctl restart lighthouse-beacon.service
-```
-
-## Checkpoint sync (Lighthouse)
-Lighthouse refuses insecure genesis sync on mainnet unless you accept weak-subjectivity risk.
-Preferred fix is checkpoint sync.
-
-If you need to re-seed the beacon DB, do not delete validator data.
-Only remove the beacon DB folder and keep the validators directory intact:
-```
-# Stop lighthouse first
-sudo systemctl stop lighthouse-beacon.service
-
-# Backup only the beacon DB (leave validators/ alone)
-mv /home/nima/.lighthouse/mainnet/beacon \
-   /home/nima/.lighthouse/mainnet/beacon.bak.$(date +%F)
-
-# Ensure checkpoint sync is set in systemd, then restart
-sudo systemctl daemon-reload
-sudo systemctl start lighthouse-beacon.service
-```
-
-## Incident write-up
-See: `/home/nima/code/crypto/blockchains/eth/LIGHTHOUSE_FAILURE_ANALYSIS.md`
-
-## Notes
-- Keep RPC endpoints bound to localhost unless you explicitly need remote access.
-- Always upgrade both EL and CL clients before scheduled hard forks.
-- The JWT secret at `/home/nima/lighthouse/jwt.hex` must be readable by both services.
-- The active systemd override uses `/home/nima/reth/reth.toml`. The base unit still references `reth-archive.toml` unless you consolidate the unit files.
+- Keep RPC and WS bound to localhost unless there is an explicit auth and
+  network exposure plan.
+- Reth defaults to archive mode; this deployment explicitly passes `--full`.
+- The old Polygon Bor database was removed to provide SSD headroom for ETH.
+- Do not commit `jwt.hex`, chain data, release tarballs, or generated logs here.
