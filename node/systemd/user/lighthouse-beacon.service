@@ -6,11 +6,12 @@ After=network-online.target reth.service
 [Service]
 Type=simple
 WorkingDirectory=/home/nima
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
 ExecStart=/home/nima/storage/samsung8tb/ethereum/bin/lighthouse bn \
   --network mainnet \
-  --datadir /home/nima/.lighthouse \
+  --datadir ${LIGHTHOUSE_DATADIR} \
   --execution-endpoint http://127.0.0.1:8551 \
-  --execution-jwt /home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex \
+  --execution-jwt ${JWT_PATH} \
   --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
   --http \
   --http-address 127.0.0.1 \
