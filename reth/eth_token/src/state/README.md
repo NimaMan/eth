@@ -18,9 +18,9 @@ This folder corresponds to Python modules under `erc20_token/token_state`.
 - Pool math belongs in `pools`.
 - Health scoring belongs in `health`.
 
-## First Port Targets
+## Python Sources
 
 1. `token_transfer_tracker.py`.
 2. `control_address_tracker.py`.
 3. `pool_state_bridge.py`.
-4. `token_state_monitor.py`.
+4. `token_state_monitor.py` is represented by Rust `status.rs` and `TokenStatusManager`.

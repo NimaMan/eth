@@ -39,7 +39,7 @@ pub struct RenouncementState {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ControlAddressTracker {
+pub struct TokenAuthorityTracker {
     pub token_control_addresses: HashSet<String>,
     pub role_signatures: HashSet<B256>,
     pub history_limit: usize,
@@ -54,7 +54,7 @@ pub struct ControlAddressTracker {
     pub renouncement_event_log_index: Option<u64>,
 }
 
-impl ControlAddressTracker {
+impl TokenAuthorityTracker {
     pub fn new(history_limit: usize) -> Self {
         Self {
             token_control_addresses: HashSet::new(),
@@ -272,7 +272,7 @@ mod tests {
             log_index: 4,
         });
 
-        let mut tracker = ControlAddressTracker::new(10);
+        let mut tracker = TokenAuthorityTracker::new(10);
         let added = tracker.update_from_processed_transaction(&tx);
 
         assert_eq!(added.len(), 4);
@@ -297,7 +297,7 @@ mod tests {
                 log_index: 8,
             });
 
-        let mut tracker = ControlAddressTracker::new(10);
+        let mut tracker = TokenAuthorityTracker::new(10);
         tracker.update_from_processed_transaction(&tx);
 
         assert!(tracker.ownership_renounced);

@@ -11,7 +11,7 @@ use crate::pools::uniswap::v2::{
     LPApprovalEvent, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
 };
-use crate::state::{ControlAddressTracker, TokenStateMonitor, TokenTransferTracker};
+use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
 
 pub const DEFAULT_TOKEN_HISTORY_LIMIT: usize = 1000;
 
@@ -53,7 +53,7 @@ impl ERC20TokenMetadata {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PoolInfo {
+pub struct PoolStateSnapshot {
     pub pool_address: String,
     pub protocol: String,
     pub denom_address: String,
@@ -68,7 +68,7 @@ pub struct PoolInfo {
     pub scam_label: Option<String>,
 }
 
-impl From<&UniswapV2Pool> for PoolInfo {
+impl From<&UniswapV2Pool> for PoolStateSnapshot {
     fn from(pool: &UniswapV2Pool) -> Self {
         Self {
             pool_address: pool.base.identity.pool_address.clone(),
@@ -106,7 +106,7 @@ pub struct TokenSummary {
     pub latest_block: Option<u64>,
     pub latest_timestamp: Option<u64>,
     pub total_liquidity_by_denom: HashMap<String, f64>,
-    pub current_prices: HashMap<String, PoolInfo>,
+    pub current_prices: HashMap<String, PoolStateSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -129,8 +129,8 @@ pub struct ERC20Token {
     pub latest_block_timestamp: Option<u64>,
     pub token_control_addresses: HashSet<String>,
     pub transfer_tracker: TokenTransferTracker,
-    pub control_tracker: ControlAddressTracker,
-    pub state_monitor: TokenStateMonitor,
+    pub authority_tracker: TokenAuthorityTracker,
+    pub status_manager: TokenStatusManager,
     pub v2_pools: HashMap<String, UniswapV2Pool>,
 }
 
@@ -162,8 +162,8 @@ impl ERC20Token {
                 decimals,
                 DEFAULT_TOKEN_HISTORY_LIMIT,
             ),
-            control_tracker: ControlAddressTracker::new(DEFAULT_TOKEN_HISTORY_LIMIT),
-            state_monitor: TokenStateMonitor::new(total_supply),
+            authority_tracker: TokenAuthorityTracker::new(DEFAULT_TOKEN_HISTORY_LIMIT),
+            status_manager: TokenStatusManager::new(total_supply),
             v2_pools: HashMap::new(),
         }
     }
@@ -278,13 +278,13 @@ impl ERC20Token {
         );
         self.transfer_tracker
             .update_from_processed_transaction(transaction)?;
-        self.state_monitor.update_from_processed_transaction(
+        self.status_manager.update_from_processed_transaction(
             transaction,
             self.transfer_tracker.total_supply_from_transfers,
             self.decimals,
         )?;
         let newly_added = self
-            .control_tracker
+            .authority_tracker
             .update_from_processed_transaction(transaction);
         if !newly_added.is_empty() {
             self.token_control_addresses.extend(newly_added.clone());
@@ -311,7 +311,7 @@ impl ERC20Token {
         self.token_life_cycle_status = Some(TokenLifecycleState::ContractCreation);
         self.token_control_addresses.insert(creator_address);
         let creator = self.creator_address.clone().unwrap_or_default();
-        self.control_tracker
+        self.authority_tracker
             .register([parse_address_lossy(&creator)]);
         self.register_control_addresses_with_pools([creator]);
     }
@@ -344,7 +344,7 @@ impl ERC20Token {
     }
 
     pub fn trading_enabled(&self) -> bool {
-        if self.state_monitor.trading_enabled {
+        if self.status_manager.trading_enabled {
             return true;
         }
         self.v2_pools
@@ -353,11 +353,11 @@ impl ERC20Token {
     }
 
     pub fn is_scam(&self) -> bool {
-        self.state_monitor.is_scam || self.v2_pools.values().any(|pool| pool.base.is_scam())
+        self.status_manager.is_scam || self.v2_pools.values().any(|pool| pool.base.is_scam())
     }
 
     pub fn scam_label(&self) -> Option<String> {
-        if let Some(label) = self.state_monitor.scam_label.clone() {
+        if let Some(label) = self.status_manager.scam_label.clone() {
             return Some(label);
         }
         self.v2_pools
@@ -365,14 +365,14 @@ impl ERC20Token {
             .find_map(|pool| pool.base.scam_label.clone())
     }
 
-    pub fn current_prices(&self) -> HashMap<String, PoolInfo> {
+    pub fn current_prices(&self) -> HashMap<String, PoolStateSnapshot> {
         self.v2_pools
             .iter()
-            .map(|(address, pool)| (address.clone(), PoolInfo::from(pool)))
+            .map(|(address, pool)| (address.clone(), PoolStateSnapshot::from(pool)))
             .collect()
     }
 
-    pub fn get_pool_info(&self) -> HashMap<String, PoolInfo> {
+    pub fn get_pool_info(&self) -> HashMap<String, PoolStateSnapshot> {
         self.current_prices()
     }
 
@@ -406,19 +406,19 @@ impl ERC20Token {
     }
 
     pub fn current_owner(&self) -> Option<String> {
-        self.control_tracker.current_owner.clone()
+        self.authority_tracker.current_owner.clone()
     }
 
     pub fn ownership_renounced(&self) -> bool {
-        self.control_tracker.ownership_renounced
+        self.authority_tracker.ownership_renounced
     }
 
     pub fn trading_enabled_block(&self) -> Option<u64> {
-        self.state_monitor.trading_enabled_block
+        self.status_manager.trading_enabled_block
     }
 
     pub fn trading_enabled_tx(&self) -> Option<String> {
-        self.state_monitor.trading_enabled_tx.clone()
+        self.status_manager.trading_enabled_tx.clone()
     }
 
     pub fn all_pool_reserves(&self) -> HashMap<String, Value> {
@@ -470,7 +470,7 @@ impl ERC20Token {
         }
     }
 
-    pub fn to_dict(&self) -> Value {
+    pub fn to_json_value(&self) -> Value {
         json!({
             "token_data": self,
             "summary": self.get_token_summary(),

@@ -11,20 +11,20 @@ use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 use crate::pools::BasePoolConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TokenUpdateReport {
+pub struct TokenStateUpdateReport {
     pub token_address: String,
     pub discovered_uniswap_v2_pools: Vec<String>,
     pub updated_uniswap_v2_pools: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TokenManager {
+pub struct TokenStateManager {
     pub tokens: HashMap<String, ERC20Token>,
     pub history_limit: usize,
     pub known_routers: Vec<String>,
 }
 
-impl TokenManager {
+impl TokenStateManager {
     pub fn new(history_limit: usize) -> Self {
         Self {
             tokens: HashMap::new(),
@@ -63,7 +63,7 @@ impl TokenManager {
     pub fn update_from_processed_transaction(
         &mut self,
         tx: &ProcessedTransaction,
-    ) -> Result<Vec<TokenUpdateReport>> {
+    ) -> Result<Vec<TokenStateUpdateReport>> {
         let token_addresses: Vec<_> = self.tokens.keys().cloned().collect();
         let mut reports = Vec::new();
 
@@ -90,7 +90,7 @@ impl TokenManager {
             }
 
             if !discovered.is_empty() || !updated.is_empty() {
-                reports.push(TokenUpdateReport {
+                reports.push(TokenStateUpdateReport {
                     token_address,
                     discovered_uniswap_v2_pools: discovered,
                     updated_uniswap_v2_pools: updated,
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn discovers_and_updates_uniswap_v2_pool_for_tracked_token() {
-        let mut manager = TokenManager::new(100);
+        let mut manager = TokenStateManager::new(100);
         manager.add_token(metadata());
         let mut tx = tx();
         tx.uniswap_v2_pair_created_events

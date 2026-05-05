@@ -2,4 +2,6 @@
 
 pub mod token;
 
-pub use token::{ERC20Token, ERC20TokenMetadata, PoolInfo, TokenLifecycleState, TokenSummary};
+pub use token::{
+    ERC20Token, ERC20TokenMetadata, PoolStateSnapshot, TokenLifecycleState, TokenSummary,
+};

@@ -6,7 +6,7 @@ use tx_processor::ProcessedTransaction;
 pub const DEFAULT_HIDDEN_MINT_THRESHOLD: f64 = 1.01;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TokenStateMonitor {
+pub struct TokenStatusManager {
     pub total_supply: String,
     pub hidden_mint_threshold: f64,
     pub trading_enabled: bool,
@@ -25,7 +25,7 @@ pub struct TokenStateMonitor {
     pub scam_tx: Option<String>,
 }
 
-impl TokenStateMonitor {
+impl TokenStatusManager {
     pub fn new(total_supply: impl Into<String>) -> Self {
         Self {
             total_supply: total_supply.into(),
@@ -167,15 +167,15 @@ mod tests {
             block_number: 100,
             log_index: 7,
         });
-        let mut monitor = TokenStateMonitor::new("100000000000000000000");
+        let mut status_manager = TokenStatusManager::new("100000000000000000000");
 
-        monitor
+        status_manager
             .update_from_processed_transaction(&enabled_tx, 0.0, 18)
             .unwrap();
 
-        assert!(monitor.trading_enabled);
-        assert_eq!(monitor.trading_enabled_block, Some(100));
-        assert_eq!(monitor.trading_enabled_event_log_index, Some(7));
+        assert!(status_manager.trading_enabled);
+        assert_eq!(status_manager.trading_enabled_block, Some(100));
+        assert_eq!(status_manager.trading_enabled_event_log_index, Some(7));
 
         let mut disabled = tx();
         disabled.trading_disabled_events.push(TradingDisabledEvent {
@@ -183,25 +183,25 @@ mod tests {
             block_number: 101,
             log_index: 8,
         });
-        monitor
+        status_manager
             .update_from_processed_transaction(&disabled, 0.0, 18)
             .unwrap();
 
-        assert!(!monitor.trading_enabled);
-        assert_eq!(monitor.trading_disabled_event_log_index, Some(8));
+        assert!(!status_manager.trading_enabled);
+        assert_eq!(status_manager.trading_disabled_event_log_index, Some(8));
     }
 
     #[test]
     fn hidden_mint_marks_scam_when_transfer_mints_exceed_supply_threshold() {
         let tx = tx();
-        let mut monitor = TokenStateMonitor::new("100000000000000000000");
+        let mut status_manager = TokenStatusManager::new("100000000000000000000");
 
-        monitor
+        status_manager
             .update_from_processed_transaction(&tx, 102.0, 18)
             .unwrap();
 
-        assert!(monitor.is_scam);
-        assert_eq!(monitor.scam_label.as_deref(), Some("hidden_mint"));
-        assert_eq!(monitor.scam_block, Some(100));
+        assert!(status_manager.is_scam);
+        assert_eq!(status_manager.scam_label.as_deref(), Some("hidden_mint"));
+        assert_eq!(status_manager.scam_block, Some(100));
     }
 }
