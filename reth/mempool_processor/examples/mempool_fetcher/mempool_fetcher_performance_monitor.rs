@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// Run with: cargo run --example mempool_fetcher_performance_monitor --release
 ///
 /// Logs to: mempool_processor/logs/performance_YYYYMMDD_HHMMSS.csv
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -174,7 +174,9 @@ async fn run_performance_monitor() -> Result<(), Box<dyn std::error::Error>> {
     info!("");
 
     // Initialize IPC client
-    let ipc_client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+    let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+    info!("IPC path: {}", ipc_path);
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
     ipc_client.start().await?;
 
     // Stats tracking

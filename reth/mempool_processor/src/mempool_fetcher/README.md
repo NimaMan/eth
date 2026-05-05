@@ -39,7 +39,8 @@ Common types shared across the codebase:
 ```rust
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 
-let client = MempoolFetcherIPCClient::new(Some("/tmp/reth.ipc"))?;
+let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+let client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
 client.start().await?;
 
 let txs = client.get_transactions_instant(100).await;
@@ -104,7 +105,7 @@ Here's the detailed timing breakdown of how a transaction flows through our syst
 #### Stage 2: IPC Notification Written (T₀ + ~5-10μs)
 - **Time**: 5-10μs after mempool entry
 - **Location**: Reth writes to Unix domain socket
-- **Action**: Full transaction JSON written to `/tmp/reth.ipc`
+- **Action**: Full transaction JSON written to the configured Reth IPC socket
 
 #### Stage 3: Socket Read by MempoolFetcherIPCClient (T₀ + ~7-17μs)
 - **Time**: 2-7μs to read from socket (measured as `detection_ns`)

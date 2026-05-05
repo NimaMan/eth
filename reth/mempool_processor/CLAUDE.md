@@ -149,10 +149,10 @@ src/
 ### Essential Environment Variables
 ```bash
 # IPC connection (required)
-RETH_IPC_PATH=/tmp/reth.ipc
+RETH_IPC_PATH=/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc
 
 # Simulation RPC (required)  
-ETH_RPC_URL=http://localhost:8545
+RETH_HTTP_RPC=http://127.0.0.1:8545
 
 # Database (optional)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eth_db

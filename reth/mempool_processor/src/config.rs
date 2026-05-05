@@ -3,13 +3,28 @@ use serde::{Deserialize, Serialize};
 ///
 /// This module contains all configuration parameters for the mempool processor
 /// system, providing a single source of truth for all settings.
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+pub const ETH_CONFIG_PATH_ENV: &str = "ETH_CONFIG_PATH";
+pub const DEFAULT_ETH_CONFIG_PATH: &str = "/home/nima/code/crypto/blockchains/eth/config.env";
+pub const RETH_DATADIR_ENV: &str = "RETH_DATADIR";
+pub const RETH_DB_PATH_ENV: &str = "RETH_DB_PATH";
+pub const RETH_IPC_PATH_ENV: &str = "RETH_IPC_PATH";
+pub const IPC_PATH_ENV: &str = "IPC_PATH";
+pub const MEMPOOL_IPC_PATH_ENV: &str = "MEMPOOL_IPC_PATH";
+pub const MEMPOOL_RETH_DATADIR_ENV: &str = "MEMPOOL_RETH_DATADIR";
+pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
+pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
+pub const LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
+
 /// Default location of the local Reth data directory used by the processor.
-pub const DEFAULT_RETH_DATA_DIR: &str = "/home/nima/.local/share/reth/mainnet";
+pub const DEFAULT_RETH_DATA_DIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 /// Default IPC socket path exposed by the local Reth node.
-pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/.local/share/reth/mainnet/reth.ipc";
+pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc";
+/// Default HTTP RPC endpoint exposed by the local Reth node.
+pub const DEFAULT_ETH_RPC_URL: &str = "http://127.0.0.1:8545";
 /// Default number of simulation worker threads.
 pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the repository.
@@ -19,13 +34,115 @@ pub const DEFAULT_TOKEN_CACHE_REP_ENDPOINT: &str = "tcp://127.0.0.1:5558";
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "token:snapshot:";
 
+/// Path to the shared Ethereum workspace config.
+pub fn eth_config_path() -> PathBuf {
+    std::env::var_os(ETH_CONFIG_PATH_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join("config.env")
+        })
+}
+
+/// Reth data directory for examples and runtime defaults.
+pub fn reth_datadir_from_env() -> String {
+    config_value(&[MEMPOOL_RETH_DATADIR_ENV, RETH_DATADIR_ENV, RETH_DB_PATH_ENV])
+        .unwrap_or_else(|| DEFAULT_RETH_DATA_DIR.to_string())
+}
+
+/// IPC socket path for examples and lightweight tools.
+///
+/// Resolution order is explicit environment variables, then the shared
+/// repository `config.env`, then `<RETH_DATADIR>/reth.ipc`.
+pub fn reth_ipc_path_from_env() -> String {
+    config_value(&[MEMPOOL_IPC_PATH_ENV, RETH_IPC_PATH_ENV, IPC_PATH_ENV]).unwrap_or_else(|| {
+        Path::new(&reth_datadir_from_env())
+            .join("reth.ipc")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+/// HTTP RPC endpoint for examples that need `txpool_*` or trace RPC calls.
+pub fn eth_rpc_url_from_env() -> String {
+    config_value(&[ETH_RPC_URL_ENV, RETH_HTTP_RPC_ENV])
+        .unwrap_or_else(|| DEFAULT_ETH_RPC_URL.to_string())
+}
+
+/// Redis URL for live blockchain/token snapshot data.
+pub fn live_data_redis_url_from_env() -> String {
+    config_value(&[LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV])
+        .unwrap_or_else(|| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
+}
+
+fn config_value(keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Ok(value) = std::env::var(key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    let config = load_config_env();
+    for key in keys {
+        if let Some(value) = config.get(*key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn load_config_env() -> HashMap<String, String> {
+    let contents = match std::fs::read_to_string(eth_config_path()) {
+        Ok(contents) => contents,
+        Err(_) => return HashMap::new(),
+    };
+    parse_env_config(&contents)
+}
+
+fn parse_env_config(contents: &str) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for raw_line in contents.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+
+        values.insert(key.to_string(), unquote(value.trim()).to_string());
+    }
+
+    values
+}
+
+fn unquote(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+        .unwrap_or(value)
+}
+
 fn default_simulation_workers() -> usize {
     DEFAULT_SIM_WORKERS
 }
 
 fn default_live_data_redis_url() -> String {
-    std::env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL")
-        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
+    live_data_redis_url_from_env()
 }
 
 /// Main configuration structure
@@ -241,7 +358,7 @@ impl Default for TokenCacheSourceConfig {
             eth_threshold: 0.1,
             zmq_pub_endpoint: DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string(),
             zmq_rep_endpoint: DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string(),
-            redis_url: DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string(),
+            redis_url: live_data_redis_url_from_env(),
             redis_token_prefix: DEFAULT_REDIS_TOKEN_PREFIX.to_string(),
         }
     }
@@ -267,7 +384,7 @@ impl Default for MempoolProcessorConfig {
     fn default() -> Self {
         Self {
             ipc: IpcConfig {
-                socket_path: DEFAULT_RETH_IPC_PATH.to_string(),
+                socket_path: reth_ipc_path_from_env(),
                 buffer_size: 65536,
                 reconnect_delay: Duration::from_secs(5),
                 max_reconnect_attempts: 10,
@@ -300,14 +417,14 @@ impl Default for MempoolProcessorConfig {
 
             simulation: SimulationConfig {
                 enabled: true,
-                reth_datadir: DEFAULT_RETH_DATA_DIR.to_string(),
+                reth_datadir: reth_datadir_from_env(),
                 worker_threads: DEFAULT_SIM_WORKERS,
                 batch_size: 50,
                 batch_timeout: Duration::from_millis(100),
                 max_queue_size: 1000,
                 skip_simple_transfers: true,
                 min_value_eth: 0.01,
-                live_data_redis_url: DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string(),
+                live_data_redis_url: live_data_redis_url_from_env(),
             },
 
             database: DatabaseConfig {
@@ -357,13 +474,8 @@ impl MempoolProcessorConfig {
         let mut config = Self::default();
 
         // Override with environment variables
-        if let Ok(path) = std::env::var("MEMPOOL_IPC_PATH") {
-            config.ipc.socket_path = path;
-        }
-
-        if let Ok(dir) = std::env::var("MEMPOOL_RETH_DATADIR") {
-            config.simulation.reth_datadir = dir;
-        }
+        config.ipc.socket_path = reth_ipc_path_from_env();
+        config.simulation.reth_datadir = reth_datadir_from_env();
 
         if let Ok(workers) = std::env::var("MEMPOOL_SIM_WORKERS") {
             if let Ok(val) = workers.parse() {
@@ -371,9 +483,7 @@ impl MempoolProcessorConfig {
             }
         }
 
-        if let Ok(url) = std::env::var("LIVE_BLOCKCHAIN_DATA_REDIS_URL") {
-            config.simulation.live_data_redis_url = url;
-        }
+        config.simulation.live_data_redis_url = live_data_redis_url_from_env();
 
         if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_SIGNAL_ENDPOINT") {
             config.zmq.signal_endpoint = endpoint;
@@ -412,12 +522,28 @@ impl MempoolProcessorConfig {
 
         // Honeypot threshold removed - now determined by can't sell condition
 
-        if config.ipc.socket_path == DEFAULT_RETH_IPC_PATH {
-            let derived = Path::new(&config.simulation.reth_datadir).join("reth.ipc");
-            config.ipc.socket_path = derived.to_string_lossy().into_owned();
-        }
-
         config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_shared_config_env_values() {
+        let values = parse_env_config(
+            r#"
+            # shared config
+            RETH_DATADIR=/mnt/eth/reth
+            RETH_IPC_PATH="/mnt/eth/reth/reth.ipc"
+            RETH_HTTP_RPC='http://127.0.0.1:8545'
+            "#,
+        );
+
+        assert_eq!(values["RETH_DATADIR"], "/mnt/eth/reth");
+        assert_eq!(values["RETH_IPC_PATH"], "/mnt/eth/reth/reth.ipc");
+        assert_eq!(values["RETH_HTTP_RPC"], "http://127.0.0.1:8545");
     }
 }
 

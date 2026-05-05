@@ -1,5 +1,8 @@
 # Mempool Fetcher Examples
 
+All fetcher examples use `RETH_IPC_PATH` or `IPC_PATH` when set, otherwise
+they resolve `RETH_IPC_PATH` from `/home/nima/code/crypto/blockchains/eth/config.env`.
+
 ## Instant Collection Performance Measurement
 
 **`measure_instant_fetch_performance.rs`** - Measure the new instant fetch method with configurable parameters
@@ -48,7 +51,9 @@ cargo run --example mempool_fetcher_performance_monitor --release
 
 **`verify_new_transactions_only.rs`** - Validates we only get NEW transactions (not existing mempool)
 
-**`analyze_transaction_arrival_pattern.rs`** - Analyzes how transactions arrive in bursts
+**`test_fetcher_simple.rs`** - Small connectivity smoke test that fetches up to 10 transactions
+
+**`function_detector_example.rs`** - Runs live transactions through the function detector
 
 ## Production Stats
 

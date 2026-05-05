@@ -70,20 +70,12 @@ struct Args {
     #[arg(long, env = "MEMPOOL_CONFIG_PATH")]
     config: Option<String>,
     /// IPC socket path
-    #[arg(
-        long,
-        env = "IPC_PATH",
-        default_value_t = mempool_processor::config::DEFAULT_RETH_IPC_PATH.to_string()
-    )]
-    ipc_path: String,
+    #[arg(long, env = "IPC_PATH")]
+    ipc_path: Option<String>,
 
     /// Reth database path for simulations
-    #[arg(
-        long,
-        env = "RETH_DB_PATH",
-        default_value_t = mempool_processor::config::DEFAULT_RETH_DATA_DIR.to_string()
-    )]
-    reth_db_path: String,
+    #[arg(long, env = "RETH_DB_PATH")]
+    reth_db_path: Option<String>,
 
     /// Log directory base path
     #[arg(long, default_value = mempool_processor::config::DEFAULT_LOG_DIR)]
@@ -247,8 +239,14 @@ async fn main() -> Result<()> {
     };
 
     // Resolve key paths from config (CLI may still print separate values)
-    let cfg_ipc_path = base_config.ipc.socket_path.clone();
-    let cfg_reth_db_path = base_config.simulation.reth_datadir.clone();
+    let cfg_ipc_path = args
+        .ipc_path
+        .clone()
+        .unwrap_or_else(|| base_config.ipc.socket_path.clone());
+    let cfg_reth_db_path = args
+        .reth_db_path
+        .clone()
+        .unwrap_or_else(|| base_config.simulation.reth_datadir.clone());
     let cfg_log_dir = base_config.logging.log_dir.clone();
     let cfg_report_interval = base_config.logging.metrics_interval.as_secs();
     let cfg_sim_workers = base_config.simulation.worker_threads;

@@ -24,8 +24,8 @@ use tx_simulator::TxSimulator;
 #[derive(Parser, Debug)]
 struct Args {
     /// Reth datadir (contains db/static_files)
-    #[arg(long, default_value = "~/.local/share/reth/mainnet")]
-    datadir: String,
+    #[arg(long, env = "RETH_DATADIR")]
+    datadir: Option<String>,
     /// Transaction hash of the contract creation
     #[arg(long, value_name = "TX_HASH")]
     tx: String,
@@ -52,7 +52,11 @@ fn derive_contract_address(sender: Address, nonce: u64) -> Address {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let tx_hash = B256::from_str(&args.tx)?;
-    let datadir = expand_tilde(&args.datadir);
+    let datadir = expand_tilde(
+        &args
+            .datadir
+            .unwrap_or_else(mempool_processor::config::reth_datadir_from_env),
+    );
 
     println!("Datadir: {}", datadir);
     println!("Tx hash: {:?}", tx_hash);

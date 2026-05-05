@@ -28,12 +28,8 @@ struct Args {
     tx: String,
 
     /// Reth DB path
-    #[arg(
-        long,
-        env = "RETH_DB_PATH",
-        default_value = "/home/nima/.local/share/reth/mainnet"
-    )]
-    datadir: String,
+    #[arg(long, env = "RETH_DATADIR")]
+    datadir: Option<String>,
 }
 
 fn expand_tilde(path: &str) -> String {
@@ -49,7 +45,11 @@ fn expand_tilde(path: &str) -> String {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let tx_hash = B256::from_str(&args.tx)?;
-    let datadir = expand_tilde(&args.datadir);
+    let datadir = expand_tilde(
+        &args
+            .datadir
+            .unwrap_or_else(mempool_processor::config::reth_datadir_from_env),
+    );
 
     println!("Datadir: {}", datadir);
     println!("Tx hash: {:?}", tx_hash);

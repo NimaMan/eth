@@ -1,8 +1,7 @@
 use chrono::Utc;
 use eyre::Result;
 use mempool_processor::config::{
-    DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
-    DEFAULT_TOKEN_CACHE_PUB_ENDPOINT, DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
+    DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT, DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
 };
 use mempool_processor::function_detector::FunctionDetector;
 /// Transaction Router with Token Cache Example
@@ -136,8 +135,9 @@ async fn main() -> Result<()> {
 
     // Initialize IPC client
     info!("🔌 Connecting to Reth IPC...");
-    let ipc_client =
-        MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
+    let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+    info!("IPC path: {}", ipc_path);
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 
@@ -156,14 +156,14 @@ async fn main() -> Result<()> {
     // Statistics
     let mut contract_creations = 0u64;
     let mut creator_actions = 0u64;
-    let mut dex_interactions = 0u64;
+    let dex_interactions = 0u64;
     let mut regular_txs = 0u64;
     let mut high_priority = 0u64;
     let mut requires_simulation = 0u64;
 
     // Token cache hit tracking
     let mut creator_cache_hits = 0u64;
-    let mut pool_cache_hits = 0u64;
+    let pool_cache_hits = 0u64;
 
     info!("📊 Processing {} transactions...", target_count);
     writeln!(log_file, "\n\nTransaction Processing Started")?;
@@ -210,6 +210,8 @@ async fn main() -> Result<()> {
                 } => {
                     contract_creations += 1;
                     writeln!(log_file, "  Category: CONTRACT_CREATION")?;
+                    writeln!(log_file, "    Deployer: {:?}", deployer)?;
+                    writeln!(log_file, "    Contract Address: {:?}", contract_address)?;
                     writeln!(log_file, "    Is Token: {}", is_token)?;
                     writeln!(log_file, "    Has Liquidity: {}", has_liquidity_in_calldata)?;
                 }
@@ -222,6 +224,7 @@ async fn main() -> Result<()> {
                     creator_actions += 1;
                     writeln!(log_file, "  Category: CREATOR_TRANSACTION")?;
                     writeln!(log_file, "    Creator: {}", creator)?;
+                    writeln!(log_file, "    Target Address: {:?}", target_address)?;
                     writeln!(log_file, "    Target Token: {:?}", target_token)?;
                     writeln!(log_file, "    Function: {:?}", function_type)?;
 
@@ -486,7 +489,7 @@ fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
     let rep_endpoint = std::env::var("TOKEN_CACHE_REP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string());
     let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
-        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string());
+        .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
     let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
         .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
 

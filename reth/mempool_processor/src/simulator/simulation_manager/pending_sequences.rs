@@ -137,8 +137,7 @@ impl PendingSequences {
     async fn fetch_block_hashes_via_rpc(block_number: u64) -> EyreResult<HashSet<B256>> {
         lazy_static! {
             static ref RPC_CLIENT: Client = Client::new();
-            static ref RPC_URL: String = std::env::var("ETH_RPC_URL")
-                .unwrap_or_else(|_| "http://localhost:8545".to_string());
+            static ref RPC_URL: String = crate::config::eth_rpc_url_from_env();
         }
 
         let payload = json!({

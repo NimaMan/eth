@@ -6,7 +6,6 @@
 /// Usage: cargo run --example test_fetcher_simple
 use mempool_processor::mempool_fetcher::MempoolFetcherIPCClient;
 use std::time::Duration;
-use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,9 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("================================\n");
 
     // 1. Create IPC client
-    println!("📡 Connecting to IPC at /home/nima/.local/share/reth/mainnet/reth.ipc...");
-    let ipc_client =
-        MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
+    let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+    println!("📡 Connecting to IPC at {}...", ipc_path);
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
 
     // 2. Start monitoring
     println!("🚀 Starting mempool monitoring...");

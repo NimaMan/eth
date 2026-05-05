@@ -29,7 +29,7 @@ ExecStart=/home/nima/storage/samsung8tb/ethereum/bin/reth node \
   --ws.addr 127.0.0.1 \
   --ws.port 8546 \
   --ws.api eth,net,web3,debug,trace,txpool,rpc,reth \
-  --ipcpath ${RETH_DATADIR}/reth.ipc \
+  --ipcpath ${RETH_IPC_PATH} \
   --metrics 127.0.0.1:9001
 Restart=always
 RestartSec=5

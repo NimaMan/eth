@@ -516,8 +516,9 @@ writeln!(log_file, "[{}] TRADING_ENABLED | Token: {} | BuyTax: {}% | SellTax: {}
 ### Key Environment Variables
 ```bash
 # Required
-IPC_PATH=/tmp/reth.ipc          # Reth IPC socket
-RETH_DATADIR=~/.local/share/reth/mainnet
+ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
+RETH_IPC_PATH=/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc
+RETH_DATADIR=/home/nima/storage/samsung8tb/ethereum/reth
 
 # Optional
 LOG_LEVEL=info                  # Logging verbosity
@@ -580,9 +581,8 @@ The service accepts the following command-line arguments:
 mempool_signal_detector [OPTIONS]
 
 OPTIONS:
-    --ipc-path <PATH>           IPC socket path [env: IPC_PATH] [default: /tmp/reth.ipc]
-    --reth-db-path <PATH>       Reth database path for simulations [env: RETH_DB_PATH] 
-                                [default: /home/nima/.local/share/reth/mainnet]
+    --ipc-path <PATH>           IPC socket path [env: IPC_PATH]
+    --reth-db-path <PATH>       Reth database path for simulations [env: RETH_DB_PATH]
     --log-dir <PATH>            Log directory base path [default: mempool_processor/logs]
     --batch-size <SIZE>         Batch size for transaction processing [default: 100]
     --sim-workers <COUNT>       Simulation worker threads [default: 10]

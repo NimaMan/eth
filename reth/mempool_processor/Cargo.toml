@@ -157,6 +157,10 @@ name = "replay_liquidity_removal"
 path = "examples/simulator/replay_liquidity_removal.rs"
 
 [[example]]
+name = "replay_trading_status"
+path = "examples/simulator/replay_trading_status.rs"
+
+[[example]]
 name = "test_unified_writer"
 path = "examples/test_unified_writer.rs"
 

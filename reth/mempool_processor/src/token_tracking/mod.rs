@@ -427,7 +427,7 @@ mod basic_tests {
 
     #[tokio::test]
     async fn handle_token_message_updates_cache() {
-        let mut subscriber = TokenTrackingSubscriber::with_sources(
+        let subscriber = TokenTrackingSubscriber::with_sources(
             0.1,
             "tcp://127.0.0.1:6007",
             "tcp://127.0.0.1:6008",

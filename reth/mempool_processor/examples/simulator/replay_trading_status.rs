@@ -53,8 +53,8 @@ use tx_simulator::{TxSimulator, UnsignedTransaction};
 #[command(author, version, about)]
 struct Args {
     /// Path to the local Reth data directory (containing db/ and static_files/)
-    #[arg(long, default_value = "/home/nima/.local/share/reth/mainnet")]
-    datadir: PathBuf,
+    #[arg(long, env = "RETH_DATADIR")]
+    datadir: Option<PathBuf>,
 
     /// Optional path to the Reth index (defaults to <datadir>/reth_index when present)
     #[arg(long)]
@@ -86,7 +86,12 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    if args.datadir.is_none() {
+        args.datadir = Some(PathBuf::from(
+            mempool_processor::config::reth_datadir_from_env(),
+        ));
+    }
 
     let rt = Runtime::new().context("failed to create Tokio runtime")?;
 
@@ -102,10 +107,11 @@ fn main() -> Result<()> {
 async fn run_example(args: Args) -> Result<()> {
     info!(
         "🔄 Initialising TxSimulator from {}",
-        args.datadir.display()
+        datadir(&args).display()
     );
     let tx_simulator = Arc::new(
-        TxSimulator::new(args.datadir.to_str().unwrap()).context("failed to open Reth database")?,
+        TxSimulator::new(datadir(&args).to_str().unwrap())
+            .context("failed to open Reth database")?,
     );
 
     info!("🔍 Building query provider");
@@ -216,7 +222,7 @@ async fn run_example(args: Args) -> Result<()> {
                 "  token metadata loaded: symbol={} decimals={}",
                 meta.symbol, meta.decimals
             );
-            meta.decimals
+            Ok(meta.decimals)
         }
         Ok(None) => {
             warn!(
@@ -355,10 +361,16 @@ fn resolve_reth_index_path(args: &Args) -> Option<PathBuf> {
     if let Some(explicit) = &args.reth_index {
         return Some(explicit.clone());
     }
-    let default_path = args.datadir.join("reth_index");
+    let default_path = datadir(args).join("reth_index");
     if default_path.exists() {
         Some(default_path)
     } else {
         None
     }
+}
+
+fn datadir(args: &Args) -> &PathBuf {
+    args.datadir
+        .as_ref()
+        .expect("datadir is initialized after Args::parse")
 }

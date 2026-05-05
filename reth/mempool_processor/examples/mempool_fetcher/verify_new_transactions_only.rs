@@ -22,9 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // First, get some existing transactions from mempool
     let rpc_client = reqwest::Client::new();
+    let rpc_url = mempool_processor::config::eth_rpc_url_from_env();
     info!("Getting current mempool transactions...");
     let rpc_response = rpc_client
-        .post("http://localhost:8545")
+        .post(&rpc_url)
         .json(&serde_json::json!({
             "jsonrpc": "2.0",
             "method": "txpool_content",
@@ -39,9 +40,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Extract some transaction hashes from existing mempool
     let mut existing_hashes = HashSet::new();
-    if let Some(pending) = mempool_content.get("pending") {
-        for (_, txs_by_nonce) in pending.as_object().unwrap() {
-            for (_, tx) in txs_by_nonce.as_object().unwrap() {
+    if let Some(pending) = mempool_content
+        .get("pending")
+        .and_then(|value| value.as_object())
+    {
+        for (_, txs_by_nonce) in pending {
+            let Some(txs_by_nonce) = txs_by_nonce.as_object() else {
+                continue;
+            };
+            for (_, tx) in txs_by_nonce {
                 if let Some(hash) = tx.get("hash").and_then(|h| h.as_str()) {
                     existing_hashes.insert(hash.to_string());
                 }
@@ -56,8 +63,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Now start our subscription
     info!("Starting subscription to newPendingTransactions...");
-    let ipc_client =
-        MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
+    let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+    info!("IPC path: {}", ipc_path);
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
     ipc_client.start().await?;
 
     // Track what we receive
@@ -76,13 +84,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if existing_hashes.contains(&tx.hash) {
                     existing_count += 1;
-                    info!("❌ EXISTING transaction detected: {}", &tx.hash[..10]);
+                    info!("❌ EXISTING transaction detected: {}", short_hash(&tx.hash));
                 } else {
                     new_count += 1;
                     if new_count <= 5 {
                         info!(
                             "✅ NEW transaction: {} ({}μs)",
-                            &tx.hash[..10],
+                            short_hash(&tx.hash),
                             tx.detection_ns / 1000
                         );
                     }
@@ -102,15 +110,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("\n=== VERIFICATION RESULTS ===");
     info!("Total transactions received: {}", received_count);
+    let received_count_f64 = received_count.max(1) as f64;
     info!(
         "NEW transactions: {} ({:.1}%)",
         new_count,
-        (new_count as f64 / received_count as f64) * 100.0
+        (new_count as f64 / received_count_f64) * 100.0
     );
     info!(
         "EXISTING transactions: {} ({:.1}%)",
         existing_count,
-        (existing_count as f64 / received_count as f64) * 100.0
+        (existing_count as f64 / received_count_f64) * 100.0
     );
 
     if existing_count == 0 {
@@ -122,4 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn short_hash(hash: &str) -> &str {
+    hash.get(..10).unwrap_or(hash)
 }

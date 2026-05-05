@@ -7,9 +7,7 @@
 /// It effectively replaces the need for the Python publisher during verification/testing.
 ///
 /// Usage: cargo run --example export_all_tokens_from_cache_to_csv
-use mempool_processor::config::{
-    DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
-};
+use mempool_processor::config::DEFAULT_REDIS_TOKEN_PREFIX;
 use mempool_processor::token_tracking::types::PoolLifecycle;
 use mempool_processor::token_tracking::{
     CacheConfig, Pool, PoolType, Token, TokenTrackingCache, TokenUpdate, TokenWithPools,
@@ -31,13 +29,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Setup Redis connection
     let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
-        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string());
+        .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
     let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
         .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
 
     info!("Connecting to Redis at {}...", redis_url);
     let client = redis::Client::open(redis_url.clone())?;
-    let mut conn = client.get_tokio_connection().await?;
+    let mut conn = client.get_multiplexed_tokio_connection().await?;
 
     // 2. Scan for keys
     info!("Scanning Redis for keys matching '{}*'...", redis_prefix);
@@ -278,6 +276,7 @@ struct SnapshotBlockMeta {
 #[derive(Debug, Deserialize, Default)]
 struct SnapshotStatus {
     #[serde(default)]
+    #[allow(dead_code)]
     lifecycle: Option<String>,
     #[serde(default)]
     is_scam: Option<bool>,
@@ -296,6 +295,7 @@ struct SnapshotControl {
     #[serde(default)]
     ownership_renounced_block: Option<u64>,
     #[serde(default)]
+    #[allow(dead_code)]
     control_addresses: Option<Vec<String>>,
     #[serde(default)]
     tax_setter_addresses: Option<Vec<String>>,
@@ -304,6 +304,7 @@ struct SnapshotControl {
 #[derive(Debug, Deserialize, Default)]
 struct SnapshotPools {
     #[serde(default)]
+    #[allow(dead_code)]
     addresses: Vec<String>,
     #[serde(default)]
     info: HashMap<String, SnapshotPoolInfo>,

@@ -21,8 +21,9 @@ async fn main() -> Result<()> {
     info!("🚀 Starting function detector example");
 
     // Initialize IPC client to receive mempool transactions
-    let ipc_client =
-        MempoolFetcherIPCClient::new(Some("/home/nima/.local/share/reth/mainnet/reth.ipc"))?;
+    let ipc_path = mempool_processor::config::reth_ipc_path_from_env();
+    info!("IPC path: {}", ipc_path);
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
     ipc_client.start().await?;
     info!("✅ Connected to IPC");
 

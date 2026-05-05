@@ -23,11 +23,11 @@ use tracing::{info, warn};
 use alloy_primitives::{Address, B256, U256};
 use mempool_processor::{
     config::{
-        DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL, DEFAULT_REDIS_TOKEN_PREFIX,
-        DEFAULT_TOKEN_CACHE_PUB_ENDPOINT, DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
+        DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT,
+        DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
     },
     function_detector::FunctionDetector,
-    mempool_fetcher::{MempoolFetcherIPCClient, MempoolTransaction},
+    mempool_fetcher::MempoolFetcherIPCClient,
     simulator::MempoolSimulator,
     token_tracking::{TokenTrackingCache, TokenTrackingSubscriber},
     tx_router::{SimulationPriority, TransactionCategory, TransactionRouter as TxRouter},
@@ -36,7 +36,7 @@ use reth_chain_query::to_checksum_address;
 use std::collections::VecDeque;
 // Import pool simulation types from tx_processor
 use std::str::FromStr;
-use tx_processor::{PoolBuySellParameters, PoolBuySellSimulationResult, PoolType};
+use tx_processor::{PoolBuySellParameters, PoolType};
 // Import the correct types from simulation_manager
 use mempool_processor::simulator::simulation_manager::{
     SimulationResult, SimulationType, TxSimulationJob,
@@ -111,7 +111,7 @@ fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
     let rep_endpoint = std::env::var("TOKEN_CACHE_REP_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string());
     let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
-        .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string());
+        .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
     let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
         .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
 
@@ -381,11 +381,13 @@ impl SimplifiedSimulationManager {
     }
 
     /// Get current statistics
+    #[allow(dead_code)]
     pub async fn get_stats(&self) -> ManagerStats {
         self.stats.lock().await.clone()
     }
 
     /// Get queue length
+    #[allow(dead_code)]
     pub async fn queue_length(&self) -> usize {
         self.queue.lock().await.len()
     }
@@ -396,16 +398,12 @@ impl SimplifiedSimulationManager {
 #[derive(Parser, Debug)]
 struct Args {
     /// IPC socket path
-    #[arg(long, env = "IPC_PATH", default_value = "/tmp/reth.ipc")]
-    ipc_path: String,
+    #[arg(long, env = "IPC_PATH")]
+    ipc_path: Option<String>,
 
     /// Reth database path
-    #[arg(
-        long,
-        env = "RETH_DB_PATH",
-        default_value = "/home/nima/.local/share/reth/mainnet"
-    )]
-    reth_db_path: String,
+    #[arg(long, env = "RETH_DB_PATH")]
+    reth_db_path: Option<String>,
 
     /// Number of transactions to process
     #[arg(long, default_value = "10000")]
@@ -419,6 +417,14 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let ipc_path = args
+        .ipc_path
+        .clone()
+        .unwrap_or_else(mempool_processor::config::reth_ipc_path_from_env);
+    let reth_db_path = args
+        .reth_db_path
+        .clone()
+        .unwrap_or_else(mempool_processor::config::reth_datadir_from_env);
 
     // Initialize logging
     tracing_subscriber::fmt()
@@ -495,7 +501,7 @@ async fn main() -> Result<()> {
     info!("\n🔧 Initializing pipeline components...");
 
     // IPC client
-    let ipc_client = MempoolFetcherIPCClient::new(Some(&args.ipc_path))?;
+    let ipc_client = MempoolFetcherIPCClient::new(Some(&ipc_path))?;
     ipc_client.start().await?;
     info!("✅ IPC client connected");
 
@@ -508,7 +514,7 @@ async fn main() -> Result<()> {
     info!("✅ Transaction router initialized");
 
     // Initialize unified simulator with custom config
-    let simulator = Arc::new(MempoolSimulator::new(&args.reth_db_path, None)?);
+    let simulator = Arc::new(MempoolSimulator::new(&reth_db_path, None)?);
     info!("✅ MempoolSimulator initialized (no database lock issues!)");
 
     // Get latest block
@@ -639,7 +645,8 @@ async fn main() -> Result<()> {
             // Log simulation result with token/pool info
             let token_info = match &result.request.category {
                 TransactionCategory::ContractCreation {
-                    contract_address, ..
+                    contract_address: _,
+                    ..
                 } => {
                     format!(
                         " Token:{} Pool:{}",

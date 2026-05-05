@@ -340,7 +340,7 @@ Reserved (types include `TaxChange`, but current implementation does not emit it
 │ └─────────────┘ │    │ └──────────────┘ │    │ └─────────────┘ │
 │                 │    │                  │    │        │        │
 │ Reth Node       │    │ Detection Time:  │    │        ▼        │
-│ /tmp/reth.ipc   │    │    2-7μs        │    │ ┌─────────────┐ │
+│ reth.ipc        │    │    2-7μs        │    │ ┌─────────────┐ │
 └─────────────────┘    └──────────────────┘    │ │ Pool State  │ │
                                                │ │ Analysis    │ │
                                                │ └─────────────┘ │
@@ -367,7 +367,7 @@ Reserved (types include `TaxChange`, but current implementation does not emit it
 ### End‑to‑End Pipeline Flow
 
 ```
-Reth Node (IPC @ /tmp/reth.ipc)
+Reth Node (IPC @ /home/nima/storage/samsung8tb/ethereum/reth/reth.ipc)
         │
         ▼
 ┌──────────────────────────────┐
@@ -448,7 +448,7 @@ Support services
 ```
 mempool_signal_detector (Single Binary)
 │
-├── 🔌 MempoolFetcherIPCClient           ──▶ /tmp/reth.ipc
+├── 🔌 MempoolFetcherIPCClient           ──▶ /home/nima/storage/samsung8tb/ethereum/reth/reth.ipc
 │   ├── Non-blocking socket reads        ──▶ 2-7μs detection
 │   ├── JSON streaming parser            ──▶ Zero-copy parsing
 │   └── Auto-reconnect on failure        ──▶ Resilient connection
@@ -559,8 +559,9 @@ simulation_manager.submit(request).await?;
 
 ### Prerequisites
 - **Rust**: 1.70+ with cargo
-- **Reth Node**: Running with IPC enabled (`/tmp/reth.ipc`)
-- **Reth Database**: Read access to `/home/nima/.local/share/reth/mainnet`
+- **Reth Node**: Running with IPC enabled (`/home/nima/storage/samsung8tb/ethereum/reth/reth.ipc`)
+- **Reth Database**: Read access to `/home/nima/storage/samsung8tb/ethereum/reth`
+- **Shared Config**: `/home/nima/code/crypto/blockchains/eth/config.env`
 - **Python Token Tracker**: Optional; when offline the cache is sparse but pipeline still runs
 - **PostgreSQL**: Optional for audit logging (set `SignalPublisherConfig.enable_database = false` to skip)
 
@@ -577,10 +578,8 @@ cargo build --release
 
 ### Configuration
 ```bash
-# Environment variables (optional)
-export ETH_RPC_URL="http://localhost:8545"
-export IPC_PATH="/tmp/reth.ipc"
-export RETH_DB_PATH="/home/nima/.local/share/reth/mainnet"
+# Shared Ethereum workspace config
+export ETH_CONFIG_PATH="/home/nima/code/crypto/blockchains/eth/config.env"
 
 # Token tracking service endpoints
 export TOKEN_TRACKING_PUB="tcp://localhost:5557"  # Token updates from Python
@@ -591,8 +590,6 @@ export SIGNAL_ZMQ_ENDPOINT="tcp://127.0.0.1:5556"
 
 # Run the main service
 ./target/release/mempool_signal_detector \
-  --ipc-path /tmp/reth.ipc \
-  --reth-db-path /home/nima/.local/share/reth/mainnet \
   --log-dir mempool_processor/logs \
   --batch-size 100 \
   --sim-workers 10
