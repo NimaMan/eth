@@ -83,7 +83,7 @@ class TokenTransferTracker:
         self.update_bribe_amount(transaction)
 
     def update_bribe_amount(self, transaction: Dict) -> None:
-        bribe_amount = transaction.get('bribe_amount', 0) or 0
+        bribe_amount = _parse_raw_amount(transaction.get('bribe_amount', 0) or 0)
         if bribe_amount > 0:
             briber_address = transaction['from_address']
             self.bribe_amounts_by_tx[briber_address] = bribe_amount
@@ -132,7 +132,7 @@ class TokenTransferTracker:
                 "depth": transfer["depth"],
                 "from_address": transfer["from_address"],
                 "to_address": transfer["to_address"],
-                "amount": float(transfer["value"]),
+                "amount": _parse_raw_amount(transfer["value"]),
                 "token_address": "ETH",
             }
             bounded_history.append_to_dict_history(
@@ -183,7 +183,7 @@ class TokenTransferTracker:
         tx_hash = transaction["hash"]
         block_number = transaction["block_number"]
         tx_index = transaction["tx_index"]
-        amount = int(transfer["amount"]) / 10 ** self.decimals
+        amount = _parse_raw_amount(transfer["amount"]) / 10 ** self.decimals
         transfer_dict = {
             "tx_hash": tx_hash,
             "block_number": block_number,
@@ -211,7 +211,7 @@ class TokenTransferTracker:
             "log_index": transfer["log_index"],
             "from_address": transfer["from_address"],
             "to_address": transfer["to_address"],
-            "amount": float(transfer["amount"]) / 10**18,
+            "amount": _parse_raw_amount(transfer["amount"]) / 10**18,
             "token_address": "WETH",
         }
         bounded_history.append_to_dict_history(
@@ -225,7 +225,7 @@ class TokenTransferTracker:
         if transfer["token_address"] in DENOM_ADDRESSES:
             denom_name = DENOM_ADDRESSES[transfer["token_address"]]
             denom_decimals = ERC20_TOKEN_DECIMALS[denom_name]
-            amount = float(transfer["amount"]) / 10**denom_decimals
+            amount = _parse_raw_amount(transfer["amount"]) / 10**denom_decimals
             if denom_name not in self.other_currencies:
                 self.other_currencies[denom_name] = 0
             self.other_currencies[denom_name] += 1
@@ -246,3 +246,14 @@ class TokenTransferTracker:
 
     def set_pool_manager(self, pool_manager) -> None:
         self.pool_manager = pool_manager
+
+
+def _parse_raw_amount(value) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned.lower().startswith("0x"):
+            return int(cleaned, 16)
+        return int(cleaned)
+    return int(value)

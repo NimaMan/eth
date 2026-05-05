@@ -99,7 +99,7 @@ class LiveTokenNetworkBuilder:
         tx_hash = tx_dict['hash']
         tx_index = tx_dict['tx_index']
         fee_source = tx_dict['from_address']
-        bribe_amount = tx_dict.get('bribe_amount', 0.0) or 0.0
+        bribe_amount = _parse_numeric_amount(tx_dict.get('bribe_amount', 0.0) or 0.0)
         tx_fee = (tx_dict.get('fees') or {}).get('tx_fee', 0.0)
         erc20_transfers = self.live_token.erc20_transfers.get(tx_hash, [])
         eth_transfers = self.live_token.eth_transfers.get(tx_hash, [])
@@ -160,3 +160,17 @@ class LiveTokenNetworkBuilder:
 
         # Use orjson with NumPy serialization option
         return orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
+
+
+def _parse_numeric_amount(value):
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned.lower().startswith("0x"):
+            return int(cleaned, 16)
+        try:
+            return int(cleaned)
+        except ValueError:
+            return float(cleaned)
+    return value
