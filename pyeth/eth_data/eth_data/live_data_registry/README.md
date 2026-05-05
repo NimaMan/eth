@@ -7,7 +7,7 @@ shares the same view without duplicating Redis plumbing.
 ### Layout
 
 - `redis_client.py` — cached sync/async Redis clients driven by `LIVE_BLOCKCHAIN_DATA_REDIS_URL`.
-- `keys.py` — canonical key builders (`block:block_header:<n>`, `block:processed_transactions:<n>`, `token:snapshot:<addr>`, …).
+- `keys.py` — canonical key builders (`eth/live/block/<n>/header`, `eth/live/block/<n>/txs`, `eth/live/token/snapshot/<addr>`, …).
 - `snapshot_serialization.py` — utilities for shaping/serialising block snapshots (token snapshots will live here too).
 - `publisher.py` — async writer used by block/token processors.
 - `reader.py` — synchronous reader for consumers (mempool processor, notebooks, etc.).

@@ -118,7 +118,7 @@ sequenceDiagram
 7.  Each task calls `TransactionProcessor.process_transaction` with the transaction, its receipt, and its trace.
 8.  `TransactionProcessor` decodes logs, parses traces, classifies the transaction, and returns a rich `ProcessedTransaction` object.
 9.  The results are gathered and returned up the call stack.
-10. `LiveBlockProcessor` publishes the final block number to the Redis `live_blocks` channel and stores the enriched snapshot in Redis so downstream consumers can replay it immediately.
+10. `LiveBlockProcessor` publishes the final block number to the Redis `eth/live/block_notifications` channel and stores the enriched snapshot under the `eth/live/block/<number>/...` tree so downstream consumers can replay it immediately.
 
 ### Output Data Model: `ProcessedTransaction`
 

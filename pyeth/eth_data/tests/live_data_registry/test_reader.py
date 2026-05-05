@@ -19,7 +19,7 @@ def test_fetch_live_token_snapshot():
     if not token_key:
         pytest.skip("No token snapshots available in Redis to test against")
 
-    token_address = token_key.split(":")[-1]
+    token_address = token_key.rsplit("/", 1)[-1]
     snapshot = reader.get_token_snapshot(token_address)
 
     assert snapshot is not None, "Expected snapshot for live token address"

@@ -26,7 +26,7 @@ Architecture & Workflow:
         * Other relevant on-chain events
 
 3. Message Distribution:
-    - Publishes processed block numbers to Redis Pub/Sub (`live_blocks` by default)
+    - Publishes processed block numbers to Redis Pub/Sub (`eth/live/block_notifications` by default)
     - Writes block headers and processed transactions to Redis for downstream replay
     - Ensures consumers receive both the notification and the cached state
 
@@ -126,7 +126,7 @@ class LiveBlockProcessor:
         index_address_txs: bool = False, 
         logger=None,
         redis_url: Optional[str] = None,
-        block_notification_channel: str = "live_blocks",
+        block_notification_channel: str = "eth/live/block_notifications",
         live_block_cache_size: int = 5,
     ):
         # Initialize WebSocket provider and web3 instance

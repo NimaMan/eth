@@ -6,7 +6,7 @@ The script:
 2. Logs each head arrival with both the chain timestamp and the local receive time.
 3. Sleeps for a second, then tries to fetch the full block over HTTP to see if it is
    already available, logging any lag.
-4. Optionally listens to the Redis `live_blocks` channel to measure how quickly our
+4. Optionally listens to the Redis `eth/live/block_notifications` channel to measure how quickly our
    block processor publishes processed block notifications.
 
 Run it for ~60 seconds (default) to compare the cadence you receive vs. the expected
@@ -44,7 +44,7 @@ async def monitor_block_arrivals(
     http_url: str,
     duration_seconds: int = 60,
     redis_url: str = "redis://localhost:6379/0",
-    redis_channel: str = "live_blocks",
+    redis_channel: str = "eth/live/block_notifications",
 ) -> None:
     """Subscribe to newHeads and log arrival + fetch latencies for roughly duration_seconds."""
     ws_w3 = AsyncWeb3(WebSocketProvider(websocket_url))
@@ -270,7 +270,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--redis-channel",
-        default="live_blocks",
+        default="eth/live/block_notifications",
         help="Redis Pub/Sub channel carrying processed block numbers",
     )
     return parser.parse_args()

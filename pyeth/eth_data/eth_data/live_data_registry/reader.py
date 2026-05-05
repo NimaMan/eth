@@ -1,7 +1,7 @@
 """
 Synchronous reader helpers for live data snapshots.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import orjson
 
 from . import keys
@@ -34,6 +34,11 @@ class RedisSnapshotReader:
         raw = self.redis.get(keys.block_header_key(block_number))
         return _decode(raw)
 
+    def fetch_block_meta(self, block_number: int) -> Optional[Dict[str, Any]]:
+        """Return the cached metadata for a specific block if available."""
+        raw = self.redis.get(keys.block_meta_key(block_number))
+        return _decode(raw)
+
     def get_latest_block_number(self) -> Optional[int]:
         value = self.redis.get(keys.latest_block_number_key())
         if value is None:
@@ -42,6 +47,21 @@ class RedisSnapshotReader:
             return int(value)
         except ValueError:
             return None
+
+    def get_latest_block_hash(self) -> Optional[str]:
+        return self.redis.get(keys.latest_block_hash_key())
+
+    def get_recent_block_numbers(self, limit: int = 100) -> List[int]:
+        if limit <= 0:
+            return []
+        values = self.redis.zrevrange(keys.recent_blocks_key(), 0, max(limit - 1, 0))
+        numbers: List[int] = []
+        for value in values:
+            try:
+                numbers.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        return numbers
 
     def get_latest_block(self) -> Optional[Dict[str, Any]]:
         number = self.get_latest_block_number()
@@ -56,6 +76,11 @@ class RedisSnapshotReader:
     def get_token_snapshot(self, token_address: str) -> Optional[Dict[str, Any]]:
         """Return the stored token snapshot for address if present."""
         return self.get_token(token_address)
+
+    def get_token_addresses(self) -> List[str]:
+        """Return all token addresses present in the token snapshot index."""
+        values = self.redis.smembers(keys.token_index_key())
+        return sorted(value.decode() if isinstance(value, bytes) else value for value in values)
 
     def get_position(self, portfolio_id: str, token_address: str) -> Optional[Dict[str, Any]]:
         raw = self.redis.get(keys.position_key(portfolio_id, token_address))
@@ -98,7 +123,7 @@ def _tx_sort_key(value: Optional[Dict[str, Any]]) -> int:
     if isinstance(idx, int):
         return idx
     try:
-        return int(idx)
+        return int(idx, 16) if isinstance(idx, str) and idx.startswith("0x") else int(idx)
     except (TypeError, ValueError):
         return 0
 

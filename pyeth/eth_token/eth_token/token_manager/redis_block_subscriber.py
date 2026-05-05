@@ -12,7 +12,7 @@ class RedisBlockSubscriber:
     def __init__(
         self,
         redis_url: str = "redis://localhost:6379/0",
-        channel: str = "live_blocks",
+        channel: str = "eth/live/block_notifications",
         callback: Optional[Callable] = None,
         logger=None,
         block_snapshot_reader: Optional[RedisSnapshotReader] = None,
@@ -29,6 +29,10 @@ class RedisBlockSubscriber:
         async def _handler(channel: str, payload: dict) -> None:
             block_number = payload.get("block_number")
             if block_number is None:
+                return
+            try:
+                block_number = int(block_number)
+            except (TypeError, ValueError):
                 return
             try:
                 processed = await asyncio.to_thread(

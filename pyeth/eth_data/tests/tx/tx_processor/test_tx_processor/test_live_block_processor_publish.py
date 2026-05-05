@@ -37,7 +37,7 @@ def test_live_block_processor_publishes_blocks_via_redis():
 
 
 async def _assert_block_notification():
-    channel = f"test_live_blocks_{uuid.uuid4().hex}"
+    channel = f"test_eth_live_block_notifications_{uuid.uuid4().hex}"
     processor = LiveBlockProcessor(
         block_notification_channel=channel,
         redis_url=REDIS_URL,

@@ -21,8 +21,8 @@ Reth index writer fits in.
 3. **Redis snapshot**  
    Once a block is processed, `_publish_live_block_snapshot` serialises the
    result via the **live data registry** and stores it under
-   `block:block_header:<number>` plus `block:processed_transactions:<number>` and updates
-   `block:latest_block_number`.
+   `eth/live/block/<number>/header` plus `eth/live/block/<number>/txs` and updates
+   `eth/live/latest/block_number`.
    The snapshot includes:
    - canonical header (all roots, timestamps, base fee…)
    - transaction count
@@ -106,7 +106,7 @@ WebSocket newHeads
         |                                 |                               |
         | write snapshot (block, txs)     |                               |
         |-------------------------------->|                               |
-|                                 | store under block:block_header:<n> + block:processed_transactions:<n>    |
+|                                 | store under eth/live/block/<n>/header + eth/live/block/<n>/txs           |
         |                                 |                               |
         | publish {"block_number": n}     |                               |
         |---------------------------------------------------------->      |
