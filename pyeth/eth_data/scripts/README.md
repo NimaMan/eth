@@ -14,8 +14,7 @@ scripts/
 │   └── service_manager.sh    # Master service manager
 ├── process_blocks_live.py    # Live block processor script
 ├── run_live_processor.sh     # Development runner
-├── simulate_historical_tx.py # Simulate a mined tx against prior block
-└── provide_tx_service/       # Transaction validation service
+└── simulate_historical_tx.py # Simulate a mined tx against prior block
 ```
 
 ## Quick Start

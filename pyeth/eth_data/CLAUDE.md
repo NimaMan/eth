@@ -97,7 +97,6 @@ PostgreSQL schema optimized for analytical queries:
 
 Complete systemd service management:
 - **Live Block Processor Service**: Real-time blockchain monitoring
-- **Transaction Validation Service**: REST API for validation
 - **Migration tools**: Smooth upgrade from old services
 - **Monitoring scripts**: Health checks and log analysis
 
@@ -236,11 +235,8 @@ pytest tests/
 
 ### Integration Tests
 ```bash
-# Test Rust integration
-python test_rust_provider.py
-
-# Test validation service
-python scripts/provide_tx_service/setup_validation_service.py
+# Test Rust-backed PyReth wrappers
+pytest tests/tx/tx_processor/test_pyreth_tx_processor_wrappers.py
 ```
 
 ### Performance Tests
