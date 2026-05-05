@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Compare address balance changes between:
-  - Python eth_data (ProcessedTxProvider.address_balance_changes)
-  - PyReth tx_processor (address_balance_changes)
+Compare address balance changes between the Python PyReth provider wrapper and
+the direct PyReth tx_processor binding.
 
 Usage:
   python python_vs_pyreth_address_balance_changes.py <TX_HASH> [--rpc http://127.0.0.1:8545]
@@ -39,13 +38,13 @@ def main():
     sys.path.extend([os.path.join(repo_root, "py"), os.path.join(repo_root, "py/eth_data")])
 
     from web3 import Web3
-    from eth_data.tx_provider.processed_tx_providor import ProcessedTxProvider
+    from eth_data.tx_provider import ProcessedTxProvider
     try:
         from eth_data.chain_utils.common_addresses import ERC20_TOKEN_DECIMALS
     except Exception:
         ERC20_TOKEN_DECIMALS = {"ETH": 18, "WETH": 18}
 
-    # Python eth_data
+    # Python compatibility wrapper over Rust/PyReth.
     w3 = Web3(Web3.HTTPProvider(args.rpc))
     py_provider = ProcessedTxProvider(w3=w3, calculate_state_changes=True)
     py_tx = py_provider.get_processed_tx(args.tx_hash)
