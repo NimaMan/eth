@@ -1,21 +1,20 @@
 eth_price_leverage (Python)
 
-Lightweight Python package to train and evaluate RL agents on the Rust-backed stablecoin trading environment exposed via `pyreth`.
+Lightweight Python package for price-leverage analysis helpers that operate on data produced by the Rust/PyReth stack.
+
+The old Python RL env/action/agent wrappers around retired `PyStablecoinEnv` and `PyStablecoinAction` bindings have been removed. Reintroduce those workflows only through first-class PyReth bindings.
 
 Structure
-- envs: Pythonic wrappers around `pyreth` environments
-- actions: Helpers to construct valid actions (routes, tokens, sizes)
-- policies: Stateless or stateful action selection logic (random/heuristic)
-- agents: Glue to run policies against envs and collect trajectories
-- examples: Small runnable examples
+- policies/best_venue: Venue scoring helpers for price batches
+- examples/analytics: Plotting and analysis scripts
 - config: Typed configs for env/training
 
 Quick start
-1) Ensure `pyreth` is installed and your local Reth DB is available.
-2) Export `RETH_DATADIR`, `BAYGUS_TEST_EOA`, optionally `START_BLOCK`.
-3) Run: `python py/eth_price_leverage/examples/run_basic_agent.py`
+Import the scoring helpers directly:
+
+```python
+from eth_price_leverage.policies.best_venue import BestVenueScorer
+```
 
 Notes
-- Rewards are computed inside the Rust env in USD terms (Chainlink ETH/USD), default timing is Next-Block.
-- Portfolio balances are U256 in Rust; this wrapper exposes them as Python ints for convenience.
-
+- Block, tx, simulation, and env execution should be owned by Rust/PyReth bindings rather than Python wrapper layers.

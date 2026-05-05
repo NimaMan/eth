@@ -11,7 +11,7 @@ Key Features:
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 import math
-import pyreth
+from pyreth import PoolBuySellParameters
 
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
 from eth_token.erc20_token.pools.numeric import parse_raw_float, parse_raw_int
@@ -165,7 +165,7 @@ class UniswapV3Pool(BasePool):
         })
     
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        config = pyreth.PoolBuySellParameters.with_denom_amount(
+        config = PoolBuySellParameters.with_denom_amount(
             float(self.test_buy_amount_eth),
             int(self.get_token_decimals()),
             int(self.get_denom_decimals()),
