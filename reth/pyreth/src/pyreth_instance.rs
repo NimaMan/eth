@@ -12,6 +12,7 @@ use tx_simulator::TxSimulator;
 
 use super::chain_query::PyChainQuery;
 use super::provider::PyProcessedTxProvider;
+use super::simulator::PyLiveTxSimulator;
 use super::simulator::PyPoolBuySellSimulator;
 use super::simulator::PySimulator;
 use super::tx_processor::py_tx_processor::PyTxProcessor;
@@ -86,6 +87,11 @@ impl PyRethInstance {
         PySimulator::from_shared(self.simulator.clone())
     }
 
+    /// Get a live-first simulator that targets the latest tracked Redis state.
+    pub fn live_simulator(&self) -> PyLiveTxSimulator {
+        PyLiveTxSimulator::from_shared(self.simulator.clone())
+    }
+
     /// Get a chain query interface that uses the shared database
     pub fn chain_query(&self) -> PyResult<PyChainQuery> {
         PyChainQuery::from_simulator(self.simulator.clone())
@@ -121,7 +127,7 @@ impl PyRethInstance {
         Ok(format!(
             "Connected to Reth database at {}\n\
              Shared instance: Yes\n\
-             Available components: simulator(), chain_query(), tx_processor(), pool_buy_sell_simulator(), price_client()\n\
+             Available components: simulator(), live_simulator(), chain_query(), tx_processor(), pool_buy_sell_simulator(), price_client()\n\
              Components can be created without additional file watchers"
         , datadir))
     }

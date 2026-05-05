@@ -28,6 +28,7 @@ pub mod block_trace;
 pub mod contract_method_simulator;
 pub mod header_utils;
 pub mod live_chain_data;
+pub mod live_tx_simulator;
 pub mod simulation_revert_decoder;
 pub mod tx_builders;
 
@@ -60,6 +61,7 @@ pub mod live_chain_cache {
 // Re-export main types
 pub use crate::tx_chain::token_metadata::{TokenMetadataResult, TokenMetadataSimulator};
 pub use live_chain_cache::{LiveChainCache, LiveChainCacheBuilder};
+pub use live_tx_simulator::LiveTxSimulator;
 pub use simulator::{RethTxSimulator, TxSimulator};
 pub use single_tx::parallel::ParallelTxSimulationOptions;
 pub use single_tx::signed::SignedTransaction;

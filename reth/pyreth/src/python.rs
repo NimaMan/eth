@@ -21,8 +21,8 @@ use crate::provider::{
 };
 use crate::pyreth_instance::{clear_singleton, is_singleton_initialized, PyRethInstance};
 use crate::simulator::{
-    PyPoolBuySellParameters, PyPoolBuySellSimulationResult, PyPoolBuySellSimulator,
-    PySimulationResult, PySimulator,
+    PyLiveTxSimulator, PyPoolBuySellParameters, PyPoolBuySellSimulationResult,
+    PyPoolBuySellSimulator, PySimulationResult, PySimulator,
 };
 use crate::tx_processor::py_processed_transaction::PyProcessedTransaction;
 use crate::tx_processor::py_tx_processor::PyTxProcessor;
@@ -40,6 +40,7 @@ pub fn pyreth_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Transaction simulation classes
     m.add_class::<PySimulator>()?;
+    m.add_class::<PyLiveTxSimulator>()?;
     m.add_class::<PySimulationResult>()?;
 
     // Chain query classes

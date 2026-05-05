@@ -186,7 +186,9 @@ impl PySimulator {
 }
 
 /// Convert Python dict to UnsignedTransaction
-fn dict_to_unsigned_transaction(tx_dict: &Bound<'_, PyDict>) -> PyResult<UnsignedTransaction> {
+pub(crate) fn dict_to_unsigned_transaction(
+    tx_dict: &Bound<'_, PyDict>,
+) -> PyResult<UnsignedTransaction> {
     let from = tx_dict
         .get_item("from")?
         .map(|v| v.extract::<String>())
