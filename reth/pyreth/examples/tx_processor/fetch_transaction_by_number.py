@@ -12,7 +12,7 @@ Environment:
 import argparse
 from typing import Any
 
-import pyreth
+from pyreth import chain_query
 
 
 def format_address(address: Any) -> str:
@@ -31,7 +31,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    chain = pyreth.PyReth().chain_query()
+    chain = chain_query()
     tx_number = args.tx_number
     print(f"Looking up transaction number {tx_number}...")
 

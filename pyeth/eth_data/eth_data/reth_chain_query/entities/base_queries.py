@@ -9,7 +9,7 @@ like time conversion and error handling.
 from typing import Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
-import pyreth
+from pyreth import chain_query
 
 
 class TimePeriod(Enum):
@@ -57,25 +57,22 @@ class BaseEntityQuery:
     """
     
     # Class-level PyReth singleton
-    _reth_instance = None
-    
-    def __init__(self, reth_instance: Optional[pyreth.PyReth] = None):
+    _chain_query = None
+
+    def __init__(self, reth_instance=None):
         """
         Initialize with optional PyReth instance.
         
         Args:
-            reth_instance: Optional PyReth instance. If not provided,
-                          uses or creates singleton.
+            reth_instance: Optional legacy PyReth instance. If not provided,
+                          uses the pyreth module-level singleton accessor.
         """
         if reth_instance:
-            self.reth = reth_instance
+            self.query = reth_instance.chain_query()
         else:
-            # Use class-level singleton
-            if BaseEntityQuery._reth_instance is None:
-                BaseEntityQuery._reth_instance = pyreth.PyReth()
-            self.reth = BaseEntityQuery._reth_instance
-        
-        self.query = self.reth.chain_query()
+            if BaseEntityQuery._chain_query is None:
+                BaseEntityQuery._chain_query = chain_query()
+            self.query = BaseEntityQuery._chain_query
     
     def convert_time_to_blocks(
         self, 

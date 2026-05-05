@@ -19,7 +19,10 @@ use crate::provider::{
     PyAddressProcessedTxProvider, PyProcessedBlock, PyProcessedTxProvider,
     PyTokenProcessedTxProvider,
 };
-use crate::pyreth_instance::{clear_singleton, is_singleton_initialized, PyRethInstance};
+use crate::pyreth_instance::{
+    block_processor, chain_query, clear_singleton, is_singleton_initialized, live_simulator,
+    pool_buy_sell_simulator, processed_tx_provider, simulator, tx_processor, PyRethInstance,
+};
 use crate::simulator::{
     PyLiveTxSimulator, PyPoolBuySellParameters, PyPoolBuySellSimulationResult,
     PyPoolBuySellSimulator, PySimulationResult, PySimulator,
@@ -37,6 +40,15 @@ pub fn pyreth_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Utility functions for singleton management
     m.add_function(wrap_pyfunction!(clear_singleton, m)?)?;
     m.add_function(wrap_pyfunction!(is_singleton_initialized, m)?)?;
+
+    // Singleton-backed component accessors
+    m.add_function(wrap_pyfunction!(block_processor, m)?)?;
+    m.add_function(wrap_pyfunction!(processed_tx_provider, m)?)?;
+    m.add_function(wrap_pyfunction!(tx_processor, m)?)?;
+    m.add_function(wrap_pyfunction!(chain_query, m)?)?;
+    m.add_function(wrap_pyfunction!(simulator, m)?)?;
+    m.add_function(wrap_pyfunction!(live_simulator, m)?)?;
+    m.add_function(wrap_pyfunction!(pool_buy_sell_simulator, m)?)?;
 
     // Transaction simulation classes
     m.add_class::<PySimulator>()?;

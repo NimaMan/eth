@@ -1,7 +1,6 @@
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.block_token_processor import HistoricalBlockTokenProcessor
-from eth_data.blockchain.pyreth_block_processor import PyRethBlockProcessor
-import orjson
+from eth_data.live_data_registry.snapshot_serialization import normalize_block_header
 
 
 def test_metadata_nonce_too_high_is_retryable() -> None:
@@ -12,7 +11,7 @@ def test_metadata_nonce_too_high_is_retryable() -> None:
     )
 
 
-def test_pyreth_block_processor_returns_token_processor_shape() -> None:
+def test_token_processor_accepts_pyreth_block_shape() -> None:
     class FakeTx:
         def __init__(self, tx_index: int) -> None:
             self.tx_index = tx_index
@@ -36,19 +35,10 @@ def test_pyreth_block_processor_returns_token_processor_shape() -> None:
         base_fee_per_gas = "42"
         transactions = [FakeTx(2), FakeTx(0), {"hash": "0x1", "tx_index": 1}]
 
-    class FakeProvider:
-        def process_block(self, block_number: int):
-            assert block_number == 123
-            return FakeBlock()
+    transactions = BlockTokenProcessor._get_block_transactions(FakeBlock())
 
-    import asyncio
-
-    result = asyncio.run(
-        PyRethBlockProcessor(processed_tx_provider=FakeProvider()).process_block(123)
-    )
-
-    assert [tx["tx_index"] if isinstance(tx, dict) else tx.tx_index for tx in result.transactions] == [0, 1, 2]
-    assert orjson.loads(result.block_header)["parentHash"] == "0xparent"
+    assert [tx["tx_index"] if isinstance(tx, dict) else tx.tx_index for tx in transactions] == [0, 1, 2]
+    assert normalize_block_header(FakeBlock())["parentHash"] == "0xparent"
 
 
 def test_historical_processor_uses_pyreth_adapter_when_provider_is_supplied() -> None:
@@ -63,5 +53,4 @@ def test_historical_processor_uses_pyreth_adapter_when_provider_is_supplied() ->
         processed_tx_provider=FakeProvider(),
     )
 
-    assert isinstance(processor.block_processor, PyRethBlockProcessor)
-    assert processor.block_processor.processed_tx_provider is not None
+    assert processor.block_processor is not None

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::B256;
+use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 
 use crate::provider::{
@@ -94,5 +95,40 @@ impl BlockDataFetcher {
             .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
         rpc.fetch_raw_block_data(block_hash, block_number, include_traces)
             .await
+    }
+
+    /// Return the latest execution block number from the configured RPC.
+    pub async fn latest_rpc_block_number(&self) -> Result<u64> {
+        let rpc = self
+            .rpc_fetcher
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
+        rpc.latest_block_number().await
+    }
+
+    /// Fetch block data from RPC by block number.
+    pub async fn fetch_rpc_block_by_number_with_traces(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+    ) -> Result<RawBlockData> {
+        let rpc = self
+            .rpc_fetcher
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
+        rpc.fetch_raw_block_by_number_data(block_number, include_traces)
+            .await
+    }
+
+    /// Fetch exact per-transaction post-state diffs for a block from RPC.
+    pub async fn fetch_rpc_state_diffs_by_number(
+        &self,
+        block_number: u64,
+    ) -> Result<Vec<PreStateFrame>> {
+        let rpc = self
+            .rpc_fetcher
+            .as_ref()
+            .ok_or_else(|| eyre::eyre!("RPC block fetcher not configured"))?;
+        rpc.trace_block_state_diffs_by_number(block_number).await
     }
 }

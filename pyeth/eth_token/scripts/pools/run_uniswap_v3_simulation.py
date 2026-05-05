@@ -6,9 +6,7 @@ Usage:
 
 from decimal import Decimal
 
-import pyreth
-
-from eth_data.utils.pyreth_client import PyrethClient
+from pyreth import PoolBuySellParameters, pool_buy_sell_simulator
 
 
 # Known mainnet addresses (USDC/WETH 0.3% pool)
@@ -20,10 +18,9 @@ ETH_DECIMALS = Decimal(10) ** 18
 
 
 def run_simulation(test_amount_eth: float = 1.0) -> None:
-    client = PyrethClient.instance()
-    simulator = client.pool_buy_sell_simulator()
+    simulator = pool_buy_sell_simulator()
 
-    config = pyreth.PoolBuySellParameters(USDC_DECIMALS, 18)
+    config = PoolBuySellParameters(USDC_DECIMALS, 18)
     config.denom_amount = test_amount_eth
     # Leaving `block_number` unset lets the simulator pick the latest head.
 

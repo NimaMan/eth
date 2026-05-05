@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence
 from web3 import Web3
-from eth_data.pyreth_client import PyrethClient
+from pyreth import chain_query
 
 
 @dataclass(frozen=True)
@@ -30,9 +30,8 @@ class AddressTxRecord:
 class RethAddressTxHistory:
     """High-level access to the Reth-backed address→tx history."""
 
-    def __init__(self, pyreth_client: Optional[PyrethClient] = None) -> None:
-        self._client = pyreth_client or PyrethClient.instance()
-        self._chain_query = self._client.chain_query()
+    def __init__(self, pyreth_client: Optional[Any] = None) -> None:
+        self._chain_query = pyreth_client.chain_query() if pyreth_client is not None else chain_query()
 
     @staticmethod
     def _normalise_address(address: str) -> str:

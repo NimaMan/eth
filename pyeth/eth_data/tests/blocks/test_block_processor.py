@@ -2,8 +2,8 @@ import asyncio
 import pytest
 import pytest_asyncio
 from web3 import AsyncWeb3, AsyncHTTPProvider
-from eth_data.blockchain.block_data_models import ProcessedBlockResult
-from eth_data.blockchain.block_processor import BlockProcessor
+from pyreth import block_processor as pyreth_block_processor
+
 from eth_data.utils.logger import get_logger
 
 logger = get_logger(name="test_block_processor", log_folder="tests")
@@ -38,12 +38,7 @@ async def block_processor(web3_instance):
     Yields:
         BlockProcessor: An instance of BlockProcessor initialized with the node URL.
     """
-    node_url = "http://127.0.0.1:8545"
-    processor = BlockProcessor(node_url=node_url, logger=logger)
-    try:
-        yield processor
-    finally:
-        logger.info("BlockProcessor instance cleanup completed.")
+    yield pyreth_block_processor()
 
 @pytest.mark.asyncio
 async def test_process_single_block(block_processor, web3_instance):
@@ -65,17 +60,13 @@ async def test_process_single_block(block_processor, web3_instance):
 
         logger.info(f"Testing block processing for block {test_block_number}")
 
-        # Fetch block data
-        block_data = await web3_instance.eth.get_block(test_block_number, full_transactions=True)
-
-        # Process the block
-        processed_block_result = await block_processor.process_block(
-            block_number=test_block_number,
-            transactions=block_data['transactions']
+        processed_block_result = await asyncio.to_thread(
+            block_processor.process_block,
+            test_block_number,
         )
 
         # Verify the processed block
-        assert isinstance(processed_block_result, ProcessedBlockResult), "Processed block should be a ProcessedBlockResult"
+        assert hasattr(processed_block_result, "transactions"), "Processed block should expose transactions"
         assert len(processed_block_result.transactions) > 0, "Processed block should contain at least one transaction"
 
         # Log the results
@@ -90,25 +81,27 @@ async def test_process_single_block(block_processor, web3_instance):
 async def test_batch_block_processing():
     """Test complete batch processing flow"""
     # Setup
-    node_url = "http://localhost:8545"
-    processor = BlockProcessor(node_url)
+    processor = pyreth_block_processor()
     
     try:
         # Get a range of recent blocks
-        latest_block = await processor.block_fetcher.fetch_latest_block_number()
+        latest_block = processor.get_latest_block()
         start_block = latest_block - 10  # Test with 10 blocks
         
         print(f"\nTesting batch processing for blocks {start_block} to {latest_block}")
         
         # Process blocks
-        processed_blocks = await processor.process_block_range(start_block, latest_block)
+        processed_blocks = {
+            block_number: await asyncio.to_thread(processor.process_block, block_number)
+            for block_number in range(start_block, latest_block + 1)
+        }
         
         # Verify results
         assert len(processed_blocks) > 0, "No blocks processed"
         
         # Check data completeness for each block
         for block_num, block_data in processed_blocks.items():
-            assert isinstance(block_data, ProcessedBlockResult), f"Invalid data format for block {block_num}"
+            assert hasattr(block_data, "transactions"), f"Invalid data format for block {block_num}"
             
             # Verify each transaction was analyzed
             for tx_result in block_data.transactions:

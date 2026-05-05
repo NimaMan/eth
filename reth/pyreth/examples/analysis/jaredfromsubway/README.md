@@ -8,7 +8,7 @@ We want to quantify every strategy the address uses (sandwiches, cross-venue arb
 The repository already exposes everything we need without leaving our own infrastructure:
 
 1. **Reth processed index** – use it to enumerate every transaction hash that involves the target address or its helper contracts (e.g. `0x1f2F10…DF387`). The index stores balance deltas, decoded events, and internal transfers.
-2. **`PyReth` Python bindings** – provide convenient accessors (`ProcessedTxProvider`, `ChainQuery`) to pull decoded data directly from the index or query on-chain state at specific blocks.
+2. **`PyReth` Python bindings** – provide convenient accessors (`block_processor()`, `chain_query()`) to pull decoded data directly from the index or query on-chain state at specific blocks.
 3. **Local RPC node** – for any missing context we can issue JSON-RPC calls against our own node (no reliance on third-party endpoints).
 4. **Scripts in this folder** – `sandwich_breakdown.py` provides per-bundle inspection, and `latest_tx_profit.py` now walks the newest processed transactions to aggregate net flows across Jared’s key addresses.
 

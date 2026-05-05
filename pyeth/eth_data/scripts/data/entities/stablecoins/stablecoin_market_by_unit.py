@@ -6,7 +6,7 @@ Demonstrates how to analyze stablecoin markets grouped by currency unit (USD, EU
 Each unit shows totals in its own denomination without cross-currency conversion.
 """
 
-from pyreth import PyReth
+from pyreth import chain_query as pyreth_chain_query
 from typing import Dict, List
 import sys
 
@@ -35,9 +35,7 @@ def analyze_stablecoin_market_by_unit():
     print("💱 Stablecoin Market Analysis by Currency Unit (PyReth)")
     print("=" * 70)
     
-    # Initialize PyReth with singleton pattern
-    reth = PyReth()
-    chain_query = reth.chain_query()
+    chain_query = pyreth_chain_query()
     
     # Get latest block
     latest_block = chain_query.get_latest_block()
@@ -180,8 +178,7 @@ def test_entity_identification():
     print("🔍 ENTITY IDENTIFICATION TEST")
     print("=" * 70)
     
-    reth = PyReth()
-    chain_query = reth.chain_query()
+    chain_query = pyreth_chain_query()
     
     test_addresses = [
         ("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "USDC"),

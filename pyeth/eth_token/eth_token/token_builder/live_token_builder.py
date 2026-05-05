@@ -19,7 +19,8 @@ import asyncio
 from dataclasses import asdict, is_dataclass
 from typing import Optional, List, Dict, Any
 
-from eth_data.utils.pyreth_client import PyrethClient
+from pyreth import block_processor
+
 from eth_token.erc20_token.erc20_token import ERC20Token
 
 
@@ -31,11 +32,10 @@ class LiveTokenBuilder:
         # w3 retained for backwards compatibility with callers that inspect it
         self.w3 = w3
 
-        client = PyrethClient.instance()
         if processed_tx_provider is not None:
             self.processed_tx_provider = processed_tx_provider
         else:
-            self.processed_tx_provider = client.processed_tx_provider()
+            self.processed_tx_provider = block_processor()
 
         self.token_provider = self.processed_tx_provider.token_provider()
 

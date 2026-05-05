@@ -78,9 +78,9 @@ def main():
     print("-" * 40)
     
     # Use a recent block (current - 100)
-    from pyreth import PyReth
-    pyreth = PyReth()
-    chain_query = pyreth.chain_query()
+    from pyreth import chain_query as pyreth_chain_query
+
+    chain_query = pyreth_chain_query()
     current_block = chain_query.get_latest_block()
     recent_block = current_block - 100
     

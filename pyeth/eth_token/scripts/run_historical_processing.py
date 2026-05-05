@@ -15,7 +15,7 @@ from typing import Optional
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
 from eth_token.token_manager.live_token_provider import LiveTokenProvider
 from eth_token.utils.logger import get_logger
-from eth_data.blockchain.block_processor import BlockProcessor
+from pyreth import block_processor
 
 
 async def process_historical_blocks(
@@ -27,11 +27,11 @@ async def process_historical_blocks(
     """Process historical blocks and store token states"""
     
     logger = logger or get_logger(name="historical_test", log_folder="tokens_live")
-    block_processor = BlockProcessor(logger=logger)
+    processor = block_processor()
     
     # Get latest block if not specified
     if not end_block:
-        end_block = await block_processor.block_fetcher.fetch_latest_block_number()
+        end_block = processor.get_latest_block()
     
     start_block = end_block - block_range
     logger.info(f"Processing blocks {start_block} to {end_block}")
@@ -110,4 +110,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

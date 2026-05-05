@@ -1,6 +1,7 @@
 use std::{future::Future, str::FromStr, sync::Arc};
 
 use alloy_primitives::B256;
+use alloy_rpc_types_trace::geth::PreStateFrame;
 use chrono::{DateTime, Utc};
 use eyre::Result;
 use jsonrpsee::{
@@ -114,6 +115,31 @@ impl LiveBlockProcessor {
         }
     }
 
+    pub async fn latest_block_number(&self) -> Result<u64> {
+        self.block_processor.latest_rpc_block_number().await
+    }
+
+    pub async fn process_block_number(&self, block_number: u64) -> Result<LiveProcessedBlock> {
+        let processed = self
+            .block_processor
+            .process_block_via_rpc_number(block_number, self.include_traces)
+            .await?;
+        let state_diffs = self.fetch_state_diffs_for_processed_block(&processed).await;
+        let execution_info = ExecutionInfo {
+            block_hash: processed.header.hash,
+            block_number: processed.header.number,
+            timestamp: processed.header.timestamp,
+        };
+
+        Ok(LiveProcessedBlock {
+            execution_info,
+            head_arrival: Utc::now(),
+            processed_block: processed,
+            state_diffs,
+            processed_at: Utc::now(),
+        })
+    }
+
     /// Continuously run and invoke the callback for each processed block.
     pub async fn run<F, Fut>(&mut self, mut handler: F) -> Result<()>
     where
@@ -143,6 +169,7 @@ impl LiveBlockProcessor {
             .block_processor
             .process_block_via_rpc(hash, block_number, self.include_traces)
             .await?;
+        let state_diffs = self.fetch_state_diffs_for_processed_block(&processed).await;
 
         if block_number == 0 {
             block_number = processed.header.number;
@@ -161,8 +188,45 @@ impl LiveBlockProcessor {
             execution_info,
             head_arrival: arrival,
             processed_block: processed,
+            state_diffs,
             processed_at: Utc::now(),
         })
+    }
+
+    async fn fetch_state_diffs_for_processed_block(
+        &self,
+        processed: &ProcessedBlock,
+    ) -> Option<Vec<PreStateFrame>> {
+        let block_number = processed.header.number;
+        let tx_count = processed.transactions.len();
+        if tx_count == 0 {
+            return Some(Vec::new());
+        }
+
+        match self
+            .block_processor
+            .fetch_rpc_state_diffs_by_number(block_number)
+            .await
+        {
+            Ok(state_diffs) if state_diffs.len() == tx_count => Some(state_diffs),
+            Ok(state_diffs) => {
+                tracing::warn!(
+                    block_number,
+                    tx_count,
+                    state_diff_count = state_diffs.len(),
+                    "prestate diff trace count did not match block transaction count"
+                );
+                None
+            }
+            Err(err) => {
+                tracing::warn!(
+                    block_number,
+                    "failed to fetch exact prestate diff traces: {}",
+                    err
+                );
+                None
+            }
+        }
     }
 }
 
@@ -172,6 +236,7 @@ pub struct LiveProcessedBlock {
     pub execution_info: ExecutionInfo,
     pub head_arrival: DateTime<Utc>,
     pub processed_block: ProcessedBlock,
+    pub state_diffs: Option<Vec<PreStateFrame>>,
     pub processed_at: DateTime<Utc>,
 }
 

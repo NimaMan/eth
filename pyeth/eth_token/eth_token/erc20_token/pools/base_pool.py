@@ -5,9 +5,10 @@ Each pool instance tracks its own events and updates its state accordingly.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 
-from eth_data.pyreth_client import PyrethClient, pyreth
+from pyreth import PoolBuySellParameters, chain_query, pool_buy_sell_simulator
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
 from eth_token.erc20_token.pools.addresses import (
     checksum_address_set,
@@ -103,9 +104,9 @@ class BasePool(ABC):
         # Shared chain data helpers
         self.pool_chain_fetcher = pool_chain_fetcher or PoolChainDataFetcher()
         self.token_chain_fetcher = token_chain_fetcher or TokenChainDataFetcher()
-        self.pyreth_client = PyrethClient.instance()
-        self.pool_buy_sell_simulator = self.pyreth_client.pool_buy_sell_simulator()
-        self.pool_buy_sell_config = pyreth.PoolBuySellParameters(
+        self.chain_query = chain_query()
+        self.pool_buy_sell_simulator = pool_buy_sell_simulator()
+        self.pool_buy_sell_config = PoolBuySellParameters(
             int(token_decimals),
             denom_decimals,
         )
@@ -303,14 +304,19 @@ class BasePool(ABC):
     def pool_age_hours(self) -> Optional[float]:        
         if self.creation_timestamp is None or self.creation_timestamp == 0:
             return None
-        current_timestamp = self.pyreth_client.get_current_block_timestamp()
+        current_timestamp = self._current_block_timestamp()
         return (current_timestamp - self.creation_timestamp) / 3600
 
     def trading_age_hours(self) -> Optional[float]:
-        current_timestamp = self.pyreth_client.get_current_block_timestamp()
+        current_timestamp = self._current_block_timestamp()
         if not self.can_buy or not self.can_buy_timestamp:
             return None
         return (current_timestamp - self.can_buy_timestamp) / 3600
+
+    def _current_block_timestamp(self) -> int:
+        latest_block = self.chain_query.get_latest_block()
+        timestamp = self.chain_query.block_to_timestamp(latest_block)
+        return int(datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp())
 
     @property
     def trading_enabled(self) -> bool:

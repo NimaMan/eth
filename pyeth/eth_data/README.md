@@ -1,148 +1,161 @@
-# Ethereum Block and Transaction Processor
+# Ethereum Data Python Package
 
-## 1. Objective and Architecture
+`eth_data` is the Python access layer around the Rust Ethereum processing stack. Rust owns canonical live block ingestion, block processing, transaction decoding, simulation, and Redis block publication. Python keeps compatibility adapters, Redis readers for downstream consumers, token/position snapshot publishing, database helpers, and analysis scripts.
 
-The `eth_data` package monitors Ethereum blocks from Python while delegating canonical block and transaction processing to the Rust `tx_processor` crate through PyReth. Python keeps compatibility wrappers, data schemas, Redis publishing, and orchestration code; it no longer owns receipt/log/trace transaction processing.
+## Ownership
 
-### Core Architecture
+- Live block processing: Rust `tx_processor` live binary.
+- Processed block publication: Rust writes the `eth/live/block/<number>/...` Redis tree and emits block notifications.
+- Historical/offline block access from Python: `pyreth.block_processor().process_block(...)`.
+- Transaction access from Python: `pyreth.tx_processor()` and `pyreth.block_processor()`.
+- Live token consumers: Python reads Rust-published Redis blocks through `RedisSnapshotReader` and publishes token snapshots through `LiveDataPublisher.publish_token()`.
 
-The system is composed of several layers, each with a distinct responsibility, ensuring a clean separation of concerns.
+Python should not reimplement receipt/log/trace parsing or live block publication.
 
-```mermaid
-graph TD
-    subgraph "Connectivity & Orchestration"
-        A[LiveBlockProcessor]
-    end
-    subgraph "Rust/PyReth Processing"
-        B[BlockProcessor compatibility wrapper]
-        C[PyReth processed_tx_provider]
-        D[Rust tx_processor]
-    end
-    subgraph "External Systems"
-        J[Ethereum Node]
-        K[Redis (Live Data)]
-        L[Database/Sarigoz]
-    end
+## Current Layout
 
-    J -- "New Block (WebSocket)" --> A
-    A -- "Process Block" --> B
-    A -- "Publish Snapshot + Notify" --> K
-    B -- "Process Block" --> C
-    B -- "Save txs (Optional)" --> L
-    C -- "Load/decode/simulate" --> D
-    D -- "Reth DB access" --> J
+```text
+eth_data/
+├── live_data_registry/              # Redis key contract, readers, token/position publishers
+├── chain_utils/                     # PyReth-backed constants and address metadata
+├── reth_chain_query/                # Python-facing Reth query helpers
+├── database/                        # Schemas, fetchers, writers
+└── utils/                           # Logging and generic helpers
 ```
 
-## 2. Core Components
+Removed legacy Python-owned areas include the old `blockchain` package, Python live block processor, MCP server, generic Redis notification wrapper, and `tx_alert`.
 
-### `LiveBlockProcessor`
-- **Responsibility**: The main entry point of the system.
-- Manages WebSocket connection to the Ethereum node for instant new block notifications.
-- Orchestrates the entire processing pipeline for each new block.
-- Publishes processed block snapshots and live block notifications to Redis so downstream consumers can replay or subscribe immediately.
-- Implements robust reconnection logic with exponential backoff for the Ethereum node connection, ensuring high availability.
+## Live Data Registry
 
-### `BlockProcessor`
-- **Responsibility**: To process a single block or a range of blocks.
-- Takes a block number as input.
-- Compatibility class over `PyRethBlockProcessor`.
-- Delegates block and transaction processing to `PyReth().processed_tx_provider().process_block(...)`.
-- Optionally saves the final processed transactions through the address index writer.
+`live_data_registry` is kept because it is the shared Redis contract between Rust and Python.
 
-### `TransactionBatchProcessor`
-- **Responsibility**: To efficiently process all transactions within a single block.
-- Compatibility class over Rust/PyReth block and transaction batch processing.
-- Uses the Rust processed transaction provider rather than Python RPC receipt/log/trace parsing.
+Rust writes:
 
-### `TransactionProcessor`
-- **Responsibility**: To dissect a single transaction and extract all relevant information.
-- Compatibility class over `PyReth().tx_processor()`.
-- Rust owns log decoding, trace interpretation, classification, action identification, fee/bribe metrics, address aggregation, and balance changes.
-- Returns the canonical PyReth `ProcessedTransaction` object.
+```text
+eth/live/latest/block_number
+eth/live/latest/block_hash
+eth/live/blocks
+eth/live/recent_blocks
+eth/live/block/<number>/meta
+eth/live/block/<number>/header
+eth/live/block/<number>/txs
+eth/live/block/<number>/tx_index
+eth/live/block/<number>/addresses
+eth/live/block/<number>/chain_state_snapshot
+```
 
-## 3. Data Flow and Processing Pipeline
+Python reads those keys through `RedisSnapshotReader` and writes derived snapshots:
 
-The end-to-end workflow is as follows:
+```text
+eth/live/token/snapshot/<token_address>
+eth/live/token/snapshot/index
+eth/live/position/<portfolio_id>/<token_address>
+```
+
+`LiveDataPublisher` intentionally has no `publish_block()` API. Block publication belongs to Rust.
+
+## Data Flow
 
 ```mermaid
 sequenceDiagram
-    participant WS as WebSocket
-    participant LBP as LiveBlockProcessor
-    participant BP as BlockProcessor
-    participant PyReth as PyReth processed_tx_provider
-    participant Rust as Rust tx_processor
-    participant Redis as Redis Live Data
+    participant Node as Reth/Lighthouse
+    participant RustLive as Rust live_block_processor
+    participant RustTx as Rust tx_processor
+    participant Redis as Redis eth/live
+    participant PyToken as Python token tracker
 
-    WS->>LBP: New Block Notification
-    LBP->>BP: process_block(block_number)
-    BP->>PyReth: process_block(block_number)
-    PyReth->>Rust: Load/decode/simulate from Reth
-    Rust-->>PyReth: ProcessedBlock
-    PyReth-->>BP: List[ProcessedTransaction]
-    BP-->>LBP: Processed Block Data
-    LBP->>Redis: Publish Block Snapshot
-    LBP->>Redis: Publish Block Notification
+    Node->>RustLive: new block head
+    RustLive->>RustTx: process block
+    RustTx-->>RustLive: ProcessedBlock
+    RustLive->>Redis: block snapshot + notification
+    PyToken->>Redis: read processed block
+    PyToken->>PyToken: update token state
+    PyToken->>Redis: publish token snapshot
 ```
 
-## 4. Key Algorithms and Optimizations
+## Common Python APIs
 
-### Algorithm: Single Block Processing
+### Process Historical Blocks
 
-1.  `LiveBlockProcessor` receives a new block header from the WebSocket subscription.
-2.  It invokes `BlockProcessor.process_block(block_number)`.
-3.  `BlockProcessor` delegates to PyReth/Rust for the processed block.
-4.  Rust loads, decodes, traces, simulates, and materializes canonical processed transactions.
-5.  **Optimization**: `TransactionBatchProcessor` makes batch RPC calls to the node to get all transaction receipts and all transaction traces for the block. This is the most significant performance optimization.
-6.  `TransactionBatchProcessor` creates an `asyncio` task for each transaction.
-7.  Each task calls `TransactionProcessor.process_transaction` with the transaction, its receipt, and its trace.
-8.  `TransactionProcessor` decodes logs, parses traces, classifies the transaction, and returns a rich `ProcessedTransaction` object.
-9.  The results are gathered and returned up the call stack.
-10. `LiveBlockProcessor` publishes the final block number to the Redis `eth/live/block_notifications` channel and stores the enriched snapshot under the `eth/live/block/<number>/...` tree so downstream consumers can replay it immediately.
+```python
+from pyreth import block_processor
 
-### Output Data Model: `ProcessedTransaction`
+processor = block_processor()
+result = processor.process_block(25_000_000)
+```
 
-The final output for each transaction is a rich dataclass containing dozens of fields, including:
-- Basic transaction info (hash, from, to, value, status, etc.).
-- A breakdown of transaction fees.
-- Classified transaction type and specific actions.
-- Decoded event logs, categorized into lists like `erc20_transfers`, `uniswap_v2_swaps`, `erc20_approval_events`, `erc721_approval_events`, etc.
-- A list of `InternalTransaction` objects representing ETH transfers between contracts.
-- A comprehensive set of all unique addresses involved in the transaction.
+### Fetch Processed Transactions
 
-## 5. Configuration and Dependencies
+```python
+from pyreth import block_processor
 
-### Configuration
-The system is configured via parameters passed to the `LiveBlockProcessor`, typically sourced from environment variables:
-- `websocket_url`: The WebSocket URL of the Ethereum node.
-- `http_url`: The HTTP RPC URL of the Ethereum node.
-- `redis_url`: Optional Redis connection string (defaults to `LIVE_BLOCKCHAIN_DATA_REDIS_URL`) used for both block snapshots and Pub/Sub notifications.
-- `index_address_txs`: A boolean flag to enable/disable writing address participation to the index database.
-- `PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS`: Optional integer (defaults to 120) that controls how long the address-index writer buffers a block before handing it to PyReth. Increasing the value gives Reth more time to seal its TransactionLookup stage; setting it to `0` restores immediate writes.
-- `PYRETH_ADDRESS_TX_MAX_FLUSH_BLOCKS`: Maximum number of matured blocks the writer will push into a single MDBX transaction (default 20). Lower the value if you prefer smaller, more frequent commits.
-- `PYRETH_INDEX_DB_SYNC_MODE`: Controls MDBX durability vs. latency. Defaults to `safe-no-sync` for fast writes; set to `durable` to restore fully synchronous commits if you can tolerate the extra latency.
+provider = block_processor()
+tx = provider.processed_transaction_by_hash("0x...")
+```
 
-#### Observed Latency (Nov 2025)
+### Read Live Blocks From Redis
 
-`scripts/monitor_block_arrival.py` still reports healthy inbound heads (median lag ≈ 2.1 s, interval ≈ 12 s), so the node/WebSocket feed is not the bottleneck. The live pipeline logger pinpoints the slow stages.
+```python
+from eth_data.live_data_registry import RedisSnapshotReader
 
-##### Pipeline instrumentation snapshot — 2025‑11‑09 14:11–14:22 CET
+reader = RedisSnapshotReader()
+latest = reader.get_latest_block_number()
+block = reader.get_block(latest)
+```
 
-Source: `eth/logs/block_processor_pipeline/live_block_processor_pipeline_20251109_141102.log`.
+### Publish Token Snapshots
 
-- `process_duration` now averages **9.4 s** (p95 10.9 s, max 11.5 s) while `head_to_process` stays ≈ 0 s, so `BlockProcessor.process_block` itself is consuming the wall-clock budget before we even enqueue the block. See blocks 23761919‑23761928 at `eth/logs/block_processor_pipeline/live_block_processor_pipeline_20251109_141102.log:6-15`.
-- `publish_time` stays in the same 9–10 s band (p95 53 s, max 63 s). This measurement now includes the synchronous snapshot build + `LiveDataPublisher.publish_block` call that writes headers/transactions to Redis; the Pub/Sub notification itself is negligible compared to serializing ~200 `ProcessedTransaction` objects.
-- `index_time` is now near-zero for head blocks because the async index worker buffers each block for at least `PYRETH_ADDRESS_TX_WRITE_LAG_SECONDS` (default 120 s) before calling `TransactionAddresstoTxIndexer.write_transactions_address_tx` (see `eth_data/database/writers/transaction_writer.py:1-154`). The lag ensures Reth’s transaction lookup stage has already sealed the block, so writes stay append-only and complete in milliseconds instead of the 8–63 s spikes we saw earlier.
-- When either serialization or the PyReth writer stalls, `head_to_publish` inflates to the same magnitude (median 19.2 s, p95 53 s) even though WebSocket delivery stayed timely. The backlog then flushes multiple heads in the same second (e.g., blocks 23761929‑23761931 at lines 16‑18), giving the illusion that Ethereum emitted “duplicate” timestamps.
+```python
+from eth_data.live_data_registry import LiveDataPublisher
 
-**Conclusion:** The current live service is CPU/IO bound inside our own synchronous stages (block processing, `TransactionAddresstoTxIndexer`, and JSON serialization), not Redis or the upstream node. These steps all run on the main event loop thread, so any spike (PyReth flush, JSON GC, or a transaction-heavy block) immediately translates into 20–60 s publish delays.
+publisher = LiveDataPublisher()
+await publisher.publish_token(token_address, snapshot)
+```
 
-**Action items:**
-1. Offload `TransactionAddresstoTxIndexer` to a dedicated worker (separate process or queue) so PyReth writes cannot block head ingestion. Even a background thread would help because `write_transactions` releases the event loop for tens of seconds today.
-2. Trim the snapshot payload or pre-serialize transactions outside the hot path. Even though the Redis notification is tiny, building and writing the full snapshot currently dominates `publish_time`.
-3. Keep the pipeline logger enabled while iterating—it is the only place we see `process_duration`, `publish_time`, and `index_time` per block, so regressions are immediately obvious.
+## Runtime Configuration
 
-Until we ship the above, downstream consumers must tolerate publish jitter up to ~1 minute despite the processor handling each block correctly.
+Live block services are configured in the Rust binary and systemd units under:
 
-### Dependencies
-- **Core**: `web3.py`, `redis` (Pub/Sub + snapshot cache), `orjson`.
-- **`baygus`**: This module has a dependency on the `baygus` project for database writing (`TransactionWriter`) and stablecoin analysis. This means it is designed to work as part of a larger analytics ecosystem and is not fully standalone.
+```text
+/home/nima/code/crypto/deploy/systemd/blockchains/ethereum
+```
+
+Important runtime settings:
+
+- Ethereum HTTP RPC: usually `http://127.0.0.1:8545`
+- Ethereum WebSocket RPC: usually `ws://127.0.0.1:8546`
+- Redis: `LIVE_BLOCKCHAIN_DATA_REDIS_URL`, defaulting to `redis://localhost:6379/0`
+- PyReth: installed from `/home/nima/code/crypto/blockchains/eth/reth/pyreth`
+
+Check services with:
+
+```bash
+systemctl status eth-live-block-processor.service
+systemctl status reth.service
+systemctl status lighthouse-beacon.service
+```
+
+## Testing
+
+Run focused Python tests with the relevant package roots on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=/home/nima/code/crypto/blockchains/eth/pyeth/eth_data \
+pytest -q pyeth/eth_data/tests/live_data_registry/test_publisher.py
+
+PYTHONPATH=/home/nima/code/crypto/blockchains/eth/pyeth/eth_data:/home/nima/code/crypto/blockchains/eth/pyeth/eth_token:/home/nima/code/crypto/blockchains/eth/pyeth/eth_token/eth_token \
+pytest -q pyeth/eth_token/tests/token_manager/test_block_token_processor.py
+```
+
+PyReth must import successfully before running tests that touch processing:
+
+```bash
+python -c "import pyreth; print(pyreth.__version__)"
+```
+
+## Cleanup Rules
+
+- Do not add new Python block processors.
+- Do not add Python Redis block publishers.
+- Prefer PyReth/Rust for transaction, block, simulation, and Reth DB access.
+- Keep Python modules that provide Redis readers, token/position snapshot publication, database models, and downstream consumer glue.

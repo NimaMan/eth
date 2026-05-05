@@ -1,15 +1,14 @@
 """TokenChainDataFetcher: lightweight PyReth-backed token metadata helper."""
 
 from typing import Optional, List, Any, Dict
-from eth_data.pyreth_client import PyrethClient
+from pyreth import chain_query
 
 
 class TokenChainDataFetcher:
     """Thin wrapper around PyReth chain-query methods for ERC20 metadata."""
 
     def __init__(self) -> None:
-        client = PyrethClient.instance()
-        self._chain_query = client.chain_query()
+        self._chain_query = chain_query()
 
     @property
     def chain_query(self):

@@ -15,7 +15,10 @@ Adding the contract deployment (nonce 0) and the initial liquidity supply
 simulation to succeed.
 """
 
+from typing import Any
+
 import pyreth
+from pyreth import block_processor, pool_buy_sell_simulator
 
 WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
 WETH_DECIMALS = 18
@@ -72,7 +75,7 @@ def run_simulation(
     return result
 
 
-def load_prior_transactions(provider: pyreth.ProcessedTxProvider) -> list[pyreth.ProcessedTransaction]:
+def load_prior_transactions(provider: Any) -> list[pyreth.ProcessedTransaction]:
     """Fetch the deployment + liquidity txs that seed the new pool."""
     priors: list[pyreth.ProcessedTransaction] = []
     for tx_hash in PRIOR_TX_HASHES:
@@ -86,9 +89,8 @@ def load_prior_transactions(provider: pyreth.ProcessedTxProvider) -> list[pyreth
 def main() -> None:
     print("Chrono pool bootstrap simulation demo\n")
 
-    reth = pyreth.PyReth()
-    simulator = reth.pool_buy_sell_simulator()
-    provider = reth.processed_tx_provider()
+    simulator = pool_buy_sell_simulator()
+    provider = block_processor()
 
     baseline = run_simulation(
         simulator,

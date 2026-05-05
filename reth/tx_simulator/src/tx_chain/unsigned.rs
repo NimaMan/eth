@@ -280,7 +280,7 @@ impl UnsignedTxChainSimulation {
             decode_revert_reason(revert_data.as_ref(), initial_context.as_ref())
         };
         if !success && revert_reason.is_none() {
-            revert_reason = Some("Transaction reverted without data".to_string());
+            revert_reason = Some("Empty revert payload from transaction execution".to_string());
         }
         let revert_context = if success { None } else { initial_context };
 

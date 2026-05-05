@@ -14,9 +14,10 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, getcontext
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import pyreth
+from pyreth import block_processor, chain_query as pyreth_chain_query
 from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 from eth_data.reth_chain_query.reth_index.address_tx_history import RethAddressTxHistory
 
@@ -129,7 +130,7 @@ class TokenMetadataResolver:
 class LatestTransactionFetcher:
     def __init__(
         self,
-        provider: pyreth.ProcessedTxProvider,
+        provider: Any,
         history: RethAddressTxHistory,
         chain_query: pyreth.ChainQuery,
     ):
@@ -559,13 +560,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_arg_parser().parse_args()
 
-    reth = pyreth.PyReth()
-    provider = reth.processed_tx_provider()
-    history = RethAddressTxHistory(pyreth_client=reth)
+    provider = block_processor()
+    history = RethAddressTxHistory()
     try:
         chain_query = history._chain_query  # pyright: ignore[reportPrivateUsage]
     except AttributeError:
-        chain_query = reth.chain_query()
+        chain_query = pyreth_chain_query()
     fetcher = LatestTransactionFetcher(provider, history, chain_query)
     calculator = ProfitCalculator(chain_query)
     network_builder = NetworkBuilder(calculator)

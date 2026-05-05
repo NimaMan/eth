@@ -93,6 +93,7 @@ pub struct ProcessedTransaction {
     // Other events and actions
     pub erc20_approval_events: Vec<ERC20ApprovalEvent>,
     pub erc721_approval_events: Vec<ERC721ApprovalEvent>,
+    #[serde(default)]
     pub approval_for_all_events: Vec<ApprovalForAllEvent>,
     pub uniswap_v2_mints: Vec<UniswapV2MintEvent>,
     pub uniswap_v2_burns: Vec<UniswapV2BurnEvent>,

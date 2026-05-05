@@ -19,7 +19,6 @@ pub fn resolve_live_data_redis_url() -> String {
         .unwrap_or_else(|_| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
 }
 
-use self::live_chain_cache::LiveChainCache;
 use crate::{
     config::view_call::{STATE_RETRY_DELAY_MS, STATE_RETRY_MAX_ATTEMPTS},
     header_utils::parse_sealed_header_from_json,
@@ -28,10 +27,16 @@ use crate::{
     tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},
     TxSimulator,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_trace::geth::{AccountState as PreStateAccountState, DiffMode, PreStateFrame};
 use eyre::{eyre, Result};
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{HeaderProvider, StateProviderBox};
+use reth_revm::{
+    db::{AccountState as RevmAccountState, DbAccount},
+    Database,
+};
+use revm::bytecode::Bytecode;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
@@ -42,7 +47,7 @@ use self::live_data_registry::ChainStateSnapshot;
 pub(crate) enum BlockStateProvider {
     /// State is available directly from MDBX.
     Historical(StateProviderBox),
-    /// State was reconstructed by replaying live data into a forked cache DB.
+    /// State was restored from an exact Redis live overlay snapshot.
     LiveFork(ForkedState),
 }
 
@@ -136,10 +141,7 @@ impl<'a> BlockContextLoader<'a> {
             );
         }
 
-        let fork = self
-            .reconstruct_state_from_live_data(cache, persisted, block_number, header.clone())
-            .await?;
-        Ok(Some(fork))
+        Ok(None)
     }
 
     /// Resolve a sealed header for a specific block, falling back to live cache.
@@ -227,66 +229,6 @@ impl<'a> BlockContextLoader<'a> {
         ))
     }
 
-    async fn reconstruct_state_from_live_data(
-        &self,
-        cache: Arc<LiveChainCache>,
-        persisted_block: u64,
-        target_block: u64,
-        final_header: SealedHeader,
-    ) -> Result<ForkedState> {
-        if target_block <= persisted_block {
-            return Err(eyre!(
-                "target block {} already persisted (latest {})",
-                target_block,
-                persisted_block
-            ));
-        }
-
-        self.simulator.assert_block_available(persisted_block)?;
-        let mut fork_state = self.simulator.create_forked_state(persisted_block)?;
-        let simulator = Arc::new(self.simulator.clone());
-
-        let mut current = persisted_block;
-        while current < target_block {
-            let next_block = current + 1;
-            let header = if next_block == final_header.number {
-                final_header.clone()
-            } else {
-                self.fetch_header_from_live_cache(next_block).await?
-            };
-
-            fork_state.block_number = header.number;
-            fork_state.block_header = header.clone();
-            fork_state.nonces.clear();
-
-            let raw = cache
-                .fetch_processed_block(next_block)
-                .await?
-                .ok_or_else(|| {
-                    eyre!(
-                        "missing processed transactions for block {} while replaying {}->{}; this block must be present in the live Redis cache",
-                        next_block,
-                        persisted_block,
-                        target_block
-                    )
-                })?;
-            let transactions = decode_processed_transactions(&raw)?;
-            if transactions.is_empty() {
-                current = next_block;
-                continue;
-            }
-
-            let mut chain = UnsignedTxChainSimulation::new(simulator.clone(), fork_state);
-            for tx in transactions {
-                chain.step(tx).await?;
-            }
-            fork_state = chain.into_forked_state();
-            current = next_block;
-        }
-
-        Ok(fork_state)
-    }
-
     async fn build_live_state_snapshot_from_processed_payloads(
         &self,
         block_number: u64,
@@ -346,6 +288,66 @@ impl<'a> BlockContextLoader<'a> {
         ))
     }
 
+    async fn build_live_state_snapshot_from_prestate_diffs(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        parent_hash: B256,
+        header_payload: &str,
+        state_diffs: &[PreStateFrame],
+    ) -> Result<ChainStateSnapshot> {
+        let header = parse_sealed_header_from_json(header_payload)?;
+        if header.number != block_number {
+            return Err(eyre!(
+                "live state snapshot header block mismatch: header={}, expected={}",
+                header.number,
+                block_number
+            ));
+        }
+        if header.hash() != block_hash {
+            return Err(eyre!(
+                "live state snapshot header hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.hash(),
+                block_hash
+            ));
+        }
+        if header.parent_hash != parent_hash {
+            return Err(eyre!(
+                "live state snapshot parent hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.parent_hash,
+                parent_hash
+            ));
+        }
+
+        let (mut fork_state, base_block_number) = self
+            .load_parent_state_for_live_snapshot(block_number, parent_hash)
+            .await?;
+        fork_state.block_number = header.number;
+        fork_state.block_header = header;
+        fork_state.nonces.clear();
+
+        for (tx_index, frame) in state_diffs.iter().enumerate() {
+            let diff = frame.as_diff().ok_or_else(|| {
+                eyre!(
+                    "live state snapshot diff for block {} tx index {} was not diffMode",
+                    block_number,
+                    tx_index
+                )
+            })?;
+            apply_prestate_diff(&mut fork_state, diff)?;
+        }
+
+        Ok(ChainStateSnapshot::new(
+            base_block_number,
+            block_number,
+            block_hash,
+            parent_hash,
+            fork_state.db.cache.clone(),
+        ))
+    }
+
     async fn load_parent_state_for_live_snapshot(
         &self,
         block_number: u64,
@@ -370,16 +372,16 @@ impl<'a> BlockContextLoader<'a> {
                             parent_block,
                             snapshot_base_block_number = snapshot.base_block_number,
                             persisted,
-                            "rebasing live state overlay snapshot to latest persisted block"
+                            "using parent live state overlay snapshot with older persisted base"
                         );
-                    } else {
-                        let header = self.load_block_header(parent_block, None).await?;
-                        let base_block_number = snapshot.base_block_number;
-                        return Ok((
-                            self.forked_state_from_snapshot(&snapshot, header).await?,
-                            base_block_number,
-                        ));
                     }
+
+                    let header = self.load_block_header(parent_block, None).await?;
+                    let base_block_number = snapshot.base_block_number;
+                    return Ok((
+                        self.forked_state_from_snapshot(&snapshot, header).await?,
+                        base_block_number,
+                    ));
                 } else {
                     warn!(
                         block_number,
@@ -391,11 +393,11 @@ impl<'a> BlockContextLoader<'a> {
                 }
             }
 
-            let parent_header = self.fetch_header_from_live_cache(parent_block).await?;
-            let fork = self
-                .reconstruct_state_from_live_data(cache, persisted, parent_block, parent_header)
-                .await?;
-            return Ok((fork, persisted));
+            return Err(eyre!(
+                "cannot build live state snapshot for block {}: exact parent snapshot for {} is unavailable",
+                block_number,
+                parent_block
+            ));
         }
 
         Err(eyre!(
@@ -432,15 +434,6 @@ impl<'a> BlockContextLoader<'a> {
     }
 }
 
-/// Convert stored processed transaction JSON into [`UnsignedTransaction`] values.
-fn decode_processed_transactions(values: &[Value]) -> Result<Vec<UnsignedTransaction>> {
-    let mut txs = Vec::with_capacity(values.len());
-    for value in values {
-        txs.push(build_unsigned_transaction_from_processed_tx_json(value)?);
-    }
-    Ok(txs)
-}
-
 /// Convert stored processed transaction JSON strings into [`UnsignedTransaction`] values.
 fn decode_processed_transaction_payloads(payloads: &[&str]) -> Result<Vec<UnsignedTransaction>> {
     let mut txs = Vec::with_capacity(payloads.len());
@@ -450,6 +443,72 @@ fn decode_processed_transaction_payloads(payloads: &[&str]) -> Result<Vec<Unsign
         txs.push(build_unsigned_transaction_from_processed_tx_json(&value)?);
     }
     Ok(txs)
+}
+
+fn apply_prestate_diff(fork_state: &mut ForkedState, diff: &DiffMode) -> Result<()> {
+    for address in diff
+        .pre
+        .keys()
+        .filter(|address| !diff.post.contains_key(*address))
+    {
+        mark_account_not_existing(fork_state, *address);
+    }
+
+    for (address, post_state) in &diff.post {
+        let created_in_tx = !diff.pre.contains_key(address);
+        apply_post_state_to_account(fork_state, *address, post_state, created_in_tx)?;
+    }
+
+    Ok(())
+}
+
+fn mark_account_not_existing(fork_state: &mut ForkedState, address: Address) {
+    fork_state
+        .db
+        .cache
+        .accounts
+        .insert(address, DbAccount::new_not_existing());
+    fork_state.nonces.remove(&address);
+}
+
+fn apply_post_state_to_account(
+    fork_state: &mut ForkedState,
+    address: Address,
+    post_state: &PreStateAccountState,
+    created_in_tx: bool,
+) -> Result<()> {
+    let mut info = fork_state.db.basic(address)?.unwrap_or_default();
+
+    if let Some(balance) = post_state.balance {
+        info.balance = balance;
+    }
+    if let Some(nonce) = post_state.nonce {
+        info.nonce = nonce;
+    }
+    if let Some(code) = post_state.code.as_ref() {
+        let bytecode = Bytecode::new_raw(code.clone());
+        info.code_hash = bytecode.hash_slow();
+        info.code = Some(bytecode);
+    }
+
+    fork_state.db.insert_account_info(address, info);
+    if created_in_tx {
+        if let Some(account) = fork_state.db.cache.accounts.get_mut(&address) {
+            account.update_account_state(RevmAccountState::StorageCleared);
+        }
+    }
+
+    for (slot, value) in &post_state.storage {
+        let slot: U256 = (*slot).into();
+        let value: U256 = (*value).into();
+        fork_state
+            .db
+            .insert_account_storage(address, slot, value)
+            .map_err(|err| eyre!("failed to apply storage diff for {address}: {err:?}"))?;
+    }
+
+    fork_state.nonces.remove(&address);
+    Ok(())
 }
 
 impl TxSimulator {
@@ -474,6 +533,27 @@ impl TxSimulator {
                 parent_hash,
                 header_payload,
                 tx_payloads,
+            )
+            .await
+    }
+
+    /// Build a cumulative live state overlay for a block from exact prestate
+    /// diff traces (`prestateTracer` with `diffMode=true`).
+    pub async fn build_live_state_snapshot_from_prestate_diffs(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        parent_hash: B256,
+        header_payload: &str,
+        state_diffs: &[PreStateFrame],
+    ) -> Result<ChainStateSnapshot> {
+        self.block_context_loader()
+            .build_live_state_snapshot_from_prestate_diffs(
+                block_number,
+                block_hash,
+                parent_hash,
+                header_payload,
+                state_diffs,
             )
             .await
     }

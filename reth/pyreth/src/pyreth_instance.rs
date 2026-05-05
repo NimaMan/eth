@@ -7,7 +7,6 @@ use parking_lot::Mutex;
 /// "too many file watches" error.
 use pyo3::prelude::*;
 use std::sync::Arc;
-use tx_processor::tx_processor::TxProcessor;
 use tx_simulator::TxSimulator;
 
 use super::chain_query::PyChainQuery;
@@ -110,7 +109,7 @@ impl PyRethInstance {
     /// Get a pool buy sell simulator that uses the shared database
     pub fn pool_buy_sell_simulator(&self) -> PyResult<PyPoolBuySellSimulator> {
         // Create TxProcessor - it doesn't need provider factory for simple operations
-        let processor = Arc::new(TxProcessor::new());
+        let processor = Arc::new(::tx_processor::tx_processor::TxProcessor::new());
 
         PyPoolBuySellSimulator::from_shared(self.simulator.clone(), processor)
     }
@@ -150,6 +149,52 @@ pub fn clear_singleton() -> PyResult<()> {
 #[pyfunction]
 pub fn is_singleton_initialized() -> bool {
     DB_INSTANCE.lock().is_some()
+}
+
+/// Return the singleton-backed block processor.
+///
+/// This exposes the Rust processed transaction provider directly. It is named
+/// `block_processor` in Python because its primary block API is
+/// `process_block(block_number)`.
+#[pyfunction]
+pub fn block_processor() -> PyResult<PyProcessedTxProvider> {
+    PyRethInstance::new()?.processed_tx_provider()
+}
+
+/// Return the singleton-backed processed transaction provider.
+#[pyfunction]
+pub fn processed_tx_provider() -> PyResult<PyProcessedTxProvider> {
+    block_processor()
+}
+
+/// Return the singleton-backed transaction processor.
+#[pyfunction]
+pub fn tx_processor() -> PyResult<PyTxProcessor> {
+    PyRethInstance::new()?.tx_processor()
+}
+
+/// Return the singleton-backed chain query interface.
+#[pyfunction]
+pub fn chain_query() -> PyResult<PyChainQuery> {
+    PyRethInstance::new()?.chain_query()
+}
+
+/// Return the singleton-backed simulator.
+#[pyfunction]
+pub fn simulator() -> PyResult<PySimulator> {
+    Ok(PyRethInstance::new()?.simulator())
+}
+
+/// Return the singleton-backed live simulator.
+#[pyfunction]
+pub fn live_simulator() -> PyResult<PyLiveTxSimulator> {
+    Ok(PyRethInstance::new()?.live_simulator())
+}
+
+/// Return the singleton-backed pool buy/sell simulator.
+#[pyfunction]
+pub fn pool_buy_sell_simulator() -> PyResult<PyPoolBuySellSimulator> {
+    PyRethInstance::new()?.pool_buy_sell_simulator()
 }
 
 /// Get or create singleton instance (internal use)

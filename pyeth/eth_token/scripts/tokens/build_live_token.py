@@ -3,8 +3,8 @@ from dataclasses import asdict
 from typing import Dict, Tuple
 
 from web3 import Web3
+from pyreth import block_processor
 
-from eth_data.blockchain.block_processor import BlockProcessor
 from eth_data.reth_chain_query.reth_index.address_tx_history import RethAddressTxHistory
 from eth_token.erc20_token.erc20_token import ERC20Token
 
@@ -18,30 +18,24 @@ async def build_token(contract_address: str) -> Tuple[ERC20Token, Dict[int, str]
     if not w3.is_connected():
         raise RuntimeError(f"Unable to connect to Ethereum node at {NODE_URL}")
 
-    block_processor = BlockProcessor(w3=w3)
+    processor = block_processor()
     address_history = RethAddressTxHistory()
     token = ERC20Token(contract_address=contract_address)
     token_block_coverage: Dict[int, str] = {}
 
-    try:
-        token_tx_records = address_history.get_transactions(contract_address)
-        block_numbers = sorted({record.block_number for record in token_tx_records})
-        print(f"Found {len(block_numbers)} blocks touching {contract_address}")
+    token_tx_records = address_history.get_transactions(contract_address)
+    block_numbers = sorted({record.block_number for record in token_tx_records})
+    print(f"Found {len(block_numbers)} blocks touching {contract_address}")
 
-        for block_number in block_numbers:
-            processed_block_result = await block_processor.process_block(block_number)
-            block_header = processed_block_result.block_header
-            for tx in processed_block_result:
-                pool_addresses = set(token.pool_addresses)
-                unique_addrs = set(tx.unique_addresses)
-                if contract_address in unique_addrs or unique_addrs & pool_addresses:
-                    token_block_coverage[tx.block_number] = tx.hash
-                    tx_payload = tx.to_dict()
-                    if block_header is not None:
-                        tx_payload["block_header"] = block_header
-                    token.update_from_transaction(tx_payload)
-    finally:
-        await block_processor.close()
+    for block_number in block_numbers:
+        processed_block = await asyncio.to_thread(processor.process_block, block_number)
+        for tx in processed_block.transactions:
+            pool_addresses = set(token.pool_addresses)
+            unique_addrs = set(tx.unique_addresses)
+            if contract_address in unique_addrs or unique_addrs & pool_addresses:
+                token_block_coverage[tx.block_number] = tx.hash
+                tx_payload = tx.to_dict()
+                token.update_from_transaction(tx_payload)
 
     return token, token_block_coverage
 

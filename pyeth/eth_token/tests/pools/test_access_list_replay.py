@@ -26,11 +26,11 @@ POOL_ADDRESS = "0x0895Dd4a9aAB7A4457F34a6268A0EC95Fe7B2f16"
 WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 
 
-def _require_pyreth() -> "pyreth.PyReth":
+def _require_pyreth() -> None:
     if pyreth is None:
         pytest.skip(f"pyreth unavailable: {_pyreth_import_error}")
     try:
-        return pyreth.PyReth()
+        pyreth.block_processor()
     except Exception as exc:  # pragma: no cover - runtime guard
         pytest.skip(f"PyReth could not be initialised: {exc}")
 
@@ -38,9 +38,9 @@ def _require_pyreth() -> "pyreth.PyReth":
 @pytest.mark.integration
 def test_prior_replay_preserves_access_list():
     """Prior transaction replay succeeds when access list is retained."""
-    reth = _require_pyreth()
-    simulator = reth.pool_buy_sell_simulator()
-    provider = reth.processed_tx_provider()
+    _require_pyreth()
+    simulator = pyreth.pool_buy_sell_simulator()
+    provider = pyreth.block_processor()
 
     prior = provider.processed_transaction_by_hash(TX_HASH)
 

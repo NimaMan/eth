@@ -1,25 +1,20 @@
-"""
-Snapshot builders shared by the live data registry.
-"""
+"""Serialization helpers for Python-owned live snapshots."""
 import dataclasses
-from typing import Any, Dict, Mapping, MutableMapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional
 
 import orjson
 from hexbytes import HexBytes
 
-from eth_data.blockchain.block_data_models import BlockHeader, ProcessedBlockResult
-
-JsonLike = Union[str, Mapping[str, Any], BlockHeader]
 MAX_I64 = 2**63 - 1
 
 
-def normalize_block_header(header: JsonLike) -> Dict[str, Any]:
+def normalize_block_header(header: Any) -> Dict[str, Any]:
     """
     Convert the block header representation into a plain dict.
     """
     if header is None:
         return {}
-    if isinstance(header, BlockHeader):
+    if hasattr(header, "to_rpc_dict"):
         return header.to_rpc_dict()
     if isinstance(header, str):
         try:
@@ -28,45 +23,7 @@ def normalize_block_header(header: JsonLike) -> Dict[str, Any]:
             return {"raw": header}
     if isinstance(header, Mapping):
         return dict(header)
-    raise TypeError(f"Unsupported block header type: {type(header)!r}")
-
-
-def build_block_snapshot(
-    processed_block: ProcessedBlockResult,
-    *,
-    block_number: Optional[int] = None,
-    include_transactions: bool = False,
-) -> Dict[str, Any]:
-    """
-    Build a JSON-friendly dict for a processed block.
-    """
-    header_dict = normalize_block_header(processed_block.block_header)
-    header_json = orjson.dumps(header_dict).decode()
-    resolved_number = (
-        block_number
-        or (int(header_dict.get("number", "0"), 16) if header_dict.get("number") else None)
-    )
-    snapshot: Dict[str, Any] = {
-        "block_number": resolved_number,
-        "header": header_json,
-        "tx_count": len(processed_block.transactions),
-    }
-    if include_transactions:
-        snapshot["transactions"] = [json_safe(tx) for tx in processed_block.transactions]
-    return snapshot
-
-
-def dumps_snapshot(snapshot: Mapping[str, Any]) -> str:
-    """
-    Serialize a snapshot dict to JSON using orjson.
-    """
-    return orjson.dumps(json_safe(snapshot)).decode()
-
-
-def loads_snapshot(payload: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not payload:
-        return None
-    return orjson.loads(payload)
+    return _block_header_from_processed_block(header)
 
 
 def json_safe(value: Any) -> Any:
@@ -97,10 +54,46 @@ def json_safe(value: Any) -> Any:
     return value
 
 
+def _block_header_from_processed_block(block: Any) -> Dict[str, Any]:
+    if block is None:
+        return {}
+    return {
+        "hash": _format_optional_hex(_get_field(block, "hash")),
+        "parentHash": _format_optional_hex(_get_field(block, "parent_hash")),
+        "number": _format_optional_hex(_get_field(block, "number")),
+        "gasLimit": _format_optional_hex(_get_field(block, "gas_limit")),
+        "gasUsed": _format_optional_hex(_get_field(block, "gas_used")),
+        "timestamp": _format_optional_hex(_get_field(block, "timestamp")),
+        "baseFeePerGas": _format_optional_hex(_get_field(block, "base_fee_per_gas")),
+    }
+
+
+def _get_field(value: Any, field: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
+def _format_optional_hex(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if stripped.startswith(("0x", "0X")):
+            return stripped
+        if stripped.isdecimal():
+            return hex(int(stripped))
+        return f"0x{stripped}"
+    if isinstance(value, (bytes, bytearray, memoryview, HexBytes)):
+        return f"0x{bytes(value).hex()}"
+    if isinstance(value, int):
+        return hex(value)
+    return str(value)
+
+
 __all__ = [
-    "build_block_snapshot",
     "json_safe",
     "normalize_block_header",
-    "dumps_snapshot",
-    "loads_snapshot",
 ]

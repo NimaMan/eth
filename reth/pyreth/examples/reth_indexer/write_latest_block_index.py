@@ -2,10 +2,11 @@ from collections import defaultdict
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import pyreth
+from pyreth import block_processor
 
 
 def main() -> None:
-    provider = pyreth.ProcessedTxProvider()
+    provider = block_processor()
     latest_block = provider.get_latest_block()
     processed_block = provider.process_block(latest_block)
 

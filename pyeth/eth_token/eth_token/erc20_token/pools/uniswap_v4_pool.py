@@ -35,7 +35,7 @@ from eth_token.erc20_token.pools.addresses import require_checksum_address
 from eth_token.erc20_token.pools.numeric import parse_raw_float, parse_raw_int
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
-from eth_data.pyreth_client import pyreth
+from pyreth import PoolBuySellParameters
 from eth_data.chain_utils.common_addresses import ZERO_ADDRESS, canonicalize_dex_pool_type
 
 
@@ -182,7 +182,7 @@ class UniswapV4Pool(BasePool):
         self._update_virtual_reserves()
 
     def evaluate_trading_status(self, transaction: Dict) -> None:
-        config = pyreth.PoolBuySellParameters.with_denom_amount(
+        config = PoolBuySellParameters.with_denom_amount(
             float(self.test_buy_amount_eth),
             int(self.get_token_decimals()),
             int(self.get_denom_decimals()),

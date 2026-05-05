@@ -11,22 +11,19 @@ recent token objects cached.
 | ---- | ------- |
 | `block_token_processor.py` | Deterministic per-block mutation engine for ERC‑20 tokens. Walks transactions sequentially, handles contract creation instantly, mutates existing tokens in order, and refreshes the shared `LiveTokensCache`. |
 | `live_block_token_processor.py` | Async wrapper that warms up the cache, subscribes to the live block feed, monitors updated tokens, and exposes `unprocessed_token_updates` / `new_updates_event` to other services (e.g. `LiveTokenTracker`). |
-| `block_subscriber.py` | `LiveBlockSnapshotSubscriber`: listens to the `block_published_notifier` exchange, hydrates block snapshots via `RedisSnapshotReader`, and forwards them to the processor callback. |
+| `redis_block_subscriber.py` | `RedisBlockSubscriber`: listens to the Rust live processor's Redis Pub/Sub block notification, hydrates block snapshots via `RedisSnapshotReader`, and forwards them to the processor callback. |
 | `live_tokens_cache.py` | LRU cache of active `ERC20Token` objects with pool-to-token mapping, optional PnL persistence, and eviction policies. Serves both the processor and any consumers needing quick lookups. |
 
 ## Data Flow
 
 ```
 ┌────────────────────────────┐       snapshot write          ┌─────────────────────────────┐
-│ eth_data LiveBlockProcessor│ ─────────────────────────────► │ Redis (LiveDataPublisher)   │
+│ Rust eth live processor    │ ─────────────────────────────► │ Redis eth/live block tree   │
 │  • newHeads                │                               └──────────────┬──────────────┘
-│  • ProcessedBlockResult    │ block number msg                               │
+│  • Rust ProcessedBlock     │ Pub/Sub block number                           │
 └────────────┬───────────────┘                                               ▼
-             │                                                  ┌──────────────────────────────┐
-             ▼                                                  │ block_published_notifier (fanout)│
-┌────────────────────────────┐                                  └──────────────┬──────────────┘
-│ block_subscriber.BlockSub… │ ◄───────────────────────────────────────────────┘
-│  • queue per consumer      │
+┌────────────────────────────┐
+│ RedisBlockSubscriber       │ ◄──────────── eth/live/block_notifications
 │  • resolve block via Redis │
 └────────────┬───────────────┘
              ▼
@@ -78,8 +75,8 @@ recent token objects cached.
 1. **Warmup** (`HistoricalBlockTokenProcessor.process_range_until_live`)
    - Replays a configurable number of historical blocks to hydrate `LiveTokensCache` before live
      tracking starts. While this runs, `process_block_tokens` behaves exactly as described above.
-2. **Live subscription** (`LiveBlockSnapshotSubscriber.start`)
-   - Starts the RabbitMQ consumer described earlier and routes each live block snapshot to
+2. **Live subscription** (`RedisBlockSubscriber.start`)
+   - Starts the Redis Pub/Sub listener and routes each live block snapshot to
      `process_block_live`, which simply calls `process_block_tokens` and fires `block_processed_event`.
 3. **Update monitoring** (`_monitor_token_updates`)
    - Waits for `block_processed_event`, copies the `updated_tokens` dict for that block, enqueues
@@ -99,13 +96,13 @@ recent token objects cached.
 
 ## End-to-End Summary
 
-1. `LiveBlockProcessor` publishes the `ProcessedBlockResult` snapshot to Redis and the block number
-   to RabbitMQ.
-2. `LiveBlockSnapshotSubscriber` consumes those numbers, fetches the full snapshot, and hands it to
+1. The Rust Ethereum live processor publishes the processed block snapshot to Redis and the block number
+   to `eth/live/block_notifications`.
+2. `RedisBlockSubscriber` consumes those numbers, fetches the full snapshot, and hands it to
    `LiveBlockTokenProcessor.process_block_live`.
 3. `BlockTokenProcessor` walks the transactions sequentially, creating new tokens as needed and
    updating existing ones. `updated_tokens` ends up containing the token objects mutated during the
    block.
 4. `_monitor_token_updates` snapshots those mutated tokens and puts them on an asyncio queue so
-   higher-level components (strategy engines, publishers, writers) can react without touching Redis
-   or RabbitMQ directly.
+   higher-level components (strategy engines, publishers, writers) can react without directly reading
+   the processed block tree.

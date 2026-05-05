@@ -1,7 +1,14 @@
 """Common address helpers sourced from PyReth."""
 from typing import Optional
+
 from web3 import Web3
-import pyreth
+
+try:
+    import pyreth
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "pyreth must be installed and loadable to use eth_data.chain_utils.common_addresses"
+    ) from exc
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 POOL_FACTORIES = dict(pyreth.pool_factories())
@@ -20,6 +27,7 @@ def is_v4_pool_manager(address: str) -> bool:
 
 def is_known_factory(address: str) -> bool:
     return pyreth.is_known_factory(address)
+
 
 DEX_POOL_TYPES = tuple(pyreth.dex_pool_types())
 DEX_POOL_TYPE_SET = set(DEX_POOL_TYPES)
@@ -70,6 +78,7 @@ ETF_ADDRESSES_BY_NAME = dict(pyreth.etf_address_map())
 ETF_NAMES_BY_ADDRESS = {addr: name for name, addr in ETF_ADDRESSES_BY_NAME.items()}
 ETF_ADDRESS_SET = set(ETF_ADDRESSES_BY_NAME.values())
 
+
 def _pair_dict(info, include_fee=False):
     data = {
         "token": info.symbol,
@@ -82,6 +91,7 @@ def _pair_dict(info, include_fee=False):
     if include_fee:
         data["fee"] = info.fee_tier
     return data
+
 
 UNISWAP_V2_PAIRS = [_pair_dict(info) for info in pyreth.uniswap_v2_pairs()]
 UNISWAP_V2_PAIR_LOOKUP = {(entry["token"], entry["denom"]): entry for entry in UNISWAP_V2_PAIRS}
@@ -102,7 +112,6 @@ denominator_addresses_by_name = {
 denominator_names_by_address = {v: k for k, v in denominator_addresses_by_name.items()}
 denominator_byte_addresses_by_name = {key: byte_addresses_by_name[key] for key in denominator_addresses_by_name}
 denominator_names_by_byte_address = {v: k for k, v in denominator_byte_addresses_by_name.items()}
-
 
 __all__ = [
     "ZERO_ADDRESS",
@@ -143,6 +152,4 @@ __all__ = [
     "denominator_names_by_byte_address",
     "fee_recipients",
     "fee_recipients_set",
-    "alleged_mr_beast_wallet",
-    "sandwich_attackers",
 ]

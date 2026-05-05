@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{hex, Address, Selector, U256};
 use tx_simulator::types::CallFrame;
-use tx_simulator::{TxSimulator, UnsignedTransaction};
+use tx_simulator::{FullSimulationResult, TxSimulator, UnsignedTransaction};
 
 const SELECTOR_TRANSFER: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 const SELECTOR_TRANSFER_FROM: [u8; 4] = [0x23, 0xb8, 0x72, 0xdd];
@@ -23,11 +23,64 @@ struct FailureContext {
 }
 
 pub(super) fn format_failure_with_revert(prefix: &str, revert: Option<&str>) -> String {
-    let reason = revert.map(|s| s.trim()).filter(|s| !s.is_empty());
+    let reason = revert
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(normalize_revert_text);
     match reason {
         Some(reason) => format!("{prefix} (revert: {reason})"),
-        None => format!("{prefix} (revert reason unknown)"),
+        None => format!("{prefix} (empty revert payload; no decoded reason)"),
     }
+}
+
+pub(super) fn format_failure_with_full_trace(
+    base_message: &str,
+    full: &FullSimulationResult,
+) -> String {
+    let failure_context = find_failure_context(&full.call_trace, 0);
+    let mut reason_opt = full
+        .revert_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty() && !is_uninformative_revert(reason))
+        .map(normalize_revert_text);
+
+    if reason_opt.is_none() {
+        if let Some(ctx) = failure_context.as_ref() {
+            reason_opt = ctx
+                .reason
+                .as_deref()
+                .map(str::trim)
+                .filter(|reason| !reason.is_empty() && !is_uninformative_revert(reason))
+                .map(normalize_revert_text);
+        }
+    }
+
+    if reason_opt.is_none() {
+        reason_opt = extract_reason_from_call_trace(&full.call_trace)
+            .map(|reason| normalize_revert_text(reason.trim()))
+            .filter(|reason| !is_uninformative_revert(reason));
+    }
+
+    let mut message = if let Some(reason) = reason_opt {
+        format!("{base_message}: {reason}")
+    } else if let Some(ctx) = full.revert_context.as_ref() {
+        format!(
+            "{base_message}: empty revert payload from top-level target {} (target_has_code={}, calldata_len={} bytes)",
+            ctx.target, ctx.has_code, ctx.calldata_len
+        )
+    } else {
+        format!("{base_message}: empty revert payload; no decoded reason")
+    };
+
+    if let Some(ctx) = failure_context.as_ref() {
+        if let Some(extra) = format_failure_context(ctx) {
+            message.push_str("; ");
+            message.push_str(&extra);
+        }
+    }
+
+    message
 }
 
 pub(super) async fn enrich_failure_reason_with_trace(
@@ -45,6 +98,7 @@ pub(super) async fn enrich_failure_reason_with_trace(
             let trimmed = s.trim();
             trimmed.is_empty()
                 || trimmed.contains("without returning data")
+                || trimmed.contains("Empty revert payload")
                 || trimmed.contains("UniswapV2:")
                 || trimmed.eq_ignore_ascii_case("execution reverted")
         })
@@ -105,6 +159,30 @@ pub(super) async fn enrich_failure_reason_with_trace(
     }
 
     base
+}
+
+fn normalize_revert_text(reason: &str) -> String {
+    reason
+        .replace(
+            "reverted without returning data",
+            "returned an empty revert payload",
+        )
+        .replace(
+            "Transaction reverted without data",
+            "Empty revert payload from transaction execution",
+        )
+        .replace("Reverted without reason", "Empty revert payload")
+}
+
+fn is_uninformative_revert(reason: &str) -> bool {
+    let trimmed = reason.trim();
+    trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("execution reverted")
+        || trimmed.eq_ignore_ascii_case("Reverted without reason")
+        || trimmed.eq_ignore_ascii_case("Transaction reverted without data")
+        || trimmed.eq_ignore_ascii_case("Empty revert payload")
+        || trimmed.contains("without returning data")
+        || trimmed.contains("Empty revert payload from")
 }
 
 fn extract_reason_from_call_trace(frame: &CallFrame) -> Option<String> {
@@ -392,5 +470,62 @@ fn format_failure_context(ctx: &FailureContext) -> Option<String> {
         None
     } else {
         Some(format!("failure originated from {}", parts.join(", ")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, Bytes, U256};
+    use tx_simulator::RevertContext;
+
+    fn frame(to: Address, input: Bytes, calls: Vec<CallFrame>) -> CallFrame {
+        CallFrame {
+            from: address!("0000000000000000000000000000000000000001"),
+            gas: U256::from(1_000_000),
+            gas_used: U256::from(10_000),
+            to: Some(to),
+            input,
+            output: None,
+            error: Some("execution reverted".to_string()),
+            revert_reason: None,
+            calls,
+            logs: Vec::new(),
+            value: Some(U256::ZERO),
+            typ: "CALL".to_string(),
+        }
+    }
+
+    #[test]
+    fn full_trace_failure_replaces_empty_revert_wording() {
+        let target = address!("C36442b4a4522E871399CD717aBDD847Ab11FE88");
+        let child = frame(
+            target,
+            Bytes::from_static(&[0x88, 0x31, 0x64, 0x56]),
+            Vec::new(),
+        );
+        let full = FullSimulationResult {
+            success: false,
+            gas_used: 100_000,
+            revert_reason: Some(
+                "Contract 0xC36442b4a4522E871399CD717aBDD847Ab11FE88 reverted without returning data"
+                    .to_string(),
+            ),
+            revert_context: Some(RevertContext {
+                target,
+                has_code: true,
+                calldata_len: 4,
+            }),
+            call_trace: frame(target, Bytes::from_static(&[0x88, 0x31, 0x64, 0x56]), vec![child]),
+            struct_logs: None,
+            logs: Vec::new(),
+        };
+
+        let message = format_failure_with_full_trace("Setup transaction replay failed", &full);
+
+        assert!(message.contains("Setup transaction replay failed"));
+        assert!(message.contains("empty revert payload"));
+        assert!(message.contains("selector 0x88316456"));
+        assert!(!message.contains("reverted without returning data"));
     }
 }

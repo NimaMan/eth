@@ -6,18 +6,17 @@ from datetime import timedelta
 from typing import Optional, Set, Tuple
 
 from web3 import Web3
+from pyreth import AddressTxIndexer, block_processor
 
-from eth_data.blockchain.block_processor import BlockProcessor
-from py.eth_data.eth_data.pyreth_client import PyrethClient
+from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
 
 SECONDS_PER_DAY = 24 * 60 * 60
 
 
 def _find_first_block_after_timestamp(
-    processor: BlockProcessor, cutoff_ts: int, latest_block: int
+    w3: Web3, cutoff_ts: int, latest_block: int
 ) -> int:
     """Binary search to find the earliest block whose timestamp >= cutoff."""
-    w3 = processor.w3
     low = 0
     high = latest_block
     candidate = latest_block
@@ -44,7 +43,7 @@ def _verify_index_write(
         return False, "No transactions with address participation to verify."
 
     sample_address = next(iter(sample_tx.unique_addresses))
-    indexer = PyrethClient.instance().address_indexer()
+    indexer = AddressTxIndexer()
     tx_refs = indexer.address_transactions(sample_address)
     matching = [
         ref
@@ -67,15 +66,17 @@ def _verify_index_write(
 
 
 async def _process_recent_blocks(days: int, target_address: Optional[str]) -> None:
-    processor = BlockProcessor(index_address_txs=True, logger=None)
+    processor = block_processor()
+    transaction_writer = TransactionAddresstoTxIndexer()
+    w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
 
-    latest_block = processor.w3.eth.get_block_number()
-    latest_block_data = processor.w3.eth.get_block(latest_block, full_transactions=False)
+    latest_block = w3.eth.get_block_number()
+    latest_block_data = w3.eth.get_block(latest_block, full_transactions=False)
     latest_timestamp = latest_block_data["timestamp"]
     lookback_seconds = days * SECONDS_PER_DAY
     cutoff_timestamp = max(0, latest_timestamp - lookback_seconds)
 
-    start_block = _find_first_block_after_timestamp(processor, cutoff_timestamp, latest_block)
+    start_block = _find_first_block_after_timestamp(w3, cutoff_timestamp, latest_block)
     total_blocks = latest_block - start_block + 1
     print(
         f"Processing {total_blocks} block(s) "
@@ -88,7 +89,6 @@ async def _process_recent_blocks(days: int, target_address: Optional[str]) -> No
         try:
             target_checksum = Web3.to_checksum_address(target_address)
         except ValueError as err:
-            await processor.close()
             raise SystemExit(f"Invalid target address {target_address}: {err}") from err
 
     total_transactions = 0
@@ -97,31 +97,25 @@ async def _process_recent_blocks(days: int, target_address: Optional[str]) -> No
     verification_message: Optional[str] = None
     target_seen_hashes: Set[Tuple[int, str]] = set()
 
-    try:
-        for block_number in range(start_block, latest_block + 1):
-            processed = await processor.process_block(block_number)
-            total_transactions += len(processed)
-            appended = (
-                processor.transaction_writer.last_appended
-                if processor.transaction_writer is not None
-                else 0
-            )
-            total_appended += appended or 0
+    for block_number in range(start_block, latest_block + 1):
+        processed_block = await asyncio.to_thread(processor.process_block, block_number)
+        processed = list(processed_block.transactions)
+        total_transactions += len(processed)
+        appended = transaction_writer.write_transactions_address_tx(processed)
+        total_appended += appended or 0
 
-            print(
-                f"Block {block_number}: processed {len(processed)} txs, "
-                f"appended {appended or 0} address->tx entries"
-            )
+        print(
+            f"Block {block_number}: processed {len(processed)} txs, "
+            f"appended {appended or 0} address->tx entries"
+        )
 
-            if target_checksum:
-                for tx in processed:
-                    if target_checksum in getattr(tx, "unique_addresses", set()):
-                        target_seen_hashes.add((block_number, tx.hash.lower()))
+        if target_checksum:
+            for tx in processed:
+                if target_checksum in getattr(tx, "unique_addresses", set()):
+                    target_seen_hashes.add((block_number, tx.hash.lower()))
 
-            if not verified and appended and not target_checksum:
-                verified, verification_message = _verify_index_write(processed, block_number)
-    finally:
-        await processor.close()
+        if not verified and appended and not target_checksum:
+            verified, verification_message = _verify_index_write(processed, block_number)
 
     print(
         f"Completed processing of {total_blocks} block(s); "
@@ -129,7 +123,7 @@ async def _process_recent_blocks(days: int, target_address: Optional[str]) -> No
         f"total address->tx entries appended={total_appended}"
     )
     if target_checksum:
-        indexer = PyrethClient.instance().address_indexer()
+        indexer = AddressTxIndexer()
         tx_refs = indexer.address_transactions(target_checksum)
         indexed_hashes: Set[Tuple[int, str]] = {
             (ref.block_number, ref.tx_hash.lower())

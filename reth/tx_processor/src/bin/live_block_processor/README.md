@@ -1,6 +1,6 @@
 # Rust Live Block Processor
 
-This binary is the Rust replacement for the Python `eth_data.blockchain.live_block_processor.LiveBlockProcessor`.
+This binary is the Rust replacement for the retired Python live block processor.
 
 It watches Ethereum head updates, processes each live block through the Rust transaction processor, publishes the processed block snapshot to Redis, and emits a Redis Pub/Sub notification after each block is cached.
 

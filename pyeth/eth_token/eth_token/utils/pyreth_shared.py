@@ -1,11 +1,11 @@
-"""Backward-compatible wrapper around the centralized PyrethClient."""
+"""Backward-compatible helpers around the pyreth module-level accessors."""
 
 from typing import Any, Tuple
 
-from eth_data.utils import PyrethClient
+import pyreth
+from pyreth import chain_query
 
 
 def get_pyreth_chain_query() -> Tuple[Any, Any]:
     """Return the shared PyReth instance and its ChainQuery handle."""
-    client = PyrethClient.instance()
-    return client.pyreth, client.chain_query()
+    return pyreth, chain_query()

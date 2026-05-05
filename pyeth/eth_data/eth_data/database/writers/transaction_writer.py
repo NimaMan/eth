@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from eth_data.pyreth_client import PyrethClient
+from pyreth import AddressTxIndexer
 
 
 def _env_int(name: str, default: int) -> int:
@@ -29,7 +29,7 @@ class _PendingBlock:
 
 class TransactionAddresstoTxIndexer:
     def __init__(self) -> None:
-        self._address_indexer = PyrethClient.instance().address_indexer()
+        self._address_indexer = AddressTxIndexer()
         self.last_appended = 0
         self._write_lag_seconds = ADDRESS_TX_WRITE_LAG_SECONDS
         self._pending_blocks: Dict[int, _PendingBlock] = {}

@@ -1,7 +1,10 @@
 import orjson
 
 from eth_data.live_data_registry.publisher import _prepare_payload
-from eth_data.live_data_registry.snapshot_serialization import dumps_snapshot
+from eth_data.live_data_registry.snapshot_serialization import (
+    json_safe,
+    normalize_block_header,
+)
 
 
 def test_prepare_payload_stringifies_uint256_sized_values():
@@ -22,9 +25,23 @@ def test_prepare_payload_stringifies_uint256_sized_values():
     assert "updated_at" in decoded
 
 
-def test_dumps_snapshot_stringifies_nested_large_ints():
+def test_json_safe_stringifies_nested_large_ints():
     value = 2**128
 
-    decoded = orjson.loads(dumps_snapshot({"values": [1, value]}))
+    decoded = json_safe({"values": [1, value]})
 
     assert decoded == {"values": [1, str(value)]}
+
+
+def test_normalize_block_header_accepts_pyreth_processed_block_shape():
+    class FakeBlock:
+        number = 123
+        hash = "0xblock"
+        parent_hash = "0xparent"
+        timestamp = 456
+        gas_used = 789
+        gas_limit = 1000
+        base_fee_per_gas = "42"
+        transactions = [{"hash": "0xtx", "tx_index": 0}]
+
+    assert normalize_block_header(FakeBlock())["number"] == "0x7b"

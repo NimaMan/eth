@@ -2,8 +2,9 @@
 
 from typing import Any, Dict, Optional
 
+from pyreth import chain_query
+
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
-from eth_data.pyreth_client import PyrethClient
 from eth_token.erc20_token.pools.addresses import checksum_address
 
 
@@ -11,8 +12,7 @@ class PoolChainDataFetcher:
     """Fetch pool liquidity snapshots via PyReth ChainQuery."""
 
     def __init__(self) -> None:
-        client = PyrethClient.instance()
-        self._chain_query = client.chain_query()
+        self._chain_query = chain_query()
 
     @property
     def chain_query(self):

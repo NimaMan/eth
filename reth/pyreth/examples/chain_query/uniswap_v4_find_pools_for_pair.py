@@ -10,7 +10,7 @@ Defaults to USDC/WETH, 20000 blocks, 5 results.
 """
 
 import sys
-import pyreth
+from pyreth import chain_query
 
 PM = "0x000000000004444C5DC75cB358380d2E3de08a90"
 USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
@@ -19,7 +19,7 @@ WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 
 
 def run(pair_a, pair_b, blocks_back=20000, max_results=5):
-    q = pyreth.PyReth().chain_query()
+    q = chain_query()
     pools = q.find_uniswap_v4_pools_for_pair(PM, pair_a, pair_b, int(blocks_back), int(max_results))
     print(f"Pair: {pair_a} / {pair_b}")
     print(f"Found: {len(pools)}")
@@ -47,4 +47,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

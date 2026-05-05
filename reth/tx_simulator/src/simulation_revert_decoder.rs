@@ -10,7 +10,7 @@ use crate::types::RevertContext;
 /// Decode revert data from EVM execution into a human-readable message
 pub fn decode_revert_data(revert_data: &Bytes) -> String {
     if revert_data.is_empty() {
-        return "Reverted without reason".to_string();
+        return "Empty revert payload".to_string();
     }
 
     // Convert to hex string for processing
@@ -25,13 +25,13 @@ pub fn decode_revert_reason(
 ) -> Option<String> {
     let base = revert_data.map(|data| {
         if data.is_empty() {
-            "Reverted without reason".to_string()
+            "Empty revert payload".to_string()
         } else {
             decode_revert_data(data)
         }
     });
 
-    if base.as_deref() != Some("Reverted without reason") {
+    if base.as_deref() != Some("Empty revert payload") {
         return base;
     }
 
@@ -48,8 +48,8 @@ pub fn decode_revert_reason(
             );
         }
         return Some(format!(
-            "Contract {} reverted without returning data",
-            ctx.target
+            "Empty revert payload from target {} (target_has_code=true, calldata_len={} bytes)",
+            ctx.target, ctx.calldata_len
         ));
     }
 
@@ -265,6 +265,6 @@ mod tests {
     fn test_empty_revert() {
         let revert_data = Bytes::new();
         let decoded = decode_revert_data(&revert_data);
-        assert_eq!(decoded, "Reverted without reason");
+        assert_eq!(decoded, "Empty revert payload");
     }
 }

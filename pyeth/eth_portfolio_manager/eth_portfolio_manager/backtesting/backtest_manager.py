@@ -44,8 +44,8 @@ import asyncio
 import time
 
 import tqdm
+from pyreth import block_processor
 
-from eth_data.blockchain.block_processor import BlockProcessor
 from eth_portfolio_manager.core.strategy_position_manager import StrategyPositionManager
 from eth_portfolio_manager.backtesting.backtest_strategy_engine import BacktestStrategyEngine
 from eth_token.token_manager.block_token_processor import BlockTokenProcessor
@@ -56,7 +56,7 @@ class BacktestExecutionEngine:
         self.config = config
         self.logger = logger
         # Initialize components
-        self.block_processor = BlockProcessor(logger=self.logger)
+        self.block_processor = block_processor()
         self.block_token_processor = BlockTokenProcessor(logger=self.logger)
         self.strategy_engines = {}
         for strategy_name, strategy in self.config.strategies.items():
@@ -73,7 +73,10 @@ class BacktestExecutionEngine:
             for current_block in tqdm.tqdm(range(self.config.start_block, self.config.end_block + 1)):
                 
                 # 1. Get block data
-                block_result = await self.block_processor.process_block(block_number=current_block)
+                block_result = await asyncio.to_thread(
+                    self.block_processor.process_block,
+                    current_block,
+                )
                 
                 start_token_process_time = time.time()
                 # 2. Process tokens in this block

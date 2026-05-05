@@ -24,7 +24,7 @@ pub struct LiveTxEntry {
     pub unique_addresses: Vec<String>,
 }
 
-/// Build a snapshot that mirrors Python's `build_block_snapshot` output.
+/// Build a snapshot that matches the Redis live-data block schema.
 pub fn build_live_block_snapshot(block: &ProcessedBlock) -> Result<LiveBlockSnapshot> {
     let header_json = serde_json::to_string(&HeaderPayload::from(&block.header))
         .map_err(|err| eyre!("failed to serialize block header: {}", err))?;

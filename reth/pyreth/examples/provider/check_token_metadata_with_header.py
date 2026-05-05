@@ -11,7 +11,7 @@ import os
 
 import aio_pika
 import orjson
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 
 RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost/")
 EXCHANGE_NAME = "blocks_exchange"
@@ -76,7 +76,7 @@ async def main() -> None:
     block_number = await fetch_next_published_block()
     print(f"Received block {block_number}")
 
-    chain_query = pyreth.PyReth().chain_query()
+    chain_query = pyreth_chain_query()
     print(f"Querying USDC metadata at block {block_number}...")
     try:
         metadata = chain_query.get_token_metadata(USDC_ADDRESS, block_number)

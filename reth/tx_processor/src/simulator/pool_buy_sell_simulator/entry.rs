@@ -10,7 +10,9 @@ use super::balance_deltas::{
     extract_tokens_received_from_processed_transaction,
 };
 use super::buyer_setup::prepare_buyer_account;
-use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
+use super::failure::{
+    enrich_failure_reason_with_trace, format_failure_with_full_trace, format_failure_with_revert,
+};
 use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::results::create_failed_result;
 use super::uniswap_v4::check_can_buy_sell_uniswap_v4;
@@ -179,13 +181,42 @@ pub async fn check_can_buy_sell_pool(
         let succeeded = setup_sim_result.success;
         prior_tx_results.push(setup_processed);
         if !succeeded {
-            let revert_reason = setup_sim_result
-                .revert_reason
-                .clone()
-                .unwrap_or_else(|| "Unknown revert".to_string());
+            let prior_to = prior_tx
+                .to_address
+                .map(|address| format!("{address:#x}"))
+                .unwrap_or_else(|| "contract creation".to_string());
+            let base_message = format!(
+                "Setup transaction replay failed tx={} mined_block={} tx_index={} nonce={} from={:#x} to={} mined_status={} simulation_base_block={}",
+                prior_hash,
+                prior_tx.block_number,
+                prior_tx.tx_index,
+                prior_nonce,
+                prior_tx.from_address,
+                prior_to,
+                prior_tx.status,
+                block_number
+            );
             let failure_message = format!(
-                "Prior transaction {} (nonce {}) failed: {}",
-                prior_hash, prior_nonce, revert_reason
+                "{}{}",
+                format_failure_with_full_trace(&base_message, &setup_sim_result),
+                if prior_tx.status {
+                    "; mined receipt succeeded, so this is a setup replay mismatch rather than an on-chain transaction failure"
+                } else {
+                    ""
+                }
+            );
+            tracing::warn!(
+                target: "pool_buy_sell_sim",
+                step = "setup_replay_failed",
+                tx_hash = %prior_hash,
+                mined_block = prior_tx.block_number,
+                tx_index = prior_tx.tx_index,
+                nonce = prior_nonce,
+                from = %prior_tx.from_address,
+                to = %prior_to,
+                mined_status = prior_tx.status,
+                simulation_base_block = block_number,
+                failure = %failure_message
             );
             return Ok(create_failed_result(
                 config,

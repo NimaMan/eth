@@ -20,6 +20,8 @@ Responsibilities
    sync while offering a simple synchronous mutation API callable from async workflows.
 """
 
+import asyncio
+
 from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional, List
@@ -31,7 +33,7 @@ from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_token.utils.logger import get_logger
-from eth_data.blockchain.pyreth_block_processor import PyRethBlockProcessor
+from pyreth import block_processor as pyreth_block_processor
 
 
 class BlockTokenProcessor:
@@ -60,7 +62,7 @@ class BlockTokenProcessor:
 
     def process_block_tokens(self, process_block_result, block_number) -> int:
         """Process a single block's transactions sequentially."""
-        block_tx_list = process_block_result.get('transactions')
+        block_tx_list = self._get_block_transactions(process_block_result)
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._address_tx_index.clear() # Reset per-block address index so pending replay never leaks across blocks
         
@@ -221,6 +223,22 @@ class BlockTokenProcessor:
                 self.live_tokens_cache.update_pool_mapping(token)
 
     @staticmethod
+    def _get_block_transactions(process_block_result: Any) -> List[Any]:
+        if isinstance(process_block_result, dict):
+            transactions = process_block_result.get("transactions", [])
+        elif hasattr(process_block_result, "get"):
+            transactions = process_block_result.get("transactions", [])
+        else:
+            transactions = getattr(process_block_result, "transactions", [])
+        return sorted(list(transactions or []), key=BlockTokenProcessor._tx_index)
+
+    @staticmethod
+    def _tx_index(tx: Any) -> int:
+        if isinstance(tx, dict):
+            return int(tx.get("tx_index", 0) or 0)
+        return int(getattr(tx, "tx_index", 0) or 0)
+
+    @staticmethod
     def _ensure_tx_dict(tx: Any) -> Dict:
         if isinstance(tx, dict):
             return tx
@@ -294,10 +312,7 @@ class HistoricalBlockTokenProcessor:
             self.logger.warning(
                 "HistoricalBlockTokenProcessor ignores index_address_txs when using PyReth block processing"
             )
-        self.block_processor = block_processor or PyRethBlockProcessor(
-            processed_tx_provider=processed_tx_provider,
-            logger=self.logger,
-        )
+        self.block_processor = block_processor or processed_tx_provider or pyreth_block_processor()
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
             logger=self.logger
         )
@@ -309,7 +324,7 @@ class HistoricalBlockTokenProcessor:
             if block_number not in self.processed_blocks:
                 try:
                     # Use shared base processor for token processing
-                    processed_block_result = await self.block_processor.process_block(block_number)
+                    processed_block_result = await self._process_block(block_number)
                     # Process block data for token updates
                     self.block_token_processor.process_block_tokens(
                         processed_block_result,
@@ -327,7 +342,7 @@ class HistoricalBlockTokenProcessor:
         current_block = start_block
         while not self._has_caught_up_to_live:
             try:
-                processed_block_result = await self.block_processor.process_block(block_number=current_block)
+                processed_block_result = await self._process_block(current_block)
                 # Process block data for token updates 
                 self.block_token_processor.process_block_tokens(
                     processed_block_result,
@@ -346,4 +361,10 @@ class HistoricalBlockTokenProcessor:
                 raise
 
         return self.block_token_processor.latest_processed_block
+
+    async def _process_block(self, block_number: int):
+        process_block = self.block_processor.process_block
+        if asyncio.iscoroutinefunction(process_block):
+            return await process_block(int(block_number))
+        return await asyncio.to_thread(process_block, int(block_number))
         

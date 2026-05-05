@@ -4,7 +4,7 @@ import statistics
 import time
 from pathlib import Path
 
-from eth_data.blockchain.block_processor import BlockProcessor
+from pyreth import block_processor
 from web3 import Web3
 
 
@@ -17,13 +17,13 @@ async def collect_metrics(
     latest = w3.eth.block_number
     start = max(0, latest - block_count + 1)
 
-    processor = BlockProcessor(node_url=http_url, logger=None)
+    processor = block_processor()
 
     rows = []
     print(f"Processing blocks {start} → {latest} …")
     for block_number in range(start, latest + 1):
         wall_start = time.perf_counter()
-        result = await processor.process_block(block_number=block_number)
+        result = await asyncio.to_thread(processor.process_block, block_number)
         wall_end = time.perf_counter()
         metrics = getattr(result, "metrics", {}) or {}
         rows.append(
@@ -37,8 +37,6 @@ async def collect_metrics(
                 "failed_tx_count": metrics.get("failed_tx_count", 0),
             }
         )
-
-    await processor.block_fetcher.close()
 
     with output_path.open("w", newline="") as f:
         writer = csv.DictWriter(

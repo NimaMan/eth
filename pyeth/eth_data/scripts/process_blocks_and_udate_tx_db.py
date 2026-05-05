@@ -1,6 +1,8 @@
 import asyncio
 from tqdm import tqdm
-from eth_data.blockchain.block_processor import BlockProcessor
+from pyreth import block_processor
+
+from eth_data.database.writers.transaction_writer import TransactionAddresstoTxIndexer
 from eth_data.utils.logger import get_logger
 from datetime import datetime, timezone
 from sqlalchemy import text
@@ -28,18 +30,14 @@ async def process_blocks_in_range(
     """
     logger = get_logger(name="db_tx_processor")
     
-    # Initialize processor with database saving enabled
-    processor = BlockProcessor(
-        node_url=node_url,
-        index_address_txs=index_address_txs,
-        logger=logger
-    )
+    processor = block_processor()
+    transaction_writer = TransactionAddresstoTxIndexer() if index_address_txs else None
     
     try:
         # Determine block range
         if end_block is None:
             # Get latest block number
-            latest_block = await processor.block_fetcher.w3.eth.get_block_number()
+            latest_block = processor.get_latest_block()
             end_block = latest_block
         
         if start_block is None:
@@ -48,7 +46,9 @@ async def process_blocks_in_range(
         
         logger.info(f"Block range: {start_block} to {end_block}")        
         for block_number in tqdm(range(end_block, start_block - 1, -1)):    
-            await processor.process_block(block_number)
+            processed_block = await asyncio.to_thread(processor.process_block, block_number)
+            if transaction_writer is not None:
+                transaction_writer.write_transactions_address_tx(processed_block.transactions)
         
     except Exception as e:
         logger.error(f"Error in process_blocks: {str(e)}")
@@ -135,13 +135,11 @@ def find_missing_blocks(start_date_str: str, node_url: str = "http://localhost:8
 
 async def process_blocks_batch(block_numbers: list[int]):
     logger = get_logger("db_tx_processor")
-    block_processor = BlockProcessor(
-        node_url="http://localhost:8545",
-        index_address_txs=True,
-        logger=logger
-    )
+    processor = block_processor()
+    transaction_writer = TransactionAddresstoTxIndexer()
     for block_number in tqdm(block_numbers):
-        await block_processor.process_block(block_number)
+        processed_block = await asyncio.to_thread(processor.process_block, block_number)
+        transaction_writer.write_transactions_address_tx(processed_block.transactions)
 
 def update_tx_db_with_missing_blocks(start_date_str="2025-01-01"):
     missing_blocks = find_missing_blocks(start_date_str)

@@ -1,5 +1,6 @@
 use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types_trace::geth::PreStateFrame;
 use jsonrpsee::{
     core::client::ClientT,
     http_client::{HttpClient, HttpClientBuilder},
@@ -14,6 +15,8 @@ use crate::provider::{
 use eyre::Result;
 use std::str::FromStr;
 
+const TRACE_RPC_MAX_RESPONSE_BYTES: u32 = 256 * 1024 * 1024;
+
 pub struct RpcBlockDataFetcher {
     http: HttpClient,
     debug: HttpClient,
@@ -21,13 +24,13 @@ pub struct RpcBlockDataFetcher {
 
 impl RpcBlockDataFetcher {
     pub fn new(http_endpoint: &str) -> Result<Self> {
-        let http = HttpClientBuilder::default().build(http_endpoint)?;
-        let debug = HttpClientBuilder::default().build(http_endpoint)?;
+        let http = build_http_client(http_endpoint)?;
+        let debug = build_http_client(http_endpoint)?;
         Ok(Self { http, debug })
     }
 
     pub fn with_debug_endpoint(mut self, endpoint: &str) -> Result<Self> {
-        self.debug = HttpClientBuilder::default().build(endpoint)?;
+        self.debug = build_http_client(endpoint)?;
         Ok(self)
     }
 
@@ -36,6 +39,23 @@ impl RpcBlockDataFetcher {
         let block = self
             .http
             .request::<Option<Value>, _>("eth_getBlockByHash", params)
+            .await?;
+        Ok(block)
+    }
+
+    pub async fn latest_block_number(&self) -> Result<u64> {
+        let value = self
+            .http
+            .request::<String, _>("eth_blockNumber", rpc_params![])
+            .await?;
+        parse_u64_hex_str(&value)
+    }
+
+    pub async fn fetch_block_by_number(&self, block_number: u64) -> Result<Option<Value>> {
+        let params = rpc_params![format!("0x{block_number:x}"), true];
+        let block = self
+            .http
+            .request::<Option<Value>, _>("eth_getBlockByNumber", params)
             .await?;
         Ok(block)
     }
@@ -87,6 +107,25 @@ impl RpcBlockDataFetcher {
         Ok(traces)
     }
 
+    pub async fn trace_block_state_diffs_by_number(
+        &self,
+        block_number: u64,
+    ) -> Result<Vec<PreStateFrame>> {
+        let params = rpc_params![
+            format!("0x{block_number:x}"),
+            serde_json::json!({
+                "tracer": "prestateTracer",
+                "tracerConfig": {"diffMode": true},
+                "timeout": "60s"
+            })
+        ];
+        let traces = self
+            .debug
+            .request::<Vec<Value>, _>("debug_traceBlockByNumber", params)
+            .await?;
+        parse_prestate_diff_frames(traces)
+    }
+
     pub async fn fetch_raw_block_data(
         &self,
         block_hash: B256,
@@ -119,6 +158,44 @@ impl RpcBlockDataFetcher {
             traces,
         })
     }
+
+    pub async fn fetch_raw_block_by_number_data(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+    ) -> Result<RawBlockData> {
+        let block_value = self
+            .fetch_block_by_number(block_number)
+            .await?
+            .ok_or_else(|| eyre::eyre!("block {} missing from RPC", block_number))?;
+        let header = parse_block_header(&block_value)?;
+        let transactions = parse_transactions(&block_value, &header)?;
+        let receipts_value = self
+            .fetch_receipts(header.hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("receipts for block {} missing from RPC", block_number))?;
+        let receipts = parse_receipts(&receipts_value, header.number)?;
+
+        let traces = if include_traces {
+            let trace_entries = self.trace_block_by_number(header.number).await?;
+            Some(parse_block_traces(trace_entries)?)
+        } else {
+            None
+        };
+
+        Ok(RawBlockData {
+            header,
+            transactions,
+            receipts,
+            traces,
+        })
+    }
+}
+
+fn build_http_client(endpoint: &str) -> Result<HttpClient> {
+    Ok(HttpClientBuilder::default()
+        .max_response_size(TRACE_RPC_MAX_RESPONSE_BYTES)
+        .build(endpoint)?)
 }
 
 fn parse_block_header(block: &Value) -> Result<crate::provider::BlockHeader> {
@@ -272,6 +349,40 @@ fn parse_block_traces(entries: Vec<Value>) -> Result<Vec<TransactionTrace>> {
         traces.push(parse_trace(&trace_value)?);
     }
     Ok(traces)
+}
+
+fn parse_prestate_diff_frames(entries: Vec<Value>) -> Result<Vec<PreStateFrame>> {
+    let mut frames = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.into_iter().enumerate() {
+        let trace_value = match entry {
+            Value::Object(mut map) => {
+                if let Some(error) = map.remove("error") {
+                    let tx_hash = map
+                        .get("txHash")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<unknown>");
+                    return Err(eyre::eyre!(
+                        "prestate diff trace failed for tx {} at index {}: {}",
+                        tx_hash,
+                        index,
+                        error
+                    ));
+                }
+                map.remove("result").unwrap_or(Value::Object(map))
+            }
+            other => other,
+        };
+        let frame: PreStateFrame = serde_json::from_value(trace_value)
+            .map_err(|err| eyre::eyre!("failed to decode prestate diff frame: {}", err))?;
+        if !frame.is_diff() {
+            return Err(eyre::eyre!(
+                "prestate tracer response for tx index {} was not diffMode",
+                index
+            ));
+        }
+        frames.push(frame);
+    }
+    Ok(frames)
 }
 
 fn parse_trace(value: &Value) -> Result<TransactionTrace> {

@@ -1,6 +1,7 @@
 use std::{env, path::PathBuf, sync::Arc, time::Instant};
 
 use alloy_primitives::B256;
+use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 use std::str::FromStr;
@@ -73,84 +74,37 @@ impl LiveBlockService {
         self.run_internal(Some(limit)).await
     }
 
+    pub async fn warmup_recent_blocks(&mut self, block_count: usize) -> Result<()> {
+        if block_count == 0 {
+            return Ok(());
+        }
+
+        let latest = self.processor.latest_block_number().await?;
+        let start = latest.saturating_sub(block_count.saturating_sub(1) as u64);
+        tracing::info!(
+            warmup_blocks = block_count,
+            start_block = start,
+            end_block = latest,
+            "warming live block processor"
+        );
+
+        for block_number in start..=latest {
+            match self.processor.process_block_number(block_number).await {
+                Ok(processed) => self.handle_processed_block(&processed).await,
+                Err(err) => {
+                    tracing::warn!(block_number, "failed to warm live block processor: {}", err);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn run_internal(mut self, limit: Option<usize>) -> Result<()> {
         let mut processed_count: usize = 0;
         loop {
             let processed = self.processor.next_processed_block().await?;
-
-            if let Some(publisher) = &self.publisher {
-                match build_live_block_snapshot(&processed.processed_block) {
-                    Ok(snapshot) => {
-                        let state_snapshot = match self.state_simulator.as_ref() {
-                            Some(simulator) => {
-                                let started = Instant::now();
-                                match build_chain_state_snapshot(simulator, &snapshot).await {
-                                    Ok(snapshot) => {
-                                        tracing::info!(
-                                            block_number = processed.execution_info.block_number,
-                                            state_snapshot_build_ms = started.elapsed().as_millis(),
-                                            base_block_number = snapshot.base_block_number,
-                                            accounts = snapshot.account_count(),
-                                            contracts = snapshot.contract_count(),
-                                            "built live state overlay snapshot"
-                                        );
-                                        Some(snapshot)
-                                    }
-                                    Err(err) => {
-                                        tracing::warn!(
-                                            block_number = processed.execution_info.block_number,
-                                            "failed to build live state overlay snapshot: {}",
-                                            err
-                                        );
-                                        None
-                                    }
-                                }
-                            }
-                            None => None,
-                        };
-                        if let Err(err) = publisher
-                            .publish_snapshot(&snapshot, state_snapshot.as_ref())
-                            .await
-                        {
-                            tracing::warn!(
-                                block_number = processed.execution_info.block_number,
-                                "failed to publish live block snapshot: {}",
-                                err
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        tracing::warn!(
-                            block_number = processed.execution_info.block_number,
-                            "failed to build live block snapshot: {}",
-                            err
-                        );
-                    }
-                }
-            }
-
-            if let Some(notifier) = &self.notifier {
-                if let Err(err) = notifier
-                    .notify_block_processed(processed.execution_info.block_number)
-                    .await
-                {
-                    tracing::warn!(
-                        block_number = processed.execution_info.block_number,
-                        "failed to publish live block notification: {}",
-                        err
-                    );
-                }
-            }
-
-            if let Some(logger) = &self.logger {
-                if let Err(err) = logger.log_block(&processed) {
-                    tracing::warn!(
-                        block_number = processed.execution_info.block_number,
-                        "failed to write live block log: {}",
-                        err
-                    );
-                }
-            }
+            self.handle_processed_block(&processed).await;
 
             processed_count += 1;
             if let Some(max) = limit {
@@ -160,6 +114,94 @@ impl LiveBlockService {
             }
         }
         Ok(())
+    }
+
+    async fn handle_processed_block(&self, processed: &crate::live::LiveProcessedBlock) {
+        if let Some(publisher) = &self.publisher {
+            match build_live_block_snapshot(&processed.processed_block) {
+                Ok(snapshot) => {
+                    let state_snapshot = match (
+                        self.state_simulator.as_ref(),
+                        processed.state_diffs.as_deref(),
+                    ) {
+                        (Some(simulator), Some(state_diffs)) => {
+                            let started = Instant::now();
+                            match build_chain_state_snapshot(simulator, &snapshot, state_diffs)
+                                .await
+                            {
+                                Ok(snapshot) => {
+                                    tracing::info!(
+                                        block_number = processed.execution_info.block_number,
+                                        state_snapshot_build_ms = started.elapsed().as_millis(),
+                                        base_block_number = snapshot.base_block_number,
+                                        accounts = snapshot.account_count(),
+                                        contracts = snapshot.contract_count(),
+                                        "built live state overlay snapshot"
+                                    );
+                                    Some(snapshot)
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        block_number = processed.execution_info.block_number,
+                                        "failed to build live state overlay snapshot: {}",
+                                        err
+                                    );
+                                    None
+                                }
+                            }
+                        }
+                        (Some(_), None) => {
+                            tracing::warn!(
+                                block_number = processed.execution_info.block_number,
+                                "exact state diffs unavailable; live state overlay snapshot will not be advanced"
+                            );
+                            None
+                        }
+                        (None, _) => None,
+                    };
+                    if let Err(err) = publisher
+                        .publish_snapshot(&snapshot, state_snapshot.as_ref())
+                        .await
+                    {
+                        tracing::warn!(
+                            block_number = processed.execution_info.block_number,
+                            "failed to publish live block snapshot: {}",
+                            err
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        block_number = processed.execution_info.block_number,
+                        "failed to build live block snapshot: {}",
+                        err
+                    );
+                }
+            }
+        }
+
+        if let Some(notifier) = &self.notifier {
+            if let Err(err) = notifier
+                .notify_block_processed(processed.execution_info.block_number)
+                .await
+            {
+                tracing::warn!(
+                    block_number = processed.execution_info.block_number,
+                    "failed to publish live block notification: {}",
+                    err
+                );
+            }
+        }
+
+        if let Some(logger) = &self.logger {
+            if let Err(err) = logger.log_block(processed) {
+                tracing::warn!(
+                    block_number = processed.execution_info.block_number,
+                    "failed to write live block log: {}",
+                    err
+                );
+            }
+        }
     }
 }
 
@@ -184,6 +226,7 @@ fn redis_processed_block_stream() -> String {
 async fn build_chain_state_snapshot(
     simulator: &TxSimulator,
     block_snapshot: &LiveBlockSnapshot,
+    state_diffs: &[PreStateFrame],
 ) -> Result<ChainStateSnapshot> {
     let header_payload = block_snapshot.header_json.as_deref().ok_or_else(|| {
         eyre::eyre!(
@@ -199,20 +242,14 @@ async fn build_chain_state_snapshot(
     })?;
     let block_hash = parse_b256(&block_snapshot.block_hash, "block hash")?;
     let parent_hash = parse_b256(parent_hash, "parent hash")?;
-    let mut tx_entries: Vec<_> = block_snapshot.tx_entries.iter().collect();
-    tx_entries.sort_by_key(|entry| entry.tx_index);
-    let tx_payloads: Vec<&str> = tx_entries
-        .into_iter()
-        .map(|entry| entry.payload_json.as_str())
-        .collect();
 
     simulator
-        .build_live_state_snapshot_from_processed_payloads(
+        .build_live_state_snapshot_from_prestate_diffs(
             block_snapshot.block_number,
             block_hash,
             parent_hash,
             header_payload,
-            &tx_payloads,
+            state_diffs,
         )
         .await
 }

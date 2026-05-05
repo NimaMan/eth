@@ -6,6 +6,7 @@ use crate::tx_processor::data_models::{
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
 use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::{bail, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::{
@@ -126,6 +127,34 @@ impl BlockProcessor {
             .fetch_rpc_block_by_hash_with_traces(block_hash, block_number, include_traces)
             .await?;
         self.process_raw_block(raw).await
+    }
+
+    /// Return the latest execution block number from the configured RPC fetcher.
+    pub async fn latest_rpc_block_number(&self) -> Result<u64> {
+        self.fetcher.latest_rpc_block_number().await
+    }
+
+    /// Process a block fetched through RPC by block number.
+    pub async fn process_block_via_rpc_number(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+    ) -> Result<ProcessedBlock> {
+        let raw = self
+            .fetcher
+            .fetch_rpc_block_by_number_with_traces(block_number, include_traces)
+            .await?;
+        self.process_raw_block(raw).await
+    }
+
+    /// Fetch exact per-transaction post-state diffs for a block through RPC.
+    pub async fn fetch_rpc_state_diffs_by_number(
+        &self,
+        block_number: u64,
+    ) -> Result<Vec<PreStateFrame>> {
+        self.fetcher
+            .fetch_rpc_state_diffs_by_number(block_number)
+            .await
     }
 
     /// Process a batch of block numbers in parallel.

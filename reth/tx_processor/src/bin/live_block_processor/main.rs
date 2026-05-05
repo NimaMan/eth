@@ -11,6 +11,8 @@ use tracing_subscriber::EnvFilter;
 use tx_processor::live::{LiveBlockProcessorConfig, LiveBlockService};
 use tx_simulator::config::repo;
 
+const LIVE_BLOCK_WARMUP_BLOCKS: usize = 5;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let log_path = live_block_log_path()?;
@@ -37,7 +39,7 @@ async fn main() -> Result<()> {
 
     let provider = Arc::new(RethQueryProvider::new(&reth_datadir)?);
 
-    let service = LiveBlockService::new(
+    let mut service = LiveBlockService::new(
         provider,
         processor_config,
         redis_url.clone(),
@@ -47,14 +49,19 @@ async fn main() -> Result<()> {
     .await?;
 
     println!(
-        "Running live block service (limit={:?}, redis={:?}, datadir={}, rpc={}, ws={}, log={})",
+        "Running live block service (limit={:?}, warmup_blocks={}, redis={:?}, datadir={}, rpc={}, ws={}, log={})",
         block_limit,
+        LIVE_BLOCK_WARMUP_BLOCKS,
         redis_url,
         reth_datadir,
         execution_rpc,
         execution_ws,
         log_path.display()
     );
+
+    service
+        .warmup_recent_blocks(LIVE_BLOCK_WARMUP_BLOCKS)
+        .await?;
 
     if let Some(limit) = block_limit {
         service.run_for_blocks(limit).await?;

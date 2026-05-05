@@ -5,12 +5,11 @@ import os
 sys.path.append("/home/nima/code/crypto/eth/pyeth/eth_data")
 sys.path.append("/home/nima/code/crypto/eth/pyeth/eth_token")
 
-from eth_data.pyreth_client import PyrethClient
+from pyreth import block_processor, chain_query
 
 try:
-    client = PyrethClient.instance()
-    provider = client.processed_tx_provider()
-    q = client.chain_query()
+    provider = block_processor()
+    q = chain_query()
 
     tx_hash2 = "0xe464e002492443d063ae85dfb798c7100898a640dbc55d4737c6117edee0dcf9"
     print(f"Fetching tx {tx_hash2}...")

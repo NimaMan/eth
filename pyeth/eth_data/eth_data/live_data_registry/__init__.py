@@ -11,13 +11,11 @@ and retention policy stay consistent.
 from .publisher import LiveDataPublisher
 from .reader import RedisSnapshotReader
 from .snapshot_serialization import (
-    build_block_snapshot,
     normalize_block_header,
 )
 
 __all__ = [
     "LiveDataPublisher",
     "RedisSnapshotReader",
-    "build_block_snapshot",
     "normalize_block_header",
 ]
