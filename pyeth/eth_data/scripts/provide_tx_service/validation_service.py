@@ -33,7 +33,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 
 # Configure logging directly since we may not have logger utils
 logging.basicConfig(level=logging.INFO)
@@ -151,9 +150,12 @@ def convert_address_balance_changes_for_rust(changes: Dict[str, Any]) -> Dict[st
     
     return converted
 
-def serialize_processed_transaction(ptx: ProcessedTransaction) -> Dict[str, Any]:
+def serialize_processed_transaction(ptx: Any) -> Dict[str, Any]:
     """Convert ProcessedTransaction to JSON-serializable dict"""
     try:
+        if hasattr(ptx, "to_dict"):
+            return ptx.to_dict()
+
         # Custom serialization for dataclass with sets and complex types
         result = {
             # Core transaction data

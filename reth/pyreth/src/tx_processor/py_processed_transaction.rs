@@ -482,14 +482,6 @@ impl PyProcessedTransaction {
         Ok(s)
     }
 
-    /// Convert to Python dataclass instance via ProcessedTransaction.from_dict()
-    fn as_python_dataclass(&self, py: Python) -> PyResult<PyObject> {
-        let dict = self.to_dict(py)?.into_py(py);
-        let module = py.import_bound("eth_data.eth_data.tx_processor.data_models.tx_models")?;
-        let cls = module.getattr("ProcessedTransaction")?;
-        let res = cls.call_method1("from_dict", (dict,))?;
-        Ok(res.into())
-    }
     /// Get internal transactions as Python list of dicts
     #[getter]
     fn internal_transactions(&self, py: Python) -> PyResult<Py<PyList>> {
@@ -1069,8 +1061,8 @@ impl PyProcessedTransaction {
         Ok(dict.unbind())
     }
 
-    // NOTE: to_dict() is defined earlier in this impl and returns a schema
-    // that matches eth_data.tx_processor.data_models.ProcessedTransaction.
+    // NOTE: to_dict() is defined earlier in this impl and returns the
+    // canonical Python-facing transaction schema.
 
     fn __repr__(&self) -> String {
         format!(

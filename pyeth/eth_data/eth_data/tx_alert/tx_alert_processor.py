@@ -1,11 +1,11 @@
 
 import asyncio
-from typing import List
+from typing import Any, List
 from eth_data.tx_alert.bribe_alert import BribeAlert
 from eth_data.tx_alert.user_involved_alert import OrcaAlert, WhaleAlert
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.utils.logger import get_logger
 
+ProcessedTransaction = Any
 
 class TransactionAlertProcessor:
     def __init__(self, logger=None):

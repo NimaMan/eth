@@ -2,28 +2,28 @@ Interoperability Plan: ProcessedTransaction between Rust and Python
 
 Overview
 
-- Goal: Ensure Rust and Python produce the same ProcessedTransaction from the blockchain, and use one shared data structure when exchanging results between the two languages. Python already fetches on‑chain data and builds processed transactions; Rust does the same and also produces simulation results. Both must conform to a single schema so we can pass data seamlessly either way.
-- Scope: Transaction processing and simulation results (including pool buy→approve→sell) flow across the boundary as ProcessedTransaction objects (Rust → Python for simulations most of the time). Downstream analytics in Python operate on the same schema as the existing Python dataclasses.
+- Goal: Use the Rust ProcessedTransaction as the single shared data structure when exchanging results between Rust and Python.
+- Scope: Transaction processing and simulation results (including pool buy->approve->sell) flow across the boundary as PyReth ProcessedTransaction objects. Downstream analytics in Python operate on the same attributes or the canonical `to_dict()` shape.
 
 Design Principles
 
-- Single schema contract: Both Rust and Python implementations conform to the exact same ProcessedTransaction shape (field names, types, and nested structures). Either side may be the producer (Python for historical loads; Rust for high‑throughput and simulations).
+- Single schema contract: Rust owns the ProcessedTransaction shape (field names, types, and nested structures). Python consumes the PyO3 object or its `to_dict()` output.
 - Lossless transport: Large integers (U256) and binary data are converted to safe string/hex types; no float down‑casting.
 - Thin bindings: pyo3 classes expose Rust data; no business logic in bindings (e.g., tax math, trading enabled checks) — those stay in Rust.
-- Backward‑compatible schema: The dict shape Python receives matches eth_data/eth_data/tx_processor/data_models/tx_models.py dataclasses.
+- Backward-compatible schema: The dict shape Python receives is the canonical PyReth transaction schema.
 
 Data Model Contract
 
 - Canonical Rust type: tx_processor::tx_processor::data_models::ProcessedTransaction
   - Fields: hash, block_number, block_timestamp, tx_index, from_address, to_address, contract_address, value, status, nonce, tx_type, actions, fees, bribe_amount, unique_addresses, erc20/721/1155_contracts, eth/erc20/erc721/erc1155 transfers, internal_transactions, uniswap_v2/v3/v4 events, permit2, other_events, address_balance_changes, latest_states, input
-- Python target type: eth_data.tx_processor.data_models.tx_models.ProcessedTransaction
+- Python target type: pyreth.ProcessedTransaction
 - Mapping rules:
   - Addresses: EIP‑55 checksum strings (0x‑prefixed)
   - Hashes: 0x‑prefixed hex strings
   - Amounts (U256): decimal strings (not float), e.g. "1000000000000000000"
   - Bytes/input: 0x‑prefixed hex string
   - Sets (unique_addresses, contract sets): Python set[str]; when serializing to dict/JSON, may become list[str]
-  - Nested events/structs: map field‑for‑field to Python dicts matching existing dataclasses (ERC20TransferEvent, InternalTransaction, UniswapV2SwapEvent, etc.)
+  - Nested events/structs: map field-for-field to Python dicts matching the Rust model (ERC20TransferEvent, InternalTransaction, UniswapV2SwapEvent, etc.)
   - Address balance changes: exposed via ProcessedTransaction.address_balance_changes in Rust; Python can continue to compute derived metrics from there as needed
 
 Binding Surface (current and planned)
@@ -43,15 +43,14 @@ Binding Surface (current and planned)
   - PoolBuySellSimulator.check_sushiswap_pool(...)
   - Planned upgrade: results include buy_transaction, approve_transaction, sell_transaction as PyProcessedTransaction for full transparency on each step.
 
-PyProcessedTransaction utility methods (to add)
+PyProcessedTransaction utility methods
 
-- to_dict() -> dict: returns a dict that conforms exactly to Python dataclasses in eth_data/eth_data/tx_processor/data_models/tx_models.py. Field names and shapes match. Useful when you want a pure‑Python object graph.
+- to_dict() -> dict: returns a canonical, pure-Python dict with the same field names and nested structures exposed by the Rust model.
 - to_json() -> str: canonical JSON with the same schema (decimal strings for U256, checksum addresses, hex for bytes).
-- as_python_dataclass() -> eth_data.tx_processor.data_models.tx_models.ProcessedTransaction: convenience constructor that calls ProcessedTransaction.from_dict on the dict above.
 
 Why dict/json interop in addition to pyo3 classes?
 
-- Seamless integration with existing Python code and tests that expect dataclasses and dicts.
+- Seamless integration with existing Python code that expects dicts.
 - Stable contract for non‑Python consumers (notebooks, services) when needed.
 - Zero logic duplication: conversion is mechanical; analytics remain in Rust or in existing Python modules that operate on the canonical dict.
 
@@ -71,7 +70,6 @@ Examples (intended usage from Python)
 - Single tx from hash (with simulation):
   - ptx = TxProcessor().process_transaction_from_hash_with_simulation("0x...")
   - py_dict = ptx.to_dict()  # canonical, lossless schema (U256 as decimal strings)
-  - py_dc = ptx.as_python_dataclass()  # optional convenience
 
 - Single tx from hash (DB‑only, no simulation):
   - ptx = TxProcessor().load_transaction_from_hash_db_only("0x...")

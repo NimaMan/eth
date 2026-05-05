@@ -59,9 +59,9 @@ from tqdm import tqdm
 from web3 import Web3
 
 from eth_data.blockchain.block_processor import BlockProcessor
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.database.db_fetchers.tx_meta_data_fetcher import TxMetaDataFetcher
 
+ProcessedTransaction = Any
 
 class ProcessedTransactionProvider:
     """
@@ -77,7 +77,7 @@ class ProcessedTransactionProvider:
             w3: Web3 instance
             logger: An optional logger instance.
         """
-        
+
         self.w3 = w3 or Web3(Web3.HTTPProvider('http://localhost:8545'))
         self.logger = logger
         self.tx_meta_data_fetcher = TxMetaDataFetcher(logger=self.logger)
@@ -389,7 +389,6 @@ class ProcessedTransactionProvider:
                     self.logger.error(f"Failed to process block {block_num} for cache: {e}")
                 # Store empty list to prevent repeated processing attempts
                 self.processed_block_cache[block_num] = []
-        
-        if self.logger: 
+
+        if self.logger:
             self.logger.info(f"Cache update complete. Successfully processed {processed_count} blocks with {total_tx_count} txs. Failed: {failed_count} blocks.")
-        

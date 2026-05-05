@@ -5,15 +5,12 @@ Shared block-level data models used across the block processing pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import orjson
 from hexbytes import HexBytes
 
 __all__ = ["BlockHeader", "ProcessedBlockResult"]
-
-if TYPE_CHECKING:
-    from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 
 _FIELD_NAME_TO_RPC_KEY = {
     "hash": "hash",
@@ -142,7 +139,7 @@ class ProcessedBlockResult:
     downstream serialization for messaging and caching layers.
     """
 
-    transactions: List["ProcessedTransaction"]
+    transactions: List[Any]
     block_header: Optional[Union[str, BlockHeader]] = None
 
     def __post_init__(self) -> None:

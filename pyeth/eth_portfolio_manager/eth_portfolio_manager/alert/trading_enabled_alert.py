@@ -1,6 +1,5 @@
-from eth_data.tx_processor.data_models import tx_models as tx_models
-from eth_token.alert.base_alert import BaseAlert
-from typing import List
+from eth_portfolio_manager.alert.base_alert import BaseAlert
+from typing import Any, List
 from dataclasses import dataclass
 from eth_token.utils.logger import get_logger
 
@@ -14,7 +13,7 @@ class TradingEnabledAlertData:
     from_address: str
     to_address: str
 
-ProcessedTransaction = tx_models.ProcessedTransaction
+ProcessedTransaction = Any
 
 
 def _tx_type(detailed_tx: ProcessedTransaction) -> str:

@@ -1,12 +1,12 @@
-from typing import List, Any
+from typing import Any, List
 
 from eth_data.chain_utils.common_addresses import fee_recipients
 from eth_data.tx_alert.base_alert_class import BaseAlert
 from eth_data.tx_alert.alert_models import BribeAlertData
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.tx_alert.config import BRIBE_THRESHOLD_WEI
 from eth_data.utils.logger import get_logger
 
+ProcessedTransaction = Any
 
 logger = get_logger("bribe_alert", log_folder="alert")
 

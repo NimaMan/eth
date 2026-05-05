@@ -1,7 +1,8 @@
-from typing import Any, List, Dict, Optional
+from typing import Any
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
+
+ProcessedTransaction = Any
 
 
 class AlertPriority(IntEnum):

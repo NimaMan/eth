@@ -1,10 +1,10 @@
 from typing import List, Any, Optional, Set
 from eth_data.tx_alert.base_alert_class import BaseAlert, AlertPriority
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.tx_alert.alert_models import UserInvolvedAlertData
 from eth_data.tx_alert.config import get_grey_addresses, get_orca_addresses, get_whale_addresses
 from eth_data.utils.logger import get_logger
 
+ProcessedTransaction = Any
 
 class BaseUserAlert(BaseAlert):
     """Base class for user-related alerts to avoid code duplication"""

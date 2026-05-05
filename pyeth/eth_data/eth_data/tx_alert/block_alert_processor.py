@@ -14,11 +14,11 @@ Flow:
 """
 import time 
 import asyncio
-from typing import List
+from typing import Any, List
 from eth_data.tx_alert.tx_alert_processor import TransactionAlertProcessor
-from eth_data.tx_processor.data_models.tx_models import ProcessedTransaction
 from eth_data.utils.logger import get_logger
 
+ProcessedTransaction = Any
 
 class BlockAlertProcessor:
     def __init__(self, logger=None):
