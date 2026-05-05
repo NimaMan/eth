@@ -21,6 +21,8 @@ Data/control flow (typical cycle):
 ## Responsibilities of Soleth (on-chain executor)
 - Provide the on-chain router entrypoints the off-chain agent targets.
 - Enforce safety (reentrancy guards, bounded slippage, calldata sanity) and execute swaps/settlement.
+- Support bounded builder/validator payment commands for private-bundle execution when the off-chain
+  executor chooses that path.
 - Optimize gas paths (e.g., permit/infinite approvals, flash accounting for multi-hop, calldata-light encodings).
 - Serve as the canonical contract that Rust/Python builders reference for ABI/bytecode when constructing transactions.
 

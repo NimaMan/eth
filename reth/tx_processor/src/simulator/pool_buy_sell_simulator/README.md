@@ -68,8 +68,12 @@ each leg records full call traces. `TxProcessor` processes the trace into a
   semantics even for ETH denominated pairs.
 
 ### Buy leg
-- **V2/Sushi:** `build_token_to_token_swap_v2`, input path `denom -> token`
-- **V3:** `build_token_to_token_swap_v3`
+- **Current implementation gap:** `entry.rs` still calls `build_buy_swap(...)`,
+  which is ETH/WETH-oriented and passes `test_amount` as the buy input. That is
+  acceptable only for canonical ETH/WETH-denominated routes.
+- **Target behavior for arbitrary denoms:**
+  - **V2/Sushi:** `build_token_to_token_swap_v2`, input path `denom -> token`
+  - **V3:** `build_token_to_token_swap_v3`
 - **Rationale:** We buy using an ERC‑20 to ERC‑20 swap so that the amount of
   denomination tokens deducted from the buyer is observable in `ProcessedTransaction`.
 
@@ -84,6 +88,9 @@ each leg records full call traces. `TxProcessor` processes the trace into a
   we ask the router to compute exact `amountOut` before the transfer tax is
   applied. That is why we **must use builders that support fee-on-transfer
   semantics**.
+  - **Current implementation gap:** `entry.rs` still calls `build_sell_swap(...)`.
+    That is correct for ETH/WETH-style sells, but must be replaced or routed
+    through a denom-aware token-to-token builder when `denom_address != WETH`.
   - **Uniswap V2 / SushiSwap:** `build_sell_swap_v2`, which encodes
     `swapExactTokensForETHSupportingFeeOnTransferTokens`.
   - **Token-to-token route:** When selling `token -> denom` where denom is
@@ -135,6 +142,89 @@ state. For WETH this means confirming the initial deposit leg succeeded.
 ### Pool address validation error
 Occurs when the provided pool does not match the factory result (caused by
 token/denom ordering mistakes or stale pools).
+
+---
+
+## Historical Replay Failures To Fix
+
+The old live-trading logs under `/home/nima/code/crypto/blockchains/eth/logs`
+showed many cases where a transaction was already replayed by the real chain,
+but our local viability simulation failed while reconstructing the same context.
+Those failures should be treated as simulator/replay gaps unless the trace proves
+the buy or sell genuinely reverted on-chain.
+
+Log windows reviewed:
+- `logs/live_trading/live_token_tracking_20251128_*.log`
+- `logs/pools/PoolState_20251128_*.log`
+- related logs through early December 2025
+
+Observed failure buckets:
+
+| Bucket | Count | What it means |
+| ------ | ----- | ------------- |
+| `PoolManager._load_and_register_v3_pool` / V2 failures | 294 | Pool discovery or metadata loading failed before the simulator could register the pool. |
+| `Pool viability check failed` | 160 | The buy/approve/sell simulator failed while replaying prior transactions or executing the test route. |
+| `token metadata simulation failed` | 250 | Metadata reads were attempted through simulation but the replay state or header was incomplete. |
+| non-`None` `TradingStatus` errors | 1129 | The higher-level pool state recorded buy/sell/top-up failures after simulation. |
+
+Important concrete errors:
+
+- `State for block ... only exists in the live cache; use simulation APIs instead`
+  - Seen mostly while loading V3 pools.
+  - Cause: code asks for a direct historical `StateProvider` through
+    `TxSimulator::get_chain_state_at_block`, but recent blocks may exist only in
+    the live fork/cache path.
+  - Fix direction: chain-query pool reads must use simulation/view APIs for live
+    blocks instead of direct DB state.
+
+- `Invalid block ... while reading UniswapV3 state`
+  - Seen while loading V3 pool state.
+  - Cause: V3 state lookup reads the header with `provider_factory.block_by_number`,
+    which may return `None` for live/recent blocks even though the block context
+    loader can still provide the header.
+  - Fix direction: use `block_context_loader().load_block_header(...)` for the
+    timestamp/header path, then keep state access on the same live-aware path.
+
+- `transaction validation error: nonce too high`
+  - Seen in prior tx replay, pool viability checks, and token metadata
+    simulations.
+  - Cause: selected prior transactions are replayed with their original nonces,
+    but the selected list may skip an earlier transaction from the same sender.
+    Reth correctly rejects nonce `N` when simulated account state still expects
+    nonce `N - 1`.
+  - Fix direction: either replay the full block prefix for every sender we touch,
+    require contiguous per-sender prior tx lists, or add an explicit "selected
+    prior replay" mode that normalizes the sender nonce before each selected tx
+    and marks the result as approximate.
+
+- `transaction validation error: gas price below basefee`
+  - Seen in older viability and metadata simulations.
+  - Cause: old replay paths preserved stale legacy gas prices below the target
+    block base fee.
+  - Fix direction: keep using the current fee policy that clamps unsigned/prior
+    calls to the block header base fee; retest after execution sync.
+
+- `UniswapV2Library: IDENTICAL_ADDRESSES`,
+  `UniswapV2Library: INSUFFICIENT_INPUT_AMOUNT`,
+  `TransferHelper: TRANSFER_FROM_FAILED`, and buy-side
+  `INSUFFICIENT_LIQUIDITY`
+  - Seen in `TradingStatus` failures.
+  - Cause: some entries are likely real token/pool behavior, but the biggest
+    simulator-side suspect is denomination routing. The setup code understands
+    `denom_address`, while the main buy/sell path still calls ETH/WETH-oriented
+    builders.
+  - Fix direction: make buy and sell fully denom-aware, then only treat remaining
+    reverts as token behavior after confirming the constructed route and calldata.
+
+Priority order:
+
+1. Make the pool buy/sell path denom-aware for V2, Sushi, and V3.
+2. Fix prior transaction replay semantics so successful on-chain setup txs do
+   not fail locally because of skipped sender nonces.
+3. Move V3 pool state/header reads onto live-aware simulation/view APIs.
+4. Retest the old fee failures against the current base-fee clamping.
+5. After the local Reth execution node is synced, turn representative log cases
+   into regression examples under `examples/pool_analysis`.
 
 ---
 

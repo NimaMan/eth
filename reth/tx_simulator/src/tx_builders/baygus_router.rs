@@ -13,6 +13,7 @@ pub const CMD_SWEEP: u8 = 0x07;
 pub const CMD_BALANCER_FLASH_LOAN: u8 = 0x08;
 pub const CMD_PERMIT2_TRANSFER_FROM: u8 = 0x09;
 pub const CMD_TRANSFER_FROM: u8 = 0x0a;
+pub const CMD_COINBASE_TIP: u8 = 0x0b;
 
 /// BaygusRouter command bytes from `soleth/baygus-router/contracts/src/types/SharedTypes.sol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +29,7 @@ pub enum BaygusCommand {
     BalancerFlashLoan = CMD_BALANCER_FLASH_LOAN,
     Permit2TransferFrom = CMD_PERMIT2_TRANSFER_FROM,
     TransferFrom = CMD_TRANSFER_FROM,
+    CoinbaseTip = CMD_COINBASE_TIP,
 }
 
 impl BaygusCommand {
@@ -188,6 +190,27 @@ impl BaygusExecutePlan {
         )
     }
 
+    pub fn coinbase_tip(&mut self, amount: U256) -> &mut Self {
+        self.eth_value += amount;
+        self.push_raw(
+            BaygusCommand::CoinbaseTip,
+            encode_coinbase_tip_input(amount),
+        )
+    }
+
+    pub fn coinbase_tip_with_block_guard(
+        &mut self,
+        amount: U256,
+        min_block: U256,
+        max_block: U256,
+    ) -> &mut Self {
+        self.eth_value += amount;
+        self.push_raw(
+            BaygusCommand::CoinbaseTip,
+            encode_coinbase_tip_with_block_guard_input(amount, min_block, max_block),
+        )
+    }
+
     pub fn commands(&self) -> &[BaygusCommand] {
         &self.commands
     }
@@ -341,6 +364,22 @@ pub fn encode_sweep_input(token: Address, recipient: Address, minimum_amount: U2
     data.extend_from_slice(&pad_address(token));
     data.extend_from_slice(&pad_address(recipient));
     data.extend_from_slice(&pad_u256(minimum_amount));
+    Bytes::from(data)
+}
+
+pub fn encode_coinbase_tip_input(amount: U256) -> Bytes {
+    Bytes::from(pad_u256(amount).to_vec())
+}
+
+pub fn encode_coinbase_tip_with_block_guard_input(
+    amount: U256,
+    min_block: U256,
+    max_block: U256,
+) -> Bytes {
+    let mut data = Vec::with_capacity(WORD_BYTES * 3);
+    data.extend_from_slice(&pad_u256(amount));
+    data.extend_from_slice(&pad_u256(min_block));
+    data.extend_from_slice(&pad_u256(max_block));
     Bytes::from(data)
 }
 
@@ -529,5 +568,30 @@ mod tests {
         assert!(i_word.iter().all(|byte| *byte == 0xff));
         assert_eq!(j_word[31], 2);
         assert_eq!(encoded[WORD_BYTES * 8 + 31], 1);
+    }
+
+    #[test]
+    fn coinbase_tip_adds_command_input_and_eth_value() {
+        let mut plan = BaygusExecutePlan::new();
+        plan.coinbase_tip(U256::from(10));
+
+        assert_eq!(plan.commands_bytes().as_ref(), &[CMD_COINBASE_TIP]);
+        assert_eq!(plan.eth_value(), U256::from(10));
+        assert_eq!(plan.inputs()[0].len(), WORD_BYTES);
+        assert_eq!(plan.inputs()[0][31], 10);
+    }
+
+    #[test]
+    fn guarded_coinbase_tip_encodes_block_bounds() {
+        let mut plan = BaygusExecutePlan::new();
+        plan.coinbase_tip_with_block_guard(U256::from(10), U256::from(100), U256::from(101));
+
+        let input = &plan.inputs()[0];
+        assert_eq!(plan.commands_bytes().as_ref(), &[CMD_COINBASE_TIP]);
+        assert_eq!(plan.eth_value(), U256::from(10));
+        assert_eq!(input.len(), WORD_BYTES * 3);
+        assert_eq!(input[31], 10);
+        assert_eq!(input[WORD_BYTES + 31], 100);
+        assert_eq!(input[WORD_BYTES * 2 + 31], 101);
     }
 }

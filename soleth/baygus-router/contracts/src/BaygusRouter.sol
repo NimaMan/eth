@@ -14,6 +14,7 @@ import {
     BalanceDelta,
     CMD_BALANCER_FLASH_LOAN,
     CMD_BALANCER_SWAP,
+    CMD_COINBASE_TIP,
     CMD_CURVE_SWAP,
     CMD_PERMIT2_TRANSFER_FROM,
     CMD_SUSHISWAP,
@@ -38,7 +39,9 @@ import {
     UnauthorizedCallback,
     V2SwapFailed,
     V3SwapFailed,
-    CurveSwapFailed
+    CurveSwapFailed,
+    CoinbaseTipBlockMismatch,
+    InvalidCoinbaseTipInput
 } from "./types/Errors.sol";
 
 contract BaygusRouter is ILockCallback {
@@ -165,7 +168,7 @@ contract BaygusRouter is ILockCallback {
         (bytes memory commands, bytes[] memory inputs) = abi.decode(userData, (bytes, bytes[]));
         _executeCommands(commands, inputs, address(this));
 
-        for (uint256 i = 0; i < tokens.length; ) {
+        for (uint256 i = 0; i < tokens.length;) {
             tokens[i].safeTransfer(adapters.balancerVault, amounts[i] + feeAmounts[i]);
             unchecked {
                 ++i;
@@ -180,7 +183,7 @@ contract BaygusRouter is ILockCallback {
         if (commands.length != inputs.length) revert CommandLengthMismatch();
 
         results = new bytes[](commands.length);
-        for (uint256 i = 0; i < commands.length; ) {
+        for (uint256 i = 0; i < commands.length;) {
             results[i] = _dispatch(uint8(commands[i]), inputs[i], payer);
             unchecked {
                 ++i;
@@ -209,6 +212,8 @@ contract BaygusRouter is ILockCallback {
             result = IPoolManager(poolManager).unlock(input);
         } else if (command == CMD_PERMIT2_TRANSFER_FROM) {
             revert AdapterMissing(command);
+        } else if (command == CMD_COINBASE_TIP) {
+            _coinbaseTip(input);
         } else {
             revert InvalidCommand(command);
         }
@@ -218,19 +223,13 @@ contract BaygusRouter is ILockCallback {
         internal
         returns (BalanceDelta memory delta)
     {
-        bytes memory response = IPoolManager(poolManager).unlock(
-            abi.encode(CALLBACK_SINGLE, abi.encode(payer, request))
-        );
+        bytes memory response =
+            IPoolManager(poolManager).unlock(abi.encode(CALLBACK_SINGLE, abi.encode(payer, request)));
         delta = abi.decode(response, (BalanceDelta));
     }
 
-    function _unlockPath(address payer, MultiHopParams calldata request)
-        internal
-        returns (BalanceDelta memory delta)
-    {
-        bytes memory response = IPoolManager(poolManager).unlock(
-            abi.encode(CALLBACK_PATH, abi.encode(payer, request))
-        );
+    function _unlockPath(address payer, MultiHopParams calldata request) internal returns (BalanceDelta memory delta) {
+        bytes memory response = IPoolManager(poolManager).unlock(abi.encode(CALLBACK_PATH, abi.encode(payer, request)));
         delta = abi.decode(response, (BalanceDelta));
     }
 
@@ -250,7 +249,7 @@ contract BaygusRouter is ILockCallback {
         });
 
         _beforeSwap(context);
-        delta = IPoolManager(poolManager).swap(context.key, context.params, context.hookData);
+        delta = _decodeBalanceDelta(IPoolManager(poolManager).swap(context.key, context.params, context.hookData));
         _validateDelta(context, delta);
         _settleDelta(context.payer, context.recipient, context.key, delta);
         _afterSwap(context, delta);
@@ -267,7 +266,7 @@ contract BaygusRouter is ILockCallback {
         uint256 netCount;
         address currentPayer = payer;
 
-        for (uint256 i = 0; i < request.hops.length; ) {
+        for (uint256 i = 0; i < request.hops.length;) {
             Hop memory hop = request.hops[i];
             address recipient = i + 1 == request.hops.length ? request.recipient : address(this);
             SwapContext memory context = SwapContext({
@@ -282,7 +281,8 @@ contract BaygusRouter is ILockCallback {
             });
 
             _beforeSwap(context);
-            BalanceDelta memory delta = IPoolManager(poolManager).swap(context.key, context.params, context.hookData);
+            BalanceDelta memory delta =
+                _decodeBalanceDelta(IPoolManager(poolManager).swap(context.key, context.params, context.hookData));
             _validateDelta(context, delta);
             _afterSwap(context, delta);
 
@@ -296,21 +296,19 @@ contract BaygusRouter is ILockCallback {
             }
         }
 
-        if (request.finalMinAmount0 != 0 && finalDelta.amount0 > request.finalMinAmount0) {
+        if (request.finalMinAmount0 != 0 && finalDelta.amount0 < request.finalMinAmount0) {
             revert SlippageCheckFailed(2, finalDelta.amount0, request.finalMinAmount0);
         }
-        if (request.finalMinAmount1 != 0 && finalDelta.amount1 > request.finalMinAmount1) {
+        if (request.finalMinAmount1 != 0 && finalDelta.amount1 < request.finalMinAmount1) {
             revert SlippageCheckFailed(3, finalDelta.amount1, request.finalMinAmount1);
         }
 
-        for (uint256 i = 0; i < netCount; ) {
+        for (uint256 i = 0; i < netCount;) {
             int256 amount = netAmounts[i];
-            if (amount > 0) {
-                // forge-lint: disable-next-line(unsafe-typecast)
-                _settleCurrency(payer, currencies[i], uint256(amount));
-            } else if (amount < 0) {
-                // forge-lint: disable-next-line(unsafe-typecast)
-                _takeCurrency(request.recipient, currencies[i], uint256(-amount));
+            if (amount < 0) {
+                _settleCurrency(payer, currencies[i], _absNet(amount));
+            } else if (amount > 0) {
+                _takeCurrency(request.recipient, currencies[i], _absNet(amount));
             }
             unchecked {
                 ++i;
@@ -367,8 +365,7 @@ contract BaygusRouter is ILockCallback {
     function _v3Swap(bytes memory input) internal {
         if (adapters.uniswapV3Router == address(0)) revert AdapterMissing(CMD_V3_SWAP);
 
-        ISwapRouter.ExactInputSingleParams memory params =
-            abi.decode(input, (ISwapRouter.ExactInputSingleParams));
+        ISwapRouter.ExactInputSingleParams memory params = abi.decode(input, (ISwapRouter.ExactInputSingleParams));
         if (params.amountIn == 0) {
             params.amountIn = IERC20(params.tokenIn).balanceOf(address(this));
         }
@@ -432,10 +429,7 @@ contract BaygusRouter is ILockCallback {
             userData: ""
         });
         IBalancerVault.FundManagement memory funds = IBalancerVault.FundManagement({
-            sender: address(this),
-            fromInternalBalance: false,
-            recipient: payable(recipient),
-            toInternalBalance: false
+            sender: address(this), fromInternalBalance: false, recipient: payable(recipient), toInternalBalance: false
         });
 
         IBalancerVault(adapters.balancerVault).swap(singleSwap, funds, limit, block.timestamp);
@@ -463,33 +457,53 @@ contract BaygusRouter is ILockCallback {
         }
     }
 
-    function _settleDelta(address payer, address recipient, PoolKey memory key, BalanceDelta memory delta)
-        internal
-    {
-        if (delta.amount0 > 0) {
-            _settleCurrency(payer, key.currency0, uint256(int256(delta.amount0)));
-        } else if (delta.amount0 < 0) {
-            _takeCurrency(recipient, key.currency0, uint256(int256(-delta.amount0)));
+    function _coinbaseTip(bytes memory input) internal {
+        uint256 amount;
+        uint256 minBlock;
+        uint256 maxBlock;
+
+        if (input.length == 32) {
+            amount = abi.decode(input, (uint256));
+        } else if (input.length == 96) {
+            (amount, minBlock, maxBlock) = abi.decode(input, (uint256, uint256, uint256));
+        } else {
+            revert InvalidCoinbaseTipInput();
         }
 
-        if (delta.amount1 > 0) {
-            _settleCurrency(payer, key.currency1, uint256(int256(delta.amount1)));
-        } else if (delta.amount1 < 0) {
-            _takeCurrency(recipient, key.currency1, uint256(int256(-delta.amount1)));
+        if (block.number < minBlock || (maxBlock != 0 && block.number > maxBlock)) {
+            revert CoinbaseTipBlockMismatch(block.number, minBlock, maxBlock);
+        }
+        if (amount != 0) {
+            address(block.coinbase).safeTransferEth(amount);
+        }
+    }
+
+    function _settleDelta(address payer, address recipient, PoolKey memory key, BalanceDelta memory delta) internal {
+        if (delta.amount0 < 0) {
+            _settleCurrency(payer, key.currency0, _absDelta(delta.amount0));
+        } else if (delta.amount0 > 0) {
+            _takeCurrency(recipient, key.currency0, _absDelta(delta.amount0));
+        }
+
+        if (delta.amount1 < 0) {
+            _settleCurrency(payer, key.currency1, _absDelta(delta.amount1));
+        } else if (delta.amount1 > 0) {
+            _takeCurrency(recipient, key.currency1, _absDelta(delta.amount1));
         }
     }
 
     function _settleCurrency(address payer, address currency, uint256 amount) internal {
         if (amount == 0) return;
         if (currency == address(0)) {
-            IPoolManager(poolManager).settle{value: amount}(address(0));
+            IPoolManager(poolManager).settle{value: amount}();
         } else {
+            IPoolManager(poolManager).sync(currency);
             if (payer == address(this)) {
                 currency.safeTransfer(poolManager, amount);
             } else {
                 currency.safeTransferFrom(payer, poolManager, amount);
             }
-            IPoolManager(poolManager).settle(currency);
+            IPoolManager(poolManager).settle();
         }
     }
 
@@ -500,33 +514,29 @@ contract BaygusRouter is ILockCallback {
 
     function _beforeSwap(SwapContext memory context) internal {
         if (context.hookAdapter == address(0)) return;
-        IHookAdapter(context.hookAdapter).beforeSwap(
-            context.payer,
-            context.recipient,
-            context.key,
-            context.params,
-            context.hookData
-        );
+        IHookAdapter(context.hookAdapter)
+            .beforeSwap(context.payer, context.recipient, context.key, context.params, context.hookData);
     }
 
     function _afterSwap(SwapContext memory context, BalanceDelta memory delta) internal {
         if (context.hookAdapter == address(0)) return;
-        IHookAdapter(context.hookAdapter).afterSwap(
-            context.payer,
-            context.recipient,
-            context.key,
-            context.params,
-            delta.amount0,
-            delta.amount1,
-            context.hookData
-        );
+        IHookAdapter(context.hookAdapter)
+            .afterSwap(
+                context.payer,
+                context.recipient,
+                context.key,
+                context.params,
+                delta.amount0,
+                delta.amount1,
+                context.hookData
+            );
     }
 
     function _validateDelta(SwapContext memory context, BalanceDelta memory delta) internal pure {
-        if (context.minAmount0 != 0 && delta.amount0 > context.minAmount0) {
+        if (context.minAmount0 != 0 && delta.amount0 < context.minAmount0) {
             revert SlippageCheckFailed(0, delta.amount0, context.minAmount0);
         }
-        if (context.minAmount1 != 0 && delta.amount1 > context.minAmount1) {
+        if (context.minAmount1 != 0 && delta.amount1 < context.minAmount1) {
             revert SlippageCheckFailed(1, delta.amount1, context.minAmount1);
         }
     }
@@ -539,7 +549,7 @@ contract BaygusRouter is ILockCallback {
         int128 delta
     ) internal pure returns (uint256) {
         if (delta == 0) return count;
-        for (uint256 i = 0; i < count; ) {
+        for (uint256 i = 0; i < count;) {
             if (currencies[i] == currency) {
                 netAmounts[i] += int256(delta);
                 return count;
@@ -551,6 +561,30 @@ contract BaygusRouter is ILockCallback {
         currencies[count] = currency;
         netAmounts[count] = int256(delta);
         return count + 1;
+    }
+
+    function _decodeBalanceDelta(int256 packed) internal pure returns (BalanceDelta memory delta) {
+        // PoolManager packs each signed amount into exactly one int128 lane.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        delta.amount0 = int128(packed >> 128);
+        // PoolManager packs each signed amount into exactly one int128 lane.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        delta.amount1 = int128(packed);
+    }
+
+    function _absDelta(int128 value) internal pure returns (uint256) {
+        if (value < 0) {
+            // A BalanceDelta lane is int128, so its absolute value fits uint128.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            return uint256(uint128(-value));
+        }
+        // A non-negative int128 always fits uint128.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint256(uint128(value));
+    }
+
+    function _absNet(int256 value) internal pure returns (uint256) {
+        return uint256(value < 0 ? -value : value);
     }
 
     function _approveIfNeeded(address token, address spender, uint256 amount) internal {

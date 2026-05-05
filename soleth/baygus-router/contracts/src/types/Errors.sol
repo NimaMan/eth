@@ -15,3 +15,5 @@ error UnauthorizedCallback();
 error V2SwapFailed();
 error V3SwapFailed();
 error CurveSwapFailed();
+error CoinbaseTipBlockMismatch(uint256 currentBlock, uint256 minBlock, uint256 maxBlock);
+error InvalidCoinbaseTipInput();

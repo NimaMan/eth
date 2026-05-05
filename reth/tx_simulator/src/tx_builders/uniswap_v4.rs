@@ -829,9 +829,10 @@ fn encode_swap_exact_input_path(params: &UniswapV4BaygusMultiHopParams) -> Resul
     }
 
     const HEAD_WORDS: usize = 4;
-    let mut data = Vec::with_capacity(4 + HEAD_WORDS * 32);
+    let mut data = Vec::with_capacity(4 + 32 + HEAD_WORDS * 32);
     data.extend_from_slice(&SWAP_EXACT_INPUT_PATH_SELECTOR);
 
+    data.extend_from_slice(&pad_u64(32));
     data.extend_from_slice(&pad_u64((HEAD_WORDS * 32) as u64));
     data.extend_from_slice(&pad_address(params.recipient));
     data.extend_from_slice(&pad_i128(params.final_min_amount0));
@@ -1118,5 +1119,41 @@ mod tests {
             default_sqrt_price_limit(false),
             MAX_SQRT_RATIO_X96 - U256::from(1u8)
         );
+    }
+
+    #[test]
+    fn encodes_baygus_path_as_dynamic_struct_argument() {
+        let token0 = Address::from([0x11; 20]);
+        let token1 = Address::from([0x22; 20]);
+        let recipient = Address::from([0x33; 20]);
+        let params = UniswapV4BaygusMultiHopParams {
+            hops: vec![UniswapV4BaygusHop {
+                key: UniswapV4PoolKey {
+                    currency0: token0,
+                    currency1: token1,
+                    fee: 500,
+                    tick_spacing: 10,
+                    hooks: Address::ZERO,
+                },
+                params: UniswapV4SwapParams {
+                    zero_for_one: true,
+                    amount_specified: I256::try_from(U256::from(1u8)).unwrap(),
+                    sqrt_price_limit_x96: default_sqrt_price_limit(true),
+                },
+                hook_data: Vec::new(),
+                hook_adapter: Address::ZERO,
+                min_amount0: 0,
+                min_amount1: 0,
+            }],
+            recipient,
+            final_min_amount0: 0,
+            final_min_amount1: 0,
+        };
+
+        let calldata = encode_swap_exact_input_path(&params).expect("path calldata");
+        let data = calldata.as_ref();
+        assert_eq!(&data[..4], &SWAP_EXACT_INPUT_PATH_SELECTOR);
+        assert_eq!(U256::from_be_slice(&data[4..36]), U256::from(32));
+        assert_eq!(U256::from_be_slice(&data[36..68]), U256::from(128));
     }
 }

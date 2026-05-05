@@ -10,6 +10,7 @@ contract MockPoolManager {
 
     BalanceDelta[] private _deltas;
     uint256 private _cursor;
+    address private _syncedCurrency;
 
     mapping(address => uint256) public syncedBalance;
 
@@ -36,6 +37,7 @@ contract MockPoolManager {
     }
 
     function sync(address currency) external {
+        _syncedCurrency = currency;
         syncedBalance[currency] = _balanceOf(currency);
     }
 
@@ -57,7 +59,7 @@ contract MockPoolManager {
 
     function swap(PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
         external
-        returns (BalanceDelta memory delta)
+        returns (int256 delta)
     {
         if (msg.sender != router) revert UnauthorizedCaller();
         key;
@@ -65,7 +67,8 @@ contract MockPoolManager {
         hookData;
 
         if (_cursor < _deltas.length) {
-            delta = _deltas[_cursor];
+            BalanceDelta memory nextDelta = _deltas[_cursor];
+            delta = _packDelta(nextDelta.amount0, nextDelta.amount1);
             unchecked {
                 ++_cursor;
             }
@@ -74,10 +77,19 @@ contract MockPoolManager {
 
     function settle(address currency) external payable returns (uint256 amount) {
         if (msg.sender != router) revert UnauthorizedCaller();
+        amount = _settle(currency, msg.value);
+    }
 
+    function settle() external payable returns (uint256 amount) {
+        if (msg.sender != router) revert UnauthorizedCaller();
+        address currency = msg.value != 0 ? address(0) : _syncedCurrency;
+        amount = _settle(currency, msg.value);
+    }
+
+    function _settle(address currency, uint256 msgValue) internal returns (uint256 amount) {
         bool isNative = currency == address(0);
-        uint256 balance = isNative ? msg.value + syncedBalance[currency] : _balanceOf(currency);
-        amount = isNative ? msg.value : balance - syncedBalance[currency];
+        uint256 balance = isNative ? msgValue + syncedBalance[currency] : _balanceOf(currency);
+        amount = isNative ? msgValue : balance - syncedBalance[currency];
         syncedBalance[currency] = isNative ? syncedBalance[currency] + amount : balance;
         _settles.push(SettleCall({currency: currency, amount: amount, isNative: isNative}));
     }
@@ -119,6 +131,15 @@ contract MockPoolManager {
     function _balanceOf(address currency) internal view returns (uint256) {
         if (currency == address(0)) return address(this).balance;
         return MockERC20(currency).balanceOf(address(this));
+    }
+
+    function _packDelta(int128 amount0, int128 amount1) internal pure returns (int256 packed) {
+        assembly {
+            packed := or(
+                shl(128, and(amount0, 0xffffffffffffffffffffffffffffffff)),
+                and(amount1, 0xffffffffffffffffffffffffffffffff)
+            )
+        }
     }
 
     receive() external payable {}

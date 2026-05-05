@@ -28,6 +28,9 @@ Usage
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
 - Baygus command examples should use `BaygusExecutePlan` instead of hand-encoding ABI payloads.
+- `BaygusExecutePlan::coinbase_tip_with_block_guard(amount, min, max)` appends the router
+  `CMD_COINBASE_TIP` command and increases transaction `value` by the tip amount. Prefer this for
+  bundle/private-relay execution so stale public transactions cannot pay in the wrong block.
 
 Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.

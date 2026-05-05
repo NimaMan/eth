@@ -34,6 +34,7 @@ reth-tasks = { git = "https://github.com/paradigmxyz/reth.git", branch = "main" 
 
 # REVM - aligned with the current Reth main branch toolchain
 revm = { version = "38.0.0", default-features = false, features = ["std"] }
+revm-database = { version = "13.0.1", features = ["serde"] }
 revm-inspectors = "0.39.0"
 
 # For serialization
@@ -146,3 +147,7 @@ path = "examples/block_context/compare_live_headers.rs"
 [[example]]
 name = "signed_bundle_simulation"
 path = "examples/tx_builders/signed_bundle_simulation.rs"
+
+[[example]]
+name = "baygus_eth_stable_quotes"
+path = "examples/baygus_router_validation/baygus_v2_usdc_quote.rs"
