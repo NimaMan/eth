@@ -3,22 +3,22 @@ use eth_live_state::{
 };
 
 use crate::{
-    BlockProcessedEvent, MarketBlockInput, MarketDataEvent, MarketDataEventSink, Result,
-    TokenStateProcessor,
+    BlockProcessedEvent, BlockTokenProcessor, MarketBlockInput, MarketDataEvent,
+    MarketDataEventSink, Result,
 };
 
 #[derive(Clone, Debug)]
 pub struct MarketDataPipeline<P, W, S> {
-    token_state_processor: P,
+    block_token_processor: P,
     live_state_writer: W,
     event_sink: S,
     token_write_options: SnapshotWriteOptions,
 }
 
 impl<P, W, S> MarketDataPipeline<P, W, S> {
-    pub fn new(token_state_processor: P, live_state_writer: W, event_sink: S) -> Self {
+    pub fn new(block_token_processor: P, live_state_writer: W, event_sink: S) -> Self {
         Self {
-            token_state_processor,
+            block_token_processor,
             live_state_writer,
             event_sink,
             token_write_options: SnapshotWriteOptions::default(),
@@ -33,15 +33,15 @@ impl<P, W, S> MarketDataPipeline<P, W, S> {
 
 impl<P, W, S> MarketDataPipeline<P, W, S>
 where
-    P: TokenStateProcessor,
+    P: BlockTokenProcessor,
     W: LiveStateWriter,
     S: MarketDataEventSink,
 {
     pub async fn process_block(&self, input: MarketBlockInput) -> Result<BlockProcessedEvent> {
         let block = input.block;
         let token_update = self
-            .token_state_processor
-            .process_token_state(&block)
+            .block_token_processor
+            .process_block_tokens(&block)
             .await?;
         let updated_tokens = token_update.updated_token_addresses();
         let removed_tokens = token_update.removed_tokens.clone();

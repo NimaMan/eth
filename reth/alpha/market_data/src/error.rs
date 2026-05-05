@@ -9,8 +9,8 @@ pub enum MarketDataError {
     LiveState(#[from] LiveStateError),
     #[error("market-data source error: {0}")]
     Source(String),
-    #[error("token-state update error: {0}")]
-    TokenState(String),
+    #[error("block token processor error: {0}")]
+    BlockToken(String),
     #[error("market-data event sink error: {0}")]
     Sink(String),
 }

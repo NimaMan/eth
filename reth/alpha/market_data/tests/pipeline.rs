@@ -6,22 +6,22 @@ use eth_live_state::{
     TokenSnapshot,
 };
 use eth_market_data::{
-    MarketBlockInput, MarketDataEvent, MarketDataPipeline, RecordingMarketDataEventSink,
-    TokenStateProcessor, TokenStateUpdate,
+    BlockTokenProcessor, BlockTokenUpdate, MarketBlockInput, MarketDataEvent, MarketDataPipeline,
+    RecordingMarketDataEventSink,
 };
 use serde_json::json;
 
 #[derive(Clone, Debug)]
-struct StaticTokenStateProcessor {
-    update: TokenStateUpdate,
+struct StaticBlockTokenProcessor {
+    update: BlockTokenUpdate,
 }
 
 #[async_trait]
-impl TokenStateProcessor for StaticTokenStateProcessor {
-    async fn process_token_state(
+impl BlockTokenProcessor for StaticBlockTokenProcessor {
+    async fn process_block_tokens(
         &self,
         _block: &ProcessedBlockSnapshot,
-    ) -> eth_market_data::Result<TokenStateUpdate> {
+    ) -> eth_market_data::Result<BlockTokenUpdate> {
         Ok(self.update.clone())
     }
 }
@@ -68,14 +68,14 @@ async fn pipeline_writes_live_state_and_emits_block_event() {
         token_address,
         TokenLatestBlock::new(512, Some(1_715_100_000), Some(block_hash)),
     );
-    let token_state_processor = StaticTokenStateProcessor {
-        update: TokenStateUpdate {
+    let block_token_processor = StaticBlockTokenProcessor {
+        update: BlockTokenUpdate {
             updated_tokens: vec![token],
             removed_tokens: Vec::new(),
         },
     };
 
-    let pipeline = MarketDataPipeline::new(token_state_processor, store.clone(), sink.clone());
+    let pipeline = MarketDataPipeline::new(block_token_processor, store.clone(), sink.clone());
     let event = pipeline
         .process_block(MarketBlockInput::new(block, Some(chain_state)))
         .await

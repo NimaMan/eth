@@ -10,7 +10,7 @@ For now this crate does not replace the working Redis population inside `tx_simu
 
 - Subscribe to or fetch confirmed blocks.
 - Run transaction/log/trace processing.
-- Update `eth_token` token and pool state through a token-state processor boundary.
+- Update `eth_token` token and pool state through a `BlockTokenProcessor` boundary.
 - Build token and pool snapshots.
 - Accept live chain-state overlays when the simulator provides them.
 - Publish canonical live state through an injected `eth_live_state::LiveStateWriter` when this pipeline owns the write path.
@@ -50,13 +50,15 @@ Downstream services can hydrate full state from `eth_live_state`.
 ```text
 confirmed block source
   -> processed block input
-  -> token state processor
+  -> block token processor
   -> optional live-state writer
   -> market-data event sink
   -> engine / mempool risk / monitoring
 ```
 
 The current Redis writer can stay in `tx_simulator`. The important Rust migration is that new components consume typed events and snapshots instead of reaching into Python-era process-local caches.
+
+The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` can later be the runtime wrapper that subscribes to live block input and repeatedly calls the block processor.
 
 ## Lessons From Python
 

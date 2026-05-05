@@ -5,12 +5,12 @@ use eth_live_state::{ProcessedBlockSnapshot, TokenSnapshot};
 use crate::Result;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct TokenStateUpdate {
+pub struct BlockTokenUpdate {
     pub updated_tokens: Vec<TokenSnapshot>,
     pub removed_tokens: Vec<Address>,
 }
 
-impl TokenStateUpdate {
+impl BlockTokenUpdate {
     pub fn empty() -> Self {
         Self::default()
     }
@@ -24,7 +24,9 @@ impl TokenStateUpdate {
 }
 
 #[async_trait]
-pub trait TokenStateProcessor: Send + Sync {
-    async fn process_token_state(&self, block: &ProcessedBlockSnapshot)
-        -> Result<TokenStateUpdate>;
+pub trait BlockTokenProcessor: Send + Sync {
+    async fn process_block_tokens(
+        &self,
+        block: &ProcessedBlockSnapshot,
+    ) -> Result<BlockTokenUpdate>;
 }
