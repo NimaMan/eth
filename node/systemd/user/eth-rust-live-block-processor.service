@@ -11,7 +11,7 @@ Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
 Environment=PATH=/home/nima/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RUST_LOG=info
 Environment=ETH_PROCESSED_BLOCK_STREAM=eth/live/blocks
-Environment=ETH_LIVE_REDIS_MAX_BLOCKS=100
+Environment=ETH_LIVE_REDIS_MAX_BLOCKS=10
 Environment=REDIS_BLOCK_CHANNEL=eth/live/block_notifications
 Environment=LIVE_BLOCK_LOG=/home/nima/storage/samsung8tb/ethereum/logs/block_processor/live_block_processor.log
 ExecStart=/home/nima/code/crypto/blockchains/eth/reth/target/release/live_block_processor

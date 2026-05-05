@@ -13,6 +13,7 @@ use eyre::{eyre, Result};
 use redis::{aio::ConnectionManager, AsyncCommands, Client};
 use serde_json::Value;
 use std::collections::HashMap;
+use tracing::warn;
 
 /// Builder for [`LiveChainCache`].
 pub struct LiveChainCacheBuilder {
@@ -26,7 +27,7 @@ impl LiveChainCacheBuilder {
         Self {
             redis_url: redis_url.into(),
             overlay_ttl_secs: None,
-            retention: 5,
+            retention: 10,
         }
     }
 
@@ -215,9 +216,16 @@ impl LiveChainCache {
         let key = live_data_registry::keys::chain_state_snapshot_key(block_number);
         let payload: Option<Vec<u8>> = conn.get(key).await?;
         if let Some(raw) = payload {
-            let snapshot: ChainStateSnapshot = bincode::deserialize(&raw)
-                .map_err(|err| eyre!("failed to decode state overlay snapshot: {}", err))?;
-            Ok(Some(snapshot))
+            match bincode::deserialize(&raw) {
+                Ok(snapshot) => Ok(Some(snapshot)),
+                Err(err) => {
+                    warn!(
+                        block_number,
+                        "ignoring undecodable live state overlay snapshot: {}", err
+                    );
+                    Ok(None)
+                }
+            }
         } else {
             Ok(None)
         }

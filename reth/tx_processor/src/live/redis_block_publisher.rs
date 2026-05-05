@@ -3,7 +3,7 @@ use eyre::{eyre, Result};
 use redis::{aio::ConnectionManager, Client};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tx_simulator::live_chain_data::live_data_registry::keys;
+use tx_simulator::live_chain_data::{live_data_registry::keys, ChainStateSnapshot};
 
 /// Writes live block snapshots into Redis using the canonical schema.
 pub struct RedisBlockPublisher {
@@ -36,7 +36,11 @@ impl RedisBlockPublisher {
             .map_err(|err| eyre!("failed to connect to redis: {}", err))
     }
 
-    pub async fn publish_snapshot(&self, snapshot: &LiveBlockSnapshot) -> Result<()> {
+    pub async fn publish_snapshot(
+        &self,
+        snapshot: &LiveBlockSnapshot,
+        state_snapshot: Option<&ChainStateSnapshot>,
+    ) -> Result<()> {
         let mut conn = self.connection().await?;
         let processed_at_ms = unix_time_ms();
         let meta_key = keys::block_meta_key(snapshot.block_number);
@@ -44,9 +48,17 @@ impl RedisBlockPublisher {
         let tx_map_key = keys::processed_transactions_key(snapshot.block_number);
         let tx_index_key = keys::tx_index_key(snapshot.block_number);
         let addresses_key = keys::block_addresses_key(snapshot.block_number);
+        let state_snapshot_key = keys::chain_state_snapshot_key(snapshot.block_number);
         let recent_key = keys::recent_blocks_key();
         let latest_block_number_key = keys::latest_block_number_key();
         let latest_block_hash_key = keys::latest_block_hash_key();
+        let latest_chain_state_key = keys::latest_chain_state_block_number_key();
+        let encoded_state_snapshot = state_snapshot
+            .map(|snapshot| {
+                bincode::serialize(snapshot)
+                    .map_err(|err| eyre!("failed to serialize state overlay snapshot: {}", err))
+            })
+            .transpose()?;
         let meta_json = serde_json::to_string(&json!({
             "schema_version": 1,
             "chain": "eth",
@@ -130,6 +142,18 @@ impl RedisBlockPublisher {
             .arg(latest_block_hash_key)
             .arg(&snapshot.block_hash);
 
+        if let Some(encoded) = &encoded_state_snapshot {
+            pipe.cmd("SET").arg(&state_snapshot_key).arg(encoded);
+            if let Some(ttl) = self.ttl_seconds {
+                pipe.cmd("EXPIRE").arg(&state_snapshot_key).arg(ttl);
+            }
+            pipe.cmd("SET")
+                .arg(latest_chain_state_key)
+                .arg(snapshot.block_number);
+        } else {
+            pipe.cmd("DEL").arg(&state_snapshot_key);
+        }
+
         let cmd = pipe.cmd("XADD");
         cmd.arg(&self.processed_block_stream);
         if let Some(maxlen) = self.max_blocks.filter(|maxlen| *maxlen > 0) {
@@ -155,6 +179,17 @@ impl RedisBlockPublisher {
         }
 
         let _: redis::Value = pipe.query_async(&mut conn).await?;
+        if let (Some(state), Some(encoded)) = (state_snapshot, encoded_state_snapshot.as_ref()) {
+            tracing::info!(
+                block_number = snapshot.block_number,
+                state_snapshot_bytes = encoded.len(),
+                base_block_number = state.base_block_number,
+                accounts = state.account_count(),
+                contracts = state.contract_count(),
+                logs = state.log_count(),
+                "published live state overlay snapshot"
+            );
+        }
         self.prune_blocks(&mut conn, snapshot.block_number).await?;
         Ok(())
     }

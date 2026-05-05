@@ -28,12 +28,16 @@ use crate::{
     tx_chain::{sequential::ForkedState, unsigned::UnsignedTxChainSimulation},
     TxSimulator,
 };
+use alloy_primitives::B256;
 use eyre::{eyre, Result};
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{HeaderProvider, StateProviderBox};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use tracing::{debug, warn};
+
+use self::live_data_registry::ChainStateSnapshot;
 /// Block state returned by [`BlockContextLoader`].
 pub(crate) enum BlockStateProvider {
     /// State is available directly from MDBX.
@@ -108,6 +112,28 @@ impl<'a> BlockContextLoader<'a> {
         let persisted = self.simulator.get_latest_block()?;
         if block_number <= persisted {
             return Ok(None);
+        }
+
+        if let Some(snapshot) = cache.fetch_chain_state_snapshot(block_number).await? {
+            if snapshot.block_hash == header.hash() {
+                debug!(
+                    block_number,
+                    base_block_number = snapshot.base_block_number,
+                    accounts = snapshot.account_count(),
+                    contracts = snapshot.contract_count(),
+                    "restoring live state from Redis overlay snapshot"
+                );
+                return Ok(Some(
+                    self.forked_state_from_snapshot(&snapshot, header).await?,
+                ));
+            }
+
+            warn!(
+                block_number,
+                expected = %header.hash(),
+                found = %snapshot.block_hash,
+                "ignoring live state overlay snapshot with mismatched block hash"
+            );
         }
 
         let fork = self
@@ -260,6 +286,150 @@ impl<'a> BlockContextLoader<'a> {
 
         Ok(fork_state)
     }
+
+    async fn build_live_state_snapshot_from_processed_payloads(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        parent_hash: B256,
+        header_payload: &str,
+        tx_payloads: &[&str],
+    ) -> Result<ChainStateSnapshot> {
+        let header = parse_sealed_header_from_json(header_payload)?;
+        if header.number != block_number {
+            return Err(eyre!(
+                "live state snapshot header block mismatch: header={}, expected={}",
+                header.number,
+                block_number
+            ));
+        }
+        if header.hash() != block_hash {
+            return Err(eyre!(
+                "live state snapshot header hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.hash(),
+                block_hash
+            ));
+        }
+        if header.parent_hash != parent_hash {
+            return Err(eyre!(
+                "live state snapshot parent hash mismatch for block {}: header={}, expected={}",
+                block_number,
+                header.parent_hash,
+                parent_hash
+            ));
+        }
+
+        let (mut fork_state, base_block_number) = self
+            .load_parent_state_for_live_snapshot(block_number, parent_hash)
+            .await?;
+        fork_state.block_number = header.number;
+        fork_state.block_header = header;
+        fork_state.nonces.clear();
+
+        let transactions = decode_processed_transaction_payloads(tx_payloads)?;
+        if !transactions.is_empty() {
+            let simulator = Arc::new(self.simulator.clone());
+            let mut chain = UnsignedTxChainSimulation::new(simulator, fork_state);
+            for tx in transactions {
+                chain.step(tx).await?;
+            }
+            fork_state = chain.into_forked_state();
+        }
+
+        Ok(ChainStateSnapshot::new(
+            base_block_number,
+            block_number,
+            block_hash,
+            parent_hash,
+            fork_state.db.cache.clone(),
+        ))
+    }
+
+    async fn load_parent_state_for_live_snapshot(
+        &self,
+        block_number: u64,
+        parent_hash: B256,
+    ) -> Result<(ForkedState, u64)> {
+        let parent_block = block_number
+            .checked_sub(1)
+            .ok_or_else(|| eyre!("cannot build live state snapshot for genesis block"))?;
+        let persisted = self.simulator.get_latest_block()?;
+
+        if parent_block <= persisted {
+            let fork = self.simulator.create_forked_state(parent_block)?;
+            return Ok((fork, parent_block));
+        }
+
+        if let Some(cache) = self.simulator.live_chain_cache() {
+            if let Some(snapshot) = cache.fetch_chain_state_snapshot(parent_block).await? {
+                if snapshot.block_hash == parent_hash {
+                    if snapshot.base_block_number != persisted {
+                        debug!(
+                            block_number,
+                            parent_block,
+                            snapshot_base_block_number = snapshot.base_block_number,
+                            persisted,
+                            "rebasing live state overlay snapshot to latest persisted block"
+                        );
+                    } else {
+                        let header = self.load_block_header(parent_block, None).await?;
+                        let base_block_number = snapshot.base_block_number;
+                        return Ok((
+                            self.forked_state_from_snapshot(&snapshot, header).await?,
+                            base_block_number,
+                        ));
+                    }
+                } else {
+                    warn!(
+                        block_number,
+                        parent_block,
+                        expected = %parent_hash,
+                        found = %snapshot.block_hash,
+                        "ignoring parent live state overlay snapshot with mismatched block hash"
+                    );
+                }
+            }
+
+            let parent_header = self.fetch_header_from_live_cache(parent_block).await?;
+            let fork = self
+                .reconstruct_state_from_live_data(cache, persisted, parent_block, parent_header)
+                .await?;
+            return Ok((fork, persisted));
+        }
+
+        Err(eyre!(
+            "cannot build live state snapshot for block {}: parent {} is ahead of persisted block {} and live cache is unavailable",
+            block_number,
+            parent_block,
+            persisted
+        ))
+    }
+
+    async fn forked_state_from_snapshot(
+        &self,
+        snapshot: &ChainStateSnapshot,
+        header: SealedHeader,
+    ) -> Result<ForkedState> {
+        if snapshot.schema_version != ChainStateSnapshot::SCHEMA_VERSION {
+            return Err(eyre!(
+                "unsupported live state snapshot schema {} for block {}",
+                snapshot.schema_version,
+                snapshot.block_number
+            ));
+        }
+        self.simulator
+            .assert_block_available(snapshot.base_block_number)?;
+
+        let mut fork_state = self
+            .simulator
+            .create_forked_state(snapshot.base_block_number)?;
+        fork_state.db.cache = snapshot.cache.clone();
+        fork_state.block_number = snapshot.block_number;
+        fork_state.block_header = header;
+        fork_state.nonces.clear();
+        Ok(fork_state)
+    }
 }
 
 /// Convert stored processed transaction JSON into [`UnsignedTransaction`] values.
@@ -269,4 +439,42 @@ fn decode_processed_transactions(values: &[Value]) -> Result<Vec<UnsignedTransac
         txs.push(build_unsigned_transaction_from_processed_tx_json(value)?);
     }
     Ok(txs)
+}
+
+/// Convert stored processed transaction JSON strings into [`UnsignedTransaction`] values.
+fn decode_processed_transaction_payloads(payloads: &[&str]) -> Result<Vec<UnsignedTransaction>> {
+    let mut txs = Vec::with_capacity(payloads.len());
+    for payload in payloads {
+        let value: Value = serde_json::from_str(payload)
+            .map_err(|err| eyre!("failed to decode processed tx payload: {}", err))?;
+        txs.push(build_unsigned_transaction_from_processed_tx_json(&value)?);
+    }
+    Ok(txs)
+}
+
+impl TxSimulator {
+    /// Build a cumulative live state overlay for a processed block.
+    ///
+    /// The returned snapshot stores only REVM's fork cache on top of a persisted
+    /// base block. The live block processor writes this into Redis so later
+    /// simulations can restore recent live state without replaying the whole
+    /// Redis window on every call.
+    pub async fn build_live_state_snapshot_from_processed_payloads(
+        &self,
+        block_number: u64,
+        block_hash: B256,
+        parent_hash: B256,
+        header_payload: &str,
+        tx_payloads: &[&str],
+    ) -> Result<ChainStateSnapshot> {
+        self.block_context_loader()
+            .build_live_state_snapshot_from_processed_payloads(
+                block_number,
+                block_hash,
+                parent_hash,
+                header_payload,
+                tx_payloads,
+            )
+            .await
+    }
 }
