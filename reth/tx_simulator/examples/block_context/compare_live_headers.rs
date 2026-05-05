@@ -69,18 +69,14 @@ async fn fetch_chain_header(block_number: u64) -> Result<SealedHeader> {
 }
 
 fn report_diff(block_number: u64, redis: &SealedHeader, chain: &SealedHeader) {
-    if redis == chain {
-        println!("Block {block_number}: headers match");
-        return;
-    }
-
-    println!("Block {block_number}: header mismatch detected");
     let r = redis.header();
     let c = chain.header();
+    let mut mismatches = 0usize;
 
     macro_rules! cmp_field {
         ($label:expr, $left:expr, $right:expr) => {
             if $left != $right {
+                mismatches += 1;
                 println!(
                     "  - {} mismatch\n      redis: {:?}\n      chain: {:?}",
                     $label, $left, $right
@@ -89,6 +85,7 @@ fn report_diff(block_number: u64, redis: &SealedHeader, chain: &SealedHeader) {
         };
     }
 
+    println!("Block {block_number}: comparing header fields");
     cmp_field!("hash", redis.hash(), chain.hash());
     cmp_field!("parent_hash", r.parent_hash, c.parent_hash);
     cmp_field!("state_root", r.state_root, c.state_root);
@@ -116,4 +113,10 @@ fn report_diff(block_number: u64, redis: &SealedHeader, chain: &SealedHeader) {
         c.parent_beacon_block_root
     );
     cmp_field!("withdrawals_root", r.withdrawals_root, c.withdrawals_root);
+
+    if mismatches == 0 {
+        println!("Block {block_number}: headers match");
+    } else {
+        println!("Block {block_number}: {mismatches} header field mismatch(es)");
+    }
 }

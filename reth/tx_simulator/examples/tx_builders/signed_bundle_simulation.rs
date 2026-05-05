@@ -32,6 +32,17 @@ const SUSHISWAP_INIT_CODE_HASH: [u8; 32] = [
 async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt().with_env_filter("info").init();
 
+    // Wallet used purely for simulation (never broadcast!)
+    let pk = match env::var("KARTAL_KILIT") {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => {
+            println!("Skipping signed bundle simulation: set KARTAL_KILIT to a dev private key.");
+            return Ok(());
+        }
+        Err(err) => return Err(eyre::eyre!("failed to read KARTAL_KILIT: {}", err)),
+    };
+    let signer_secret = parse_private_key(&pk)?;
+
     // Reth DB path is resolved from env overrides or the workspace config.
     let reth_db = tx_simulator::config::repo::reth_datadir()?;
     let simulator = TxSimulator::new(&reth_db)?;
@@ -41,9 +52,6 @@ async fn main() -> eyre::Result<()> {
         simulator.get_latest_block()?
     );
 
-    // Wallet used purely for simulation (never broadcast!)
-    let pk = env::var("KARTAL_KILIT").expect("Set KARTAL_KILIT to a dev private key");
-    let signer_secret = parse_private_key(&pk)?;
     let chain_id: u64 = env::var("ETH_KARTAL_CHAIN_ID")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -99,7 +107,19 @@ async fn main() -> eyre::Result<()> {
     let mut nonce = chain.nonce_of(owner)?;
 
     // Record ETH balance before buy
-    let eth_before = chain.eth_balance_of_on_fork(owner)?;
+    let mut eth_before = chain.eth_balance_of_on_fork(owner)?;
+    let estimated_gas_cost =
+        AlloyU256::from(gas_price_wei) * AlloyU256::from(gas_swap * 2 + gas_approve);
+    let required_balance = amount_in_eth + estimated_gas_cost;
+    if eth_before < required_balance {
+        let funded_balance = required_balance * AlloyU256::from(2);
+        let previous = chain.set_eth_balance_on_fork(owner, funded_balance)?;
+        println!(
+            "Funded signer on fork for simulation only: previous {} wei, forked {} wei",
+            previous, funded_balance
+        );
+        eth_before = funded_balance;
+    }
 
     // Build and sign BUY (ETH->USDC)
     let mut buy_unsigned = build_buy_swap_with_min_out(

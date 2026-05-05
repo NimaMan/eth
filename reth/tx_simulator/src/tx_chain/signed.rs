@@ -195,6 +195,22 @@ impl SignedTxChainSimulation {
         Ok(acc.map(|a| U256::from(a.balance)).unwrap_or(U256::ZERO))
     }
 
+    /// Set native ETH balance for an address on the forked state.
+    ///
+    /// This is useful for signed simulation examples and tests where the signer is
+    /// arbitrary but the signature must still recover to that signer.
+    pub fn set_eth_balance_on_fork(&mut self, owner: Address, balance: U256) -> Result<U256> {
+        let mut account = self
+            .forked_state
+            .db
+            .basic(owner.into())?
+            .unwrap_or_default();
+        let previous = U256::from(account.balance);
+        account.balance = balance;
+        self.forked_state.db.insert_account_info(owner, account);
+        Ok(previous)
+    }
+
     /// Get current nonce for an address from the forked state
     pub fn nonce_of(&mut self, address: Address) -> Result<u64> {
         self.simulator
