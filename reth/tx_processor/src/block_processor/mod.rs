@@ -6,7 +6,7 @@ use crate::tx_processor::data_models::{
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
 use alloy_primitives::{keccak256, Address, B256};
-use eyre::Result;
+use eyre::{bail, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::{
     provider::{
@@ -100,9 +100,12 @@ impl BlockProcessor {
     pub async fn process_block_with_options(
         &self,
         block_number: u64,
-        _include_traces: bool,
+        include_traces: bool,
     ) -> Result<ProcessedBlock> {
-        let raw = self.fetcher.fetch_db_block(block_number).await?;
+        let raw = self
+            .fetcher
+            .fetch_db_block_with_traces(block_number, include_traces)
+            .await?;
         self.process_raw_block(raw).await
     }
 
@@ -116,11 +119,11 @@ impl BlockProcessor {
         &self,
         block_hash: B256,
         block_number: u64,
-        _include_traces: bool,
+        include_traces: bool,
     ) -> Result<ProcessedBlock> {
         let raw = self
             .fetcher
-            .fetch_rpc_block_by_hash(block_hash, block_number)
+            .fetch_rpc_block_by_hash_with_traces(block_hash, block_number, include_traces)
             .await?;
         self.process_raw_block(raw).await
     }
@@ -170,6 +173,26 @@ impl BlockProcessor {
             receipts,
             traces,
         } = raw_block;
+
+        if receipts.len() != transactions.len() {
+            bail!(
+                "raw block {} has {} transactions but {} receipts",
+                header.number,
+                transactions.len(),
+                receipts.len()
+            );
+        }
+
+        if let Some(trace_list) = traces.as_ref() {
+            if trace_list.len() != transactions.len() {
+                bail!(
+                    "raw block {} has {} transactions but {} traces",
+                    header.number,
+                    transactions.len(),
+                    trace_list.len()
+                );
+            }
+        }
 
         let trace_list = traces.unwrap_or_default();
 
@@ -292,4 +315,161 @@ fn derive_create_address(from: Address, nonce: u64) -> Address {
     stream.append(&nonce);
     let hash = keccak256(stream.out());
     Address::from_slice(&hash[12..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Bytes, U256};
+    use reth_chain_query::provider::{BlockHeader, CallFrame, CallType, TransactionReceipt};
+
+    fn dummy_processor() -> BlockProcessor {
+        let rpc_fetcher = RpcBlockDataFetcher::new("http://127.0.0.1:8545").unwrap();
+        let fetcher = Arc::new(BlockDataFetcher::rpc_only(rpc_fetcher));
+        BlockProcessor::with_block_fetcher(fetcher)
+    }
+
+    fn dummy_header() -> BlockHeader {
+        BlockHeader {
+            number: 1,
+            hash: B256::ZERO,
+            parent_hash: B256::ZERO,
+            timestamp: 12,
+            gas_limit: 30_000_000,
+            gas_used: 21_000,
+            base_fee_per_gas: Some(1),
+        }
+    }
+
+    fn dummy_transaction() -> TransactionData {
+        TransactionData {
+            hash: B256::ZERO,
+            block_number: 1,
+            block_timestamp: 12,
+            tx_index: 0,
+            tx_number: 0,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            value: U256::ZERO,
+            input: Bytes::new(),
+            gas_price: U256::from(1),
+            gas_limit: 21_000,
+            nonce: 0,
+            transaction_type: 0,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
+        }
+    }
+
+    fn dummy_receipt() -> TransactionReceipt {
+        TransactionReceipt {
+            tx_hash: B256::ZERO,
+            status: true,
+            gas_used: 21_000,
+            logs: Vec::new(),
+            cumulative_gas_used: 21_000,
+            effective_gas_price: U256::from(1),
+            contract_address: None,
+            blob_gas_used: None,
+        }
+    }
+
+    fn dummy_trace() -> TransactionTrace {
+        TransactionTrace {
+            call_frame: CallFrame {
+                from: Address::ZERO,
+                to: Some(Address::ZERO),
+                value: U256::ZERO,
+                input: Bytes::new(),
+                output: Bytes::new(),
+                gas_used: 21_000,
+                gas_limit: 21_000,
+                depth: 0,
+                call_type: CallType::Call,
+                subcalls: Vec::new(),
+            },
+            gas_used: 21_000,
+            output: Bytes::new(),
+            error: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn process_raw_block_rejects_receipt_count_mismatch() {
+        let raw = RawBlockData {
+            header: dummy_header(),
+            transactions: vec![dummy_transaction()],
+            receipts: Vec::new(),
+            traces: None,
+        };
+
+        let err = dummy_processor()
+            .process_raw_block(raw)
+            .await
+            .expect_err("receipt count mismatch should fail")
+            .to_string();
+
+        assert!(err.contains("1 transactions but 0 receipts"));
+    }
+
+    #[tokio::test]
+    async fn process_raw_block_rejects_trace_count_mismatch() {
+        let raw = RawBlockData {
+            header: dummy_header(),
+            transactions: Vec::new(),
+            receipts: Vec::new(),
+            traces: Some(vec![dummy_trace()]),
+        };
+
+        let err = dummy_processor()
+            .process_raw_block(raw)
+            .await
+            .expect_err("trace count mismatch should fail")
+            .to_string();
+
+        assert!(err.contains("0 transactions but 1 traces"));
+    }
+
+    #[tokio::test]
+    async fn process_raw_block_accepts_missing_traces() {
+        let raw = RawBlockData {
+            header: dummy_header(),
+            transactions: Vec::new(),
+            receipts: Vec::new(),
+            traces: None,
+        };
+
+        let processed = dummy_processor()
+            .process_raw_block(raw)
+            .await
+            .expect("empty block without traces should process");
+
+        assert!(processed.transactions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn process_raw_block_accepts_matching_empty_trace_list() {
+        let raw = RawBlockData {
+            header: dummy_header(),
+            transactions: Vec::new(),
+            receipts: Vec::new(),
+            traces: Some(Vec::new()),
+        };
+
+        let processed = dummy_processor()
+            .process_raw_block(raw)
+            .await
+            .expect("empty block with empty traces should process");
+
+        assert!(processed.transactions.is_empty());
+    }
+
+    #[test]
+    fn dummy_receipt_shape_is_valid() {
+        assert_eq!(dummy_receipt().tx_hash, B256::ZERO);
+    }
 }
