@@ -395,6 +395,6 @@ fn parse_u64_arg(name: &str, value: Option<String>) -> Result<u64> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  cargo run -p eth_token --example v2_pool_replay_reserves -- \\\n    --token <erc20> --pool <uniswap-v2-pair> --start <block> --end <block> [--datadir <reth-datadir>]"
+        "Usage:\n  cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- \\\n    --token <erc20> --pool <uniswap-v2-pair> --start <block> --end <block> [--datadir <reth-datadir>]"
     );
 }

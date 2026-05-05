@@ -15,5 +15,5 @@ tokio.workspace = true
 tx_processor = { path = "../tx_processor" }
 
 [[example]]
-name = "v2_pool_replay_reserves"
-path = "examples/v2_pool_replay_reserves.rs"
+name = "uniswap_v2_pool_replay_reserves"
+path = "examples/uniswap_v2_pool_replay_reserves.rs"
