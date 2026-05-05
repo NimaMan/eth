@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         .fetch_rpc_block_by_hash(db_block.header.hash, block_number)
         .await?;
 
-    compare_blocks(&db_block, &rpc_block);
+    compare_blocks(&db_block, &rpc_block)?;
 
     Ok(())
 }
@@ -42,19 +42,31 @@ async fn main() -> Result<()> {
 fn compare_blocks(
     db: &reth_chain_query::provider::RawBlockData,
     rpc: &reth_chain_query::provider::RawBlockData,
-) {
+) -> Result<()> {
     use std::io::Write;
-    let log_path = "/home/nima/code/crypto/eth/logs/dev/block_fetcher_diffs.log";
+
+    let transactions_match =
+        normalized_transactions(&db.transactions) == normalized_transactions(&rpc.transactions);
+
+    if db.header == rpc.header
+        && transactions_match
+        && db.receipts == rpc.receipts
+        && db.traces == rpc.traces
+    {
+        println!("✅ Blocks match after RPC normalization");
+        return Ok(());
+    }
+
+    let log_path = env::var("BLOCK_FETCHER_DIFF_LOG").unwrap_or_else(|_| {
+        "/home/nima/code/crypto/eth/logs/dev/block_fetcher_diffs.log".to_string()
+    });
+    if let Some(parent) = std::path::Path::new(&log_path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let mut log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_path)
-        .expect("failed to open dev log file");
-
-    if db == rpc {
-        println!("✅ Blocks match exactly (including traces)");
-        return;
-    }
+        .open(&log_path)?;
 
     if db.header != rpc.header {
         println!(
@@ -69,7 +81,7 @@ fn compare_blocks(
         .ok();
     }
 
-    if db.transactions != rpc.transactions {
+    if !transactions_match {
         println!(
             "❌ Transaction metadata differ (db={} rpc={})",
             db.transactions.len(),
@@ -183,4 +195,20 @@ fn compare_blocks(
     }
 
     println!("⚠️ Block comparison finished with differences.");
+    println!("Diff log: {log_path}");
+    Ok(())
+}
+
+fn normalized_transactions(
+    transactions: &[reth_chain_query::provider::TransactionMetadata],
+) -> Vec<reth_chain_query::provider::TransactionMetadata> {
+    transactions
+        .iter()
+        .cloned()
+        .map(|mut tx| {
+            // RPC block responses do not carry Reth's global transaction number.
+            tx.tx_number = 0;
+            tx
+        })
+        .collect()
 }

@@ -382,6 +382,7 @@ impl RethQueryProvider {
 
     /// Simulate all transactions in the block to produce call traces
     async fn simulate_block_traces(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
+        let tx_metadata = self.fetch_block_tx_metadata_only_internal(block_number)?;
         let tracer = BlockTracer::new(&self.tx_simulator);
         let trace_results = tracer
             .trace_block_by_number(block_number, Some(GethDebugTracingOptions::default()))
@@ -389,16 +390,20 @@ impl RethQueryProvider {
 
         let mut traces = Vec::with_capacity(trace_results.len());
 
-        for trace in trace_results {
+        for (idx, trace) in trace_results.into_iter().enumerate() {
             match trace {
                 TraceResult::Success { result, .. } => match result {
                     GethTrace::CallTracer(frame) => {
                         let gas_used: u64 = frame.gas_used.try_into().unwrap_or(u64::MAX);
                         let output = frame.output.clone().unwrap_or_else(Bytes::new);
                         let error = frame.error.clone().or(frame.revert_reason.clone());
+                        let mut call_frame = self.convert_call_frame(&frame);
+                        if let Some(tx) = tx_metadata.get(idx) {
+                            call_frame.gas_limit = tx.gas_limit;
+                        }
 
                         traces.push(TransactionTrace {
-                            call_frame: self.convert_call_frame(&frame),
+                            call_frame,
                             gas_used,
                             output,
                             error,

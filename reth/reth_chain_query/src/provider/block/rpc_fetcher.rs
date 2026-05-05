@@ -1,4 +1,4 @@
-use alloy_eips::eip2930::AccessListItem;
+use alloy_eips::{eip2930::AccessListItem, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use jsonrpsee::{
     core::client::ClientT,
@@ -162,6 +162,7 @@ fn parse_transactions(
         let access_list = parse_access_list(tx.get("accessList"))?;
         let blob_hashes = parse_blob_hashes(tx.get("blobVersionedHashes"))?;
         let max_fee_per_blob_gas = parse_u256_opt(tx.get("maxFeePerBlobGas"))?;
+        let signed_authorizations = parse_authorization_list(tx.get("authorizationList"))?;
 
         results.push(TransactionData {
             hash,
@@ -182,7 +183,7 @@ fn parse_transactions(
             access_list,
             blob_versioned_hashes: blob_hashes,
             max_fee_per_blob_gas,
-            signed_authorizations: Vec::new(),
+            signed_authorizations,
         });
     }
     Ok(results)
@@ -357,6 +358,14 @@ fn parse_blob_hashes(value: Option<&Value>) -> Result<Vec<B256>> {
         return Ok(Vec::new());
     };
     entries.iter().map(|v| parse_b256(v)).collect()
+}
+
+fn parse_authorization_list(value: Option<&Value>) -> Result<Vec<SignedAuthorization>> {
+    match value {
+        Some(Value::Array(_)) => serde_json::from_value(value.cloned().unwrap_or(Value::Null))
+            .map_err(|err| eyre::eyre!("invalid authorizationList: {}", err)),
+        _ => Ok(Vec::new()),
+    }
 }
 
 fn required_field<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {

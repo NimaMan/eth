@@ -364,8 +364,13 @@ impl RethQueryProvider {
             .await?;
 
         // Convert CallFrame from tx_simulator to our CallFrame type
+        let mut call_frame = self.convert_call_frame(&result.call_trace);
+        if let Some(gas) = call_request.gas {
+            call_frame.gas_limit = gas;
+        }
+
         Ok(TransactionTrace {
-            call_frame: self.convert_call_frame(&result.call_trace),
+            call_frame,
             gas_used: result.gas_used,
             output: result.call_trace.output.clone().unwrap_or_default(),
             error: if !result.success {
@@ -378,6 +383,14 @@ impl RethQueryProvider {
 
     /// Convert tx_simulator CallFrame to our CallFrame type
     pub(super) fn convert_call_frame(&self, frame: &tx_simulator::types::CallFrame) -> CallFrame {
+        self.convert_call_frame_at_depth(frame, 0)
+    }
+
+    fn convert_call_frame_at_depth(
+        &self,
+        frame: &tx_simulator::types::CallFrame,
+        depth: u32,
+    ) -> CallFrame {
         // tx_simulator uses alloy_rpc_types_trace::geth::CallFrame
         // which has different field names than our internal CallFrame
         CallFrame {
@@ -388,12 +401,18 @@ impl RethQueryProvider {
             output: frame.output.clone().unwrap_or_default(),
             gas_used: frame.gas_used.try_into().unwrap_or(u64::MAX),
             gas_limit: frame.gas.try_into().unwrap_or(u64::MAX),
-            depth: 0, // CallFrame from alloy doesn't have depth, we track it separately
-            call_type: CallType::Call, // Default to Call, can be enhanced later
+            depth,
+            call_type: match frame.typ.to_ascii_uppercase().as_str() {
+                "DELEGATECALL" => CallType::DelegateCall,
+                "STATICCALL" => CallType::StaticCall,
+                "CREATE" => CallType::Create,
+                "CREATE2" => CallType::Create2,
+                _ => CallType::Call,
+            },
             subcalls: frame
                 .calls
                 .iter()
-                .map(|c| self.convert_call_frame(c))
+                .map(|c| self.convert_call_frame_at_depth(c, depth + 1))
                 .collect(),
         }
     }
