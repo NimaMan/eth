@@ -133,7 +133,7 @@ impl RedisBlockPublisher {
         let cmd = pipe.cmd("XADD");
         cmd.arg(&self.processed_block_stream);
         if let Some(maxlen) = self.max_blocks.filter(|maxlen| *maxlen > 0) {
-            cmd.arg("MAXLEN").arg("~").arg(maxlen);
+            cmd.arg("MAXLEN").arg("=").arg(maxlen);
         }
         cmd.arg("*")
             .arg("schema_version")

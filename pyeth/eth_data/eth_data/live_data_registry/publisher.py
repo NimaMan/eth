@@ -112,7 +112,7 @@ class LiveDataPublisher:
                     keys.processed_block_stream_key(),
                     stream_fields,
                     maxlen=max_blocks,
-                    approximate=True,
+                    approximate=False,
                 )
             else:
                 pipe.xadd(keys.processed_block_stream_key(), stream_fields)
