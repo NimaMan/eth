@@ -58,7 +58,7 @@ impl RedisBlockPublisher {
             }
         }
 
-        pipe.query_async::<_, ()>(&mut conn).await?;
+        pipe.query_async::<()>(&mut conn).await?;
         Ok(())
     }
 }

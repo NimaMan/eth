@@ -13,6 +13,14 @@ ExecStart=/home/nima/storage/samsung8tb/ethereum/bin/reth node \
   --authrpc.addr 127.0.0.1 \
   --authrpc.port 8551 \
   --authrpc.jwtsecret ${JWT_PATH} \
+  --addr 0.0.0.0 \
+  --port 30303 \
+  --discovery.addr 0.0.0.0 \
+  --discovery.port 30303 \
+  --nat any \
+  --tx-propagation-mode all \
+  --max-outbound-peers 100 \
+  --max-inbound-peers 100 \
   --http \
   --http.addr 127.0.0.1 \
   --http.port 8545 \

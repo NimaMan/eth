@@ -10,12 +10,16 @@ pub mod repo {
     pub const ETH_NODE_ROOT_ENV: &str = "ETH_NODE_ROOT";
     pub const RETH_DATADIR_ENV: &str = "RETH_DATADIR";
     pub const RETH_DB_PATH_ENV: &str = "RETH_DB_PATH";
+    pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
+    pub const RETH_WS_RPC_ENV: &str = "RETH_WS_RPC";
     pub const LIGHTHOUSE_DATADIR_ENV: &str = "LIGHTHOUSE_DATADIR";
     pub const JWT_PATH_ENV: &str = "JWT_PATH";
     pub const LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
 
     pub const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
     pub const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
+    pub const DEFAULT_RETH_HTTP_RPC: &str = "http://127.0.0.1:8545";
+    pub const DEFAULT_RETH_WS_RPC: &str = "ws://127.0.0.1:8546";
     pub const DEFAULT_LIGHTHOUSE_DATADIR: &str = "/home/nima/.lighthouse";
     pub const DEFAULT_JWT_PATH: &str = "/home/nima/storage/samsung8tb/ethereum/jwt/jwt.hex";
     pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
@@ -39,7 +43,39 @@ pub mod repo {
     }
 
     pub fn reth_datadir() -> Result<String> {
-        resolve_value(&[RETH_DATADIR_ENV, RETH_DB_PATH_ENV], DEFAULT_RETH_DATADIR)
+        if let Ok(value) = env::var(RETH_DATADIR_ENV) {
+            if !value.trim().is_empty() {
+                return Ok(value);
+            }
+        }
+
+        let config = load_config_env()?;
+        if let Some(value) = config.get(RETH_DATADIR_ENV) {
+            if !value.trim().is_empty() {
+                return Ok(value.clone());
+            }
+        }
+
+        if let Ok(value) = env::var(RETH_DB_PATH_ENV) {
+            if !value.trim().is_empty() {
+                return Ok(value);
+            }
+        }
+        if let Some(value) = config.get(RETH_DB_PATH_ENV) {
+            if !value.trim().is_empty() {
+                return Ok(value.clone());
+            }
+        }
+
+        Ok(DEFAULT_RETH_DATADIR.to_string())
+    }
+
+    pub fn reth_http_rpc() -> Result<String> {
+        resolve_value(&[RETH_HTTP_RPC_ENV], DEFAULT_RETH_HTTP_RPC)
+    }
+
+    pub fn reth_ws_rpc() -> Result<String> {
+        resolve_value(&[RETH_WS_RPC_ENV], DEFAULT_RETH_WS_RPC)
     }
 
     pub fn lighthouse_datadir() -> Result<String> {
@@ -133,6 +169,8 @@ pub mod repo {
                 r#"
                 # shared config
                 RETH_DATADIR=/mnt/eth/reth
+                RETH_HTTP_RPC=http://127.0.0.1:8545
+                RETH_WS_RPC=ws://127.0.0.1:8546
                 JWT_PATH="/mnt/eth/jwt.hex"
                 LIVE_BLOCKCHAIN_DATA_REDIS_URL='redis://127.0.0.1:6379/0'
                 "#,
@@ -140,6 +178,8 @@ pub mod repo {
             .expect("config should parse");
 
             assert_eq!(values["RETH_DATADIR"], "/mnt/eth/reth");
+            assert_eq!(values["RETH_HTTP_RPC"], "http://127.0.0.1:8545");
+            assert_eq!(values["RETH_WS_RPC"], "ws://127.0.0.1:8546");
             assert_eq!(values["JWT_PATH"], "/mnt/eth/jwt.hex");
             assert_eq!(
                 values["LIVE_BLOCKCHAIN_DATA_REDIS_URL"],

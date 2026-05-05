@@ -41,7 +41,7 @@ impl LiveDataSnapshotFetcher {
 
         let mut conn = self
             .client
-            .get_tokio_connection()
+            .get_multiplexed_tokio_connection()
             .await
             .map_err(|err| eyre!("failed to connect to redis: {}", err))?;
 
@@ -91,7 +91,7 @@ impl LiveDataSnapshotFetcher {
     pub async fn fetch_all_addresses(&self) -> Result<Vec<String>> {
         let mut conn = self
             .client
-            .get_tokio_connection()
+            .get_multiplexed_tokio_connection()
             .await
             .map_err(|err| eyre!("failed to connect to redis: {}", err))?;
 
@@ -104,6 +104,8 @@ impl LiveDataSnapshotFetcher {
         let mut addresses = Vec::new();
         tokio::pin!(iter);
         while let Some(key) = iter.next_item().await {
+            let key =
+                key.map_err(|err| eyre!("failed to scan redis token snapshot key: {}", err))?;
             if let Some(stripped) = key.strip_prefix(&self.key_prefix) {
                 addresses.push(stripped.to_string());
             }
@@ -247,6 +249,7 @@ struct SnapshotBlockMeta {
 #[derive(Debug, Deserialize, Default)]
 struct SnapshotStatus {
     #[serde(default)]
+    #[allow(dead_code)]
     lifecycle: Option<String>,
     #[serde(default)]
     is_scam: Option<bool>,
@@ -265,6 +268,7 @@ struct SnapshotControl {
     #[serde(default)]
     ownership_renounced_block: Option<u64>,
     #[serde(default)]
+    #[allow(dead_code)]
     control_addresses: Option<Vec<String>>,
     #[serde(default)]
     tax_setter_addresses: Option<Vec<String>>,
@@ -273,6 +277,7 @@ struct SnapshotControl {
 #[derive(Debug, Deserialize, Default)]
 struct SnapshotPools {
     #[serde(default)]
+    #[allow(dead_code)]
     addresses: Vec<String>,
     #[serde(default)]
     info: HashMap<String, SnapshotPoolInfo>,

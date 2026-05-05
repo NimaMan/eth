@@ -68,18 +68,47 @@ impl LiveBlockService {
             let processed = self.processor.next_processed_block().await?;
 
             if let Some(publisher) = &self.publisher {
-                let snapshot = build_live_block_snapshot(&processed.processed_block)?;
-                publisher.publish_snapshot(&snapshot).await?;
+                match build_live_block_snapshot(&processed.processed_block) {
+                    Ok(snapshot) => {
+                        if let Err(err) = publisher.publish_snapshot(&snapshot).await {
+                            tracing::warn!(
+                                block_number = processed.execution_info.block_number,
+                                "failed to publish live block snapshot: {}",
+                                err
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            block_number = processed.execution_info.block_number,
+                            "failed to build live block snapshot: {}",
+                            err
+                        );
+                    }
+                }
             }
 
             if let Some(notifier) = &self.notifier {
-                notifier
+                if let Err(err) = notifier
                     .notify_block_processed(processed.execution_info.block_number)
-                    .await?;
+                    .await
+                {
+                    tracing::warn!(
+                        block_number = processed.execution_info.block_number,
+                        "failed to publish live block notification: {}",
+                        err
+                    );
+                }
             }
 
             if let Some(logger) = &self.logger {
-                logger.log_block(&processed)?;
+                if let Err(err) = logger.log_block(&processed) {
+                    tracing::warn!(
+                        block_number = processed.execution_info.block_number,
+                        "failed to write live block log: {}",
+                        err
+                    );
+                }
             }
 
             processed_count += 1;

@@ -31,7 +31,7 @@ impl RedisBlockNotifier {
         redis::cmd("PUBLISH")
             .arg(&self.channel)
             .arg(payload)
-            .query_async::<_, ()>(&mut conn)
+            .query_async::<()>(&mut conn)
             .await?;
         Ok(())
     }

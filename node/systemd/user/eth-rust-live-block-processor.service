@@ -1,0 +1,20 @@
+[Unit]
+Description=Ethereum Rust live block processor
+Wants=network-online.target reth.service
+After=network-online.target reth.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nima/code/crypto/blockchains/eth/reth
+EnvironmentFile=-/home/nima/code/crypto/blockchains/eth/config.env
+Environment=ETH_CONFIG_PATH=/home/nima/code/crypto/blockchains/eth/config.env
+Environment=RUST_LOG=info
+Environment=REDIS_BLOCK_CHANNEL=live_blocks
+Environment=LIVE_BLOCK_LOG=/home/nima/storage/samsung8tb/ethereum/logs/block_processor/live_block_processor.log
+ExecStart=/home/nima/.cargo/bin/cargo run --release -p tx_processor --example live_block_service
+Restart=always
+RestartSec=5
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=default.target

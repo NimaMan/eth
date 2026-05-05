@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, sync::Arc};
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::live_pipeline::{LiveBlockProcessorConfig, LiveBlockService};
+use tx_simulator::config::repo;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,27 +11,25 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let reth_datadir = env::var("RETH_DATA_DIR")
-        .unwrap_or_else(|_| "/home/nima/.local/share/reth/mainnet".to_string());
-    let execution_rpc =
-        env::var("EXECUTION_RPC").unwrap_or_else(|_| "http://127.0.0.1:8545".to_string());
-    let execution_ws =
-        env::var("EXECUTION_WS").unwrap_or_else(|_| "ws://127.0.0.1:8546".to_string());
-    let redis_url = env::var("REDIS_URL").ok();
+    let reth_datadir = repo::reth_datadir()?;
+    let execution_rpc = env_or_config("EXECUTION_RPC", repo::reth_http_rpc)?;
+    let execution_ws = env_or_config("EXECUTION_WS", repo::reth_ws_rpc)?;
+    let redis_url = Some(env_or_config("REDIS_URL", repo::live_data_redis_url)?);
     let notifier_channel = env::var("REDIS_BLOCK_CHANNEL")
         .ok()
-        .or_else(|| Some("live:block_published".into()));
-    let block_limit: usize = env::var("LIVE_BLOCK_LIMIT")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| Some("live_blocks".into()));
+    let block_limit: Option<usize> = env::var("LIVE_BLOCK_LIMIT")
         .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(2);
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| value.parse().ok());
     let log_path = env::var("LIVE_BLOCK_LOG")
         .ok()
         .map(|path| PathBuf::from(path));
 
     let processor_config = LiveBlockProcessorConfig::default()
-        .with_execution_rpc(execution_rpc)
-        .with_execution_ws(execution_ws);
+        .with_execution_rpc(execution_rpc.clone())
+        .with_execution_ws(execution_ws.clone());
 
     let provider = Arc::new(RethQueryProvider::new(&reth_datadir)?);
 
@@ -44,10 +43,26 @@ async fn main() -> Result<()> {
     .await?;
 
     println!(
-        "Running live block service for {} blocks (redis={:?})",
-        block_limit, redis_url
+        "Running live block service (limit={:?}, redis={:?}, datadir={}, rpc={}, ws={})",
+        block_limit, redis_url, reth_datadir, execution_rpc, execution_ws
     );
 
-    service.run_for_blocks(block_limit).await?;
+    if let Some(limit) = block_limit {
+        service.run_for_blocks(limit).await?;
+    } else {
+        service.run().await?;
+    }
     Ok(())
+}
+
+fn env_or_config<F>(env_key: &str, resolver: F) -> Result<String>
+where
+    F: FnOnce() -> Result<String>,
+{
+    if let Ok(value) = env::var(env_key) {
+        if !value.trim().is_empty() {
+            return Ok(value);
+        }
+    }
+    resolver()
 }

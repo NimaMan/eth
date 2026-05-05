@@ -1,6 +1,9 @@
-use crate::block_processor::ProcessedBlock;
+use crate::block_processor::{ProcessedBlock, ProcessedBlockTransactions};
+use alloy_primitives::Address;
 use eyre::{eyre, Result};
 use serde::Serialize;
+use serde_json::{json, Value};
+use std::collections::HashSet;
 
 /// Snapshot payload ready for Redis persistence.
 #[derive(Debug, Clone)]
@@ -15,7 +18,11 @@ pub fn build_live_block_snapshot(block: &ProcessedBlock) -> Result<LiveBlockSnap
     let header_json = serde_json::to_string(&HeaderPayload::from(&block.header))
         .map_err(|err| eyre!("failed to serialize block header: {}", err))?;
 
-    let tx_entries: Vec<(String, String)> = Vec::new();
+    let tx_entries = block
+        .transactions
+        .iter()
+        .map(build_transaction_entry)
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(LiveBlockSnapshot {
         block_number: block.header.number,
@@ -58,4 +65,82 @@ impl From<&reth_chain_query::provider::BlockHeader> for HeaderPayload {
 
 fn to_hex(value: u64) -> String {
     format!("0x{:x}", value)
+}
+
+fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<(String, String)> {
+    let tx_hash = format!("{:#x}", tx.processed.hash);
+    let mut payload = serde_json::to_value(&tx.processed).map_err(|err| {
+        eyre!(
+            "failed to serialize processed transaction {}: {}",
+            tx_hash,
+            err
+        )
+    })?;
+
+    let object = payload.as_object_mut().ok_or_else(|| {
+        eyre!(
+            "processed transaction {} did not serialize to an object",
+            tx_hash
+        )
+    })?;
+
+    object.insert("hash".to_string(), json!(tx_hash.clone()));
+    object.insert(
+        "from_address".to_string(),
+        json!(reth_chain_query::to_checksum_address(
+            &tx.processed.from_address
+        )),
+    );
+    object.insert(
+        "to_address".to_string(),
+        tx.processed
+            .to_address
+            .map(|address| json!(reth_chain_query::to_checksum_address(&address)))
+            .unwrap_or(Value::Null),
+    );
+    object.insert(
+        "contract_address".to_string(),
+        tx.processed
+            .contract_address
+            .map(|address| json!(reth_chain_query::to_checksum_address(&address)))
+            .unwrap_or(Value::Null),
+    );
+    object.insert(
+        "input".to_string(),
+        json!(format!("0x{}", hex::encode(&tx.processed.input))),
+    );
+    object.insert(
+        "unique_addresses".to_string(),
+        address_set_to_json(&tx.processed.unique_addresses),
+    );
+    object.insert(
+        "erc20_contracts".to_string(),
+        address_set_to_json(&tx.processed.erc20_contracts),
+    );
+    object.insert(
+        "erc721_contracts".to_string(),
+        address_set_to_json(&tx.processed.erc721_contracts),
+    );
+    object.insert(
+        "erc1155_contracts".to_string(),
+        address_set_to_json(&tx.processed.erc1155_contracts),
+    );
+
+    let tx_json = serde_json::to_string(&payload).map_err(|err| {
+        eyre!(
+            "failed to encode processed transaction {}: {}",
+            tx_hash,
+            err
+        )
+    })?;
+    Ok((tx_hash, tx_json))
+}
+
+fn address_set_to_json(addresses: &HashSet<Address>) -> Value {
+    let mut values: Vec<String> = addresses
+        .iter()
+        .map(reth_chain_query::to_checksum_address)
+        .collect();
+    values.sort();
+    json!(values)
 }

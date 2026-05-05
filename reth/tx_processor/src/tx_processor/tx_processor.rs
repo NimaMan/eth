@@ -82,6 +82,7 @@ impl TxProcessor {
         let mut erc1155_transfers = Vec::new();
         let mut erc20_approval_events = Vec::new();
         let mut erc721_approval_events = Vec::new();
+        let mut approval_for_all_events = Vec::new();
         let mut uniswap_v2_syncs = Vec::new();
         let mut uniswap_v2_swaps = Vec::new();
         let mut uniswap_v3_pools = Vec::new();
@@ -124,6 +125,7 @@ impl TxProcessor {
                     DecodedEvent::ERC1155TransferEvent(event) => erc1155_transfers.push(event),
                     DecodedEvent::ERC20ApprovalEvent(event) => erc20_approval_events.push(event),
                     DecodedEvent::ERC721ApprovalEvent(event) => erc721_approval_events.push(event),
+                    DecodedEvent::ApprovalForAllEvent(event) => approval_for_all_events.push(event),
                     DecodedEvent::UniswapV2SyncEvent(event) => uniswap_v2_syncs.push(event),
                     DecodedEvent::UniswapV2SwapEvent(event) => uniswap_v2_swaps.push(event),
                     DecodedEvent::UniswapV3PoolCreatedEvent(event) => uniswap_v3_pools.push(event),
@@ -263,6 +265,7 @@ impl TxProcessor {
         processed_tx.erc1155_transfers = erc1155_transfers;
         processed_tx.erc20_approval_events = erc20_approval_events;
         processed_tx.erc721_approval_events = erc721_approval_events;
+        processed_tx.approval_for_all_events = approval_for_all_events;
         processed_tx.uniswap_v2_syncs = uniswap_v2_syncs;
         processed_tx.uniswap_v2_swaps = uniswap_v2_swaps;
         processed_tx.uniswap_v3_pools = uniswap_v3_pools;
@@ -307,6 +310,9 @@ impl TxProcessor {
         }
         for approval in &processed_tx.erc20_approval_events {
             erc20_contracts.insert(approval.token_address);
+        }
+        for approval in &processed_tx.approval_for_all_events {
+            processed_tx.erc721_contracts.insert(approval.token_address);
         }
         for event in &processed_tx.trading_enabled_events {
             erc20_contracts.insert(event.token_address);
@@ -792,6 +798,12 @@ fn populate_unique_addresses(tx: &mut ProcessedTransaction) {
         set.insert(approval.token_address);
         set.insert(approval.owner);
         set.insert(approval.approved_address);
+    }
+
+    for approval in &tx.approval_for_all_events {
+        set.insert(approval.token_address);
+        set.insert(approval.owner);
+        set.insert(approval.operator);
     }
 
     for event in &tx.uniswap_v2_syncs {

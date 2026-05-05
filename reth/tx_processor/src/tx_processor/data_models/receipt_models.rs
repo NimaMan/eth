@@ -134,6 +134,15 @@ pub struct ERC721ApprovalEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalForAllEvent {
+    pub token_address: Address,
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+    pub log_index: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UniswapV2PairCreatedEvent {
     pub pair_address: Address,
     pub token0: Address,
