@@ -11,6 +11,7 @@ use crate::pools::uniswap::v2::{
     LPApprovalEvent, LPTransferEvent, UniswapV2BurnEvent, UniswapV2MintEvent, UniswapV2Pool,
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
 };
+use crate::state::{ControlAddressTracker, TokenStateMonitor, TokenTransferTracker};
 
 pub const DEFAULT_TOKEN_HISTORY_LIMIT: usize = 1000;
 
@@ -127,17 +128,23 @@ pub struct ERC20Token {
     pub latest_block_number: Option<u64>,
     pub latest_block_timestamp: Option<u64>,
     pub token_control_addresses: HashSet<String>,
+    pub transfer_tracker: TokenTransferTracker,
+    pub control_tracker: ControlAddressTracker,
+    pub state_monitor: TokenStateMonitor,
     pub v2_pools: HashMap<String, UniswapV2Pool>,
 }
 
 impl ERC20Token {
     pub fn new(metadata: ERC20TokenMetadata) -> Self {
+        let contract_address = metadata.address;
+        let decimals = metadata.decimals;
+        let total_supply = metadata.total_supply;
         Self {
-            contract_address: metadata.address,
+            contract_address: contract_address.clone(),
             name: metadata.name,
             symbol: metadata.symbol,
-            decimals: metadata.decimals,
-            total_supply: metadata.total_supply,
+            decimals,
+            total_supply: total_supply.clone(),
             history_limit: DEFAULT_TOKEN_HISTORY_LIMIT,
             creation_block: None,
             creation_timestamp: None,
@@ -150,6 +157,13 @@ impl ERC20Token {
             latest_block_number: None,
             latest_block_timestamp: None,
             token_control_addresses: HashSet::new(),
+            transfer_tracker: TokenTransferTracker::new(
+                contract_address,
+                decimals,
+                DEFAULT_TOKEN_HISTORY_LIMIT,
+            ),
+            control_tracker: ControlAddressTracker::new(DEFAULT_TOKEN_HISTORY_LIMIT),
+            state_monitor: TokenStateMonitor::new(total_supply),
             v2_pools: HashMap::new(),
         }
     }
@@ -177,6 +191,9 @@ impl ERC20Token {
     }
 
     pub fn add_uniswap_v2_pool(&mut self, pool: UniswapV2Pool) -> Option<UniswapV2Pool> {
+        let mut pool = pool;
+        pool.base
+            .register_token_control_addresses(&self.token_control_addresses);
         let pool_address = pool.base.identity.pool_address.clone();
         let previous = self.v2_pools.insert(pool_address, pool);
         self.refresh_lifecycle_status();
@@ -249,6 +266,34 @@ impl ERC20Token {
         Ok(())
     }
 
+    pub fn update_token_state_from_processed_transaction(
+        &mut self,
+        transaction: &ProcessedTransaction,
+    ) -> Result<()> {
+        self.record_transaction_metadata(
+            hash_string(&transaction.hash),
+            Some(&address_string(&transaction.from_address)),
+            transaction.block_number,
+            transaction.block_timestamp,
+        );
+        self.transfer_tracker
+            .update_from_processed_transaction(transaction)?;
+        self.state_monitor.update_from_processed_transaction(
+            transaction,
+            self.transfer_tracker.total_supply_from_transfers,
+            self.decimals,
+        )?;
+        let newly_added = self
+            .control_tracker
+            .update_from_processed_transaction(transaction);
+        if !newly_added.is_empty() {
+            self.token_control_addresses.extend(newly_added.clone());
+            self.register_control_addresses_with_pools(newly_added);
+        }
+        self.refresh_lifecycle_status();
+        Ok(())
+    }
+
     pub fn handle_contract_creation(
         &mut self,
         block_number: u64,
@@ -265,6 +310,10 @@ impl ERC20Token {
         self.creator_nonce = Some(creator_nonce);
         self.token_life_cycle_status = Some(TokenLifecycleState::ContractCreation);
         self.token_control_addresses.insert(creator_address);
+        let creator = self.creator_address.clone().unwrap_or_default();
+        self.control_tracker
+            .register([parse_address_lossy(&creator)]);
+        self.register_control_addresses_with_pools([creator]);
     }
 
     pub fn record_transaction_metadata(
@@ -295,16 +344,22 @@ impl ERC20Token {
     }
 
     pub fn trading_enabled(&self) -> bool {
+        if self.state_monitor.trading_enabled {
+            return true;
+        }
         self.v2_pools
             .values()
             .any(|pool| pool.base.trading_enabled())
     }
 
     pub fn is_scam(&self) -> bool {
-        self.v2_pools.values().any(|pool| pool.base.is_scam())
+        self.state_monitor.is_scam || self.v2_pools.values().any(|pool| pool.base.is_scam())
     }
 
     pub fn scam_label(&self) -> Option<String> {
+        if let Some(label) = self.state_monitor.scam_label.clone() {
+            return Some(label);
+        }
         self.v2_pools
             .values()
             .find_map(|pool| pool.base.scam_label.clone())
@@ -329,6 +384,41 @@ impl ERC20Token {
                 .or_insert(0.0) += pool.base.state.total_liquidity;
         }
         liquidity
+    }
+
+    pub fn total_bribe_amount(&self) -> f64 {
+        self.transfer_tracker.total_bribe_amount
+    }
+
+    pub fn total_supply_from_transfers(&self) -> f64 {
+        self.transfer_tracker.total_supply_from_transfers
+    }
+
+    pub fn unique_addresses(&self) -> Vec<String> {
+        let mut addresses: Vec<_> = self
+            .transfer_tracker
+            .address_tx_counter
+            .keys()
+            .cloned()
+            .collect();
+        addresses.sort();
+        addresses
+    }
+
+    pub fn current_owner(&self) -> Option<String> {
+        self.control_tracker.current_owner.clone()
+    }
+
+    pub fn ownership_renounced(&self) -> bool {
+        self.control_tracker.ownership_renounced
+    }
+
+    pub fn trading_enabled_block(&self) -> Option<u64> {
+        self.state_monitor.trading_enabled_block
+    }
+
+    pub fn trading_enabled_tx(&self) -> Option<String> {
+        self.state_monitor.trading_enabled_tx.clone()
     }
 
     pub fn all_pool_reserves(&self) -> HashMap<String, Value> {
@@ -396,6 +486,19 @@ impl ERC20Token {
             self.token_life_cycle_status = Some(TokenLifecycleState::TradingEnabled);
         } else if self.has_pool() {
             self.token_life_cycle_status = Some(TokenLifecycleState::PairCreation);
+        }
+    }
+
+    fn register_control_addresses_with_pools(
+        &mut self,
+        addresses: impl IntoIterator<Item = String>,
+    ) {
+        let addresses: Vec<_> = addresses.into_iter().collect();
+        if addresses.is_empty() {
+            return;
+        }
+        for pool in self.v2_pools.values_mut() {
+            pool.base.register_token_control_addresses(&addresses);
         }
     }
 }
@@ -509,6 +612,10 @@ fn normalize_address(value: impl AsRef<str>) -> String {
 
 fn normalize_address_string(value: impl Into<String>) -> String {
     value.into().trim().to_ascii_lowercase()
+}
+
+fn parse_address_lossy(value: &str) -> Address {
+    value.parse().unwrap_or(Address::ZERO)
 }
 
 #[cfg(test)]

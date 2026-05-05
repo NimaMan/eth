@@ -17,3 +17,7 @@ tx_processor = { path = "../tx_processor" }
 [[example]]
 name = "uniswap_v2_pool_replay_reserves"
 path = "examples/replay/uniswap_v2_pool_replay_reserves.rs"
+
+[[example]]
+name = "uniswap_v2_lp_tracker_parity"
+path = "examples/validation/uniswap_v2_lp_tracker_parity.rs"
