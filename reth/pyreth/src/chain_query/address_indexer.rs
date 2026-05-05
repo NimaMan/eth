@@ -9,6 +9,7 @@ use tokio::runtime::Runtime;
 use reth_chain_query::reth_index::{AddressParticipation, AddressTxWriter, RethIndexDB};
 use reth_chain_query::RethQueryProvider;
 
+use crate::chain_query::chain_query::shared_reth_index_db;
 use crate::chain_query::PyAddressTransactionRef;
 use crate::pyreth_instance::get_or_create_singleton;
 
@@ -142,13 +143,7 @@ impl PyAddressTxIndexer {
         }
 
         let index_db = if read_only {
-            Arc::new(RethIndexDB::open_read_only(&index_dir).map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Failed to open RethIndex DB at {}: {}",
-                    index_dir.display(),
-                    e
-                ))
-            })?)
+            shared_reth_index_db(&index_dir)?
         } else {
             Arc::new(RethIndexDB::open(&index_dir).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -323,13 +318,7 @@ impl PyAddressTxIndexFetcher {
             )));
         }
 
-        let index_db = Arc::new(RethIndexDB::open_read_only(&index_dir).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to open RethIndex DB at {}: {}",
-                index_dir.display(),
-                e
-            ))
-        })?);
+        let index_db = shared_reth_index_db(&index_dir)?;
 
         let simulator = get_or_create_singleton(&datadir).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(

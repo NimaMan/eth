@@ -11,13 +11,15 @@
 /// 4. Track balance changes between blocks
 /// 5. Share TxSimulator instance with other PyReth components
 use chrono::SecondsFormat;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::tx_processor::processed_tx_bridge::processed_transactions_from_py_iterable;
+use crate::tx_processor::processed_tx_bridge::processed_transaction_hashes_from_py_iterable;
 use alloy_primitives::Address;
 use alloy_primitives::B256 as RB256;
 use reth_chain_query::dex::find_uniswap_v4_pools_for_pair;
@@ -29,6 +31,36 @@ use reth_chain_query::tx_builders::amm_swap_route::AmmSwapRoute;
 use reth_chain_query::BlockTimeConverter;
 use reth_chain_query::{Account, BalanceChanges, CompleteBalances, Portfolio, RethQueryProvider};
 use tokio::runtime::Runtime;
+
+static RETH_INDEX_DB: Lazy<Mutex<Option<(PathBuf, Arc<RethIndexDB>)>>> =
+    Lazy::new(|| Mutex::new(None));
+
+pub(crate) fn shared_reth_index_db(index_dir: &Path) -> PyResult<Arc<RethIndexDB>> {
+    let cache_key = index_dir
+        .canonicalize()
+        .unwrap_or_else(|_| index_dir.to_path_buf());
+    let mut cached = RETH_INDEX_DB.lock();
+
+    if let Some((cached_path, db)) = cached.as_ref() {
+        if cached_path == &cache_key {
+            return Ok(db.clone());
+        }
+    }
+
+    let db = Arc::new(RethIndexDB::open_read_only(index_dir).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Failed to open Reth address index at {}: {}",
+            index_dir.display(),
+            e
+        ))
+    })?);
+    *cached = Some((cache_key, db.clone()));
+    Ok(db)
+}
+
+pub(crate) fn clear_reth_index_db_cache() {
+    *RETH_INDEX_DB.lock() = None;
+}
 
 /// Python wrapper for Account information
 #[pyclass(name = "Account")]
@@ -234,13 +266,7 @@ impl PyChainQuery {
             .map(PathBuf::from)
             .unwrap_or_else(|_| Path::new(&datadir).join("reth_index"));
 
-        let index_db = Arc::new(RethIndexDB::open_read_only(&index_dir).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to open Reth address index at {}: {}",
-                index_dir.display(),
-                e
-            ))
-        })?);
+        let index_db = shared_reth_index_db(&index_dir)?;
 
         let time_converter = Arc::new(BlockTimeConverter::new(simulator.clone()));
 
@@ -876,8 +902,7 @@ impl PyChainQuery {
         let provider = self.provider.clone();
         let metadata_block = block_number.or(gas_block_number);
         let pending_tx_hashes: Vec<RB256> = if let Some(iterable) = pending_transactions {
-            let processed = processed_transactions_from_py_iterable(iterable)?;
-            processed.into_iter().map(|ptx| ptx.hash).collect()
+            processed_transaction_hashes_from_py_iterable(iterable)?
         } else {
             Vec::new()
         };

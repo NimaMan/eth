@@ -1,8 +1,9 @@
 use crate::tx_processor::py_processed_transaction::PyProcessedTransaction;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBool, PyBytes, PyDict, PyFloat, PyList, PyLong, PyString, PyTuple};
 use serde_json::{Map, Number, Value};
+use std::str::FromStr;
 use tx_processor::ProcessedTransaction as RustProcessedTransaction;
 
 /// Extract a Rust `ProcessedTransaction` from any Python object that represents it.
@@ -62,6 +63,70 @@ pub(crate) fn processed_transactions_from_py_iterable(
         transactions.push(processed_transaction_from_py_object(&obj)?);
     }
     Ok(transactions)
+}
+
+pub(crate) fn processed_transaction_hashes_from_py_iterable(
+    prior_iterable: &Bound<'_, PyAny>,
+) -> PyResult<Vec<B256>> {
+    if prior_iterable.is_none() {
+        return Ok(Vec::new());
+    }
+
+    if prior_iterable.is_instance_of::<PyString>() {
+        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "prior transactions must be provided as an iterable of processed transaction objects",
+        ));
+    }
+
+    let iter = prior_iterable.iter().map_err(|_| {
+        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "prior transactions must be an iterable of processed transaction objects",
+        )
+    })?;
+
+    let mut hashes = Vec::new();
+    for item in iter {
+        let obj = item?;
+        hashes.push(processed_transaction_hash_from_py_object(&obj)?);
+    }
+    Ok(hashes)
+}
+
+fn processed_transaction_hash_from_py_object(prior: &Bound<'_, PyAny>) -> PyResult<B256> {
+    if let Ok(py_processed) = prior.extract::<PyRef<PyProcessedTransaction>>() {
+        return parse_tx_hash(&py_processed.hash);
+    }
+
+    if let Ok(dict) = prior.downcast::<PyDict>() {
+        return processed_transaction_hash_from_mapping(dict);
+    }
+
+    if prior.hasattr("hash")? {
+        let hash: String = prior.getattr("hash")?.extract()?;
+        return parse_tx_hash(&hash);
+    }
+
+    let py = prior.py();
+    let owned_dict = to_owned_dict(py, prior)?;
+    processed_transaction_hash_from_mapping(owned_dict.bind(py))
+}
+
+fn processed_transaction_hash_from_mapping(dict: &Bound<'_, PyDict>) -> PyResult<B256> {
+    let hash_obj = dict.get_item("hash")?.ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "processed transaction payload is missing hash",
+        )
+    })?;
+    let hash: String = hash_obj.extract()?;
+    parse_tx_hash(&hash)
+}
+
+fn parse_tx_hash(hash: &str) -> PyResult<B256> {
+    B256::from_str(hash).map_err(|err| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "invalid processed transaction hash {hash:?}: {err}"
+        ))
+    })
 }
 
 fn processed_transaction_from_mapping(

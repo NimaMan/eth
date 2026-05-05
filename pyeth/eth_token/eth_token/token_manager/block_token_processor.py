@@ -59,18 +59,21 @@ class BlockTokenProcessor:
         self.is_live_mode = False
         # Per-block sender -> tx list index used for intra-block pending simulation
         self._address_tx_index = defaultdict(list)
+        self.last_block_failure_count = 0
 
     def process_block_tokens(self, process_block_result, block_number) -> int:
         """Process a single block's transactions sequentially."""
         block_tx_list = self._get_block_transactions(process_block_result)
         self.updated_tokens.clear() # Clear the updated tokens cache
         self._address_tx_index.clear() # Reset per-block address index so pending replay never leaks across blocks
+        self.last_block_failure_count = 0
         
         # Ensure transactions mutate token state in canonical block order
         for tx in block_tx_list:
             tx_data = self._ensure_tx_dict(tx)
             self._index_transaction(tx_data) # Index after processing so later txs can replay earlier same-sender txs
-            self._process_transaction(tx_data, block_number)
+            if not self._process_transaction(tx_data, block_number):
+                self.last_block_failure_count += 1
             
         # Set start_block on first block processed
         if self.start_block is None:
@@ -87,14 +90,16 @@ class BlockTokenProcessor:
                 transaction, block_number
             )
             if is_token_creation:
-                self._handle_token_creation(transaction, block_number, token_metadata, contract_address)
-                return
+                return self._handle_token_creation(
+                    transaction, block_number, token_metadata, contract_address
+                )
                 
             # Handle regular transactions
-            self._handle_token_update_from_transaction(transaction)
+            return self._handle_token_update_from_transaction(transaction)
                 
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Error processing transaction {transaction.get('hash')}: {e}")
+            return False
 
     def _is_token_creation(self, transaction: Dict, block_number: int) -> Optional[Dict[str, Any]]:
         """Return token metadata if transaction deploys a new ERC-20 contract."""
@@ -184,43 +189,64 @@ class BlockTokenProcessor:
                 token = ERC20Token(
                     contract_address,
                     token_metadata,
+                    token_chain_data_fetcher=self.token_chain_fetcher,
                 )
                 token.update_from_transaction(transaction)
                 self.live_tokens_cache[contract_address] = token
                 self.updated_tokens[contract_address] = token
                 if self.logger:
-                    self.logger.info(f"New token created: {contract_address} in block {block_number}")
+                    symbol = self._metadata_value(token_metadata, "symbol")
+                    name = self._metadata_value(token_metadata, "name")
+                    decimals = self._metadata_value(token_metadata, "decimals")
+                    self.logger.info(
+                        "%s New ERC20 token created: address=%s block=%s tx=%s "
+                        "symbol=%s name=%s decimals=%s",
+                        self.__class__.__name__,
+                        contract_address,
+                        block_number,
+                        transaction.get("hash"),
+                        symbol,
+                        name,
+                        decimals,
+                    )
 
             except Exception as e:
                 self.logger.error(f"{self.__class__.__name__} Failed to create token {contract_address} at tx {transaction.get('hash')}: {e}")
+                return False
+        return True
 
     def _update_token(self, token: ERC20Token, transaction: Dict, token_address: str):
         """Safely update a token with transaction data"""
         try:
             token.update_from_transaction(transaction)
+            return True
         except Exception as e:
             self.logger.error(f"{self.__class__.__name__} Failed to update token {token_address} at tx {transaction.get('hash')}: {e}") 
+            return False
 
     def _handle_token_update_from_transaction(self, transaction: Dict):
         """Handle transaction involving existing tokens"""
         erc20_contracts = transaction.get('erc20_contracts', set())
         if not erc20_contracts:
-            return
+            return True
+        has_failure = False
             
         for token_address in erc20_contracts:
             token = self.live_tokens_cache[token_address]
             if token:
-                self._update_token(
+                if not self._update_token(
                     token=token,
                     transaction=transaction,
                     token_address=token_address
-                )
+                ):
+                    has_failure = True
                 self.updated_tokens[token_address] = token
         
         # Update the pool and token mapping so that we know which pools belong to which tokens
         if self.updated_tokens:
             for token in self.updated_tokens.values():
                 self.live_tokens_cache.update_pool_mapping(token)
+        return not has_failure
 
     @staticmethod
     def _get_block_transactions(process_block_result: Any) -> List[Any]:
@@ -273,6 +299,14 @@ class BlockTokenProcessor:
         
         return txs
 
+    @staticmethod
+    def _metadata_value(metadata: Optional[Any], key: str) -> Optional[Any]:
+        if metadata is None:
+            return None
+        if isinstance(metadata, dict):
+            return metadata.get(key)
+        return getattr(metadata, key, None)
+
 
 
 class HistoricalBlockTokenProcessor:
@@ -305,7 +339,8 @@ class HistoricalBlockTokenProcessor:
                  logger=None,
                  index_address_txs: bool = False,
                  block_processor=None,
-                 processed_tx_provider=None):
+                 processed_tx_provider=None,
+                 block_batch_size: int = 20):
         self.logger = logger or get_logger(name="token_manager")
         self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
         if index_address_txs:
@@ -317,6 +352,7 @@ class HistoricalBlockTokenProcessor:
             logger=self.logger
         )
         self.processed_blocks = self.block_token_processor.processed_blocks
+        self.block_batch_size = max(1, int(block_batch_size or 1))
     
     async def process_block_range(self, start_block: int, end_block: int):
         """Process block data in sequential order using shared base processor"""
@@ -336,31 +372,128 @@ class HistoricalBlockTokenProcessor:
                     raise
 
     async def process_range_until_live(self, block_range: int):
-        """Process blocks in ranges until we're close enough to live"""
-        start_block = self.w3.eth.get_block_number() - block_range
+        """Process a fixed warmup range based on the live head at startup."""
+        rpc_latest_at_start = self.w3.eth.get_block_number()
+        processable_latest_at_start = await self._latest_processable_block()
+        latest_block = min(rpc_latest_at_start, processable_latest_at_start)
+        if latest_block < rpc_latest_at_start:
+            self.logger.info(
+                "Historical warmup capped at persisted PyReth block %s (rpc_latest=%s)",
+                latest_block,
+                rpc_latest_at_start,
+            )
+        start_block = max(1, latest_block - block_range + 1)
+        target_block = latest_block
+        total_blocks = target_block - start_block + 1
         self._has_caught_up_to_live = False
-        current_block = start_block
-        while not self._has_caught_up_to_live:
-            try:
-                processed_block_result = await self._process_block(current_block)
-                # Process block data for token updates 
-                self.block_token_processor.process_block_tokens(
-                    processed_block_result,
-                    block_number=current_block
-                )
-                self.block_token_processor.latest_processed_block = current_block
-                # Check if we're caught up after processing this range
-                latest_block = self.w3.eth.get_block_number()
-                if latest_block - current_block == 0:
-                    self._has_caught_up_to_live = True
-                    self.logger.info(f"Caught up to live (gap: {latest_block - current_block} blocks)")
-                    break
-                current_block += 1
-            except Exception as e:
-                self.logger.error(f"Error catching up to live at block {current_block}: {e}")
-                raise
+        processed_count = 0
 
+        processed_count = await self._process_fixed_range(
+            start_block=start_block,
+            end_block=target_block,
+            processed_count=processed_count,
+            total_blocks=total_blocks,
+        )
+
+        self._has_caught_up_to_live = True
+        self.logger.info(
+            "Historical warmup fixed range complete start=%s end=%s latest_at_start=%s rpc_latest_at_start=%s",
+            max(1, latest_block - block_range + 1),
+            target_block,
+            latest_block,
+            rpc_latest_at_start,
+        )
         return self.block_token_processor.latest_processed_block
+
+    async def _latest_processable_block(self) -> int:
+        get_latest_block = getattr(self.block_processor, "get_latest_block", None)
+        if get_latest_block is None:
+            return self.w3.eth.get_block_number()
+        try:
+            latest = get_latest_block()
+            if asyncio.iscoroutine(latest):
+                latest = await latest
+            return int(latest)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to fetch latest PyReth persisted block; falling back to RPC latest: %s",
+                exc,
+            )
+            return self.w3.eth.get_block_number()
+
+    async def _process_fixed_range(
+        self,
+        start_block: int,
+        end_block: int,
+        processed_count: int,
+        total_blocks: int,
+    ) -> int:
+        for batch_start in range(start_block, end_block + 1, self.block_batch_size):
+            batch_blocks = list(range(
+                batch_start,
+                min(end_block, batch_start + self.block_batch_size - 1) + 1,
+            ))
+            try:
+                batch_started_at = time.perf_counter()
+                processed_block_results = await self._process_blocks(batch_blocks)
+                batch_process_elapsed = time.perf_counter() - batch_started_at
+                process_block_elapsed = batch_process_elapsed / max(1, len(processed_block_results))
+                self.logger.info(
+                    "Historical warmup batch %s-%s blocks=%s process_blocks=%.3fs",
+                    batch_blocks[0],
+                    batch_blocks[-1],
+                    len(batch_blocks),
+                    batch_process_elapsed,
+                )
+
+                for current_block, processed_block_result in zip(
+                    batch_blocks,
+                    processed_block_results,
+                ):
+                    started_at = time.perf_counter()
+                    # Process block data for token updates
+                    transactions = BlockTokenProcessor._get_block_transactions(processed_block_result)
+                    token_process_started_at = time.perf_counter()
+                    self.block_token_processor.process_block_tokens(
+                        processed_block_result,
+                        block_number=current_block
+                    )
+                    token_process_elapsed = time.perf_counter() - token_process_started_at
+                    self.block_token_processor.latest_processed_block = current_block
+                    processed_count += 1
+                    self.logger.info(
+                        "Historical warmup updated_tokens=%s %s->%s|%s (%s/%s) "
+                        "process_block=%.3fs token_process=%.3fs total=%.3fs",
+                        len(self.block_token_processor.updated_tokens),
+                        current_block,
+                        len(transactions),
+                        self.block_token_processor.last_block_failure_count,
+                        processed_count,
+                        total_blocks,
+                        process_block_elapsed,
+                        token_process_elapsed,
+                        time.perf_counter() - started_at,
+                    )
+            except Exception as e:
+                self.logger.error(f"Error catching up to live at block {batch_blocks[0]}-{batch_blocks[-1]}: {e}")
+                raise
+        return processed_count
+
+    async def _process_blocks(self, block_numbers: List[int]) -> List[Any]:
+        if len(block_numbers) == 1:
+            return [await self._process_block(block_numbers[0])]
+
+        process_block_batch = getattr(self.block_processor, "process_block_batch", None)
+        if process_block_batch is None:
+            return [await self._process_block(block_number) for block_number in block_numbers]
+
+        if asyncio.iscoroutinefunction(process_block_batch):
+            return await process_block_batch([int(block_number) for block_number in block_numbers])
+
+        return await asyncio.to_thread(
+            process_block_batch,
+            [int(block_number) for block_number in block_numbers],
+        )
 
     async def _process_block(self, block_number: int):
         process_block = self.block_processor.process_block

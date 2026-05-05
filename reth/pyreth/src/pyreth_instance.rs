@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use std::sync::Arc;
 use tx_simulator::TxSimulator;
 
-use super::chain_query::PyChainQuery;
+use super::chain_query::chain_query::{clear_reth_index_db_cache, PyChainQuery};
 use super::provider::PyProcessedTxProvider;
 use super::simulator::PyLiveTxSimulator;
 use super::simulator::PyPoolBuySellSimulator;
@@ -138,6 +138,7 @@ pub fn clear_singleton() -> PyResult<()> {
     *instance = None;
     let mut provider = PROVIDER_INSTANCE.lock();
     *provider = None;
+    clear_reth_index_db_cache();
     Ok(())
 }
 

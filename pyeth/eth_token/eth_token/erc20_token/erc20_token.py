@@ -26,10 +26,10 @@ class TokenLifecycleState(enum.Enum):
 class ERC20Token:
     """This class contains all the data and information of a token."""
 
-    def __init__(self, contract_address: str, token_metadata=None):
+    def __init__(self, contract_address: str, token_metadata=None, token_chain_data_fetcher=None):
 
         self.contract_address = Web3.to_checksum_address(contract_address)
-        self.token_chain_data_fetcher = TokenChainDataFetcher()
+        self.token_chain_data_fetcher = token_chain_data_fetcher or TokenChainDataFetcher()
         if token_metadata is None:
             token_metadata = self.token_chain_data_fetcher.get_token_metadata(self.contract_address)
         if token_metadata is None:
