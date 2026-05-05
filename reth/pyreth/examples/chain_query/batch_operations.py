@@ -3,13 +3,12 @@
 Example: Batch operations for efficient querying
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 import time
 
 def main():
     # Create PyReth instance
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     print("=== Chain Query: Batch Operations ===\n")
     

@@ -9,7 +9,7 @@ This example demonstrates:
 - Cross-entity correlation analysis
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 from datetime import datetime, timedelta, timezone
 import json
 from typing import Dict, List, Tuple
@@ -20,8 +20,7 @@ class EntityFlowAnalyzer:
     
     def __init__(self):
         """Initialize with PyReth singleton."""
-        self.reth = pyreth.PyReth()
-        self.query = self.reth.chain_query()
+        self.query = pyreth_chain_query()
     
     def analyze_period(
         self, 

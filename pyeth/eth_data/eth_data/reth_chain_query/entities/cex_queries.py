@@ -18,9 +18,9 @@ class CEXQueries(BaseEntityQuery):
     Python only formats and presents the data.
     """
     
-    def __init__(self, reth_instance=None):
-        """Initialize CEX queries with shared Reth instance."""
-        super().__init__(reth_instance)
+    def __init__(self):
+        """Initialize CEX queries with shared Reth access."""
+        super().__init__()
     
     # Basic CEX queries
     

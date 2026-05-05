@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n📋 Next Steps:");
     println!("1. Debug maturin pyo3 binding detection");
     println!("2. Generate working Python module");
-    println!("3. Test PyReth.simulator() in Python");
+    println!("3. Test pyreth.simulator() in Python");
     println!("4. Add back tx_processor bindings");
     println!("5. Add back reth_chain_query bindings");
     println!("6. Test complete functionality");

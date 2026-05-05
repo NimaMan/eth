@@ -41,12 +41,11 @@ The time conversion system is fully integrated across all entity analysis module
 ## Usage Pattern
 
 ```python
-import pyreth
+from pyreth import chain_query
 from datetime import datetime, timedelta, timezone
 
 # Initialize
-reth = pyreth.PyReth()
-query = reth.chain_query()
+query = chain_query()
 
 # Convert time range to blocks
 now = datetime.now(timezone.utc)

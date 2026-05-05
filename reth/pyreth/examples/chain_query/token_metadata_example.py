@@ -5,12 +5,11 @@ Example: Query ERC20 token metadata via pyreth ChainQuery
 Demonstrates get_token_name/symbol/decimals/total_supply and get_token_metadata.
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 
 
 def main():
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
 
     # USDC
     token = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"

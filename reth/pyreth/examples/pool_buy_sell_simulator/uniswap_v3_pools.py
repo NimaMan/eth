@@ -87,8 +87,7 @@ def main():
     
     try:
         # Initialize
-        reth = pyreth.PyReth()
-        simulator = reth.pool_buy_sell_simulator()
+        simulator = pyreth_pool_buy_sell_simulator()
         print("✅ Pool Buy Sell Simulator initialized")
         
         print(f"\nAnalyzing USDC on different V3 fee tiers")

@@ -6,11 +6,10 @@ Demonstrates TxProcessor.simulate_unsigned_transaction(...), which is the
 preferred way to create synthetic transactions for simulation.
 """
 
-import pyreth
+from pyreth import tx_processor as pyreth_tx_processor
 
 def main():
-    reth = pyreth.PyReth()
-    processor = reth.tx_processor()
+    processor = pyreth_tx_processor()
 
     print("=== TxProcessor: simulate_unsigned_transaction ===\n")
 

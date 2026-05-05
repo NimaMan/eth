@@ -6,12 +6,12 @@ This demonstrates using the ChainQuery module to get on-chain data
 without needing RPC calls - directly from the Reth database.
 """
 
-import pyreth
+from pyreth import chain_query
 from eth_data.chain_utils.common_addresses import STABLECOINS_ADDRESS_BY_NAME as STABLECOINS
 
 def main():
-    # Initialize ChainQuery
-    query = pyreth.ChainQuery()
+    # Initialize ChainQuery from the shared PyReth accessor.
+    query = chain_query()
     print("Connected to Reth database")
     print("=" * 60)
     

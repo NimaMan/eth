@@ -10,12 +10,11 @@ Optionally export PYRETH_DATADIR if your Reth database lives elsewhere.
 
 from __future__ import annotations
 
-import pyreth
+from pyreth import processed_tx_provider as pyreth_processed_tx_provider
 
 
 def main() -> None:
-    reth = pyreth.PyReth()
-    provider = reth.processed_tx_provider()
+    provider = pyreth_processed_tx_provider()
 
     latest_block_number = provider.get_latest_block()
     processed_block = provider.process_block(latest_block_number)

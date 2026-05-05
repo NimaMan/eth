@@ -6,7 +6,7 @@ Runs the Baygus executor powered pipeline against a known Uniswap v4 USDC/WETH p
 Prints the swap outcomes and gas metrics for each leg if the pool is tradeable.
 """
 
-import pyreth
+from pyreth import pool_buy_sell_simulator as pyreth_pool_buy_sell_simulator
 
 WETH_ADDRESS = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
 WETH_DECIMALS = 18
@@ -25,8 +25,7 @@ HOOKS = "0x36FABF0DaCD49E94dDb3A21999F199068a9Fe8a8"
 
 
 def main():
-    reth = pyreth.PyReth()
-    sim = reth.pool_buy_sell_simulator()
+    sim = pyreth_pool_buy_sell_simulator()
 
     cfg = sim.default_config(6, WETH_DECIMALS)
     cfg.denom_address = WETH_ADDRESS

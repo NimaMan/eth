@@ -51,10 +51,10 @@ impl PyTxProcessor {
 impl PyTxProcessor {
     /// Create new TxProcessor instance
     ///
-    /// DEPRECATED: Use PyReth().tx_processor() instead to avoid multiple database connections
+    /// DEPRECATED: Use the module-level tx_processor() accessor instead to avoid multiple database connections
     #[new]
     fn new() -> PyResult<Self> {
-        eprintln!("WARNING: Creating standalone TxProcessor is deprecated. Use PyReth().tx_processor() instead.");
+        eprintln!("WARNING: Creating standalone TxProcessor is deprecated. Use pyreth.tx_processor() instead.");
 
         // Hardcoded reth_datadir
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";

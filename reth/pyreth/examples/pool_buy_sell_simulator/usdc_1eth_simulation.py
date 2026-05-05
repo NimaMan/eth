@@ -54,8 +54,7 @@ def main():
     
     try:
         # Initialize PyReth and simulator
-        reth = pyreth.PyReth()
-        simulator = reth.pool_buy_sell_simulator()
+        simulator = pyreth_pool_buy_sell_simulator()
         print("✅ Pool Buy Sell Simulator initialized")
         
         # Create custom config for 1 ETH

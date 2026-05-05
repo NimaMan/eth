@@ -24,7 +24,7 @@ for _p in _cand:
     if os.path.isdir(_p):
         sys.path.insert(0, _p)
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 
 
 def fmt_addr(a: str) -> str:
@@ -34,8 +34,7 @@ def fmt_addr(a: str) -> str:
 
 
 def main():
-    reth = pyreth.PyReth()
-    q = reth.chain_query()
+    q = pyreth_chain_query()
 
     # Defaults (Ethereum mainnet)
     # Uniswap V2 USDC/WETH pair

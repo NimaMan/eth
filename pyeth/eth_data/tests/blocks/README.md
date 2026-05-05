@@ -4,7 +4,7 @@ This directory contains integration/performance tests for Python consumers of th
 
 ### Available Tests
 
-- `test_block_processor.py` – end-to-end validation of `pyreth.block_processor()`.
+- `test_block_processor.py` - end-to-end validation of `from pyreth import block_processor`.
 
 ### Prerequisites
 

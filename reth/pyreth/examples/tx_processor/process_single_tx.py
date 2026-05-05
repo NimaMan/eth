@@ -3,14 +3,13 @@
 Example: Process a single transaction using PyReth tx_processor
 """
 
-import pyreth
+from pyreth import tx_processor as pyreth_tx_processor
 
 def main():
     # Create PyReth instance with shared database
-    reth = pyreth.PyReth()
     
     # Get tx processor that shares the database connection
-    processor = reth.tx_processor()
+    processor = pyreth_tx_processor()
     
     print("=== Transaction Processor: Single Transaction ===\n")
     

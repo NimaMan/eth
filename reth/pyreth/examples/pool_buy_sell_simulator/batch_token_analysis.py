@@ -146,8 +146,7 @@ def main():
     
     try:
         # Initialize
-        reth = pyreth.PyReth()
-        simulator = reth.pool_buy_sell_simulator()
+        simulator = pyreth_pool_buy_sell_simulator()
         print("✅ Pool Buy Sell Simulator initialized")
         print()
         

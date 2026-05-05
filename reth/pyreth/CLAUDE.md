@@ -1,19 +1,19 @@
 # PyReth Module
 
 ## Objective
-Provide Python bindings for high-performance Ethereum blockchain data access through Rust, offering transaction processing, simulation, chain queries, and price data access with a singleton pattern to prevent resource exhaustion.
+Provide Python bindings for high-performance Ethereum blockchain data access through Rust, offering transaction processing, block processing, simulation, and chain queries with a singleton pattern to prevent resource exhaustion.
 
 ## Core Components
 
-### 1. PyReth Main Instance (Singleton)
-- **Purpose**: Single entry point managing shared database connection
+### 1. PyReth Module Accessors
+- **Purpose**: Module-level entry points backed by one shared database connection
 - **Key Feature**: Prevents "too many file watches" errors through singleton pattern
 - **Components Available**:
   - `tx_processor()`: Transaction processing
+  - `block_processor()`: Block processing / processed transaction provider
+  - `processed_tx_provider()`: Alias for processed transaction provider
   - `simulator()`: Transaction simulation  
   - `chain_query()`: Blockchain queries
-  - `trading_simulator()`: Trading simulation
-  - `price_client()`: ETH price data
 
 ### 2. Singleton Pattern Implementation
 
@@ -31,35 +31,28 @@ PyReth uses a singleton pattern to ensure only ONE database connection is create
 2. **File Watching Disabled**: Uses `false` parameter in `StaticFileProvider::read_only()` 
 3. **Shared Components**: All components use the shared `TxProcessor`
 4. **Thread Safety**: Uses `Arc<Mutex<>>` for safe concurrent access
-5. **Lazy Initialization**: Database opens on first `PyReth()` call
+5. **Lazy Initialization**: Database opens on first module-level accessor call
 
 ## Usage
 
-### ✅ Correct Usage (Singleton Pattern)
+### Correct Usage
 ```python
-import pyreth
-
-# Create main instance (opens database once)
-reth = pyreth.PyReth()
+from pyreth import block_processor, chain_query, simulator, tx_processor
 
 # Get components that share the database
-processor = reth.tx_processor()
-simulator = reth.simulator()
-query = reth.chain_query()
-trading_sim = reth.trading_simulator()
-price_client = reth.price_client()
+processor = tx_processor()
+blocks = block_processor()
+sim = simulator()
+query = chain_query()
 
 # All components share the same database connection
 # No file watcher exhaustion even with 500+ instances!
 ```
 
-### ❌ Deprecated Usage (Standalone)
+### Deprecated Usage (Standalone)
 ```python
-# DEPRECATED - Will show warnings
-processor = pyreth.TxProcessor()  # Creates new DB connection
-simulator = pyreth.Simulator()    # Creates another DB connection
-query = pyreth.ChainQuery()       # Creates yet another DB connection
-# This would cause file watcher exhaustion if not for singleton!
+# Do not instantiate component classes directly from Python.
+# Use module-level accessors instead: tx_processor(), simulator(), chain_query().
 ```
 
 ## Module Structure
@@ -74,14 +67,13 @@ pyreth/
 │   │   ├── tx_processor.rs      # Transaction processor bindings
 │   │   ├── simulator.rs         # Simulator bindings
 │   │   ├── chain_query.rs       # Chain query bindings
-│   │   ├── trading_simulator.rs # Trading simulator bindings
-│   │   └── price_reader.rs      # Price reader bindings
+│   │   └── provider.rs          # Processed block/provider bindings
 │   └── types/
 │       └── processed_transaction.rs # Shared transaction types
 ├── examples/
-│   ├── test_singleton.py        # Singleton behavior test
-│   ├── price_client/            # Price client examples
-│   └── trading_simulator/       # Trading simulation examples
+│   ├── chain_query/             # Chain query examples
+│   ├── provider/                # Processed block/provider examples
+│   └── tx_processor/            # Transaction processor examples
 └── Cargo.toml
 ```
 
@@ -126,21 +118,19 @@ pyreth/
 2. **Read-Only Access**: Uses `open_db_read_only()` for safety
 3. **No File Watching**: `StaticFileProvider::read_only(path, false)` disables watches
 4. **First Creation**: May show ONE warning about file watchers on initial DB open
-5. **Subsequent Calls**: All `PyReth()` calls return the same instance
+5. **Subsequent Calls**: Module-level accessors reuse the same instance
 
 ## Migration Guide
 
 Update existing code from:
-```python
-processor = pyreth.TxProcessor()
-simulator = pyreth.Simulator()
-```
+direct component constructors
 
 To:
 ```python
-reth = pyreth.PyReth()
-processor = reth.tx_processor()
-simulator = reth.simulator()
+from pyreth import simulator as pyreth_simulator, tx_processor
+
+processor = tx_processor()
+simulator = pyreth_simulator()
 ```
 
 ## Testing
@@ -160,18 +150,16 @@ python examples/trading_simulator/test_trading_enabled.py
 
 ### 1. Check Trading Enabled (Used by Token Manager)
 ```python
-import pyreth
+from pyreth import pool_buy_sell_simulator
 
-# Module-level singleton
-py_reth = pyreth.PyReth()
+pool_simulator = pool_buy_sell_simulator()
 
 def check_trading_enabled(token_address, pool_address):
-    trading_sim = py_reth.trading_simulator()
-    config = trading_sim.default_config(18)
+    config = pool_simulator.default_config(18)
     config = config.with_denom_amount(0.01, 18, 18)  # 0.01 denom units
     config.denom_address = "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
     
-    result = trading_sim.simulate_with_config(
+    result = pool_simulator.simulate_with_config(
         token_address,
         pool_address, 
         config
@@ -181,22 +169,13 @@ def check_trading_enabled(token_address, pool_address):
 
 ### 2. Process Transaction
 ```python
-reth = pyreth.PyReth()
-processor = reth.tx_processor()
+from pyreth import tx_processor
+
+processor = tx_processor()
 
 tx = processor.process_transaction("0x...")
 print(f"Type: {tx.tx_type}")
 print(f"ERC20 transfers: {len(tx.erc20_transfers)}")
-```
-
-### 3. Get Historical Price
-```python
-reth = pyreth.PyReth()
-price_client = reth.price_client()
-
-# Get ETH/USD price at specific block
-price = price_client.get_eth_price_at_block(20000000)
-print(f"ETH price: ${price}")
 ```
 
 ## Dependencies

@@ -9,7 +9,7 @@ This script tests:
 4. Block-time conversion is bidirectional and accurate
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 from datetime import datetime, timedelta, timezone
 import sys
 
@@ -18,8 +18,7 @@ def verify_time_conversion():
     """Verify basic time conversion functionality."""
     print("\n1. Testing Time Conversion...")
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Test timestamp to block
     now = datetime.now(timezone.utc)
@@ -58,8 +57,7 @@ def verify_entity_flows():
     """Verify entity flow analysis uses time conversion."""
     print("\n2. Testing Entity Flow Analysis...")
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Get blocks for last hour
     now = datetime.now(timezone.utc)
@@ -113,8 +111,7 @@ def verify_period_blocks():
     """Verify period block counts match expectations."""
     print("\n4. Testing Period Block Counts...")
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     periods = [
         ("1 hour", timedelta(hours=1), 250, 360),      # Allow up to 360 blocks

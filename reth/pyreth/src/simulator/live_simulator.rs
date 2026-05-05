@@ -26,12 +26,12 @@ impl PyLiveTxSimulator {
 impl PyLiveTxSimulator {
     /// Initialize a standalone live simulator.
     ///
-    /// Prefer `PyReth().live_simulator()` so all PyReth components share one
+    /// Prefer `pyreth.live_simulator()` so all PyReth components share one
     /// database connection.
     #[new]
     pub fn new() -> PyResult<Self> {
         eprintln!(
-            "WARNING: Creating standalone LiveTxSimulator is deprecated. Use PyReth().live_simulator() instead."
+            "WARNING: Creating standalone LiveTxSimulator is deprecated. Use pyreth.live_simulator() instead."
         );
 
         let reth_datadir = std::env::var("PYRETH_DATADIR")

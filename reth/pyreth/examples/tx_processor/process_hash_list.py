@@ -3,15 +3,14 @@
 Example: Process multiple transactions from a list of hashes
 """
 
-import pyreth
+from pyreth import tx_processor as pyreth_tx_processor
 import time
 
 def main():
     # Create PyReth instance with shared database
-    reth = pyreth.PyReth()
     
     # Get tx processor
-    processor = reth.tx_processor()
+    processor = pyreth_tx_processor()
     
     print("=== Transaction Processor: Batch Processing ===\n")
     

@@ -3,7 +3,7 @@
 Example: Track balance changes between blocks
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 
 def format_wei(wei_str):
@@ -16,8 +16,7 @@ def format_token_amount(amount_str, decimals=6):
 
 def main():
     # Create PyReth instance
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     print("=== Chain Query: Balance Changes ===\n")
     

@@ -23,9 +23,8 @@ def main() -> None:
     print(f"Block: {BLOCK}")
     print()
 
-    reth = pyreth.PyReth()
-    simulator = reth.pool_buy_sell_simulator()
-    decimals = reth.chain_query().get_token_decimals(TOKEN, None)
+    simulator = pyreth_pool_buy_sell_simulator()
+    decimals = pyreth_chain_query().get_token_decimals(TOKEN, None)
 
     config = pyreth.PoolBuySellParameters.with_denom_amount(0.01, decimals, WETH_DECIMALS)
     config.denom_address = WETH_ADDRESS

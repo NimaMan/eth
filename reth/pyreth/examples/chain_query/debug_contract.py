@@ -3,11 +3,10 @@
 Debug contract detection
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 
 def main():
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Known contracts
     usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"

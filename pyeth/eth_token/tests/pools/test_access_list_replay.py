@@ -12,9 +12,15 @@ import pytest
 
 
 try:
-    import pyreth  # type: ignore
+    from pyreth import (  # type: ignore
+        PoolBuySellParameters,
+        block_processor,
+        pool_buy_sell_simulator,
+    )
 except Exception as exc:  # pragma: no cover - environment specific
-    pyreth = None  # pragma: no cover
+    PoolBuySellParameters = None  # type: ignore[assignment]  # pragma: no cover
+    block_processor = None  # type: ignore[assignment]  # pragma: no cover
+    pool_buy_sell_simulator = None  # type: ignore[assignment]  # pragma: no cover
     _pyreth_import_error = exc  # pragma: no cover
 else:
     _pyreth_import_error = None
@@ -27,10 +33,10 @@ WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
 
 
 def _require_pyreth() -> None:
-    if pyreth is None:
+    if block_processor is None:
         pytest.skip(f"pyreth unavailable: {_pyreth_import_error}")
     try:
-        pyreth.block_processor()
+        block_processor()
     except Exception as exc:  # pragma: no cover - runtime guard
         pytest.skip(f"PyReth could not be initialised: {exc}")
 
@@ -39,12 +45,12 @@ def _require_pyreth() -> None:
 def test_prior_replay_preserves_access_list():
     """Prior transaction replay succeeds when access list is retained."""
     _require_pyreth()
-    simulator = pyreth.pool_buy_sell_simulator()
-    provider = pyreth.block_processor()
+    simulator = pool_buy_sell_simulator()
+    provider = block_processor()
 
     prior = provider.processed_transaction_by_hash(TX_HASH)
 
-    params = pyreth.PoolBuySellParameters.with_denom_amount(0.05, 18, 18)
+    params = PoolBuySellParameters.with_denom_amount(0.05, 18, 18)
     params.block_number = int(prior.block_number) - 1
     params.token_decimals = 18
     params.denom_decimals = 18

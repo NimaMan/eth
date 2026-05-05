@@ -79,14 +79,13 @@ def fetch_prior_details(prior: pyreth.ProcessedTransaction) -> Tuple[Optional[st
 
 
 def run_simulation(
-    reth: pyreth.PyReth,
     block_number: int,
     label: str,
     prior_hash: Optional[str] = None,
 ) -> SimulationOutcome:
-    chain_query = reth.chain_query()
-    simulator = reth.pool_buy_sell_simulator()
-    processed_provider = reth.processed_tx_provider()
+    chain_query = pyreth_chain_query()
+    simulator = pyreth_pool_buy_sell_simulator()
+    processed_provider = pyreth_processed_tx_provider()
 
     config = pyreth.PoolBuySellParameters.with_denom_amount(BUY_AMOUNT_ETH, TOKEN_DECIMALS, WETH_DECIMALS)
     config.denom_address = WETH_ADDRESS
@@ -187,17 +186,14 @@ def print_outcome(outcome: SimulationOutcome) -> None:
 
 
 def main() -> None:
-    reth = pyreth.PyReth()
 
     scenario_a = run_simulation(
-        reth=reth,
         block_number=BLOCK_NO_PRIORLESS,
         label="Block 23592071 – no prior",
     )
     print_outcome(scenario_a)
 
     scenario_b = run_simulation(
-        reth=reth,
         block_number=BLOCK_NO_WITH_PRIOR,
         label="Block 23592072 – prior = LP approval",
         prior_hash=PRIOR_TX_HASH,

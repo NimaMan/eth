@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import pyreth
+from pyreth import pool_buy_sell_simulator as pyreth_pool_buy_sell_simulator
 from typing import List, Tuple
 
 
@@ -56,8 +56,7 @@ def main():
     
     try:
         # Initialize
-        reth = pyreth.PyReth()
-        simulator = reth.pool_buy_sell_simulator()
+        simulator = pyreth_pool_buy_sell_simulator()
         print("✅ Pool Buy Sell Simulator initialized")
         print()
         

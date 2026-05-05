@@ -74,16 +74,13 @@ python stablecoin_supplies.py
 
 ## Usage Pattern
 
-All examples follow the singleton pattern for PyReth:
+All examples use PyReth's module-level singleton accessors:
 
 ```python
-import pyreth
+from pyreth import chain_query
 
-# Create singleton instance
-reth = pyreth.PyReth()
-
-# Get ChainQuery interface
-query = reth.chain_query()
+# Get ChainQuery interface backed by the shared singleton
+query = chain_query()
 
 # Use time conversion
 timestamp = query.block_to_timestamp(20000000)

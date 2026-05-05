@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-import pyreth
+from pyreth import tx_processor as pyreth_tx_processor
 import json
 from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 
@@ -19,8 +19,7 @@ def analyze_liquidity_removal():
     """Analyze a liquidity removal transaction in detail"""
     
     # Create PyReth instance with proper singleton pattern
-    py_reth = pyreth.PyReth()
-    processor = py_reth.tx_processor()
+    processor = pyreth_tx_processor()
     
     # The liquidity removal transaction to analyze
     tx_hash = "0xb20e91c60b35647725b1878b60e2ccf6543fc17983983227656cf98bebb22966"
@@ -216,8 +215,7 @@ def analyze_multiple_removals():
         # Add more transactions here
     ]
     
-    py_reth = pyreth.PyReth()
-    processor = py_reth.tx_processor()
+    processor = pyreth_tx_processor()
     
     for tx_hash, description in suspicious_txs:
         print(f"\nChecking: {description}")

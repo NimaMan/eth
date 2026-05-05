@@ -39,10 +39,9 @@ def main():
     print(f"Pool:  {pool} (Uniswap V2)")
 
     # Init components
-    reth = pyreth.PyReth()
-    sim = reth.pool_buy_sell_simulator()
-    txp = reth.tx_processor()
-    query = reth.chain_query()
+    sim = pyreth_pool_buy_sell_simulator()
+    txp = pyreth_tx_processor()
+    query = pyreth_chain_query()
 
     # Base config
     decimals = query.get_token_decimals(token, None)

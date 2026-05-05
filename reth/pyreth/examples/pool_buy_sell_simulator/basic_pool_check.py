@@ -9,7 +9,7 @@ This example uses USDC as it's a well-known, stable token that should
 always be tradeable without taxes.
 """
 
-import pyreth
+from pyreth import pool_buy_sell_simulator as pyreth_pool_buy_sell_simulator
 
 
 def main():
@@ -24,11 +24,10 @@ def main():
     
     try:
         # Create PyReth instance (singleton pattern)
-        reth = pyreth.PyReth()
         print("✅ Connected to Reth database")
         
         # Get the pool buy sell simulator
-        simulator = reth.pool_buy_sell_simulator()
+        simulator = pyreth_pool_buy_sell_simulator()
         print("✅ Pool Buy Sell Simulator initialized")
         print()
         

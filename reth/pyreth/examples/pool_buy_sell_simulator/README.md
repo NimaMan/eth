@@ -107,13 +107,10 @@ python mind_of_pepe_replay.py
 ### Creating the Simulator
 
 ```python
-import pyreth
+from pyreth import pool_buy_sell_simulator
 
-# Create singleton PyReth instance
-reth = pyreth.PyReth()
-
-# Get pool buy sell simulator
-simulator = reth.pool_buy_sell_simulator()
+# Get pool buy sell simulator backed by the shared singleton
+simulator = pool_buy_sell_simulator()
 ```
 
 ### Checking Pools

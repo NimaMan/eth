@@ -13,7 +13,7 @@ Algorithm:
 5. Test multi-hop swap scenarios and edge cases
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, List, Optional, Tuple
 
 # DEX and token addresses
@@ -106,8 +106,7 @@ def simulate_eth_to_token_swap():
     print("=" * 80)
     print("Simulating ETH -> USDC swap on Uniswap V2")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Swap parameters
     eth_amount = 1_000_000_000_000_000_000  # 1 ETH
@@ -185,8 +184,7 @@ def simulate_token_to_eth_swap():
     print("=" * 80)
     print("Simulating USDC -> ETH swap (with approval)")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Swap parameters
     usdc_amount = 3000 * 10**6  # 3000 USDC
@@ -279,8 +277,7 @@ def simulate_multi_hop_swap():
     print("=" * 80)
     print("Simulating ETH -> UNI -> DAI swap (two hops)")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Multi-hop path: ETH -> UNI -> DAI
     eth_amount = 2_000_000_000_000_000_000  # 2 ETH
@@ -352,8 +349,7 @@ def analyze_slippage_tolerance():
     print("=" * 80)
     print("Testing swap success with different slippage tolerances")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     eth_amount = 5_000_000_000_000_000_000  # 5 ETH (large amount for slippage testing)
     
@@ -439,8 +435,7 @@ def simulate_sandwich_attack_scenario():
     print("=" * 80)
     print("Simulating swap behavior under MEV pressure")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Scenario: Large swap that could be sandwiched
     large_eth_amount = 50_000_000_000_000_000_000  # 50 ETH (very large)

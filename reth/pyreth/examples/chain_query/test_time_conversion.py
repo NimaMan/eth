@@ -20,8 +20,7 @@ def test_block_time_conversion():
     print("=" * 50)
     
     # Initialize PyReth (singleton pattern)
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Get latest block
     latest_block = query.get_latest_block()
@@ -86,8 +85,7 @@ def test_entity_flows_with_time():
     print("=" * 50)
     
     # Initialize PyReth
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Calculate blocks for last 24 hours
     now = datetime.now(timezone.utc)
@@ -178,8 +176,7 @@ def test_aggregation_periods():
     
     from datetime import datetime, timedelta, timezone
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Get blocks for exact time ranges
     # Note: Actual block counts may vary from theoretical values due to

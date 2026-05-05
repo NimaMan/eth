@@ -13,7 +13,7 @@ Algorithm:
 5. Provide gas recommendations with safety margins
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, List, Tuple, Optional
 
 # Common addresses for testing
@@ -94,8 +94,7 @@ def demonstrate_eth_transfer_gas_estimation():
     print("ETH TRANSFER GAS ESTIMATION")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test 1: Standard ETH transfer
     eth_transfer = {
@@ -143,8 +142,7 @@ def demonstrate_erc20_gas_estimation():
     print("ERC20 OPERATIONS GAS ESTIMATION")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # ERC20 operations to test
     operations = [
@@ -187,8 +185,7 @@ def demonstrate_gas_optimization():
     print("GAS OPTIMIZATION ANALYSIS")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test different gas prices to see if they affect gas usage
     print("\n🔍 Testing gas price impact on gas usage")
@@ -230,8 +227,7 @@ def create_gas_estimation_report():
     print("COMPREHENSIVE GAS ESTIMATION REPORT")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test scenarios with expected gas ranges
     test_scenarios = [

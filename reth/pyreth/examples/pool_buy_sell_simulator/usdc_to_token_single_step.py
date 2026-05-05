@@ -29,9 +29,8 @@ def encode_erc20_transfer(to_address: str, amount: int) -> str:
 
 
 def main() -> None:
-    reth = pyreth.PyReth()
-    chain_query = reth.chain_query()
-    simulator = reth.pool_buy_sell_simulator()
+    chain_query = pyreth_chain_query()
+    simulator = pyreth_pool_buy_sell_simulator()
 
     print("Single-hop denom swap simulation\n")
     token_symbol = chain_query.get_token_symbol(TOKEN_ADDRESS, ANCHOR_BLOCK)

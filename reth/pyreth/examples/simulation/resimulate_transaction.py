@@ -19,7 +19,7 @@ This allows us to:
 4. Validate transaction logic against historical states
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query, tx_processor as pyreth_tx_processor, simulator as pyreth_simulator
 from typing import Optional
 
 def resimulate_transaction(
@@ -83,9 +83,8 @@ def test_resimulation():
     print("=" * 80)
     
     # Initialize components using singleton pattern
-    reth = pyreth.PyReth()
-    processor = reth.tx_processor()
-    simulator = reth.simulator()
+    processor = pyreth_tx_processor()
+    simulator = pyreth_simulator()
     
     # Test Case 1: The liquidity removal transaction
     tx_hash = "0xb20e91c60b35647725b1878b60e2ccf6543fc17983983227656cf98bebb22966"
@@ -165,7 +164,7 @@ def test_resimulation():
         print("Attempting to simulate at latest block...")
         try:
             # Get latest block using chain_query
-            chain_query = reth.chain_query()
+            chain_query = pyreth_chain_query()
             latest_block = chain_query.get_latest_block()
             current_sim = resimulate_transaction(problem_tx, simulator, latest_block)
             print(f"  Unexpected success at block {latest_block}")

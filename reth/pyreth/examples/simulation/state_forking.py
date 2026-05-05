@@ -13,7 +13,7 @@ Algorithm:
 5. Demonstrate time-sensitive contract interactions
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, List, Optional, Tuple
 
 # Test addresses and contracts
@@ -37,8 +37,7 @@ def simulate_at_different_blocks():
     print("=" * 80)
     print("Testing how blockchain state affects transaction outcomes")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Define a test transaction
     test_tx = {
@@ -127,8 +126,7 @@ def test_contract_evolution():
     print("=" * 80)
     print("Testing contract interactions across different deployment states")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test USDC transfer at different historical points
     # (USDC was deployed at block ~6082465, became widely used later)
@@ -194,8 +192,7 @@ def analyze_defi_state_sensitivity():
     print("=" * 80)
     print("Analyzing how DeFi interactions change with blockchain state")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test different DeFi operations across time
     defi_scenarios = [
@@ -277,8 +274,7 @@ def demonstrate_time_travel_debugging():
     print("=" * 80)
     print("Using historical simulation to debug transaction issues")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Simulate debugging a failed transaction by testing at different blocks
     problematic_tx = {

@@ -12,7 +12,7 @@ Optionally export PYRETH_DATADIR if your Reth database lives elsewhere.
 from __future__ import annotations
 import argparse
 
-import pyreth
+from pyreth import processed_tx_provider as pyreth_processed_tx_provider
 
 
 DEFAULT_WINDOW = 500
@@ -29,8 +29,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    reth = pyreth.PyReth()
-    core_provider = reth.processed_tx_provider()
+    core_provider = pyreth_processed_tx_provider()
     token_provider = core_provider.token_provider()
 
     latest = core_provider.get_latest_block()

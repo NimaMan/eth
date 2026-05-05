@@ -36,8 +36,7 @@ def format_balance_changes(balances, label: str) -> None:
 
 
 def main() -> None:
-    reth = pyreth.PyReth()
-    simulator = reth.pool_buy_sell_simulator()
+    simulator = pyreth_pool_buy_sell_simulator()
 
     config = pyreth.PoolBuySellParameters.with_denom_amount(BUY_AMOUNT_ETH, FLOKI_DECIMALS, WETH_DECIMALS)
     config.denom_address = WETH_ADDRESS

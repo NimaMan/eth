@@ -6,11 +6,10 @@ Demonstrates TxProcessor.process_transactions_detailed(...) which returns a
 dict with 'success' and 'failed' lists for robust batch processing.
 """
 
-import pyreth
+from pyreth import tx_processor as pyreth_tx_processor
 
 def main():
-    reth = pyreth.PyReth()
-    processor = reth.tx_processor()
+    processor = pyreth_tx_processor()
 
     # Example list (include an invalid hash to show error handling)
     tx_hashes = [

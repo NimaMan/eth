@@ -13,7 +13,7 @@ Algorithm:
 5. Handle inter-transaction dependencies and failures
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, List, Optional, Tuple
 
 # Test addresses and contracts
@@ -131,8 +131,7 @@ def simulate_individual_transactions():
     print("=" * 80)
     print("Simulating each transaction independently")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     batch = create_transaction_batch()
     results = []
@@ -200,8 +199,7 @@ def simulate_sequential_batch():
     print("=" * 80)
     print("Simulating transactions with sequential nonce management")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Create modified batch with sequential nonces
     batch = create_transaction_batch()
@@ -278,8 +276,7 @@ def analyze_gas_optimization():
     print("GAS OPTIMIZATION ANALYSIS")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test different gas price strategies
     print("\n🔍 Testing Gas Price Impact")
@@ -343,8 +340,7 @@ def simulate_complex_batch_scenario():
     print("=" * 80)
     print("Simulating a realistic DeFi interaction sequence")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Complex scenario: User wants to perform multiple DeFi operations
     complex_batch = [

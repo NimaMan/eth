@@ -3,14 +3,13 @@
 Example: Query ETH and token balances using ChainQuery
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 
 def main():
     # Create PyReth instance with shared database
-    reth = pyreth.PyReth()
     
     # Get chain query interface
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     print("=== Chain Query: Balance Operations ===\n")
     

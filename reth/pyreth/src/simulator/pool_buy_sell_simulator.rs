@@ -521,10 +521,10 @@ impl PyPoolBuySellSimulator {
 impl PyPoolBuySellSimulator {
     /// Create new PoolBuySellSimulator instance
     ///
-    /// DEPRECATED: Use PyReth().pool_buy_sell_simulator() instead to avoid multiple database connections
+    /// DEPRECATED: Use the module-level pool_buy_sell_simulator() accessor instead to avoid multiple database connections
     #[new]
     fn new() -> PyResult<Self> {
-        eprintln!("WARNING: Creating standalone PoolBuySellSimulator is deprecated. Use PyReth().pool_buy_sell_simulator() instead.");
+        eprintln!("WARNING: Creating standalone PoolBuySellSimulator is deprecated. Use pyreth.pool_buy_sell_simulator() instead.");
 
         // Create TxSimulator and TxProcessor for standalone use
         let simulator = Arc::new(

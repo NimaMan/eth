@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import os
-import pyreth
+from pyreth import chain_query as pyreth_chain_query, clear_singleton
 
 from eth_price_leverage.envs.stablecoin_env import StablecoinEnv
 
 
 def main() -> None:
     # Resolve latest block using the shared instance, then clear to avoid DB conflicts
-    reth = pyreth.PyReth(); q = reth.chain_query(); latest = q.get_latest_block(); del q, reth; pyreth.clear_singleton()
+    q = pyreth_chain_query()
+    latest = q.get_latest_block()
+    del q
+    clear_singleton()
     start = latest - 10
     print(f"latest={latest} start={start}")
 

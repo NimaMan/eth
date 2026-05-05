@@ -18,9 +18,9 @@ class ETFQueries(BaseEntityQuery):
     Python only formats and presents the data.
     """
     
-    def __init__(self, reth_instance=None):
-        """Initialize ETF queries with shared Reth instance."""
-        super().__init__(reth_instance)
+    def __init__(self):
+        """Initialize ETF queries with shared Reth access."""
+        super().__init__()
     
     # Basic ETF queries
     

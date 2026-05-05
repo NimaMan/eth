@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 from typing import Sequence
 
-import pyreth
+from pyreth import processed_tx_provider as pyreth_processed_tx_provider
 
 
 DEFAULT_WINDOW = 500  # how many recent blocks to inspect by default
@@ -39,8 +39,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    reth = pyreth.PyReth()
-    core_provider = reth.processed_tx_provider()
+    core_provider = pyreth_processed_tx_provider()
     addr_provider = core_provider.address_provider()
 
     latest = core_provider.get_latest_block()

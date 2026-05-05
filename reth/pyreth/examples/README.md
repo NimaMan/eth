@@ -48,11 +48,9 @@ PyReth provides comprehensive transaction simulation with the refactored singlet
 
 ### Basic Simulation
 ```python
-import pyreth
+from pyreth import simulator as pyreth_simulator
 
-# Initialize singleton instance
-reth = pyreth.PyReth()
-simulator = reth.simulator()
+simulator = pyreth_simulator()
 
 # Basic ETH transfer simulation
 tx = {
@@ -80,11 +78,11 @@ print(f"Gas used: {result.gas_used}")
 ### Re-simulation Function
 ```python
 from simulation.resimulate_transaction import resimulate_transaction
+from pyreth import simulator as pyreth_simulator, tx_processor
 
 # Get original transaction using singleton
-reth = pyreth.PyReth()
-processor = reth.tx_processor()
-simulator = reth.simulator()
+processor = tx_processor()
+simulator = pyreth_simulator()
 
 tx = processor.process_transaction("0x...")
 new_result = resimulate_transaction(tx, simulator, block_number=12345678)
@@ -93,15 +91,12 @@ new_result = resimulate_transaction(tx, simulator, block_number=12345678)
 ## Basic Usage
 
 ```python
-import pyreth
+from pyreth import chain_query, simulator as pyreth_simulator, tx_processor
 
-# Initialize singleton instance for shared database connection
-reth = pyreth.PyReth()
-
-# Get components from singleton
-query = reth.chain_query()
-processor = reth.tx_processor()
-simulator = reth.simulator()
+# Get components from the shared singleton
+query = chain_query()
+processor = tx_processor()
+simulator = pyreth_simulator()
 
 # Direct database queries
 balance = query.get_balance("0x...")

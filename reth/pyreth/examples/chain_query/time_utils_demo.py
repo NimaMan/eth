@@ -9,7 +9,7 @@ This example shows:
 - Getting block ranges for time windows
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query
 from datetime import datetime, timedelta, timezone
 
 
@@ -19,8 +19,7 @@ def demo_basic_conversion():
     print("=" * 50)
     
     # Initialize PyReth
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Get current block
     latest_block = query.get_latest_block()
@@ -57,8 +56,7 @@ def demo_time_to_blocks():
     print("\n\n⏰ Time Ranges to Block Ranges")
     print("=" * 50)
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Define some time ranges
     now = datetime.now(timezone.utc)
@@ -99,8 +97,7 @@ def demo_period_boundaries():
     print("\n\n📊 Period Boundaries")
     print("=" * 50)
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Different period types
     periods = [
@@ -156,8 +153,7 @@ def demo_practical_use_case():
     print("\n\n💡 Practical Use Case: Daily Analysis Window")
     print("=" * 50)
     
-    reth = pyreth.PyReth()
-    query = reth.chain_query()
+    query = pyreth_chain_query()
     
     # Get blocks for different analysis windows
     windows = [

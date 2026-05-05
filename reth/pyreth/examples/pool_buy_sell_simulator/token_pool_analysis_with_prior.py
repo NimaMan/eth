@@ -35,13 +35,12 @@ def format_selector(input_data: str) -> str:
 
 def configure_prior_transaction(
     cfg: "pyreth.PoolBuySellParameters",
-    reth: pyreth.PyReth,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """Apply the static prior transaction to the simulator parameters."""
     if not TX_HASH:
         return None, None
 
-    processed_provider = reth.processed_tx_provider()
+    processed_provider = pyreth_processed_tx_provider()
     try:
         prior = processed_provider.processed_transaction_by_hash(TX_HASH)
         cfg.set_prior_tx_from_processed(prior)
@@ -89,14 +88,13 @@ def main() -> None:
     print(f"Buy amount (ETH): {BUY_AMOUNT_ETH}")
     print()
 
-    reth = pyreth.PyReth()
-    simulator = reth.pool_buy_sell_simulator()
+    simulator = pyreth_pool_buy_sell_simulator()
 
     config = pyreth.PoolBuySellParameters.with_denom_amount(BUY_AMOUNT_ETH, TOKEN_DECIMALS, WETH_DECIMALS)
     config.denom_address = WETH_ADDRESS
     config.block_number = SIMULATION_BLOCK
 
-    prior_source, prior_fee_info = configure_prior_transaction(config, reth)
+    prior_source, prior_fee_info = configure_prior_transaction(config)
     if prior_source:
         print(f"Prior transaction: {prior_source}")
     else:

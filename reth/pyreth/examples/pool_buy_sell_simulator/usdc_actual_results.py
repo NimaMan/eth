@@ -28,9 +28,8 @@ def main():
     
     try:
         # Initialize
-        reth = pyreth.PyReth()
-        simulator = reth.pool_buy_sell_simulator()
-        txp = reth.tx_processor()
+        simulator = pyreth_pool_buy_sell_simulator()
+        txp = pyreth_tx_processor()
         
         # Create config for 1 ETH
         config = pyreth.PoolBuySellParameters(6, WETH_DECIMALS)

@@ -13,7 +13,7 @@ Algorithm:
 5. Provide guidance on error resolution and debugging
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, List, Optional, Tuple
 
 # Test addresses and contracts
@@ -150,8 +150,7 @@ def test_validation_errors():
     print("=" * 80)
     print("Testing errors that occur during transaction validation")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     validation_tests = [
         {
@@ -232,8 +231,7 @@ def test_contract_execution_errors():
     print("=" * 80)
     print("Testing errors that occur during contract execution")
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     execution_tests = [
         {
@@ -307,8 +305,7 @@ def test_edge_cases():
     print("EDGE CASES AND UNUSUAL SCENARIOS")
     print("=" * 80)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     edge_cases = [
         {

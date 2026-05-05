@@ -68,15 +68,18 @@ Trading Viability (Buy→Approve→Sell) Flow
 Examples (intended usage from Python)
 
 - Single tx from hash (with simulation):
-  - ptx = TxProcessor().process_transaction_from_hash_with_simulation("0x...")
+  - `from pyreth import tx_processor`
+  - ptx = tx_processor().process_transaction_from_hash_with_simulation("0x...")
   - py_dict = ptx.to_dict()  # canonical, lossless schema (U256 as decimal strings)
 
 - Single tx from hash (DB‑only, no simulation):
-  - ptx = TxProcessor().load_transaction_from_hash_db_only("0x...")
+  - `from pyreth import tx_processor`
+  - ptx = tx_processor().load_transaction_from_hash_db_only("0x...")
 - py_dict = ptx.to_dict()  # events/fees present; address_balance_changes will be empty
 
 - Simulate buy→approve→sell viability:
-  - res = PoolBuySellSimulator().check_uniswap_v2_pool(token, pool)
+  - `from pyreth import pool_buy_sell_simulator`
+  - res = pool_buy_sell_simulator().check_uniswap_v2_pool(token, pool)
   - if res.can_buy: inspect res.buy_transaction.to_dict()  # planned addition
 
 Performance & Compatibility

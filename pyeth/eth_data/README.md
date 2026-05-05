@@ -6,8 +6,8 @@
 
 - Live block processing: Rust `tx_processor` live binary.
 - Processed block publication: Rust writes the `eth/live/block/<number>/...` Redis tree and emits block notifications.
-- Historical/offline block access from Python: `pyreth.block_processor().process_block(...)`.
-- Transaction access from Python: `pyreth.tx_processor()` and `pyreth.block_processor()`.
+- Historical/offline block access from Python: `from pyreth import block_processor`.
+- Transaction access from Python: `from pyreth import tx_processor, block_processor`.
 - Live token consumers: Python reads Rust-published Redis blocks through `RedisSnapshotReader` and publishes token snapshots through `LiveDataPublisher.publish_token()`.
 
 Python should not reimplement receipt/log/trace parsing or live block publication.

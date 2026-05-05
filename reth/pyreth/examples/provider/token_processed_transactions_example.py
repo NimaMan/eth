@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-import pyreth
+from pyreth import processed_tx_provider as pyreth_processed_tx_provider
 
 TOKEN_ADDRESS = "0xc8Ab73b7EaeE2FD3C858dcDB22fB03433A7aeB9F"
 DEFAULT_WINDOW = 2_000
@@ -30,8 +30,7 @@ MAX_PRINT = 15
 def main() -> None:
     window = int(os.environ.get("TOKEN_WINDOW", DEFAULT_WINDOW))
 
-    reth = pyreth.PyReth()
-    core_provider = reth.processed_tx_provider()
+    core_provider = pyreth_processed_tx_provider()
     token_provider = core_provider.token_provider()
 
     latest = core_provider.get_latest_block()

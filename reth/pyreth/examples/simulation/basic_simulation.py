@@ -13,7 +13,7 @@ Algorithm:
 5. Handle common error scenarios (insufficient funds, invalid nonce, etc.)
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, Optional
 
 def create_eth_transfer_tx(
@@ -55,8 +55,7 @@ def simulate_eth_transfer():
     print("=" * 60)
     
     # Initialize PyReth singleton
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     print("✅ PyReth simulator initialized")
     
     # Test 1: Small self-transfer from funded address
@@ -119,8 +118,7 @@ def demonstrate_error_scenarios():
     print("ERROR SCENARIO DEMONSTRATIONS")
     print("=" * 60)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Error 1: Insufficient funds
     print("\n1. Insufficient funds scenario")
@@ -202,8 +200,7 @@ def demonstrate_flexible_types():
     print("FLEXIBLE TYPE HANDLING DEMONSTRATION")
     print("=" * 60)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test with integer values
     print("\n1. Using integer values")
@@ -298,7 +295,7 @@ def main():
         print("✅ BASIC SIMULATION EXAMPLES COMPLETED")
         print("=" * 60)
         print("\n🎯 Key Takeaways:")
-        print("  • PyReth.simulator() provides robust transaction simulation")
+        print("  • simulator() provides robust transaction simulation")
         print("  • Singleton pattern ensures efficient database usage")
         print("  • Supports both integer and string parameter types")
         print("  • Provides detailed error messages for debugging")

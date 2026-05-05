@@ -13,7 +13,7 @@ Algorithm:
 5. Handle contract-specific error scenarios (insufficient balance, etc.)
 """
 
-import pyreth
+from pyreth import simulator as pyreth_simulator
 from typing import Dict, Any, Optional
 
 # Common contract addresses on Ethereum mainnet
@@ -100,8 +100,7 @@ def simulate_erc20_transfer():
     print("ERC20 TOKEN TRANSFER SIMULATION")
     print("=" * 70)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     print("✅ PyReth simulator initialized")
     
     # Test 1: USDC transfer simulation
@@ -156,8 +155,7 @@ def simulate_erc20_approve():
     print("ERC20 APPROVE SIMULATION")
     print("=" * 70)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test approve operation
     print("\n1. Simulating USDC approve")
@@ -200,8 +198,7 @@ def simulate_contract_creation():
     print("CONTRACT CREATION SIMULATION")
     print("=" * 70)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     print("\n1. Simulating simple contract deployment")
     print("-" * 40)
@@ -249,8 +246,7 @@ def demonstrate_gas_estimation():
     print("GAS ESTIMATION USING SIMULATION")
     print("=" * 70)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     operations = [
         ("ERC20 Transfer", encode_erc20_transfer("0x742d35cc6568966c0f99d1b7bd0a99b4c2b4d6b8", 100 * 10**6), 80000),
@@ -293,8 +289,7 @@ def simulate_failing_contracts():
     print("FAILING CONTRACT INTERACTION SCENARIOS")
     print("=" * 70)
     
-    reth = pyreth.PyReth()
-    simulator = reth.simulator()
+    simulator = pyreth_simulator()
     
     # Test 1: Transfer more tokens than balance
     print("\n1. Transfer exceeding balance")

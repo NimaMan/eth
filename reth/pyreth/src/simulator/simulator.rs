@@ -50,10 +50,10 @@ pub struct PySimulationResult {
 impl PySimulator {
     /// Initialize simulator with Reth database
     ///
-    /// DEPRECATED: Use PyReth().simulator() instead to avoid multiple database connections
+    /// DEPRECATED: Use the module-level simulator() accessor instead to avoid multiple database connections
     #[new]
     pub fn new() -> PyResult<Self> {
-        eprintln!("WARNING: Creating standalone Simulator is deprecated. Use PyReth().simulator() instead.");
+        eprintln!("WARNING: Creating standalone Simulator is deprecated. Use pyreth.simulator() instead.");
 
         let reth_datadir = "/home/nima/.local/share/reth/mainnet";
 

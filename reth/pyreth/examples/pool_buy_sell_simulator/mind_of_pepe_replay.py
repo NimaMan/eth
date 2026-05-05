@@ -50,9 +50,8 @@ def main() -> None:
     print(f"Block: {BLOCK_NUMBER}")
     print()
 
-    reth = pyreth.PyReth()
-    simulator = reth.pool_buy_sell_simulator()
-    tx_processor = reth.tx_processor()
+    simulator = pyreth_pool_buy_sell_simulator()
+    tx_processor = pyreth_tx_processor()
 
     print("Loading prior transaction sequence:")
     prior_transactions = load_prior_transactions(tx_processor, PRIOR_TRANSACTION_HASHES)

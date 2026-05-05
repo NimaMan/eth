@@ -25,16 +25,12 @@ static PROVIDER_INSTANCE: Lazy<Arc<Mutex<Option<Arc<PyProcessedTxProvider>>>>> =
 
 /// Main PyReth instance that owns the shared database connection
 ///
-/// Usage:
-///   import pyreth
-///   
-///   # Create main instance (opens database once)
-///   reth = pyreth.PyReth()
-///   
-///   # Get components that share the database
-///   processor = reth.tx_processor()
-///   simulator = reth.simulator()
-///   query = reth.chain_query()
+/// Prefer the module-level Python accessors:
+///   from pyreth import chain_query, simulator, tx_processor
+///
+///   processor = tx_processor()
+///   sim = simulator()
+///   query = chain_query()
 #[pyclass(name = "PyReth")]
 pub struct PyRethInstance {
     simulator: Arc<TxSimulator>,
@@ -126,7 +122,7 @@ impl PyRethInstance {
         Ok(format!(
             "Connected to Reth database at {}\n\
              Shared instance: Yes\n\
-             Available components: simulator(), live_simulator(), chain_query(), tx_processor(), pool_buy_sell_simulator(), price_client()\n\
+             Available components: simulator(), live_simulator(), chain_query(), tx_processor(), block_processor(), processed_tx_provider(), pool_buy_sell_simulator()\n\
              Components can be created without additional file watchers"
         , datadir))
     }
@@ -134,7 +130,7 @@ impl PyRethInstance {
 
 /// Clear the singleton instance (mainly for testing)
 ///
-/// This forces the next PyReth() call to create a new database connection.
+/// This forces the next module-level accessor call to create a new database connection.
 /// Use with caution as it may leave existing components with stale references.
 #[pyfunction]
 pub fn clear_singleton() -> PyResult<()> {

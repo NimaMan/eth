@@ -7,17 +7,16 @@ This script investigates two specific transactions:
 2. Original undetected scam transaction
 """
 
-import pyreth
+from pyreth import chain_query as pyreth_chain_query, tx_processor as pyreth_tx_processor, simulator as pyreth_simulator
 import json
 
 def investigate_transactions():
     """Investigate the problematic transactions"""
     
     # Initialize pyreth components using shared instance
-    reth = pyreth.PyReth()
-    processor = reth.tx_processor()
-    simulator = reth.simulator()
-    chain_query = reth.chain_query()
+    processor = pyreth_tx_processor()
+    simulator = pyreth_simulator()
+    chain_query = pyreth_chain_query()
     
     print("=" * 80)
     print("TRANSACTION INVESTIGATION USING PYRETH")

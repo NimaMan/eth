@@ -5,15 +5,14 @@ Requires a locally synced Reth dataset with block 23700867 present.
 """
 
 import pytest
+from pyreth import processed_tx_provider as pyreth_processed_tx_provider
 
 TARGET_TX_HASH = "0x134939eab652b27b4517a96416992bb3aa34b967008a60efd220839acfea1fc6"
 
 
-def _require_pyreth() -> "pyreth.PyReth":
-    if pyreth is None:
-        pytest.skip(f"pyreth unavailable: {_pyreth_import_error}")
+def _require_pyreth() -> None:
     try:
-        return pyreth.PyReth()
+        pyreth_processed_tx_provider()
     except Exception as exc:  # pragma: no cover - runtime guard
         pytest.skip(f"PyReth could not be initialised: {exc}")
 
@@ -24,8 +23,8 @@ def _require_pyreth() -> "pyreth.PyReth":
     raises=RuntimeError,
 )
 def test_processed_transaction_by_hash_replays_block_prefix():
-    reth = _require_pyreth()
-    provider = reth.processed_tx_provider()
+    _require_pyreth()
+    provider = pyreth_processed_tx_provider()
 
     processed = provider.processed_transaction_by_hash(TARGET_TX_HASH)
     assert processed.hash.lower() == TARGET_TX_HASH.lower()

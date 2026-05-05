@@ -2,8 +2,8 @@
 Base class for entity queries using PyReth.
 
 This module provides the foundation for all entity-specific queries,
-managing the PyReth singleton instance and providing common utilities
-like time conversion and error handling.
+using PyReth's module-level singleton accessor and providing common
+utilities like time conversion and error handling.
 """
 
 from typing import Optional, Tuple
@@ -50,7 +50,7 @@ class BaseEntityQuery:
     Base class for all entity queries using PyReth singleton.
     
     Provides:
-    - Singleton PyReth instance management
+    - Singleton PyReth chain query access
     - Time to block conversion
     - Common error handling
     - Caching utilities
@@ -59,20 +59,11 @@ class BaseEntityQuery:
     # Class-level PyReth singleton
     _chain_query = None
 
-    def __init__(self, reth_instance=None):
-        """
-        Initialize with optional PyReth instance.
-        
-        Args:
-            reth_instance: Optional legacy PyReth instance. If not provided,
-                          uses the pyreth module-level singleton accessor.
-        """
-        if reth_instance:
-            self.query = reth_instance.chain_query()
-        else:
-            if BaseEntityQuery._chain_query is None:
-                BaseEntityQuery._chain_query = chain_query()
-            self.query = BaseEntityQuery._chain_query
+    def __init__(self):
+        """Initialize from the pyreth module-level singleton accessor."""
+        if BaseEntityQuery._chain_query is None:
+            BaseEntityQuery._chain_query = chain_query()
+        self.query = BaseEntityQuery._chain_query
     
     def convert_time_to_blocks(
         self, 
