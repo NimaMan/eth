@@ -1,11 +1,10 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, U256};
 use eyre::Result;
-use reth_provider::BlockReader;
 
 use crate::provider::RethQueryProvider;
 
 impl RethQueryProvider {
-    /// Read Uniswap V3 pool slot0 and liquidity using direct state reads.
+    /// Read Uniswap V3 pool slot0 and liquidity through live-aware view calls.
     /// Returns (sqrtPriceX96, tick, liquidity, block_timestamp)
     pub async fn uni_v3_get_slot0_and_liquidity(
         &self,
@@ -14,47 +13,69 @@ impl RethQueryProvider {
     ) -> Result<(U256, i32, U256, u64)> {
         let block_number = block.unwrap_or(self.get_latest_block()?);
 
-        let state = self.simulator().get_chain_state_at_block(block_number)?;
+        let slot0_selector = &keccak256(b"slot0()")[0..4];
+        let slot0_res = self
+            .simulator()
+            .simulate_view_function(
+                pool,
+                Bytes::from(slot0_selector.to_vec()),
+                Some(block_number),
+            )
+            .await?;
+        if !slot0_res.success || slot0_res.output.len() < 64 {
+            return Err(eyre::eyre!(
+                "UniswapV3 slot0() failed for pool {} at block {}",
+                pool,
+                block_number
+            ));
+        }
 
-        // slot0 at storage slot 0
-        let slot0_storage = state
-            .storage(pool, B256::from(U256::ZERO))?
-            .unwrap_or_default();
-        let slot0_packed = U256::from_be_bytes(slot0_storage.to_be_bytes::<32>());
+        // slot0() returns (uint160 sqrtPriceX96, int24 tick, ...).
+        let sqrt_price_x96 = U256::from_be_bytes::<32>(
+            slot0_res.output[0..32]
+                .try_into()
+                .expect("slot0 output length checked"),
+        );
+        let tick = decode_abi_int24(&slot0_res.output[32..64]);
 
-        // Decode sqrtPriceX96 (low 160 bits) and tick (next 24 bits, signed)
-        let sqrt_price_mask = U256::MAX >> (256 - 160);
-        let sqrt_price_x96 = slot0_packed & sqrt_price_mask;
+        let liquidity_selector = &keccak256(b"liquidity()")[0..4];
+        let liquidity_res = self
+            .simulator()
+            .simulate_view_function(
+                pool,
+                Bytes::from(liquidity_selector.to_vec()),
+                Some(block_number),
+            )
+            .await?;
+        if !liquidity_res.success || liquidity_res.output.len() < 32 {
+            return Err(eyre::eyre!(
+                "UniswapV3 liquidity() failed for pool {} at block {}",
+                pool,
+                block_number
+            ));
+        }
+        let liquidity = U256::from_be_bytes::<32>(
+            liquidity_res.output[0..32]
+                .try_into()
+                .expect("liquidity output length checked"),
+        );
 
-        let tick_mask = U256::from((1u32 << 24) - 1);
-        let tick_raw: U256 = (slot0_packed >> 160) & tick_mask;
-        let tick = if tick_raw >= U256::from(1u32 << 23) {
-            let tick_u32 = tick_raw.to::<u32>();
-            let tick_signed = (tick_u32 as i64) - (1i64 << 24);
-            tick_signed as i32
-        } else {
-            tick_raw.to::<i32>()
-        };
-
-        // liquidity at storage slot 4
-        let liquidity_storage = state
-            .storage(pool, B256::from(U256::from(4)))?
-            .unwrap_or_default();
-        let liquidity = U256::from_be_bytes(liquidity_storage.to_be_bytes::<32>());
-
-        // Fetch timestamp for the block
         let timestamp = self
-            .provider_factory()
-            .block_by_number(block_number)
-            .map_err(|e| eyre::eyre!(e.to_string()))?
-            .ok_or_else(|| {
-                eyre::eyre!(
-                    "Invalid block {} while reading UniswapV3 state",
-                    block_number
-                )
-            })?
+            .simulator()
+            .block_context_loader()
+            .load_block_header(block_number, None)
+            .await?
             .timestamp;
 
         Ok((sqrt_price_x96, tick, liquidity, timestamp))
+    }
+}
+
+fn decode_abi_int24(word: &[u8]) -> i32 {
+    let raw = ((word[29] as u32) << 16) | ((word[30] as u32) << 8) | word[31] as u32;
+    if (raw & (1 << 23)) != 0 {
+        (raw as i32) - (1 << 24)
+    } else {
+        raw as i32
     }
 }

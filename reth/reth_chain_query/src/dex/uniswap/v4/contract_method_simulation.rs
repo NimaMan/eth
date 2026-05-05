@@ -1,7 +1,6 @@
 use crate::provider::RethQueryProvider;
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use eyre::Result;
-use reth_provider::BlockReader;
 
 impl RethQueryProvider {
     /// Read Uniswap V4 pool state via PoolManager view functions.
@@ -62,17 +61,11 @@ impl RethQueryProvider {
         }
         let liquidity = U256::from_be_bytes::<32>(liq_res.output[0..32].try_into().unwrap());
 
-        // Fetch timestamp for the block
         let timestamp = self
-            .provider_factory()
-            .block_by_number(block_number)
-            .map_err(|e| eyre::eyre!(e.to_string()))?
-            .ok_or_else(|| {
-                eyre::eyre!(
-                    "Invalid block {} while reading UniswapV4 state",
-                    block_number
-                )
-            })?
+            .simulator()
+            .block_context_loader()
+            .load_block_header(block_number, None)
+            .await?
             .timestamp;
 
         Ok((sqrt_price_x96, tick, liquidity, timestamp))
