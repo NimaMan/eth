@@ -2,7 +2,7 @@
 
 ## 1. Objective and Architecture
 
-The `eth_data` is a high-performance Python system designed to monitor the Ethereum blockchain in real-time. It ingests new blocks, dissects every transaction within them, and outputs a rich, structured data format suitable for advanced analytics, trading systems, and monitoring. The system is built for resilience and speed, leveraging asynchronous processing and optimized RPC batching.
+The `eth_data` package monitors Ethereum blocks from Python while delegating canonical block and transaction processing to the Rust `tx_processor` crate through PyReth. Python keeps compatibility wrappers, data schemas, Redis publishing, and orchestration code; it no longer owns receipt/log/trace transaction processing.
 
 ### Core Architecture
 
@@ -13,21 +13,10 @@ graph TD
     subgraph "Connectivity & Orchestration"
         A[LiveBlockProcessor]
     end
-    subgraph "Block-Level Processing"
-        B[BlockProcessor]
-    end
-    subgraph "Transaction Batching"
-        C[TransactionBatchProcessor]
-    end
-    subgraph "Detailed Transaction Analysis"
-        D[TransactionProcessor]
-    end
-    subgraph "Data Helpers"
-        E[BlockFetcher]
-        F[TransactionBatchDataFetcher]
-        G[TransactionLogProcessor]
-        H[TransactionTraceProcessor]
-        I[EthTransactionClassifier]
+    subgraph "Rust/PyReth Processing"
+        B[BlockProcessor compatibility wrapper]
+        C[PyReth processed_tx_provider]
+        D[Rust tx_processor]
     end
     subgraph "External Systems"
         J[Ethereum Node]
@@ -38,16 +27,10 @@ graph TD
     J -- "New Block (WebSocket)" --> A
     A -- "Process Block" --> B
     A -- "Publish Snapshot + Notify" --> K
-    B -- "Fetch Block Data" --> E
-    B -- "Process Transactions" --> C
+    B -- "Process Block" --> C
     B -- "Save txs (Optional)" --> L
-    C -- "Batch Fetch Receipts/Traces" --> F
-    C -- "Process Single Transaction" --> D
-    D -- "Use Helpers" --> G
-    D -- "Use Helpers" --> H
-    D -- "Use Helpers" --> I
-    F -- "Batch RPC Calls" --> J
-    E -- "RPC Calls" --> J
+    C -- "Load/decode/simulate" --> D
+    D -- "Reth DB access" --> J
 ```
 
 ## 2. Core Components
@@ -62,25 +45,20 @@ graph TD
 ### `BlockProcessor`
 - **Responsibility**: To process a single block or a range of blocks.
 - Takes a block number as input.
-- Uses `BlockFetcher` to retrieve the full block data, including the list of transaction objects.
-- Delegates the processing of the block's transactions to the `TransactionBatchProcessor`.
-- Optionally, it can save the final processed transactions to a database via a `TransactionWriter` (from the `baygus` project).
+- Compatibility class over `PyRethBlockProcessor`.
+- Delegates block and transaction processing to `PyReth().processed_tx_provider().process_block(...)`.
+- Optionally saves the final processed transactions through the address index writer.
 
 ### `TransactionBatchProcessor`
 - **Responsibility**: To efficiently process all transactions within a single block.
-- This is a key performance component. It uses `TransactionBatchDataFetcher` to retrieve all transaction receipts and traces for the entire block in a small number of batched RPC calls. This dramatically reduces network latency compared to fetching them one by one.
-- Once all data is fetched, it processes each transaction concurrently using `asyncio.create_task`.
-- It delegates the detailed analysis of each individual transaction to the `TransactionProcessor`.
+- Compatibility class over Rust/PyReth block and transaction batch processing.
+- Uses the Rust processed transaction provider rather than Python RPC receipt/log/trace parsing.
 
 ### `TransactionProcessor`
 - **Responsibility**: To dissect a single transaction and extract all relevant information.
-- This component performs the deepest analysis.
-- **Log Processing**: Uses `TransactionLogProcessor` to decode event logs from the receipt (e.g., ERC20/721/1155 transfers, Uniswap swaps, approvals).
-- **Trace Processing**: Uses `TransactionTraceProcessor` to parse the transaction trace and identify internal ETH transfers.
-- **Classification**: Uses `EthTransactionClassifier` to assign a high-level category (e.g., "Swap", "Transfer", "Contract Creation").
-- **Action Identification**: Identifies more specific actions (e.g., "Swap ETH for Token").
-- **Data Aggregation**: Calculates transaction fees, bribe amounts, and aggregates all unique addresses involved.
-- **Output**: Assembles all extracted data into a final, comprehensive `ProcessedTransaction` object.
+- Compatibility class over `PyReth().tx_processor()`.
+- Rust owns log decoding, trace interpretation, classification, action identification, fee/bribe metrics, address aggregation, and balance changes.
+- Returns the canonical PyReth `ProcessedTransaction` object.
 
 ## 3. Data Flow and Processing Pipeline
 
@@ -91,15 +69,16 @@ sequenceDiagram
     participant WS as WebSocket
     participant LBP as LiveBlockProcessor
     participant BP as BlockProcessor
-    participant TBP as TransactionBatchProcessor
-    participant TP as TransactionProcessor
+    participant PyReth as PyReth processed_tx_provider
+    participant Rust as Rust tx_processor
     participant Redis as Redis Live Data
 
     WS->>LBP: New Block Notification
     LBP->>BP: process_block(block_number)
-    BP->>TBP: process_block_transactions(txs)
-    TBP->>TBP: Batch Fetch Receipts & Traces
-    TBP-->>BP: List[ProcessedTransaction]
+    BP->>PyReth: process_block(block_number)
+    PyReth->>Rust: Load/decode/simulate from Reth
+    Rust-->>PyReth: ProcessedBlock
+    PyReth-->>BP: List[ProcessedTransaction]
     BP-->>LBP: Processed Block Data
     LBP->>Redis: Publish Block Snapshot
     LBP->>Redis: Publish Block Notification
@@ -111,8 +90,8 @@ sequenceDiagram
 
 1.  `LiveBlockProcessor` receives a new block header from the WebSocket subscription.
 2.  It invokes `BlockProcessor.process_block(block_number)`.
-3.  `BlockProcessor` fetches the full block data, which includes a list of transaction objects.
-4.  `BlockProcessor` passes this list to `TransactionBatchProcessor.process_block_transactions`.
+3.  `BlockProcessor` delegates to PyReth/Rust for the processed block.
+4.  Rust loads, decodes, traces, simulates, and materializes canonical processed transactions.
 5.  **Optimization**: `TransactionBatchProcessor` makes batch RPC calls to the node to get all transaction receipts and all transaction traces for the block. This is the most significant performance optimization.
 6.  `TransactionBatchProcessor` creates an `asyncio` task for each transaction.
 7.  Each task calls `TransactionProcessor.process_transaction` with the transaction, its receipt, and its trace.

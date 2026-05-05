@@ -51,12 +51,11 @@ eth_data/
 │   ├── mempool_processor.py      # Mempool transaction tracking
 │   └── block_fetcher.py          # Block data retrieval
 │
-├── tx_processor/        # Transaction processing engine
-│   ├── tx_processor.py           # Core transaction processor
-│   ├── tx_batch_processor.py     # Batch processing optimization
-│   ├── tx_data_fetcher.py        # Transaction data retrieval
-│   ├── tx_log_processor.py       # Event log decoding
-│   ├── tx_trace_processor.py     # Internal transaction extraction
+├── tx_processor/        # PyReth/Rust transaction compatibility wrappers
+│   ├── pyreth_tx_processor.py    # Rust-backed transaction adapter
+│   ├── tx_processor.py           # Legacy class name over Rust adapter
+│   ├── tx_batch_processor.py     # Rust-backed batch/block processing
+│   ├── tx_data_fetcher.py        # Hash-only compatibility facade
 │   └── data_models/              # Data structures
 │       └── tx_models.py         # ProcessedTransaction model
 │

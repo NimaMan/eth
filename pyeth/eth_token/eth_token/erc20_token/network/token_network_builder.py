@@ -2,7 +2,6 @@ import orjson
 import networkx as nx
 from networkx.readwrite import json_graph
 
-from eth_data.tx_processor.address_balance_change_calculator import AddressBalanceChangeCalculator
 from eth_token.erc20_token.network.address_activity_tracker import AddressTokenActivityTracker
 
 
@@ -10,7 +9,6 @@ class LiveTokenNetworkBuilder:
     def __init__(self, live_token):
         self.live_token = live_token
         self.graph = nx.MultiDiGraph()
-        self.state_diff_calculator = AddressBalanceChangeCalculator()
 
     def __iter__(self):
         return iter(self.graph.nodes)
@@ -103,15 +101,8 @@ class LiveTokenNetworkBuilder:
         tx_fee = (tx_dict.get('fees') or {}).get('tx_fee', 0.0)
         erc20_transfers = self.live_token.erc20_transfers.get(tx_hash, [])
         eth_transfers = self.live_token.eth_transfers.get(tx_hash, [])
-        # Get balance changes (only significant ones are returned by calculator)
-        balance_changes = self.state_diff_calculator.calculate_address_balance_changes(
-            tx_hash, 
-            fee_source,
-            block_number, 
-            tx_index, 
-            eth_transfers, 
-            erc20_transfers
-            )
+        _ = eth_transfers, erc20_transfers
+        balance_changes = tx_dict.get("address_balance_changes") or {}
         
         if not balance_changes:
             return

@@ -31,7 +31,7 @@ from eth_token.erc20_token.erc20_token import ERC20Token
 from eth_token.token_manager.live_tokens_cache import LiveTokensCache
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_token.utils.logger import get_logger
-from eth_data.blockchain.block_processor import BlockProcessor
+from eth_data.blockchain.pyreth_block_processor import PyRethBlockProcessor
 
 
 class BlockTokenProcessor:
@@ -285,10 +285,19 @@ class HistoricalBlockTokenProcessor:
                  block_token_processor: BlockTokenProcessor = None,
                  w3: Web3 = None,
                  logger=None,
-                 index_address_txs: bool = False):
+                 index_address_txs: bool = False,
+                 block_processor=None,
+                 processed_tx_provider=None):
         self.logger = logger or get_logger(name="token_manager")
         self.w3 = w3 or Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))    
-        self.block_processor = BlockProcessor(logger=self.logger, index_address_txs=index_address_txs)
+        if index_address_txs:
+            self.logger.warning(
+                "HistoricalBlockTokenProcessor ignores index_address_txs when using PyReth block processing"
+            )
+        self.block_processor = block_processor or PyRethBlockProcessor(
+            processed_tx_provider=processed_tx_provider,
+            logger=self.logger,
+        )
         self.block_token_processor = block_token_processor or BlockTokenProcessor(
             logger=self.logger
         )

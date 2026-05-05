@@ -76,6 +76,9 @@ def json_safe(value: Any) -> Any:
     if dataclasses.is_dataclass(value):
         value = dataclasses.asdict(value)
 
+    if hasattr(value, "to_dict"):
+        value = value.to_dict()
+
     if isinstance(value, dict):
         return {k: json_safe(v) for k, v in value.items()}
 

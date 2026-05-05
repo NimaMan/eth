@@ -35,8 +35,8 @@ bribe exposure.
 
 - **LiveTokenNetworkBuilder** (`live_token_network_builder.py`)
   - Ingests processed transactions (`tx_dict`)
-  - Calculates address state deltas using
-    `AddressBalanceChangeCalculator`
+  - Reads address state deltas from Rust/PyReth
+    `tx_dict["address_balance_changes"]`
   - Maintains a `networkx.MultiDiGraph` with per-edge metadata (transfer
     amount, type, fee source)
   - Updates `AddressTokenActivityTracker` instances attached to graph nodes

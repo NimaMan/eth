@@ -6,7 +6,6 @@ from aiohttp import ClientSession, TCPConnector
 from web3 import Web3
 from eth_data.tx_processor.tx_processor import TransactionProcessor
 from eth_data.tx_processor.tx_data_fetcher import TransactionDataFetcher
-from eth_data.tx_processor.tx_trace_processor import TransactionTraceProcessor
 from eth_data.tx_processor.tx_batch_processor import TransactionBatchProcessor
 from eth_data.blockchain.block_processor import BlockProcessor
 
@@ -45,4 +44,4 @@ async def block_processor(session):
         node_url="http://127.0.0.1:8545",
         session=session
     )
-    yield processor 
+    yield processor

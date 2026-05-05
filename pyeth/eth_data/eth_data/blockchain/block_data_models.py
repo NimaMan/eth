@@ -146,7 +146,7 @@ class ProcessedBlockResult:
     block_header: Optional[Union[str, BlockHeader]] = None
 
     def __post_init__(self) -> None:
-        self.transactions.sort(key=lambda tx: tx.tx_index)
+        self.transactions.sort(key=self._tx_index)
         if self.block_header is None or isinstance(self.block_header, str):
             return
         if isinstance(self.block_header, BlockHeader):
@@ -173,3 +173,9 @@ class ProcessedBlockResult:
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
+
+    @staticmethod
+    def _tx_index(tx: Any) -> int:
+        if isinstance(tx, dict):
+            return int(tx.get("tx_index", 0))
+        return int(getattr(tx, "tx_index", 0))
