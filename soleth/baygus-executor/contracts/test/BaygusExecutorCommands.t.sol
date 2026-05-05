@@ -9,12 +9,14 @@ import {
     CMD_PERMIT2_TRANSFER_FROM,
     CMD_SWEEP,
     CMD_TRANSFER_FROM,
+    CMD_V2_PAIR_SWAP,
     CMD_V2_SWAP
 } from "../src/types/SharedTypes.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPermit2} from "./mocks/MockPermit2.sol";
 import {MockPoolManager} from "./mocks/MockPoolManager.sol";
 import {MockReentrantReceiver} from "./mocks/MockReentrantReceiver.sol";
+import {MockV2Pair} from "./mocks/MockV2Pair.sol";
 import {MockV2Router} from "./mocks/MockV2Router.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
@@ -281,6 +283,54 @@ contract BaygusExecutorCommandsTest is TestBase {
         router.execute(commands, inputs);
 
         assertEq(tokenIn.balanceOf(address(v2)), 20 ether, "v2 consumed all router input");
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router input drained");
+        assertEq(tokenOut.balanceOf(address(this)), 15 ether, "output received");
+    }
+
+    function testTransferThenV2PairSwapCommand() external {
+        MockERC20 tokenIn = new MockERC20("Token In", "TIN", 18);
+        MockERC20 tokenOut = new MockERC20("Token Out", "TOUT", 18);
+        MockV2Pair pair = new MockV2Pair(address(tokenOut), address(tokenIn));
+        BaygusExecutor router = _router(address(0));
+
+        tokenIn.mint(address(this), 100 ether);
+        tokenOut.mint(address(pair), 25 ether);
+        tokenIn.approve(address(router), 100 ether);
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_TRANSFER_FROM), uint8(CMD_V2_PAIR_SWAP));
+        bytes[] memory inputs = new bytes[](2);
+        inputs[0] = abi.encode(address(tokenIn), 20 ether);
+        inputs[1] = abi.encode(
+            address(pair), address(tokenIn), uint256(20 ether), uint256(15 ether), uint256(0), address(this)
+        );
+
+        router.execute(commands, inputs);
+
+        assertEq(tokenIn.balanceOf(address(this)), 80 ether, "input spent");
+        assertEq(tokenIn.balanceOf(address(pair)), 20 ether, "pair received input");
+        assertEq(tokenOut.balanceOf(address(this)), 15 ether, "output received");
+        assertEq(tokenIn.allowance(address(router), address(pair)), 0, "pair approval not used");
+    }
+
+    function testV2PairSwapCanUseRouterBalanceWhenAmountInIsZero() external {
+        MockERC20 tokenIn = new MockERC20("Token In", "TIN", 18);
+        MockERC20 tokenOut = new MockERC20("Token Out", "TOUT", 18);
+        MockV2Pair pair = new MockV2Pair(address(tokenIn), address(tokenOut));
+        BaygusExecutor router = _router(address(0));
+
+        tokenIn.mint(address(this), 100 ether);
+        tokenOut.mint(address(pair), 25 ether);
+        tokenIn.approve(address(router), 100 ether);
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_TRANSFER_FROM), uint8(CMD_V2_PAIR_SWAP));
+        bytes[] memory inputs = new bytes[](2);
+        inputs[0] = abi.encode(address(tokenIn), 20 ether);
+        inputs[1] =
+            abi.encode(address(pair), address(tokenIn), uint256(0), uint256(0), uint256(15 ether), address(this));
+
+        router.execute(commands, inputs);
+
+        assertEq(tokenIn.balanceOf(address(pair)), 20 ether, "pair received all router input");
         assertEq(tokenIn.balanceOf(address(router)), 0, "router input drained");
         assertEq(tokenOut.balanceOf(address(this)), 15 ether, "output received");
     }

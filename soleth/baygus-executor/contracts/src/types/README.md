@@ -11,3 +11,8 @@ should contain only the commands needed for the active strategy's atomic executi
 
 `CMD_COINBASE_TIP` accepts either `abi.encode(amount)` or
 `abi.encode(amount, minBlock, maxBlock)`. Prefer the guarded form for live execution.
+
+`CMD_V2_PAIR_SWAP` accepts
+`abi.encode(pair, tokenIn, amountIn, amount0Out, amount1Out, recipient)`. The planner is responsible
+for token order and output math; the contract only moves `tokenIn` into the pair and executes the
+precomputed swap.

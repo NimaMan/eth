@@ -42,6 +42,9 @@ Usage
 - `BaygusExecutionPlan::coinbase_tip_with_block_guard(amount, min, max)` appends the executor
   `CMD_COINBASE_TIP` command and increases transaction `value` by the tip amount. Prefer this for
   bundle/private-relay execution so stale public transactions cannot pay in the wrong block.
+- Use `BaygusExecutionPlan::v2_pair_swap(...)` for V2/Sushi hot paths when the planner already knows
+  the pair and exact output amounts. Send final output directly to the buyer unless a later command
+  needs the balance inside the executor.
 
 Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.

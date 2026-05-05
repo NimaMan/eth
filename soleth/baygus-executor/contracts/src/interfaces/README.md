@@ -13,3 +13,6 @@ signature to the exact Baygus execution plan.
 `IPoolManager.swap` intentionally returns `int256` because Uniswap v4 packs `BalanceDelta` into one
 word on mainnet. Do not change this to a two-field struct return; that ABI-decodes incorrectly
 against the deployed PoolManager.
+
+`IUniswapV2Pair` is intentionally limited to `swap`. The executor should not read pair reserves or
+token ordering on-chain; the simulator/planner supplies the exact pair output amounts.

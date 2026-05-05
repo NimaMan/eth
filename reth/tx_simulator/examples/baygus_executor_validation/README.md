@@ -73,9 +73,11 @@ Build these first:
   but produce zero output at the latest local block.
 - `baygus_gas_benchmark.rs`: compares direct router execution gas against Baygus Executor command
   execution gas for representative WETH/stable routes. It reports both executor pull modes
-  (`transfer_from` and Permit2), and prints setup/deploy gas separately.
-- `v2_stable_execute_plan.rs`: `transfer_from -> v2_swap -> sweep`, plus optional guarded
-  `coinbase_tip`.
+  (`transfer_from` and Permit2), the direct V2 pair executor path where available, and prints
+  setup/deploy gas separately.
+- `v2_stable_execute_plan.rs`: keep router-adapter coverage for regression, but prefer
+  `transfer_from -> v2_pair_swap` with final output sent directly to the recipient for hot V2/Sushi
+  production plans.
 - `v3_stable_execute_plan.rs`: `transfer_from -> v3_swap -> sweep`, plus optional guarded
   `coinbase_tip`.
 - `curve_stable_execute_plan.rs`: `transfer_from -> curve_swap -> sweep`.
@@ -91,6 +93,10 @@ before deploying:
 - use direct pair/pool execution instead of a generic router adapter;
 - split a minimal production executor from the broader research executor;
 - drop commands that are not required by the current strategy.
+
+Current 1 WETH gas benchmark at local block `25030123`: generic Baygus router mode is roughly
+`+47k` to `+50k` gas over direct router execution after removing unnecessary sweeps; direct V2 pair
+mode is roughly `+17k` to `+18k` gas over direct router execution for WETH/stable V2/Sushi routes.
 
 Run the ETH/stable quote check with:
 

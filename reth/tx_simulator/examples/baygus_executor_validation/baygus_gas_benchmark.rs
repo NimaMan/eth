@@ -5,7 +5,7 @@ use tx_simulator::{
     tx_builders::{
         baygus_executor::{
             build_baygus_execute_tx, build_permit2_approve_tx, BaygusExecutionPlan,
-            BaygusV3ExactInputSingle,
+            BaygusV2PairSwap, BaygusV3ExactInputSingle,
         },
         uniswap_v2::{self, Router as V2Router},
         uniswap_v3,
@@ -25,16 +25,29 @@ const BUYER: &str = "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5";
 const WETH: &str = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const USDC: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const USDT: &str = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
+const UNISWAP_V2_WETH_USDC_PAIR: &str = "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc";
+const UNISWAP_V2_WETH_USDT_PAIR: &str = "0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852";
+const SUSHISWAP_V2_WETH_USDC_PAIR: &str = "0x397FF1542f962076d0BFE58eA045FfA2d347ACa0";
 const UNISWAP_V4_POOL_MANAGER: &str = "0x000000000004444C5DC75cB358380d2E3de08a90";
 const PERMIT2: &str = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
 
 const ERC20_BALANCE_OF_SELECTOR: [u8; 4] = [0x70, 0xa0, 0x82, 0x31];
+const UNISWAP_V2_PAIR_TOKEN0_SELECTOR: [u8; 4] = [0x0d, 0xfe, 0x16, 0x81];
 
 #[derive(Debug, Clone, Copy)]
 enum RouteKind {
-    UniswapV2,
-    SushiswapV2,
+    UniswapV2 { pair: Address },
+    SushiswapV2 { pair: Address },
     UniswapV3 { fee: u32 },
+}
+
+impl RouteKind {
+    const fn pair(self) -> Option<Address> {
+        match self {
+            Self::UniswapV2 { pair } | Self::SushiswapV2 { pair } => Some(pair),
+            Self::UniswapV3 { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,6 +81,10 @@ struct GasBenchmark {
     permit2_setup_gas: u64,
     permit2_execute_gas: u64,
     permit2_output: U256,
+    pair_deploy_gas: Option<u64>,
+    pair_setup_gas: Option<u64>,
+    pair_execute_gas: Option<u64>,
+    pair_output: Option<U256>,
 }
 
 #[tokio::main]
@@ -87,26 +104,38 @@ async fn main() -> Result<()> {
     let usdt = parse_address(USDT, "USDT")?;
     let pool_manager = parse_address(UNISWAP_V4_POOL_MANAGER, "Uniswap V4 PoolManager")?;
     let permit2 = parse_address(PERMIT2, "Permit2")?;
+    let uniswap_v2_weth_usdc_pair =
+        parse_address(UNISWAP_V2_WETH_USDC_PAIR, "Uniswap V2 WETH/USDC pair")?;
+    let uniswap_v2_weth_usdt_pair =
+        parse_address(UNISWAP_V2_WETH_USDT_PAIR, "Uniswap V2 WETH/USDT pair")?;
+    let sushiswap_v2_weth_usdc_pair =
+        parse_address(SUSHISWAP_V2_WETH_USDC_PAIR, "SushiSwap V2 WETH/USDC pair")?;
     let amount_in = U256::from(ONE_ETH_WEI);
 
     let routes = vec![
         BenchRoute {
             label: "Uniswap V2 WETH/USDC",
-            kind: RouteKind::UniswapV2,
+            kind: RouteKind::UniswapV2 {
+                pair: uniswap_v2_weth_usdc_pair,
+            },
             output_token: usdc,
             output_symbol: "USDC",
             output_decimals: 6,
         },
         BenchRoute {
             label: "Uniswap V2 WETH/USDT",
-            kind: RouteKind::UniswapV2,
+            kind: RouteKind::UniswapV2 {
+                pair: uniswap_v2_weth_usdt_pair,
+            },
             output_token: usdt,
             output_symbol: "USDT",
             output_decimals: 6,
         },
         BenchRoute {
             label: "SushiSwap V2 WETH/USDC",
-            kind: RouteKind::SushiswapV2,
+            kind: RouteKind::SushiswapV2 {
+                pair: sushiswap_v2_weth_usdc_pair,
+            },
             output_token: usdc,
             output_symbol: "USDC",
             output_decimals: 6,
@@ -164,6 +193,17 @@ async fn main() -> Result<()> {
             PullMode::Permit2Allowance,
         )
         .await?;
+        let pair_executor = run_executor_v2_pair(
+            &simulator,
+            block_number,
+            buyer,
+            weth,
+            pool_manager,
+            amount_in,
+            route,
+            direct.output,
+        )
+        .await?;
         results.push(GasBenchmark {
             label: route.label,
             output_symbol: route.output_symbol,
@@ -179,6 +219,12 @@ async fn main() -> Result<()> {
             permit2_setup_gas: permit2_executor.setup_gas,
             permit2_execute_gas: permit2_executor.execute_gas,
             permit2_output: permit2_executor.output,
+            pair_deploy_gas: pair_executor.as_ref().map(|benchmark| benchmark.deploy_gas),
+            pair_setup_gas: pair_executor.as_ref().map(|benchmark| benchmark.setup_gas),
+            pair_execute_gas: pair_executor
+                .as_ref()
+                .map(|benchmark| benchmark.execute_gas),
+            pair_output: pair_executor.map(|benchmark| benchmark.output),
         });
     }
 
@@ -186,18 +232,19 @@ async fn main() -> Result<()> {
     println!("Execution Gas");
     println!("-------------");
     println!(
-        "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "Route", "direct", "exec erc20", "exec p2", "erc20 ovh", "p2 ovh"
+        "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12}",
+        "Route", "direct", "exec erc20", "exec p2", "exec pair", "erc20 ovh", "pair ovh"
     );
     for result in &results {
         println!(
-            "{:<32} {:>12} {:>12} {:>12} {:>+12} {:>+12}",
+            "{:<32} {:>12} {:>12} {:>12} {:>12} {:>+12} {:>12}",
             result.label,
             result.direct_execute_gas,
             result.executor_execute_gas,
             result.permit2_execute_gas,
+            gas_label(result.pair_execute_gas),
             result.executor_execute_gas as i128 - result.direct_execute_gas as i128,
-            result.permit2_execute_gas as i128 - result.direct_execute_gas as i128
+            overhead_label(result.pair_execute_gas, result.direct_execute_gas)
         );
     }
 
@@ -205,16 +252,17 @@ async fn main() -> Result<()> {
     println!("Execution Cost at Benchmark Gas Price");
     println!("-------------------------------------");
     println!(
-        "{:<32} {:>12} {:>12} {:>12}",
-        "Route", "direct ETH", "erc20 ETH", "p2 ETH"
+        "{:<32} {:>12} {:>12} {:>12} {:>12}",
+        "Route", "direct ETH", "erc20 ETH", "p2 ETH", "pair ETH"
     );
     for result in &results {
         println!(
-            "{:<32} {:>12} {:>12} {:>12}",
+            "{:<32} {:>12} {:>12} {:>12} {:>12}",
             result.label,
             gas_cost_eth(result.direct_execute_gas),
             gas_cost_eth(result.executor_execute_gas),
-            gas_cost_eth(result.permit2_execute_gas)
+            gas_cost_eth(result.permit2_execute_gas),
+            gas_cost_eth_label(result.pair_execute_gas)
         );
     }
 
@@ -222,18 +270,20 @@ async fn main() -> Result<()> {
     println!("Setup Gas");
     println!("---------");
     println!(
-        "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12}",
-        "Route", "direct", "erc20", "p2", "deploy", "p2 deploy"
+        "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12}",
+        "Route", "direct", "erc20", "p2", "pair", "deploy", "p2 dep", "pair dep"
     );
     for result in &results {
         println!(
-            "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12}",
+            "{:<32} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12} {:>12}",
             result.label,
             result.direct_setup_gas,
             result.executor_setup_gas,
             result.permit2_setup_gas,
+            gas_label(result.pair_setup_gas),
             result.executor_deploy_gas,
-            result.permit2_deploy_gas
+            result.permit2_deploy_gas,
+            gas_label(result.pair_deploy_gas)
         );
     }
 
@@ -242,7 +292,7 @@ async fn main() -> Result<()> {
     println!("-------");
     for result in &results {
         println!(
-            "{:<32} direct {} {} | erc20 {} {} | p2 {} {} | diffs erc20 {} p2 {}",
+            "{:<32} direct {} {} | erc20 {} {} | p2 {} {} | pair {} {} | diffs erc20 {} p2 {} pair {}",
             result.label,
             format_units(result.direct_output, result.output_decimals, 6),
             result.output_symbol,
@@ -250,8 +300,11 @@ async fn main() -> Result<()> {
             result.output_symbol,
             format_units(result.permit2_output, result.output_decimals, 6),
             result.output_symbol,
+            output_label(result.pair_output, result.output_decimals),
+            result.output_symbol,
             diff_label(result.executor_output, result.direct_output),
-            diff_label(result.permit2_output, result.direct_output)
+            diff_label(result.permit2_output, result.direct_output),
+            output_diff_label(result.pair_output, result.direct_output)
         );
     }
 
@@ -387,12 +440,93 @@ async fn run_executor(
     })
 }
 
+async fn run_executor_v2_pair(
+    simulator: &TxSimulator,
+    block_number: u64,
+    buyer: Address,
+    weth: Address,
+    pool_manager: Address,
+    amount_in: U256,
+    route: BenchRoute,
+    expected_output: U256,
+) -> Result<Option<ExecutorBenchmark>> {
+    let Some(pair) = route.kind.pair() else {
+        return Ok(None);
+    };
+
+    let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
+    let executor_address = compute_contract_address(buyer, chain.account_nonce(buyer)?);
+
+    let mut deploy_tx = build_baygus_executor_deploy_tx(buyer, pool_manager)?;
+    apply_simple_gas_policy(&mut deploy_tx);
+    let deploy = chain.step(deploy_tx).await?;
+    ensure_success("Baygus Executor deploy", &deploy)?;
+
+    if !chain.account_has_code(executor_address)? {
+        return Err(eyre!(
+            "executor deploy succeeded but no bytecode is visible at {executor_address}"
+        ));
+    }
+
+    let mut approve_tx = build_token_approval_tx(buyer, weth, executor_address, U256::MAX);
+    apply_simple_gas_policy(&mut approve_tx);
+    let approve = chain.step(approve_tx).await?;
+    ensure_success("WETH approval for direct-pair executor", &approve)?;
+
+    let mut deposit_tx = build_weth_deposit_tx(buyer, weth, amount_in);
+    apply_simple_gas_policy(&mut deposit_tx);
+    let deposit = chain.step(deposit_tx).await?;
+    ensure_success(
+        &format!("{} direct-pair WETH deposit", route.label),
+        &deposit,
+    )?;
+
+    let token0 = uniswap_v2_pair_token0(&mut chain, pair)?;
+    let (amount0_out, amount1_out) = if token0 == route.output_token {
+        (expected_output, U256::ZERO)
+    } else {
+        (U256::ZERO, expected_output)
+    };
+
+    let before = erc20_balance_of(&mut chain, route.output_token, buyer)?;
+    let mut plan = BaygusExecutionPlan::new();
+    plan.transfer_from(weth, amount_in)
+        .v2_pair_swap(BaygusV2PairSwap {
+            pair,
+            token_in: weth,
+            amount_in,
+            amount0_out,
+            amount1_out,
+            recipient: buyer,
+        });
+    let mut execute_tx = build_baygus_execute_tx(executor_address, buyer, &plan);
+    apply_simple_gas_policy(&mut execute_tx);
+    let execute = chain.step(execute_tx).await?;
+    ensure_success(
+        &format!("{} direct-pair executor execute", route.label),
+        &execute,
+    )?;
+    let after = erc20_balance_of(&mut chain, route.output_token, buyer)?;
+
+    Ok(Some(ExecutorBenchmark {
+        deploy_gas: deploy.gas_used,
+        setup_gas: approve.gas_used + deposit.gas_used,
+        execute_gas: execute.gas_used,
+        output: after.checked_sub(before).ok_or_else(|| {
+            eyre!(
+                "{} direct-pair executor output balance decreased",
+                route.label
+            )
+        })?,
+    }))
+}
+
 fn build_direct_approval(route: BenchRoute, buyer: Address, weth: Address) -> UnsignedTransaction {
     match route.kind {
-        RouteKind::UniswapV2 => {
+        RouteKind::UniswapV2 { .. } => {
             uniswap_v2::build_approve_v2(V2Router::UniswapV2, buyer, weth, U256::MAX)
         }
-        RouteKind::SushiswapV2 => {
+        RouteKind::SushiswapV2 { .. } => {
             uniswap_v2::build_approve_v2(V2Router::SushiswapV2, buyer, weth, U256::MAX)
         }
         RouteKind::UniswapV3 { .. } => uniswap_v3::build_approve_v3(buyer, weth, U256::MAX),
@@ -406,7 +540,7 @@ fn build_direct_swap(
     amount_in: U256,
 ) -> UnsignedTransaction {
     match route.kind {
-        RouteKind::UniswapV2 => uniswap_v2::build_token_to_token_swap_v2_with_min_out(
+        RouteKind::UniswapV2 { .. } => uniswap_v2::build_token_to_token_swap_v2_with_min_out(
             V2Router::UniswapV2,
             buyer,
             weth,
@@ -415,7 +549,7 @@ fn build_direct_swap(
             U256::ZERO,
             u64::MAX,
         ),
-        RouteKind::SushiswapV2 => uniswap_v2::build_token_to_token_swap_v2_with_min_out(
+        RouteKind::SushiswapV2 { .. } => uniswap_v2::build_token_to_token_swap_v2_with_min_out(
             V2Router::SushiswapV2,
             buyer,
             weth,
@@ -454,28 +588,18 @@ fn build_executor_swap(
         }
     }
     match route.kind {
-        RouteKind::UniswapV2 => {
-            plan.v2_swap(
-                amount_in,
-                U256::ZERO,
-                [weth, route.output_token],
-                executor_address,
-            );
+        RouteKind::UniswapV2 { .. } => {
+            plan.v2_swap(amount_in, U256::ZERO, [weth, route.output_token], buyer);
         }
-        RouteKind::SushiswapV2 => {
-            plan.sushiswap_swap(
-                amount_in,
-                U256::ZERO,
-                [weth, route.output_token],
-                executor_address,
-            );
+        RouteKind::SushiswapV2 { .. } => {
+            plan.sushiswap_swap(amount_in, U256::ZERO, [weth, route.output_token], buyer);
         }
         RouteKind::UniswapV3 { fee } => {
             plan.v3_swap(BaygusV3ExactInputSingle {
                 token_in: weth,
                 token_out: route.output_token,
                 fee,
-                recipient: executor_address,
+                recipient: buyer,
                 deadline: U256::MAX,
                 amount_in,
                 amount_out_minimum: U256::ZERO,
@@ -483,7 +607,6 @@ fn build_executor_swap(
             });
         }
     }
-    plan.sweep(route.output_token, buyer, U256::ZERO);
     build_baygus_execute_tx(executor_address, buyer, &plan)
 }
 
@@ -535,6 +658,30 @@ fn erc20_balance_of(
     decode_u256_word(result.output.as_ref(), 0, "balanceOf output")
 }
 
+fn uniswap_v2_pair_token0(
+    chain: &mut tx_simulator::UnsignedTxChainSimulation,
+    pair: Address,
+) -> Result<Address> {
+    let result =
+        chain.simulate_view_call(pair, Bytes::from(UNISWAP_V2_PAIR_TOKEN0_SELECTOR.to_vec()))?;
+    if !result.success {
+        return Err(eyre!("token0() view call failed for pair {pair}"));
+    }
+    decode_address_word(result.output.as_ref(), 0, "token0 output")
+}
+
+fn decode_address_word(data: &[u8], offset: usize, label: &str) -> Result<Address> {
+    let word = data.get(offset..offset + 32).ok_or_else(|| {
+        eyre!(
+            "{label} too short: need word at offset {offset}, got {} bytes",
+            data.len()
+        )
+    })?;
+    let mut address = [0u8; 20];
+    address.copy_from_slice(&word[12..32]);
+    Ok(Address::from(address))
+}
+
 fn decode_u256_word(data: &[u8], offset: usize, label: &str) -> Result<U256> {
     let end = offset + 32;
     let word = data.get(offset..end).ok_or_else(|| {
@@ -575,6 +722,32 @@ fn max_uint48() -> u64 {
 
 fn gas_cost_eth(gas: u64) -> String {
     format_units(U256::from(gas) * U256::from(BENCH_GAS_PRICE_WEI), 18, 6)
+}
+
+fn gas_label(gas: Option<u64>) -> String {
+    gas.map(|value| value.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn gas_cost_eth_label(gas: Option<u64>) -> String {
+    gas.map(gas_cost_eth).unwrap_or_else(|| "n/a".to_string())
+}
+
+fn overhead_label(gas: Option<u64>, direct: u64) -> String {
+    gas.map(|value| format!("{:+}", value as i128 - direct as i128))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn output_label(output: Option<U256>, decimals: usize) -> String {
+    output
+        .map(|value| format_units(value, decimals, 6))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn output_diff_label(output: Option<U256>, direct: U256) -> String {
+    output
+        .map(|value| diff_label(value, direct))
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn format_units(amount: U256, decimals: usize, precision: usize) -> String {

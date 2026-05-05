@@ -15,6 +15,10 @@ Execution commands are deliberately small and explicit. The router does not infe
 pools on-chain; off-chain Rust code must build the exact sequence, value, slippage bounds, and
 coinbase-tip bounds before the transaction is signed.
 
+`CMD_V2_PAIR_SWAP` is the preferred V2/Sushi hot-path primitive when the planner has already chosen
+the pair. It transfers `tokenIn` to the pair and calls `swap` with explicit `amount0Out` and
+`amount1Out`; it does not approve a router or sweep output by default.
+
 Do not treat this source tree as a mandate to deploy every supported adapter. The production
 executor should be the smallest bytecode that covers the active strategy. Keep broad protocol
 coverage here for simulation and regression testing, then split or omit unused commands for a cheap

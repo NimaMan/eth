@@ -9,6 +9,7 @@ import {ILockCallback} from "./interfaces/ILockCallback.sol";
 import {IPermit2} from "./interfaces/IPermit2.sol";
 import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
+import {IUniswapV2Pair} from "./interfaces/IUniswapV2Pair.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 import {
     AdapterConfig,
@@ -23,6 +24,7 @@ import {
     CMD_SWEEP,
     CMD_TRANSFER_FROM,
     CMD_V2_SWAP,
+    CMD_V2_PAIR_SWAP,
     CMD_V3_SWAP,
     CMD_V4_SWAP,
     PoolKey,
@@ -214,6 +216,8 @@ contract BaygusExecutor is ILockCallback {
             _transferFrom(input, payer);
         } else if (command == CMD_V2_SWAP) {
             _v2Swap(input, adapters.uniswapV2Router, command);
+        } else if (command == CMD_V2_PAIR_SWAP) {
+            _v2PairSwap(input);
         } else if (command == CMD_SUSHISWAP) {
             _v2Swap(input, adapters.sushiswapRouter, command);
         } else if (command == CMD_V3_SWAP) {
@@ -495,6 +499,17 @@ contract BaygusExecutor is ILockCallback {
                 revert(add(data, 0x20), mload(data))
             }
         }
+    }
+
+    function _v2PairSwap(bytes memory input) internal {
+        (address pair, address tokenIn, uint256 amountIn, uint256 amount0Out, uint256 amount1Out, address recipient) =
+            abi.decode(input, (address, address, uint256, uint256, uint256, address));
+        if (amountIn == 0) {
+            amountIn = IERC20(tokenIn).balanceOf(address(this));
+        }
+
+        tokenIn.safeTransfer(pair, amountIn);
+        IUniswapV2Pair(pair).swap(amount0Out, amount1Out, recipient, "");
     }
 
     function _v3Swap(bytes memory input) internal {

@@ -12,6 +12,10 @@ Production deployments should stay minimal. Keep route search, pool choice, quot
 gas policy, and bribe sizing off-chain. Add Solidity only for behavior that must happen atomically
 inside the transaction, and benchmark every added command against the direct router or pool path.
 
+For V2/Sushi hot paths, the cheap executor form is direct pair execution with all reserves, token
+ordering, and expected output computed off-chain. The contract should receive a fixed pair and fixed
+amounts, not on-chain discovery or quote logic.
+
 Use:
 
 ```bash

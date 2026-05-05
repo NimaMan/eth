@@ -22,6 +22,7 @@ pub const CMD_PERMIT2_TRANSFER_FROM: u8 = 0x09;
 pub const CMD_TRANSFER_FROM: u8 = 0x0a;
 pub const CMD_COINBASE_TIP: u8 = 0x0b;
 pub const CMD_PERMIT2_SIGNATURE_TRANSFER_FROM: u8 = 0x0c;
+pub const CMD_V2_PAIR_SWAP: u8 = 0x0d;
 
 /// BaygusExecutor command bytes from `soleth/baygus-executor/contracts/src/types/SharedTypes.sol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,7 @@ pub enum BaygusCommand {
     TransferFrom = CMD_TRANSFER_FROM,
     CoinbaseTip = CMD_COINBASE_TIP,
     Permit2SignatureTransferFrom = CMD_PERMIT2_SIGNATURE_TRANSFER_FROM,
+    V2PairSwap = CMD_V2_PAIR_SWAP,
 }
 
 impl BaygusCommand {
@@ -80,6 +82,16 @@ pub struct BaygusBalancerSwap {
     pub recipient: Address,
     pub amount: U256,
     pub limit: U256,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BaygusV2PairSwap {
+    pub pair: Address,
+    pub token_in: Address,
+    pub amount_in: U256,
+    pub amount0_out: U256,
+    pub amount1_out: U256,
+    pub recipient: Address,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,6 +191,10 @@ impl BaygusExecutionPlan {
             BaygusCommand::Sushiswap,
             encode_v2_swap_input(amount_in, amount_out_min, path, recipient),
         )
+    }
+
+    pub fn v2_pair_swap(&mut self, params: BaygusV2PairSwap) -> &mut Self {
+        self.push_raw(BaygusCommand::V2PairSwap, encode_v2_pair_swap_input(params))
     }
 
     pub fn v3_swap(&mut self, params: BaygusV3ExactInputSingle) -> &mut Self {
@@ -456,6 +472,17 @@ pub fn encode_v2_swap_input(
     Bytes::from(data)
 }
 
+pub fn encode_v2_pair_swap_input(params: BaygusV2PairSwap) -> Bytes {
+    let mut data = Vec::with_capacity(WORD_BYTES * 6);
+    data.extend_from_slice(&pad_address(params.pair));
+    data.extend_from_slice(&pad_address(params.token_in));
+    data.extend_from_slice(&pad_u256(params.amount_in));
+    data.extend_from_slice(&pad_u256(params.amount0_out));
+    data.extend_from_slice(&pad_u256(params.amount1_out));
+    data.extend_from_slice(&pad_address(params.recipient));
+    Bytes::from(data)
+}
+
 pub fn encode_v3_swap_input(params: BaygusV3ExactInputSingle) -> Bytes {
     assert!(params.fee <= 0x00ff_ffff, "Uniswap V3 fee must fit uint24");
 
@@ -694,6 +721,42 @@ mod tests {
         assert_eq!(plan.inputs()[0].len(), WORD_BYTES * 2);
         assert_eq!(plan.inputs()[1].len(), WORD_BYTES * 7);
         assert_eq!(plan.calldata()[4 + 64 + 31], 2);
+    }
+
+    #[test]
+    fn plan_transfer_then_v2_pair_swap_encodes_static_pair_input() {
+        let pair = address(0xaa);
+        let token_in = address(0x11);
+        let recipient = address(0x33);
+
+        let mut plan = BaygusExecutionPlan::new();
+        plan.transfer_from(token_in, U256::from(100))
+            .v2_pair_swap(BaygusV2PairSwap {
+                pair,
+                token_in,
+                amount_in: U256::from(100),
+                amount0_out: U256::from(95),
+                amount1_out: U256::ZERO,
+                recipient,
+            });
+
+        assert_eq!(
+            plan.commands_bytes().as_ref(),
+            &[CMD_TRANSFER_FROM, CMD_V2_PAIR_SWAP]
+        );
+        assert_eq!(plan.inputs().len(), 2);
+        assert_eq!(plan.inputs()[1].len(), WORD_BYTES * 6);
+        assert_eq!(&plan.inputs()[1][12..WORD_BYTES], pair.as_slice());
+        assert_eq!(
+            &plan.inputs()[1][WORD_BYTES + 12..WORD_BYTES * 2],
+            token_in.as_slice()
+        );
+        assert_eq!(plan.inputs()[1][WORD_BYTES * 3 - 1], 100);
+        assert_eq!(plan.inputs()[1][WORD_BYTES * 4 - 1], 95);
+        assert_eq!(
+            &plan.inputs()[1][WORD_BYTES * 5 + 12..WORD_BYTES * 6],
+            recipient.as_slice()
+        );
     }
 
     #[test]

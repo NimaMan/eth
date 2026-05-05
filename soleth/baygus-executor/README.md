@@ -6,7 +6,7 @@ turn a typed off-chain route into one on-chain transaction surface that can:
 - execute Uniswap v4 `unlock -> swap -> settle/take` flows;
 - net intermediate currencies across v4 paths;
 - run simple command sequences such as pull, V2/Sushi/V3 swap, Curve swap, Balancer swap, flash
-  loan, sweep, and bounded coinbase tips;
+  loan, direct V2 pair swap, sweep, and bounded coinbase tips;
 - keep protocol adapter addresses configurable at deployment.
 
 ## Design goal
@@ -48,6 +48,14 @@ typed Solidity test first, then add the matching Rust builder.
 - `0x0a` `CMD_TRANSFER_FROM`: pulls tokens from `msg.sender`.
 - `0x0b` `CMD_COINBASE_TIP`: pays `block.coinbase` from executor native balance.
 - `0x0c` `CMD_PERMIT2_SIGNATURE_TRANSFER_FROM`: pulls tokens through Permit2 SignatureTransfer.
+- `0x0d` `CMD_V2_PAIR_SWAP`: transfers input directly to a Uniswap V2-compatible pair and calls
+  `swap(amount0Out, amount1Out, recipient, "")`.
+
+For hot one-hop V2/Sushi routes, prefer `CMD_V2_PAIR_SWAP` over the generic router adapter when the
+off-chain planner already knows the pair and exact output. Its input is
+`(pair, tokenIn, amountIn, amount0Out, amount1Out, recipient)`. Set `amountIn = 0` only when the
+executor should spend its full current `tokenIn` balance. The command does not quote, discover
+pairs, infer token order, or perform routing; those decisions belong in Rust/Python before signing.
 
 Coinbase tips are intended for private bundles or carefully bounded public transactions. Use the
 guarded input form `(amount, minBlock, maxBlock)` so a stale transaction cannot pay a builder in an

@@ -59,6 +59,15 @@ one-hop swap, direct router or direct pair/pool execution is the baseline. Baygu
 when its extra gas buys an execution property we need, such as atomic multi-step execution,
 Permit2 witness binding, private-bundle bribe handling, or exact simulator-to-chain plan matching.
 
+Latest local benchmark at block `25030123` for 1 WETH -> stablecoin routes:
+
+- Generic Baygus router command, output sent directly to the buyer: about `+47k` to `+50k` gas
+  over the direct router path.
+- Baygus direct V2 pair command: about `+17k` to `+18k` gas over the direct router path for
+  Uniswap V2/Sushi V2 WETH/stable routes.
+- Permit2 AllowanceTransfer is still more expensive than plain ERC20 allowance for execution; use it
+  only when the allowance model is worth the gas.
+
 If a command adds overhead without being required by the live path, remove it from the production
 executor and keep it in the research executor or off-chain planner.
 
