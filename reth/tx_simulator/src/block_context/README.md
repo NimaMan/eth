@@ -12,7 +12,7 @@ live feed.
 
 1. **load_block_header(block)**
    * Try `provider.header_by_number` first.
-   * If MDBX returns `None`, pull `block:block_header:<n>` from Redis and
+   * If MDBX returns `None`, pull `eth/live/block/<n>/header` from Redis and
      decode it into a `SealedHeader`.
 
 2. **load_state_for_block(block)**

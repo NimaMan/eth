@@ -23,11 +23,11 @@ p2p_port_udp = 9000
 
 [live_data_registry]
 redis_url_env = "LIVE_BLOCKCHAIN_DATA_REDIS_URL"
-block_header_prefix = "block:block_header:"
-processed_transactions_prefix = "block:processed_transactions:"
-latest_block_number_key = "block:latest_block_number"
-chain_state_snapshot_prefix = "block:chain_state_snapshot:"
-latest_chain_state_block_number_key = "block:latest_chain_state_block_number"
+block_header_prefix = "eth/live/block/<block_number>/header"
+processed_transactions_prefix = "eth/live/block/<block_number>/txs"
+latest_block_number_key = "eth/live/latest/block_number"
+chain_state_snapshot_prefix = "eth/live/block/<block_number>/chain_state_snapshot"
+latest_chain_state_block_number_key = "eth/live/latest/chain_state_block_number"
 
 [services]
 reth_rpc = "http://127.0.0.1:8545"

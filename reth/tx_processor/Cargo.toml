@@ -91,12 +91,12 @@ name = "usdc_to_dai_uniswap_v3"
 path = "examples/pool_analysis/usdc_to_dai_uniswap_v3.rs"
 
 [[example]]
-name = "live_block_service"
-path = "examples/live/run_live_block_service.rs"
-
-[[example]]
 name = "token_metadata_with_prior_tx"
 path = "examples/token_parameter_extraction/token_metadata_with_prior_tx.rs"
+
+[[bin]]
+name = "live_block_processor"
+path = "src/bin/live_block_processor/main.rs"
 
 [[example]]
 name = "denom_token_metadata"

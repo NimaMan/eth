@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{env, path::PathBuf, sync::Arc};
 
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
@@ -29,7 +29,12 @@ impl LiveBlockService {
     ) -> Result<Self> {
         let processor = LiveBlockProcessor::connect(provider, processor_config).await?;
         let publisher = match redis_url.as_ref() {
-            Some(url) => Some(RedisBlockPublisher::new(url, None)?),
+            Some(url) => Some(RedisBlockPublisher::new(
+                url,
+                redis_ttl_seconds(),
+                redis_max_blocks(),
+                redis_processed_block_stream(),
+            )?),
             None => None,
         };
         let notifier = match (redis_url.as_ref(), notifier_channel.as_ref()) {
@@ -120,4 +125,30 @@ impl LiveBlockService {
         }
         Ok(())
     }
+}
+
+fn redis_ttl_seconds() -> Option<usize> {
+    env_usize(&["ETH_LIVE_REDIS_TTL_SECONDS", "LIVE_BLOCK_REDIS_TTL_SECONDS"])
+}
+
+fn redis_max_blocks() -> Option<usize> {
+    env_usize(&["ETH_LIVE_REDIS_MAX_BLOCKS", "LIVE_BLOCK_REDIS_MAX_BLOCKS"]).or(Some(1000))
+}
+
+fn redis_processed_block_stream() -> String {
+    env::var("ETH_PROCESSED_BLOCK_STREAM")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            tx_simulator::live_chain_data::live_data_registry::keys::processed_block_stream_key()
+                .to_string()
+        })
+}
+
+fn env_usize(keys: &[&str]) -> Option<usize> {
+    keys.iter().find_map(|key| {
+        env::var(key)
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+    })
 }

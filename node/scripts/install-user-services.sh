@@ -2,12 +2,18 @@
 set -euo pipefail
 
 REPO_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+RETH_DIR=$(cd "$REPO_DIR/../reth" && pwd)
 USER_SYSTEMD_DIR=${USER_SYSTEMD_DIR:-$HOME/.config/systemd/user}
 RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 ENABLE_NODE_SERVICES=${ENABLE_NODE_SERVICES:-1}
 ENABLE_LIVE_PROCESSOR_SERVICE=${ENABLE_LIVE_PROCESSOR_SERVICE:-1}
+BUILD_LIVE_PROCESSOR=${BUILD_LIVE_PROCESSOR:-1}
 
 mkdir -p "$USER_SYSTEMD_DIR"
+
+if [ "$ENABLE_LIVE_PROCESSOR_SERVICE" = "1" ] && [ "$BUILD_LIVE_PROCESSOR" = "1" ]; then
+  cargo --manifest-path "$RETH_DIR/Cargo.toml" build --release -p tx_processor --bin live_block_processor
+fi
 
 ln -sfn "$REPO_DIR/systemd/user/reth.service" "$USER_SYSTEMD_DIR/reth.service"
 ln -sfn "$REPO_DIR/systemd/user/lighthouse-beacon.service" "$USER_SYSTEMD_DIR/lighthouse-beacon.service"

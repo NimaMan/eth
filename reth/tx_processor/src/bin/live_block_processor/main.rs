@@ -18,14 +18,12 @@ async fn main() -> Result<()> {
     let notifier_channel = env::var("REDIS_BLOCK_CHANNEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| Some("live_blocks".into()));
+        .or_else(|| Some("eth/live/block_notifications".into()));
     let block_limit: Option<usize> = env::var("LIVE_BLOCK_LIMIT")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| value.parse().ok());
-    let log_path = env::var("LIVE_BLOCK_LOG")
-        .ok()
-        .map(|path| PathBuf::from(path));
+    let log_path = env::var("LIVE_BLOCK_LOG").ok().map(PathBuf::from);
 
     let processor_config = LiveBlockProcessorConfig::default()
         .with_execution_rpc(execution_rpc.clone())

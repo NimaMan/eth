@@ -115,15 +115,29 @@ impl LiveChainCache {
     /// Return up to `limit` most recent block numbers present in the cache, descending.
     pub async fn recent_block_numbers(&self, limit: usize) -> Result<Vec<u64>> {
         let mut conn = self.connection().await?;
-        let mut numbers = Vec::with_capacity(limit);
         if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let raw: Vec<String> = redis::cmd("ZREVRANGE")
+            .arg(live_data_registry::keys::recent_blocks_key())
+            .arg(0)
+            .arg(limit.saturating_sub(1))
+            .query_async(&mut conn)
+            .await?;
+        let numbers: Vec<u64> = raw
+            .into_iter()
+            .filter_map(|value| value.parse::<u64>().ok())
+            .collect();
+        if !numbers.is_empty() {
             return Ok(numbers);
         }
 
         let Some(latest) = self.latest_block_number().await? else {
-            return Ok(numbers);
+            return Ok(Vec::new());
         };
 
+        let mut numbers = Vec::with_capacity(limit);
         numbers.push(latest);
         let mut current = latest;
         for _ in 1..limit {

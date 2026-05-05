@@ -9,8 +9,19 @@ use std::collections::HashSet;
 #[derive(Debug, Clone)]
 pub struct LiveBlockSnapshot {
     pub block_number: u64,
+    pub block_hash: String,
+    pub parent_hash: Option<String>,
+    pub timestamp: u64,
     pub header_json: Option<String>,
-    pub tx_entries: Vec<(String, String)>,
+    pub tx_entries: Vec<LiveTxEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LiveTxEntry {
+    pub hash: String,
+    pub tx_index: u64,
+    pub payload_json: String,
+    pub unique_addresses: Vec<String>,
 }
 
 /// Build a snapshot that mirrors Python's `build_block_snapshot` output.
@@ -26,6 +37,9 @@ pub fn build_live_block_snapshot(block: &ProcessedBlock) -> Result<LiveBlockSnap
 
     Ok(LiveBlockSnapshot {
         block_number: block.header.number,
+        block_hash: format!("{:#x}", block.header.hash),
+        parent_hash: Some(format!("{:#x}", block.header.parent_hash)),
+        timestamp: block.header.timestamp,
         header_json: Some(header_json),
         tx_entries,
     })
@@ -67,8 +81,9 @@ fn to_hex(value: u64) -> String {
     format!("0x{:x}", value)
 }
 
-fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<(String, String)> {
+fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<LiveTxEntry> {
     let tx_hash = format!("{:#x}", tx.processed.hash);
+    let unique_addresses = address_set_to_strings(&tx.processed.unique_addresses);
     let mut payload = serde_json::to_value(&tx.processed).map_err(|err| {
         eyre!(
             "failed to serialize processed transaction {}: {}",
@@ -111,7 +126,7 @@ fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<(String, S
     );
     object.insert(
         "unique_addresses".to_string(),
-        address_set_to_json(&tx.processed.unique_addresses),
+        json!(unique_addresses.clone()),
     );
     object.insert(
         "erc20_contracts".to_string(),
@@ -133,14 +148,23 @@ fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<(String, S
             err
         )
     })?;
-    Ok((tx_hash, tx_json))
+    Ok(LiveTxEntry {
+        hash: tx_hash,
+        tx_index: tx.processed.tx_index,
+        payload_json: tx_json,
+        unique_addresses,
+    })
 }
 
 fn address_set_to_json(addresses: &HashSet<Address>) -> Value {
+    json!(address_set_to_strings(addresses))
+}
+
+fn address_set_to_strings(addresses: &HashSet<Address>) -> Vec<String> {
     let mut values: Vec<String> = addresses
         .iter()
         .map(reth_chain_query::to_checksum_address)
         .collect();
     values.sort();
-    json!(values)
+    values
 }
