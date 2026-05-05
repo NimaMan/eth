@@ -171,6 +171,13 @@ fn build_transaction_entry(tx: &ProcessedBlockTransactions) -> Result<LiveTxEntr
         "erc1155_contracts".to_string(),
         address_set_to_json(&tx.processed.erc1155_contracts),
     );
+    object.insert(
+        "processing_error".to_string(),
+        tx.processing_error
+            .as_ref()
+            .map(|error| json!(error))
+            .unwrap_or(Value::Null),
+    );
 
     let tx_json = serde_json::to_string(&payload).map_err(|err| {
         eyre!(

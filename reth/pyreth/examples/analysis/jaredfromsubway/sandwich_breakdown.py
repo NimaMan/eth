@@ -28,8 +28,9 @@ from eth_abi import decode
 from web3 import Web3
 from web3.contract import Contract
 from web3.types import EventData, LogReceipt
+from eth_token.erc20_token.pools.addresses import checksum_address_set, require_checksum_address
 
-WETH = Web3.to_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+WETH = require_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
 WETH_TRANSFER = Web3.keccak(text="Transfer(address,address,uint256)").hex()
 WETH_WITHDRAW = Web3.keccak(text="Withdrawal(address,uint256)").hex()
 UNISWAP_V2_SWAP = Web3.keccak(
@@ -102,7 +103,7 @@ class TxSummary:
     swap_legs: List[SwapLeg] = field(default_factory=list)
 
     def add_weth_flow(self, address: str, delta: int) -> None:
-        key = address.lower()
+        key = require_checksum_address(address)
         flow = self.weth_flows.setdefault(key, WethFlow(address=address))
         flow.delta_wei += delta
 
@@ -136,31 +137,31 @@ def get_token_meta(w3: Web3, address: str) -> Tuple[str, int]:
 def decode_weth_transfers(
     logs: Iterable[LogReceipt], summary: TxSummary, focus_addrs: Iterable[str]
 ) -> None:
-    focus = {addr.lower() for addr in focus_addrs}
+    focus = checksum_address_set(focus_addrs)
     for log in logs:
         if log["address"] != WETH:
             continue
         topic0 = log["topics"][0].hex()
         if topic0 == WETH_TRANSFER:
-            from_addr = Web3.to_checksum_address(log["topics"][1].hex()[-40:])
-            to_addr = Web3.to_checksum_address(log["topics"][2].hex()[-40:])
+            from_addr = require_checksum_address(log["topics"][1].hex()[-40:])
+            to_addr = require_checksum_address(log["topics"][2].hex()[-40:])
             raw = log["data"]
             if isinstance(raw, (bytes, bytearray)):
                 value = int.from_bytes(raw, "big")
             else:
                 value = int(raw, 16)
-            if from_addr.lower() in focus:
+            if from_addr in focus:
                 summary.add_weth_flow(from_addr, -value)
-            if to_addr.lower() in focus:
+            if to_addr in focus:
                 summary.add_weth_flow(to_addr, value)
         elif topic0 == WETH_WITHDRAW:
-            to_addr = Web3.to_checksum_address(log["topics"][1].hex()[-40:])
+            to_addr = require_checksum_address(log["topics"][1].hex()[-40:])
             raw = log["data"]
             if isinstance(raw, (bytes, bytearray)):
                 value = int.from_bytes(raw, "big")
             else:
                 value = int(raw, 16)
-            if to_addr.lower() in focus:
+            if to_addr in focus:
                 summary.add_weth_flow(to_addr, -value)
 
 
@@ -170,7 +171,7 @@ def decode_uniswap_swaps(w3: Web3, logs: Iterable[LogReceipt], summary: TxSummar
             continue
         if log["topics"][0].hex() != UNISWAP_V2_SWAP:
             continue
-        pool = Web3.to_checksum_address(log["address"])
+        pool = require_checksum_address(log["address"])
         pair = get_pair_contract(w3, pool)
         token0 = pair.functions.token0().call()
         token1 = pair.functions.token1().call()
@@ -198,11 +199,11 @@ def decode_uniswap_swaps(w3: Web3, logs: Iterable[LogReceipt], summary: TxSummar
 def fetch_bundle_transactions(w3: Web3, tx_hash: str) -> Tuple[str, List[str]]:
     tx = w3.eth.get_transaction(tx_hash)
     block = w3.eth.get_block(tx["blockNumber"], full_transactions=True)
-    sender = tx["from"].lower()
+    sender = require_checksum_address(tx["from"])
     bundle_hashes = [
         Web3.to_hex(t["hash"])
         for t in block["transactions"]
-        if t["from"].lower() == sender
+        if require_checksum_address(t["from"]) == sender
     ]
     bundle_hashes.sort(
         key=lambda h: w3.eth.get_transaction(h)["transactionIndex"]
@@ -258,7 +259,7 @@ def main() -> None:
     if not w3.is_connected():
         raise SystemExit(f"Unable to connect to RPC endpoint: {args.rpc}")
 
-    focus_addrs = [Web3.to_checksum_address(addr) for addr in args.watch]
+    focus_addrs = [require_checksum_address(addr) for addr in args.watch]
     sender, bundle_hashes = fetch_bundle_transactions(w3, args.tx_hash)
 
     print(f"Bundle sender: {sender}")
@@ -299,10 +300,10 @@ def main() -> None:
 
     net_profit = decimal.Decimal(0)
     for summary in summaries:
-        delta = summary.weth_flows.get(focus_addrs[0].lower())
+        delta = summary.weth_flows.get(require_checksum_address(focus_addrs[0]))
         if delta:
             net_profit += delta.delta_eth()
-        delta_contract = summary.weth_flows.get(focus_addrs[1].lower())
+        delta_contract = summary.weth_flows.get(require_checksum_address(focus_addrs[1]))
         if delta_contract:
             net_profit += delta_contract.delta_eth()
 

@@ -2,6 +2,7 @@ import pytest
 
 from eth_data.live_data_registry import keys
 from eth_data.live_data_registry.reader import RedisSnapshotReader
+from eth_token.erc20_token.pools.addresses import require_checksum_address
 
 
 @pytest.mark.integration
@@ -23,4 +24,4 @@ def test_fetch_live_token_snapshot():
     snapshot = reader.get_token_snapshot(token_address)
 
     assert snapshot is not None, "Expected snapshot for live token address"
-    assert snapshot.get("contract_address", "").lower() == token_address.lower()
+    assert require_checksum_address(snapshot.get("contract_address", "")) == require_checksum_address(token_address)

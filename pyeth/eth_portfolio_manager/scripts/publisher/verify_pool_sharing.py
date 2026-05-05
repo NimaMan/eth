@@ -42,9 +42,10 @@ from web3 import Web3
 from typing import Dict, Tuple, List, Optional, Set
 import asyncio
 from datetime import datetime
+from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 
 # Constants
-WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+WETH_ADDRESS = require_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
 TOLERANCE_PERCENT = 0.1  # 0.1% tolerance
 TOLERANCE_ETH_ABS = 0.001  # 0.001 ETH absolute tolerance
 
@@ -127,12 +128,13 @@ class PoolSharingVerifier:
     
     def get_token_info(self, token_address: str) -> Tuple[int, str]:
         """Get decimals and symbol for a token."""
+        token_address = require_checksum_address(token_address)
         if token_address in self.token_decimals_cache:
             return self.token_decimals_cache[token_address], self.token_symbol_cache[token_address]
         
         try:
             token_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(token_address),
+                address=token_address,
                 abi=ERC20_ABI
             )
             decimals = token_contract.functions.decimals().call()
@@ -150,9 +152,10 @@ class PoolSharingVerifier:
     
     def get_pool_reserves_from_chain(self, pool_address: str) -> Optional[Dict]:
         """Get actual pool reserves from blockchain."""
+        pool_address = require_checksum_address(pool_address)
         try:
             pool_contract = self.w3.eth.contract(
-                address=self.w3.to_checksum_address(pool_address),
+                address=pool_address,
                 abi=UNISWAP_V2_PAIR_ABI
             )
             
@@ -173,8 +176,8 @@ class PoolSharingVerifier:
             reserve1 = float(reserve1_raw) / (10 ** decimals1)
             
             # Determine which is WETH
-            token0_is_weth = token0.lower() == WETH_ADDRESS.lower()
-            token1_is_weth = token1.lower() == WETH_ADDRESS.lower()
+            token0_is_weth = same_address(token0, WETH_ADDRESS)
+            token1_is_weth = same_address(token1, WETH_ADDRESS)
             
             # One token must be WETH for ETH pools
             if not (token0_is_weth or token1_is_weth):
@@ -243,13 +246,14 @@ class PoolSharingVerifier:
         # Extract published values
         pub_eth = published_data.get('eth_reserve', 0)
         pub_token = published_data.get('token_reserve', 0)
-        pub_token_addr = published_data.get('token_address', '').lower()
+        pub_token_addr = require_checksum_address(published_data.get('token_address', ''))
+        chain_token_addr = require_checksum_address(chain_data['token_address'])
         
         # Verify token address matches
-        if pub_token_addr != chain_data['token_address'].lower():
+        if pub_token_addr != chain_token_addr:
             print(f"\n❌ {pool_address}: Token address mismatch!")
             print(f"   Published: {pub_token_addr}")
-            print(f"   Chain:     {chain_data['token_address'].lower()}")
+            print(f"   Chain:     {chain_token_addr}")
             self.results['failed_pools'].append({
                 'pool': pool_address,
                 'reason': 'Token address mismatch'

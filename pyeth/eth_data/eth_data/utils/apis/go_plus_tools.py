@@ -1,5 +1,6 @@
 import requests
 from typing import Optional
+from eth_token.erc20_token.pools.addresses import checksum_address
 
 
 def get_url(chain_id: int) -> str:
@@ -19,8 +20,10 @@ def get_token_security(contract_address: str, chain_id: int=1) -> dict:
     response = requests.get(url, params=params)
     response = response.json()
     if 'result' in response:
-        if contract_address.lower() in response['result']:
-            return response['result'][contract_address.lower()]
+        requested_address = checksum_address(contract_address)
+        for result_address, result in response['result'].items():
+            if checksum_address(result_address) == requested_address:
+                return result
 
 
 def is_honeypot(contract_address: str, chain_id: int=1) -> Optional[bool]:

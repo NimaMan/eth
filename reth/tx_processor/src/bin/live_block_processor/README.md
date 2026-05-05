@@ -16,12 +16,14 @@ It watches Ethereum head updates, processes each live block through the Rust tra
 - Redis default: `LIVE_BLOCKCHAIN_DATA_REDIS_URL` from `config.env`, falling back to `redis://localhost:6379/0`
 - Redis Stream default: `eth/live/blocks`
 - Pub/Sub channel default: `eth/live/block_notifications`
+- Log file default: `ETH_LOG_DIR/block_processor/live_block_processor_<YYYYMMDD_HHMMSS>.log`
 
 Runtime state is intentionally not embedded here because it changes every block. Check systemd and Redis directly:
 
 ```bash
 systemctl status eth-live-block-processor.service --no-pager
 redis-cli GET eth/live/latest/block_number
+ls -t /home/nima/code/crypto/blockchains/eth/logs/block_processor/live_block_processor_*.log | head -1
 ```
 
 ## What It Publishes
@@ -63,6 +65,23 @@ LIVE_BLOCK_LIMIT=1 \
 RUST_LOG=info \
 cargo run --release -p tx_processor --bin live_block_processor
 ```
+
+The timestamped log file keeps only compact per-block summary lines:
+
+```text
+2026-05-05 11:05:49.521 - INFO - 25028392->435|10 in 0.18s
+```
+
+The number after `|` is the count of transactions that the Rust processor failed
+to decode/process. On-chain reverts with receipt status `0x0` do not increment it.
+Verbose Rust tracing stays in journald; inspect it with
+`journalctl -u eth-live-block-processor.service`.
+
+Path selection order:
+
+- `LIVE_BLOCK_LOG=/path/to/file.log` writes to that exact file.
+- `LIVE_BLOCK_LOG=/path/to/dir` or `LIVE_BLOCK_LOG_DIR=/path/to/dir` creates a timestamped file there.
+- Otherwise it uses `ETH_LOG_DIR/block_processor`, matching the Python logger layout.
 
 Continuous mode:
 

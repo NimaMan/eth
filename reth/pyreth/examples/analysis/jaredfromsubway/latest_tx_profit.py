@@ -17,6 +17,7 @@ from decimal import Decimal, getcontext
 from typing import Dict, Iterable, List, Optional
 
 import pyreth
+from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 from eth_data.reth_chain_query.reth_index.address_tx_history import RethAddressTxHistory
 
 getcontext().prec = 40
@@ -27,9 +28,13 @@ WATCHED_ENTITIES: Dict[str, str] = {
     "bundle_contract": "0x1f2F10D1C40777AE1Da742455c65828FF36Df387",
     "payout_wallet": "0x02c552AFB2F5C7b8e8253e5a28Dcdf2AD68Cdb3D",
 }
+WATCHED_ENTITIES = {
+    alias: require_checksum_address(address)
+    for alias, address in WATCHED_ENTITIES.items()
+}
 
-ADDRESS_TO_ALIAS = {addr.lower(): alias for alias, addr in WATCHED_ENTITIES.items()}
-WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+ADDRESS_TO_ALIAS = {addr: alias for alias, addr in WATCHED_ENTITIES.items()}
+WETH_ADDRESS = require_checksum_address("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
 
 
 @dataclass
@@ -103,7 +108,7 @@ class TokenMetadataResolver:
         self._cache: Dict[str, Dict[str, object]] = {}
 
     def get(self, token_address: str, block_number: int) -> Dict[str, object]:
-        key = token_address.lower()
+        key = require_checksum_address(token_address)
         if key not in self._cache:
             decimals = 18
             symbol = token_address[:6]
@@ -242,7 +247,7 @@ class ProfitCalculator:
 
         token_net = change.get("token_net") or {}
         for token_address, raw_amount in token_net.items():
-            if token_address.lower() != WETH_ADDRESS.lower():
+            if not same_address(token_address, WETH_ADDRESS):
                 continue
             metadata = self._metadata.get(token_address, block_number)
             decimals = int(metadata["decimals"])
@@ -260,7 +265,7 @@ class ProfitCalculator:
         balance_changes = tx.address_balance_changes or {}
 
         for address, change in balance_changes.items():
-            alias = ADDRESS_TO_ALIAS.get(address.lower())
+            alias = ADDRESS_TO_ALIAS.get(require_checksum_address(address))
             if not alias:
                 continue
             flow = flows.setdefault(alias, AddressFlow(address=address, alias=alias))
@@ -283,7 +288,7 @@ class ProfitCalculator:
         fees = tx.fees or {}
         if fees:
             gas_paid_eth = self._gas_fee_delta(tx)
-            alias = ADDRESS_TO_ALIAS.get(tx.from_address.lower())
+            alias = ADDRESS_TO_ALIAS.get(require_checksum_address(tx.from_address))
             if alias:
                 flow = flows.setdefault(
                     alias,
@@ -312,7 +317,7 @@ class ProfitCalculator:
                 eth_delta = flow.currency.get("ETH", Decimal(0))
                 aggregate.eth += eth_delta
                 for token_amount in flow.tokens.values():
-                    if token_amount.token_address.lower() == WETH_ADDRESS.lower():
+                    if same_address(token_amount.token_address, WETH_ADDRESS):
                         aggregate.weth += token_amount.amount
                     else:
                         aggregate.add_token(token_amount)
@@ -415,7 +420,7 @@ class ProfitReporter:
         def describe(entries):
             lines = []
             for address, delta in entries[:top_n]:
-                alias = ADDRESS_TO_ALIAS.get(address.lower(), "")
+                alias = ADDRESS_TO_ALIAS.get(require_checksum_address(address), "")
                 tag = f" ({alias})" if alias else ""
                 lines.append(f"  {address}{tag}: {self._format_decimal(delta)}")
             return "\n".join(lines) if lines else "  (none)"
@@ -432,8 +437,8 @@ class ProfitReporter:
         sorted_edges = sorted(edges, key=lambda edge: edge.amount, reverse=True)
         print("\nTop edges by absolute ETH flow:")
         for edge in sorted_edges[:top_n]:
-            src_alias = ADDRESS_TO_ALIAS.get(edge.source.lower(), "")
-            dst_alias = ADDRESS_TO_ALIAS.get(edge.target.lower(), "")
+            src_alias = ADDRESS_TO_ALIAS.get(require_checksum_address(edge.source), "")
+            dst_alias = ADDRESS_TO_ALIAS.get(require_checksum_address(edge.target), "")
             src_tag = f" ({src_alias})" if src_alias else ""
             dst_tag = f" ({dst_alias})" if dst_alias else ""
             print(

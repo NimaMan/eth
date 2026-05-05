@@ -45,6 +45,11 @@ from eth_token.erc20_token.pools.base_pool import BasePool
 from eth_token.erc20_token.pools.uniswap_v2_pool import UniswapV2Pool
 from eth_token.erc20_token.pools.uniswap_v3_pool import UniswapV3Pool
 from eth_token.erc20_token.pools.uniswap_v4_pool import UniswapV4Pool, PoolKey
+from eth_token.erc20_token.pools.addresses import (
+    checksum_address,
+    checksum_address_set,
+    require_checksum_address,
+)
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.chain_utils.common_addresses import (
@@ -58,6 +63,7 @@ from eth_data.chain_utils.common_addresses import (
 UNISWAP_V2_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V2')
 UNISWAP_V3_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V3')
 UNISWAP_V4_PROTOCOL = canonicalize_dex_pool_type('UNISWAP-V4')
+ZERO_ADDRESS_CHECKSUM = require_checksum_address(ZERO_ADDRESS)
 
 
 PROTOCOL_ALIASES = {
@@ -76,7 +82,7 @@ class PoolManager:
     """
     
     def __init__(self, token_address: str, history_limit: int = 100):
-        self.token_address = token_address
+        self.token_address = require_checksum_address(token_address)
         self.history_limit = history_limit
         
         # Pool storage by address
@@ -118,16 +124,20 @@ class PoolManager:
             v4_pool.update_from_transaction(transaction)            
     
     def _get_denom_symbol(self, token_address: str) -> str:
+        token_address = checksum_address(token_address) or token_address
         return DENOM_ADDRESSES.get(token_address, 'Unknown')
     
     def _get_token_decimals(self, block_number: Optional[int] = None, block_header: Optional[str] = None) -> Optional[int]:
+        _ = block_header
         if self._token_decimals is None:
-            self._token_decimals = int(self.token_chain_data_fetcher.get_token_decimals(self.token_address,block_number,block_header))
+            self._token_decimals = int(self.token_chain_data_fetcher.get_token_decimals(self.token_address, block_number))
         return self._token_decimals
 
     def _get_denom_decimals(self, denom_address: str, block_number: Optional[int] = None, block_header: Optional[str] = None) -> int:
+        _ = block_header
+        denom_address = require_checksum_address(denom_address)
         if denom_address not in self._denom_decimals_cache:
-            self._denom_decimals_cache[denom_address] = int(self.token_chain_data_fetcher.get_token_decimals(denom_address, block_number,block_header))
+            self._denom_decimals_cache[denom_address] = int(self.token_chain_data_fetcher.get_token_decimals(denom_address, block_number))
         return self._denom_decimals_cache[denom_address]
 
     def _pool_decimal_kwargs(self, denom_address: str, block_number: Optional[int] = None, block_header: Optional[str] = None) -> Dict[str, int]:
@@ -157,9 +167,9 @@ class PoolManager:
     def _handle_v2_creation(self, pair_event: dict, transaction: Dict):
         """Handle V2 pair creation."""
 
-        pair_address = pair_event['pair_address']
-        token0 = pair_event['token0']
-        token1 = pair_event['token1']
+        pair_address = require_checksum_address(pair_event['pair_address'])
+        token0 = require_checksum_address(pair_event['token0'])
+        token1 = require_checksum_address(pair_event['token1'])
         
         # Skip if already registered
         if pair_address in self.pools:
@@ -201,9 +211,9 @@ class PoolManager:
         """Handle V3 pool creation."""
         
         # V3 pool creation events use 'pool' field for address
-        pool_address = pool_event.get('pool', pool_event.get('pool_address', ''))
-        token0 = pool_event['token0']
-        token1 = pool_event['token1']
+        pool_address = require_checksum_address(pool_event.get('pool', pool_event.get('pool_address', '')))
+        token0 = require_checksum_address(pool_event['token0'])
+        token1 = require_checksum_address(pool_event['token1'])
         fee = pool_event.get('fee', 3000)
         
         # Skip if already registered
@@ -253,11 +263,11 @@ class PoolManager:
         
         # V4 events use event_id for pool identification
         pool_id = init_event.get('event_id', init_event.get('pool_id', ''))
-        currency0 = init_event['currency0']
-        currency1 = init_event['currency1']
+        currency0 = require_checksum_address(init_event['currency0'])
+        currency1 = require_checksum_address(init_event['currency1'])
         fee = init_event.get('fee', 3000)
         tick_spacing = init_event.get('tick_spacing', 60)
-        hooks = init_event.get('hooks', '0x0000000000000000000000000000000000000000')
+        hooks = require_checksum_address(init_event.get('hooks', ZERO_ADDRESS))
         
         # Skip if already registered
         if pool_id in self.v4_pools:
@@ -282,7 +292,7 @@ class PoolManager:
             hooks=hooks
         )
         
-        if denom_address == ZERO_ADDRESS:
+        if denom_address == ZERO_ADDRESS_CHECKSUM:
             denom_address = DENOM_NAMES_TO_ADDRESS["WETH"]            
         decimal_kwargs = self._pool_decimal_kwargs(
                 denom_address,
@@ -332,13 +342,16 @@ class PoolManager:
         Used for pools that already exist when we start tracking a token.
         """
         
-        # Skip if already exists
-        if pool_address in self.pools:
-            return self.pools[pool_address]
-
         normalized_protocol = canonicalize_dex_pool_type(
             PROTOCOL_ALIASES.get(protocol, protocol)
         )
+        denom_address = require_checksum_address(denom_address)
+        if normalized_protocol != UNISWAP_V4_PROTOCOL:
+            pool_address = require_checksum_address(pool_address)
+
+        # Skip if already exists
+        if pool_address in self.pools:
+            return self.pools[pool_address]
 
         # Create appropriate pool instance
         if normalized_protocol == UNISWAP_V2_PROTOCOL:
@@ -396,6 +409,7 @@ class PoolManager:
         Returns:
             The created V4 pool instance or None if creation fails
         """
+        denom_address = require_checksum_address(denom_address)
         # Check if already exists
         if pool_id in self.v4_pools:
             return self.v4_pools[pool_id]
@@ -406,7 +420,7 @@ class PoolManager:
             currency1=denom_address if not token1_is_denom else self.token_address,
             fee=kwargs.get('fee', 3000),
             tick_spacing=kwargs.get('tick_spacing', 60),
-            hooks=kwargs.get('hooks', '0x0000000000000000000000000000000000000000')
+            hooks=require_checksum_address(kwargs.get('hooks', ZERO_ADDRESS))
         )
         
         # Create V4 pool instance
@@ -426,9 +440,10 @@ class PoolManager:
         return pool
     
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
-        self._token_control_addresses.update(addresses)
+        normalized_addresses = checksum_address_set(addresses)
+        self._token_control_addresses.update(normalized_addresses)
         for pool in self.get_all_pools():
-            pool.register_token_control_addresses(addresses)
+            pool.register_token_control_addresses(normalized_addresses)
         
     def _update_latest_block_transactions(self, transaction: Dict) -> None:
         block_number = transaction.get('block_number')
@@ -438,19 +453,21 @@ class PoolManager:
             self._latest_block_txs_from_addresses_containing_control_adresses = set()
         tx_hash = transaction.get('hash')
         self._latest_block_txs[tx_hash] = transaction
-        unique_addresses = set(transaction.get('unique_addresses') or [])
+        unique_addresses = checksum_address_set(transaction.get('unique_addresses') or [])
         if not self._token_control_addresses.intersection(unique_addresses):
             return
         # Track the from addresses that have had token control addresses in their tx.
-        from_address = transaction.get('from_address')
-        self._latest_block_txs_from_addresses_containing_control_adresses.add(from_address)
+        from_address = checksum_address(transaction.get('from_address'))
+        if from_address:
+            self._latest_block_txs_from_addresses_containing_control_adresses.add(from_address)
     
     def _current_block_controller_transactions(self) -> Dict[str, Dict[str, Any]]:
         if not self._latest_block_txs or not self._latest_block_txs_from_addresses_containing_control_adresses:
             return {}
         relevant: Dict[str, Dict[str, Any]] = {}
         for tx_hash, tx in self._latest_block_txs.items():
-            if tx.get('from_address') in self._latest_block_txs_from_addresses_containing_control_adresses:
+            from_address = checksum_address(tx.get('from_address'))
+            if from_address in self._latest_block_txs_from_addresses_containing_control_adresses:
                 relevant[tx_hash] = tx
         return relevant
 
@@ -478,7 +495,8 @@ class PoolManager:
             if len(parts) == 2:
                 pool_id = parts[1]
                 return self.v4_pools.get(pool_id)
-        pool = self.pools.get(pool_address)
+        pool_key = checksum_address(pool_address) or pool_address
+        pool = self.pools.get(pool_key)
         return pool
         
     def get_all_pools(self) -> List[BasePool]:
@@ -674,14 +692,14 @@ class PoolManager:
         # Check V2 swaps
         if transaction.get('uniswap_v2_swaps'):
             for swap in transaction['uniswap_v2_swaps']:
-                pair_address = swap.get('pair_address', '')
+                pair_address = checksum_address(swap.get('pair_address'))
                 if pair_address and pair_address not in self.pools:
                     self._load_and_register_v2_pool(pair_address, transaction)
                 
         # Check V3 swaps  
         if transaction.get('uniswap_v3_swaps'):
             for swap in transaction['uniswap_v3_swaps']:
-                pool_address = swap.get('pool_address', '')
+                pool_address = checksum_address(swap.get('pool_address'))
                 if pool_address and pool_address not in self.pools:
                     self._load_and_register_v3_pool(pool_address, transaction)
         
@@ -693,6 +711,7 @@ class PoolManager:
 
         Used when a pool is detected through swap events rather than creation events.
         """
+        pair_address = require_checksum_address(pair_address)
         try:
             # Skip if already being processed
             if pair_address in self._processing_pools:
@@ -722,7 +741,9 @@ class PoolManager:
                 token_address=self.token_address,
                 denom_address=pool_info['denom_address'],
                 **decimal_kwargs,
-                token1_is_denom=pool_info['token1_is_denom']
+                token1_is_denom=pool_info['token1_is_denom'],
+                pool_chain_fetcher=self.chain_data_fetcher,
+                token_chain_fetcher=self.token_chain_data_fetcher,
             )
             
             pool.creation_block = transaction.get('block_number')
@@ -747,6 +768,7 @@ class PoolManager:
 
         Used when a pool is detected through swap events rather than creation events.
         """
+        pool_address = require_checksum_address(pool_address)
         try:
             # Skip if already being processed
             if pool_address in self._processing_pools:
@@ -777,7 +799,9 @@ class PoolManager:
                 denom_address=pool_info['denom_address'],
                 **decimal_kwargs,
                 token1_is_denom=pool_info['token1_is_denom'],
-                fee_tier=pool_info.get('fee', 3000)
+                fee_tier=pool_info.get('fee', 3000),
+                pool_chain_fetcher=self.chain_data_fetcher,
+                token_chain_fetcher=self.token_chain_data_fetcher,
             )
             
             pool.creation_block = transaction.get('block_number')

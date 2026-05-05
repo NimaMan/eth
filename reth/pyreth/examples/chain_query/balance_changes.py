@@ -4,6 +4,7 @@ Example: Track balance changes between blocks
 """
 
 import pyreth
+from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 
 def format_wei(wei_str):
     """Format wei to ETH with 4 decimals"""
@@ -38,8 +39,8 @@ def main():
     ]
     
     # Token addresses
-    usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+    usdc = require_checksum_address("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+    usdt = require_checksum_address("0xdAC17F958D2ee523a2206206994597C13D831ec7")
     
     tokens = [usdc, usdt]
     
@@ -68,7 +69,7 @@ def main():
             if token_changes:
                 print(f"\nToken Changes:")
                 for token_addr, change_data in token_changes.items():
-                    token_name = "USDC" if token_addr.lower() == usdc.lower() else "USDT"
+                    token_name = "USDC" if same_address(token_addr, usdc) else "USDT"
                     print(f"  {token_name}: {change_data}")
             
         except Exception as e:

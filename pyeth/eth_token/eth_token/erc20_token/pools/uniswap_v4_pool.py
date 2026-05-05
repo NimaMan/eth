@@ -29,9 +29,10 @@ Blockchain Interface:
 
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
-from web3 import Web3
 
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
+from eth_token.erc20_token.pools.addresses import require_checksum_address
+from eth_token.erc20_token.pools.numeric import parse_raw_float, parse_raw_int
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.pyreth_client import pyreth
@@ -128,8 +129,8 @@ class UniswapV4Pool(BasePool):
         # Mark token as buyable from first swap event
         self.mark_can_buy_from_event(transaction, event_type='swap')
         
-        self.sqrt_price_x96 = int(swap.get('sqrt_price_x96', 0))
-        new_tick = int(swap.get('tick', 0))
+        self.sqrt_price_x96 = parse_raw_int(swap.get('sqrt_price_x96', 0))
+        new_tick = parse_raw_int(swap.get('tick', 0))
         
         if self.current_tick != new_tick:
             self.current_liquidity = self._get_liquidity_for_tick(new_tick)
@@ -138,8 +139,8 @@ class UniswapV4Pool(BasePool):
         self._update_virtual_reserves()
         self._update_prices()
 
-        amount0 = float(swap.get('amount0', 0))
-        amount1 = float(swap.get('amount1', 0))
+        amount0 = parse_raw_float(swap.get('amount0', 0))
+        amount1 = parse_raw_float(swap.get('amount1', 0))
         token_amount, denom_amount = self._map_token_and_denom(amount0, amount1)
         self.state.token_volume_in += max(0.0, token_amount)
         self.state.token_volume_out += max(0.0, -token_amount)
@@ -153,9 +154,9 @@ class UniswapV4Pool(BasePool):
         # NOTE: Modifying liquidity does NOT mean trading is enabled
         # We only mark trading enabled on swaps
 
-        liquidity_delta = int(modify.get('liquidity_delta', 0))
-        tick_lower = int(modify.get('tick_lower', 0))
-        tick_upper = int(modify.get('tick_upper', 0))
+        liquidity_delta = parse_raw_int(modify.get('liquidity_delta', 0))
+        tick_lower = parse_raw_int(modify.get('tick_lower', 0))
+        tick_upper = parse_raw_int(modify.get('tick_upper', 0))
         self.register_token_control_addresses(
             [modify.get('owner')]
             or [modify.get('sender')]
@@ -281,11 +282,11 @@ class UniswapV4Pool(BasePool):
             self._append_event(self.price_history, (self.state.last_update_block, self.get_price()))
 
     def _get_token0_decimals(self) -> int:
-        currency0 = Web3.to_checksum_address(self.pool_key.currency0)
-        token_addr = Web3.to_checksum_address(self.token_address)
-        denom_addr = Web3.to_checksum_address(self.denom_address)
+        currency0 = require_checksum_address(self.pool_key.currency0)
+        token_addr = require_checksum_address(self.token_address)
+        denom_addr = require_checksum_address(self.denom_address)
 
-        if currency0 == Web3.to_checksum_address(ZERO_ADDRESS):
+        if currency0 == require_checksum_address(ZERO_ADDRESS):
             return 18
         if currency0 == token_addr:
             return self.get_token_decimals()
@@ -294,11 +295,11 @@ class UniswapV4Pool(BasePool):
         return int(self.token_chain_fetcher.get_token_decimals(currency0))
 
     def _get_token1_decimals(self) -> int:
-        currency1 = Web3.to_checksum_address(self.pool_key.currency1)
-        token_addr = Web3.to_checksum_address(self.token_address)
-        denom_addr = Web3.to_checksum_address(self.denom_address)
+        currency1 = require_checksum_address(self.pool_key.currency1)
+        token_addr = require_checksum_address(self.token_address)
+        denom_addr = require_checksum_address(self.denom_address)
 
-        if currency1 == Web3.to_checksum_address(ZERO_ADDRESS):
+        if currency1 == require_checksum_address(ZERO_ADDRESS):
             return 18
         if currency1 == token_addr:
             return self.get_token_decimals()

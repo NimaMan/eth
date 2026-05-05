@@ -2,10 +2,10 @@ mod conversion;
 pub mod types;
 
 use crate::tx_processor::data_models::{
-    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction,
+    ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction, TransactionFees,
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{keccak256, Address, B256, U256};
 use eyre::{bail, Result};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use reth_chain_query::{
@@ -204,15 +204,33 @@ impl BlockProcessor {
             .enumerate()
         {
             let trace = trace_list.get(index).cloned();
-            let processed = self
+            let (processed, processing_error) = match self
                 .process_single_transaction(&metadata, &receipt, trace.as_ref())
-                .await?;
+                .await
+            {
+                Ok(processed) => (processed, None),
+                Err(err) => {
+                    let error = err.to_string();
+                    tracing::warn!(
+                        block_number = header.number,
+                        tx_index = metadata.tx_index,
+                        tx_hash = format!("{:#x}", metadata.hash),
+                        "failed to process transaction: {}",
+                        error
+                    );
+                    (
+                        processing_failed_transaction(&metadata, &receipt, &error),
+                        Some(error),
+                    )
+                }
+            };
 
             processed_transactions.push(ProcessedBlockTransactions {
                 metadata,
                 receipt,
                 processed,
                 trace,
+                processing_error,
             });
         }
 
@@ -315,6 +333,60 @@ fn derive_create_address(from: Address, nonce: u64) -> Address {
     stream.append(&nonce);
     let hash = keccak256(stream.out());
     Address::from_slice(&hash[12..])
+}
+
+fn processing_failed_transaction(
+    metadata: &TransactionData,
+    receipt: &TransactionReceipt,
+    reason: &str,
+) -> ProcessedTransaction {
+    let mut tx = ProcessedTransaction::new(
+        metadata.hash,
+        metadata.block_number,
+        metadata.block_timestamp,
+        metadata.tx_index,
+        metadata.from,
+        metadata.to,
+        metadata.value,
+        receipt.status,
+        metadata.nonce,
+        metadata.transaction_type,
+        metadata.input.clone().to_vec(),
+    );
+    tx.tx_type = "Processing Failed".to_string();
+    tx.actions = vec![reason.to_string()];
+    tx.fees = TransactionFees {
+        gas_price: metadata.gas_price,
+        gas_used: receipt.gas_used,
+        gas_limit: metadata.gas_limit,
+        tx_fee: metadata.gas_price * U256::from(receipt.gas_used),
+        protocol_type: protocol_type_for_raw_tx(metadata.transaction_type),
+        max_fee_per_gas: metadata.max_fee_per_gas.clone(),
+        max_priority_fee: metadata.max_priority_fee_per_gas.clone(),
+        max_fee_per_blob_gas: metadata.max_fee_per_blob_gas.clone(),
+        blob_gas_used: receipt.blob_gas_used,
+    };
+    tx.unique_addresses.insert(metadata.from);
+    if let Some(to) = metadata.to {
+        tx.unique_addresses.insert(to);
+    } else if receipt.status {
+        let contract_address = derive_create_address(metadata.from, metadata.nonce);
+        tx.contract_address = Some(contract_address);
+        tx.unique_addresses.insert(contract_address);
+    }
+    tx
+}
+
+fn protocol_type_for_raw_tx(raw_tx_type: u8) -> String {
+    match raw_tx_type {
+        0 => "legacy",
+        1 => "eip2930",
+        2 => "eip1559",
+        3 => "eip4844",
+        4 => "eip7702",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 #[cfg(test)]

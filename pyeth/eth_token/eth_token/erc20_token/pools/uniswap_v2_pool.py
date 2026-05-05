@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 import pyreth
 
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
+from eth_token.erc20_token.pools.numeric import parse_raw_float
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_token.utils import bounded_history
@@ -105,7 +106,7 @@ class LPTokenTracker:
         Args:
             transfer: Raw ERC20 transfer event dict.
         """
-        amount = float(transfer['amount']) / (10 ** self.lp_decimals)
+        amount = parse_raw_float(transfer['amount']) / (10 ** self.lp_decimals)
         event = {
             'block_number': transfer.get('block_number'),
             'tx_hash': transfer.get('tx_hash'),
@@ -320,8 +321,8 @@ class UniswapV2Pool(BasePool):
             known_routers=ROUTER_ADDRESSES,
             history_limit=self.history_limit,
         )
-        self.lp_tracker._token_address = token_address
-        self.lp_tracker._pool_address = pool_address
+        self.lp_tracker._token_address = self.token_address
+        self.lp_tracker._pool_address = self.pool_address
 
     def get_protocol(self) -> str:
         return UNISWAP_V2_PROTOCOL
@@ -419,8 +420,8 @@ class UniswapV2Pool(BasePool):
         # Get decimals for proper conversion
         token0_decimals = self._decimals_for_token_position(is_token0=True)
         token1_decimals = self._decimals_for_token_position(is_token0=False)
-        reserve0_raw = float(sync['reserve0'])
-        reserve1_raw = float(sync['reserve1'])
+        reserve0_raw = parse_raw_float(sync['reserve0'])
+        reserve1_raw = parse_raw_float(sync['reserve1'])
         reserve0 = reserve0_raw / (10 ** token0_decimals)
         reserve1 = reserve1_raw / (10 ** token1_decimals)        
         token_reserve, denom_reserve = self._map_token_and_denom(reserve0, reserve1)
@@ -453,10 +454,10 @@ class UniswapV2Pool(BasePool):
         # Extract swap data
         sender = swap.get('sender')
         to = swap.get('to')
-        amount0_in = float(swap.get('amount0In', swap.get('amount0_in', 0)))
-        amount1_in = float(swap.get('amount1In', swap.get('amount1_in', 0)))
-        amount0_out = float(swap.get('amount0Out', swap.get('amount0_out', 0)))
-        amount1_out = float(swap.get('amount1Out', swap.get('amount1_out', 0)))
+        amount0_in = parse_raw_float(swap.get('amount0In', swap.get('amount0_in', 0)))
+        amount1_in = parse_raw_float(swap.get('amount1In', swap.get('amount1_in', 0)))
+        amount0_out = parse_raw_float(swap.get('amount0Out', swap.get('amount0_out', 0)))
+        amount1_out = parse_raw_float(swap.get('amount1Out', swap.get('amount1_out', 0)))
         
         # Update volumes
         token_in, denom_in = self._map_token_and_denom(amount0_in, amount1_in)
@@ -494,7 +495,7 @@ class UniswapV2Pool(BasePool):
     def _process_mint(self, mint: dict, transaction: Dict):
         """Process a V2 mint (add liquidity) event."""
         to = mint.get('to_address', mint.get('to'))
-        amount = float(mint.get('amount', 0))        
+        amount = parse_raw_float(mint.get('amount', 0))
         self.state.total_mints += 1
         
         # Store mint event
@@ -509,8 +510,8 @@ class UniswapV2Pool(BasePool):
     def _process_burn(self, burn: dict, transaction: Dict):
         """Process a V2 burn (remove liquidity) event."""
         from_address = burn.get('from_address', burn.get('sender'))
-        amount0 = float(burn.get('amount0', burn.get('amount', 0)))
-        amount1 = float(burn.get('amount1', 0))
+        amount0 = parse_raw_float(burn.get('amount0', burn.get('amount', 0)))
+        amount1 = parse_raw_float(burn.get('amount1', 0))
         amount = amount0  # LP token amount removed approximated via amount0 component.
         self.state.total_burns += 1
         

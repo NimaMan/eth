@@ -2,13 +2,15 @@ from sqlalchemy import create_engine, Engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import os
-from eth_data.utils.logger import get_logger
+import logging
 
 # Global engine cache for connection reuse
 _engines = {}
 
 
-logger = get_logger(name="db_conn")
+logger = logging.getLogger("db_conn")
+logger.addHandler(logging.NullHandler())
+logger.propagate = False
 
 
 def get_db_engine(db: str = 'eth_db', pool_size: int = 10, max_overflow: int = 20) -> Engine:

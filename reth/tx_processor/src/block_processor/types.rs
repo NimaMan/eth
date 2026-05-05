@@ -17,6 +17,7 @@ pub struct ProcessedBlockTransactions {
     pub receipt: TransactionReceipt,
     pub processed: ProcessedTransaction,
     pub trace: Option<TransactionTrace>,
+    pub processing_error: Option<String>,
 }
 
 /// Controls batch block processing behaviour.

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirna
 
 import pyreth
 import json
+from eth_token.erc20_token.pools.addresses import require_checksum_address, same_address
 
 
 def analyze_liquidity_removal():
@@ -23,7 +24,7 @@ def analyze_liquidity_removal():
     
     # The liquidity removal transaction to analyze
     tx_hash = "0xb20e91c60b35647725b1878b60e2ccf6543fc17983983227656cf98bebb22966"
-    pool_address = "0xd5113065d0dA0CD94F8c0Ba7B2Fa61d8A48AE404"
+    pool_address = require_checksum_address("0xd5113065d0dA0CD94F8c0Ba7B2Fa61d8A48AE404")
     
     print("LIQUIDITY REMOVAL ANALYSIS")
     print("=" * 60)
@@ -65,7 +66,7 @@ def analyze_liquidity_removal():
             print(f"  Amount: {amount}")
             
             # Check if it's from the pool
-            if from_addr.lower() == pool_address.lower():
+            if same_address(from_addr, pool_address):
                 print("  ⚠️ TRANSFER FROM POOL - Potential liquidity removal")
         
         # Analyze Uniswap events
@@ -122,7 +123,7 @@ def analyze_liquidity_removal():
             print(f"  Depth: {itx['depth']}")
             
             # Check if it's from the pool
-            if itx['from'].lower() == pool_address.lower():
+            if same_address(itx['from'], pool_address):
                 print(f"  ⚠️ ETH REMOVED FROM POOL: {itx['value'] / 10**18:.6f} ETH")
         
         # Look for specific function calls
@@ -159,7 +160,7 @@ def analyze_liquidity_removal():
         # Calculate total ETH removed
         total_eth_removed = sum(
             etx['value'] / 10**18 for etx in eth_transfers 
-            if etx['from'].lower() == pool_address.lower()
+            if same_address(etx['from'], pool_address)
         )
         
         # Check for liquidity removal indicators
@@ -178,7 +179,7 @@ def analyze_liquidity_removal():
             else:
                 from_addr = transfer.from_address
                 
-            if from_addr.lower() == pool_address.lower():
+            if same_address(from_addr, pool_address):
                 pool_transfers.append(transfer)
                 
         if pool_transfers:

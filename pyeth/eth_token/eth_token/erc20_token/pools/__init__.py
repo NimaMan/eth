@@ -6,6 +6,12 @@ from transactions and maintain its own state.
 """
 
 from .base_pool import BasePool
+from .addresses import (
+    checksum_address,
+    checksum_address_set,
+    require_checksum_address,
+    same_address,
+)
 from .pool_data_models import PoolRuntimeState, PoolLiquiditySnapshot
 from .uniswap_v2_pool import UniswapV2Pool
 from .uniswap_v3_pool import UniswapV3Pool
@@ -18,6 +24,10 @@ from .arbitrage_detector import ArbitrageDetector, ArbitrageOpportunity
 
 __all__ = [
     'BasePool',
+    'checksum_address',
+    'checksum_address_set',
+    'require_checksum_address',
+    'same_address',
     'PoolRuntimeState',
     'PoolLiquiditySnapshot',
     'UniswapV2Pool',

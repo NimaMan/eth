@@ -14,6 +14,7 @@ import math
 import pyreth
 
 from eth_token.erc20_token.pools.base_pool import BasePool, logger
+from eth_token.erc20_token.pools.numeric import parse_raw_float, parse_raw_int
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
 from eth_token.erc20_token.token_chain_data_fetcher import TokenChainDataFetcher
 from eth_data.chain_utils.common_addresses import canonicalize_dex_pool_type
@@ -131,8 +132,8 @@ class UniswapV3Pool(BasePool):
         # Mark token as buyable from first swap event
         self.mark_can_buy_from_event(transaction, event_type='swap')
         
-        self.sqrt_price_x96 = int(swap.get('sqrt_price_x96', 0))
-        new_tick = int(swap.get('tick', 0))
+        self.sqrt_price_x96 = parse_raw_int(swap.get('sqrt_price_x96', 0))
+        new_tick = parse_raw_int(swap.get('tick', 0))
         
         # Update active liquidity if tick is crossed
         if self.current_tick != new_tick:
@@ -142,8 +143,8 @@ class UniswapV3Pool(BasePool):
         self._update_virtual_reserves()
         self._update_prices()
         
-        amount0 = float(swap.get('amount0', 0))
-        amount1 = float(swap.get('amount1', 0))
+        amount0 = parse_raw_float(swap.get('amount0', 0))
+        amount1 = parse_raw_float(swap.get('amount1', 0))
         token_amount, denom_amount = self._map_token_and_denom(amount0, amount1)
         self.state.token_volume_in += max(0.0, token_amount)
         self.state.token_volume_out += max(0.0, -token_amount)
@@ -215,9 +216,9 @@ class UniswapV3Pool(BasePool):
         # NOTE: Adding liquidity does NOT mean trading is enabled
         # Trading might still be disabled - we only mark trading enabled on swaps
         
-        liquidity_delta = int(mint.get('amount', 0))
-        tick_lower = int(mint.get('tick_lower', 0))
-        tick_upper = int(mint.get('tick_upper', 0))
+        liquidity_delta = parse_raw_int(mint.get('amount', 0))
+        tick_lower = parse_raw_int(mint.get('tick_lower', 0))
+        tick_upper = parse_raw_int(mint.get('tick_upper', 0))
         self.register_token_control_addresses([mint.get('owner')] or [mint.get('to_address')])
 
         self._update_tick(tick_lower, liquidity_delta)
@@ -246,9 +247,9 @@ class UniswapV3Pool(BasePool):
         # NOTE: Removing liquidity does NOT indicate trading status
         # We only mark trading enabled on swaps
         
-        liquidity_delta = int(burn.get('amount', 0))
-        tick_lower = int(burn.get('tick_lower', 0))
-        tick_upper = int(burn.get('tick_upper', 0))
+        liquidity_delta = parse_raw_int(burn.get('amount', 0))
+        tick_lower = parse_raw_int(burn.get('tick_lower', 0))
+        tick_upper = parse_raw_int(burn.get('tick_upper', 0))
 
         self._update_tick(tick_lower, -liquidity_delta)
         self._update_tick(tick_upper, liquidity_delta)

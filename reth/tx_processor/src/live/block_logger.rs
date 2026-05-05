@@ -35,11 +35,11 @@ impl BlockProcessingLogger {
     pub fn log_block(&self, processed: &LiveProcessedBlock) -> Result<()> {
         let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let tx_count = processed.processed_block.transactions.len();
-        let failed = processed
+        let processing_failures = processed
             .processed_block
             .transactions
             .iter()
-            .filter(|tx| !tx.processed.status)
+            .filter(|tx| tx.processing_error.is_some())
             .count();
         let duration_secs = (processed.processed_at - processed.head_arrival)
             .num_microseconds()
@@ -47,7 +47,11 @@ impl BlockProcessingLogger {
             / 1_000_000f64;
         let line = format!(
             "{} - INFO - {}->{}|{} in {:.2}s\n",
-            timestamp, processed.execution_info.block_number, tx_count, failed, duration_secs
+            timestamp,
+            processed.execution_info.block_number,
+            tx_count,
+            processing_failures,
+            duration_secs
         );
 
         let mut guard = self

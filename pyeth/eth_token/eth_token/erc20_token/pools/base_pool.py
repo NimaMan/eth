@@ -9,6 +9,10 @@ from typing import Dict, List, Optional, Any, Tuple, Iterable, Set
 
 from eth_data.pyreth_client import PyrethClient, pyreth
 from eth_data.chain_utils.common_addresses import DENOM_ADDRESSES, ZERO_ADDRESS
+from eth_token.erc20_token.pools.addresses import (
+    checksum_address_set,
+    require_checksum_address,
+)
 from eth_token.erc20_token.pools.pool_data_models import PoolRuntimeState, PoolLifecycle
 from eth_token.erc20_token.pools.pool_reserve_tracker import PoolReserveTracker, logger
 from eth_token.erc20_token.pools.pool_chain_data_fetcher import PoolChainDataFetcher
@@ -48,10 +52,10 @@ class BasePool(ABC):
             denom_address: The paired token address (WETH, USDC, etc.)
             token1_is_denom: Whether token1 is the denomination token
         """
-        self.pool_address = pool_address
-        self.display_address = pool_address
-        self.token_address = token_address
-        self.denom_address = denom_address
+        self.pool_address = require_checksum_address(pool_address)
+        self.display_address = self.pool_address
+        self.token_address = require_checksum_address(token_address)
+        self.denom_address = require_checksum_address(denom_address)
         threshold_config = get_threshold_for_token(self.denom_address) or {}
         self.denom_threshold = threshold_config.get("threshold", 0.0)
         
@@ -105,7 +109,7 @@ class BasePool(ABC):
             int(token_decimals),
             denom_decimals,
         )
-        self.pool_buy_sell_config.denom_address = denom_address
+        self.pool_buy_sell_config.denom_address = self.denom_address
        
         # Scam detection (from reserve tracker)
         self.scam_label: Optional[str] = None
@@ -114,9 +118,9 @@ class BasePool(ABC):
 
         # Reserve tracker with bounded history
         self.reserve_tracker = PoolReserveTracker(
-            pool_address=pool_address,
-            denom_address=denom_address,
-            token_address=token_address,
+            pool_address=self.pool_address,
+            denom_address=self.denom_address,
+            token_address=self.token_address,
             pool_type=self.get_protocol(),
             history_limit=history_limit,
         )
@@ -336,11 +340,10 @@ class BasePool(ABC):
         return self.trading_enabled                   
 
     def register_token_control_addresses(self, addresses: Iterable[Optional[str]]) -> None:
-        for address in addresses:
-            self.token_control_addresses.add(address)
+        self.token_control_addresses.update(checksum_address_set(addresses))
 
     def _has_control_address(self, transaction: Dict)  -> bool:
-        unique_addresses = set(transaction.get('unique_addresses') or [])
+        unique_addresses = checksum_address_set(transaction.get('unique_addresses') or [])
         if not unique_addresses or not self.token_control_addresses:
             return False
         return bool(self.token_control_addresses.intersection(unique_addresses))

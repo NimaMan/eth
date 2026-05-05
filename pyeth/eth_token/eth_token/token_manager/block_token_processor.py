@@ -150,6 +150,8 @@ class BlockTokenProcessor:
 
     def _is_retryable_metadata_error(self, exc: Exception) -> bool:
         message = str(exc).lower()
+        if "transaction validation error: nonce" in message and "too high" in message:
+            return True
         return any(marker in message for marker in self.METADATA_RETRYABLE_ERRORS)
 
     def _wait_for_metadata_base_block(self, simulation_block: int) -> Optional[int]:

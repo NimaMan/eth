@@ -1,14 +1,21 @@
-use std::{env, path::PathBuf, sync::Arc};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
+use chrono::Local;
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
+use tracing_subscriber::EnvFilter;
 use tx_processor::live::{LiveBlockProcessorConfig, LiveBlockService};
 use tx_simulator::config::repo;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let log_path = live_block_log_path()?;
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(EnvFilter::from_default_env())
         .try_init();
 
     let reth_datadir = repo::reth_datadir()?;
@@ -23,7 +30,6 @@ async fn main() -> Result<()> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| value.parse().ok());
-    let log_path = env::var("LIVE_BLOCK_LOG").ok().map(PathBuf::from);
 
     let processor_config = LiveBlockProcessorConfig::default()
         .with_execution_rpc(execution_rpc.clone())
@@ -36,13 +42,18 @@ async fn main() -> Result<()> {
         processor_config,
         redis_url.clone(),
         notifier_channel,
-        log_path,
+        Some(log_path.clone()),
     )
     .await?;
 
     println!(
-        "Running live block service (limit={:?}, redis={:?}, datadir={}, rpc={}, ws={})",
-        block_limit, redis_url, reth_datadir, execution_rpc, execution_ws
+        "Running live block service (limit={:?}, redis={:?}, datadir={}, rpc={}, ws={}, log={})",
+        block_limit,
+        redis_url,
+        reth_datadir,
+        execution_rpc,
+        execution_ws,
+        log_path.display()
     );
 
     if let Some(limit) = block_limit {
@@ -51,6 +62,53 @@ async fn main() -> Result<()> {
         service.run().await?;
     }
     Ok(())
+}
+
+fn live_block_log_path() -> Result<PathBuf> {
+    if let Some(raw_path) = non_empty_env("LIVE_BLOCK_LOG") {
+        let path = PathBuf::from(raw_path);
+        if is_log_file_path(&path) {
+            return Ok(path);
+        }
+        return Ok(timestamped_log_path(path));
+    }
+
+    if let Some(raw_dir) = non_empty_env("LIVE_BLOCK_LOG_DIR") {
+        return Ok(timestamped_log_path(PathBuf::from(raw_dir)));
+    }
+
+    if let Some(raw_eth_log_dir) = non_empty_env("ETH_LOG_DIR") {
+        return Ok(timestamped_log_path(
+            PathBuf::from(raw_eth_log_dir).join("block_processor"),
+        ));
+    }
+
+    Ok(timestamped_log_path(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("logs")
+            .join("block_processor"),
+    ))
+}
+
+fn timestamped_log_path(dir: PathBuf) -> PathBuf {
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+    dir.join(format!("live_block_processor_{timestamp}.log"))
+}
+
+fn is_log_file_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("log"))
+        .unwrap_or(false)
+}
+
+fn non_empty_env(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn env_or_config<F>(env_key: &str, resolver: F) -> Result<String>
