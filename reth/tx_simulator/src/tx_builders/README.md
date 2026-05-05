@@ -6,6 +6,8 @@ Purpose
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
   - BaygusExecutor: typed `execute(bytes,bytes[])` command plans
 - No chain reads here; callers must supply addresses and parameters.
+- Builders are where route and execution decisions should be finalized. Prefer adding off-chain
+  builder logic over adding on-chain branching, discovery, or generic adapter behavior.
 
 Entrypoints
 - `amm/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
@@ -28,6 +30,8 @@ Usage
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
 - Baygus command examples should use `BaygusExecutionPlan` instead of hand-encoding ABI payloads.
+- Keep production plans narrow. If the direct router or pair/pool calldata is cheaper and no
+  atomic executor feature is needed, use the direct builder instead of Baygus.
 - Use `BaygusExecutionPlan::permit2_transfer_from(...)` when the caller has already granted Permit2
   allowance to the deployed executor.
 - Use `BaygusExecutionPlan::permit2_signature_transfer_from(...)` when the owner has signed a
@@ -43,3 +47,5 @@ Roadmap
 - Path-aware multi-hop builders: accept explicit paths (e.g., tokenIn → WETH → tokenOut) and, for V3, per-hop fee tiers.
   - API sketch: `build_token_to_token_path_v2(trader, path: [Address; 3], amount_in, amount_out_min, deadline)`
   - This enables robust routing when no direct pool exists.
+- Gas-first Baygus production builders: create minimal plans for hot paths and benchmark them
+  against direct router/pool execution before any new command is considered deployable.

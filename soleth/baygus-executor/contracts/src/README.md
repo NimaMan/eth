@@ -15,6 +15,11 @@ Execution commands are deliberately small and explicit. The router does not infe
 pools on-chain; off-chain Rust code must build the exact sequence, value, slippage bounds, and
 coinbase-tip bounds before the transaction is signed.
 
+Do not treat this source tree as a mandate to deploy every supported adapter. The production
+executor should be the smallest bytecode that covers the active strategy. Keep broad protocol
+coverage here for simulation and regression testing, then split or omit unused commands for a cheap
+live deployment.
+
 For Uniswap v4, the mainnet PoolManager returns `BalanceDelta` as one packed `int256`, not as a
 two-word Solidity struct. The router decodes that packed value before applying settlement. Positive
 deltas are amounts to take from PoolManager; negative deltas are amounts to settle. ERC20

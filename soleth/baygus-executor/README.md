@@ -9,6 +9,18 @@ turn a typed off-chain route into one on-chain transaction surface that can:
   loan, sweep, and bounded coinbase tips;
 - keep protocol adapter addresses configurable at deployment.
 
+## Design goal
+
+Baygus should be cheap on-chain. The off-chain simulator and search pipeline should do every piece
+of work that can be done before signing: route discovery, pool selection, calldata construction,
+price checks, slippage bounds, block bounds, gas estimates, profit checks, and bribe sizing. The
+deployed contract should only contain primitives that must execute atomically on-chain.
+
+The full `BaygusExecutor` command surface is useful for validation and research, but it is not
+automatically the cheapest production deployment. For live deployment, prefer the smallest executor
+that covers the strategy's required hot path. Do not deploy Curve, Balancer, flash-loan, v4, hook,
+or generic command support unless the strategy needs it and the gas benchmark justifies it.
+
 The Rust builders load Foundry artifacts from `out/`. Rebuild artifacts after contract changes:
 
 ```bash
@@ -65,3 +77,5 @@ Do not deploy a new executor until all of these are true:
 - Constructor arguments are fixed: PoolManager and all adapter addresses are immutable after deploy.
 - The bytecode hash and ABI diff are recorded next to the deployment note.
 - The exact buy/sell/coinbase-tip plan is simulated against the target block state before signing.
+- A gas benchmark proves the deployed surface is cheaper or strategically necessary versus direct
+  router or pool calls. If not, move that logic off-chain or into a smaller executor.

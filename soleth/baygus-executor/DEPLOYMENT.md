@@ -3,6 +3,24 @@
 This executor is part of the transaction execution path. Treat every deploy as immutable production
 infrastructure: the PoolManager and adapter addresses are constructor state and cannot be changed.
 
+## Deployment Principle
+
+Deploy the least amount of code that can execute the strategy safely. Anything that can be computed,
+selected, validated, or priced off-chain belongs in the Rust/Python pipeline, not in Solidity.
+
+The on-chain executor should only provide atomic actions that cannot be safely split across
+transactions, such as pulling funds with a bound signature, executing the selected swap path,
+sweeping proceeds, and paying a bounded coinbase tip. Do not include generic adapters or command
+families in a production deploy just because the research executor supports them.
+
+Before mainnet deployment, classify each command as one of:
+
+- required for the current live strategy;
+- useful for simulation or research only;
+- cheaper to replace with direct router/pool calldata.
+
+Only the first category should be in the deployed production bytecode.
+
 ## Mainnet Constructor Inputs
 
 - Uniswap v4 PoolManager: `0x000000000004444C5DC75cB358380d2E3de08a90`
@@ -34,6 +52,16 @@ Before mainnet deployment, also run the exact deploy/buy/sell/coinbase-tip seque
 Reth-backed simulator at the intended block. The signed live transaction should use the same calldata
 builder that passed simulation.
 
+## Gas Gate
+
+Every proposed deploy must include a gas comparison against the direct path it replaces. For a plain
+one-hop swap, direct router or direct pair/pool execution is the baseline. Baygus is acceptable only
+when its extra gas buys an execution property we need, such as atomic multi-step execution,
+Permit2 witness binding, private-bundle bribe handling, or exact simulator-to-chain plan matching.
+
+If a command adds overhead without being required by the live path, remove it from the production
+executor and keep it in the research executor or off-chain planner.
+
 ## Coinbase Tip Command
 
 `CMD_COINBASE_TIP` pays `block.coinbase` from the executor native balance. The live executor should use
@@ -57,5 +85,7 @@ Record these values for every deployment:
 - deployed executor address
 - constructor arguments
 - `BaygusExecutor` bytecode hash
+- deployed runtime size
+- deploy gas and hot-path execution gas versus direct execution
 - artifact path used by Rust: `soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json`
 - Foundry and Rust check output

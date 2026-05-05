@@ -5,6 +5,11 @@ Keep these examples focused on the executor surface: deploy the current Soleth b
 the local simulation state, compose Baygus commands with `tx_simulator::tx_builders`, execute the
 sequence, and assert balances, traces, gas, and revert behavior.
 
+Validation is also a pruning tool. These examples should show which parts of the executor are worth
+deploying and which parts are better handled off-chain or removed from production bytecode. The
+default answer for live deployment is a smaller executor; the full command surface must earn its gas
+with benchmarked value.
+
 ## Why stablecoin pools first
 
 Stablecoin routes are the right first target because they exercise the executor without adding price
@@ -77,6 +82,15 @@ Build these first:
 - `executor_deploy_smoke.rs`: deploy only, assert bytecode exists, constructor adapters are readable.
 
 After these pass, add Balancer pool-id based tests and then mainnet deployment dry-run output.
+
+When a Baygus route is materially more expensive than the direct path, prefer one of these fixes
+before deploying:
+
+- move routing or validation logic off-chain;
+- send final swap output directly to the recipient instead of sweeping;
+- use direct pair/pool execution instead of a generic router adapter;
+- split a minimal production executor from the broader research executor;
+- drop commands that are not required by the current strategy.
 
 Run the ETH/stable quote check with:
 
