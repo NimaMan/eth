@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "alpha/core",
     "tx_simulator",
     "tx_processor",
     "reth_chain_query",
