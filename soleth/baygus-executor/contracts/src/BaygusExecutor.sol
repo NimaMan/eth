@@ -17,6 +17,7 @@ import {
     CMD_BALANCER_SWAP,
     CMD_COINBASE_TIP,
     CMD_CURVE_SWAP,
+    CMD_PERMIT2_SIGNATURE_TRANSFER_FROM,
     CMD_PERMIT2_TRANSFER_FROM,
     CMD_SUSHISWAP,
     CMD_SWEEP,
@@ -32,6 +33,7 @@ import {
     CommandLengthMismatch,
     EmptyPath,
     InvalidCommand,
+    InvalidPermit2SignatureTransferInput,
     InvalidPermit2TransferFromInput,
     InvalidTransferFromInput,
     MissingPoolManager,
@@ -52,6 +54,13 @@ contract BaygusExecutor is ILockCallback {
 
     uint8 private constant CALLBACK_SINGLE = 0;
     uint8 private constant CALLBACK_PATH = 1;
+    bytes32 private constant BAYGUS_EXECUTION_TYPEHASH =
+        keccak256("BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)");
+    bytes32 private constant PERMIT2_SIGNATURE_TRANSFER_INPUT_TYPEHASH = keccak256(
+        "Permit2SignatureTransferInput(address owner,address token,uint256 permittedAmount,uint256 nonce,uint256 deadline,uint256 requestedAmount)"
+    );
+    string private constant BAYGUS_EXECUTION_WITNESS_TYPE =
+        "BaygusExecution witness)BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)TokenPermissions(address token,uint256 amount)";
 
     address public immutable poolManager;
     AdapterConfig public adapters;
@@ -186,15 +195,21 @@ contract BaygusExecutor is ILockCallback {
         if (commands.length != inputs.length) revert CommandLengthMismatch();
 
         results = new bytes[](commands.length);
+        bytes32 planWitness = _hasCommand(commands, CMD_PERMIT2_SIGNATURE_TRANSFER_FROM)
+            ? _executionPlanWitness(commands, inputs, payer)
+            : bytes32(0);
         for (uint256 i = 0; i < commands.length;) {
-            results[i] = _dispatch(uint8(commands[i]), inputs[i], payer);
+            results[i] = _dispatch(uint8(commands[i]), inputs[i], payer, planWitness);
             unchecked {
                 ++i;
             }
         }
     }
 
-    function _dispatch(uint8 command, bytes memory input, address payer) internal returns (bytes memory result) {
+    function _dispatch(uint8 command, bytes memory input, address payer, bytes32 planWitness)
+        internal
+        returns (bytes memory result)
+    {
         if (command == CMD_TRANSFER_FROM) {
             _transferFrom(input, payer);
         } else if (command == CMD_V2_SWAP) {
@@ -215,6 +230,8 @@ contract BaygusExecutor is ILockCallback {
             result = IPoolManager(poolManager).unlock(input);
         } else if (command == CMD_PERMIT2_TRANSFER_FROM) {
             _permit2TransferFrom(input, payer);
+        } else if (command == CMD_PERMIT2_SIGNATURE_TRANSFER_FROM) {
+            _permit2SignatureTransferFrom(input, payer, planWitness);
         } else if (command == CMD_COINBASE_TIP) {
             _coinbaseTip(input);
         } else {
@@ -321,41 +338,134 @@ contract BaygusExecutor is ILockCallback {
 
     function _transferFrom(bytes memory input, address defaultFrom) internal {
         address token;
-        address from;
         uint256 amount;
 
-        if (input.length == 64) {
-            (token, amount) = abi.decode(input, (address, uint256));
-            from = defaultFrom;
-        } else if (input.length == 96) {
-            (token, from, amount) = abi.decode(input, (address, address, uint256));
-        } else {
-            revert InvalidTransferFromInput();
-        }
+        if (input.length != 64) revert InvalidTransferFromInput();
+        (token, amount) = abi.decode(input, (address, uint256));
 
-        token.safeTransferFrom(from, address(this), amount);
+        token.safeTransferFrom(defaultFrom, address(this), amount);
     }
 
     function _permit2TransferFrom(bytes memory input, address defaultFrom) internal {
         if (adapters.permit2 == address(0)) revert AdapterMissing(CMD_PERMIT2_TRANSFER_FROM);
 
         address token;
-        address from;
         uint256 amount;
 
-        if (input.length == 64) {
-            (token, amount) = abi.decode(input, (address, uint256));
-            from = defaultFrom;
-        } else if (input.length == 96) {
-            (token, from, amount) = abi.decode(input, (address, address, uint256));
-        } else {
-            revert InvalidPermit2TransferFromInput();
-        }
+        if (input.length != 64) revert InvalidPermit2TransferFromInput();
+        (token, amount) = abi.decode(input, (address, uint256));
 
         if (amount > type(uint160).max) revert Permit2AmountOverflow(amount);
         // Checked above because Permit2 amount is uint160.
         // forge-lint: disable-next-line(unsafe-typecast)
-        IPermit2(adapters.permit2).transferFrom(from, address(this), uint160(amount), token);
+        IPermit2(adapters.permit2).transferFrom(defaultFrom, address(this), uint160(amount), token);
+    }
+
+    function _permit2SignatureTransferFrom(bytes memory input, address defaultOwner, bytes32 planWitness) internal {
+        if (adapters.permit2 == address(0)) revert AdapterMissing(CMD_PERMIT2_SIGNATURE_TRANSFER_FROM);
+        if (input.length < 256) revert InvalidPermit2SignatureTransferInput();
+
+        (
+            address owner,
+            address token,
+            uint256 permittedAmount,
+            uint256 nonce,
+            uint256 deadline,
+            uint256 requestedAmount,
+            bytes memory signature
+        ) = abi.decode(input, (address, address, uint256, uint256, uint256, uint256, bytes));
+
+        if (owner == address(0)) owner = defaultOwner;
+
+        IPermit2.PermitTransferFrom memory permit = IPermit2.PermitTransferFrom({
+            permitted: IPermit2.TokenPermissions({token: token, amount: permittedAmount}),
+            nonce: nonce,
+            deadline: deadline
+        });
+        IPermit2.SignatureTransferDetails memory transferDetails =
+            IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: requestedAmount});
+
+        IPermit2(adapters.permit2)
+            .permitWitnessTransferFrom(
+                permit, transferDetails, owner, planWitness, BAYGUS_EXECUTION_WITNESS_TYPE, signature
+            );
+    }
+
+    function _hasCommand(bytes memory commands, uint8 target) internal pure returns (bool) {
+        for (uint256 i = 0; i < commands.length;) {
+            if (uint8(commands[i]) == target) return true;
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
+    }
+
+    function _executionPlanWitness(bytes memory commands, bytes[] memory inputs, address caller)
+        internal
+        view
+        returns (bytes32)
+    {
+        return keccak256(
+            abi.encode(
+                BAYGUS_EXECUTION_TYPEHASH,
+                address(this),
+                caller,
+                keccak256(commands),
+                _executionInputsHash(commands, inputs, caller)
+            )
+        );
+    }
+
+    function _executionInputsHash(bytes memory commands, bytes[] memory inputs, address caller)
+        internal
+        pure
+        returns (bytes32)
+    {
+        bytes32[] memory inputHashes = new bytes32[](inputs.length);
+        for (uint256 i = 0; i < inputs.length;) {
+            if (uint8(commands[i]) == CMD_PERMIT2_SIGNATURE_TRANSFER_FROM) {
+                inputHashes[i] = _permit2SignatureTransferInputHash(inputs[i], caller);
+            } else {
+                inputHashes[i] = keccak256(inputs[i]);
+            }
+            unchecked {
+                ++i;
+            }
+        }
+        return keccak256(abi.encodePacked(inputHashes));
+    }
+
+    function _permit2SignatureTransferInputHash(bytes memory input, address defaultOwner)
+        internal
+        pure
+        returns (bytes32)
+    {
+        if (input.length < 256) revert InvalidPermit2SignatureTransferInput();
+
+        (
+            address owner,
+            address token,
+            uint256 permittedAmount,
+            uint256 nonce,
+            uint256 deadline,
+            uint256 requestedAmount,
+            bytes memory ignoredSignature
+        ) = abi.decode(input, (address, address, uint256, uint256, uint256, uint256, bytes));
+
+        ignoredSignature;
+        if (owner == address(0)) owner = defaultOwner;
+        return keccak256(
+            abi.encode(
+                PERMIT2_SIGNATURE_TRANSFER_INPUT_TYPEHASH,
+                owner,
+                token,
+                permittedAmount,
+                nonce,
+                deadline,
+                requestedAmount
+            )
+        );
     }
 
     function _v2Swap(bytes memory input, address router, uint8 command) internal {

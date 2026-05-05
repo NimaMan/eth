@@ -1,8 +1,14 @@
 use crate::UnsignedTransaction;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 
 const WORD_BYTES: usize = 32;
 const PERMIT2_APPROVE_SELECTOR: [u8; 4] = [0x87, 0x51, 0x7c, 0x45];
+const BAYGUS_EXECUTION_TYPE: &str =
+    "BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)";
+const PERMIT2_SIGNATURE_TRANSFER_INPUT_TYPE: &str = "Permit2SignatureTransferInput(address owner,address token,uint256 permittedAmount,uint256 nonce,uint256 deadline,uint256 requestedAmount)";
+
+pub const BAYGUS_EXECUTION_WITNESS_TYPE: &str =
+    "BaygusExecution witness)BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)TokenPermissions(address token,uint256 amount)";
 
 pub const CMD_V4_SWAP: u8 = 0x01;
 pub const CMD_V2_SWAP: u8 = 0x02;
@@ -15,6 +21,7 @@ pub const CMD_BALANCER_FLASH_LOAN: u8 = 0x08;
 pub const CMD_PERMIT2_TRANSFER_FROM: u8 = 0x09;
 pub const CMD_TRANSFER_FROM: u8 = 0x0a;
 pub const CMD_COINBASE_TIP: u8 = 0x0b;
+pub const CMD_PERMIT2_SIGNATURE_TRANSFER_FROM: u8 = 0x0c;
 
 /// BaygusExecutor command bytes from `soleth/baygus-executor/contracts/src/types/SharedTypes.sol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +38,7 @@ pub enum BaygusCommand {
     Permit2TransferFrom = CMD_PERMIT2_TRANSFER_FROM,
     TransferFrom = CMD_TRANSFER_FROM,
     CoinbaseTip = CMD_COINBASE_TIP,
+    Permit2SignatureTransferFrom = CMD_PERMIT2_SIGNATURE_TRANSFER_FROM,
 }
 
 impl BaygusCommand {
@@ -72,6 +80,19 @@ pub struct BaygusBalancerSwap {
     pub recipient: Address,
     pub amount: U256,
     pub limit: U256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaygusPermit2SignatureTransferFrom {
+    /// Use `Address::ZERO` to default to the executor caller. Non-zero owners are safe here
+    /// because Permit2 verifies a signature over the exact Baygus plan witness.
+    pub owner: Address,
+    pub token: Address,
+    pub permitted_amount: U256,
+    pub nonce: U256,
+    pub deadline: U256,
+    pub requested_amount: U256,
+    pub signature: Bytes,
 }
 
 /// A typed command plan for `BaygusExecutor.execute(bytes,bytes[])`.
@@ -117,18 +138,6 @@ impl BaygusExecutionPlan {
         )
     }
 
-    pub fn transfer_from_owner(
-        &mut self,
-        token: Address,
-        owner: Address,
-        amount: U256,
-    ) -> &mut Self {
-        self.push_raw(
-            BaygusCommand::TransferFrom,
-            encode_transfer_from_owner_input(token, owner, amount),
-        )
-    }
-
     pub fn permit2_transfer_from(&mut self, token: Address, amount: U256) -> &mut Self {
         self.push_raw(
             BaygusCommand::Permit2TransferFrom,
@@ -136,15 +145,13 @@ impl BaygusExecutionPlan {
         )
     }
 
-    pub fn permit2_transfer_from_owner(
+    pub fn permit2_signature_transfer_from(
         &mut self,
-        token: Address,
-        owner: Address,
-        amount: U256,
+        params: BaygusPermit2SignatureTransferFrom,
     ) -> &mut Self {
         self.push_raw(
-            BaygusCommand::Permit2TransferFrom,
-            encode_permit2_transfer_from_owner_input(token, owner, amount),
+            BaygusCommand::Permit2SignatureTransferFrom,
+            encode_permit2_signature_transfer_from_input(params),
         )
     }
 
@@ -264,6 +271,10 @@ impl BaygusExecutionPlan {
     pub fn to_transaction(&self, router: Address, caller: Address) -> UnsignedTransaction {
         build_baygus_execute_tx(router, caller, self)
     }
+
+    pub fn plan_witness(&self, executor: Address, caller: Address) -> B256 {
+        baygus_plan_witness(executor, caller, self)
+    }
 }
 
 pub fn build_baygus_execute_tx(
@@ -350,24 +361,77 @@ pub fn encode_transfer_from_input(token: Address, amount: U256) -> Bytes {
     Bytes::from(data)
 }
 
-pub fn encode_transfer_from_owner_input(token: Address, owner: Address, amount: U256) -> Bytes {
-    let mut data = Vec::with_capacity(WORD_BYTES * 3);
-    data.extend_from_slice(&pad_address(token));
-    data.extend_from_slice(&pad_address(owner));
-    data.extend_from_slice(&pad_u256(amount));
-    Bytes::from(data)
-}
-
 pub fn encode_permit2_transfer_from_input(token: Address, amount: U256) -> Bytes {
     encode_transfer_from_input(token, amount)
 }
 
-pub fn encode_permit2_transfer_from_owner_input(
-    token: Address,
-    owner: Address,
-    amount: U256,
+pub fn encode_permit2_signature_transfer_from_input(
+    params: BaygusPermit2SignatureTransferFrom,
 ) -> Bytes {
-    encode_transfer_from_owner_input(token, owner, amount)
+    let encoded_signature = encode_dynamic_bytes(params.signature.as_ref());
+    let mut data = Vec::with_capacity(WORD_BYTES * 7 + encoded_signature.len());
+    data.extend_from_slice(&pad_address(params.owner));
+    data.extend_from_slice(&pad_address(params.token));
+    data.extend_from_slice(&pad_u256(params.permitted_amount));
+    data.extend_from_slice(&pad_u256(params.nonce));
+    data.extend_from_slice(&pad_u256(params.deadline));
+    data.extend_from_slice(&pad_u256(params.requested_amount));
+    data.extend_from_slice(&pad_usize(WORD_BYTES * 7));
+    data.extend_from_slice(&encoded_signature);
+    Bytes::from(data)
+}
+
+pub fn baygus_plan_witness(executor: Address, caller: Address, plan: &BaygusExecutionPlan) -> B256 {
+    let commands = plan.commands_bytes();
+    let inputs_hash = baygus_inputs_hash(commands.as_ref(), plan.inputs(), caller);
+    let mut data = Vec::with_capacity(WORD_BYTES * 5);
+    data.extend_from_slice(keccak256(BAYGUS_EXECUTION_TYPE.as_bytes()).as_slice());
+    data.extend_from_slice(&pad_address(executor));
+    data.extend_from_slice(&pad_address(caller));
+    data.extend_from_slice(keccak256(commands.as_ref()).as_slice());
+    data.extend_from_slice(inputs_hash.as_slice());
+    keccak256(data)
+}
+
+pub fn baygus_inputs_hash(commands: &[u8], inputs: &[Bytes], caller: Address) -> B256 {
+    assert_eq!(
+        commands.len(),
+        inputs.len(),
+        "Baygus commands and inputs must have the same length"
+    );
+
+    let mut data = Vec::with_capacity(WORD_BYTES * inputs.len());
+    for (command, input) in commands.iter().zip(inputs) {
+        let input_hash = if *command == CMD_PERMIT2_SIGNATURE_TRANSFER_FROM {
+            permit2_signature_transfer_input_hash(input, caller)
+        } else {
+            keccak256(input.as_ref())
+        };
+        data.extend_from_slice(input_hash.as_slice());
+    }
+    keccak256(data)
+}
+
+pub fn permit2_signature_transfer_input_hash(input: &Bytes, caller: Address) -> B256 {
+    assert!(
+        input.len() >= WORD_BYTES * 8,
+        "Permit2 signature transfer input must contain ABI head and signature tail"
+    );
+
+    let mut owner = decode_address_word(input.as_ref(), 0);
+    if owner == Address::ZERO {
+        owner = caller;
+    }
+
+    let mut data = Vec::with_capacity(WORD_BYTES * 7);
+    data.extend_from_slice(keccak256(PERMIT2_SIGNATURE_TRANSFER_INPUT_TYPE.as_bytes()).as_slice());
+    data.extend_from_slice(&pad_address(owner));
+    data.extend_from_slice(word(input.as_ref(), 1));
+    data.extend_from_slice(word(input.as_ref(), 2));
+    data.extend_from_slice(word(input.as_ref(), 3));
+    data.extend_from_slice(word(input.as_ref(), 4));
+    data.extend_from_slice(word(input.as_ref(), 5));
+    keccak256(data)
 }
 
 pub fn encode_v2_swap_input(
@@ -568,6 +632,19 @@ fn pad_bool(value: bool) -> [u8; WORD_BYTES] {
     out
 }
 
+fn word(data: &[u8], index: usize) -> &[u8] {
+    let start = index * WORD_BYTES;
+    let end = start + WORD_BYTES;
+    data.get(start..end)
+        .expect("ABI word index must be in bounds")
+}
+
+fn decode_address_word(data: &[u8], index: usize) -> Address {
+    let mut address = [0u8; 20];
+    address.copy_from_slice(&word(data, index)[12..]);
+    Address::from(address)
+}
+
 fn max_uint160() -> U256 {
     (U256::from(1u8) << 160) - U256::from(1u8)
 }
@@ -622,18 +699,164 @@ mod tests {
     #[test]
     fn permit2_transfer_from_uses_reserved_command_byte() {
         let token = address(0x11);
-        let owner = address(0x22);
 
         let mut plan = BaygusExecutionPlan::new();
-        plan.permit2_transfer_from_owner(token, owner, U256::from(100));
+        plan.permit2_transfer_from(token, U256::from(100));
 
         assert_eq!(plan.commands_bytes().as_ref(), &[CMD_PERMIT2_TRANSFER_FROM]);
-        assert_eq!(plan.inputs()[0].len(), WORD_BYTES * 3);
+        assert_eq!(plan.inputs()[0].len(), WORD_BYTES * 2);
+        assert_eq!(plan.inputs()[0][WORD_BYTES * 2 - 1], 100);
+    }
+
+    #[test]
+    fn permit2_signature_transfer_from_encodes_single_use_pull() {
+        let owner = address(0x11);
+        let token = address(0x22);
+        let signature = Bytes::from(vec![0xaa, 0xbb, 0xcc]);
+
+        let input =
+            encode_permit2_signature_transfer_from_input(BaygusPermit2SignatureTransferFrom {
+                owner,
+                token,
+                permitted_amount: U256::from(1_000),
+                nonce: U256::from(7),
+                deadline: U256::from(1_800_000_000u64),
+                requested_amount: U256::from(400),
+                signature: signature.clone(),
+            });
+
+        assert_eq!(input.len(), WORD_BYTES * 9);
+        assert_eq!(&input[12..WORD_BYTES], owner.as_slice());
+        assert_eq!(&input[WORD_BYTES + 12..WORD_BYTES * 2], token.as_slice());
+        assert_eq!(input[WORD_BYTES * 3 - 2], 0x03);
+        assert_eq!(input[WORD_BYTES * 3 - 1], 0xe8);
+        assert_eq!(input[WORD_BYTES * 4 - 1], 7);
+        assert_eq!(input[WORD_BYTES * 6 - 2], 0x01);
+        assert_eq!(input[WORD_BYTES * 6 - 1], 0x90);
+        assert_eq!(input[WORD_BYTES * 7 - 1], (WORD_BYTES * 7) as u8);
+        assert_eq!(input[WORD_BYTES * 8 - 1], signature.len() as u8);
         assert_eq!(
-            &plan.inputs()[0][WORD_BYTES + 12..WORD_BYTES * 2],
-            owner.as_slice()
+            &input[WORD_BYTES * 8..WORD_BYTES * 8 + signature.len()],
+            signature.as_ref()
         );
-        assert_eq!(plan.inputs()[0][WORD_BYTES * 3 - 1], 100);
+    }
+
+    #[test]
+    fn plan_permit2_signature_transfer_from_uses_reserved_command_byte() {
+        let mut plan = BaygusExecutionPlan::new();
+        plan.permit2_signature_transfer_from(BaygusPermit2SignatureTransferFrom {
+            owner: Address::ZERO,
+            token: address(0x11),
+            permitted_amount: U256::from(100),
+            nonce: U256::from(1),
+            deadline: U256::from(2),
+            requested_amount: U256::from(100),
+            signature: Bytes::from_static(b"signature"),
+        });
+
+        assert_eq!(
+            plan.commands_bytes().as_ref(),
+            &[CMD_PERMIT2_SIGNATURE_TRANSFER_FROM]
+        );
+        assert_eq!(plan.inputs()[0][WORD_BYTES * 7 - 1], (WORD_BYTES * 7) as u8);
+    }
+
+    #[test]
+    fn permit2_signature_plan_witness_ignores_signature_bytes() {
+        let executor = address(0xee);
+        let caller = address(0xcc);
+        let token = address(0x11);
+
+        let mut plan_a = BaygusExecutionPlan::new();
+        plan_a.permit2_signature_transfer_from(BaygusPermit2SignatureTransferFrom {
+            owner: Address::ZERO,
+            token,
+            permitted_amount: U256::from(100),
+            nonce: U256::from(1),
+            deadline: U256::from(2),
+            requested_amount: U256::from(100),
+            signature: Bytes::from_static(b"signature-a"),
+        });
+
+        let mut plan_b = BaygusExecutionPlan::new();
+        plan_b.permit2_signature_transfer_from(BaygusPermit2SignatureTransferFrom {
+            owner: Address::ZERO,
+            token,
+            permitted_amount: U256::from(100),
+            nonce: U256::from(1),
+            deadline: U256::from(2),
+            requested_amount: U256::from(100),
+            signature: Bytes::from_static(b"signature-b"),
+        });
+
+        assert_eq!(
+            plan_a.plan_witness(executor, caller),
+            plan_b.plan_witness(executor, caller)
+        );
+    }
+
+    #[test]
+    fn permit2_signature_plan_witness_binds_plan_and_caller() {
+        let executor = address(0xee);
+        let caller = address(0xcc);
+        let token = address(0x11);
+        let recipient = address(0x22);
+
+        let mut plan = BaygusExecutionPlan::new();
+        plan.permit2_signature_transfer_from(BaygusPermit2SignatureTransferFrom {
+            owner: Address::ZERO,
+            token,
+            permitted_amount: U256::from(100),
+            nonce: U256::from(1),
+            deadline: U256::from(2),
+            requested_amount: U256::from(100),
+            signature: Bytes::from_static(b"signature"),
+        })
+        .sweep(token, recipient, U256::ZERO);
+
+        let mut changed_plan = plan.clone();
+        changed_plan.sweep(token, address(0x33), U256::ZERO);
+
+        assert_ne!(
+            plan.plan_witness(executor, caller),
+            plan.plan_witness(executor, address(0xcd))
+        );
+        assert_ne!(
+            plan.plan_witness(executor, caller),
+            changed_plan.plan_witness(executor, caller)
+        );
+    }
+
+    #[test]
+    fn permit2_signature_zero_owner_hashes_as_caller() {
+        let caller = address(0xcc);
+        let token = address(0x11);
+
+        let zero_owner_input =
+            encode_permit2_signature_transfer_from_input(BaygusPermit2SignatureTransferFrom {
+                owner: Address::ZERO,
+                token,
+                permitted_amount: U256::from(100),
+                nonce: U256::from(1),
+                deadline: U256::from(2),
+                requested_amount: U256::from(100),
+                signature: Bytes::from_static(b"signature"),
+            });
+        let explicit_owner_input =
+            encode_permit2_signature_transfer_from_input(BaygusPermit2SignatureTransferFrom {
+                owner: caller,
+                token,
+                permitted_amount: U256::from(100),
+                nonce: U256::from(1),
+                deadline: U256::from(2),
+                requested_amount: U256::from(100),
+                signature: Bytes::from_static(b"signature"),
+            });
+
+        assert_eq!(
+            permit2_signature_transfer_input_hash(&zero_owner_input, caller),
+            permit2_signature_transfer_input_hash(&explicit_owner_input, caller)
+        );
     }
 
     #[test]

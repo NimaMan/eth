@@ -5,6 +5,7 @@ error AdapterMissing(uint8 command);
 error CommandLengthMismatch();
 error EmptyPath();
 error InvalidCommand(uint8 command);
+error InvalidPermit2SignatureTransferInput();
 error InvalidPermit2TransferFromInput();
 error InvalidTransferFromInput();
 error MissingPoolManager();

@@ -39,3 +39,4 @@ uint8 constant CMD_BALANCER_FLASH_LOAN = 0x08;
 uint8 constant CMD_PERMIT2_TRANSFER_FROM = 0x09;
 uint8 constant CMD_TRANSFER_FROM = 0x0a;
 uint8 constant CMD_COINBASE_TIP = 0x0b;
+uint8 constant CMD_PERMIT2_SIGNATURE_TRANSFER_FROM = 0x0c;

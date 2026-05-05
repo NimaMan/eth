@@ -28,8 +28,13 @@ Usage
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
 - Baygus command examples should use `BaygusExecutionPlan` instead of hand-encoding ABI payloads.
-- Use `BaygusExecutionPlan::permit2_transfer_from(_owner)` when the owner has already granted
-  Permit2 allowance to the deployed executor.
+- Use `BaygusExecutionPlan::permit2_transfer_from(...)` when the caller has already granted Permit2
+  allowance to the deployed executor.
+- Use `BaygusExecutionPlan::permit2_signature_transfer_from(...)` when the owner has signed a
+  one-time Permit2 `PermitWitnessTransferFrom` for the deployed executor as spender. Sign the
+  witness returned by `BaygusExecutionPlan::plan_witness(executor, caller)` with
+  `BAYGUS_EXECUTION_WITNESS_TYPE`. This removes the separate Permit2 allowance setup tx, but the
+  owner still needs ERC20 approval to Permit2.
 - `BaygusExecutionPlan::coinbase_tip_with_block_guard(amount, min, max)` appends the executor
   `CMD_COINBASE_TIP` command and increases transaction `value` by the tip amount. Prefer this for
   bundle/private-relay execution so stale public transactions cannot pay in the wrong block.

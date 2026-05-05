@@ -32,17 +32,29 @@ typed Solidity test first, then add the matching Rust builder.
 - `0x06` `CMD_BALANCER_SWAP`: swaps through the configured Balancer vault.
 - `0x07` `CMD_SWEEP`: transfers the executor's token or native balance to a recipient.
 - `0x08` `CMD_BALANCER_FLASH_LOAN`: starts a Balancer flash loan and executes a nested plan.
-- `0x09` `CMD_PERMIT2_TRANSFER_FROM`: pulls tokens through Permit2 AllowanceTransfer.
-- `0x0a` `CMD_TRANSFER_FROM`: pulls tokens from `msg.sender` or an explicit owner.
+- `0x09` `CMD_PERMIT2_TRANSFER_FROM`: pulls `msg.sender` tokens through Permit2 AllowanceTransfer.
+- `0x0a` `CMD_TRANSFER_FROM`: pulls tokens from `msg.sender`.
 - `0x0b` `CMD_COINBASE_TIP`: pays `block.coinbase` from executor native balance.
+- `0x0c` `CMD_PERMIT2_SIGNATURE_TRANSFER_FROM`: pulls tokens through Permit2 SignatureTransfer.
 
 Coinbase tips are intended for private bundles or carefully bounded public transactions. Use the
 guarded input form `(amount, minBlock, maxBlock)` so a stale transaction cannot pay a builder in an
 unexpected block. `msg.value` must fund the tip plus any native-input swap value.
 
-Permit2 transfer input is either `(token, amount)` to pull from `msg.sender`, or
-`(token, owner, amount)` to pull from an explicit owner. The owner must already have approved
-Permit2 and granted this executor Permit2 allowance.
+ERC20 and Permit2 allowance-transfer inputs are only `(token, amount)` and always pull from
+`msg.sender`. Explicit-owner allowance pulls are intentionally rejected so a public executor cannot
+drain standing third-party allowances.
+
+Permit2 signature-transfer input is
+`(owner, token, permittedAmount, nonce, deadline, requestedAmount, signature)`. Use `owner =
+address(0)` to default to `msg.sender`. The owner signs a Permit2 `PermitWitnessTransferFrom`
+message for this executor as the spender. The witness is
+`BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)`, passed
+to Permit2 with witness type string
+`BaygusExecution witness)BaygusExecution(address executor,address caller,bytes32 commandsHash,bytes32 inputsHash)TokenPermissions(address token,uint256 amount)`.
+It binds the signature to this executor, the transaction caller, command bytes, and all command
+inputs except the signature bytes themselves. This avoids a prior Permit2 allowance, but the owner
+must still have approved the ERC20 token to Permit2.
 
 ## Pre-deployment gate
 
