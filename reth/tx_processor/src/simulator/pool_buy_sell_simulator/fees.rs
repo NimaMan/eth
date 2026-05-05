@@ -63,18 +63,106 @@ pub(super) fn apply_fee_policy(
     }
 }
 
-pub(super) fn override_prior_gas_price_with_header(
+pub(super) fn normalize_prior_fees_with_header(
     base_fee: Option<u128>,
     prior_tx: &ProcessedTransaction,
     unsigned_tx: &mut UnsignedTransaction,
 ) {
-    if !matches!(prior_tx.raw_tx_type, 0 | 1) {
+    let Some(base_fee) = base_fee else {
         return;
-    }
-    if let Some(base_fee) = base_fee {
+    };
+
+    if matches!(prior_tx.raw_tx_type, 0 | 1) {
         unsigned_tx.gas_price = Some(base_fee);
-        // legacy transactions should not have EIP-1559 fields
         unsigned_tx.max_fee_per_gas = None;
         unsigned_tx.max_priority_fee_per_gas = None;
+        return;
+    }
+
+    let priority_fee = unsigned_tx.max_priority_fee_per_gas.unwrap_or(0);
+    let min_required = base_fee.saturating_add(priority_fee);
+    let max_fee = unsigned_tx.max_fee_per_gas.unwrap_or(min_required);
+
+    unsigned_tx.gas_price = None;
+    unsigned_tx.max_priority_fee_per_gas = Some(priority_fee);
+    unsigned_tx.max_fee_per_gas = Some(max_fee.max(min_required));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, B256, U256};
+
+    fn processed_tx(raw_tx_type: u8) -> ProcessedTransaction {
+        ProcessedTransaction::new(
+            B256::ZERO,
+            0,
+            0,
+            0,
+            Address::ZERO,
+            Some(Address::ZERO),
+            U256::ZERO,
+            true,
+            0,
+            raw_tx_type,
+            Vec::new(),
+        )
+    }
+
+    fn unsigned_tx() -> UnsignedTransaction {
+        UnsignedTransaction {
+            from: Some(Address::ZERO),
+            to: Some(Address::ZERO),
+            value: Some(U256::ZERO),
+            data: None,
+            gas: Some(100_000),
+            gas_price: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            nonce: Some(0),
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn legacy_prior_replay_uses_replay_block_base_fee() {
+        let prior_tx = processed_tx(0);
+        let mut tx = unsigned_tx();
+        tx.gas_price = Some(40);
+
+        normalize_prior_fees_with_header(Some(100), &prior_tx, &mut tx);
+
+        assert_eq!(tx.gas_price, Some(100));
+        assert_eq!(tx.max_fee_per_gas, None);
+        assert_eq!(tx.max_priority_fee_per_gas, None);
+    }
+
+    #[test]
+    fn eip1559_prior_replay_clamps_max_fee_to_base_plus_priority() {
+        let prior_tx = processed_tx(2);
+        let mut tx = unsigned_tx();
+        tx.max_fee_per_gas = Some(50);
+        tx.max_priority_fee_per_gas = Some(3);
+
+        normalize_prior_fees_with_header(Some(100), &prior_tx, &mut tx);
+
+        assert_eq!(tx.gas_price, None);
+        assert_eq!(tx.max_fee_per_gas, Some(103));
+        assert_eq!(tx.max_priority_fee_per_gas, Some(3));
+    }
+
+    #[test]
+    fn eip1559_prior_replay_fills_missing_fee_fields() {
+        let prior_tx = processed_tx(2);
+        let mut tx = unsigned_tx();
+
+        normalize_prior_fees_with_header(Some(100), &prior_tx, &mut tx);
+
+        assert_eq!(tx.gas_price, None);
+        assert_eq!(tx.max_fee_per_gas, Some(100));
+        assert_eq!(tx.max_priority_fee_per_gas, Some(0));
     }
 }

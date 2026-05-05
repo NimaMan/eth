@@ -11,7 +11,7 @@ use super::balance_deltas::{
 };
 use super::buyer_setup::prepare_buyer_account;
 use super::failure::{enrich_failure_reason_with_trace, format_failure_with_revert};
-use super::fees::{apply_fee_policy, override_prior_gas_price_with_header};
+use super::fees::{apply_fee_policy, normalize_prior_fees_with_header};
 use super::results::create_failed_result;
 use super::uniswap_v4::check_can_buy_sell_uniswap_v4;
 use super::validation::validate_pool_registration;
@@ -124,7 +124,7 @@ pub async fn check_can_buy_sell_pool(
                 None
             };
         }
-        override_prior_gas_price_with_header(base_fee, prior_tx, &mut setup_call);
+        normalize_prior_fees_with_header(base_fee, prior_tx, &mut setup_call);
 
         let has_explicit_fee = setup_call.gas_price.is_some()
             || setup_call.max_fee_per_gas.is_some()
