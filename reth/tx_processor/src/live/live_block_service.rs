@@ -199,9 +199,10 @@ async fn build_chain_state_snapshot(
     })?;
     let block_hash = parse_b256(&block_snapshot.block_hash, "block hash")?;
     let parent_hash = parse_b256(parent_hash, "parent hash")?;
-    let tx_payloads: Vec<&str> = block_snapshot
-        .tx_entries
-        .iter()
+    let mut tx_entries: Vec<_> = block_snapshot.tx_entries.iter().collect();
+    tx_entries.sort_by_key(|entry| entry.tx_index);
+    let tx_payloads: Vec<&str> = tx_entries
+        .into_iter()
         .map(|entry| entry.payload_json.as_str())
         .collect();
 
