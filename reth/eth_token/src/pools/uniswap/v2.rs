@@ -52,15 +52,46 @@ pub struct UniswapV2SwapEvent {
 pub struct UniswapV2MintEvent {
     pub pair_address: String,
     pub to: Option<String>,
-    pub amount: String,
+    #[serde(default)]
+    pub amount: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UniswapV2BurnEvent {
     pub pair_address: String,
     pub sender: Option<String>,
+    #[serde(default)]
     pub amount0: String,
+    #[serde(default)]
     pub amount1: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct UniswapV2TransactionEvents {
+    pub syncs: Vec<UniswapV2SyncEvent>,
+    pub swaps: Vec<UniswapV2SwapEvent>,
+    pub mints: Vec<UniswapV2MintEvent>,
+    pub burns: Vec<UniswapV2BurnEvent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LPTransferEvent {
+    pub from_address: String,
+    pub to_address: String,
+    pub amount: String,
+    pub block_number: Option<u64>,
+    pub tx_hash: Option<String>,
+    pub log_index: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LPApprovalEvent {
+    pub owner: String,
+    pub spender: String,
+    pub amount: String,
+    pub block_number: Option<u64>,
+    pub tx_hash: Option<String>,
+    pub block_timestamp: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,6 +106,22 @@ pub struct ApprovalInfo {
 pub struct LPHolderInfo {
     pub balance: f64,
     pub approvals: HashMap<String, ApprovalInfo>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LPHolderSnapshot {
+    pub address: String,
+    pub balance: f64,
+    pub share: f64,
+    pub approvals: HashMap<String, LPApprovalSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LPApprovalSnapshot {
+    pub amount: f64,
+    pub tx_hash: String,
+    pub block_number: u64,
+    pub is_router: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -177,6 +224,19 @@ impl LPTokenTracker {
         }
     }
 
+    pub fn record_transfer_event(&mut self, transfer: &LPTransferEvent) -> Result<()> {
+        let amount = parse_raw_f64(&transfer.amount)? / decimal_scale(self.lp_decimals);
+        self.record_transfer(
+            &transfer.from_address,
+            &transfer.to_address,
+            amount,
+            transfer.block_number.unwrap_or_default(),
+            transfer.tx_hash.clone().unwrap_or_default(),
+            transfer.log_index,
+        );
+        Ok(())
+    }
+
     pub fn record_approval(
         &mut self,
         owner: impl AsRef<str>,
@@ -216,6 +276,18 @@ impl LPTokenTracker {
         approval
     }
 
+    pub fn record_approval_event(&mut self, approval: &LPApprovalEvent) -> Result<ApprovalInfo> {
+        let amount = parse_raw_f64(&approval.amount)? / decimal_scale(self.lp_decimals);
+        Ok(self.record_approval(
+            &approval.owner,
+            &approval.spender,
+            amount,
+            approval.block_number.unwrap_or_default(),
+            approval.tx_hash.clone().unwrap_or_default(),
+            approval.block_timestamp,
+        ))
+    }
+
     pub fn balances(&self) -> HashMap<String, f64> {
         self.holders
             .iter()
@@ -231,6 +303,45 @@ impl LPTokenTracker {
             .get(&normalize_address(address))
             .map(|holder| (holder.balance / self.total_supply) * 100.0)
             .unwrap_or(0.0)
+    }
+
+    pub fn holder_snapshots(&self) -> Vec<LPHolderSnapshot> {
+        let mut snapshots: Vec<_> = self
+            .holders
+            .iter()
+            .filter(|(_, holder)| holder.balance > 0.0 || !holder.approvals.is_empty())
+            .map(|(address, holder)| {
+                let approvals = holder
+                    .approvals
+                    .iter()
+                    .map(|(spender, approval)| {
+                        (
+                            spender.clone(),
+                            LPApprovalSnapshot {
+                                amount: approval.amount,
+                                tx_hash: approval.tx_hash.clone(),
+                                block_number: approval.block_number,
+                                is_router: self.known_routers.contains(spender),
+                            },
+                        )
+                    })
+                    .collect();
+                LPHolderSnapshot {
+                    address: address.clone(),
+                    balance: holder.balance,
+                    share: self.share(address),
+                    approvals,
+                }
+            })
+            .collect();
+
+        snapshots.sort_by(|left, right| {
+            right
+                .balance
+                .partial_cmp(&left.balance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        snapshots
     }
 
     pub fn total_approved_to_routers(&self) -> f64 {
@@ -259,6 +370,10 @@ impl LPTokenTracker {
             .last()
             .and_then(|event| event.get("block_number"))
             .and_then(Value::as_u64)
+    }
+
+    pub fn last_approval_event(&self) -> Option<Value> {
+        self.approval_events.last().cloned()
     }
 
     pub fn holders_with_approvals(&self) -> Vec<String> {
@@ -347,6 +462,26 @@ impl UniswapV2Pool {
         Ok(true)
     }
 
+    pub fn update_from_events(
+        &mut self,
+        events: &UniswapV2TransactionEvents,
+        tx: &UniswapV2TxContext,
+    ) -> Result<()> {
+        for sync in &events.syncs {
+            self.process_sync(sync, tx)?;
+        }
+        for swap in &events.swaps {
+            self.process_swap(swap, tx)?;
+        }
+        for mint in &events.mints {
+            self.process_mint(mint, tx)?;
+        }
+        for burn in &events.burns {
+            self.process_burn(burn, tx)?;
+        }
+        Ok(())
+    }
+
     pub fn process_swap(
         &mut self,
         swap: &UniswapV2SwapEvent,
@@ -412,7 +547,12 @@ impl UniswapV2Pool {
             return Ok(false);
         }
 
-        let amount = parse_raw_f64(&mint.amount)?;
+        let amount = mint
+            .amount
+            .as_deref()
+            .map(parse_raw_f64)
+            .transpose()?
+            .unwrap_or_default();
         self.base.state.total_mints += 1;
         append_with_history_limit(
             &mut self.base.mint_events,
@@ -467,6 +607,42 @@ impl UniswapV2Pool {
         self.base.swap_events[len.saturating_sub(count)..]
             .iter()
             .collect()
+    }
+
+    pub fn process_lp_transfer(&mut self, transfer: &LPTransferEvent) -> Result<()> {
+        self.lp_tracker.record_transfer_event(transfer)
+    }
+
+    pub fn process_lp_approval(&mut self, approval: &LPApprovalEvent) -> Result<ApprovalInfo> {
+        self.lp_tracker.record_approval_event(approval)
+    }
+
+    pub fn lp_share(&self, address: impl AsRef<str>) -> f64 {
+        self.lp_tracker.share(address)
+    }
+
+    pub fn lp_holders(&self) -> Vec<LPHolderSnapshot> {
+        self.lp_tracker.holder_snapshots()
+    }
+
+    pub fn total_approved_to_routers(&self) -> f64 {
+        self.lp_tracker.total_approved_to_routers()
+    }
+
+    pub fn lp_approved_percentage(&self) -> f64 {
+        self.lp_tracker.approved_percentage()
+    }
+
+    pub fn last_lp_approval_block(&self) -> Option<u64> {
+        self.lp_tracker.last_approval_block()
+    }
+
+    pub fn last_lp_approval_event(&self) -> Option<Value> {
+        self.lp_tracker.last_approval_event()
+    }
+
+    pub fn holders_with_approvals(&self) -> Vec<String> {
+        self.lp_tracker.holders_with_approvals()
     }
 
     pub fn pool_data_for_publishing(&self) -> Value {
@@ -590,7 +766,7 @@ mod tests {
             &UniswapV2MintEvent {
                 pair_address: "0xPOOL".to_string(),
                 to: Some("0xTO".to_string()),
-                amount: "10".to_string(),
+                amount: Some("10".to_string()),
             },
             &tx,
         )
@@ -625,6 +801,11 @@ mod tests {
         assert_eq!(pool.lp_tracker.approved_percentage(), 80.0);
         assert_eq!(pool.lp_tracker.last_approval_block(), Some(2));
         assert_eq!(
+            pool.lp_tracker.last_approval_event().unwrap()["tx_hash"],
+            "0xAPPROVE"
+        );
+        assert_eq!(pool.lp_tracker.holder_snapshots()[0].address, "0xholder");
+        assert_eq!(
             pool.lp_tracker.holders_with_approvals(),
             vec!["0xholder".to_string()]
         );
@@ -642,5 +823,75 @@ mod tests {
         assert_eq!(data["trading_enabled"], true);
         assert_eq!(data["trading_enabled_block"], 200);
         assert_eq!(data["trading_enabled_tx"], "0xBUY");
+    }
+
+    #[test]
+    fn update_from_events_processes_v2_event_batch() {
+        let mut pool = pool();
+        let tx = UniswapV2TxContext::new(300, 1_900, "0xBATCH");
+        let events = UniswapV2TransactionEvents {
+            syncs: vec![UniswapV2SyncEvent {
+                pair_address: "0xPOOL".to_string(),
+                reserve0: "100000000000000000000".to_string(),
+                reserve1: "2000000000000000000".to_string(),
+            }],
+            swaps: vec![UniswapV2SwapEvent {
+                pair_address: "0xPOOL".to_string(),
+                sender: None,
+                to: None,
+                amount0_in: "0".to_string(),
+                amount1_in: "1".to_string(),
+                amount0_out: "2".to_string(),
+                amount1_out: "0".to_string(),
+            }],
+            mints: vec![UniswapV2MintEvent {
+                pair_address: "0xPOOL".to_string(),
+                to: None,
+                amount: None,
+            }],
+            burns: vec![UniswapV2BurnEvent {
+                pair_address: "0xPOOL".to_string(),
+                sender: None,
+                amount0: "0".to_string(),
+                amount1: "0".to_string(),
+            }],
+        };
+
+        pool.update_from_events(&events, &tx).unwrap();
+
+        assert_eq!(pool.base.sync_events.len(), 1);
+        assert_eq!(pool.base.swap_events.len(), 1);
+        assert_eq!(pool.base.mint_events[0]["amount"], 0.0);
+        assert_eq!(pool.base.burn_events.len(), 1);
+    }
+
+    #[test]
+    fn lp_event_helpers_scale_raw_amounts_like_python() {
+        let mut pool = pool();
+
+        pool.process_lp_transfer(&LPTransferEvent {
+            from_address: ZERO_ADDRESS.to_string(),
+            to_address: "0xHOLDER".to_string(),
+            amount: "100000000000000000000".to_string(),
+            block_number: Some(1),
+            tx_hash: Some("0xMINT".to_string()),
+            log_index: Some(7),
+        })
+        .unwrap();
+        pool.process_lp_approval(&LPApprovalEvent {
+            owner: "0xHOLDER".to_string(),
+            spender: "0xROUTER".to_string(),
+            amount: "25000000000000000000".to_string(),
+            block_number: Some(2),
+            tx_hash: Some("0xAPPROVE".to_string()),
+            block_timestamp: Some(55),
+        })
+        .unwrap();
+
+        assert_eq!(pool.lp_share("0xholder"), 100.0);
+        assert_eq!(pool.total_approved_to_routers(), 25.0);
+        assert_eq!(pool.lp_approved_percentage(), 25.0);
+        assert_eq!(pool.last_lp_approval_block(), Some(2));
+        assert_eq!(pool.holders_with_approvals(), vec!["0xholder".to_string()]);
     }
 }
