@@ -1,0 +1,237 @@
+use crate::{
+    broadcast::RpcBroadcaster,
+    config::{BroadcastMode, EthTxExecutorConfig},
+    error::Result,
+    gas::TxGasProfile,
+    nonce::NonceManager,
+    position::{BlockPositionEstimate, MempoolPositionEstimator},
+    repository::{ExecutionEvent, ExecutionRecorder},
+    request::DirectRawTransactionRequest,
+    signer::LocalTransactionSigner,
+    types::{ExecutionStatus, PreparedDirectRawTransaction, SubmitDirectRawResult},
+    validation::prepare_direct_raw_request,
+};
+use serde_json::json;
+use std::{sync::Arc, time::Instant};
+use tracing::{info, warn};
+
+pub struct EthTxExecutionService {
+    config: EthTxExecutorConfig,
+    signer: LocalTransactionSigner,
+    nonce_manager: NonceManager,
+    broadcaster: RpcBroadcaster,
+    position_estimator: MempoolPositionEstimator,
+    recorder: Arc<dyn ExecutionRecorder>,
+}
+
+impl EthTxExecutionService {
+    pub fn new(
+        config: EthTxExecutorConfig,
+        signer: LocalTransactionSigner,
+        nonce_manager: NonceManager,
+        broadcaster: RpcBroadcaster,
+        position_estimator: MempoolPositionEstimator,
+        recorder: Arc<dyn ExecutionRecorder>,
+    ) -> Self {
+        Self {
+            config,
+            signer,
+            nonce_manager,
+            broadcaster,
+            position_estimator,
+            recorder,
+        }
+    }
+
+    pub async fn submit_direct_raw(
+        &self,
+        request: DirectRawTransactionRequest,
+    ) -> Result<SubmitDirectRawResult> {
+        let started = Instant::now();
+        let mut prepared =
+            prepare_direct_raw_request(&self.config, request, self.signer.address())?;
+        self.record(
+            &prepared.attempt_id,
+            ExecutionStatus::Received,
+            "direct raw request received",
+            json!({
+                "from": prepared.from,
+                "to": prepared.to,
+                "chain_id": prepared.chain_id,
+                "gas_limit": prepared.gas_limit,
+                "max_fee_per_gas": prepared.max_fee_per_gas,
+                "max_priority_fee_per_gas": prepared.max_priority_fee_per_gas,
+                "simulation": prepared.simulation,
+                "metadata": prepared.metadata,
+            }),
+        )
+        .await;
+
+        let nonce = self.nonce_manager.reserve(prepared.nonce).await?;
+        prepared.nonce = Some(nonce);
+
+        let position = self.estimate_position(&prepared).await;
+        let signed = self.signer.sign_direct_raw(&prepared).await?;
+        self.record(
+            &prepared.attempt_id,
+            ExecutionStatus::Signed,
+            "transaction signed",
+            json!({
+                "tx_hash": signed.tx_hash,
+                "nonce": nonce,
+                "position": position,
+            }),
+        )
+        .await;
+
+        match self.config.broadcast_mode {
+            BroadcastMode::DryRun => {
+                info!(
+                    attempt_id = prepared.attempt_id,
+                    tx_hash = ?signed.tx_hash,
+                    "dry-run direct raw transaction signed"
+                );
+                self.record(
+                    &prepared.attempt_id,
+                    ExecutionStatus::DryRun,
+                    "dry run complete; transaction was not broadcast",
+                    json!({ "tx_hash": signed.tx_hash }),
+                )
+                .await;
+                Ok(self.result(
+                    prepared,
+                    ExecutionStatus::DryRun,
+                    Some(signed.tx_hash),
+                    position,
+                    None,
+                    started,
+                ))
+            }
+            BroadcastMode::PublicMempool => match self
+                .broadcaster
+                .send_raw_transaction(&signed.raw_tx_hex)
+                .await
+            {
+                Ok(rpc_hash) => {
+                    info!(
+                        attempt_id = prepared.attempt_id,
+                        tx_hash = ?rpc_hash,
+                        "broadcast direct raw transaction"
+                    );
+                    self.record(
+                        &prepared.attempt_id,
+                        ExecutionStatus::Broadcast,
+                        "transaction broadcast",
+                        json!({
+                            "local_tx_hash": signed.tx_hash,
+                            "rpc_tx_hash": rpc_hash,
+                        }),
+                    )
+                    .await;
+                    Ok(self.result(
+                        prepared,
+                        ExecutionStatus::Broadcast,
+                        Some(rpc_hash),
+                        position,
+                        None,
+                        started,
+                    ))
+                }
+                Err(err) => {
+                    self.nonce_manager.invalidate().await;
+                    let message = err.to_string();
+                    self.record(
+                        &prepared.attempt_id,
+                        ExecutionStatus::BroadcastError,
+                        &message,
+                        json!({ "tx_hash": signed.tx_hash }),
+                    )
+                    .await;
+                    Ok(self.result(
+                        prepared,
+                        ExecutionStatus::BroadcastError,
+                        Some(signed.tx_hash),
+                        position,
+                        Some(message),
+                        started,
+                    ))
+                }
+            },
+        }
+    }
+
+    async fn estimate_position(
+        &self,
+        prepared: &PreparedDirectRawTransaction,
+    ) -> Option<BlockPositionEstimate> {
+        if !self.config.estimate_pending_position {
+            return None;
+        }
+
+        match self
+            .position_estimator
+            .estimate(TxGasProfile {
+                gas_limit: prepared.gas_limit,
+                max_fee_per_gas: prepared.max_fee_per_gas,
+                max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
+            })
+            .await
+        {
+            Ok(position) => Some(position),
+            Err(err) => {
+                warn!(
+                    attempt_id = prepared.attempt_id,
+                    error = %err,
+                    "could not estimate pending block position"
+                );
+                None
+            }
+        }
+    }
+
+    fn result(
+        &self,
+        prepared: PreparedDirectRawTransaction,
+        status: ExecutionStatus,
+        tx_hash: Option<ethers_core::types::H256>,
+        position: Option<BlockPositionEstimate>,
+        error: Option<String>,
+        started: Instant,
+    ) -> SubmitDirectRawResult {
+        SubmitDirectRawResult {
+            attempt_id: prepared.attempt_id,
+            status,
+            tx_hash,
+            from: prepared.from,
+            to: prepared.to,
+            nonce: prepared.nonce.expect("nonce assigned before result"),
+            gas_limit: prepared.gas_limit,
+            max_fee_per_gas: prepared.max_fee_per_gas,
+            max_priority_fee_per_gas: prepared.max_priority_fee_per_gas,
+            position,
+            error,
+            elapsed_ms: started.elapsed().as_millis(),
+        }
+    }
+
+    async fn record(
+        &self,
+        attempt_id: &str,
+        status: ExecutionStatus,
+        message: impl Into<String>,
+        payload: serde_json::Value,
+    ) {
+        if let Err(err) = self
+            .recorder
+            .record(ExecutionEvent::new(
+                attempt_id,
+                status,
+                Some(message.into()),
+                payload,
+            ))
+            .await
+        {
+            warn!(attempt_id, error = %err, "failed to record execution event");
+        }
+    }
+}

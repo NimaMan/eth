@@ -1,8 +1,0 @@
-[package]
-name = "tx_ranking_system"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-ethers-core = "2.0.14"
-eyre = "0.6"
