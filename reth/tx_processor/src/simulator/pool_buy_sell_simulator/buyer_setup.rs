@@ -5,7 +5,7 @@ use eyre::{eyre, Result};
 use reth_chain_query::dex::{fetch_uniswap_v2_pair_address, UNISWAP_V2_FACTORY};
 use tx_simulator::{
     tx_builders::{
-        amm_swap_route::AmmSwapRoute, build_approve_for_route, build_sell_swap,
+        amm_swap_route::AmmSwapRoute, build_approve_for_route, build_denom_to_token_swap,
         uniswap_v4::build_weth_deposit_tx as build_v4_weth_deposit_tx,
     },
     TxSimulator, UnsignedTxChainSimulation,
@@ -261,10 +261,11 @@ async fn prefund_denom_via_weth(
         return Ok(Some(failure));
     }
 
-    let mut swap_tx = build_sell_swap(
+    let mut swap_tx = build_denom_to_token_swap(
         &route,
         config.buyer_address,
         config.weth_address,
+        config.denom_address,
         weth_buffered,
         0,
         u64::MAX,

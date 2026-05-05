@@ -79,6 +79,7 @@ impl TxSimulator {
             let block_number = options.at_block.unwrap_or(latest);
 
             let mut forked_state = simulator.create_forked_state(block_number)?;
+            let total_transactions = transactions.len();
 
             let mut results = Vec::new();
             let mut cumulative_gas_used = 0u64;
@@ -88,17 +89,15 @@ impl TxSimulator {
             // Create fused inspector that persists across transactions
             let mut inspector: Option<TracingInspector> = None;
 
-            for (_index, mut transaction) in transactions.into_iter().enumerate() {
+            for (index, mut transaction) in transactions.into_iter().enumerate() {
+                let mut auto_nonce = None;
+
                 // Auto-detect nonce if not provided
                 if transaction.nonce.is_none() {
                     if let Some(from) = transaction.from {
                         let nonce = simulator.get_nonce_from_state(&mut forked_state, from)?;
                         transaction.nonce = Some(nonce);
-
-                        // Track nonce for auto-increment
-                        if options.auto_increment_nonces {
-                            *forked_state.nonces.entry(from).or_insert(nonce) = nonce + 1;
-                        }
+                        auto_nonce = Some((from, nonce));
                     }
                 }
 
@@ -107,14 +106,35 @@ impl TxSimulator {
                     transaction.gas = Some(gas_limit);
                 }
 
-                // Simulate the transaction on the forked state with fused inspector
-                let result = simulator.simulate_on_fork_with_inspector(
+                // Simulate the transaction on the forked state with fused inspector.
+                let mut result = match simulator.simulate_on_fork_with_inspector(
                     &mut forked_state,
                     transaction,
                     &mut inspector,
-                )?;
+                ) {
+                    Ok(result) => {
+                        if let Some((from, nonce)) = auto_nonce {
+                            if options.auto_increment_nonces {
+                                forked_state.nonces.insert(from, nonce + 1);
+                            }
+                        }
+                        result
+                    }
+                    Err(err) => SequentialTransactionResult {
+                        transaction_index: index,
+                        success: false,
+                        gas_used: 0,
+                        revert_reason: Some(err.to_string()),
+                        revert_context: None,
+                        cumulative_gas_used,
+                        updated_nonces: forked_state.nonces.clone(),
+                    },
+                };
+                result.transaction_index = index;
 
                 cumulative_gas_used += result.gas_used;
+                result.cumulative_gas_used = cumulative_gas_used;
+                result.updated_nonces = forked_state.nonces.clone();
 
                 // Track success/failure
                 if result.success {
@@ -135,7 +155,7 @@ impl TxSimulator {
             let sequence_success = failed_transactions == 0;
 
             Ok(SequentialSimulationResult {
-                total_transactions: results.len(),
+                total_transactions,
                 successful_transactions,
                 failed_transactions,
                 total_gas_used: cumulative_gas_used,
@@ -237,7 +257,11 @@ impl TxSimulator {
         let success = res.result.is_success();
         let gas_used = res.result.tx_gas_used();
         let raw_output = res.result.output().cloned();
-        let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
+        let revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(raw_output.as_ref(), initial_context.as_ref())
+        };
         let revert_context = if success { None } else { initial_context };
 
         // Extract unsigned_tx trace and step logs
@@ -328,7 +352,11 @@ impl TxSimulator {
         let success = res.result.is_success();
         let gas_used = res.result.tx_gas_used();
         let revert_data = res.result.output().cloned();
-        let revert_reason = decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
+        let revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(revert_data.as_ref(), initial_context.as_ref())
+        };
         let revert_context = if success { None } else { initial_context };
 
         // Update nonces

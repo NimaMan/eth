@@ -8,7 +8,7 @@ use std::path::Path;
 ///
 /// This module contains the main TxSimulator struct and its core methods
 /// for initialization and database access.
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::{runtime::Runtime, task};
 use tracing::warn;
 
@@ -36,7 +36,6 @@ pub struct TxSimulator {
     pub(crate) evm_config: EthEvmConfig,
     pub(crate) defaults: SimulationDefaults,
     pub(crate) live_chain_cache: Option<Arc<LiveChainCache>>,
-    loader_runtime: Arc<Runtime>,
 }
 
 impl TxSimulator {
@@ -64,22 +63,20 @@ impl TxSimulator {
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_only(static_files_path)?,
-            RocksDBProvider::builder(datadir.join("rocksdb")).build()?,
+            RocksDBProvider::builder(datadir.join("rocksdb"))
+                .with_default_tables()
+                .with_read_only(true)
+                .build()?,
             reth_tasks::Runtime::test(),
         )?;
 
         let evm_config = EthEvmConfig::new(chain_spec.clone());
-
-        let loader_runtime = Arc::new(
-            Runtime::new().map_err(|err| eyre!("failed to create loader runtime: {}", err))?,
-        );
 
         let mut simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
-            loader_runtime,
         };
         simulator.attach_default_live_chain_cache();
         Ok(simulator)
@@ -92,16 +89,11 @@ impl TxSimulator {
         let chain_spec = provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
 
-        let loader_runtime = Arc::new(
-            Runtime::new().map_err(|err| eyre!("failed to create loader runtime: {}", err))?,
-        );
-
         let mut simulator = Self {
             provider_factory,
             evm_config,
             defaults: SimulationDefaults::default(),
             live_chain_cache: None,
-            loader_runtime,
         };
         simulator.attach_default_live_chain_cache();
         Ok(simulator)
@@ -220,7 +212,7 @@ impl TxSimulator {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             task::block_in_place(|| handle.block_on(fut))
         } else {
-            self.loader_runtime.block_on(fut)
+            loader_runtime().block_on(fut)
         }
     }
 
@@ -257,3 +249,10 @@ impl TxSimulator {
 
 // Alias for compatibility
 pub type RethTxSimulator = TxSimulator;
+
+fn loader_runtime() -> &'static Runtime {
+    static LOADER_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    LOADER_RUNTIME.get_or_init(|| {
+        Runtime::new().expect("failed to create tx_simulator block-context loader runtime")
+    })
+}

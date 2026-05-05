@@ -178,6 +178,72 @@ pub fn build_sell_swap(
     }
 }
 
+/// Build a denomination-token -> target-token swap for pool viability checks.
+///
+/// V2-style routers use the fee-on-transfer supporting token-to-token selector so
+/// taxed output tokens do not trip the plain router path.
+pub fn build_denom_to_token_swap(
+    route: &AmmSwapRoute,
+    trader: Address,
+    denom_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    _slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    build_fee_tolerant_token_to_token_swap(route, trader, denom_in, token_out, amount_in, deadline)
+}
+
+/// Build a target-token -> denomination-token swap for pool viability checks.
+///
+/// V2-style routers use the fee-on-transfer supporting token-to-token selector so
+/// taxed input tokens can be sold without the router's plain transfer check.
+pub fn build_token_to_denom_swap(
+    route: &AmmSwapRoute,
+    trader: Address,
+    token_in: Address,
+    denom_out: Address,
+    amount_in: U256,
+    _slippage_bps: u32,
+    deadline: u64,
+) -> UnsignedTransaction {
+    build_fee_tolerant_token_to_token_swap(route, trader, token_in, denom_out, amount_in, deadline)
+}
+
+fn build_fee_tolerant_token_to_token_swap(
+    route: &AmmSwapRoute,
+    trader: Address,
+    token_in: Address,
+    token_out: Address,
+    amount_in: U256,
+    deadline: u64,
+) -> UnsignedTransaction {
+    match *route {
+        AmmSwapRoute::UniswapV2 { .. } => uniswap_v2::build_token_to_token_swap_supporting_fee_v2(
+            uniswap_v2::Router::UniswapV2,
+            trader,
+            token_in,
+            token_out,
+            amount_in,
+            deadline,
+        ),
+        AmmSwapRoute::SushiswapV2 { .. } => {
+            uniswap_v2::build_token_to_token_swap_supporting_fee_v2(
+                uniswap_v2::Router::SushiswapV2,
+                trader,
+                token_in,
+                token_out,
+                amount_in,
+                deadline,
+            )
+        }
+        AmmSwapRoute::UniswapV3 { fee_tier, .. } => uniswap_v3::build_token_to_token_swap_v3(
+            trader, token_in, token_out, amount_in, fee_tier, 0, deadline,
+        ),
+        _ => build_token_to_token_swap(route, trader, token_in, token_out, amount_in, 0, deadline),
+    }
+}
+
 /// Build a sell swap with explicit amountOutMin.
 pub fn build_sell_swap_with_min_out(
     route: &AmmSwapRoute,
@@ -385,5 +451,68 @@ pub fn build_sell_with_permit(
             slippage_bps,
             deadline,
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn addr(byte: u8) -> Address {
+        Address::from([byte; 20])
+    }
+
+    #[test]
+    fn v2_denom_buy_uses_supporting_fee_token_to_token_selector() {
+        let tx = build_denom_to_token_swap(
+            &AmmSwapRoute::UniswapV2 { pool: addr(1) },
+            addr(2),
+            addr(3),
+            addr(4),
+            U256::from(1000),
+            0,
+            u64::MAX,
+        );
+        let data = tx.data.expect("swap calldata");
+
+        assert_eq!(&data[..4], &[0x5c, 0x11, 0xd7, 0x95]);
+        assert_eq!(tx.value, Some(U256::ZERO));
+    }
+
+    #[test]
+    fn v2_denom_sell_uses_supporting_fee_token_to_token_selector() {
+        let tx = build_token_to_denom_swap(
+            &AmmSwapRoute::SushiswapV2 { pool: addr(1) },
+            addr(2),
+            addr(3),
+            addr(4),
+            U256::from(1000),
+            0,
+            u64::MAX,
+        );
+        let data = tx.data.expect("swap calldata");
+
+        assert_eq!(&data[..4], &[0x5c, 0x11, 0xd7, 0x95]);
+        assert_eq!(tx.value, Some(U256::ZERO));
+    }
+
+    #[test]
+    fn v3_denom_buy_uses_exact_input_single_selector() {
+        let tx = build_denom_to_token_swap(
+            &AmmSwapRoute::UniswapV3 {
+                pool: addr(1),
+                fee_tier: 3000,
+            },
+            addr(2),
+            addr(3),
+            addr(4),
+            U256::from(1000),
+            0,
+            u64::MAX,
+        );
+        let data = tx.data.expect("swap calldata");
+
+        assert_eq!(&data[..4], &[0x41, 0x4b, 0xf3, 0x89]);
+        assert_eq!(tx.value, Some(U256::ZERO));
     }
 }

@@ -245,8 +245,11 @@ impl UnsignedTxChainSimulation {
         let success = res.result.is_success();
         let gas_used = res.result.tx_gas_used();
         let revert_data = res.result.output().cloned();
-        let mut revert_reason =
-            decode_revert_reason(revert_data.as_ref(), initial_context.as_ref());
+        let mut revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(revert_data.as_ref(), initial_context.as_ref())
+        };
         if !success && revert_reason.is_none() {
             revert_reason = Some("Transaction reverted without data".to_string());
         }

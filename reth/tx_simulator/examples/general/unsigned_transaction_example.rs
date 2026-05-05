@@ -107,12 +107,12 @@ async fn main() -> Result<()> {
     println!("\n📝 Example 4: Failed Transaction Analysis");
     println!("{}", "-".repeat(42));
 
-    // Try to send more ETH than available
+    // Set gas below intrinsic cost so this fails deterministically before execution.
     let failed_call = UnsignedTransaction {
-        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?), // Funded account
+        from: Some("0x0C96c602b1b332B8AB2093E5d72D804a24bd5689".parse()?),
         to: Some("0xa0b86a33e6c2c76f8c4f8e60b55c2e6f4fd9a3db".parse()?),
-        value: Some(U256::from_str("5000000000000000000").unwrap()), // 5 ETH
-        gas: Some(21000),
+        value: Some(U256::from_str("5000000000000000000").unwrap()),
+        gas: Some(20_000),
         gas_price: Some(20_000_000_000),
         ..Default::default()
     };

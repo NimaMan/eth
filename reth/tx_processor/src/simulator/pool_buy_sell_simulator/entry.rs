@@ -23,7 +23,7 @@ use crate::tx_processor::tax_calculator::{
 };
 use tx_simulator::tx_builders::{
     amm_swap_route::AmmSwapRoute,
-    build_approve_for_route, build_buy_swap, build_sell_swap,
+    build_approve_for_route, build_denom_to_token_swap, build_token_to_denom_swap,
     uniswap_v2::{build_approve_v2, Router as UniswapV2Router},
     uniswap_v3::build_approve_v3,
 };
@@ -319,9 +319,10 @@ pub async fn check_can_buy_sell_pool(
     // BUY
     let slippage_bps = (config.slippage_tolerance * 100.0).round() as u32;
     let deadline = u64::MAX;
-    let mut buy_tx = build_buy_swap(
+    let mut buy_tx = build_denom_to_token_swap(
         &route,
         config.buyer_address,
+        config.denom_address,
         config.token_address,
         config.test_amount,
         slippage_bps,
@@ -505,28 +506,11 @@ pub async fn check_can_buy_sell_pool(
             err.wrap_err(context)
         })?;
     }
-    let sell_route = match config.pool_type {
-        PoolType::UniswapV2 => AmmSwapRoute::UniswapV2 {
-            pool: config.pool_address,
-        },
-        PoolType::SushiSwap => AmmSwapRoute::SushiswapV2 {
-            pool: config.pool_address,
-        },
-        PoolType::UniswapV3 { fee_tier } => AmmSwapRoute::UniswapV3 {
-            pool: config.pool_address,
-            fee_tier,
-        },
-        other => {
-            return Err(eyre::eyre!(
-                "Pool type {:?} not yet implemented for denomination token swaps",
-                other
-            ));
-        }
-    };
-    let mut sell_tx = build_sell_swap(
-        &sell_route,
+    let mut sell_tx = build_token_to_denom_swap(
+        &route,
         config.buyer_address,
         config.token_address,
+        config.denom_address,
         tokens_received,
         slippage_bps,
         deadline,

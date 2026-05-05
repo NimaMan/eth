@@ -95,8 +95,7 @@ async fn execute_floki_trading_workflow(
 
     // Debug: Check if we received tokens
     if buy_result.success && buy_result.call_trace.logs.is_empty() {
-        println!("  ⚠️  WARNING: No logs emitted! FLOKI tokens might not have been transferred.");
-        println!("  This could mean the swap didn't actually execute a token transfer.");
+        println!("  Note: call trace logs are empty; verifying token balance directly.");
     }
 
     if !buy_result.success {
@@ -298,9 +297,8 @@ async fn execute_floki_trading_workflow(
 
     println!("\n📊 Alternative Test Summary:");
     if sell_result2.success {
-        println!("  ✅ Mixed approach WORKS! State persistence confirmed as the issue.");
-        println!("  • step() properly persists FLOKI's complex state");
-        println!("  • step_with_trace() alone fails to persist state between transactions");
+        println!("  ✅ Mixed step()/trace path works too.");
+        println!("  • FLOKI sells require the supporting-fee selector and enough gas.");
     } else {
         println!("  ❌ Mixed approach also failed. Issue might be deeper than state persistence.");
     }
@@ -383,7 +381,7 @@ fn create_buy_floki_transaction(buyer: Address, eth_amount: U256) -> UnsignedTra
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(eth_amount),
         data: Some(Bytes::from(data)),
-        gas: Some(300_000),
+        gas: Some(500_000),
         gas_price: Some(20_000_000_000), // 20 gwei
         nonce: None,                     // Let UnsignedTxChainSimulation handle nonce
         max_fee_per_gas: None,
@@ -448,8 +446,8 @@ fn create_balance_check_transaction(owner: Address, token: Address) -> UnsignedT
 
 /// Create a transaction to sell FLOKI for ETH using Uniswap V2
 fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> UnsignedTransaction {
-    // swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
-    let mut data = vec![0x18, 0xcb, 0xaf, 0xe5]; // Function selector
+    // swapExactTokensForETHSupportingFeeOnTransferTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline)
+    let mut data = vec![0x79, 0x1a, 0xc9, 0x47]; // Function selector
 
     // amountIn (amount of FLOKI to sell)
     data.extend_from_slice(&floki_amount.to_be_bytes::<32>());
@@ -483,7 +481,7 @@ fn create_sell_floki_transaction(seller: Address, floki_amount: U256) -> Unsigne
         to: Some(Address::from_str(UNISWAP_V2_ROUTER).unwrap()),
         value: Some(U256::ZERO),
         data: Some(Bytes::from(data)),
-        gas: Some(300_000),
+        gas: Some(500_000),
         gas_price: Some(20_000_000_000),
         nonce: None,
         max_fee_per_gas: None,

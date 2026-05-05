@@ -419,7 +419,11 @@ impl TxSimulator {
         let success = res.result.is_success();
         let gas_used = res.result.tx_gas_used();
         let raw_output = res.result.output().cloned();
-        let revert_reason = decode_revert_reason(raw_output.as_ref(), initial_context.as_ref());
+        let revert_reason = if success {
+            None
+        } else {
+            decode_revert_reason(raw_output.as_ref(), initial_context.as_ref())
+        };
         let revert_context = if success {
             None
         } else {

@@ -21,8 +21,9 @@ async fn main() -> Result<()> {
     println!("--------------------------------------");
     let invalid_call = UnsignedTransaction {
         from: Some("0x0000000000000000000000000000000000000001".parse()?),
-        to: Some("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse()?), // WETH
+        to: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?), // USDC
         data: Some(Bytes::from(vec![0x12, 0x34, 0x56, 0x78])),           // Invalid selector
+        gas: Some(100_000),
         ..Default::default()
     };
 
@@ -49,6 +50,7 @@ async fn main() -> Result<()> {
         from: Some("0x0000000000000000000000000000000000000001".parse()?),
         to: Some("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse()?), // USDC
         data: Some(Bytes::from(transfer_data)),
+        gas: Some(150_000),
         ..Default::default()
     };
 
@@ -73,6 +75,7 @@ async fn main() -> Result<()> {
         to: Some("0xE592427A0AEce92De3Edee1F18E0157C05861564".parse()?), // V3 Router
         data: Some(Bytes::from(swap_data)),
         value: Some(U256::from(1000000000000000u64)), // 0.001 ETH
+        gas: Some(300_000),
         ..Default::default()
     };
 
