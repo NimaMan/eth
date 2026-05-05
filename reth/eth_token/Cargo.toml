@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+alloy-primitives = { version = "1.5.7", features = ["rlp"] }
 eyre.workspace = true
 indexmap = "2"
 serde.workspace = true
 serde_json.workspace = true
+tx_processor = { path = "../tx_processor" }
