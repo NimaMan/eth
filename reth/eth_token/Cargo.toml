@@ -8,6 +8,12 @@ license.workspace = true
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }
 eyre.workspace = true
 indexmap = "2"
+reth_chain_query = { path = "../reth_chain_query" }
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 tx_processor = { path = "../tx_processor" }
+
+[[example]]
+name = "v2_pool_replay_reserves"
+path = "examples/v2_pool_replay_reserves.rs"
