@@ -4,6 +4,7 @@ members = [
     "tx_simulator",
     "tx_processor",
     "reth_chain_query",
+    "eth_token",
     "mempool_processor",
     "pyreth",
 ]
