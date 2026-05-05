@@ -3,7 +3,7 @@ use std::{env, path::PathBuf, sync::Arc};
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
 
-use crate::live_pipeline::{
+use crate::live::{
     block_logger::BlockProcessingLogger,
     block_notifier::RedisBlockNotifier,
     block_snapshot::build_live_block_snapshot,

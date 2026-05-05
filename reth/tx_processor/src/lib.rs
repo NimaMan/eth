@@ -17,7 +17,7 @@ pub use tx_simulator::{
 
 // Export transaction processing modules
 pub mod block_processor;
-pub mod live_pipeline;
+pub mod live;
 pub mod processed_tx_provider;
 pub mod simulator;
 pub mod tx_builder;
@@ -27,7 +27,7 @@ pub mod tx_processor;
 pub use block_processor::{
     BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockTransactions,
 };
-pub use live_pipeline::{
+pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
 };
 pub use processed_tx_provider::{

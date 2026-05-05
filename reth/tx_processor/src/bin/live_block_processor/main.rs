@@ -2,7 +2,7 @@ use std::{env, path::PathBuf, sync::Arc};
 
 use eyre::Result;
 use reth_chain_query::RethQueryProvider;
-use tx_processor::live_pipeline::{LiveBlockProcessorConfig, LiveBlockService};
+use tx_processor::live::{LiveBlockProcessorConfig, LiveBlockService};
 use tx_simulator::config::repo;
 
 #[tokio::main]

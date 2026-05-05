@@ -1,4 +1,4 @@
-use crate::live_pipeline::live_block_processor::LiveProcessedBlock;
+use crate::live::live_block_processor::LiveProcessedBlock;
 use chrono::Utc;
 use eyre::{eyre, Result};
 use std::{

@@ -1,4 +1,4 @@
-use crate::live_pipeline::block_snapshot::LiveBlockSnapshot;
+use crate::live::block_snapshot::LiveBlockSnapshot;
 use eyre::{eyre, Result};
 use redis::{aio::ConnectionManager, Client};
 use serde_json::json;
