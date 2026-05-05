@@ -9,6 +9,7 @@ import orjson
 
 from . import keys
 from .redis_client import get_async_client
+from .snapshot_serialization import json_safe
 
 
 class LiveDataPublisher:
@@ -172,11 +173,11 @@ def _prepare_payload(snapshot: Dict[str, Any]) -> str:
     if "updated_at" not in snapshot:
         snapshot = dict(snapshot)
         snapshot["updated_at"] = time.time()
-    return orjson.dumps(snapshot).decode()
+    return orjson.dumps(json_safe(snapshot)).decode()
 
 
 def _dumps_json(value: Dict[str, Any]) -> str:
-    return orjson.dumps(value).decode()
+    return orjson.dumps(json_safe(value)).decode()
 
 
 def _header_dict(snapshot: Dict[str, Any]) -> Dict[str, Any]:

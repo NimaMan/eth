@@ -52,7 +52,7 @@ def build_block_snapshot(
         "tx_count": len(processed_block.transactions),
     }
     if include_transactions:
-        snapshot["transactions"] = [_json_safe(tx) for tx in processed_block.transactions]
+        snapshot["transactions"] = [json_safe(tx) for tx in processed_block.transactions]
     return snapshot
 
 
@@ -60,7 +60,7 @@ def dumps_snapshot(snapshot: Mapping[str, Any]) -> str:
     """
     Serialize a snapshot dict to JSON using orjson.
     """
-    return orjson.dumps(snapshot).decode()
+    return orjson.dumps(json_safe(snapshot)).decode()
 
 
 def loads_snapshot(payload: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -69,7 +69,7 @@ def loads_snapshot(payload: Optional[str]) -> Optional[Dict[str, Any]]:
     return orjson.loads(payload)
 
 
-def _json_safe(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
     """
     Recursively convert values to JSON-serializable structures.
     """
@@ -77,13 +77,13 @@ def _json_safe(value: Any) -> Any:
         value = dataclasses.asdict(value)
 
     if isinstance(value, dict):
-        return {k: _json_safe(v) for k, v in value.items()}
+        return {k: json_safe(v) for k, v in value.items()}
 
     if isinstance(value, (list, tuple)):
-        return [_json_safe(v) for v in value]
+        return [json_safe(v) for v in value]
 
     if isinstance(value, set):
-        return [_json_safe(v) for v in value]
+        return [json_safe(v) for v in value]
 
     if isinstance(value, (bytes, bytearray, memoryview, HexBytes)):
         return bytes(value).hex()
@@ -96,6 +96,7 @@ def _json_safe(value: Any) -> Any:
 
 __all__ = [
     "build_block_snapshot",
+    "json_safe",
     "normalize_block_header",
     "dumps_snapshot",
     "loads_snapshot",
