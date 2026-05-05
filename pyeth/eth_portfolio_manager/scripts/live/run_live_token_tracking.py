@@ -5,10 +5,10 @@ Objective:
 ---------
 1. Run real-time portfolio position tracking with multiple strategies
 2. Extract and track pool ETH reserve levels from token updates
-3. Publish pool levels via ZeroMQ to the Rust mempool processor
+3. Publish token update notifications via ZeroMQ to the Rust mempool processor
 4. Use live_trading_db for enhanced position tracking and signal publishing
 5. Enable scam detection in pending transactions before they're confirmed
-6. Maintain bidirectional communication between Python and Rust components
+6. Maintain Redis-backed token state for Rust consumers
 7. Persist strategy results and positions for dashboard consumption
 
 This script implements the enhanced version with live_trading_db:
@@ -33,7 +33,32 @@ from eth_portfolio_manager.strategy import MarketTracker, WalletTrackerStrategy
 from eth_portfolio_manager.utils.logger import get_logger
 
 
-logger = get_logger(name="live_token_tracking", log_folder="live_trading")
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return int(value)
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return float(value)
+
+
+logger = get_logger(
+    name="live_token_tracking",
+    log_folder="live_trading",
+    console_output=_env_bool("LIVE_TOKEN_TRACKER_CONSOLE_LOG", False),
+)
 
 
 class LivePortfolioConfig:
@@ -87,9 +112,11 @@ class LivePortfolioServiceWithPoolSharing:
             )
         
         if self.adapter:
-            self.logger.info("✅ Successfully integrated LiveTokenTracker with live_trading_db")
+            self.logger.info("Successfully integrated LiveTokenTracker with live_trading_db")
+        elif save_strategy_results:
+            self.logger.warning("Failed to integrate live_trading_db, using original system")
         else:
-            self.logger.warning("⚠️ Failed to integrate live_trading_db, using original system")
+            self.logger.info("live_trading_db strategy persistence disabled")
         
         self._shutdown_event = asyncio.Event()
         self._is_shutting_down = False
@@ -151,9 +178,8 @@ class LivePortfolioServiceWithPoolSharing:
             
             # Log ZMQ endpoints from the live tracker
             pub_endpoint = getattr(self.engine.token_update_notifier, 'pub_endpoint', 'Unknown')
-            rep_endpoint = getattr(self.engine.token_update_notifier, 'rep_endpoint', 'Unknown')
             self.logger.info(f"ZeroMQ PUB socket bound to {pub_endpoint}")
-            self.logger.info(f"ZeroMQ REP socket bound to {rep_endpoint}")
+            self.logger.info("Token startup state is served from Redis token snapshots/index")
             self.logger.info("Waiting for Rust mempool processor to connect...")
             
             # Keep the service running until shutdown
@@ -251,10 +277,11 @@ async def run_live_portfolio_with_pool_sharing(
 
 
 if __name__ == "__main__":
-    warmup_blocks = 1000  # Number of blocks to warm up on startup  
-    save_strategy_results = True  # Enable to use live_trading_db
-    add_pnl_to_db = False  # Disable PnL tracking to avoid writer errors
-    min_eth_threshold = 0.01  # Minimum ETH reserve (0.01 ETH)
+    warmup_blocks = _env_int("LIVE_TOKEN_TRACKER_WARMUP_BLOCKS", 1000)
+    save_strategy_results = _env_bool("LIVE_TOKEN_TRACKER_SAVE_STRATEGY_RESULTS", True)
+    add_pnl_to_db = _env_bool("LIVE_TOKEN_TRACKER_ADD_PNL_TO_DB", False)
+    add_status_to_db = _env_bool("LIVE_TOKEN_TRACKER_ADD_STATUS_TO_DB", False)
+    min_eth_threshold = _env_float("LIVE_TOKEN_TRACKER_MIN_ETH_THRESHOLD", 0.01)
     
     # Ensure unexpected exceptions are logged
     def _excepthook(exc_type, exc, tb):
@@ -272,6 +299,7 @@ if __name__ == "__main__":
                 warmup_blocks=warmup_blocks,
                 save_strategy_results=save_strategy_results,
                 add_pnl_to_db=add_pnl_to_db,
+                add_status_to_db=add_status_to_db,
                 min_eth_threshold=min_eth_threshold
         ))
     except KeyboardInterrupt:

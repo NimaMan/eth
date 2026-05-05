@@ -15,10 +15,11 @@ in the latest block.
 
 2. **TokenUpdateNotifier (`token_update_notifier.py`)**
    - Publishes just the address lists via ZeroMQ (PUB socket for block
-     updates, REQ/REP for querying the latest lists).
+     updates).
    - External processors (e.g., the Rust mempool service) subscribe to
      the notifier, receive the updated addresses, and then fetch full
-     snapshots from Redis.
+     snapshots from Redis. Startup discovery uses the Redis token snapshot
+     index instead of a ZMQ query socket.
 
 3. **TradeSignalPublisher (`trade_signal_publisher.py`)**
    - Unchanged: handles signal delivery and execution acknowledgements.

@@ -33,7 +33,8 @@ pub(super) async fn prepare_state_for_metadata(
 
     for hash in pending_tx_hashes {
         let hash_hex = format!("0x{}", hex::encode(hash.as_slice()));
-        let Some(tx_value) = find_pending_transaction(&cache, resolved_block, &hash_hex).await?
+        let Some((candidate_block, tx_value)) =
+            find_pending_transaction(&cache, resolved_block, &hash_hex).await?
         else {
             warn!(
                 target: "reth_chain_query::erc20",
@@ -46,10 +47,23 @@ pub(super) async fn prepare_state_for_metadata(
         };
 
         let unsigned_tx = build_unsigned_transaction_from_processed_tx_json(&tx_value)?;
+        if let (Some(from), Some(nonce)) = (unsigned_tx.from, unsigned_tx.nonce) {
+            let previous_nonce = chain.set_account_nonce_for_replay(from, nonce)?;
+            debug!(
+                target: "reth_chain_query::erc20",
+                block = resolved_block,
+                pending_block = candidate_block,
+                hash = hash_hex,
+                %from,
+                previous_nonce,
+                replay_nonce = nonce,
+                "Set account nonce before pending metadata replay"
+            );
+        }
         debug!(
             target: "reth_chain_query::erc20",
             block = resolved_block,
-            pending_block = resolved_block + 1,
+            pending_block = candidate_block,
             hash = hash_hex,
             "Replaying pending tx before fetching token metadata"
         );
@@ -63,7 +77,7 @@ async fn find_pending_transaction(
     cache: &tx_simulator::LiveChainCache,
     base_block: u64,
     hash: &str,
-) -> Result<Option<Value>> {
+) -> Result<Option<(u64, Value)>> {
     let latest_live = cache
         .latest_block_number()
         .await?
@@ -71,7 +85,7 @@ async fn find_pending_transaction(
 
     for candidate in (base_block + 1)..=latest_live {
         if let Some(tx) = cache.find_processed_transaction(candidate, hash).await? {
-            return Ok(Some(tx));
+            return Ok(Some((candidate, tx)));
         }
     }
 

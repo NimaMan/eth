@@ -10,12 +10,14 @@ use std::collections::HashMap;
 use std::time::Instant;
 use tracing::{debug, warn};
 
-pub(crate) const DEFAULT_TOKEN_KEY_PREFIX: &str = "token:snapshot:";
+pub(crate) const DEFAULT_TOKEN_KEY_PREFIX: &str = "eth/live/token/snapshot/";
+pub(crate) const LEGACY_TOKEN_KEY_PREFIX: &str = "token:snapshot:";
 
 #[derive(Clone)]
 pub struct LiveDataSnapshotFetcher {
     client: redis::Client,
     key_prefix: String,
+    index_key: String,
 }
 
 impl LiveDataSnapshotFetcher {
@@ -25,9 +27,11 @@ impl LiveDataSnapshotFetcher {
         let prefix = key_prefix
             .map(|s| s.to_string())
             .unwrap_or_else(|| DEFAULT_TOKEN_KEY_PREFIX.to_string());
+        let index_key = token_index_key_for_prefix(&prefix);
         Ok(Self {
             client,
             key_prefix: prefix,
+            index_key,
         })
     }
 
@@ -87,6 +91,24 @@ impl LiveDataSnapshotFetcher {
         Ok(results)
     }
 
+    /// Return all token addresses from the explicit Redis token snapshot index.
+    pub async fn fetch_indexed_addresses(&self) -> Result<Vec<String>> {
+        let mut conn = self
+            .client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|err| eyre!("failed to connect to redis: {}", err))?;
+
+        let mut addresses: Vec<String> = redis::cmd("SMEMBERS")
+            .arg(&self.index_key)
+            .query_async(&mut conn)
+            .await
+            .map_err(|err| eyre!("failed to fetch token snapshot index: {}", err))?;
+        addresses.sort();
+        addresses.dedup();
+        Ok(addresses)
+    }
+
     /// Fallback: scan Redis for all token snapshot keys and return their addresses.
     pub async fn fetch_all_addresses(&self) -> Result<Vec<String>> {
         let mut conn = self
@@ -107,11 +129,21 @@ impl LiveDataSnapshotFetcher {
             let key =
                 key.map_err(|err| eyre!("failed to scan redis token snapshot key: {}", err))?;
             if let Some(stripped) = key.strip_prefix(&self.key_prefix) {
-                addresses.push(stripped.to_string());
+                if stripped != "index" {
+                    addresses.push(stripped.to_string());
+                }
             }
         }
 
         Ok(addresses)
+    }
+}
+
+fn token_index_key_for_prefix(prefix: &str) -> String {
+    if let Some(stripped) = prefix.strip_suffix('/') {
+        format!("{stripped}/index")
+    } else {
+        format!("{prefix}index")
     }
 }
 

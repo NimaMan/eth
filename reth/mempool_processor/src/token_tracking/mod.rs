@@ -13,30 +13,29 @@ pub mod types;
 pub use address_tracking_cache::{AddressRole, AddressTrackingCache};
 pub use cache::{CacheStats, TokenTrackingCache, UpdateResult};
 use serde_json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 pub use types::CacheConfig;
 pub use types::{Address, Pool, PoolType, Token, TokenUpdate, TokenUpdatePayload, TokenWithPools};
 use zmq;
 
-use self::live_data::{apply_snapshot_map_to_cache, LiveDataSnapshotFetcher};
+use self::live_data::{
+    apply_snapshot_map_to_cache, LiveDataSnapshotFetcher, LEGACY_TOKEN_KEY_PREFIX,
+};
 use self::types::{
-    PoolUpdatesMessage, TokenCreatorMessage, TokenCreatorsMessage, TokenQueryResponse,
-    TokenUpdatesMessage,
+    PoolUpdatesMessage, TokenCreatorMessage, TokenCreatorsMessage, TokenUpdatesMessage,
 };
 
 // Default ZMQ endpoints
 const DEFAULT_ZMQ_PUB_ENDPOINT: &str = "tcp://localhost:5557";
-const DEFAULT_ZMQ_REP_ENDPOINT: &str = "tcp://localhost:5558";
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
-const DEFAULT_REDIS_TOKEN_PREFIX: &str = "token:snapshot:";
+const DEFAULT_REDIS_TOKEN_PREFIX: &str = "eth/live/token/snapshot/";
 
 pub struct TokenTrackingSubscriber {
     cache: Arc<TokenTrackingCache>,
     zmq_pub_endpoint: String,
-    zmq_rep_endpoint: String,
     redis_fetcher: LiveDataSnapshotFetcher,
+    legacy_redis_fetcher: Option<LiveDataSnapshotFetcher>,
 }
 
 impl TokenTrackingSubscriber {
@@ -44,17 +43,15 @@ impl TokenTrackingSubscriber {
         Self::with_sources(
             eth_threshold,
             DEFAULT_ZMQ_PUB_ENDPOINT,
-            DEFAULT_ZMQ_REP_ENDPOINT,
             DEFAULT_REDIS_URL,
             DEFAULT_REDIS_TOKEN_PREFIX,
         )
     }
 
-    pub fn with_endpoints(eth_threshold: f64, pub_endpoint: &str, rep_endpoint: &str) -> Self {
+    pub fn with_endpoints(eth_threshold: f64, pub_endpoint: &str) -> Self {
         Self::with_sources(
             eth_threshold,
             pub_endpoint,
-            rep_endpoint,
             DEFAULT_REDIS_URL,
             DEFAULT_REDIS_TOKEN_PREFIX,
         )
@@ -63,7 +60,6 @@ impl TokenTrackingSubscriber {
     pub fn with_sources(
         eth_threshold: f64,
         pub_endpoint: &str,
-        rep_endpoint: &str,
         redis_url: &str,
         redis_token_prefix: &str,
     ) -> Self {
@@ -74,11 +70,19 @@ impl TokenTrackingSubscriber {
         let cache = Arc::new(TokenTrackingCache::new(config));
         let redis_fetcher = LiveDataSnapshotFetcher::new(redis_url, Some(redis_token_prefix))
             .expect("failed to initialize redis snapshot fetcher");
+        let legacy_redis_fetcher = if redis_token_prefix == LEGACY_TOKEN_KEY_PREFIX {
+            None
+        } else {
+            Some(
+                LiveDataSnapshotFetcher::new(redis_url, Some(LEGACY_TOKEN_KEY_PREFIX))
+                    .expect("failed to initialize legacy redis snapshot fetcher"),
+            )
+        };
         Self {
             cache,
             zmq_pub_endpoint: pub_endpoint.to_string(),
-            zmq_rep_endpoint: rep_endpoint.to_string(),
             redis_fetcher,
+            legacy_redis_fetcher,
         }
     }
 
@@ -92,152 +96,108 @@ impl TokenTrackingSubscriber {
         self.cache.clone()
     }
 
-    /// Request initial pool state from Python service via REQ/REP socket
-    async fn request_initial_pool_state(&self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Requesting pool data from Python service...");
+    /// Hydrate initial token state from Redis snapshots.
+    ///
+    /// ZMQ is only the live invalidation feed. Startup/restart recovery comes
+    /// from the Redis token index, with a scan fallback for older publishers.
+    async fn hydrate_initial_token_state(&self) -> Result<(), Box<dyn std::error::Error>> {
+        info!("Hydrating initial token cache from Redis token snapshot index...");
 
-        // Create REQ socket to request pool data
-        let context = zmq::Context::new();
-        let requester = context.socket(zmq::REQ)?;
-        requester.set_rcvtimeo(2_000)?;
-        requester.set_sndtimeo(2_000)?;
-
-        // Connect to REP endpoint
-        requester.connect(&self.zmq_rep_endpoint)?;
-        info!(
-            "Connected to Python REP socket at {}",
-            self.zmq_rep_endpoint
-        );
-
-        // Create request for all tokens
-        let request = serde_json::json!({
-            "type": "get_all_tokens"
-        });
-
-        // Send request
-        requester.send(&request.to_string(), 0)?;
-        debug!("Sent get_all_tokens request");
-
-        // Receive response (with timeout)
-        let response_str = match requester.recv_string(0) {
-            Ok(Ok(s)) => Some(s),
-            Ok(Err(e)) => {
-                warn!(
-                    "ZMQ string conversion error: {:?} (continuing with Redis fallback)",
-                    e
-                );
-                None
-            }
-            Err(e) => {
-                warn!(
-                    "ZMQ recv error: {:?} (likely publisher offline); continuing with Redis fallback",
-                    e
-                );
-                None
-            }
-        };
-        if let Some(response_str) = response_str {
-            debug!("Received response from Python service");
-
-            // Parse response
-            let response: TokenQueryResponse = serde_json::from_str(&response_str)?;
-
-            if response.status != "success" {
-                warn!(
-                    "Failed to get token data: {}",
-                    response
-                        .error
-                        .unwrap_or_else(|| "Unknown error".to_string())
-                );
-            } else {
-                let token_count = response.count.unwrap_or(0);
+        match self.redis_fetcher.fetch_indexed_addresses().await {
+            Ok(addresses) if !addresses.is_empty() => {
                 info!(
-                    "Received {} token addresses from Python service",
-                    token_count
+                    "Found {} token snapshots via Redis index; hydrating cache...",
+                    addresses.len()
                 );
-
-                if let Some(data_value) = response.data {
-                    if let Some(addresses) = data_value.as_array() {
-                        let addr_list: Vec<String> = addresses
-                            .iter()
-                            .filter_map(|val| val.as_str().map(|s| s.to_string()))
-                            .collect();
-                        self.fetch_and_apply_snapshots(&addr_list, 0, "initial_load", 0.0)
-                            .await;
-                    } else if data_value.is_object() {
-                        match serde_json::from_value::<HashMap<Address, TokenWithPools>>(data_value)
-                        {
-                            Ok(token_data) => {
-                                let update = types::TokenUpdate {
-                                    message_type: "initial_load".to_string(),
-                                    token_count,
-                                    block_number: 0,
-                                    timestamp: 0.0,
-                                    data: token_data,
-                                };
-
-                                let result = self.cache.batch_update(update).await;
-                                info!(
-                                    "✅ Initialized cache with {} tokens, {} pools, {} creators",
-                                    result.tokens_updated,
-                                    result.pools_updated,
-                                    result.creators_added
-                                );
-                            }
-                            Err(err) => {
-                                error!("Failed to parse legacy token snapshot payload: {}", err);
-                            }
-                        }
-                    } else {
-                        warn!("Initial response payload not understood; skipping cache warmup");
-                    }
-                }
+                self.fetch_and_apply_snapshots(
+                    &self.redis_fetcher,
+                    &addresses,
+                    0,
+                    "redis_index",
+                    0.0,
+                )
+                .await;
             }
-        } else {
-            warn!("No ZMQ response received; skipping ZMQ warmup and falling back to Redis");
+            Ok(_) => {
+                info!("Redis token snapshot index is empty; scanning snapshot keys...");
+                self.hydrate_initial_token_state_from_scan().await;
+            }
+            Err(err) => {
+                warn!(
+                    "Redis token snapshot index unavailable ({}); scanning snapshot keys...",
+                    err
+                );
+                self.hydrate_initial_token_state_from_scan().await;
+            }
+        }
+
+        let stats = self.cache.stats().await;
+        if stats.total_tokens == 0 {
+            self.hydrate_initial_token_state_from_legacy().await;
         }
 
         let stats = self.cache.stats().await;
         info!(
-            "Cache stats after initialization: {} tokens, {} pools, {} creators",
+            "Cache stats after Redis warmup: {} tokens, {} pools, {} creators",
             stats.total_tokens, stats.total_pools, stats.total_creators
         );
-
-        // Fallback: if ZMQ path didn't hydrate anything, scan Redis directly.
-        if stats.total_tokens == 0 {
-            info!("Token cache empty after ZMQ init; scanning Redis for snapshots...");
-            match self.redis_fetcher.fetch_all_addresses().await {
-                Ok(addresses) if !addresses.is_empty() => {
-                    info!(
-                        "Found {} token snapshots via Redis scan; hydrating cache...",
-                        addresses.len()
-                    );
-                    self.fetch_and_apply_snapshots(&addresses, 0, "redis_scan", 0.0)
-                        .await;
-                    let stats = self.cache.stats().await;
-                    info!(
-                        "Cache stats after Redis scan: {} tokens, {} pools, {} creators",
-                        stats.total_tokens, stats.total_pools, stats.total_creators
-                    );
-                }
-                Ok(_) => {
-                    warn!("Redis scan returned no token snapshots; cache remains empty");
-                }
-                Err(err) => {
-                    warn!("Redis scan failed for token snapshots: {}", err);
-                }
-            }
-        }
 
         Ok(())
     }
 
-    /// Request initial token creator data from Python service
-    /// NOTE: This is now handled within request_initial_pool_data since creators are embedded in token data
-    async fn request_initial_creator_data(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Creator data is now loaded as part of token data in request_initial_pool_data
-        debug!("Creator data already loaded from token data");
-        Ok(())
+    async fn hydrate_initial_token_state_from_scan(&self) {
+        match self.redis_fetcher.fetch_all_addresses().await {
+            Ok(addresses) if !addresses.is_empty() => {
+                info!(
+                    "Found {} token snapshots via Redis scan; hydrating cache...",
+                    addresses.len()
+                );
+                self.fetch_and_apply_snapshots(
+                    &self.redis_fetcher,
+                    &addresses,
+                    0,
+                    "redis_scan",
+                    0.0,
+                )
+                .await;
+            }
+            Ok(_) => {
+                warn!("Redis scan returned no token snapshots; cache remains empty");
+            }
+            Err(err) => {
+                warn!("Redis scan failed for token snapshots: {}", err);
+            }
+        }
+    }
+
+    async fn hydrate_initial_token_state_from_legacy(&self) {
+        let Some(legacy_fetcher) = &self.legacy_redis_fetcher else {
+            return;
+        };
+
+        info!("Canonical token snapshots are empty; checking legacy token:snapshot:* keys...");
+        match legacy_fetcher.fetch_all_addresses().await {
+            Ok(addresses) if !addresses.is_empty() => {
+                info!(
+                    "Found {} legacy token snapshots; hydrating cache for migration...",
+                    addresses.len()
+                );
+                self.fetch_and_apply_snapshots(
+                    legacy_fetcher,
+                    &addresses,
+                    0,
+                    "legacy_redis_scan",
+                    0.0,
+                )
+                .await;
+            }
+            Ok(_) => {
+                warn!("Legacy Redis scan returned no token snapshots");
+            }
+            Err(err) => {
+                warn!("Legacy Redis scan failed for token snapshots: {}", err);
+            }
+        }
     }
 
     pub async fn start_listening(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -256,13 +216,10 @@ impl TokenTrackingSubscriber {
         subscriber.set_subscribe(b"")?;
         debug!("Subscribed to all messages from publisher.");
 
-        // Request initial data from Python
-        if let Err(e) = self.request_initial_pool_state().await {
-            warn!("Failed to get initial pool state: {}", e);
-        }
-
-        if let Err(e) = self.request_initial_creator_data().await {
-            warn!("Failed to get initial creator data: {}", e);
+        // Subscribe first, then warm from Redis so restart/startup recovery does
+        // not depend on an in-memory Python query socket.
+        if let Err(e) = self.hydrate_initial_token_state().await {
+            warn!("Failed to hydrate initial token state: {}", e);
         }
 
         info!("📊 Real-time token tracking updates active");
@@ -364,8 +321,14 @@ impl TokenTrackingSubscriber {
                 .await;
             }
             TokenUpdatePayload::Addresses(addresses) => {
-                self.fetch_and_apply_snapshots(&addresses, block_number, &message_type, timestamp)
-                    .await;
+                self.fetch_and_apply_snapshots(
+                    &self.redis_fetcher,
+                    &addresses,
+                    block_number,
+                    &message_type,
+                    timestamp,
+                )
+                .await;
             }
             TokenUpdatePayload::Empty => {
                 debug!("Token update payload empty; nothing to hydrate");
@@ -375,6 +338,7 @@ impl TokenTrackingSubscriber {
 
     async fn fetch_and_apply_snapshots(
         &self,
+        fetcher: &LiveDataSnapshotFetcher,
         addresses: &[String],
         block_number: u64,
         reason: &str,
@@ -382,7 +346,7 @@ impl TokenTrackingSubscriber {
     ) {
         const BATCH_SIZE: usize = 64;
         for chunk in addresses.chunks(BATCH_SIZE) {
-            match self.redis_fetcher.fetch_token_with_pools(chunk).await {
+            match fetcher.fetch_token_with_pools(chunk).await {
                 Ok(map) => {
                     if map.is_empty() {
                         continue;
@@ -419,10 +383,8 @@ mod basic_tests {
     #[test]
     fn can_create_subscriber_with_custom_endpoints() {
         let pub_endpoint = "tcp://127.0.0.1:5557";
-        let rep_endpoint = "tcp://127.0.0.1:5558";
-        let subscriber = TokenTrackingSubscriber::with_endpoints(0.1, pub_endpoint, rep_endpoint);
+        let subscriber = TokenTrackingSubscriber::with_endpoints(0.1, pub_endpoint);
         assert_eq!(subscriber.zmq_pub_endpoint, pub_endpoint);
-        assert_eq!(subscriber.zmq_rep_endpoint, rep_endpoint);
     }
 
     #[tokio::test]
@@ -430,7 +392,6 @@ mod basic_tests {
         let subscriber = TokenTrackingSubscriber::with_sources(
             0.1,
             "tcp://127.0.0.1:6007",
-            "tcp://127.0.0.1:6008",
             "redis://127.0.0.1:6379/0",
             DEFAULT_REDIS_TOKEN_PREFIX,
         );

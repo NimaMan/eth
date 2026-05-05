@@ -40,8 +40,8 @@ The Portfolio Manager is a comprehensive system for managing cryptocurrency trad
 
 5. **Token Information Publishing**
    - Extract critical token and pool data from updates
-   - Publish via ZeroMQ PUB/SUB (port 5557) and REQ/REP (port 5558)
-   - Enable external systems to query current state
+   - Publish lightweight ZeroMQ PUB/SUB notifications on port 5557
+   - Store full token state in Redis snapshots/index for startup recovery
    - Support high-frequency updates with minimal latency
 
 
@@ -89,8 +89,7 @@ Ethereum Node → Block Processor → Token Processor → Portfolio Manager → 
    - `TokenInfoExtractor` extracts pool reserves and token data
    - `TokenInfoPublisher` publishes via ZeroMQ:
      - PUB socket (5557): Real-time updates stream
-     - REP socket (5558): Request/reply for state queries
-   - Enables external systems (Rust mempool processor) to monitor state
+   - Enables external systems (Rust mempool processor) to hydrate state from Redis
 
 ### Configuration Parameters
 - `warmup_blocks`: Historical blocks to process before live (default: 10000)
@@ -151,7 +150,7 @@ Real-time data distribution:
 - **TokenInfoExtractor**: Extracts token and pool state from updates
 - **TokenInfoPublisher**: Publishes via ZeroMQ to external systems
 - **Published Data**: Pool reserves, tax rates, trading status, limits
-- **Communication**: PUB/SUB for streaming, REQ/REP for queries
+- **Communication**: PUB/SUB for live notifications, Redis for state queries/recovery
 
 ### 7. Database Layer
 PostgreSQL with optimized schema:
@@ -432,7 +431,7 @@ PostgreSQL Storage
 ### 3. External Systems
 - **Rust Mempool Processor**: 
   - Receives token/pool updates via ZeroMQ PUB (port 5557)
-  - Can query current state via ZeroMQ REP (port 5558)
+  - Loads current state from Redis token snapshots and the Redis token index
   - Uses data for transaction impact assessment
 - **Web Interface**: Portfolio monitoring UI (Sarigoz)
 - **Analytics**: Performance reporting and backtesting
@@ -456,9 +455,7 @@ PostgreSQL Storage
     }
 }
 
-# REQ/REP Queries (port 5558)
-Request: {"type": "get_pool", "pool_address": "0x..."}
-Response: {"status": "success", "data": {...pool_data...}}
+# Startup/query state is served from Redis token snapshots/index.
 ```
 
 ## Performance Considerations
@@ -669,7 +666,7 @@ The `run_live_portfolio.py` script:
 - Connects to local Ethereum node at `http://127.0.0.1:8545`
 - Processes blocks starting from `current_block - warmup_blocks`
 - Runs configured strategies (default: MarketTracker)
-- Publishes token/pool updates via ZeroMQ (PUB: 5557, REP: 5558)
+- Publishes token/pool update notifications via ZeroMQ (PUB: 5557)
 - Optionally saves strategy results and PnL to database
 
 Configuration in script:

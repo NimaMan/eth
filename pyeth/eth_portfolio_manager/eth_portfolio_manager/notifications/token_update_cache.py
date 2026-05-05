@@ -47,7 +47,7 @@ class TokenUpdateCache:
 
     def get_stats(self) -> Dict[str, int]:
         """
-        Lightweight stats used by the REQ/REP API.
+        Lightweight stats for logging/debugging.
         """
         return {
             "total_tokens": len(self._all_tokens),

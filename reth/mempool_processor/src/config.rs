@@ -30,9 +30,8 @@ pub const DEFAULT_SIM_WORKERS: usize = 4;
 /// Default log directory within the repository.
 pub const DEFAULT_LOG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/logs");
 pub const DEFAULT_TOKEN_CACHE_PUB_ENDPOINT: &str = "tcp://127.0.0.1:5557";
-pub const DEFAULT_TOKEN_CACHE_REP_ENDPOINT: &str = "tcp://127.0.0.1:5558";
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
-pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "token:snapshot:";
+pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "eth/live/token/snapshot/";
 
 /// Path to the shared Ethereum workspace config.
 pub fn eth_config_path() -> PathBuf {
@@ -344,8 +343,6 @@ pub struct TokenCacheSourceConfig {
     pub eth_threshold: f64,
     /// ZMQ PUB endpoint for token update notifications
     pub zmq_pub_endpoint: String,
-    /// ZMQ REP endpoint for token cache queries
-    pub zmq_rep_endpoint: String,
     /// Redis URL hosting live token snapshots
     pub redis_url: String,
     /// Key prefix for token snapshots
@@ -357,7 +354,6 @@ impl Default for TokenCacheSourceConfig {
         Self {
             eth_threshold: 0.1,
             zmq_pub_endpoint: DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string(),
-            zmq_rep_endpoint: DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string(),
             redis_url: live_data_redis_url_from_env(),
             redis_token_prefix: DEFAULT_REDIS_TOKEN_PREFIX.to_string(),
         }
@@ -508,10 +504,6 @@ impl MempoolProcessorConfig {
 
         if let Ok(pub_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT") {
             config.token_cache_source.zmq_pub_endpoint = pub_endpoint;
-        }
-
-        if let Ok(rep_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_REP_ENDPOINT") {
-            config.token_cache_source.zmq_rep_endpoint = rep_endpoint;
         }
 
         if let Ok(threshold) = std::env::var("MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD") {

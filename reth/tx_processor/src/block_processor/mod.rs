@@ -338,6 +338,13 @@ mod tests {
             gas_limit: 30_000_000,
             gas_used: 21_000,
             base_fee_per_gas: Some(1),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+            block_access_list_hash: None,
+            slot_number: None,
         }
     }
 

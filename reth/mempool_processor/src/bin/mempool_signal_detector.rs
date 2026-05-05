@@ -342,7 +342,6 @@ async fn main() -> Result<()> {
     let mut token_subscriber = TokenTrackingSubscriber::with_sources(
         source_cfg.eth_threshold,
         &source_cfg.zmq_pub_endpoint,
-        &source_cfg.zmq_rep_endpoint,
         &source_cfg.redis_url,
         &source_cfg.redis_token_prefix,
     );

@@ -581,9 +581,9 @@ cargo build --release
 # Shared Ethereum workspace config
 export ETH_CONFIG_PATH="/home/nima/code/crypto/blockchains/eth/config.env"
 
-# Token tracking service endpoints
+# Token tracking service inputs
 export TOKEN_TRACKING_PUB="tcp://localhost:5557"  # Token updates from Python
-export TOKEN_TRACKING_REP="tcp://localhost:5558"  # Query endpoint
+export REDIS_URL="redis://127.0.0.1:6379/0"      # Startup snapshots/index
 
 # Signal publishing
 export SIGNAL_ZMQ_ENDPOINT="tcp://127.0.0.1:5556"

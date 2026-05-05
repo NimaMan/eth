@@ -59,6 +59,13 @@ pub struct BlockHeader {
     pub gas_limit: u64,
     pub gas_used: u64,
     pub base_fee_per_gas: Option<u64>,
+    pub withdrawals_root: Option<B256>,
+    pub blob_gas_used: Option<u64>,
+    pub excess_blob_gas: Option<u64>,
+    pub parent_beacon_block_root: Option<B256>,
+    pub requests_hash: Option<B256>,
+    pub block_access_list_hash: Option<B256>,
+    pub slot_number: Option<u64>,
 }
 
 /// Block with transactions (for get_block_with_txs compatibility)

@@ -60,17 +60,23 @@ impl RethQueryProvider {
         // nor the live cache can supply the requested block, the subsequent view calls will fail
         // with a descriptive error.
 
-        let bytecode = self
-            .get_contract_bytecode_at_block(address, Some(resolved_block))
-            .await?;
-        if bytecode.is_empty() {
-            return Ok(None);
-        }
+        if let Some(chain) = pending_chain.as_mut() {
+            if !chain.account_has_code(address)? {
+                return Ok(None);
+            }
+        } else {
+            let bytecode = self
+                .get_contract_bytecode_at_block(address, Some(resolved_block))
+                .await?;
+            if bytecode.is_empty() {
+                return Ok(None);
+            }
 
-        if !contains_signature(&bytecode, &TRANSFER_TOPIC)
-            || !contains_signature(&bytecode, &APPROVAL_TOPIC)
-        {
-            return Ok(None);
+            if !contains_signature(&bytecode, &TRANSFER_TOPIC)
+                || !contains_signature(&bytecode, &APPROVAL_TOPIC)
+            {
+                return Ok(None);
+            }
         }
 
         let total_supply = match call_uint256_view(

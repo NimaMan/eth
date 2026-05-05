@@ -133,6 +133,13 @@ fn parse_block_header(block: &Value) -> Result<crate::provider::BlockHeader> {
             .get("baseFeePerGas")
             .map(|v| parse_u64(v))
             .transpose()?,
+        withdrawals_root: parse_b256_opt(block.get("withdrawalsRoot"))?,
+        blob_gas_used: parse_u64_opt(block.get("blobGasUsed"))?,
+        excess_blob_gas: parse_u64_opt(block.get("excessBlobGas"))?,
+        parent_beacon_block_root: parse_b256_opt(block.get("parentBeaconBlockRoot"))?,
+        requests_hash: parse_b256_opt(block.get("requestsHash"))?,
+        block_access_list_hash: parse_b256_opt(block.get("blockAccessListHash"))?,
+        slot_number: parse_u64_opt(block.get("slotNumber"))?,
     })
 }
 
@@ -385,7 +392,11 @@ fn parse_u64(value: &Value) -> Result<u64> {
 }
 
 fn parse_u64_opt(value: Option<&Value>) -> Result<Option<u64>> {
-    value.map(parse_u64).transpose()
+    match value {
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(value) => parse_u64(value).map(Some),
+    }
 }
 
 fn parse_u64_hex_str(value: &str) -> Result<u64> {
@@ -444,6 +455,14 @@ fn parse_b256(value: &Value) -> Result<B256> {
         .as_str()
         .ok_or_else(|| eyre::eyre!("invalid hash value {:?}", value))?;
     B256::from_str(s).map_err(|err| eyre::eyre!("invalid hash {}: {}", s, err))
+}
+
+fn parse_b256_opt(value: Option<&Value>) -> Result<Option<B256>> {
+    match value {
+        Some(Value::Null) | None => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(value) => parse_b256(value).map(Some),
+    }
 }
 
 fn parse_bytes(value: Option<&Value>) -> Result<Bytes> {

@@ -20,7 +20,7 @@ The LiveTradingAdapter serves as a temporary bridge component during migration.
 **Key Responsibilities**:
 - Processes blockchain data via LiveBlockTokenProcessor
 - Manages strategy execution through LiveStrategyEngine
-- Extracts and publishes pool ETH reserves to Rust via ZMQ (ports 5557/5558)
+- Publishes token update notifications to Rust via ZMQ (port 5557)
 - Persists token and pool status to database via TokenStatusWriter
 - Coordinates PnL tracking when enabled
 
@@ -82,7 +82,7 @@ LiveTokenTracker (orchestration)
         ├─→ TokenUpdateCache (addresses per block)
         │       ↓
         │   TokenUpdateNotifier → Rust Mempool Processor
-        │   (ZMQ 5557/5558)
+        │   (ZMQ 5557 + Redis snapshots/index)
         │
         ├─→ Strategy Processing
         │       ↓
@@ -136,8 +136,8 @@ def extract_wallet_address(strategy):
 - **Notifier**: TokenUpdateNotifier
 - **Ports**: 
   - 5557 (PUB): Real-time updates
-  - 5558 (REP): Query interface
-- **Data**: Token contract addresses + block numbers (consumers hydrate snapshots from Redis)
+- **Data**: Token contract addresses + block numbers. Consumers hydrate
+  snapshots from Redis and use the Redis token snapshot index for startup.
 
 ### Trading Signals (Python → eth_kartal)
 - **Purpose**: Execute trades on-chain
@@ -164,7 +164,6 @@ min_eth_threshold = 0.01    # Min pool liquidity
 
 # ZMQ Endpoints (hardcoded)
 POOL_PUB_ENDPOINT = "tcp://*:5557"
-POOL_REP_ENDPOINT = "tcp://*:5558"
 SIGNAL_PUB_ENDPOINT = "tcp://localhost:5559"
 ```
 

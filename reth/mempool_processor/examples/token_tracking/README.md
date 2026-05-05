@@ -28,8 +28,9 @@ cargo run --example export_all_tokens_from_cache_to_csv my_tokens.csv
 ```
 
 ### Requirements:
-- Python token publisher must be running on ports 5557/5558
-- Cache needs time to populate (waits 5 seconds by default)
+- Redis token snapshots must be available. The current canonical prefix is
+  `eth/live/token/snapshot/`; legacy `token:snapshot:` can be selected with
+  `TOKEN_SNAPSHOT_REDIS_PREFIX`.
 
 ### Output Format:
 Each row represents one token with its creator and all associated pools. This provides a complete snapshot of the token ecosystem for analysis.

@@ -137,6 +137,30 @@ def build_token_snapshot(
     return snapshot
 
 
+def build_token_snapshot_map(
+    tokens: Dict[str, ERC20Token],
+    *,
+    include_history: bool = False,
+    history_limit: int = DEFAULT_HISTORY_SNAPSHOT_LIMIT,
+    on_error=None,
+) -> Dict[str, Dict[str, Any]]:
+    """Build Redis-friendly snapshots for a mapping of token address to token."""
+    snapshots: Dict[str, Dict[str, Any]] = {}
+    for address, token in (tokens or {}).items():
+        try:
+            snapshots[address] = build_token_snapshot(
+                token,
+                include_history=include_history,
+                history_limit=history_limit,
+            )
+        except Exception as exc:
+            if on_error is not None:
+                on_error(address, exc)
+            else:
+                raise
+    return snapshots
+
+
 @dataclass
 class TokenSnapshot:
     contract_address: str
@@ -218,7 +242,8 @@ def _trim_mapping(
 
 
 def _build_pool_flags(token: ERC20Token, pool_address: str) -> Dict[str, Any]:
-    pool_obj = token.pool_manager.get_pool(pool_address) if token.pool_manager else None
+    pool_manager = getattr(token, "pool_manager", None)
+    pool_obj = pool_manager.get_pool(pool_address) if pool_manager else None
     return {
         "is_scam": getattr(pool_obj, "is_scam", False),
         "scam_label": getattr(pool_obj, "scam_label", None),
@@ -237,6 +262,7 @@ def _build_pool_flags(token: ERC20Token, pool_address: str) -> Dict[str, Any]:
 
 __all__ = [
     "build_token_snapshot",
+    "build_token_snapshot_map",
     "TokenSnapshot",
     "load_token_snapshot",
     "SNAPSHOT_VERSION",

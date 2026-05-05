@@ -45,7 +45,7 @@ Architecture:
 ┌─────────────────────────┐     ZeroMQ          ┌─────────────────────┐
 │                         │     PUB (5557)      │                     │
 │  TokenUpdateNotifier    ├────────────────────►│  Rust Mempool       │
-│                         │     REP (5558)      │  Processor          │
+│                         │                     │  Processor          │
 └─────────────────────────┘                     └─────────────────────┘
 ```
 
@@ -142,7 +142,7 @@ class LiveTokenTracker:
         Note:
             ZMQ endpoints are hardcoded to ensure consistent communication:
             - Publisher endpoint: tcp://*:5557
-            - Reply endpoint: tcp://*:5558
+            - Full token state and startup discovery are read from Redis snapshots
         """
         self.logger = logger or get_logger("portfolio_live_pools")
         self.config = config
@@ -184,7 +184,6 @@ class LiveTokenTracker:
         self.token_update_cache = TokenUpdateCache(logger=self.logger)
         self.token_update_notifier = TokenUpdateNotifier(
             pub_endpoint="tcp://*:5557",
-            rep_endpoint="tcp://*:5558",
             logger=self.logger,
         )
         # Connect cache to publisher
@@ -308,7 +307,7 @@ class LiveTokenTracker:
                 while not self.live_token_processor.unprocessed_token_updates.empty():
                     try:
                         result = await self.live_token_processor.unprocessed_token_updates.get()
-                        block_number, updated_tokens = result
+                        block_number, updated_tokens = result[:2]
                         
                         if updated_tokens:
                             # Process strategy updates

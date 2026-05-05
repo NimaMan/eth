@@ -22,10 +22,7 @@ use tracing::{info, warn};
 // Mempool processor imports
 use alloy_primitives::{Address, B256, U256};
 use mempool_processor::{
-    config::{
-        DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT,
-        DEFAULT_TOKEN_CACHE_REP_ENDPOINT,
-    },
+    config::{DEFAULT_REDIS_TOKEN_PREFIX, DEFAULT_TOKEN_CACHE_PUB_ENDPOINT},
     function_detector::FunctionDetector,
     mempool_fetcher::MempoolFetcherIPCClient,
     simulator::MempoolSimulator,
@@ -108,25 +105,17 @@ struct ManagerStats {
 fn build_token_subscriber(threshold: f64) -> TokenTrackingSubscriber {
     let pub_endpoint = std::env::var("TOKEN_CACHE_PUB_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string());
-    let rep_endpoint = std::env::var("TOKEN_CACHE_REP_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_TOKEN_CACHE_REP_ENDPOINT.to_string());
     let redis_url = std::env::var("TOKEN_SNAPSHOT_REDIS_URL")
         .unwrap_or_else(|_| mempool_processor::config::live_data_redis_url_from_env());
     let redis_prefix = std::env::var("TOKEN_SNAPSHOT_REDIS_PREFIX")
         .unwrap_or_else(|_| DEFAULT_REDIS_TOKEN_PREFIX.to_string());
 
     println!(
-        "Token snapshot sources: redis={}, pub={}, rep={}",
-        redis_url, pub_endpoint, rep_endpoint
+        "Token snapshot sources: redis={}, pub={}",
+        redis_url, pub_endpoint
     );
 
-    TokenTrackingSubscriber::with_sources(
-        threshold,
-        &pub_endpoint,
-        &rep_endpoint,
-        &redis_url,
-        &redis_prefix,
-    )
+    TokenTrackingSubscriber::with_sources(threshold, &pub_endpoint, &redis_url, &redis_prefix)
 }
 
 fn parse_tx_hash_or_zero(hash: &str) -> B256 {

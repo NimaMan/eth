@@ -24,6 +24,7 @@ from web3 import Web3
 from dataclasses import asdict, is_dataclass
 from typing import Dict, Any, Optional, List
 from collections import OrderedDict, defaultdict
+import time
 from tqdm import tqdm
 
 from eth_token.erc20_token.erc20_token import ERC20Token
@@ -34,6 +35,15 @@ from eth_data.blockchain.block_processor import BlockProcessor
 
 
 class BlockTokenProcessor:
+    METADATA_RETRY_ATTEMPTS = 8
+    METADATA_RETRY_DELAY_SECONDS = 2.0
+    METADATA_RETRYABLE_ERRORS = (
+        "not yet available locally or via live cache",
+        "header validation error",
+        "missing live block header",
+        "live data for block",
+    )
+
     def __init__(self, logger=None, add_pnl_to_db: bool = False):
         self.logger = logger
         self.add_pnl_to_db = add_pnl_to_db
@@ -90,23 +100,72 @@ class BlockTokenProcessor:
         if not contract_address:
             return False, None, None
 
-        try:
-            # Replay earlier same-sender txs in this block for metadata hydration.
-            pending_transactions = self._collect_address_transactions(transaction.get("from_address"))
-            pending_transactions = sorted(pending_transactions, key=lambda x: x["tx_index"])
-            simulation_block = block_number - 1
-            token_metadata = self.token_chain_fetcher.get_token_metadata(
-                contract_address,
-                block_number = simulation_block,
-                pending_transactions=pending_transactions,
-                gas_block_number=block_number,
-            )
-            if token_metadata is None:
+        # Replay earlier same-sender txs in this block for metadata hydration.
+        pending_transactions = self._collect_address_transactions(transaction.get("from_address"))
+        pending_transactions = sorted(pending_transactions, key=lambda x: x["tx_index"])
+        simulation_block = block_number - 1
+
+        for attempt in range(1, self.METADATA_RETRY_ATTEMPTS + 1):
+            try:
+                token_metadata = self.token_chain_fetcher.get_token_metadata(
+                    contract_address,
+                    block_number=simulation_block,
+                    pending_transactions=pending_transactions,
+                    gas_block_number=block_number,
+                )
+                if token_metadata is None:
+                    return False, None, None
+                return True, token_metadata, contract_address
+            except Exception as exc:
+                if (
+                    self.is_live_mode
+                    and attempt < self.METADATA_RETRY_ATTEMPTS
+                    and self._is_retryable_metadata_error(exc)
+                ):
+                    latest_persisted = self._wait_for_metadata_base_block(block_number)
+                    self.logger.warning(
+                        "%s retrying token metadata for contract %s in tx %s "
+                        "(block=%s, simulation_block=%s, latest_persisted=%s, "
+                        "attempt=%s/%s): %s",
+                        self.__class__.__name__,
+                        contract_address,
+                        transaction.get("hash"),
+                        block_number,
+                        simulation_block,
+                        latest_persisted,
+                        attempt + 1,
+                        self.METADATA_RETRY_ATTEMPTS,
+                        exc,
+                    )
+                    time.sleep(self.METADATA_RETRY_DELAY_SECONDS)
+                    continue
+
+                self.logger.error(
+                    f"{self.__class__.__name__} Error getting token metadata for contract "
+                    f"{contract_address} in transaction {transaction.get('hash')}: {exc}"
+                )
                 return False, None, None
-            return True, token_metadata, contract_address
-        except Exception as exc:
-            self.logger.error(f"{self.__class__.__name__} Error getting token metadata for contract {contract_address} in transaction {transaction.get('hash')}: {exc}")
-            return False, None, None
+
+        return False, None, None
+
+    def _is_retryable_metadata_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in self.METADATA_RETRYABLE_ERRORS)
+
+    def _wait_for_metadata_base_block(self, simulation_block: int) -> Optional[int]:
+        latest = None
+        for _ in range(3):
+            try:
+                latest = self._chain_query.get_latest_block()
+            except Exception:
+                latest = None
+
+            if latest is not None and latest >= simulation_block:
+                return latest
+
+            time.sleep(self.METADATA_RETRY_DELAY_SECONDS)
+
+        return latest
 
     def _handle_token_creation(
         self,

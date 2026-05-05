@@ -61,6 +61,26 @@ struct HeaderPayload {
     timestamp: String,
     #[serde(rename = "baseFeePerGas", skip_serializing_if = "Option::is_none")]
     base_fee_per_gas: Option<String>,
+    #[serde(rename = "withdrawalsRoot", skip_serializing_if = "Option::is_none")]
+    withdrawals_root: Option<String>,
+    #[serde(rename = "blobGasUsed", skip_serializing_if = "Option::is_none")]
+    blob_gas_used: Option<String>,
+    #[serde(rename = "excessBlobGas", skip_serializing_if = "Option::is_none")]
+    excess_blob_gas: Option<String>,
+    #[serde(
+        rename = "parentBeaconBlockRoot",
+        skip_serializing_if = "Option::is_none"
+    )]
+    parent_beacon_block_root: Option<String>,
+    #[serde(rename = "requestsHash", skip_serializing_if = "Option::is_none")]
+    requests_hash: Option<String>,
+    #[serde(
+        rename = "blockAccessListHash",
+        skip_serializing_if = "Option::is_none"
+    )]
+    block_access_list_hash: Option<String>,
+    #[serde(rename = "slotNumber", skip_serializing_if = "Option::is_none")]
+    slot_number: Option<String>,
 }
 
 impl From<&reth_chain_query::provider::BlockHeader> for HeaderPayload {
@@ -73,6 +93,17 @@ impl From<&reth_chain_query::provider::BlockHeader> for HeaderPayload {
             gas_used: to_hex(header.gas_used),
             timestamp: to_hex(header.timestamp),
             base_fee_per_gas: header.base_fee_per_gas.map(to_hex),
+            withdrawals_root: header.withdrawals_root.map(|value| format!("{value:#x}")),
+            blob_gas_used: header.blob_gas_used.map(to_hex),
+            excess_blob_gas: header.excess_blob_gas.map(to_hex),
+            parent_beacon_block_root: header
+                .parent_beacon_block_root
+                .map(|value| format!("{value:#x}")),
+            requests_hash: header.requests_hash.map(|value| format!("{value:#x}")),
+            block_access_list_hash: header
+                .block_access_list_hash
+                .map(|value| format!("{value:#x}")),
+            slot_number: header.slot_number.map(to_hex),
         }
     }
 }

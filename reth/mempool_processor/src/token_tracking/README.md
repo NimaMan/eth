@@ -8,7 +8,7 @@ Real-time cache system for token, pool, and creator state management with Python
 ```
 Python Token Tracker (postgresql + chain state)
     ↓ [ZMQ PUB on port 5557 - real-time updates]
-    ↓ [ZMQ REP on port 5558 - initial bulk load]
+    ↓ [Redis token snapshots/index - startup recovery]
 TokenTrackingSubscriber 
     ↓ [Deserialize with field aliasing]
 TokenTrackingCache
@@ -142,7 +142,11 @@ async fn describe_token(provider: &RethQueryProvider, token: Address) {
 
 ### ZMQ Endpoints
 - **SUB**: tcp://localhost:5557 (real-time updates from Python)
-- **REQ**: tcp://localhost:5558 (initial bulk load request)
+
+### Redis Startup State
+- **Snapshots**: `eth/live/token/snapshot/<token_address>`
+- **Index**: `eth/live/token/snapshot/index`
+- **Legacy fallback**: `token:snapshot:*` is scanned if the canonical snapshot set is empty.
 
 ### Cache Limits
 - **Pools**: 100,000 max (LRU eviction)

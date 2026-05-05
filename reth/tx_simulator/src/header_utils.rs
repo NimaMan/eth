@@ -42,9 +42,9 @@ pub fn parse_sealed_header_from_json(json: &str) -> Result<SealedHeader> {
         blob_gas_used: parse_optional_u64(obj, "blobGasUsed")?,
         excess_blob_gas: parse_optional_u64(obj, "excessBlobGas")?,
         parent_beacon_block_root: parse_optional_b256(obj, "parentBeaconBlockRoot")?,
-        requests_hash: None,
-        block_access_list_hash: None,
-        slot_number: None,
+        requests_hash: parse_optional_b256(obj, "requestsHash")?,
+        block_access_list_hash: parse_optional_b256(obj, "blockAccessListHash")?,
+        slot_number: parse_optional_u64(obj, "slotNumber")?,
     };
 
     Ok(SealedHeader::new(header, hash))
@@ -238,7 +238,14 @@ mod tests {
             "gasLimit":"0x3938700",
             "gasUsed":"0x17c4920",
             "timestamp":"0x69f9a8a7",
-            "baseFeePerGas":"0x753c357"
+            "baseFeePerGas":"0x753c357",
+            "withdrawalsRoot":"0x0000000000000000000000000000000000000000000000000000000000001234",
+            "blobGasUsed":"0x60000",
+            "excessBlobGas":"0x120000",
+            "parentBeaconBlockRoot":"0x0000000000000000000000000000000000000000000000000000000000005678",
+            "requestsHash":"0x0000000000000000000000000000000000000000000000000000000000009abc",
+            "blockAccessListHash":"0x000000000000000000000000000000000000000000000000000000000000def0",
+            "slotNumber":"0x123"
         }"#;
 
         let sealed = parse_sealed_header_from_json(json).expect("sparse header should parse");
@@ -261,6 +268,9 @@ mod tests {
         assert_eq!(header.gas_used, 24_922_400);
         assert_eq!(header.timestamp, 1_777_969_319);
         assert_eq!(header.base_fee_per_gas, Some(122_930_007));
+        assert_eq!(header.blob_gas_used, Some(393_216));
+        assert_eq!(header.excess_blob_gas, Some(1_179_648));
+        assert_eq!(header.slot_number, Some(291));
     }
 
     #[test]

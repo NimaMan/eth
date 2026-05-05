@@ -79,7 +79,6 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         self._monitor_task = None
         self._watcher_task = None
         self.token_snapshot_publisher = LiveDataPublisher()
-        self._published_token_addresses = set()
 
     async def _on_task_done(self, name: str, task: asyncio.Task):
         """Handle unexpected background task completion by logging and initiating shutdown."""
@@ -160,7 +159,6 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
         async def _write_snapshot(token_address, snapshot):
             try:
                 await self.token_snapshot_publisher.publish_token(token_address, snapshot)
-                self._published_token_addresses.add(token_address)
             except Exception as exc:
                 self.logger.error(
                     "Failed to publish token snapshot for %s at block %s: %s",
@@ -187,11 +185,11 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                 self.logger.info(f"Processed block {current_block} ({len(self.updated_tokens)} tokens)")
                 if self.updated_tokens:
                     updated_snapshot_tokens = dict(self.updated_tokens)
-                    snapshot_payloads = await self._publish_token_snapshots(
+                    await self._publish_token_snapshots(
                         current_block, updated_snapshot_tokens
                     )
                     await self.unprocessed_token_updates.put(
-                        (current_block, updated_snapshot_tokens, snapshot_payloads)
+                        (current_block, updated_snapshot_tokens)
                     )
                     self.new_updates_event.set()
                 # Clear the event for next block
@@ -282,23 +280,8 @@ class LiveBlockTokenProcessor(BlockTokenProcessor):
                     self.logger.debug(f"Unprocessed token updates: {item}")
                 except asyncio.QueueEmpty:
                     break
-            await self._cleanup_published_token_snapshots()
             self._shutdown_event.set()
             self.logger.info("LiveBlockTokenProcessor shutdown complete")
         except Exception as e:
             self.logger.error(f"Error during LiveBlockTokenProcessor shutdown: {e}")
             raise
-
-    async def _cleanup_published_token_snapshots(self):
-        if not self._published_token_addresses:
-            return
-        try:
-            await asyncio.gather(
-                *[
-                    self.token_snapshot_publisher.delete_token(address)
-                    for address in self._published_token_addresses
-                ],
-                return_exceptions=True,
-            )
-        finally:
-            self._published_token_addresses.clear()
