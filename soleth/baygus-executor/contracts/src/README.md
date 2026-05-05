@@ -1,6 +1,6 @@
 # Source
 
-`BaygusRouter.sol` is the only production entry point.
+`BaygusExecutor.sol` is the only production entry point.
 
 It exposes two typed Uniswap v4 functions for Rust builders:
 

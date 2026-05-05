@@ -3,8 +3,8 @@ use eyre::Result;
 use reth_chain_query::common_addresses::uniswap_v4_pools;
 use reth_chain_query::to_checksum_address;
 use reth_chain_query::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
-    build_baygus_single_hop_exact_input_call, build_router_deploy_tx,
+    build_baygus_executor_deploy_tx, build_baygus_executor_multihop_tx,
+    build_baygus_executor_single_hop_exact_input_call, build_router_deploy_tx,
     build_swap_exact_input_single_tx, build_token_approval_tx, build_weth_deposit_tx,
     compute_contract_address, infer_orientation_from_output, UniswapV4BaygusSingleHopRequest,
     UniswapV4PoolKey,
@@ -74,24 +74,24 @@ async fn main() -> Result<()> {
 
     let mut step_index = 0u64;
 
-    // 1) Deploy the Baygus router (default) unless the legacy minimal router is explicitly forced.
+    // 1) Deploy the Baygus executor (default) unless the legacy minimal router is explicitly forced.
     let force_minimal_router = std::env::var("UNISWAP_V4_USE_MINIMAL_ROUTER")
         .map(|flag| {
             let lowered = flag.trim().to_ascii_lowercase();
             lowered == "1" || lowered == "true" || lowered == "yes"
         })
         .unwrap_or(false);
-    let use_baygus_router = pool.hooks != Address::ZERO || !force_minimal_router;
-    if use_baygus_router && pool.hooks == Address::ZERO {
+    let use_baygus_executor = pool.hooks != Address::ZERO || !force_minimal_router;
+    if use_baygus_executor && pool.hooks == Address::ZERO {
         println!(
-            "Using Baygus router on hookless pool (set UNISWAP_V4_USE_MINIMAL_ROUTER=1 to use MinimalV4Router)"
+            "Using Baygus executor on hookless pool (set UNISWAP_V4_USE_MINIMAL_ROUTER=1 to use MinimalV4Router)"
         );
-    } else if !use_baygus_router {
+    } else if !use_baygus_executor {
         println!("Using legacy MinimalV4Router because UNISWAP_V4_USE_MINIMAL_ROUTER=1");
     }
 
-    let mut deploy_tx = if use_baygus_router {
-        build_baygus_router_deploy_tx(buyer_address, pool.pool_manager)
+    let mut deploy_tx = if use_baygus_executor {
+        build_baygus_executor_deploy_tx(buyer_address, pool.pool_manager)
     } else {
         build_router_deploy_tx(buyer_address, pool.pool_manager, weth_address)
     }?;
@@ -169,7 +169,7 @@ async fn main() -> Result<()> {
         step_index += 1;
     }
 
-    // 4) Build and execute Baygus router buy
+    // 4) Build and execute Baygus executor buy
     let buy_request = UniswapV4BaygusSingleHopRequest {
         pool_key: pool_key.clone(),
         token_in: buy_orientation.input_currency,
@@ -182,14 +182,14 @@ async fn main() -> Result<()> {
         sqrt_price_limit_x96: None,
     };
 
-    let mut buy_tx = if use_baygus_router {
-        let buy_call = build_baygus_single_hop_exact_input_call(&buy_request)?;
+    let mut buy_tx = if use_baygus_executor {
+        let buy_call = build_baygus_executor_single_hop_exact_input_call(&buy_request)?;
         println!(
             "hook adapter: {} sqrt_limit: {}",
             buy_call.params.hops[0].hook_adapter,
             buy_call.params.hops[0].params.sqrt_price_limit_x96
         );
-        build_baygus_router_multihop_tx(
+        build_baygus_executor_multihop_tx(
             router_address,
             buyer_address,
             &buy_call.params,

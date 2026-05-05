@@ -1,13 +1,12 @@
 use alloy_primitives::{Address, Bytes, U256};
 use eyre::{eyre, Result};
-use reth_provider::AccountReader;
 use std::str::FromStr;
 use tx_simulator::{
     tx_builders::{
-        baygus_router::{build_baygus_execute_tx, BaygusExecutePlan, BaygusV3ExactInputSingle},
+        baygus_executor::{build_baygus_execute_tx, BaygusExecutionPlan, BaygusV3ExactInputSingle},
         uniswap_v4::{
-            build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
-            build_baygus_single_hop_exact_input_call, build_token_approval_tx,
+            build_baygus_executor_deploy_tx, build_baygus_executor_multihop_tx,
+            build_baygus_executor_single_hop_exact_input_call, build_token_approval_tx,
             build_weth_deposit_tx, compute_contract_address, UniswapV4BaygusSingleHopRequest,
             UniswapV4PoolKey,
         },
@@ -54,6 +53,7 @@ struct Route {
     output_token: Address,
     quote: QuoteKind,
     execution: ExecutionKind,
+    block_hint: Option<u64>,
     required: bool,
 }
 
@@ -75,7 +75,8 @@ async fn main() -> Result<()> {
     };
 
     let simulator = TxSimulator::new(&reth_datadir)?;
-    let block_number = simulator.get_latest_block()?;
+    let latest_block = simulator.get_latest_block()?;
+    let block_number = configured_simulation_block(latest_block)?;
 
     let buyer = parse_address(BUYER, "buyer")?;
     let weth = parse_address(WETH, "WETH")?;
@@ -89,40 +90,37 @@ async fn main() -> Result<()> {
 
     let routes = eth_stable_routes(weth, usdc, usdt, v2_router, sushi_router, v3_quoter);
 
-    let provider = simulator.provider_factory().provider()?;
-    let deployer_nonce = provider
-        .basic_account(&buyer)?
-        .map(|account| account.nonce)
-        .unwrap_or(0);
-    let router_address = compute_contract_address(buyer, deployer_nonce);
-    drop(provider);
-
     let mut chain = simulator.start_simulation_chain(Some(block_number)).await?;
+    let deployer_nonce = chain.account_nonce(buyer)?;
+    let executor_address = compute_contract_address(buyer, deployer_nonce);
 
     println!("Baygus ETH -> stable validation");
     println!("===============================");
     println!("Reth datadir      : {reth_datadir}");
     println!("Simulation block  : {block_number}");
     println!("Buyer/deployer    : {buyer}");
-    println!("Baygus router     : {router_address}");
+    if block_number != latest_block {
+        println!("Latest block      : {latest_block}");
+    }
+    println!("Baygus executor   : {executor_address}");
     println!(
         "Amount in         : {} WETH per route",
         format_units(amount_in, 18, 6)
     );
     println!("Routes            : {}", routes.len());
 
-    let mut deploy_tx = build_baygus_router_deploy_tx(buyer, pool_manager)?;
+    let mut deploy_tx = build_baygus_executor_deploy_tx(buyer, pool_manager)?;
     apply_simple_gas_policy(&mut deploy_tx);
     let deploy_result = chain.step(deploy_tx).await?;
     ensure_success("Baygus deploy", &deploy_result)?;
 
-    if !chain.account_has_code(router_address)? {
+    if !chain.account_has_code(executor_address)? {
         return Err(eyre!(
-            "Baygus deploy reported success but no code is visible at {router_address}"
+            "Baygus deploy reported success but no code is visible at {executor_address}"
         ));
     }
 
-    let mut approve_tx = build_token_approval_tx(buyer, weth, router_address, U256::MAX);
+    let mut approve_tx = build_token_approval_tx(buyer, weth, executor_address, U256::MAX);
     apply_simple_gas_policy(&mut approve_tx);
     let approve_result = chain.step(approve_tx).await?;
     ensure_success("WETH approval", &approve_result)?;
@@ -137,7 +135,17 @@ async fn main() -> Result<()> {
     let mut failures = Vec::new();
     let mut findings = Vec::new();
     for route in routes {
-        match run_route(&mut chain, &route, buyer, router_address, weth, amount_in).await {
+        match run_route(
+            &mut chain,
+            &route,
+            buyer,
+            executor_address,
+            weth,
+            amount_in,
+            block_number,
+        )
+        .await
+        {
             Ok(report) => reports.push(report),
             Err(err) => {
                 if route.required {
@@ -232,6 +240,7 @@ fn eth_stable_routes(
             output_token: usdc,
             quote: QuoteKind::V2Router { router: v2_router },
             execution: ExecutionKind::UniswapV2,
+            block_hint: None,
             required: true,
         },
         Route {
@@ -241,6 +250,7 @@ fn eth_stable_routes(
             output_token: usdt,
             quote: QuoteKind::V2Router { router: v2_router },
             execution: ExecutionKind::UniswapV2,
+            block_hint: None,
             required: true,
         },
         Route {
@@ -252,6 +262,7 @@ fn eth_stable_routes(
                 router: sushi_router,
             },
             execution: ExecutionKind::SushiswapV2,
+            block_hint: None,
             required: true,
         },
         Route {
@@ -264,6 +275,7 @@ fn eth_stable_routes(
                 fee: 500,
             },
             execution: ExecutionKind::UniswapV3 { fee: 500 },
+            block_hint: None,
             required: true,
         },
         Route {
@@ -281,6 +293,7 @@ fn eth_stable_routes(
                     hooks: Address::ZERO,
                 },
             },
+            block_hint: Some(23_560_197),
             required: false,
         },
         Route {
@@ -298,6 +311,7 @@ fn eth_stable_routes(
                     hooks: Address::ZERO,
                 },
             },
+            block_hint: Some(23_566_463),
             required: false,
         },
     ]
@@ -307,9 +321,10 @@ async fn run_route(
     chain: &mut tx_simulator::UnsignedTxChainSimulation,
     route: &Route,
     buyer: Address,
-    router_address: Address,
+    executor_address: Address,
     weth: Address,
     amount_in: U256,
+    block_number: u64,
 ) -> Result<RouteReport> {
     let quote = quote_route(chain, route, weth, amount_in)?;
 
@@ -319,7 +334,7 @@ async fn run_route(
     ensure_success(&format!("{} WETH deposit", route.label), &deposit_result)?;
 
     let before = erc20_balance_of(chain, route.output_token, buyer)?;
-    let mut execute_tx = build_execute_tx(route, buyer, router_address, weth, amount_in)?;
+    let mut execute_tx = build_execute_tx(route, buyer, executor_address, weth, amount_in)?;
     apply_simple_gas_policy(&mut execute_tx);
     let execute_result = chain.step_with_trace(execute_tx).await?;
     if !execute_result.success {
@@ -349,9 +364,8 @@ async fn run_route(
         .ok_or_else(|| eyre!("{} output balance decreased", route.label))?;
     if output.is_zero() {
         return Err(eyre!(
-            "{} produced zero {}",
-            route.label,
-            route.output_symbol
+            "{}",
+            zero_output_diagnostic(route, block_number, execute_result.gas_used)
         ));
     }
 
@@ -364,6 +378,50 @@ async fn run_route(
         deposit_gas: deposit_result.gas_used,
         execute_gas: execute_result.gas_used,
     })
+}
+
+fn configured_simulation_block(latest_block: u64) -> Result<u64> {
+    match std::env::var("BAYGUS_SIM_BLOCK") {
+        Ok(value) => {
+            let requested = value.trim().parse::<u64>().map_err(|err| {
+                eyre!("invalid BAYGUS_SIM_BLOCK value {value:?}; expected block number: {err}")
+            })?;
+            if requested > latest_block {
+                return Err(eyre!(
+                    "BAYGUS_SIM_BLOCK {requested} is ahead of latest local block {latest_block}"
+                ));
+            }
+            Ok(requested)
+        }
+        Err(std::env::VarError::NotPresent) => Ok(latest_block),
+        Err(err) => Err(eyre!("failed to read BAYGUS_SIM_BLOCK: {err}")),
+    }
+}
+
+fn zero_output_diagnostic(route: &Route, block_number: u64, execute_gas: u64) -> String {
+    let mut diagnostic = format!(
+        "{} executed successfully at block {} but produced zero {} (execute gas {})",
+        route.label, block_number, route.output_symbol, execute_gas
+    );
+
+    if let ExecutionKind::UniswapV4 { pool_key } = &route.execution {
+        diagnostic.push_str(&format!(
+            "; v4 pool key currency0={} currency1={} fee={} tickSpacing={} hooks={}",
+            pool_key.currency0,
+            pool_key.currency1,
+            pool_key.fee,
+            pool_key.tick_spacing,
+            pool_key.hooks
+        ));
+    }
+
+    if let Some(block_hint) = route.block_hint {
+        diagnostic.push_str(&format!(
+            "; historical hint: rerun with BAYGUS_SIM_BLOCK={block_hint}"
+        ));
+    }
+
+    diagnostic
 }
 
 fn trace_failures_enabled() -> bool {
@@ -411,50 +469,50 @@ fn quote_route(
 fn build_execute_tx(
     route: &Route,
     buyer: Address,
-    router_address: Address,
+    executor_address: Address,
     weth: Address,
     amount_in: U256,
 ) -> Result<UnsignedTransaction> {
     match &route.execution {
         ExecutionKind::UniswapV2 => {
-            let mut plan = BaygusExecutePlan::new();
+            let mut plan = BaygusExecutionPlan::new();
             plan.transfer_from(weth, amount_in)
                 .v2_swap(
                     amount_in,
                     U256::ZERO,
                     [weth, route.output_token],
-                    router_address,
+                    executor_address,
                 )
                 .sweep(route.output_token, buyer, U256::ZERO);
-            Ok(build_baygus_execute_tx(router_address, buyer, &plan))
+            Ok(build_baygus_execute_tx(executor_address, buyer, &plan))
         }
         ExecutionKind::SushiswapV2 => {
-            let mut plan = BaygusExecutePlan::new();
+            let mut plan = BaygusExecutionPlan::new();
             plan.transfer_from(weth, amount_in)
                 .sushiswap_swap(
                     amount_in,
                     U256::ZERO,
                     [weth, route.output_token],
-                    router_address,
+                    executor_address,
                 )
                 .sweep(route.output_token, buyer, U256::ZERO);
-            Ok(build_baygus_execute_tx(router_address, buyer, &plan))
+            Ok(build_baygus_execute_tx(executor_address, buyer, &plan))
         }
         ExecutionKind::UniswapV3 { fee } => {
-            let mut plan = BaygusExecutePlan::new();
+            let mut plan = BaygusExecutionPlan::new();
             plan.transfer_from(weth, amount_in)
                 .v3_swap(BaygusV3ExactInputSingle {
                     token_in: weth,
                     token_out: route.output_token,
                     fee: *fee,
-                    recipient: router_address,
+                    recipient: executor_address,
                     deadline: U256::MAX,
                     amount_in,
                     amount_out_minimum: U256::ZERO,
                     sqrt_price_limit_x96: U256::ZERO,
                 })
                 .sweep(route.output_token, buyer, U256::ZERO);
-            Ok(build_baygus_execute_tx(router_address, buyer, &plan))
+            Ok(build_baygus_execute_tx(executor_address, buyer, &plan))
         }
         ExecutionKind::UniswapV4 { pool_key } => {
             let request = UniswapV4BaygusSingleHopRequest {
@@ -468,8 +526,8 @@ fn build_execute_tx(
                 hook_data: Vec::new(),
                 sqrt_price_limit_x96: None,
             };
-            let call = build_baygus_single_hop_exact_input_call(&request)?;
-            build_baygus_router_multihop_tx(router_address, buyer, &call.params, call.eth_value)
+            let call = build_baygus_executor_single_hop_exact_input_call(&request)?;
+            build_baygus_executor_multihop_tx(executor_address, buyer, &call.params, call.eth_value)
         }
     }
 }

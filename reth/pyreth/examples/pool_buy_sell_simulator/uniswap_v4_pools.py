@@ -2,7 +2,7 @@
 """
 Uniswap V4 Pools - Buy → Approve → Sell Simulation
 
-Runs the Baygus router powered pipeline against a known Uniswap v4 USDC/WETH pool.
+Runs the Baygus executor powered pipeline against a known Uniswap v4 USDC/WETH pool.
 Prints the swap outcomes and gas metrics for each leg if the pool is tradeable.
 """
 
@@ -60,7 +60,7 @@ def main():
         if res.error_message:
             print("❌ Swap pipeline failed")
         else:
-            print("✅ Baygus router v4 buy → approve → sell succeeded")
+            print("✅ Baygus executor v4 buy → approve → sell succeeded")
     except Exception as e:
         print("❌ Unexpected error calling V4 check:", e)
         raise

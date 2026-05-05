@@ -21,8 +21,8 @@ use crate::tx_processor::tax_calculator::{
 };
 use crate::tx_processor::TxProcessor;
 use tx_simulator::tx_builders::uniswap_v4::{
-    build_baygus_router_deploy_tx, build_baygus_router_multihop_tx,
-    build_baygus_single_hop_exact_input_call,
+    build_baygus_executor_deploy_tx, build_baygus_executor_multihop_tx,
+    build_baygus_executor_single_hop_exact_input_call,
     build_token_approval_tx as build_v4_token_approval_tx,
     build_weth_deposit_tx as build_v4_weth_deposit_tx,
     build_weth_withdraw_tx as build_v4_weth_withdraw_tx,
@@ -199,7 +199,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 
     if !router_exists_on_chain && !router_exists_in_chain {
         let mut deploy_tx =
-            build_baygus_router_deploy_tx(config.buyer_address, v4_cfg.pool_manager)?;
+            build_baygus_executor_deploy_tx(config.buyer_address, v4_cfg.pool_manager)?;
         apply_fee_policy(&mut deploy_tx, &config, base_fee);
         let deploy_result = chain
             .step_with_trace(deploy_tx.clone())
@@ -239,7 +239,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
                 None,
                 None,
                 format_failure_with_revert(
-                    "Baygus router deployment failed",
+                    "Baygus executor deployment failed",
                     deploy_result.revert_reason.as_deref(),
                 ),
                 false,
@@ -255,7 +255,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
                 None,
                 None,
                 None,
-                "Baygus router deployment succeeded but bytecode not visible in simulation state"
+                "Baygus executor deployment succeeded but bytecode not visible in simulation state"
                     .to_string(),
                 false,
                 false,
@@ -365,7 +365,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
                 None,
                 None,
                 format_failure_with_revert(
-                    "WETH approval for Baygus router failed",
+                    "WETH approval for Baygus executor failed",
                     weth_approve_result.revert_reason.as_deref(),
                 ),
                 false,
@@ -386,8 +386,8 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         hook_data: v4_cfg.hook_data.clone(),
         sqrt_price_limit_x96: None,
     };
-    let buy_call = build_baygus_single_hop_exact_input_call(&buy_request)?;
-    let mut buy_tx = build_baygus_router_multihop_tx(
+    let buy_call = build_baygus_executor_single_hop_exact_input_call(&buy_request)?;
+    let mut buy_tx = build_baygus_executor_multihop_tx(
         router_address,
         config.buyer_address,
         &buy_call.params,
@@ -401,7 +401,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         .await
         .map_err(|err| {
             let context = format!(
-                "while executing Uniswap V4 buy via Baygus router with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                "while executing Uniswap V4 buy via Baygus executor with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
                 buy_tx.gas,
                 buy_tx.gas_price,
                 buy_tx.max_fee_per_gas,
@@ -429,7 +429,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             &simulator,
             &buy_tx,
             block_number,
-            "Baygus router buy transaction failed",
+            "Baygus executor buy transaction failed",
             buy_result.revert_reason.as_deref(),
         )
         .await;
@@ -500,7 +500,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             Some(approve_processed),
             None,
             format_failure_with_revert(
-                "Token approval for Baygus router failed",
+                "Token approval for Baygus executor failed",
                 approve_result.revert_reason.as_deref(),
             ),
             true,
@@ -521,9 +521,9 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         hook_data: v4_cfg.hook_data.clone(),
         sqrt_price_limit_x96: None,
     };
-    let sell_call = build_baygus_single_hop_exact_input_call(&sell_request)?;
+    let sell_call = build_baygus_executor_single_hop_exact_input_call(&sell_request)?;
 
-    let mut sell_tx = build_baygus_router_multihop_tx(
+    let mut sell_tx = build_baygus_executor_multihop_tx(
         router_address,
         config.buyer_address,
         &sell_call.params,
@@ -536,7 +536,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
         .await
         .map_err(|err| {
             let context = format!(
-                "while executing Uniswap V4 sell via Baygus router with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
+                "while executing Uniswap V4 sell via Baygus executor with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",
                 sell_tx.gas,
                 sell_tx.gas_price,
                 sell_tx.max_fee_per_gas,
@@ -564,7 +564,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             &simulator,
             &sell_tx,
             block_number,
-            "Baygus router sell transaction failed",
+            "Baygus executor sell transaction failed",
             sell_result.revert_reason.as_deref(),
         )
         .await;

@@ -10,7 +10,7 @@ use std::{
 use crate::UnsignedTransaction;
 
 const MINIMAL_ROUTER_BYTECODE_RELATIVE_PATH: &str = "contracts/uniswap_v4/MinimalV4Router.bin";
-const BAYGUS_ROUTER_ARTIFACT_RELATIVE_PATH: &str = "out/BaygusRouter.sol/BaygusRouter.json";
+const BAYGUS_EXECUTOR_ARTIFACT_RELATIVE_PATH: &str = "out/BaygusExecutor.sol/BaygusExecutor.json";
 const MOCK_POOL_MANAGER_ARTIFACT_RELATIVE_PATH: &str =
     "out/MockPoolManager.sol/MockPoolManager.json";
 const MOCK_ERC20_ARTIFACT_RELATIVE_PATH: &str = "out/MockERC20.sol/MockERC20.json";
@@ -31,27 +31,37 @@ impl FoundryArtifact {
     }
 }
 
-/// Repository-local Baygus router artifact root under `soleth`.
-pub fn soleth_baygus_router_dir() -> PathBuf {
+/// Repository-local Baygus executor artifact root under `soleth`.
+pub fn soleth_baygus_executor_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("soleth/baygus-router")
+        .join("soleth/baygus-executor")
 }
 
 pub fn minimal_router_bytecode_path() -> PathBuf {
-    soleth_baygus_router_dir().join(MINIMAL_ROUTER_BYTECODE_RELATIVE_PATH)
+    soleth_baygus_executor_dir().join(MINIMAL_ROUTER_BYTECODE_RELATIVE_PATH)
 }
 
+pub fn baygus_executor_artifact_path() -> PathBuf {
+    soleth_baygus_executor_dir().join(BAYGUS_EXECUTOR_ARTIFACT_RELATIVE_PATH)
+}
+
+#[deprecated(note = "use soleth_baygus_executor_dir")]
+pub fn soleth_baygus_router_dir() -> PathBuf {
+    soleth_baygus_executor_dir()
+}
+
+#[deprecated(note = "use baygus_executor_artifact_path")]
 pub fn baygus_router_artifact_path() -> PathBuf {
-    soleth_baygus_router_dir().join(BAYGUS_ROUTER_ARTIFACT_RELATIVE_PATH)
+    baygus_executor_artifact_path()
 }
 
 pub fn mock_pool_manager_artifact_path() -> PathBuf {
-    soleth_baygus_router_dir().join(MOCK_POOL_MANAGER_ARTIFACT_RELATIVE_PATH)
+    soleth_baygus_executor_dir().join(MOCK_POOL_MANAGER_ARTIFACT_RELATIVE_PATH)
 }
 
 pub fn mock_erc20_artifact_path() -> PathBuf {
-    soleth_baygus_router_dir().join(MOCK_ERC20_ARTIFACT_RELATIVE_PATH)
+    soleth_baygus_executor_dir().join(MOCK_ERC20_ARTIFACT_RELATIVE_PATH)
 }
 
 fn decode_hex_bytecode(hex_value: &str, label: &str) -> Result<Vec<u8>> {
@@ -66,7 +76,7 @@ fn decode_hex_bytecode(hex_value: &str, label: &str) -> Result<Vec<u8>> {
 fn read_raw_bytecode_file(path: &Path, label: &str) -> Result<Vec<u8>> {
     let contents = fs::read_to_string(path).map_err(|err| {
         eyre!(
-            "failed to read {label} bytecode from {}: {err}; build or restore soleth/baygus-router artifacts first",
+            "failed to read {label} bytecode from {}: {err}; build or restore soleth/baygus-executor artifacts first",
             path.display()
         )
     })?;
@@ -76,7 +86,7 @@ fn read_raw_bytecode_file(path: &Path, label: &str) -> Result<Vec<u8>> {
 fn read_foundry_artifact_bytecode(path: &Path, label: &str) -> Result<Vec<u8>> {
     let contents = fs::read_to_string(path).map_err(|err| {
         eyre!(
-            "failed to read {label} artifact from {}: {err}; build or restore soleth/baygus-router artifacts first",
+            "failed to read {label} artifact from {}: {err}; build or restore soleth/baygus-executor artifacts first",
             path.display()
         )
     })?;
@@ -103,9 +113,9 @@ const MOCK_ERC20_MINT_SELECTOR: [u8; 4] = [0x40, 0xc1, 0x0f, 0x19];
 const ERC20_BALANCE_OF_SELECTOR: [u8; 4] = [0x70, 0xa0, 0x82, 0x31];
 /// Minimal router swap selector keccak256("swapExactInputSingle((address,address,uint24,int24,address,bool,uint128,uint128,address,bool,bytes))")
 const SWAP_EXACT_INPUT_SINGLE_SELECTOR: [u8; 4] = [0x2c, 0xc3, 0x0a, 0x09];
-/// Baygus router multihop selector keccak256("swapExactInputPath((((address,address,uint24,int24,address),(bool,int256,uint160),bytes,address,int128,int128)[],address,int128,int128))")
+/// Baygus executor multihop selector keccak256("swapExactInputPath((((address,address,uint24,int24,address),(bool,int256,uint160),bytes,address,int128,int128)[],address,int128,int128))")
 const SWAP_EXACT_INPUT_PATH_SELECTOR: [u8; 4] = [0xc8, 0x33, 0x24, 0x4d];
-/// Baygus router single hop selector keccak256("swapExactInputSingle(((address,address,uint24,int24,address),(bool,int256,uint160),address,bytes,address,int128,int128))")
+/// Baygus executor single hop selector keccak256("swapExactInputSingle(((address,address,uint24,int24,address),(bool,int256,uint160),address,bytes,address,int128,int128))")
 const BAYGUS_SWAP_EXACT_INPUT_SINGLE_SELECTOR: [u8; 4] = [0xa2, 0xda, 0x1d, 0x92];
 
 /// MockPoolManager setRouter selector keccak256("setRouter(address)")
@@ -176,7 +186,7 @@ pub struct UniswapV4BaygusSingleHopCall {
 }
 
 #[derive(Debug, Clone)]
-pub struct BaygusRouterAdapterConfig {
+pub struct BaygusExecutorAdapterConfig {
     pub uniswap_v2_router: Address,
     pub sushiswap_router: Address,
     pub uniswap_v3_router: Address,
@@ -184,12 +194,15 @@ pub struct BaygusRouterAdapterConfig {
     pub permit2: Address,
 }
 
+#[deprecated(note = "use BaygusExecutorAdapterConfig")]
+pub type BaygusRouterAdapterConfig = BaygusExecutorAdapterConfig;
+
 fn parse_mainnet_address(value: &str, label: &str) -> Result<Address> {
     Address::from_str(value).map_err(|err| eyre!("invalid {label} address {value}: {err}"))
 }
 
-pub fn default_baygus_adapter_config() -> Result<BaygusRouterAdapterConfig> {
-    Ok(BaygusRouterAdapterConfig {
+pub fn default_baygus_executor_adapter_config() -> Result<BaygusExecutorAdapterConfig> {
+    Ok(BaygusExecutorAdapterConfig {
         uniswap_v2_router: parse_mainnet_address(
             "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
             "Uniswap V2 router",
@@ -208,6 +221,11 @@ pub fn default_baygus_adapter_config() -> Result<BaygusRouterAdapterConfig> {
         )?,
         permit2: parse_mainnet_address("0x000000000022D473030F116dDEE9F6B43aC78BA3", "Permit2")?,
     })
+}
+
+#[deprecated(note = "use default_baygus_executor_adapter_config")]
+pub fn default_baygus_adapter_config() -> Result<BaygusExecutorAdapterConfig> {
+    default_baygus_executor_adapter_config()
 }
 
 /// Load the minimal Uniswap v4 router bytecode for deployment.
@@ -475,29 +493,34 @@ pub fn build_token_approval_tx(
     }
 }
 
-/// Load the Baygus router bytecode for deployment.
-pub fn baygus_router_bytecode() -> Result<Vec<u8>> {
-    read_foundry_artifact_bytecode(&baygus_router_artifact_path(), "BaygusRouter")
+/// Load the Baygus executor bytecode for deployment.
+pub fn baygus_executor_bytecode() -> Result<Vec<u8>> {
+    read_foundry_artifact_bytecode(&baygus_executor_artifact_path(), "BaygusExecutor")
 }
 
-/// Build the unsigned transaction that deploys the Baygus multi-hop router.
-pub fn build_baygus_router_deploy_tx(
+#[deprecated(note = "use baygus_executor_bytecode")]
+pub fn baygus_router_bytecode() -> Result<Vec<u8>> {
+    baygus_executor_bytecode()
+}
+
+/// Build the unsigned transaction that deploys the Baygus executor.
+pub fn build_baygus_executor_deploy_tx(
     deployer: Address,
     pool_manager: Address,
 ) -> Result<UnsignedTransaction> {
-    build_baygus_router_deploy_tx_with_adapters(
+    build_baygus_executor_deploy_tx_with_adapters(
         deployer,
         pool_manager,
-        &default_baygus_adapter_config()?,
+        &default_baygus_executor_adapter_config()?,
     )
 }
 
-pub fn build_baygus_router_deploy_tx_with_adapters(
+pub fn build_baygus_executor_deploy_tx_with_adapters(
     deployer: Address,
     pool_manager: Address,
-    adapters: &BaygusRouterAdapterConfig,
+    adapters: &BaygusExecutorAdapterConfig,
 ) -> Result<UnsignedTransaction> {
-    let mut data = baygus_router_bytecode()?;
+    let mut data = baygus_executor_bytecode()?;
     data.extend_from_slice(&pad_address(pool_manager));
     data.extend_from_slice(&pad_address(adapters.uniswap_v2_router));
     data.extend_from_slice(&pad_address(adapters.sushiswap_router));
@@ -519,8 +542,25 @@ pub fn build_baygus_router_deploy_tx_with_adapters(
     })
 }
 
-/// Build a `swapExactInputPath` Baygus router transaction for one or more Uniswap v4 hops.
-pub fn build_baygus_router_multihop_tx(
+#[deprecated(note = "use build_baygus_executor_deploy_tx")]
+pub fn build_baygus_router_deploy_tx(
+    deployer: Address,
+    pool_manager: Address,
+) -> Result<UnsignedTransaction> {
+    build_baygus_executor_deploy_tx(deployer, pool_manager)
+}
+
+#[deprecated(note = "use build_baygus_executor_deploy_tx_with_adapters")]
+pub fn build_baygus_router_deploy_tx_with_adapters(
+    deployer: Address,
+    pool_manager: Address,
+    adapters: &BaygusExecutorAdapterConfig,
+) -> Result<UnsignedTransaction> {
+    build_baygus_executor_deploy_tx_with_adapters(deployer, pool_manager, adapters)
+}
+
+/// Build a `swapExactInputPath` Baygus executor transaction for one or more Uniswap v4 hops.
+pub fn build_baygus_executor_multihop_tx(
     router: Address,
     caller: Address,
     params: &UniswapV4BaygusMultiHopParams,
@@ -541,8 +581,18 @@ pub fn build_baygus_router_multihop_tx(
     })
 }
 
-/// Build a `swapExactInputSingle` Baygus router transaction.
-pub fn build_baygus_swap_exact_input_single_tx(
+#[deprecated(note = "use build_baygus_executor_multihop_tx")]
+pub fn build_baygus_router_multihop_tx(
+    router: Address,
+    caller: Address,
+    params: &UniswapV4BaygusMultiHopParams,
+    eth_value: U256,
+) -> Result<UnsignedTransaction> {
+    build_baygus_executor_multihop_tx(router, caller, params, eth_value)
+}
+
+/// Build a `swapExactInputSingle` Baygus executor transaction.
+pub fn build_baygus_executor_swap_exact_input_single_tx(
     router: Address,
     caller: Address,
     request: &UniswapV4BaygusSingleHopRequest,
@@ -610,8 +660,17 @@ pub fn build_baygus_swap_exact_input_single_tx(
     })
 }
 
-/// Build a Baygus router single-hop exact-input call descriptor.
-pub fn build_baygus_single_hop_exact_input_call(
+#[deprecated(note = "use build_baygus_executor_swap_exact_input_single_tx")]
+pub fn build_baygus_swap_exact_input_single_tx(
+    router: Address,
+    caller: Address,
+    request: &UniswapV4BaygusSingleHopRequest,
+) -> Result<UnsignedTransaction> {
+    build_baygus_executor_swap_exact_input_single_tx(router, caller, request)
+}
+
+/// Build a Baygus executor single-hop exact-input call descriptor.
+pub fn build_baygus_executor_single_hop_exact_input_call(
     request: &UniswapV4BaygusSingleHopRequest,
 ) -> Result<UniswapV4BaygusSingleHopCall> {
     let orientation = infer_orientation_from_input(&request.pool_key, request.token_in)?;
@@ -674,6 +733,13 @@ pub fn build_baygus_single_hop_exact_input_call(
         eth_value,
         orientation,
     })
+}
+
+#[deprecated(note = "use build_baygus_executor_single_hop_exact_input_call")]
+pub fn build_baygus_single_hop_exact_input_call(
+    request: &UniswapV4BaygusSingleHopRequest,
+) -> Result<UniswapV4BaygusSingleHopCall> {
+    build_baygus_executor_single_hop_exact_input_call(request)
 }
 
 /// Build a `swapExactInputSingle` call to the minimal router.
@@ -825,7 +891,7 @@ fn encode_swap_exact_input_single(
 
 fn encode_swap_exact_input_path(params: &UniswapV4BaygusMultiHopParams) -> Result<Bytes> {
     if params.hops.is_empty() {
-        return Err(eyre!("Baygus router multi-hop requires at least one hop"));
+        return Err(eyre!("Baygus executor multi-hop requires at least one hop"));
     }
 
     const HEAD_WORDS: usize = 4;
@@ -1079,13 +1145,13 @@ mod tests {
     #[test]
     fn default_artifact_paths_point_at_soleth() {
         assert!(minimal_router_bytecode_path()
-            .ends_with("soleth/baygus-router/contracts/uniswap_v4/MinimalV4Router.bin"));
-        assert!(baygus_router_artifact_path()
-            .ends_with("soleth/baygus-router/out/BaygusRouter.sol/BaygusRouter.json"));
+            .ends_with("soleth/baygus-executor/contracts/uniswap_v4/MinimalV4Router.bin"));
+        assert!(baygus_executor_artifact_path()
+            .ends_with("soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json"));
         assert!(mock_pool_manager_artifact_path()
-            .ends_with("soleth/baygus-router/out/MockPoolManager.sol/MockPoolManager.json"));
+            .ends_with("soleth/baygus-executor/out/MockPoolManager.sol/MockPoolManager.json"));
         assert!(mock_erc20_artifact_path()
-            .ends_with("soleth/baygus-router/out/MockERC20.sol/MockERC20.json"));
+            .ends_with("soleth/baygus-executor/out/MockERC20.sol/MockERC20.json"));
     }
 
     #[test]

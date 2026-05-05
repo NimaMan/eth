@@ -1,4 +1,4 @@
-# Mainnet pool targets for Baygus Router validation.
+# Mainnet pool targets for Baygus Executor validation.
 # Checked against local Reth RPC at block 25028188.
 
 [tokens]

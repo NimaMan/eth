@@ -1,6 +1,6 @@
-# Baygus Router Deployment Gate
+# Baygus Executor Deployment Gate
 
-This router is part of the transaction execution path. Treat every deploy as immutable production
+This executor is part of the transaction execution path. Treat every deploy as immutable production
 infrastructure: the PoolManager and adapter addresses are constructor state and cannot be changed.
 
 ## Mainnet Constructor Inputs
@@ -14,7 +14,7 @@ infrastructure: the PoolManager and adapter addresses are constructor state and 
 
 ## Required Checks
 
-Run from `soleth/baygus-router/contracts`:
+Run from `soleth/baygus-executor/contracts`:
 
 ```bash
 forge fmt --check
@@ -25,9 +25,9 @@ forge test
 Run from `reth`:
 
 ```bash
-cargo test -p tx_simulator tx_builders::baygus_router --lib
+cargo test -p tx_simulator tx_builders::baygus_executor --lib
 cargo test -p tx_simulator default_artifact_paths_point_at_soleth --lib
-cargo run -p tx_processor --example baygus_execute_plan
+cargo run -p tx_processor --example baygus_execution_plan
 ```
 
 Before mainnet deployment, also run the exact deploy/buy/sell/coinbase-tip sequence through the
@@ -36,7 +36,7 @@ builder that passed simulation.
 
 ## Coinbase Tip Command
 
-`CMD_COINBASE_TIP` pays `block.coinbase` from the router native balance. The live executor should use
+`CMD_COINBASE_TIP` pays `block.coinbase` from the executor native balance. The live executor should use
 the guarded input form:
 
 ```solidity
@@ -54,8 +54,8 @@ Record these values for every deployment:
 - git commit
 - chain id
 - deployer
-- deployed router address
+- deployed executor address
 - constructor arguments
-- `BaygusRouter` bytecode hash
-- artifact path used by Rust: `soleth/baygus-router/out/BaygusRouter.sol/BaygusRouter.json`
+- `BaygusExecutor` bytecode hash
+- artifact path used by Rust: `soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json`
 - Foundry and Rust check output

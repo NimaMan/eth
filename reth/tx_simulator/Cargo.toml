@@ -150,4 +150,8 @@ path = "examples/tx_builders/signed_bundle_simulation.rs"
 
 [[example]]
 name = "baygus_eth_stable_quotes"
-path = "examples/baygus_router_validation/baygus_v2_usdc_quote.rs"
+path = "examples/baygus_executor_validation/baygus_eth_stable_quotes.rs"
+
+[[example]]
+name = "baygus_gas_benchmark"
+path = "examples/baygus_executor_validation/baygus_gas_benchmark.rs"

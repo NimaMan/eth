@@ -6,6 +6,7 @@ import {ICurvePool} from "./interfaces/ICurvePool.sol";
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IHookAdapter} from "./interfaces/IHookAdapter.sol";
 import {ILockCallback} from "./interfaces/ILockCallback.sol";
+import {IPermit2} from "./interfaces/IPermit2.sol";
 import {IPoolManager} from "./interfaces/IPoolManager.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
@@ -31,8 +32,10 @@ import {
     CommandLengthMismatch,
     EmptyPath,
     InvalidCommand,
+    InvalidPermit2TransferFromInput,
     InvalidTransferFromInput,
     MissingPoolManager,
+    Permit2AmountOverflow,
     ReentrantCall,
     SlippageCheckFailed,
     SweepInsufficientBalance,
@@ -44,7 +47,7 @@ import {
     InvalidCoinbaseTipInput
 } from "./types/Errors.sol";
 
-contract BaygusRouter is ILockCallback {
+contract BaygusExecutor is ILockCallback {
     using SafeTransferLib for address;
 
     uint8 private constant CALLBACK_SINGLE = 0;
@@ -211,7 +214,7 @@ contract BaygusRouter is ILockCallback {
         } else if (command == CMD_V4_SWAP) {
             result = IPoolManager(poolManager).unlock(input);
         } else if (command == CMD_PERMIT2_TRANSFER_FROM) {
-            revert AdapterMissing(command);
+            _permit2TransferFrom(input, payer);
         } else if (command == CMD_COINBASE_TIP) {
             _coinbaseTip(input);
         } else {
@@ -331,6 +334,28 @@ contract BaygusRouter is ILockCallback {
         }
 
         token.safeTransferFrom(from, address(this), amount);
+    }
+
+    function _permit2TransferFrom(bytes memory input, address defaultFrom) internal {
+        if (adapters.permit2 == address(0)) revert AdapterMissing(CMD_PERMIT2_TRANSFER_FROM);
+
+        address token;
+        address from;
+        uint256 amount;
+
+        if (input.length == 64) {
+            (token, amount) = abi.decode(input, (address, uint256));
+            from = defaultFrom;
+        } else if (input.length == 96) {
+            (token, from, amount) = abi.decode(input, (address, address, uint256));
+        } else {
+            revert InvalidPermit2TransferFromInput();
+        }
+
+        if (amount > type(uint160).max) revert Permit2AmountOverflow(amount);
+        // Checked above because Permit2 amount is uint160.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        IPermit2(adapters.permit2).transferFrom(from, address(this), uint160(amount), token);
     }
 
     function _v2Swap(bytes memory input, address router, uint8 command) internal {

@@ -1,6 +1,6 @@
 use alloy_primitives::{address, U256};
-use tx_simulator::tx_builders::baygus_router::{
-    build_baygus_execute_tx, BaygusExecutePlan, CMD_TRANSFER_FROM, CMD_V2_SWAP,
+use tx_simulator::tx_builders::baygus_executor::{
+    build_baygus_execute_tx, BaygusExecutionPlan, CMD_TRANSFER_FROM, CMD_V2_SWAP,
 };
 
 fn main() {
@@ -10,7 +10,7 @@ fn main() {
     let usdc = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
     let amount_in = U256::from(1_000_000_000_000_000_000u128);
 
-    let mut plan = BaygusExecutePlan::new();
+    let mut plan = BaygusExecutionPlan::new();
     plan.transfer_from(weth, amount_in)
         .v2_swap(amount_in, U256::ZERO, vec![weth, usdc], caller);
 

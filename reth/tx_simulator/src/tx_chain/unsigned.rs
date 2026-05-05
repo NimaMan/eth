@@ -97,6 +97,18 @@ impl UnsignedTxChainSimulation {
         self.forked_state.nonces.insert(address, next_nonce);
     }
 
+    pub fn account_nonce(&mut self, address: Address) -> Result<u64> {
+        if let Some(&nonce) = self.forked_state.nonces.get(&address) {
+            return Ok(nonce);
+        }
+
+        let nonce = self
+            .simulator
+            .get_nonce_from_state(&mut self.forked_state, address)?;
+        self.forked_state.nonces.insert(address, nonce);
+        Ok(nonce)
+    }
+
     /// Set the forked account nonce for approximate selected-transaction replay.
     ///
     /// This is intended for live/pool-manager replay inputs that include selected setup

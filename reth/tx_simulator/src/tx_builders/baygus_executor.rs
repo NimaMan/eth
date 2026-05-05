@@ -2,6 +2,7 @@ use crate::UnsignedTransaction;
 use alloy_primitives::{Address, Bytes, B256, U256};
 
 const WORD_BYTES: usize = 32;
+const PERMIT2_APPROVE_SELECTOR: [u8; 4] = [0x87, 0x51, 0x7c, 0x45];
 
 pub const CMD_V4_SWAP: u8 = 0x01;
 pub const CMD_V2_SWAP: u8 = 0x02;
@@ -15,7 +16,7 @@ pub const CMD_PERMIT2_TRANSFER_FROM: u8 = 0x09;
 pub const CMD_TRANSFER_FROM: u8 = 0x0a;
 pub const CMD_COINBASE_TIP: u8 = 0x0b;
 
-/// BaygusRouter command bytes from `soleth/baygus-router/contracts/src/types/SharedTypes.sol`.
+/// BaygusExecutor command bytes from `soleth/baygus-executor/contracts/src/types/SharedTypes.sol`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum BaygusCommand {
@@ -73,15 +74,18 @@ pub struct BaygusBalancerSwap {
     pub limit: U256,
 }
 
-/// A typed command plan for `BaygusRouter.execute(bytes,bytes[])`.
+/// A typed command plan for `BaygusExecutor.execute(bytes,bytes[])`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BaygusExecutePlan {
+pub struct BaygusExecutionPlan {
     commands: Vec<BaygusCommand>,
     inputs: Vec<Bytes>,
     eth_value: U256,
 }
 
-impl BaygusExecutePlan {
+#[deprecated(note = "use BaygusExecutionPlan")]
+pub type BaygusExecutePlan = BaygusExecutionPlan;
+
+impl BaygusExecutionPlan {
     pub fn new() -> Self {
         Self::default()
     }
@@ -122,6 +126,25 @@ impl BaygusExecutePlan {
         self.push_raw(
             BaygusCommand::TransferFrom,
             encode_transfer_from_owner_input(token, owner, amount),
+        )
+    }
+
+    pub fn permit2_transfer_from(&mut self, token: Address, amount: U256) -> &mut Self {
+        self.push_raw(
+            BaygusCommand::Permit2TransferFrom,
+            encode_permit2_transfer_from_input(token, amount),
+        )
+    }
+
+    pub fn permit2_transfer_from_owner(
+        &mut self,
+        token: Address,
+        owner: Address,
+        amount: U256,
+    ) -> &mut Self {
+        self.push_raw(
+            BaygusCommand::Permit2TransferFrom,
+            encode_permit2_transfer_from_owner_input(token, owner, amount),
         )
     }
 
@@ -170,7 +193,7 @@ impl BaygusExecutePlan {
         &mut self,
         tokens: impl Into<Vec<Address>>,
         amounts: impl Into<Vec<U256>>,
-        nested_plan: &BaygusExecutePlan,
+        nested_plan: &BaygusExecutionPlan,
     ) -> &mut Self {
         let user_data = nested_plan.execute_args();
         self.push_raw(
@@ -246,7 +269,7 @@ impl BaygusExecutePlan {
 pub fn build_baygus_execute_tx(
     router: Address,
     caller: Address,
-    plan: &BaygusExecutePlan,
+    plan: &BaygusExecutionPlan,
 ) -> UnsignedTransaction {
     UnsignedTransaction {
         from: Some(caller),
@@ -257,6 +280,44 @@ pub fn build_baygus_execute_tx(
         max_priority_fee_per_gas: None,
         value: Some(plan.eth_value()),
         data: Some(plan.calldata()),
+        nonce: None,
+        ..Default::default()
+    }
+}
+
+pub fn build_permit2_approve_tx(
+    owner: Address,
+    permit2: Address,
+    token: Address,
+    spender: Address,
+    amount: U256,
+    expiration: u64,
+) -> UnsignedTransaction {
+    assert!(
+        amount <= max_uint160(),
+        "Permit2 allowance amount must fit uint160"
+    );
+    assert!(
+        expiration <= max_uint48(),
+        "Permit2 expiration must fit uint48"
+    );
+
+    let mut data = Vec::with_capacity(4 + WORD_BYTES * 4);
+    data.extend_from_slice(&PERMIT2_APPROVE_SELECTOR);
+    data.extend_from_slice(&pad_address(token));
+    data.extend_from_slice(&pad_address(spender));
+    data.extend_from_slice(&pad_u256(amount));
+    data.extend_from_slice(&pad_u256(U256::from(expiration)));
+
+    UnsignedTransaction {
+        from: Some(owner),
+        to: Some(permit2),
+        gas: Some(120_000),
+        gas_price: None,
+        max_fee_per_gas: None,
+        max_priority_fee_per_gas: None,
+        value: Some(U256::ZERO),
+        data: Some(Bytes::from(data)),
         nonce: None,
         ..Default::default()
     }
@@ -295,6 +356,18 @@ pub fn encode_transfer_from_owner_input(token: Address, owner: Address, amount: 
     data.extend_from_slice(&pad_address(owner));
     data.extend_from_slice(&pad_u256(amount));
     Bytes::from(data)
+}
+
+pub fn encode_permit2_transfer_from_input(token: Address, amount: U256) -> Bytes {
+    encode_transfer_from_input(token, amount)
+}
+
+pub fn encode_permit2_transfer_from_owner_input(
+    token: Address,
+    owner: Address,
+    amount: U256,
+) -> Bytes {
+    encode_transfer_from_owner_input(token, owner, amount)
 }
 
 pub fn encode_v2_swap_input(
@@ -495,6 +568,14 @@ fn pad_bool(value: bool) -> [u8; WORD_BYTES] {
     out
 }
 
+fn max_uint160() -> U256 {
+    (U256::from(1u8) << 160) - U256::from(1u8)
+}
+
+fn max_uint48() -> u64 {
+    (1u64 << 48) - 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,7 +601,7 @@ mod tests {
         let token_out = address(0x22);
         let recipient = address(0x33);
 
-        let mut plan = BaygusExecutePlan::new();
+        let mut plan = BaygusExecutionPlan::new();
         plan.transfer_from(token_in, U256::from(100)).v2_swap(
             U256::from(100),
             U256::from(95),
@@ -536,6 +617,46 @@ mod tests {
         assert_eq!(plan.inputs()[0].len(), WORD_BYTES * 2);
         assert_eq!(plan.inputs()[1].len(), WORD_BYTES * 7);
         assert_eq!(plan.calldata()[4 + 64 + 31], 2);
+    }
+
+    #[test]
+    fn permit2_transfer_from_uses_reserved_command_byte() {
+        let token = address(0x11);
+        let owner = address(0x22);
+
+        let mut plan = BaygusExecutionPlan::new();
+        plan.permit2_transfer_from_owner(token, owner, U256::from(100));
+
+        assert_eq!(plan.commands_bytes().as_ref(), &[CMD_PERMIT2_TRANSFER_FROM]);
+        assert_eq!(plan.inputs()[0].len(), WORD_BYTES * 3);
+        assert_eq!(
+            &plan.inputs()[0][WORD_BYTES + 12..WORD_BYTES * 2],
+            owner.as_slice()
+        );
+        assert_eq!(plan.inputs()[0][WORD_BYTES * 3 - 1], 100);
+    }
+
+    #[test]
+    fn permit2_approve_tx_encodes_allowance_transfer_approval() {
+        let owner = address(0x11);
+        let permit2 = address(0x22);
+        let token = address(0x33);
+        let spender = address(0x44);
+
+        let tx = build_permit2_approve_tx(owner, permit2, token, spender, U256::from(100), 1234);
+        let data = tx.data.expect("calldata");
+
+        assert_eq!(tx.from, Some(owner));
+        assert_eq!(tx.to, Some(permit2));
+        assert_eq!(&data[..4], &PERMIT2_APPROVE_SELECTOR);
+        assert_eq!(&data[4 + 12..4 + WORD_BYTES], token.as_slice());
+        assert_eq!(
+            &data[4 + WORD_BYTES + 12..4 + WORD_BYTES * 2],
+            spender.as_slice()
+        );
+        assert_eq!(data[4 + WORD_BYTES * 3 - 1], 100);
+        assert_eq!(data[4 + WORD_BYTES * 4 - 2], 0x04);
+        assert_eq!(data[4 + WORD_BYTES * 4 - 1], 0xd2);
     }
 
     #[test]
@@ -572,7 +693,7 @@ mod tests {
 
     #[test]
     fn coinbase_tip_adds_command_input_and_eth_value() {
-        let mut plan = BaygusExecutePlan::new();
+        let mut plan = BaygusExecutionPlan::new();
         plan.coinbase_tip(U256::from(10));
 
         assert_eq!(plan.commands_bytes().as_ref(), &[CMD_COINBASE_TIP]);
@@ -583,7 +704,7 @@ mod tests {
 
     #[test]
     fn guarded_coinbase_tip_encodes_block_bounds() {
-        let mut plan = BaygusExecutePlan::new();
+        let mut plan = BaygusExecutionPlan::new();
         plan.coinbase_tip_with_block_guard(U256::from(10), U256::from(100), U256::from(101));
 
         let input = &plan.inputs()[0];

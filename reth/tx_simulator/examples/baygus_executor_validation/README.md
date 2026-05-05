@@ -1,13 +1,13 @@
-# Baygus Router Mainnet Validation
+# Baygus Executor Mainnet Validation
 
-This folder is for pre-deployment Baygus Router validation against real Ethereum mainnet state.
-Keep these examples focused on the router execution surface: deploy the current Soleth bytecode into
+This folder is for pre-deployment Baygus Executor validation against real Ethereum mainnet state.
+Keep these examples focused on the executor surface: deploy the current Soleth bytecode into
 the local simulation state, compose Baygus commands with `tx_simulator::tx_builders`, execute the
 sequence, and assert balances, traces, gas, and revert behavior.
 
 ## Why stablecoin pools first
 
-Stablecoin routes are the right first target because they exercise the router without adding price
+Stablecoin routes are the right first target because they exercise the executor without adding price
 volatility noise:
 
 - USDC and USDT use 6 decimals; DAI and FRAX use 18 decimals.
@@ -42,7 +42,7 @@ Pool targets were checked against local Reth RPC at block `25028188`.
 Each executable validation should run the same pattern:
 
 1. Build a simulation chain at a fixed recent block.
-2. Deploy the current `soleth/baygus-router/out/BaygusRouter.sol/BaygusRouter.json` bytecode into
+2. Deploy the current `soleth/baygus-executor/out/BaygusExecutor.sol/BaygusExecutor.json` bytecode into
    the simulated state with mainnet adapter addresses.
 3. Fund a deterministic test account with ETH and/or token balances using state overrides or setup
    transfers from known rich accounts.
@@ -51,7 +51,7 @@ Each executable validation should run the same pattern:
 6. Assert:
    - transaction success;
    - expected token balance deltas;
-   - router has no stranded token/native balance unless the test explicitly expects it;
+   - executor has no stranded token/native balance unless the test explicitly expects it;
    - coinbase tip paid only when block bounds match;
    - gas is recorded and below the configured ceiling;
    - trace contains the expected external adapter calls.
@@ -60,18 +60,21 @@ Each executable validation should run the same pattern:
 
 Build these first:
 
-- `baygus_eth_stable_quotes` / `baygus_v2_usdc_quote.rs`: deploy the current Baygus bytecode into
+- `baygus_eth_stable_quotes` / `baygus_eth_stable_quotes.rs`: deploy the current Baygus bytecode into
   the forked local Reth state, approve WETH once, wrap exactly `1 ETH` per route, execute all
   configured ETH-funded stable routes (Uniswap V2, SushiSwap V2, Uniswap V3, and investigated
   Uniswap V4 WETH/USDC pools), and assert Baygus output equals the direct V2/V3 quote where a
   router or quoter quote exists. V4 pools are reported as investigation findings when they execute
   but produce zero output at the latest local block.
+- `baygus_gas_benchmark.rs`: compares direct router execution gas against Baygus Executor command
+  execution gas for representative WETH/stable routes. It reports both executor pull modes
+  (`transfer_from` and Permit2), and prints setup/deploy gas separately.
 - `v2_stable_execute_plan.rs`: `transfer_from -> v2_swap -> sweep`, plus optional guarded
   `coinbase_tip`.
 - `v3_stable_execute_plan.rs`: `transfer_from -> v3_swap -> sweep`, plus optional guarded
   `coinbase_tip`.
 - `curve_stable_execute_plan.rs`: `transfer_from -> curve_swap -> sweep`.
-- `router_deploy_smoke.rs`: deploy only, assert bytecode exists, constructor adapters are readable.
+- `executor_deploy_smoke.rs`: deploy only, assert bytecode exists, constructor adapters are readable.
 
 After these pass, add Balancer pool-id based tests and then mainnet deployment dry-run output.
 
@@ -79,4 +82,17 @@ Run the ETH/stable quote check with:
 
 ```sh
 cargo run -p tx_simulator --example baygus_eth_stable_quotes
+cargo run -p tx_simulator --example baygus_gas_benchmark
 ```
+
+Useful environment flags:
+
+- `BAYGUS_SIM_BLOCK=<block>` pins the simulation state instead of using the latest local block.
+- `BAYGUS_TRACE_FAILURE=1` prints the call trace for a failed route.
+- `BAYGUS_TRACE_SUCCESS=1` prints the call trace for successful routes.
+
+For V4 latest-state zero-output findings, rerun at the route's printed `BAYGUS_SIM_BLOCK` hint to
+separate an executor issue from a pool-state/liquidity issue at the latest block.
+At block `23560197`, the 4.9bp WETH/USDC V4 route currently produces nonzero USDC through
+`BaygusExecutor`, so the latest-block zero-output finding is tracked as a pool-state investigation
+rather than a known executor revert.

@@ -1,16 +1,16 @@
-Tx Builders — AMM and Router Calldata Constructors
+Tx Builders — AMM and Executor Calldata Constructors
 
 Purpose
 - Stateless builders that construct unsigned transactions for AMM interactions:
   - V2/Sushi: swapExactETHForTokens, swapExactTokensForETH, approve
   - V3: exactInputSingle, approve (router spender), and soon: selfPermit + multicall
-  - BaygusRouter: typed `execute(bytes,bytes[])` command plans
+  - BaygusExecutor: typed `execute(bytes,bytes[])` command plans
 - No chain reads here; callers must supply addresses and parameters.
 
 Entrypoints
 - `amm/v2.rs`: `build_buy_swap_v2(_with_min_out)`, `build_sell_swap_v2(_with_min_out)`, `build_token_to_token_swap_v2(_with_min_out)`, `build_approve_v2`
 - `amm/v3.rs`: `build_buy_swap_v3(_with_min_out)`, `build_sell_swap_v3(_with_min_out)`, `build_token_to_token_swap_v3(_with_min_out)`, `build_approve_v3`
-- `baygus_router.rs`: `BaygusExecutePlan`, command encoders, and `build_baygus_execute_tx`
+- `baygus_executor.rs`: `BaygusExecutionPlan`, command encoders, and `build_baygus_execute_tx`
 - `mod.rs`:
   - Route-aware dispatchers: `build_buy_swap`, `build_sell_swap`, `build_approve_for_route`
   - Token→Token: `build_token_to_token_swap(_with_min_out)`
@@ -27,8 +27,10 @@ Usage
   - Strategy/training environments to generate unsigned txs for simulation
   - tx_processor simulators to orchestrate pool viability checks
 - All gas/base fee logic and allowance decisions happen in higher layers; builders only assemble calldata.
-- Baygus command examples should use `BaygusExecutePlan` instead of hand-encoding ABI payloads.
-- `BaygusExecutePlan::coinbase_tip_with_block_guard(amount, min, max)` appends the router
+- Baygus command examples should use `BaygusExecutionPlan` instead of hand-encoding ABI payloads.
+- Use `BaygusExecutionPlan::permit2_transfer_from(_owner)` when the owner has already granted
+  Permit2 allowance to the deployed executor.
+- `BaygusExecutionPlan::coinbase_tip_with_block_guard(amount, min, max)` appends the executor
   `CMD_COINBASE_TIP` command and increases transaction `value` by the tip amount. Prefer this for
   bundle/private-relay execution so stale public transactions cannot pay in the wrong block.
 

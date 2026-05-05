@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaygusRouter} from "../src/BaygusRouter.sol";
+import {BaygusExecutor} from "../src/BaygusExecutor.sol";
 import {AdapterConfig, PoolKey, SwapParams, BalanceDelta} from "../src/types/SharedTypes.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockHookAdapter} from "./mocks/MockHookAdapter.sol";
 import {MockPoolManager} from "./mocks/MockPoolManager.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
-contract BaygusRouterV4Test is TestBase {
+contract BaygusExecutorV4Test is TestBase {
     function _deploy()
         internal
-        returns (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC)
+        returns (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC)
     {
         tokenA = new MockERC20("Token A", "TKNA", 18);
         tokenB = new MockERC20("Token B", "TKNB", 18);
@@ -25,7 +25,7 @@ contract BaygusRouterV4Test is TestBase {
             balancerVault: address(0),
             permit2: address(0)
         });
-        router = new BaygusRouter(address(pool), adapters);
+        router = new BaygusExecutor(address(pool), adapters);
         pool.setRouter(address(router));
 
         tokenA.mint(address(this), 1_000_000 ether);
@@ -46,14 +46,14 @@ contract BaygusRouterV4Test is TestBase {
     }
 
     function testSwapExactInputSingleSettlesAndTakes() external {
-        (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
 
         pool.setNextDelta(int128(int256(150 ether)), int128(int256(-50 ether)));
         tokenB.mint(address(this), 50 ether);
         tokenB.approve(address(router), 50 ether);
         pool.sync(address(tokenB));
 
-        BaygusRouter.SwapExactInputSingleParams memory request = BaygusRouter.SwapExactInputSingleParams({
+        BaygusExecutor.SwapExactInputSingleParams memory request = BaygusExecutor.SwapExactInputSingleParams({
             key: _key(address(tokenA), address(tokenB)),
             params: _params(false),
             recipient: address(this),
@@ -83,12 +83,12 @@ contract BaygusRouterV4Test is TestBase {
     }
 
     function testSwapExactInputSingleSettlesNativeAndTakesToken() external {
-        (BaygusRouter router, MockPoolManager pool,, MockERC20 tokenB,) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool,, MockERC20 tokenB,) = _deploy();
         vm.deal(address(this), 100 ether);
 
         pool.setNextDelta(int128(int256(-50 ether)), int128(int256(10 ether)));
 
-        BaygusRouter.SwapExactInputSingleParams memory request = BaygusRouter.SwapExactInputSingleParams({
+        BaygusExecutor.SwapExactInputSingleParams memory request = BaygusExecutor.SwapExactInputSingleParams({
             key: _key(address(0), address(tokenB)),
             params: _params(true),
             recipient: address(this),
@@ -113,14 +113,14 @@ contract BaygusRouterV4Test is TestBase {
     }
 
     function testSwapExactInputSingleRevertsOnSlippage() external {
-        (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
 
         pool.setNextDelta(int128(int256(100 ether)), int128(int256(-50 ether)));
         tokenB.mint(address(this), 50 ether);
         tokenB.approve(address(router), 50 ether);
         pool.sync(address(tokenB));
 
-        BaygusRouter.SwapExactInputSingleParams memory request = BaygusRouter.SwapExactInputSingleParams({
+        BaygusExecutor.SwapExactInputSingleParams memory request = BaygusExecutor.SwapExactInputSingleParams({
             key: _key(address(tokenA), address(tokenB)),
             params: _params(false),
             recipient: address(this),
@@ -130,12 +130,12 @@ contract BaygusRouterV4Test is TestBase {
             minAmount1: 0
         });
 
-        (bool success,) = address(router).call(abi.encodeCall(BaygusRouter.swapExactInputSingle, (request)));
+        (bool success,) = address(router).call(abi.encodeCall(BaygusExecutor.swapExactInputSingle, (request)));
         assertFalse(success, "expected single-hop slippage failure");
     }
 
     function testSwapExactInputSingleInvokesHook() external {
-        (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB,) = _deploy();
 
         pool.setNextDelta(int128(int256(10 ether)), int128(int256(-5 ether)));
         tokenB.mint(address(this), 5 ether);
@@ -144,7 +144,7 @@ contract BaygusRouterV4Test is TestBase {
 
         MockHookAdapter hook = new MockHookAdapter();
         bytes memory hookData = "hook-context";
-        BaygusRouter.SwapExactInputSingleParams memory request = BaygusRouter.SwapExactInputSingleParams({
+        BaygusExecutor.SwapExactInputSingleParams memory request = BaygusExecutor.SwapExactInputSingleParams({
             key: _key(address(tokenA), address(tokenB)),
             params: _params(false),
             recipient: address(this),
@@ -166,14 +166,14 @@ contract BaygusRouterV4Test is TestBase {
     }
 
     function testSwapExactInputPathNetsIntermediateCurrency() external {
-        (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC) = _deploy();
 
         pool.queueDelta(int128(int256(800 ether)), int128(int256(-500 ether)));
         pool.queueDelta(int128(int256(600 ether)), int128(int256(-800 ether)));
         tokenA.approve(address(router), type(uint256).max);
 
-        BaygusRouter.Hop[] memory hops = new BaygusRouter.Hop[](2);
-        hops[0] = BaygusRouter.Hop({
+        BaygusExecutor.Hop[] memory hops = new BaygusExecutor.Hop[](2);
+        hops[0] = BaygusExecutor.Hop({
             key: _key(address(tokenB), address(tokenA)),
             params: _params(false),
             hookData: "",
@@ -181,7 +181,7 @@ contract BaygusRouterV4Test is TestBase {
             minAmount0: 0,
             minAmount1: 0
         });
-        hops[1] = BaygusRouter.Hop({
+        hops[1] = BaygusExecutor.Hop({
             key: _key(address(tokenC), address(tokenB)),
             params: _params(false),
             hookData: "",
@@ -189,7 +189,7 @@ contract BaygusRouterV4Test is TestBase {
             minAmount0: 0,
             minAmount1: 0
         });
-        BaygusRouter.MultiHopParams memory route = BaygusRouter.MultiHopParams({
+        BaygusExecutor.MultiHopParams memory route = BaygusExecutor.MultiHopParams({
             hops: hops, recipient: address(this), finalMinAmount0: int128(int256(600 ether)), finalMinAmount1: 0
         });
 
@@ -211,14 +211,14 @@ contract BaygusRouterV4Test is TestBase {
     }
 
     function testSwapExactInputPathRevertsOnFinalSlippage() external {
-        (BaygusRouter router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC) = _deploy();
+        (BaygusExecutor router, MockPoolManager pool, MockERC20 tokenA, MockERC20 tokenB, MockERC20 tokenC) = _deploy();
 
         pool.queueDelta(int128(int256(800 ether)), int128(int256(-500 ether)));
         pool.queueDelta(int128(int256(500 ether)), int128(int256(-800 ether)));
         tokenA.approve(address(router), type(uint256).max);
 
-        BaygusRouter.Hop[] memory hops = new BaygusRouter.Hop[](2);
-        hops[0] = BaygusRouter.Hop({
+        BaygusExecutor.Hop[] memory hops = new BaygusExecutor.Hop[](2);
+        hops[0] = BaygusExecutor.Hop({
             key: _key(address(tokenB), address(tokenA)),
             params: _params(false),
             hookData: "",
@@ -226,7 +226,7 @@ contract BaygusRouterV4Test is TestBase {
             minAmount0: 0,
             minAmount1: 0
         });
-        hops[1] = BaygusRouter.Hop({
+        hops[1] = BaygusExecutor.Hop({
             key: _key(address(tokenC), address(tokenB)),
             params: _params(false),
             hookData: "",
@@ -234,29 +234,31 @@ contract BaygusRouterV4Test is TestBase {
             minAmount0: 0,
             minAmount1: 0
         });
-        BaygusRouter.MultiHopParams memory route = BaygusRouter.MultiHopParams({
+        BaygusExecutor.MultiHopParams memory route = BaygusExecutor.MultiHopParams({
             hops: hops, recipient: address(this), finalMinAmount0: int128(int256(600 ether)), finalMinAmount1: 0
         });
 
-        (bool success,) = address(router).call(abi.encodeCall(BaygusRouter.swapExactInputPath, (route)));
+        (bool success,) = address(router).call(abi.encodeCall(BaygusExecutor.swapExactInputPath, (route)));
         assertFalse(success, "expected slippage failure");
     }
 
     function testSwapExactInputPathRejectsEmptyPath() external {
-        (BaygusRouter router,,,,) = _deploy();
+        (BaygusExecutor router,,,,) = _deploy();
 
-        BaygusRouter.Hop[] memory hops = new BaygusRouter.Hop[](0);
-        BaygusRouter.MultiHopParams memory route =
-            BaygusRouter.MultiHopParams({hops: hops, recipient: address(this), finalMinAmount0: 0, finalMinAmount1: 0});
+        BaygusExecutor.Hop[] memory hops = new BaygusExecutor.Hop[](0);
+        BaygusExecutor.MultiHopParams memory route = BaygusExecutor.MultiHopParams({
+            hops: hops, recipient: address(this), finalMinAmount0: 0, finalMinAmount1: 0
+        });
 
-        (bool success,) = address(router).call(abi.encodeCall(BaygusRouter.swapExactInputPath, (route)));
+        (bool success,) = address(router).call(abi.encodeCall(BaygusExecutor.swapExactInputPath, (route)));
         assertFalse(success, "expected empty path failure");
     }
 
     function testUnlockCallbackRejectsUnauthorizedCaller() external {
-        (BaygusRouter router,,,,) = _deploy();
+        (BaygusExecutor router,,,,) = _deploy();
 
-        (bool success,) = address(router).call(abi.encodeCall(BaygusRouter.unlockCallback, (abi.encode(uint8(0), ""))));
+        (bool success,) =
+            address(router).call(abi.encodeCall(BaygusExecutor.unlockCallback, (abi.encode(uint8(0), ""))));
         assertFalse(success, "expected unauthorized callback failure");
     }
 }

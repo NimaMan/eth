@@ -12,63 +12,63 @@ This directory contains the actual examples that exist in the tx_processor modul
 
 ### 1. Transaction Processing (`tx_processor/`) - 3 examples
 
-#### `process_transaction_by_hash.rs` 
-**Purpose:** Process transaction by hash with full event decoding  
-**Status:** ❌ Fails - dependency issues  
+#### `process_transaction_by_hash.rs`
+**Purpose:** Process transaction by hash with full event decoding
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Uses ProcessedTxProvider to fetch and decode transaction data, extract internal transactions, and calculate balance changes
 
 #### `processed_tx_from_call_data.rs`
-**Purpose:** Generate ProcessedTransaction from raw call data  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Generate ProcessedTransaction from raw call data
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Pre-execution analysis by simulating unsigned transactions
 
 #### `test_bribe_detection.rs`
-**Purpose:** MEV bribe detection in transactions  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** MEV bribe detection in transactions
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Analyzes transactions for MEV bribes and validator payments
 
 ### 2. Pool Analysis (`pool_analysis/`) - 6 examples
 
 #### `erc20_pool_tax_demo.rs`
-**Purpose:** Analyze tokens with transfer taxes  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Analyze tokens with transfer taxes
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Pool viability testing with tax detection and effective amount calculation
 
 #### `erc20_pool_with_enable_tx.rs`
-**Purpose:** Handle pools requiring enable transactions  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Handle pools requiring enable transactions
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Tests tokens with trading enable/disable mechanisms
 
 #### `erc20_pool_liquidity_removal_simple.rs`
-**Purpose:** Simulate liquidity removal from pools  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Simulate liquidity removal from pools
+**Status:** ❌ Fails - dependency issues
 **Original Function:** LP token mechanics and impermanent loss calculation
 
 #### `erc20_pool_block_range_analysis.rs`
-**Purpose:** Analyze pool behavior over block ranges  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Analyze pool behavior over block ranges
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Historical pool analysis with volume and liquidity tracking
 
 #### `can_buy_sell_common_tokens_uniswap_v2.rs`
-**Purpose:** Test token viability on Uniswap V2  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Test token viability on Uniswap V2
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Validates WETH, USDC, USDT, DAI trading on V2
 
 #### `can_buy_sell_common_tokens_uniswap_v3.rs`
-**Purpose:** Test token viability on Uniswap V3  
-**Status:** ❌ Fails - dependency issues  
+**Purpose:** Test token viability on Uniswap V3
+**Status:** ❌ Fails - dependency issues
 **Original Function:** Tests concentrated liquidity pools and fee tiers
 
 ### Upcoming Success Criteria Example (v0.5 integration)
 
 #### `can_buy_sell_uniswap_v4.rs`
-**Purpose:** Acceptance example for Baygus Router wiring (buy → approve → sell routed through Solidity).  
-**Status Goal:** ✅ Passes once v0.5 objective is complete.  
-**Success Definition:**  
-- Build Uniswap v4 calldata via the Baygus Router builder in `reth_chain_query`.  
-- Deploy (or reuse) the Baygus Router bytecode inside the simulator environment.  
-- Execute buy/approve/sell through the router and persist standard tax/trace outputs.  
-- Report success in the CLI output without manual patching.  
+**Purpose:** Acceptance example for Baygus Executor wiring (buy → approve → sell routed through Solidity).
+**Status Goal:** ✅ Passes once v0.5 objective is complete.
+**Success Definition:**
+- Build Uniswap v4 calldata via the Baygus Executor builder in `reth_chain_query`.
+- Deploy (or reuse) the Baygus Executor bytecode inside the simulator environment.
+- Execute buy/approve/sell through the router and persist standard tax/trace outputs.
+- Report success in the CLI output without manual patching.
 **How to run (when ready):**
 ```bash
 cargo run --example can_buy_sell_uniswap_v4 --package tx_processor -- \

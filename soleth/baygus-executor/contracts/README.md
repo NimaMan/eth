@@ -1,6 +1,6 @@
 # Contracts
 
-This is the Foundry project for Baygus Router.
+This is the Foundry project for Baygus Executor.
 
 - `src/` contains production Solidity.
 - `test/` contains deterministic tests and mocks.

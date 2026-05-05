@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaygusRouter} from "../src/BaygusRouter.sol";
+import {BaygusExecutor} from "../src/BaygusExecutor.sol";
 import {
     AdapterConfig,
     CMD_COINBASE_TIP,
@@ -11,35 +11,40 @@ import {
     CMD_V2_SWAP
 } from "../src/types/SharedTypes.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockPermit2} from "./mocks/MockPermit2.sol";
 import {MockPoolManager} from "./mocks/MockPoolManager.sol";
 import {MockReentrantReceiver} from "./mocks/MockReentrantReceiver.sol";
 import {MockV2Router} from "./mocks/MockV2Router.sol";
 import {TestBase} from "./utils/TestBase.sol";
 
-contract BaygusRouterCommandsTest is TestBase {
-    function _router(address v2Router) internal returns (BaygusRouter router) {
+contract BaygusExecutorCommandsTest is TestBase {
+    function _router(address v2Router) internal returns (BaygusExecutor router) {
+        router = _executor(v2Router, address(0));
+    }
+
+    function _executor(address v2Router, address permit2) internal returns (BaygusExecutor router) {
         MockPoolManager pool = new MockPoolManager();
         AdapterConfig memory adapters = AdapterConfig({
             uniswapV2Router: v2Router,
             sushiswapRouter: address(0),
             uniswapV3Router: address(0),
             balancerVault: address(0),
-            permit2: address(0)
+            permit2: permit2
         });
-        router = new BaygusRouter(address(pool), adapters);
+        router = new BaygusExecutor(address(pool), adapters);
         pool.setRouter(address(router));
     }
 
-    function _execute(BaygusRouter router, bytes memory commands, bytes[] memory inputs, uint256 value)
+    function _execute(BaygusExecutor router, bytes memory commands, bytes[] memory inputs, uint256 value)
         internal
         returns (bool success, bytes memory data)
     {
-        (success, data) = address(router).call{value: value}(abi.encodeCall(BaygusRouter.execute, (commands, inputs)));
+        (success, data) = address(router).call{value: value}(abi.encodeCall(BaygusExecutor.execute, (commands, inputs)));
     }
 
     function testTransferFromCommandPullsTokens() external {
         MockERC20 token = new MockERC20("Token", "TKN", 18);
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         token.mint(address(this), 100 ether);
         token.approve(address(router), 100 ether);
@@ -56,7 +61,7 @@ contract BaygusRouterCommandsTest is TestBase {
 
     function testTransferFromCommandCanPullFromExplicitOwner() external {
         MockERC20 token = new MockERC20("Token", "TKN", 18);
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         address owner = address(0xA11CE);
 
         token.mint(owner, 100 ether);
@@ -74,7 +79,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testInvalidTransferFromInputReverts() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         bytes memory commands = abi.encodePacked(uint8(CMD_TRANSFER_FROM));
         bytes[] memory inputs = new bytes[](1);
@@ -86,7 +91,7 @@ contract BaygusRouterCommandsTest is TestBase {
 
     function testSweepCommandTransfersRouterBalance() external {
         MockERC20 token = new MockERC20("Token", "TKN", 18);
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         address recipient = address(0xBEEF);
 
         token.mint(address(router), 75 ether);
@@ -103,7 +108,7 @@ contract BaygusRouterCommandsTest is TestBase {
 
     function testSweepCommandRevertsBelowMinimum() external {
         MockERC20 token = new MockERC20("Token", "TKN", 18);
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         token.mint(address(router), 10 ether);
 
@@ -116,7 +121,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testSweepCommandTransfersNativeValue() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         address recipient = address(0xBEEF);
         vm.deal(address(this), 10 ether);
 
@@ -127,11 +132,11 @@ contract BaygusRouterCommandsTest is TestBase {
         router.execute{value: 1 ether}(commands, inputs);
 
         assertEq(recipient.balance, 1 ether, "recipient native balance");
-        assertEq(address(router).balance, 0, "router native balance");
+        assertEq(address(router).balance, 0, "executor native balance");
     }
 
     function testNativeSweepRecipientCannotReenterExecute() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         MockReentrantReceiver receiver = new MockReentrantReceiver(router);
         vm.deal(address(this), 10 ether);
 
@@ -150,7 +155,7 @@ contract BaygusRouterCommandsTest is TestBase {
         MockERC20 tokenIn = new MockERC20("Token In", "TIN", 18);
         MockERC20 tokenOut = new MockERC20("Token Out", "TOUT", 18);
         MockV2Router v2 = new MockV2Router();
-        BaygusRouter router = _router(address(v2));
+        BaygusExecutor router = _router(address(v2));
 
         tokenIn.mint(address(this), 100 ether);
         tokenOut.mint(address(v2), 25 ether);
@@ -176,7 +181,7 @@ contract BaygusRouterCommandsTest is TestBase {
         MockERC20 tokenIn = new MockERC20("Token In", "TIN", 18);
         MockERC20 tokenOut = new MockERC20("Token Out", "TOUT", 18);
         MockV2Router v2 = new MockV2Router();
-        BaygusRouter router = _router(address(v2));
+        BaygusExecutor router = _router(address(v2));
 
         tokenIn.mint(address(this), 100 ether);
         tokenOut.mint(address(v2), 25 ether);
@@ -199,7 +204,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testV2SwapRequiresAdapter() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         address[] memory path = new address[](2);
         path[0] = address(0x1);
@@ -215,7 +220,7 @@ contract BaygusRouterCommandsTest is TestBase {
 
     function testV2SwapRejectsEmptyPath() external {
         MockV2Router v2 = new MockV2Router();
-        BaygusRouter router = _router(address(v2));
+        BaygusExecutor router = _router(address(v2));
 
         address[] memory path = new address[](1);
         path[0] = address(0x1);
@@ -229,7 +234,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testCommandLengthMismatchReverts() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         bytes memory commands = abi.encodePacked(uint8(CMD_SWEEP), uint8(CMD_SWEEP));
         bytes[] memory inputs = new bytes[](1);
@@ -240,7 +245,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testInvalidCommandReverts() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
 
         bytes memory commands = abi.encodePacked(uint8(0xff));
         bytes[] memory inputs = new bytes[](1);
@@ -250,19 +255,82 @@ contract BaygusRouterCommandsTest is TestBase {
         assertFalse(success, "expected invalid command failure");
     }
 
-    function testPermit2CommandRevertsUntilImplemented() external {
-        BaygusRouter router = _router(address(0));
+    function testPermit2TransferFromCommandPullsTokens() external {
+        MockERC20 token = new MockERC20("Token", "TKN", 18);
+        MockPermit2 permit2 = new MockPermit2();
+        BaygusExecutor router = _executor(address(0), address(permit2));
+
+        token.mint(address(this), 100 ether);
+        token.approve(address(permit2), 100 ether);
 
         bytes memory commands = abi.encodePacked(uint8(CMD_PERMIT2_TRANSFER_FROM));
         bytes[] memory inputs = new bytes[](1);
-        inputs[0] = "";
+        inputs[0] = abi.encode(address(token), 40 ether);
+
+        router.execute(commands, inputs);
+
+        assertEq(token.balanceOf(address(this)), 60 ether, "payer balance");
+        assertEq(token.balanceOf(address(router)), 40 ether, "executor balance");
+    }
+
+    function testPermit2TransferFromCommandCanPullFromExplicitOwner() external {
+        MockERC20 token = new MockERC20("Token", "TKN", 18);
+        MockPermit2 permit2 = new MockPermit2();
+        BaygusExecutor router = _executor(address(0), address(permit2));
+        address owner = address(0xA11CE);
+
+        token.mint(owner, 100 ether);
+        vm.prank(owner);
+        token.approve(address(permit2), 100 ether);
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_PERMIT2_TRANSFER_FROM));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(address(token), owner, 25 ether);
+
+        router.execute(commands, inputs);
+
+        assertEq(token.balanceOf(owner), 75 ether, "owner balance");
+        assertEq(token.balanceOf(address(router)), 25 ether, "executor balance");
+    }
+
+    function testPermit2CommandRequiresAdapter() external {
+        BaygusExecutor router = _router(address(0));
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_PERMIT2_TRANSFER_FROM));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(address(0x1), uint256(1));
 
         (bool success,) = _execute(router, commands, inputs, 0);
         assertFalse(success, "expected permit2 adapter missing failure");
     }
 
+    function testPermit2CommandRejectsMalformedInput() external {
+        MockPermit2 permit2 = new MockPermit2();
+        BaygusExecutor router = _executor(address(0), address(permit2));
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_PERMIT2_TRANSFER_FROM));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(uint256(1));
+
+        (bool success,) = _execute(router, commands, inputs, 0);
+        assertFalse(success, "expected invalid permit2 transfer input failure");
+    }
+
+    function testPermit2CommandRejectsAmountOverflow() external {
+        MockERC20 token = new MockERC20("Token", "TKN", 18);
+        MockPermit2 permit2 = new MockPermit2();
+        BaygusExecutor router = _executor(address(0), address(permit2));
+
+        bytes memory commands = abi.encodePacked(uint8(CMD_PERMIT2_TRANSFER_FROM));
+        bytes[] memory inputs = new bytes[](1);
+        inputs[0] = abi.encode(address(token), uint256(type(uint160).max) + 1);
+
+        (bool success,) = _execute(router, commands, inputs, 0);
+        assertFalse(success, "expected permit2 amount overflow failure");
+    }
+
     function testCoinbaseTipCommandPaysCurrentCoinbase() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         address coinbase = address(0xC011BA5E);
         vm.coinbase(coinbase);
         vm.deal(address(this), 10 ether);
@@ -274,11 +342,11 @@ contract BaygusRouterCommandsTest is TestBase {
         router.execute{value: 1 ether}(commands, inputs);
 
         assertEq(coinbase.balance, 1 ether, "coinbase tip");
-        assertEq(address(router).balance, 0, "router native balance");
+        assertEq(address(router).balance, 0, "executor native balance");
     }
 
     function testCoinbaseTipCommandRejectsWrongBlock() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         address coinbase = address(0xC011BA5E);
         vm.coinbase(coinbase);
         vm.deal(address(this), 10 ether);
@@ -293,7 +361,7 @@ contract BaygusRouterCommandsTest is TestBase {
     }
 
     function testCoinbaseTipCommandRejectsMalformedInput() external {
-        BaygusRouter router = _router(address(0));
+        BaygusExecutor router = _router(address(0));
         vm.deal(address(this), 10 ether);
 
         bytes memory commands = abi.encodePacked(uint8(CMD_COINBASE_TIP));
