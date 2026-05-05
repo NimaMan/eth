@@ -9,6 +9,11 @@ use eyre::{bail, eyre, Result};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, ProcessedTransaction};
 
+#[path = "../fixtures/uniswap_v2_known_pools.rs"]
+mod uniswap_v2_known_pools;
+
+use uniswap_v2_known_pools::{find_known_uniswap_v2_pool_range, KNOWN_UNISWAP_V2_POOL_RANGES};
+
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 
 #[derive(Debug)]
@@ -348,11 +353,13 @@ fn parse_args() -> Result<Args> {
     let mut pool = None;
     let mut start_block = None;
     let mut end_block = None;
+    let mut known = None;
     let mut datadir = env::var("RETH_DATADIR").unwrap_or_else(|_| DEFAULT_RETH_DATADIR.to_string());
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--known" => known = Some(args.next().ok_or_else(|| eyre!("--known needs a value"))?),
             "--token" => token = Some(parse_address_arg("--token", args.next())?),
             "--pool" => pool = Some(parse_address_arg("--pool", args.next())?),
             "--start" => start_block = Some(parse_u64_arg("--start", args.next())?),
@@ -362,12 +369,25 @@ fn parse_args() -> Result<Args> {
                     .next()
                     .ok_or_else(|| eyre!("--datadir needs a value"))?
             }
+            "--list-known" => {
+                print_known_ranges();
+                std::process::exit(0);
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
             }
             _ => bail!("unknown argument {arg}; pass --help for usage"),
         }
+    }
+
+    if let Some(known) = known {
+        let range = find_known_uniswap_v2_pool_range(&known)
+            .ok_or_else(|| eyre!("unknown --known fixture {known}"))?;
+        token.get_or_insert(range.token);
+        pool.get_or_insert(range.pool);
+        start_block.get_or_insert(range.start_block);
+        end_block.get_or_insert(range.end_block);
     }
 
     Ok(Args {
@@ -395,6 +415,15 @@ fn parse_u64_arg(name: &str, value: Option<String>) -> Result<u64> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- \\\n    --token <erc20> --pool <uniswap-v2-pair> --start <block> --end <block> [--datadir <reth-datadir>]"
+        "Usage:\n  cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- \\\n    --token <erc20> --pool <uniswap-v2-pair> --start <block> --end <block> [--datadir <reth-datadir>]\n\n  cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- --known <fixture>\n\n  cargo run -p eth_token --example uniswap_v2_pool_replay_reserves -- --list-known"
     );
+}
+
+fn print_known_ranges() {
+    for range in KNOWN_UNISWAP_V2_POOL_RANGES {
+        println!(
+            "{} token={:#x} pool={:#x} start={} end={} note={}",
+            range.name, range.token, range.pool, range.start_block, range.end_block, range.note
+        );
+    }
 }
