@@ -133,7 +133,7 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
             gas_price: prior_gas_price,
             max_fee_per_gas: prior_max_fee,
             max_priority_fee_per_gas: prior_max_priority,
-            nonce: None,
+            nonce: Some(prior_tx.nonce),
             access_list,
             blob_versioned_hashes: prior_tx.blob_versioned_hashes.clone(),
             max_fee_per_blob_gas,
@@ -151,6 +151,19 @@ pub(super) async fn check_can_buy_sell_uniswap_v4(
 
         let prior_hash = format!("{:#x}", prior_tx.hash);
         let prior_nonce = prior_tx.nonce;
+        let previous_nonce =
+            chain.set_account_nonce_for_replay(prior_tx.from_address, prior_nonce)?;
+        if previous_nonce != prior_nonce {
+            tracing::debug!(
+                target: "pool_buy_sell_sim",
+                step = "v4_prior_replay_nonce_normalization",
+                tx_hash = %prior_hash,
+                sender = %prior_tx.from_address,
+                previous_nonce,
+                replay_nonce = prior_nonce,
+                "normalizing sender nonce for selected prior transaction replay"
+            );
+        }
         let setup_result = chain.step_with_trace(setup_call.clone()).await.map_err(|err| {
             let context = format!(
                 "while replaying prior tx {prior_hash} (index {idx}, nonce {prior_nonce}) with gas_limit {:?}, gas_price {:?}, max_fee {:?}, max_priority {:?}",

@@ -97,6 +97,23 @@ impl UnsignedTxChainSimulation {
         self.forked_state.nonces.insert(address, next_nonce);
     }
 
+    /// Set the forked account nonce for approximate selected-transaction replay.
+    ///
+    /// This is intended for live/pool-manager replay inputs that include selected setup
+    /// transactions but omit earlier same-sender nonces from the block prefix.
+    pub fn set_account_nonce_for_replay(
+        &mut self,
+        address: Address,
+        replay_nonce: u64,
+    ) -> Result<u64> {
+        let mut account = self.forked_state.db.basic(address)?.unwrap_or_default();
+        let previous_nonce = account.nonce;
+        account.nonce = replay_nonce;
+        self.forked_state.db.insert_account_info(address, account);
+        self.forked_state.nonces.insert(address, replay_nonce);
+        Ok(previous_nonce)
+    }
+
     fn populate_missing_nonce(&mut self, tx: &mut UnsignedTransaction) -> Result<()> {
         if let Some(from) = tx.from {
             if tx.nonce.is_none() {

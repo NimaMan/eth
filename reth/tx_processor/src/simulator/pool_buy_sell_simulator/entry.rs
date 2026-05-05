@@ -135,6 +135,19 @@ pub async fn check_can_buy_sell_pool(
 
         let prior_hash = format!("{:#x}", prior_tx.hash);
         let prior_nonce = prior_tx.nonce;
+        let previous_nonce =
+            chain.set_account_nonce_for_replay(prior_tx.from_address, prior_nonce)?;
+        if previous_nonce != prior_nonce {
+            tracing::debug!(
+                target: "pool_buy_sell_sim",
+                step = "prior_replay_nonce_normalization",
+                tx_hash = %prior_hash,
+                sender = %prior_tx.from_address,
+                previous_nonce,
+                replay_nonce = prior_nonce,
+                "normalizing sender nonce for selected prior transaction replay"
+            );
+        }
         let setup_sim_result = chain
             .step_with_trace(setup_call.clone())
             .await
