@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::utils::{append_with_history_limit, parse_raw_f64};
 
-use super::base::{BasePool, BasePoolConfig, PoolIdentity};
+use crate::pools::base::{BasePool, BasePoolConfig, PoolIdentity};
 
 pub const UNISWAP_V2_PROTOCOL: &str = "UNISWAP-V2";
 pub const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
