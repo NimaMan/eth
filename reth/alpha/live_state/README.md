@@ -1,6 +1,6 @@
 # Live State
 
-Planned crate: `eth_live_state`
+Crate: `eth_live_state`
 
 This crate owns the shared live-state protocol used through Redis. It is infrastructure shared by market data, simulators, mempool risk, and the trading engine.
 
@@ -8,10 +8,14 @@ This crate owns the shared live-state protocol used through Redis. It is infrast
 
 - Define Redis key builders.
 - Define snapshot schemas.
-- Provide Redis readers/writers.
+- Define reader/writer traits for live-state stores.
 - Own retention and TTL policy helpers.
 - Version serialized schemas.
 - Provide test fixtures for compatibility.
+
+This crate intentionally does not own the block processor, processed-block pipeline, tracked-token set, or live-token object cache. Those are writer/consumer responsibilities in higher-level crates.
+
+`eth_market_data` should write confirmed block and token snapshots through these contracts. `LiveTxSimulator`, `eth_mempool_risk`, strategies, and the alpha engine should read snapshots through the same contracts.
 
 ## Canonical State Namespaces
 
@@ -49,9 +53,24 @@ There should be one canonical writer for confirmed state: `eth_market_data`.
 
 Mempool risk, trading engine, and simulator may read the state, but they should not mutate canonical token/pool/block snapshots.
 
+## Rust Boundary
+
+The clean dependency direction is:
+
+```text
+eth_market_data  -> eth_live_state
+tx_simulator     -> eth_live_state
+eth_mempool_risk -> eth_live_state
+eth_alpha_engine -> eth_live_state
+```
+
+`eth_live_state` should not depend on those crates. This prevents the live-state protocol from turning into a runtime orchestrator.
+
 ## Lessons From Current Code
 
 `LiveTxSimulator` already prefers Redis chain-state overlays and falls back to MDBX. That is a good design. The improvement is to move shared key/schema ownership out of `tx_simulator` so every crate uses one protocol.
+
+Python also publishes token snapshots through `LiveDataPublisher`. The Rust contract keeps the same keys and preserves the token snapshot index so tracked-token discovery is explicit instead of being hidden inside a process-local cache.
 
 When writing a block, publish atomically:
 

@@ -1,0 +1,92 @@
+use eth_live_state::{
+    BlockReadyNotification, LiveStateWriter, SnapshotWriteOptions, TokenSnapshot,
+};
+
+use crate::{
+    BlockProcessedEvent, MarketBlockInput, MarketDataEvent, MarketDataEventSink, Result,
+    TokenStateProcessor,
+};
+
+#[derive(Clone, Debug)]
+pub struct MarketDataPipeline<P, W, S> {
+    token_state_processor: P,
+    live_state_writer: W,
+    event_sink: S,
+    token_write_options: SnapshotWriteOptions,
+}
+
+impl<P, W, S> MarketDataPipeline<P, W, S> {
+    pub fn new(token_state_processor: P, live_state_writer: W, event_sink: S) -> Self {
+        Self {
+            token_state_processor,
+            live_state_writer,
+            event_sink,
+            token_write_options: SnapshotWriteOptions::default(),
+        }
+    }
+
+    pub fn with_token_write_options(mut self, options: SnapshotWriteOptions) -> Self {
+        self.token_write_options = options;
+        self
+    }
+}
+
+impl<P, W, S> MarketDataPipeline<P, W, S>
+where
+    P: TokenStateProcessor,
+    W: LiveStateWriter,
+    S: MarketDataEventSink,
+{
+    pub async fn process_block(&self, input: MarketBlockInput) -> Result<BlockProcessedEvent> {
+        let block = input.block;
+        let token_update = self
+            .token_state_processor
+            .process_token_state(&block)
+            .await?;
+        let updated_tokens = token_update.updated_token_addresses();
+        let removed_tokens = token_update.removed_tokens.clone();
+        let chain_state_available = input.chain_state.is_some();
+
+        self.live_state_writer.write_block(block.clone()).await?;
+        if let Some(chain_state) = input.chain_state {
+            self.live_state_writer
+                .write_chain_state_snapshot(chain_state)
+                .await?;
+        }
+
+        for token in token_update.updated_tokens {
+            self.write_token(token).await?;
+        }
+        for token_address in &removed_tokens {
+            self.live_state_writer.delete_token(*token_address).await?;
+        }
+
+        self.live_state_writer
+            .mark_block_ready(BlockReadyNotification::from_block(
+                &block,
+                updated_tokens.len(),
+            ))
+            .await?;
+
+        let event = BlockProcessedEvent {
+            block_number: block.block_number(),
+            block_hash: block.block_hash(),
+            parent_hash: block.meta.parent_hash,
+            processed_transaction_count: block.transactions.len(),
+            updated_tokens,
+            removed_tokens,
+            chain_state_available,
+        };
+        self.event_sink
+            .publish(MarketDataEvent::BlockProcessed(event.clone()))
+            .await?;
+        Ok(event)
+    }
+
+    async fn write_token(&self, token: TokenSnapshot) -> Result<()> {
+        self.live_state_writer
+            .write_token(token, self.token_write_options.clone())
+            .await?;
+        Ok(())
+    }
+}
