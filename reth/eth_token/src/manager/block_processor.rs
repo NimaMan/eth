@@ -6,12 +6,12 @@ use tx_processor::{ProcessedBlock, ProcessedTransaction};
 
 use super::ProcessedTokenUpdateRouter;
 use super::{
-    address_string, hash_string, normalize_address, TokenCacheStatus, TokenDiscoveryProvider,
-    TokenMetadataLookup, TokenMetadataProvider, TokenRegistry, TokenStateCache,
-    TokenStateUpdateReport, UniswapV2PoolMetadataProvider,
+    address_string, hash_string, normalize_address, TokenDiscoveryProvider, TokenMetadataLookup,
+    TokenMetadataProvider, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
+    TrackedTokenStatus, UniswapV2PoolMetadataProvider,
 };
 
-pub const DEFAULT_TOKEN_CACHE_SIZE: usize = 2000;
+pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenTransactionUpdateError {
@@ -39,7 +39,7 @@ pub struct TokenBlockUpdateReport {
 pub struct BlockTokenProcessor {
     pub registry: TokenRegistry,
     pub update_router: ProcessedTokenUpdateRouter,
-    pub token_cache: TokenStateCache,
+    pub token_index: TrackedTokenIndex,
     pub processed_blocks: BTreeMap<u64, bool>,
     pub latest_processed_block: Option<u64>,
     pub start_block: Option<u64>,
@@ -52,7 +52,7 @@ impl BlockTokenProcessor {
         Self {
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
-            token_cache: TokenStateCache::new(DEFAULT_TOKEN_CACHE_SIZE),
+            token_index: TrackedTokenIndex::new(DEFAULT_TRACKED_TOKEN_INDEX_SIZE),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
@@ -70,11 +70,12 @@ impl BlockTokenProcessor {
         registry: TokenRegistry,
         update_router: ProcessedTokenUpdateRouter,
     ) -> Self {
-        let token_cache = TokenStateCache::from_registry(&registry, DEFAULT_TOKEN_CACHE_SIZE);
+        let token_index =
+            TrackedTokenIndex::from_registry(&registry, DEFAULT_TRACKED_TOKEN_INDEX_SIZE);
         Self {
             registry,
             update_router,
-            token_cache,
+            token_index,
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
@@ -132,7 +133,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_cache(&report.token_address);
+                        self.refresh_token_index(&report.token_address);
                         token_updates.push(report);
                     }
                 }
@@ -245,7 +246,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_cache(&report.token_address);
+                        self.refresh_token_index(&report.token_address);
                         token_updates.push(report);
                     }
                 }
@@ -383,7 +384,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_cache(&report.token_address);
+                        self.refresh_token_index(&report.token_address);
                         token_updates.push(report);
                     }
                 }
@@ -475,26 +476,26 @@ impl BlockTokenProcessor {
                 address_string(&tx.from_address),
                 tx.nonce,
             );
-            self.token_cache
-                .insert_token(token, TokenCacheStatus::Creation);
+            self.token_index
+                .index_token(token, TrackedTokenStatus::Creation);
             created.push(token_address);
         }
 
         Ok(created)
     }
 
-    fn refresh_token_cache(&mut self, token_address: &str) {
+    fn refresh_token_index(&mut self, token_address: &str) {
         let Some(token) = self.registry.token(token_address) else {
             return;
         };
         let status = if token.is_scam() {
-            TokenCacheStatus::InactiveScam
+            TrackedTokenStatus::InactiveScam
         } else if token.trading_enabled() {
-            TokenCacheStatus::Active
+            TrackedTokenStatus::Active
         } else {
-            TokenCacheStatus::Creation
+            TrackedTokenStatus::Creation
         };
-        self.token_cache.insert_token(token, status);
+        self.token_index.index_token(token, status);
     }
 }
 

@@ -7,7 +7,7 @@ use crate::erc20::ERC20Token;
 use super::TokenRegistry;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum TokenCacheStatus {
+pub enum TrackedTokenStatus {
     Creation,
     Active,
     InactiveScam,
@@ -15,24 +15,24 @@ pub enum TokenCacheStatus {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TokenCacheEntry {
+pub struct TrackedTokenIndexEntry {
     pub token_address: String,
-    pub token_status: TokenCacheStatus,
+    pub token_status: TrackedTokenStatus,
     pub inserted_sequence: u64,
     pub updated_sequence: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TokenStateCache {
+pub struct TrackedTokenIndex {
     pub max_size: usize,
-    pub entries: HashMap<String, TokenCacheEntry>,
+    pub entries: HashMap<String, TrackedTokenIndexEntry>,
     pub pool_to_token: HashMap<String, String>,
     token_pool_addresses: HashMap<String, BTreeSet<String>>,
     lru_order: VecDeque<String>,
     sequence: u64,
 }
 
-impl TokenStateCache {
+impl TrackedTokenIndex {
     pub fn new(max_size: usize) -> Self {
         Self {
             max_size: max_size.max(1),
@@ -45,11 +45,11 @@ impl TokenStateCache {
     }
 
     pub fn from_registry(registry: &TokenRegistry, max_size: usize) -> Self {
-        let mut cache = Self::new(max_size);
+        let mut index = Self::new(max_size);
         for token in registry.tokens.values() {
-            cache.insert_token(token, TokenCacheStatus::Creation);
+            index.index_token(token, TrackedTokenStatus::Creation);
         }
-        cache
+        index
     }
 
     pub fn len(&self) -> usize {
@@ -72,7 +72,7 @@ impl TokenStateCache {
         self.entries.contains_key(&normalize_address(token_address))
     }
 
-    pub fn cached_token_addresses(&self) -> Vec<String> {
+    pub fn tracked_token_addresses(&self) -> Vec<String> {
         self.lru_order.iter().cloned().collect()
     }
 
@@ -90,14 +90,14 @@ impl TokenStateCache {
         self.pool_to_token.get(&address).map(String::as_str)
     }
 
-    pub fn insert_token(
+    pub fn index_token(
         &mut self,
         token: &ERC20Token,
-        token_status: TokenCacheStatus,
+        token_status: TrackedTokenStatus,
     ) -> Option<String> {
         let address = normalize_address(&token.contract_address);
         self.sequence += 1;
-        let entry = TokenCacheEntry {
+        let entry = TrackedTokenIndexEntry {
             token_address: address.clone(),
             token_status,
             inserted_sequence: self
@@ -116,7 +116,7 @@ impl TokenStateCache {
     pub fn mark_status(
         &mut self,
         token_address: impl AsRef<str>,
-        token_status: TokenCacheStatus,
+        token_status: TrackedTokenStatus,
     ) -> bool {
         let address = normalize_address(token_address);
         self.sequence += 1;

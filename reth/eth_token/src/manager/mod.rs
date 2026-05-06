@@ -8,16 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 
 pub mod block_processor;
-pub mod cache;
+pub mod index;
 pub mod metadata;
 pub mod token_builder;
 pub mod update_router;
 
 pub use block_processor::{
     BlockTokenProcessor, TokenBlockUpdateReport, TokenTransactionUpdateError,
-    DEFAULT_TOKEN_CACHE_SIZE,
+    DEFAULT_TRACKED_TOKEN_INDEX_SIZE,
 };
-pub use cache::{TokenCacheEntry, TokenCacheStatus, TokenStateCache};
+pub use index::{TrackedTokenIndex, TrackedTokenIndexEntry, TrackedTokenStatus};
 pub use metadata::{
     NoopUniswapV2PoolMetadataProvider, RethChainDiscoveryProvider, StaticTokenMetadataProvider,
     StaticUniswapV2PoolMetadataProvider, TokenDiscoveryProvider, TokenMetadataLookup,
@@ -428,7 +428,7 @@ mod tests {
             Some("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
         assert!(processor
-            .token_cache
+            .token_index
             .contains_token("0x1111111111111111111111111111111111111111"));
         assert_eq!(lookups.borrow().len(), 1);
         assert_eq!(lookups.borrow()[0].pending_tx_hashes, vec![creation_hash]);
@@ -487,7 +487,7 @@ mod tests {
         );
         assert_eq!(
             processor
-                .token_cache
+                .token_index
                 .token_for_pool("0x3333333333333333333333333333333333333333"),
             Some("0x1111111111111111111111111111111111111111")
         );
@@ -502,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn token_state_cache_indexes_pool_to_token_mapping() {
+    fn tracked_token_index_indexes_pool_to_token_mapping() {
         let mut registry = TokenRegistry::new();
         let update_router = ProcessedTokenUpdateRouter::new(100);
         registry.add_token(metadata());
@@ -518,14 +518,14 @@ mod tests {
             .update_registry_from_processed_transaction(&mut registry, &tx)
             .unwrap();
 
-        let cache = TokenStateCache::from_registry(&registry, 100);
+        let index = TrackedTokenIndex::from_registry(&registry, 100);
 
         assert_eq!(
-            cache.token_for_pool("0x3333333333333333333333333333333333333333"),
+            index.token_for_pool("0x3333333333333333333333333333333333333333"),
             Some("0x1111111111111111111111111111111111111111")
         );
         assert_eq!(
-            cache.resolve_token_address("0x3333333333333333333333333333333333333333"),
+            index.resolve_token_address("0x3333333333333333333333333333333333333333"),
             Some("0x1111111111111111111111111111111111111111")
         );
     }

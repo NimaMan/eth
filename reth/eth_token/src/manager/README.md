@@ -8,7 +8,7 @@ This folder corresponds to Python modules under `token_manager` and `token_build
 
 - Consume processed Rust blocks and update tracked token state.
 - Route events to token, pool, state, health, and network modules.
-- Maintain live token caches.
+- Maintain live token indexes.
 - Provide a stable API for future PyReth bindings.
 
 ## Boundaries
@@ -23,6 +23,6 @@ This folder corresponds to Python modules under `token_manager` and `token_build
 2. `TokenRegistry` owns tracked token storage and lookup.
 3. `ProcessedTokenUpdateRouter` routes processed transaction events into token and Uniswap V2 pool state.
 4. `TokenMetadataProvider`, `UniswapV2PoolMetadataProvider`, and `RethChainDiscoveryProvider` hydrate token and pool metadata when direct chain reads are needed.
-5. `TokenStateCache` owns token/pool address indexing and cache status tracking.
+5. `TrackedTokenIndex` owns token/pool address indexing and tracking status.
 6. `TokenStateBuilder` rebuilds a token from processed Rust transactions or processed blocks.
 7. Live token processor orchestration should be added after historical parity is established.
