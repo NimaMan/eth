@@ -12,7 +12,7 @@ use crate::tx_processor::data_models::{
 };
 use crate::{
     processed_block_trace_config_hash, ProcessedBlock, ProcessedBlockTransactions,
-    ProcessedTransaction, PROCESSED_BLOCK_SCHEMA_VERSION,
+    ProcessedTransaction,
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use eyre::{bail, Result};
@@ -23,7 +23,6 @@ use std::collections::HashSet;
 use super::reader::TokenProcessedBlockCacheReader;
 use super::writer::TokenProcessedBlockCacheWriter;
 
-const TOKEN_BLOCK_CACHE_SCHEMA_VERSION: u32 = 4;
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
 
 #[derive(Debug, Clone)]
@@ -36,8 +35,6 @@ pub struct TokenProcessedBlockCacheKey {
     pub chain_id: u64,
     pub block_number: u64,
     pub block_hash: B256,
-    pub tx_processor_schema_version: u32,
-    pub token_cache_schema_version: u32,
     pub trace_engine: String,
     pub trace_config_hash: B256,
 }
@@ -78,6 +75,24 @@ struct TokenProcessedBlockCacheEntry {
     key: TokenProcessedBlockCacheKey,
     header: BlockHeader,
     transactions: Vec<TokenCachedTransaction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyTokenProcessedBlockCacheEntry {
+    key: LegacyTokenProcessedBlockCacheKey,
+    header: BlockHeader,
+    transactions: Vec<TokenCachedTransaction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyTokenProcessedBlockCacheKey {
+    chain_id: u64,
+    block_number: u64,
+    block_hash: B256,
+    _unused_a: u32,
+    _unused_b: u32,
+    trace_engine: String,
+    trace_config_hash: B256,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,8 +145,6 @@ impl TokenProcessedBlockCacheKey {
             chain_id,
             block_number: header.number,
             block_hash: header.hash,
-            tx_processor_schema_version: PROCESSED_BLOCK_SCHEMA_VERSION,
-            token_cache_schema_version: TOKEN_BLOCK_CACHE_SCHEMA_VERSION,
             trace_engine: TRACE_ENGINE_ID.to_string(),
             trace_config_hash: processed_block_trace_config_hash(true),
         }
@@ -189,11 +202,9 @@ impl TokenProcessedBlockCacheStore {
 
             let bytes = fs::read(&path)?;
             let decoded = zstd::stream::decode_all(bytes.as_slice())?;
-            let entry: TokenProcessedBlockCacheEntry = bincode::deserialize(&decoded)?;
+            let entry = decode_cache_entry(&decoded)?;
             if entry.key.chain_id != chain_id
                 || entry.key.block_number != block_number
-                || entry.key.tx_processor_schema_version != PROCESSED_BLOCK_SCHEMA_VERSION
-                || entry.key.token_cache_schema_version != TOKEN_BLOCK_CACHE_SCHEMA_VERSION
                 || entry.key.trace_engine != TRACE_ENGINE_ID
                 || entry.key.trace_config_hash != processed_block_trace_config_hash(true)
             {
@@ -217,7 +228,7 @@ impl TokenProcessedBlockCacheStore {
 
         let bytes = fs::read(&path)?;
         let decoded = zstd::stream::decode_all(bytes.as_slice())?;
-        let entry: TokenProcessedBlockCacheEntry = bincode::deserialize(&decoded)?;
+        let entry = decode_cache_entry(&decoded)?;
         if entry.key != *key {
             bail!(
                 "token processed block cache key mismatch for {}: expected {:?}, found {:?}",
@@ -515,6 +526,43 @@ impl TokenProcessedBlockCacheEntry {
                 .into_iter()
                 .map(TokenCachedTransaction::into_block_transaction)
                 .collect(),
+        }
+    }
+}
+
+impl LegacyTokenProcessedBlockCacheEntry {
+    fn into_current(self) -> TokenProcessedBlockCacheEntry {
+        TokenProcessedBlockCacheEntry {
+            key: self.key.into_current(),
+            header: self.header,
+            transactions: self.transactions,
+        }
+    }
+}
+
+impl LegacyTokenProcessedBlockCacheKey {
+    fn into_current(self) -> TokenProcessedBlockCacheKey {
+        TokenProcessedBlockCacheKey {
+            chain_id: self.chain_id,
+            block_number: self.block_number,
+            block_hash: self.block_hash,
+            trace_engine: self.trace_engine,
+            trace_config_hash: self.trace_config_hash,
+        }
+    }
+}
+
+fn decode_cache_entry(bytes: &[u8]) -> Result<TokenProcessedBlockCacheEntry> {
+    match bincode::deserialize::<TokenProcessedBlockCacheEntry>(bytes) {
+        Ok(entry) => Ok(entry),
+        Err(current_error) => {
+            let legacy_entry: LegacyTokenProcessedBlockCacheEntry =
+                bincode::deserialize(bytes).map_err(|legacy_error| {
+                    eyre::eyre!(
+                        "failed to decode processed block cache entry; current decode error: {current_error}; legacy decode error: {legacy_error}"
+                    )
+                })?;
+            Ok(legacy_entry.into_current())
         }
     }
 }
