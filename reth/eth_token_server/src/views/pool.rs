@@ -1,5 +1,6 @@
-use eth_token::pools::{PoolRuntimeState, TradingStatus, UniswapV2Pool};
+use eth_token::pools::{LPHolderSnapshot, PoolRuntimeState, TradingStatus, UniswapV2Pool};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::runs::TrackingRun;
 
@@ -33,11 +34,23 @@ pub struct PoolView {
     pub latest_block_number: Option<u64>,
     pub trading_status: TradingStatus,
     pub runtime_state: PoolRuntimeState,
+    pub lp_total_supply: f64,
+    pub lp_holder_count: usize,
+    pub lp_holders: Vec<LPHolderSnapshot>,
+    pub lp_total_approved_to_routers: f64,
+    pub lp_approved_percentage: f64,
+    pub lp_last_approval_block: Option<u64>,
+    pub lp_last_approval: Option<Value>,
+    pub lp_holders_with_approvals: Vec<String>,
+    pub lp_transfer_count: usize,
+    pub lp_approval_count: usize,
 }
 
 impl PoolView {
     pub fn from_pool(token_address: &str, token_symbol: &str, pool: &UniswapV2Pool) -> Self {
         let trading_status = pool.base.trading_status();
+        let lp_holders = pool.lp_holders();
+        let lp_holder_count = lp_holders.len();
         Self {
             token_address: token_address.to_string(),
             token_symbol: token_symbol.to_string(),
@@ -60,6 +73,16 @@ impl PoolView {
             latest_block_number: pool.base.latest_block_number,
             trading_status,
             runtime_state: pool.base.state.clone(),
+            lp_total_supply: pool.lp_tracker.total_supply,
+            lp_holder_count,
+            lp_holders,
+            lp_total_approved_to_routers: pool.total_approved_to_routers(),
+            lp_approved_percentage: pool.lp_approved_percentage(),
+            lp_last_approval_block: pool.last_lp_approval_block(),
+            lp_last_approval: pool.last_lp_approval_event(),
+            lp_holders_with_approvals: pool.holders_with_approvals(),
+            lp_transfer_count: pool.lp_tracker.transfers.len(),
+            lp_approval_count: pool.lp_tracker.approval_events.len(),
         }
     }
 }

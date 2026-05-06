@@ -6,6 +6,7 @@ use warp::http::StatusCode;
 use warp::{Filter, Reply};
 
 use crate::error::ApiError;
+use crate::live::StartLiveTrackerRequest;
 use crate::runs::StartRunRequest;
 use crate::server::sse;
 use crate::server::ServerState;
@@ -43,6 +44,37 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(warp::get())
         .and(with_state(state.clone()))
         .and_then(cache_coverage);
+
+    let live_status = warp::path!("live" / "status")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live_status);
+
+    let live_start = warp::path!("live" / "start")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(live_start);
+
+    let live_stop = warp::path!("live" / "stop")
+        .and(warp::post())
+        .and(with_state(state.clone()))
+        .and_then(live_stop);
+
+    let live_tokens = warp::path!("live" / "tokens")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live_tokens);
+
+    let live_token_detail = warp::path!("live" / "tokens" / String)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live_token_detail);
+
+    let live_retention = warp::path!("live" / "retention")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live_retention);
 
     let progress = warp::path!("runs" / String / "progress")
         .and(warp::get())
@@ -83,6 +115,12 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(list_runs)
         .or(start_run)
         .or(cache_coverage)
+        .or(live_status)
+        .or(live_start)
+        .or(live_stop)
+        .or(live_token_detail)
+        .or(live_tokens)
+        .or(live_retention)
         .or(token_detail)
         .or(tokens)
         .or(progress)
@@ -110,6 +148,58 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "processed_block_cache_dir": state.config.processed_block_cache_dir,
             "processed_block_cache_blocks": state.config.processed_block_cache_blocks,
         }),
+        StatusCode::OK,
+    ))
+}
+
+async fn live_status(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::status(&state.live_tracker).await,
+        StatusCode::OK,
+    ))
+}
+
+async fn live_start(
+    request: StartLiveTrackerRequest,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state.live_tracker.start(request).await {
+        Ok(_) => Ok(json_response(
+            &views::live::status(&state.live_tracker).await,
+            StatusCode::CREATED,
+        )),
+        Err(error) => Ok(error_response(error.to_string(), StatusCode::BAD_REQUEST)),
+    }
+}
+
+async fn live_stop(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    state.live_tracker.stop().await;
+    Ok(json_response(
+        &views::live::status(&state.live_tracker).await,
+        StatusCode::OK,
+    ))
+}
+
+async fn live_tokens(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::token_list(&state.live_tracker).await,
+        StatusCode::OK,
+    ))
+}
+
+async fn live_token_detail(
+    token_address: String,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match views::live::token_detail(&state.live_tracker, &token_address).await {
+        Some(detail) => Ok(json_response(&detail, StatusCode::OK)),
+        None => Ok(error_response("token not found", StatusCode::NOT_FOUND)),
+    }
+}
+
+async fn live_retention(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::retention(&state.live_tracker).await,
         StatusCode::OK,
     ))
 }

@@ -4,6 +4,7 @@ use eyre::{eyre, Result};
 use reth_chain_query::RethQueryProvider;
 
 use crate::config::TokenServerConfig;
+use crate::live::LiveTracker;
 use crate::processed_block_cache::TokenProcessedBlockCacheStore;
 use crate::runs::RunManager;
 
@@ -11,6 +12,7 @@ use crate::runs::RunManager;
 pub struct ServerState {
     pub config: TokenServerConfig,
     pub runs: RunManager,
+    pub live_tracker: LiveTracker,
     pub processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
 }
 
@@ -25,11 +27,18 @@ impl ServerState {
             Some(path) => Some(Arc::new(TokenProcessedBlockCacheStore::open(path)?)),
             None => None,
         };
-        let runs = RunManager::new(config.clone(), provider, processed_block_cache.clone());
+        let runs = RunManager::new(
+            config.clone(),
+            provider.clone(),
+            processed_block_cache.clone(),
+        );
+        let live_tracker =
+            LiveTracker::new(config.clone(), provider, processed_block_cache.clone());
 
         Ok(Self {
             config,
             runs,
+            live_tracker,
             processed_block_cache,
         })
     }
