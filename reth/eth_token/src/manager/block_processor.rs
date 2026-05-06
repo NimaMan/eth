@@ -64,12 +64,6 @@ impl BlockTokenProcessor {
         }
     }
 
-    pub fn new_live(history_limit: usize) -> Self {
-        let mut processor = Self::new(history_limit);
-        processor.set_live_mode(true);
-        processor
-    }
-
     pub fn with_registry(registry: TokenRegistry, history_limit: usize) -> Self {
         let update_router = ProcessedTokenUpdateRouter::new(history_limit);
         Self::with_registry_and_update_router(registry, update_router)

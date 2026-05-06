@@ -494,40 +494,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_block_processor_discovers_live_created_token() {
-        let provider = RecordingMetadataProvider {
-            metadata: metadata(),
-            lookups: Rc::new(RefCell::new(Vec::new())),
-        };
-        let mut processor = BlockTokenProcessor::new_live(100);
-        let mut creation_tx = tx();
-        creation_tx.contract_address = Some(address!("1111111111111111111111111111111111111111"));
-        creation_tx
-            .contract_creation_events
-            .push(ContractCreationEvent {
-                contract_address: address!("1111111111111111111111111111111111111111"),
-            });
-
-        let block = ProcessedBlock {
-            header: block_header(),
-            transactions: vec![block_transaction(creation_tx)],
-        };
-
-        let report = processor
-            .process_block_with_metadata_provider(&block, &provider)
-            .await;
-
-        assert_eq!(report.failed_transaction_count, 0);
-        assert!(
-            processor
-                .registry
-                .token("0x1111111111111111111111111111111111111111")
-                .unwrap()
-                .is_live_mode
-        );
-    }
-
-    #[tokio::test]
     async fn block_processor_discovery_provider_discovers_existing_v2_pool_from_swap() {
         let mut registry = TokenRegistry::new();
         registry.add_token(metadata());
