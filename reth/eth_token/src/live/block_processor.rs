@@ -6,6 +6,8 @@ use crate::manager::{
     TokenDiscoveryProvider, TokenMetadataProvider, TokenRegistry, UniswapV2PoolMetadataProvider,
 };
 
+use super::retention::{LiveTokenRetentionPolicy, LiveTokenRetentionReport};
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveBlockTokenProcessor {
     block_processor: BlockTokenProcessor,
@@ -45,6 +47,18 @@ impl LiveBlockTokenProcessor {
 
     pub fn registry(&self) -> &TokenRegistry {
         &self.block_processor.registry
+    }
+
+    pub fn apply_retention_policy(
+        &mut self,
+        policy: &LiveTokenRetentionPolicy,
+        current_block: u64,
+    ) -> LiveTokenRetentionReport {
+        policy.apply_to_registry(
+            &mut self.block_processor.registry,
+            &mut self.block_processor.token_index,
+            current_block,
+        )
     }
 
     pub async fn process_block_live(
