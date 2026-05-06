@@ -5,6 +5,7 @@ use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 
 use super::{
     address_string, hash_string, normalize_address, ProcessedTokenUpdateRouter, TokenRegistry,
+    TrackedTokenIndex, TrackedTokenStatus,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,6 +53,7 @@ impl TokenStateBuilder {
             )
         };
         registry.add_token(self.metadata.clone());
+        let mut token_index = TrackedTokenIndex::from_registry(&registry, 1);
 
         let token_address = normalize_address(&self.metadata.address);
         let mut transactions: Vec<_> = transactions.into_iter().collect();
@@ -74,7 +76,14 @@ impl TokenStateBuilder {
                     }
                 }
             }
-            update_router.update_registry_from_processed_transaction(&mut registry, &tx)?;
+            let reports = update_router.update_registry_from_processed_transaction(
+                &mut registry,
+                &token_index,
+                &tx,
+            )?;
+            for report in reports {
+                refresh_token_index(&registry, &mut token_index, &report.token_address);
+            }
         }
 
         registry
@@ -98,6 +107,24 @@ impl TokenStateBuilder {
             .collect::<Vec<_>>();
         self.build_from_processed_transactions(transactions)
     }
+}
+
+fn refresh_token_index(
+    registry: &TokenRegistry,
+    token_index: &mut TrackedTokenIndex,
+    token_address: &str,
+) {
+    let Some(token) = registry.token(token_address) else {
+        return;
+    };
+    let status = if token.is_scam() {
+        TrackedTokenStatus::InactiveScam
+    } else if token.trading_enabled() {
+        TrackedTokenStatus::Active
+    } else {
+        TrackedTokenStatus::Creation
+    };
+    token_index.index_token(token, status);
 }
 
 fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<alloy_primitives::Address> {

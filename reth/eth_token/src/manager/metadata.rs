@@ -30,7 +30,7 @@ pub trait TokenMetadataProvider {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UniswapV2PoolMetadataLookup {
-    pub token_address: Address,
+    pub tracked_token_address: Option<Address>,
     pub pool_address: Address,
     pub block_number: u64,
     pub transaction_hash: B256,
@@ -122,8 +122,10 @@ impl UniswapV2PoolMetadataProvider for RethChainDiscoveryProvider<'_> {
                 .uni_v2_get_tokens(lookup.pool_address, Some(lookup.block_number))
                 .await?;
 
-            if token0 != lookup.token_address && token1 != lookup.token_address {
-                return Ok(None);
+            if let Some(tracked_token_address) = lookup.tracked_token_address {
+                if token0 != tracked_token_address && token1 != tracked_token_address {
+                    return Ok(None);
+                }
             }
 
             let (token0_decimals, token1_decimals) = tokio::try_join!(

@@ -127,8 +127,11 @@ impl BlockTokenProcessor {
 
             match self
                 .update_router
-                .update_registry_from_processed_transaction(&mut self.registry, &tx.processed)
-            {
+                .update_registry_from_processed_transaction(
+                    &mut self.registry,
+                    &self.token_index,
+                    &tx.processed,
+                ) {
                 Ok(reports) => {
                     processed_transaction_count += 1;
                     for report in reports {
@@ -240,8 +243,11 @@ impl BlockTokenProcessor {
 
             match self
                 .update_router
-                .update_registry_from_processed_transaction(&mut self.registry, &tx.processed)
-            {
+                .update_registry_from_processed_transaction(
+                    &mut self.registry,
+                    &self.token_index,
+                    &tx.processed,
+                ) {
                 Ok(reports) => {
                     processed_transaction_count += 1;
                     for report in reports {
@@ -375,6 +381,7 @@ impl BlockTokenProcessor {
                 .update_router
                 .update_registry_from_processed_transaction_with_discovery(
                     &mut self.registry,
+                    &self.token_index,
                     &tx.processed,
                     pool_metadata_provider,
                 )

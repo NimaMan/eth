@@ -227,8 +227,9 @@ mod tests {
             log_index: 2,
         });
 
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
         let reports = update_router
-            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
             .unwrap();
 
         assert_eq!(reports.len(), 1);
@@ -276,9 +277,11 @@ mod tests {
             18,
         )]);
 
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
         let reports = update_router
             .update_registry_from_processed_transaction_with_discovery(
                 &mut registry,
+                &token_index,
                 &tx,
                 &pool_metadata,
             )
@@ -317,8 +320,9 @@ mod tests {
             log_index: 1,
         });
 
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
         let reports = update_router
-            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
             .unwrap();
 
         assert_eq!(reports.len(), 1);
@@ -514,8 +518,9 @@ mod tests {
                 token1: address!("2222222222222222222222222222222222222222"),
                 log_index: 1,
             });
+        let token_index = TrackedTokenIndex::from_registry(&registry, 100);
         update_router
-            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .update_registry_from_processed_transaction(&mut registry, &token_index, &tx)
             .unwrap();
 
         let index = TrackedTokenIndex::from_registry(&registry, 100);

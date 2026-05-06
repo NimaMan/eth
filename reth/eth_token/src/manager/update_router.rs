@@ -1,3 +1,6 @@
+use std::collections::BTreeSet;
+
+use alloy_primitives::Address;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_processor::ProcessedTransaction;
@@ -7,8 +10,8 @@ use crate::pools::BasePoolConfig;
 
 use super::{
     address_string, hash_string, normalize_address, normalize_address_string, parse_address_lossy,
-    same_address_str, TokenRegistry, TokenStateUpdateReport, UniswapV2PoolMetadata,
-    UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+    same_address_str, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
+    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,9 +44,10 @@ impl ProcessedTokenUpdateRouter {
     pub fn update_registry_from_processed_transaction(
         &self,
         registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
     ) -> Result<Vec<TokenStateUpdateReport>> {
-        let token_addresses = registry.token_addresses();
+        let token_addresses = candidate_token_addresses(registry, token_index, tx);
         let mut reports = Vec::new();
 
         for token_address in token_addresses {
@@ -75,13 +79,20 @@ impl ProcessedTokenUpdateRouter {
     pub async fn update_registry_from_processed_transaction_with_discovery<P>(
         &self,
         registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
         tx: &ProcessedTransaction,
         pool_metadata_provider: &P,
     ) -> Result<Vec<TokenStateUpdateReport>>
     where
         P: UniswapV2PoolMetadataProvider,
     {
-        let token_addresses = registry.token_addresses();
+        let token_addresses = candidate_token_addresses_with_pool_discovery(
+            registry,
+            token_index,
+            tx,
+            pool_metadata_provider,
+        )
+        .await?;
         let mut reports = Vec::new();
 
         for token_address in token_addresses {
@@ -201,7 +212,7 @@ impl ProcessedTokenUpdateRouter {
 
             let metadata = pool_metadata_provider
                 .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
-                    token_address: parse_address_lossy(&token_address),
+                    tracked_token_address: Some(parse_address_lossy(&token_address)),
                     pool_address: event.pair_address,
                     block_number: tx.block_number,
                     transaction_hash: tx.hash,
@@ -269,7 +280,7 @@ impl ProcessedTokenUpdateRouter {
 
             let Some(metadata) = pool_metadata_provider
                 .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
-                    token_address: parse_address_lossy(&token_address),
+                    tracked_token_address: Some(parse_address_lossy(&token_address)),
                     pool_address: event.pair_address,
                     block_number: tx.block_number,
                     transaction_hash: tx.hash,
@@ -330,6 +341,156 @@ impl ProcessedTokenUpdateRouter {
                 test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
             },
         ))
+    }
+}
+
+fn candidate_token_addresses(
+    registry: &TokenRegistry,
+    token_index: &TrackedTokenIndex,
+    tx: &ProcessedTransaction,
+) -> Vec<String> {
+    let mut candidates = BTreeSet::new();
+    for address in routing_addresses(tx) {
+        insert_resolved_token_address(registry, token_index, &mut candidates, address);
+    }
+    candidates.into_iter().collect()
+}
+
+async fn candidate_token_addresses_with_pool_discovery<P>(
+    registry: &TokenRegistry,
+    token_index: &TrackedTokenIndex,
+    tx: &ProcessedTransaction,
+    pool_metadata_provider: &P,
+) -> Result<Vec<String>>
+where
+    P: UniswapV2PoolMetadataProvider,
+{
+    let mut candidates = BTreeSet::new();
+    for address in routing_addresses(tx) {
+        insert_resolved_token_address(registry, token_index, &mut candidates, address);
+    }
+
+    for pool_address in v2_pool_event_addresses(tx) {
+        let pool_address_string = address_string(&pool_address);
+        if token_index
+            .resolve_token_address(&pool_address_string)
+            .is_some()
+        {
+            continue;
+        }
+
+        let Some(metadata) = pool_metadata_provider
+            .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
+                tracked_token_address: None,
+                pool_address,
+                block_number: tx.block_number,
+                transaction_hash: tx.hash,
+                tx_index: tx.tx_index,
+            })
+            .await?
+        else {
+            continue;
+        };
+
+        insert_resolved_token_address_str(registry, token_index, &mut candidates, &metadata.token0);
+        insert_resolved_token_address_str(registry, token_index, &mut candidates, &metadata.token1);
+    }
+
+    Ok(candidates.into_iter().collect())
+}
+
+fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
+    let mut addresses = BTreeSet::new();
+
+    addresses.extend(tx.unique_addresses.iter().copied());
+    addresses.extend(tx.erc20_contracts.iter().copied());
+    if let Some(address) = tx.contract_address {
+        addresses.insert(address);
+    }
+
+    for transfer in &tx.erc20_transfers {
+        addresses.insert(transfer.token_address);
+    }
+    for approval in &tx.erc20_approval_events {
+        addresses.insert(approval.token_address);
+    }
+    for event in &tx.trading_enabled_events {
+        addresses.insert(event.token_address);
+    }
+    for event in &tx.trading_disabled_events {
+        addresses.insert(event.token_address);
+    }
+    for event in &tx.contract_creation_events {
+        addresses.insert(event.contract_address);
+    }
+    for event in &tx.ownership_transferred_events {
+        addresses.insert(event.contract_address);
+    }
+    for event in &tx.ownership_transfer_started_events {
+        addresses.insert(event.contract_address);
+    }
+    for event in &tx.access_control_role_granted_events {
+        addresses.insert(event.contract_address);
+    }
+    for event in &tx.access_control_role_revoked_events {
+        addresses.insert(event.contract_address);
+    }
+    for event in &tx.proxy_admin_changed_events {
+        addresses.insert(event.contract_address);
+    }
+
+    for event in &tx.uniswap_v2_pair_created_events {
+        addresses.insert(event.pair_address);
+        addresses.insert(event.token0);
+        addresses.insert(event.token1);
+    }
+    addresses.extend(v2_pool_event_addresses(tx));
+
+    addresses
+}
+
+fn v2_pool_event_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {
+    let mut addresses = BTreeSet::new();
+    for event in &tx.uniswap_v2_syncs {
+        addresses.insert(event.pair_address);
+    }
+    for event in &tx.uniswap_v2_swaps {
+        addresses.insert(event.pair_address);
+    }
+    for event in &tx.uniswap_v2_mints {
+        addresses.insert(event.pair_address);
+    }
+    for event in &tx.uniswap_v2_burns {
+        addresses.insert(event.pair_address);
+    }
+    addresses
+}
+
+fn insert_resolved_token_address(
+    registry: &TokenRegistry,
+    token_index: &TrackedTokenIndex,
+    candidates: &mut BTreeSet<String>,
+    address: Address,
+) {
+    insert_resolved_token_address_str(registry, token_index, candidates, &address_string(&address));
+}
+
+fn insert_resolved_token_address_str(
+    registry: &TokenRegistry,
+    token_index: &TrackedTokenIndex,
+    candidates: &mut BTreeSet<String>,
+    address: &str,
+) {
+    if let Some(token_address) = token_index.resolve_token_address(address) {
+        if registry.token(token_address).is_some() {
+            candidates.insert(token_address.to_string());
+        }
+        return;
+    }
+
+    let address = normalize_address(address);
+    if registry.token(&address).is_some() {
+        candidates.insert(address);
     }
 }
 
