@@ -71,27 +71,21 @@ pub trait UniswapV2PoolMetadataProvider {
     ) -> Pin<Box<dyn Future<Output = Result<Option<UniswapV2PoolMetadata>>> + 'a>>;
 }
 
-pub trait TokenPipelineMetadataProvider:
-    TokenMetadataProvider + UniswapV2PoolMetadataProvider
-{
-}
+pub trait TokenDiscoveryProvider: TokenMetadataProvider + UniswapV2PoolMetadataProvider {}
 
-impl<T> TokenPipelineMetadataProvider for T where
-    T: TokenMetadataProvider + UniswapV2PoolMetadataProvider
-{
-}
+impl<T> TokenDiscoveryProvider for T where T: TokenMetadataProvider + UniswapV2PoolMetadataProvider {}
 
-pub struct RethTokenMetadataProvider<'a> {
+pub struct RethChainDiscoveryProvider<'a> {
     provider: &'a RethQueryProvider,
 }
 
-impl<'a> RethTokenMetadataProvider<'a> {
+impl<'a> RethChainDiscoveryProvider<'a> {
     pub fn new(provider: &'a RethQueryProvider) -> Self {
         Self { provider }
     }
 }
 
-impl TokenMetadataProvider for RethTokenMetadataProvider<'_> {
+impl TokenMetadataProvider for RethChainDiscoveryProvider<'_> {
     fn token_metadata<'a>(
         &'a self,
         lookup: &'a TokenMetadataLookup,
@@ -117,7 +111,7 @@ impl TokenMetadataProvider for RethTokenMetadataProvider<'_> {
     }
 }
 
-impl UniswapV2PoolMetadataProvider for RethTokenMetadataProvider<'_> {
+impl UniswapV2PoolMetadataProvider for RethChainDiscoveryProvider<'_> {
     fn uniswap_v2_pool_metadata<'a>(
         &'a self,
         lookup: &'a UniswapV2PoolMetadataLookup,

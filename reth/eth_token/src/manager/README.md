@@ -20,8 +20,9 @@ This folder corresponds to Python modules under `token_manager` and `token_build
 ## Port Status
 
 1. `BlockTokenProcessor` consumes `tx_processor::ProcessedBlock`, applies transactions in block order, and reports token/pool updates.
-2. `TokenStateManager` owns tracked token state and routes processed transaction events into token and Uniswap V2 pool state.
-3. `TokenMetadataProvider` and `RethTokenMetadataProvider` hydrate ERC-20 metadata for contract creations using Rust chain query.
-4. `TokenStateCache` owns token/pool address indexing and cache status tracking.
-5. `TokenStateBuilder` rebuilds a token from processed Rust transactions or processed blocks.
-6. Live token processor orchestration should be added after historical parity is established.
+2. `TokenRegistry` owns tracked token storage and lookup.
+3. `ProcessedTokenUpdateRouter` routes processed transaction events into token and Uniswap V2 pool state.
+4. `TokenMetadataProvider`, `UniswapV2PoolMetadataProvider`, and `RethChainDiscoveryProvider` hydrate token and pool metadata when direct chain reads are needed.
+5. `TokenStateCache` owns token/pool address indexing and cache status tracking.
+6. `TokenStateBuilder` rebuilds a token from processed Rust transactions or processed blocks.
+7. Live token processor orchestration should be added after historical parity is established.

@@ -4,9 +4,10 @@ use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
 use tx_processor::{ProcessedBlock, ProcessedTransaction};
 
+use super::ProcessedTokenUpdateRouter;
 use super::{
-    address_string, hash_string, normalize_address, TokenCacheStatus, TokenMetadataLookup,
-    TokenMetadataProvider, TokenPipelineMetadataProvider, TokenStateCache, TokenStateManager,
+    address_string, hash_string, normalize_address, TokenCacheStatus, TokenDiscoveryProvider,
+    TokenMetadataLookup, TokenMetadataProvider, TokenRegistry, TokenStateCache,
     TokenStateUpdateReport, UniswapV2PoolMetadataProvider,
 };
 
@@ -36,7 +37,8 @@ pub struct TokenBlockUpdateReport {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockTokenProcessor {
-    pub state_manager: TokenStateManager,
+    pub registry: TokenRegistry,
+    pub update_router: ProcessedTokenUpdateRouter,
     pub token_cache: TokenStateCache,
     pub processed_blocks: BTreeMap<u64, bool>,
     pub latest_processed_block: Option<u64>,
@@ -48,7 +50,8 @@ pub struct BlockTokenProcessor {
 impl BlockTokenProcessor {
     pub fn new(history_limit: usize) -> Self {
         Self {
-            state_manager: TokenStateManager::new(history_limit),
+            registry: TokenRegistry::new(),
+            update_router: ProcessedTokenUpdateRouter::new(history_limit),
             token_cache: TokenStateCache::new(DEFAULT_TOKEN_CACHE_SIZE),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
@@ -58,11 +61,19 @@ impl BlockTokenProcessor {
         }
     }
 
-    pub fn with_state_manager(state_manager: TokenStateManager) -> Self {
-        let token_cache =
-            TokenStateCache::from_state_manager(&state_manager, DEFAULT_TOKEN_CACHE_SIZE);
+    pub fn with_registry(registry: TokenRegistry, history_limit: usize) -> Self {
+        let update_router = ProcessedTokenUpdateRouter::new(history_limit);
+        Self::with_registry_and_update_router(registry, update_router)
+    }
+
+    pub fn with_registry_and_update_router(
+        registry: TokenRegistry,
+        update_router: ProcessedTokenUpdateRouter,
+    ) -> Self {
+        let token_cache = TokenStateCache::from_registry(&registry, DEFAULT_TOKEN_CACHE_SIZE);
         Self {
-            state_manager,
+            registry,
+            update_router,
             token_cache,
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
@@ -114,8 +125,8 @@ impl BlockTokenProcessor {
             }
 
             match self
-                .state_manager
-                .update_from_processed_transaction(&tx.processed)
+                .update_router
+                .update_registry_from_processed_transaction(&mut self.registry, &tx.processed)
             {
                 Ok(reports) => {
                     processed_transaction_count += 1;
@@ -227,8 +238,8 @@ impl BlockTokenProcessor {
             }
 
             match self
-                .state_manager
-                .update_from_processed_transaction(&tx.processed)
+                .update_router
+                .update_registry_from_processed_transaction(&mut self.registry, &tx.processed)
             {
                 Ok(reports) => {
                     processed_transaction_count += 1;
@@ -274,23 +285,23 @@ impl BlockTokenProcessor {
         }
     }
 
-    pub async fn process_block_with_pipeline_metadata_provider<P>(
+    pub async fn process_block_with_discovery_provider<P>(
         &mut self,
         block: &ProcessedBlock,
-        metadata_provider: &P,
+        discovery_provider: &P,
     ) -> TokenBlockUpdateReport
     where
-        P: TokenPipelineMetadataProvider,
+        P: TokenDiscoveryProvider,
     {
-        self.process_block_with_metadata_and_v2_pool_provider(
+        self.process_block_with_token_and_pool_discovery_providers(
             block,
-            metadata_provider,
-            metadata_provider,
+            discovery_provider,
+            discovery_provider,
         )
         .await
     }
 
-    pub async fn process_block_with_metadata_and_v2_pool_provider<T, V>(
+    pub async fn process_block_with_token_and_pool_discovery_providers<T, V>(
         &mut self,
         block: &ProcessedBlock,
         metadata_provider: &T,
@@ -360,8 +371,9 @@ impl BlockTokenProcessor {
             }
 
             match self
-                .state_manager
-                .update_from_processed_transaction_with_v2_pool_metadata(
+                .update_router
+                .update_registry_from_processed_transaction_with_discovery(
+                    &mut self.registry,
                     &tx.processed,
                     pool_metadata_provider,
                 )
@@ -424,7 +436,7 @@ impl BlockTokenProcessor {
 
         for token_address in created_token_addresses(tx) {
             let token_address_string = address_string(&token_address);
-            if self.state_manager.token(&token_address_string).is_some() {
+            if self.registry.token(&token_address_string).is_some() {
                 continue;
             }
 
@@ -448,12 +460,12 @@ impl BlockTokenProcessor {
             };
 
             let token_address = normalize_address(&metadata.address);
-            if self.state_manager.token(&token_address).is_some() {
+            if self.registry.token(&token_address).is_some() {
                 continue;
             }
 
-            self.state_manager.add_token(metadata);
-            let Some(token) = self.state_manager.token_mut(&token_address) else {
+            self.registry.add_token(metadata);
+            let Some(token) = self.registry.token_mut(&token_address) else {
                 continue;
             };
             token.handle_contract_creation(
@@ -472,7 +484,7 @@ impl BlockTokenProcessor {
     }
 
     fn refresh_token_cache(&mut self, token_address: &str) {
-        let Some(token) = self.state_manager.token(token_address) else {
+        let Some(token) = self.registry.token(token_address) else {
             return;
         };
         let status = if token.is_scam() {

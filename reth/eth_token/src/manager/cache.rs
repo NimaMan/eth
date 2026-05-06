@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
 
-use super::TokenStateManager;
+use super::TokenRegistry;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TokenCacheStatus {
@@ -44,9 +44,9 @@ impl TokenStateCache {
         }
     }
 
-    pub fn from_state_manager(manager: &TokenStateManager, max_size: usize) -> Self {
+    pub fn from_registry(registry: &TokenRegistry, max_size: usize) -> Self {
         let mut cache = Self::new(max_size);
-        for token in manager.tokens.values() {
+        for token in registry.tokens.values() {
             cache.insert_token(token, TokenCacheStatus::Creation);
         }
         cache

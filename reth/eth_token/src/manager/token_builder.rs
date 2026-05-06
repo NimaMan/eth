@@ -3,7 +3,9 @@ use tx_processor::{ProcessedBlock, ProcessedTransaction};
 
 use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 
-use super::{address_string, hash_string, normalize_address, TokenStateManager};
+use super::{
+    address_string, hash_string, normalize_address, ProcessedTokenUpdateRouter, TokenRegistry,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TokenStateBuilder {
@@ -40,15 +42,16 @@ impl TokenStateBuilder {
         &self,
         transactions: impl IntoIterator<Item = ProcessedTransaction>,
     ) -> Result<ERC20Token> {
-        let mut manager = if self.known_routers.is_empty() {
-            TokenStateManager::new(self.history_limit)
+        let mut registry = TokenRegistry::new();
+        let update_router = if self.known_routers.is_empty() {
+            ProcessedTokenUpdateRouter::new(self.history_limit)
         } else {
-            TokenStateManager::with_known_routers(
+            ProcessedTokenUpdateRouter::with_known_routers(
                 self.history_limit,
                 self.known_routers.iter().cloned(),
             )
         };
-        manager.add_token(self.metadata.clone());
+        registry.add_token(self.metadata.clone());
 
         let token_address = normalize_address(&self.metadata.address);
         let mut transactions: Vec<_> = transactions.into_iter().collect();
@@ -59,7 +62,7 @@ impl TokenStateBuilder {
                 .into_iter()
                 .any(|address| normalize_address(address_string(&address)) == token_address)
             {
-                if let Some(token) = manager.token_mut(&token_address) {
+                if let Some(token) = registry.token_mut(&token_address) {
                     if token.creation_block.is_none() {
                         token.handle_contract_creation(
                             tx.block_number,
@@ -71,10 +74,10 @@ impl TokenStateBuilder {
                     }
                 }
             }
-            manager.update_from_processed_transaction(&tx)?;
+            update_router.update_registry_from_processed_transaction(&mut registry, &tx)?;
         }
 
-        manager
+        registry
             .tokens
             .remove(&token_address)
             .ok_or_else(|| eyre!("token {token_address} missing after build"))

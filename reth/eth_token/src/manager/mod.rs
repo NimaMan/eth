@@ -3,17 +3,15 @@
 use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256};
-use eyre::Result;
 use serde::{Deserialize, Serialize};
-use tx_processor::ProcessedTransaction;
 
 use crate::erc20::{ERC20Token, ERC20TokenMetadata};
-use crate::pools::BasePoolConfig;
 
 pub mod block_processor;
 pub mod cache;
 pub mod metadata;
 pub mod token_builder;
+pub mod update_router;
 
 pub use block_processor::{
     BlockTokenProcessor, TokenBlockUpdateReport, TokenTransactionUpdateError,
@@ -21,12 +19,13 @@ pub use block_processor::{
 };
 pub use cache::{TokenCacheEntry, TokenCacheStatus, TokenStateCache};
 pub use metadata::{
-    NoopUniswapV2PoolMetadataProvider, RethTokenMetadataProvider, StaticTokenMetadataProvider,
-    StaticUniswapV2PoolMetadataProvider, TokenMetadataLookup, TokenMetadataProvider,
-    TokenPipelineMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
+    NoopUniswapV2PoolMetadataProvider, RethChainDiscoveryProvider, StaticTokenMetadataProvider,
+    StaticUniswapV2PoolMetadataProvider, TokenDiscoveryProvider, TokenMetadataLookup,
+    TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
     UniswapV2PoolMetadataProvider,
 };
 pub use token_builder::TokenStateBuilder;
+pub use update_router::ProcessedTokenUpdateRouter;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenStateUpdateReport {
@@ -36,33 +35,15 @@ pub struct TokenStateUpdateReport {
     pub updated_uniswap_v2_pools: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct TokenStateManager {
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenRegistry {
     pub tokens: HashMap<String, ERC20Token>,
-    pub history_limit: usize,
-    pub known_routers: Vec<String>,
 }
 
-impl TokenStateManager {
-    pub fn new(history_limit: usize) -> Self {
+impl TokenRegistry {
+    pub fn new() -> Self {
         Self {
             tokens: HashMap::new(),
-            history_limit,
-            known_routers: Vec::new(),
-        }
-    }
-
-    pub fn with_known_routers(
-        history_limit: usize,
-        routers: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        Self {
-            tokens: HashMap::new(),
-            history_limit,
-            known_routers: routers
-                .into_iter()
-                .map(|router| normalize_address_string(router))
-                .collect(),
         }
     }
 
@@ -79,399 +60,9 @@ impl TokenStateManager {
         self.tokens.get_mut(&normalize_address(address))
     }
 
-    pub fn update_from_processed_transaction(
-        &mut self,
-        tx: &ProcessedTransaction,
-    ) -> Result<Vec<TokenStateUpdateReport>> {
-        let token_addresses: Vec<_> = self.tokens.keys().cloned().collect();
-        let mut reports = Vec::new();
-
-        for token_address in token_addresses {
-            let Some(token) = self.tokens.get_mut(&token_address) else {
-                continue;
-            };
-
-            let token_state_updated = touches_token_state(tx, &token_address);
-            if token_state_updated {
-                token.update_token_state_from_processed_transaction(tx)?;
-            }
-
-            let discovered = discover_uniswap_v2_pools_for_token(
-                token,
-                tx,
-                self.history_limit,
-                &self.known_routers,
-            );
-
-            let pool_addresses = token.pool_addresses();
-            let mut updated = Vec::new();
-            for pool_address in pool_addresses {
-                if touches_v2_pool(tx, &pool_address) {
-                    token.update_uniswap_v2_pool_from_processed_transaction(&pool_address, tx)?;
-                    updated.push(pool_address);
-                }
-            }
-
-            if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
-                reports.push(TokenStateUpdateReport {
-                    token_address,
-                    token_state_updated,
-                    discovered_uniswap_v2_pools: discovered,
-                    updated_uniswap_v2_pools: updated,
-                });
-            }
-        }
-
-        Ok(reports)
+    pub fn token_addresses(&self) -> Vec<String> {
+        self.tokens.keys().cloned().collect()
     }
-
-    pub async fn update_from_processed_transaction_with_v2_pool_metadata<P>(
-        &mut self,
-        tx: &ProcessedTransaction,
-        pool_metadata_provider: &P,
-    ) -> Result<Vec<TokenStateUpdateReport>>
-    where
-        P: UniswapV2PoolMetadataProvider,
-    {
-        let token_addresses: Vec<_> = self.tokens.keys().cloned().collect();
-        let mut reports = Vec::new();
-
-        for token_address in token_addresses {
-            let Some(token) = self.tokens.get_mut(&token_address) else {
-                continue;
-            };
-
-            let token_state_updated = touches_token_state(tx, &token_address);
-            if token_state_updated {
-                token.update_token_state_from_processed_transaction(tx)?;
-            }
-
-            let mut discovered = discover_uniswap_v2_pools_for_token_with_metadata(
-                token,
-                tx,
-                self.history_limit,
-                &self.known_routers,
-                pool_metadata_provider,
-            )
-            .await?;
-            discovered.extend(
-                discover_uniswap_v2_pools_from_swaps_for_token(
-                    token,
-                    tx,
-                    self.history_limit,
-                    &self.known_routers,
-                    pool_metadata_provider,
-                )
-                .await?,
-            );
-
-            let pool_addresses = token.pool_addresses();
-            let mut updated = Vec::new();
-            for pool_address in pool_addresses {
-                if touches_v2_pool(tx, &pool_address) {
-                    token.update_uniswap_v2_pool_from_processed_transaction(&pool_address, tx)?;
-                    updated.push(pool_address);
-                }
-            }
-
-            if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
-                discovered.sort();
-                discovered.dedup();
-                reports.push(TokenStateUpdateReport {
-                    token_address,
-                    token_state_updated,
-                    discovered_uniswap_v2_pools: discovered,
-                    updated_uniswap_v2_pools: updated,
-                });
-            }
-        }
-
-        Ok(reports)
-    }
-}
-
-fn touches_token_state(tx: &ProcessedTransaction, token_address: &str) -> bool {
-    tx.erc20_contracts
-        .iter()
-        .any(|address| same_address_str(*address, token_address))
-        || tx
-            .erc20_transfers
-            .iter()
-            .any(|event| same_address_str(event.token_address, token_address))
-        || tx
-            .erc20_approval_events
-            .iter()
-            .any(|event| same_address_str(event.token_address, token_address))
-        || tx
-            .ownership_transferred_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-        || tx
-            .ownership_transfer_started_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-        || tx
-            .access_control_role_granted_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-        || tx
-            .access_control_role_revoked_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-        || tx
-            .proxy_admin_changed_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-        || tx
-            .trading_enabled_events
-            .iter()
-            .any(|event| same_address_str(event.token_address, token_address))
-        || tx
-            .trading_disabled_events
-            .iter()
-            .any(|event| same_address_str(event.token_address, token_address))
-        || tx
-            .contract_address
-            .is_some_and(|address| same_address_str(address, token_address))
-        || tx
-            .contract_creation_events
-            .iter()
-            .any(|event| same_address_str(event.contract_address, token_address))
-}
-
-fn discover_uniswap_v2_pools_for_token(
-    token: &mut ERC20Token,
-    tx: &ProcessedTransaction,
-    history_limit: usize,
-    known_routers: &[String],
-) -> Vec<String> {
-    let token_address = token.contract_address.clone();
-    let mut discovered = Vec::new();
-
-    for event in &tx.uniswap_v2_pair_created_events {
-        let token_is_token0 = same_address_str(event.token0, &token_address);
-        let token_is_token1 = same_address_str(event.token1, &token_address);
-        if !token_is_token0 && !token_is_token1 {
-            continue;
-        }
-
-        let pool_address = address_string(&event.pair_address);
-        if token.uniswap_v2_pool(&pool_address).is_some() {
-            continue;
-        }
-
-        let denom_address = if token_is_token0 {
-            event.token1
-        } else {
-            event.token0
-        };
-        let pool = token.create_uniswap_v2_pool(
-            pool_address.clone(),
-            address_string(&denom_address),
-            BasePoolConfig {
-                token_decimals: token.decimals,
-                denom_decimals: None,
-                token1_is_denom: Some(token_is_token0),
-                history_limit,
-                denom_threshold: 0.0,
-                threshold_unit: None,
-                test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
-            },
-            known_routers,
-        );
-        pool.base.creation_block = Some(tx.block_number);
-        pool.base.creation_tx = Some(hash_string(&tx.hash));
-        pool.base.creation_timestamp = Some(tx.block_timestamp);
-        discovered.push(pool_address);
-    }
-
-    discovered
-}
-
-async fn discover_uniswap_v2_pools_for_token_with_metadata<P>(
-    token: &mut ERC20Token,
-    tx: &ProcessedTransaction,
-    history_limit: usize,
-    known_routers: &[String],
-    pool_metadata_provider: &P,
-) -> Result<Vec<String>>
-where
-    P: UniswapV2PoolMetadataProvider,
-{
-    let token_address = token.contract_address.clone();
-    let mut discovered = Vec::new();
-
-    for event in &tx.uniswap_v2_pair_created_events {
-        let token_is_token0 = same_address_str(event.token0, &token_address);
-        let token_is_token1 = same_address_str(event.token1, &token_address);
-        if !token_is_token0 && !token_is_token1 {
-            continue;
-        }
-
-        let pool_address = address_string(&event.pair_address);
-        if token.uniswap_v2_pool(&pool_address).is_some() {
-            continue;
-        }
-
-        let metadata = pool_metadata_provider
-            .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
-                token_address: parse_address_lossy(&token_address),
-                pool_address: event.pair_address,
-                block_number: tx.block_number,
-                transaction_hash: tx.hash,
-                tx_index: tx.tx_index,
-            })
-            .await?;
-
-        let (denom_address, config) = metadata
-            .as_ref()
-            .and_then(|metadata| v2_pool_config_from_metadata(token, metadata, history_limit))
-            .unwrap_or_else(|| {
-                let denom_address = if token_is_token0 {
-                    event.token1
-                } else {
-                    event.token0
-                };
-                (
-                    address_string(&denom_address),
-                    BasePoolConfig {
-                        token_decimals: token.decimals,
-                        denom_decimals: None,
-                        token1_is_denom: Some(token_is_token0),
-                        history_limit,
-                        denom_threshold: 0.0,
-                        threshold_unit: None,
-                        test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
-                    },
-                )
-            });
-
-        let pool = token.create_uniswap_v2_pool(
-            pool_address.clone(),
-            denom_address,
-            config,
-            known_routers,
-        );
-        pool.base.creation_block = Some(tx.block_number);
-        pool.base.creation_tx = Some(hash_string(&tx.hash));
-        pool.base.creation_timestamp = Some(tx.block_timestamp);
-        discovered.push(pool_address);
-    }
-
-    Ok(discovered)
-}
-
-async fn discover_uniswap_v2_pools_from_swaps_for_token<P>(
-    token: &mut ERC20Token,
-    tx: &ProcessedTransaction,
-    history_limit: usize,
-    known_routers: &[String],
-    pool_metadata_provider: &P,
-) -> Result<Vec<String>>
-where
-    P: UniswapV2PoolMetadataProvider,
-{
-    let token_address = token.contract_address.clone();
-    let mut discovered = Vec::new();
-
-    for event in &tx.uniswap_v2_swaps {
-        let pool_address = address_string(&event.pair_address);
-        if token.uniswap_v2_pool(&pool_address).is_some()
-            || discovered.iter().any(|known| known == &pool_address)
-        {
-            continue;
-        }
-
-        let Some(metadata) = pool_metadata_provider
-            .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
-                token_address: parse_address_lossy(&token_address),
-                pool_address: event.pair_address,
-                block_number: tx.block_number,
-                transaction_hash: tx.hash,
-                tx_index: tx.tx_index,
-            })
-            .await?
-        else {
-            continue;
-        };
-
-        let Some((denom_address, config)) =
-            v2_pool_config_from_metadata(token, &metadata, history_limit)
-        else {
-            continue;
-        };
-
-        let pool = token.create_uniswap_v2_pool(
-            pool_address.clone(),
-            denom_address,
-            config,
-            known_routers,
-        );
-        pool.base.creation_block = Some(tx.block_number);
-        pool.base.creation_tx = Some(hash_string(&tx.hash));
-        pool.base.creation_timestamp = Some(tx.block_timestamp);
-        discovered.push(pool_address);
-    }
-
-    Ok(discovered)
-}
-
-fn v2_pool_config_from_metadata(
-    token: &ERC20Token,
-    metadata: &UniswapV2PoolMetadata,
-    history_limit: usize,
-) -> Option<(String, BasePoolConfig)> {
-    let token_address = normalize_address(&token.contract_address);
-    let token_is_token0 = normalize_address(&metadata.token0) == token_address;
-    let token_is_token1 = normalize_address(&metadata.token1) == token_address;
-    if !token_is_token0 && !token_is_token1 {
-        return None;
-    }
-
-    let (denom_address, denom_decimals, token1_is_denom) = if token_is_token0 {
-        (metadata.token1.clone(), metadata.token1_decimals, true)
-    } else {
-        (metadata.token0.clone(), metadata.token0_decimals, false)
-    };
-
-    Some((
-        denom_address,
-        BasePoolConfig {
-            token_decimals: token.decimals,
-            denom_decimals: Some(denom_decimals),
-            token1_is_denom: Some(token1_is_denom),
-            history_limit,
-            denom_threshold: 0.0,
-            threshold_unit: None,
-            test_buy_amount_eth: crate::pools::base::DEFAULT_TEST_BUY_ETH,
-        },
-    ))
-}
-
-fn touches_v2_pool(tx: &ProcessedTransaction, pool_address: &str) -> bool {
-    tx.uniswap_v2_syncs
-        .iter()
-        .any(|event| same_address_str(event.pair_address, pool_address))
-        || tx
-            .uniswap_v2_swaps
-            .iter()
-            .any(|event| same_address_str(event.pair_address, pool_address))
-        || tx
-            .uniswap_v2_mints
-            .iter()
-            .any(|event| same_address_str(event.pair_address, pool_address))
-        || tx
-            .uniswap_v2_burns
-            .iter()
-            .any(|event| same_address_str(event.pair_address, pool_address))
-        || tx
-            .erc20_transfers
-            .iter()
-            .any(|event| same_address_str(event.token_address, pool_address))
-        || tx
-            .erc20_approval_events
-            .iter()
-            .any(|event| same_address_str(event.token_address, pool_address))
 }
 
 fn same_address_str(address: Address, value: &str) -> bool {
@@ -512,7 +103,7 @@ mod tests {
         ContractCreationEvent, ERC20TransferEvent, UniswapV2PairCreatedEvent, UniswapV2SwapEvent,
         UniswapV2SyncEvent,
     };
-    use tx_processor::{ProcessedBlock, ProcessedBlockTransactions};
+    use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
     fn metadata() -> ERC20TokenMetadata {
         ERC20TokenMetadata::new(
@@ -618,8 +209,9 @@ mod tests {
 
     #[test]
     fn discovers_and_updates_uniswap_v2_pool_for_tracked_token() {
-        let mut manager = TokenStateManager::new(100);
-        manager.add_token(metadata());
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
         let mut tx = tx();
         tx.uniswap_v2_pair_created_events
             .push(UniswapV2PairCreatedEvent {
@@ -635,13 +227,15 @@ mod tests {
             log_index: 2,
         });
 
-        let reports = manager.update_from_processed_transaction(&tx).unwrap();
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .unwrap();
 
         assert_eq!(reports.len(), 1);
         assert!(!reports[0].token_state_updated);
         assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
         assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
-        let token = manager
+        let token = registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         let pool = token
@@ -653,8 +247,9 @@ mod tests {
 
     #[tokio::test]
     async fn discovers_uniswap_v2_pool_from_swap_metadata_for_tracked_token() {
-        let mut manager = TokenStateManager::new(100);
-        manager.add_token(metadata());
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
         let mut tx = tx();
         tx.uniswap_v2_swaps.push(UniswapV2SwapEvent {
             pair_address: address!("3333333333333333333333333333333333333333"),
@@ -681,15 +276,19 @@ mod tests {
             18,
         )]);
 
-        let reports = manager
-            .update_from_processed_transaction_with_v2_pool_metadata(&tx, &pool_metadata)
+        let reports = update_router
+            .update_registry_from_processed_transaction_with_discovery(
+                &mut registry,
+                &tx,
+                &pool_metadata,
+            )
             .await
             .unwrap();
 
         assert_eq!(reports.len(), 1);
         assert_eq!(reports[0].discovered_uniswap_v2_pools.len(), 1);
         assert_eq!(reports[0].updated_uniswap_v2_pools.len(), 1);
-        let token = manager
+        let token = registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         let pool = token
@@ -704,8 +303,9 @@ mod tests {
 
     #[test]
     fn reports_token_state_update_for_tracked_token_transfer() {
-        let mut manager = TokenStateManager::new(100);
-        manager.add_token(metadata());
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
         let mut tx = tx();
         tx.erc20_contracts
             .insert(address!("1111111111111111111111111111111111111111"));
@@ -717,11 +317,13 @@ mod tests {
             log_index: 1,
         });
 
-        let reports = manager.update_from_processed_transaction(&tx).unwrap();
+        let reports = update_router
+            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .unwrap();
 
         assert_eq!(reports.len(), 1);
         assert!(reports[0].token_state_updated);
-        let token = manager
+        let token = registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         assert_eq!(token.total_supply_from_transfers(), 5.0);
@@ -729,9 +331,9 @@ mod tests {
 
     #[test]
     fn block_processor_sorts_transactions_and_tracks_block_report() {
-        let mut state_manager = TokenStateManager::new(100);
-        state_manager.add_token(metadata());
-        let mut processor = BlockTokenProcessor::with_state_manager(state_manager);
+        let mut registry = TokenRegistry::new();
+        registry.add_token(metadata());
+        let mut processor = BlockTokenProcessor::with_registry(registry, 100);
 
         let mut pair_tx = tx();
         pair_tx.tx_index = 0;
@@ -771,7 +373,7 @@ mod tests {
         assert_eq!(processor.latest_processed_block, Some(100));
         assert_eq!(processor.start_block, Some(100));
         let token = processor
-            .state_manager
+            .registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         let pool = token
@@ -817,7 +419,7 @@ mod tests {
         );
         assert_eq!(report.updated_token_addresses.len(), 1);
         let token = processor
-            .state_manager
+            .registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         assert_eq!(token.creation_block, Some(100));
@@ -833,10 +435,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn block_processor_pipeline_discovers_existing_v2_pool_from_swap() {
-        let mut state_manager = TokenStateManager::new(100);
-        state_manager.add_token(metadata());
-        let mut processor = BlockTokenProcessor::with_state_manager(state_manager);
+    async fn block_processor_discovery_provider_discovers_existing_v2_pool_from_swap() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token(metadata());
+        let mut processor = BlockTokenProcessor::with_registry(registry, 100);
         let token_metadata_provider = StaticTokenMetadataProvider::default();
         let pool_metadata_provider =
             StaticUniswapV2PoolMetadataProvider::new([UniswapV2PoolMetadata::new(
@@ -871,7 +473,7 @@ mod tests {
         };
 
         let report = processor
-            .process_block_with_metadata_and_v2_pool_provider(
+            .process_block_with_token_and_pool_discovery_providers(
                 &block,
                 &token_metadata_provider,
                 &pool_metadata_provider,
@@ -890,7 +492,7 @@ mod tests {
             Some("0x1111111111111111111111111111111111111111")
         );
         let token = processor
-            .state_manager
+            .registry
             .token("0x1111111111111111111111111111111111111111")
             .unwrap();
         let pool = token
@@ -901,8 +503,9 @@ mod tests {
 
     #[test]
     fn token_state_cache_indexes_pool_to_token_mapping() {
-        let mut manager = TokenStateManager::new(100);
-        manager.add_token(metadata());
+        let mut registry = TokenRegistry::new();
+        let update_router = ProcessedTokenUpdateRouter::new(100);
+        registry.add_token(metadata());
         let mut tx = tx();
         tx.uniswap_v2_pair_created_events
             .push(UniswapV2PairCreatedEvent {
@@ -911,9 +514,11 @@ mod tests {
                 token1: address!("2222222222222222222222222222222222222222"),
                 log_index: 1,
             });
-        manager.update_from_processed_transaction(&tx).unwrap();
+        update_router
+            .update_registry_from_processed_transaction(&mut registry, &tx)
+            .unwrap();
 
-        let cache = TokenStateCache::from_state_manager(&manager, 100);
+        let cache = TokenStateCache::from_registry(&registry, 100);
 
         assert_eq!(
             cache.token_for_pool("0x3333333333333333333333333333333333333333"),
