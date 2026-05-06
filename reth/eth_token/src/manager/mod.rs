@@ -48,8 +48,23 @@ impl TokenRegistry {
     }
 
     pub fn add_token(&mut self, metadata: ERC20TokenMetadata) -> Option<ERC20Token> {
+        self.add_token_with_live_mode(metadata, false)
+    }
+
+    pub fn add_token_with_live_mode(
+        &mut self,
+        metadata: ERC20TokenMetadata,
+        is_live_mode: bool,
+    ) -> Option<ERC20Token> {
         let address = normalize_address_string(metadata.address.clone());
-        self.tokens.insert(address, ERC20Token::new(metadata))
+        self.tokens
+            .insert(address, ERC20Token::with_live_mode(metadata, is_live_mode))
+    }
+
+    pub fn set_live_mode(&mut self, is_live_mode: bool) {
+        for token in self.tokens.values_mut() {
+            token.set_live_mode(is_live_mode);
+        }
     }
 
     pub fn token(&self, address: impl AsRef<str>) -> Option<&ERC20Token> {
@@ -404,6 +419,33 @@ mod tests {
         assert_eq!(duplicate.processed_transaction_count, 0);
     }
 
+    #[test]
+    fn block_processor_live_mode_propagates_to_registry_tokens() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token(metadata());
+        let mut processor = BlockTokenProcessor::with_registry(registry, 100);
+
+        assert!(!processor.is_live_mode);
+        assert!(
+            !processor
+                .registry
+                .token("0x1111111111111111111111111111111111111111")
+                .unwrap()
+                .is_live_mode
+        );
+
+        processor.set_live_mode(true);
+
+        assert!(processor.is_live_mode);
+        assert!(
+            processor
+                .registry
+                .token("0x1111111111111111111111111111111111111111")
+                .unwrap()
+                .is_live_mode
+        );
+    }
+
     #[tokio::test]
     async fn block_processor_discovers_created_token_with_metadata_provider() {
         let lookups = Rc::new(RefCell::new(Vec::new()));
@@ -449,6 +491,40 @@ mod tests {
             .contains_token("0x1111111111111111111111111111111111111111"));
         assert_eq!(lookups.borrow().len(), 1);
         assert_eq!(lookups.borrow()[0].pending_tx_hashes, vec![creation_hash]);
+    }
+
+    #[tokio::test]
+    async fn live_block_processor_discovers_live_created_token() {
+        let provider = RecordingMetadataProvider {
+            metadata: metadata(),
+            lookups: Rc::new(RefCell::new(Vec::new())),
+        };
+        let mut processor = BlockTokenProcessor::new_live(100);
+        let mut creation_tx = tx();
+        creation_tx.contract_address = Some(address!("1111111111111111111111111111111111111111"));
+        creation_tx
+            .contract_creation_events
+            .push(ContractCreationEvent {
+                contract_address: address!("1111111111111111111111111111111111111111"),
+            });
+
+        let block = ProcessedBlock {
+            header: block_header(),
+            transactions: vec![block_transaction(creation_tx)],
+        };
+
+        let report = processor
+            .process_block_with_metadata_provider(&block, &provider)
+            .await;
+
+        assert_eq!(report.failed_transaction_count, 0);
+        assert!(
+            processor
+                .registry
+                .token("0x1111111111111111111111111111111111111111")
+                .unwrap()
+                .is_live_mode
+        );
     }
 
     #[tokio::test]

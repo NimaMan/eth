@@ -112,6 +112,8 @@ pub struct TokenSummary {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ERC20Token {
     pub contract_address: String,
+    #[serde(default)]
+    pub is_live_mode: bool,
     pub name: String,
     pub symbol: String,
     pub decimals: u8,
@@ -136,11 +138,16 @@ pub struct ERC20Token {
 
 impl ERC20Token {
     pub fn new(metadata: ERC20TokenMetadata) -> Self {
+        Self::with_live_mode(metadata, false)
+    }
+
+    pub fn with_live_mode(metadata: ERC20TokenMetadata, is_live_mode: bool) -> Self {
         let contract_address = metadata.address;
         let decimals = metadata.decimals;
         let total_supply = metadata.total_supply;
         Self {
             contract_address: contract_address.clone(),
+            is_live_mode,
             name: metadata.name,
             symbol: metadata.symbol,
             decimals,
@@ -166,6 +173,10 @@ impl ERC20Token {
             status_manager: TokenStatusManager::new(total_supply),
             v2_pools: HashMap::new(),
         }
+    }
+
+    pub fn set_live_mode(&mut self, is_live_mode: bool) {
+        self.is_live_mode = is_live_mode;
     }
 
     pub fn create_uniswap_v2_pool(
@@ -633,6 +644,20 @@ mod tests {
             18,
             "1000000000000000000000",
         ))
+    }
+
+    #[test]
+    fn token_live_mode_defaults_false_and_can_be_enabled() {
+        let metadata = ERC20TokenMetadata::new(
+            "0x0000000000000000000000000000000000000001",
+            "Token",
+            "TKN",
+            18,
+            "1000000000000000000000",
+        );
+
+        assert!(!ERC20Token::new(metadata.clone()).is_live_mode);
+        assert!(ERC20Token::with_live_mode(metadata, true).is_live_mode);
     }
 
     #[test]

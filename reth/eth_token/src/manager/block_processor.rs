@@ -37,6 +37,8 @@ pub struct TokenBlockUpdateReport {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockTokenProcessor {
+    #[serde(default)]
+    pub is_live_mode: bool,
     pub registry: TokenRegistry,
     pub update_router: ProcessedTokenUpdateRouter,
     pub token_index: TrackedTokenIndex,
@@ -50,6 +52,7 @@ pub struct BlockTokenProcessor {
 impl BlockTokenProcessor {
     pub fn new(history_limit: usize) -> Self {
         Self {
+            is_live_mode: false,
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
             token_index: TrackedTokenIndex::new(DEFAULT_TRACKED_TOKEN_INDEX_SIZE),
@@ -59,6 +62,12 @@ impl BlockTokenProcessor {
             updated_token_addresses: Vec::new(),
             last_block_failure_count: 0,
         }
+    }
+
+    pub fn new_live(history_limit: usize) -> Self {
+        let mut processor = Self::new(history_limit);
+        processor.set_live_mode(true);
+        processor
     }
 
     pub fn with_registry(registry: TokenRegistry, history_limit: usize) -> Self {
@@ -73,6 +82,7 @@ impl BlockTokenProcessor {
         let token_index =
             TrackedTokenIndex::from_registry(&registry, DEFAULT_TRACKED_TOKEN_INDEX_SIZE);
         Self {
+            is_live_mode: false,
             registry,
             update_router,
             token_index,
@@ -82,6 +92,11 @@ impl BlockTokenProcessor {
             updated_token_addresses: Vec::new(),
             last_block_failure_count: 0,
         }
+    }
+
+    pub fn set_live_mode(&mut self, is_live_mode: bool) {
+        self.is_live_mode = is_live_mode;
+        self.registry.set_live_mode(is_live_mode);
     }
 
     pub fn process_block(&mut self, block: &ProcessedBlock) -> TokenBlockUpdateReport {
@@ -467,7 +482,8 @@ impl BlockTokenProcessor {
                 continue;
             }
 
-            self.registry.add_token(metadata);
+            self.registry
+                .add_token_with_live_mode(metadata, self.is_live_mode);
             let Some(token) = self.registry.token_mut(&token_address) else {
                 continue;
             };
