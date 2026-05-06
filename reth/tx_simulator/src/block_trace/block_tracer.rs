@@ -14,7 +14,7 @@ use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::{Recovered, SealedHeader, SignerRecoverable};
 use reth_provider::{BlockHashReader, BlockReader, StateProviderBox, TransactionsProvider};
 use reth_revm::database::StateProviderDatabase;
-use reth_revm::db::CacheDB;
+use reth_revm::db::{CacheDB, DbAccount};
 use reth_revm::DatabaseCommit;
 use revm::{bytecode::Bytecode, state::AccountInfo, DatabaseRef};
 use revm_inspectors::tracing::{
@@ -24,7 +24,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::block_trace::types::{
-    BlockReplayProfile, ProfiledBlockTrace, StateReadProfile, TransactionReplayProfile,
+    BlockReplayProfile, ProfiledBlockTrace, ReplayProfileConfig, StateAccessKeys, StateReadProfile,
+    StorageAccessKey, TransactionReplayProfile,
 };
 use crate::TxSimulator;
 
@@ -99,6 +100,23 @@ impl<'a> BlockTracer<'a> {
         opts: Option<GethDebugTracingOptions>,
         engine: BlockTraceEngine,
     ) -> Result<ProfiledBlockTrace> {
+        self.trace_block_by_number_profiled_with_config(
+            block_number,
+            opts,
+            engine,
+            ReplayProfileConfig::default(),
+        )
+        .await
+    }
+
+    /// Trace all transactions in a block with explicit profiling controls.
+    pub async fn trace_block_by_number_profiled_with_config(
+        &self,
+        block_number: u64,
+        opts: Option<GethDebugTracingOptions>,
+        engine: BlockTraceEngine,
+        config: ReplayProfileConfig,
+    ) -> Result<ProfiledBlockTrace> {
         let opts = opts.unwrap_or_else(Self::call_tracer_options);
         let provider = self.simulator.provider_factory.provider()?;
 
@@ -111,7 +129,31 @@ impl<'a> BlockTracer<'a> {
         let simulator = self.simulator.clone();
         tokio::task::spawn_blocking(move || {
             let mut profiled =
-                Self::trace_block_sync_profiled(&simulator, block_hash, opts, engine)?;
+                Self::trace_block_sync_profiled(&simulator, block_hash, opts, engine, config)?;
+            profiled.profile.block_hash_lookup_ms = block_hash_lookup_ms;
+            Ok(profiled)
+        })
+        .await?
+    }
+
+    /// Execute all transactions in a block without an inspector. This is a diagnostic lower bound
+    /// for EVM/state work and does not produce production-valid traces.
+    pub async fn execute_block_by_number_profiled(
+        &self,
+        block_number: u64,
+        config: ReplayProfileConfig,
+    ) -> Result<ProfiledBlockTrace> {
+        let provider = self.simulator.provider_factory.provider()?;
+
+        let hash_started = Instant::now();
+        let block_hash = provider
+            .block_hash(block_number)?
+            .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
+        let block_hash_lookup_ms = ms(hash_started.elapsed());
+
+        let simulator = self.simulator.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut profiled = Self::execute_block_sync_profiled(&simulator, block_hash, config)?;
             profiled.profile.block_hash_lookup_ms = block_hash_lookup_ms;
             Ok(profiled)
         })
@@ -188,10 +230,14 @@ impl<'a> BlockTracer<'a> {
             BlockTraceEngine::RethFusedCallTracer => {
                 Self::trace_block_sync_reth_fused_call_tracer(simulator, block_hash, opts)
             }
-            BlockTraceEngine::RethDebug => {
-                Self::trace_block_sync_profiled(simulator, block_hash, opts, engine)
-                    .map(|profiled| profiled.traces)
-            }
+            BlockTraceEngine::RethDebug => Self::trace_block_sync_profiled(
+                simulator,
+                block_hash,
+                opts,
+                engine,
+                ReplayProfileConfig::default(),
+            )
+            .map(|profiled| profiled.traces),
         }
     }
 
@@ -319,6 +365,7 @@ impl<'a> BlockTracer<'a> {
         block_hash: B256,
         opts: GethDebugTracingOptions,
         engine: BlockTraceEngine,
+        config: ReplayProfileConfig,
     ) -> Result<ProfiledBlockTrace> {
         let total_started = Instant::now();
         let mut profile = BlockReplayProfile {
@@ -349,14 +396,23 @@ impl<'a> BlockTracer<'a> {
         profile.state_open_ms = ms(state_started.elapsed());
 
         let state_reads = Arc::new(Mutex::new(StateReadProfile::default()));
+        let state_keys = Arc::new(Mutex::new(StateAccessKeys::default()));
         let state_db = InstrumentedStateProviderDatabase::new(
             StateProviderDatabase::new(state_at_parent),
             state_reads.clone(),
+            config.record_keys.then_some(state_keys.clone()),
         );
         let mut db = CacheDB::new(state_db);
 
+        if let Some(prewarm_keys) = config.prewarm_keys.as_ref() {
+            let preload_started = Instant::now();
+            prewarm_profiled_cache_db(&mut db, prewarm_keys)?;
+            profile.preload_ms = ms(preload_started.elapsed());
+        }
+
         let recovered = Self::recover_block_transactions(&transactions, &mut profile)?;
 
+        let replay_started = Instant::now();
         let traces = match engine {
             BlockTraceEngine::FreshInspector => Self::trace_profiled_fresh_inspector(
                 simulator,
@@ -384,6 +440,7 @@ impl<'a> BlockTracer<'a> {
                 &mut profile,
             )?,
         };
+        profile.exec_after_prewarm_ms = ms(replay_started.elapsed());
 
         profile.trace_node_count = trace_result_node_count(&traces);
         profile.errors = trace_result_error_count(&traces);
@@ -391,9 +448,117 @@ impl<'a> BlockTracer<'a> {
             .lock()
             .map(|guard| guard.clone())
             .unwrap_or_default();
+        profile.state_keys = state_keys
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
         profile.total_ms = ms(total_started.elapsed());
 
         Ok(ProfiledBlockTrace { traces, profile })
+    }
+
+    fn execute_block_sync_profiled(
+        simulator: &TxSimulator,
+        block_hash: B256,
+        config: ReplayProfileConfig,
+    ) -> Result<ProfiledBlockTrace> {
+        let total_started = Instant::now();
+        let mut profile = BlockReplayProfile {
+            engine: "execute-only",
+            block_hash,
+            ..Default::default()
+        };
+
+        let provider = simulator.provider_factory.provider()?;
+
+        let block_started = Instant::now();
+        let block = provider
+            .block_by_hash(block_hash)?
+            .ok_or_else(|| eyre::eyre!("Block {:?} not found", block_hash))?;
+        profile.block_load_ms = ms(block_started.elapsed());
+        profile.block_number = block.header.number;
+        profile.gas_used = block.header.gas_used;
+
+        let transactions = block.body.transactions.clone();
+        profile.tx_count = transactions.len();
+        let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let parent_hash = block.header.parent_hash;
+
+        let state_started = Instant::now();
+        let state_at_parent = simulator
+            .provider_factory
+            .history_by_block_hash(parent_hash)?;
+        profile.state_open_ms = ms(state_started.elapsed());
+
+        let state_reads = Arc::new(Mutex::new(StateReadProfile::default()));
+        let state_keys = Arc::new(Mutex::new(StateAccessKeys::default()));
+        let state_db = InstrumentedStateProviderDatabase::new(
+            StateProviderDatabase::new(state_at_parent),
+            state_reads.clone(),
+            config.record_keys.then_some(state_keys.clone()),
+        );
+        let mut db = CacheDB::new(state_db);
+
+        if let Some(prewarm_keys) = config.prewarm_keys.as_ref() {
+            let preload_started = Instant::now();
+            prewarm_profiled_cache_db(&mut db, prewarm_keys)?;
+            profile.preload_ms = ms(preload_started.elapsed());
+        }
+
+        let recovered = Self::recover_block_transactions(&transactions, &mut profile)?;
+
+        let env_started = Instant::now();
+        let evm_env = simulator
+            .evm_config
+            .evm_env(&sealed_header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+        profile.evm_env_ms = ms(env_started.elapsed());
+
+        let replay_started = Instant::now();
+        for (index, tx) in recovered.iter().enumerate() {
+            let reads_before = db.db.snapshot_reads();
+            let mut tx_profile = TransactionReplayProfile {
+                tx_index: index,
+                tx_hash: *tx.tx_hash(),
+                evm_env_ms: if index == 0 { profile.evm_env_ms } else { 0.0 },
+                ..Default::default()
+            };
+
+            let tx_env_started = Instant::now();
+            let tx_env = simulator.evm_config.tx_env(tx);
+            tx_profile.tx_env_ms = ms(tx_env_started.elapsed());
+            profile.tx_env_ms += tx_profile.tx_env_ms;
+
+            let exec_started = Instant::now();
+            let mut evm = simulator.evm_config.evm_with_env(&mut db, evm_env.clone());
+            let res = evm.transact(tx_env)?;
+            tx_profile.evm_exec_ms = ms(exec_started.elapsed());
+            profile.evm_exec_ms += tx_profile.evm_exec_ms;
+            tx_profile.gas_used = res.result.tx_gas_used();
+
+            let commit_started = Instant::now();
+            db.commit(res.state);
+            tx_profile.db_commit_ms = ms(commit_started.elapsed());
+            profile.db_commit_ms += tx_profile.db_commit_ms;
+
+            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
+            profile.tx_profiles.push(tx_profile);
+        }
+        profile.exec_after_prewarm_ms = ms(replay_started.elapsed());
+        profile.state_reads = state_reads
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        profile.state_keys = state_keys
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default();
+        profile.total_ms = ms(total_started.elapsed());
+
+        Ok(ProfiledBlockTrace {
+            traces: Vec::new(),
+            profile,
+        })
     }
 
     fn recover_block_transactions(
@@ -426,6 +591,7 @@ impl<'a> BlockTracer<'a> {
         let mut results = Vec::with_capacity(transactions.len());
 
         for (index, tx) in transactions.iter().enumerate() {
+            let reads_before = db.db.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -479,6 +645,7 @@ impl<'a> BlockTracer<'a> {
                 result: GethTrace::CallTracer(call_frame),
                 tx_hash: Some(tx_profile.tx_hash),
             });
+            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
@@ -508,6 +675,7 @@ impl<'a> BlockTracer<'a> {
         let call_config = CallConfig::default();
 
         for (index, tx) in transactions.iter().enumerate() {
+            let reads_before = db.db.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -563,6 +731,7 @@ impl<'a> BlockTracer<'a> {
                 tx_profile.inspector_build_ms += fuse_ms;
                 profile.inspector_build_ms += fuse_ms;
             }
+            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
@@ -593,6 +762,7 @@ impl<'a> BlockTracer<'a> {
         let mut results = Vec::with_capacity(transactions.len());
 
         for (index, tx) in transactions.iter().enumerate() {
+            let reads_before = db.db.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -658,6 +828,7 @@ impl<'a> BlockTracer<'a> {
                 tx_profile.inspector_build_ms += fuse_ms;
                 profile.inspector_build_ms += fuse_ms;
             }
+            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
@@ -878,34 +1049,62 @@ impl<'a> BlockTracer<'a> {
 struct InstrumentedStateProviderDatabase {
     inner: StateProviderDatabase<StateProviderBox>,
     reads: Arc<Mutex<StateReadProfile>>,
+    keys: Option<Arc<Mutex<StateAccessKeys>>>,
 }
 
 impl InstrumentedStateProviderDatabase {
     fn new(
         inner: StateProviderDatabase<StateProviderBox>,
         reads: Arc<Mutex<StateReadProfile>>,
+        keys: Option<Arc<Mutex<StateAccessKeys>>>,
     ) -> Self {
-        Self { inner, reads }
+        Self { inner, reads, keys }
     }
 
     fn record(&self, kind: StateReadKind, elapsed: Duration) {
         if let Ok(mut reads) = self.reads.lock() {
             match kind {
-                StateReadKind::Account => reads.account_reads += 1,
-                StateReadKind::Storage => reads.storage_reads += 1,
-                StateReadKind::Code => reads.code_reads += 1,
-                StateReadKind::BlockHash => reads.block_hash_reads += 1,
+                StateReadKind::Account(_) => reads.account_reads += 1,
+                StateReadKind::Storage { .. } => reads.storage_reads += 1,
+                StateReadKind::Code(_) => reads.code_reads += 1,
+                StateReadKind::BlockHash(_) => reads.block_hash_reads += 1,
             }
             reads.provider_read_ms += ms(elapsed);
         }
+
+        if let Some(keys) = &self.keys {
+            if let Ok(mut keys) = keys.lock() {
+                match kind {
+                    StateReadKind::Account(address) => {
+                        keys.accounts.insert(address);
+                    }
+                    StateReadKind::Storage { address, key } => {
+                        keys.storage.insert(StorageAccessKey { address, key });
+                    }
+                    StateReadKind::Code(code_hash) => {
+                        keys.code_hashes.insert(code_hash);
+                    }
+                    StateReadKind::BlockHash(number) => {
+                        keys.block_hashes.insert(number);
+                    }
+                }
+            }
+        }
+    }
+
+    fn snapshot_reads(&self) -> StateReadProfile {
+        self.reads
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 }
 
 enum StateReadKind {
-    Account,
-    Storage,
-    Code,
-    BlockHash,
+    Account(Address),
+    Storage { address: Address, key: U256 },
+    Code(B256),
+    BlockHash(u64),
 }
 
 impl DatabaseRef for InstrumentedStateProviderDatabase {
@@ -914,21 +1113,27 @@ impl DatabaseRef for InstrumentedStateProviderDatabase {
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let started = Instant::now();
         let result = self.inner.basic_ref(address);
-        self.record(StateReadKind::Account, started.elapsed());
+        self.record(StateReadKind::Account(address), started.elapsed());
         result
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         let started = Instant::now();
         let result = self.inner.code_by_hash_ref(code_hash);
-        self.record(StateReadKind::Code, started.elapsed());
+        self.record(StateReadKind::Code(code_hash), started.elapsed());
         result
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         let started = Instant::now();
         let result = self.inner.storage_ref(address, index);
-        self.record(StateReadKind::Storage, started.elapsed());
+        self.record(
+            StateReadKind::Storage {
+                address,
+                key: index,
+            },
+            started.elapsed(),
+        );
         result
     }
 
@@ -942,16 +1147,53 @@ impl DatabaseRef for InstrumentedStateProviderDatabase {
         let result = self
             .inner
             .storage_by_account_id_ref(address, account_id, storage_key);
-        self.record(StateReadKind::Storage, started.elapsed());
+        self.record(
+            StateReadKind::Storage {
+                address,
+                key: storage_key,
+            },
+            started.elapsed(),
+        );
         result
     }
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         let started = Instant::now();
         let result = self.inner.block_hash_ref(number);
-        self.record(StateReadKind::BlockHash, started.elapsed());
+        self.record(StateReadKind::BlockHash(number), started.elapsed());
         result
     }
+}
+
+fn prewarm_profiled_cache_db(db: &mut ProfiledCacheDb, keys: &StateAccessKeys) -> Result<()> {
+    for address in &keys.accounts {
+        match db.db.inner.basic_ref(*address)? {
+            Some(info) => db.insert_account_info(*address, info),
+            None => {
+                db.cache
+                    .accounts
+                    .entry(*address)
+                    .or_insert_with(DbAccount::new_not_existing);
+            }
+        }
+    }
+
+    for access in &keys.storage {
+        let value = db.db.inner.storage_ref(access.address, access.key)?;
+        db.insert_account_storage(access.address, access.key, value)?;
+    }
+
+    for code_hash in &keys.code_hashes {
+        let bytecode = db.db.inner.code_by_hash_ref(*code_hash)?;
+        db.cache.contracts.insert(*code_hash, bytecode);
+    }
+
+    for number in &keys.block_hashes {
+        let hash = db.db.inner.block_hash_ref(*number)?;
+        db.cache.block_hashes.insert(U256::from(*number), hash);
+    }
+
+    Ok(())
 }
 
 fn ms(duration: Duration) -> f64 {

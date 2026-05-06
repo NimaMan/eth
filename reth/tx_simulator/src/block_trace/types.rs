@@ -1,7 +1,8 @@
 /// Types for block-level simulation
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_trace::geth::TraceResult;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// Result of tracing an entire block - matches debug_traceBlockByNumber output
 #[derive(Debug, Clone)]
@@ -68,6 +69,13 @@ pub struct ProfiledBlockTrace {
     pub profile: BlockReplayProfile,
 }
 
+/// Controls optional replay profiling behavior.
+#[derive(Debug, Clone, Default)]
+pub struct ReplayProfileConfig {
+    pub record_keys: bool,
+    pub prewarm_keys: Option<StateAccessKeys>,
+}
+
 /// Cold replay timing breakdown for one block.
 #[derive(Debug, Clone, Default)]
 pub struct BlockReplayProfile {
@@ -90,6 +98,9 @@ pub struct BlockReplayProfile {
     pub trace_node_count: usize,
     pub errors: usize,
     pub state_reads: StateReadProfile,
+    pub state_keys: StateAccessKeys,
+    pub preload_ms: f64,
+    pub exec_after_prewarm_ms: f64,
     pub tx_profiles: Vec<TransactionReplayProfile>,
 }
 
@@ -101,6 +112,35 @@ pub struct StateReadProfile {
     pub code_reads: u64,
     pub block_hash_reads: u64,
     pub provider_read_ms: f64,
+}
+
+impl StateReadProfile {
+    pub fn delta_since(&self, earlier: &Self) -> Self {
+        Self {
+            account_reads: self.account_reads.saturating_sub(earlier.account_reads),
+            storage_reads: self.storage_reads.saturating_sub(earlier.storage_reads),
+            code_reads: self.code_reads.saturating_sub(earlier.code_reads),
+            block_hash_reads: self
+                .block_hash_reads
+                .saturating_sub(earlier.block_hash_reads),
+            provider_read_ms: self.provider_read_ms - earlier.provider_read_ms,
+        }
+    }
+}
+
+/// Optional provider-miss keys observed below `CacheDB`.
+#[derive(Debug, Clone, Default)]
+pub struct StateAccessKeys {
+    pub accounts: BTreeSet<Address>,
+    pub storage: BTreeSet<StorageAccessKey>,
+    pub code_hashes: BTreeSet<B256>,
+    pub block_hashes: BTreeSet<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub struct StorageAccessKey {
+    pub address: Address,
+    pub key: U256,
 }
 
 /// Optional per-transaction replay timing row.
@@ -117,5 +157,6 @@ pub struct TransactionReplayProfile {
     pub evm_exec_ms: f64,
     pub trace_build_ms: f64,
     pub db_commit_ms: f64,
+    pub state_reads: StateReadProfile,
     pub errors: usize,
 }

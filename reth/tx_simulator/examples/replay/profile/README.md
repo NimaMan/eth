@@ -69,16 +69,23 @@ Useful modes:
 
 - `engine-sweep`: run `baseline-fresh`, `tracing-fused`, and `reth-debug`.
 - `stage-breakdown`: run one `--engine`.
+- `feasibility`: run `baseline-fresh`, `tracing-fused`, `reth-debug`,
+  `execute-only`, and `oracle-prewarm`.
 - `correctness`: compare candidate traces against `baseline-fresh`.
 - `--per-tx`: emit transaction-level timing rows.
+- `--warmup-iterations`, `--discard-first`, `--label`, and `--json-summary`:
+  make repeated runs comparable.
+- `--record-keys`: record provider-miss account, storage, code, and block-hash
+  keys for prewarm experiments.
 
 CSV includes:
 
 ```text
-total_ms, block_hash_lookup_ms, block_load_ms, state_open_ms,
-sender_recovery_ms, evm_env_ms, tx_env_ms, inspector_build_ms,
-evm_exec_ms, trace_build_ms, db_commit_ms, account_reads,
-storage_reads, code_reads, block_hash_reads, provider_read_ms
+run_id, label, sample, state_mode, profile_kind, engine, iteration,
+is_warmup, total_ms, block_hash_lookup_ms, block_load_ms, state_open_ms,
+sender_recovery_ms, evm_env_ms, tx_env_ms, inspector_build_ms, evm_exec_ms,
+trace_build_ms, db_commit_ms, preload_ms, exec_after_prewarm_ms,
+account_reads, storage_reads, code_reads, block_hash_reads, provider_read_ms
 ```
 
 From processed-block profiling on `25028579..25028598` before this harness:
@@ -126,6 +133,48 @@ Provider misses averaged about `702` account reads, `1968` storage reads, `315`
 code reads, and less than `1` block-hash read per block. The top bottleneck is
 not `process_raw_block`, env construction, trace build, or DB commit; it is EVM
 execution dominated by state-provider reads.
+
+## 25 ms Feasibility
+
+Range: `25028579..25028598`
+Measured iterations: 5
+Warmup/discard: `--warmup-iterations 1 --discard-first`
+Rows per summary: `100`
+Command:
+
+```text
+profile_replay_engines \
+  --mode feasibility \
+  --start 25028579 \
+  --end 25028598 \
+  --iterations 5 \
+  --warmup-iterations 1 \
+  --discard-first \
+  --label single-block-25ms
+```
+
+Correctness passed first for `tracing-fused`, `reth-debug`, and
+`oracle-prewarm` against `baseline-fresh` on all 20 blocks.
+
+| Profile | Engine | Median ms | P95 | Max | 25 ms? |
+| --- | --- | ---: | ---: | ---: | --- |
+| Full trace | `baseline-fresh` | 199.0 | 346.1 | 438.4 | No |
+| Full trace | `tracing-fused` | 204.5 | 512.8 | 6954.9 | No |
+| Full trace | `reth-debug` | 203.4 | 5401.0 | 24191.4 | No |
+| Execute only, no trace | `execute-only` | 194.3 | 333.1 | 353.9 | No |
+| Oracle prewarm, including preload | `tracing-fused` | 148.4 | 249.1 | 253.7 | No |
+| Oracle prewarm, replay after preload only | `tracing-fused` | 14.3 | 29.2 | 30.4 | Yes, diagnostic only |
+
+Interpretation:
+
+- Cold/warm-OS-cache single-block replay is not close to `25 ms`; even
+  `execute-only` without traces has a median around `194 ms`.
+- When all provider-miss state is already loaded into `CacheDB`, full call
+  tracing can replay in about `14 ms` median after preload.
+- Including the preload cost, oracle-prewarm is still about `148 ms` median, so
+  the 25 ms path requires state to be available before the request starts.
+- The practical path is node-time capture or a reusable warmed state/read cache,
+  not independent first-touch MDBX replay per block.
 
 ## Lower Bound
 
