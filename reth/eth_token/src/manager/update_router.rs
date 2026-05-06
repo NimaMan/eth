@@ -3,10 +3,12 @@ use std::collections::BTreeSet;
 use alloy_primitives::Address;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
-use tx_processor::ProcessedTransaction;
+use tx_processor::{LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction};
 
 use crate::erc20::ERC20Token;
+use crate::pools::uniswap::{UniswapV2TradingSimulationConfig, UniswapV2TxContext};
 use crate::pools::BasePoolConfig;
+use crate::pools::UniswapV2Pool;
 
 use super::{
     address_string, hash_string, normalize_address, normalize_address_string, parse_address_lossy,
@@ -18,6 +20,12 @@ use super::{
 pub struct ProcessedTokenUpdateRouter {
     pub history_limit: usize,
     pub known_routers: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum V2TradingSimulation<'a> {
+    Historical(&'a PoolBuySellSimulator),
+    Live(&'a LivePoolBuySellSimulator),
 }
 
 impl ProcessedTokenUpdateRouter {
@@ -62,6 +70,80 @@ impl ProcessedTokenUpdateRouter {
 
             let discovered = self.discover_uniswap_v2_pools_for_token(token, tx);
             let updated = update_touched_v2_pools(token, tx)?;
+
+            if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
+                reports.push(TokenStateUpdateReport {
+                    token_address,
+                    token_state_updated,
+                    discovered_uniswap_v2_pools: discovered,
+                    updated_uniswap_v2_pools: updated,
+                });
+            }
+        }
+
+        Ok(reports)
+    }
+
+    pub async fn update_registry_from_processed_transaction_with_pool_simulator(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        pool_simulator: &PoolBuySellSimulator,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>> {
+        self.update_registry_from_processed_transaction_with_trading_simulation(
+            registry,
+            token_index,
+            tx,
+            V2TradingSimulation::Historical(pool_simulator),
+            prior_txs,
+        )
+        .await
+    }
+
+    pub async fn update_registry_from_processed_transaction_with_live_pool_simulator(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        pool_simulator: &LivePoolBuySellSimulator,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>> {
+        self.update_registry_from_processed_transaction_with_trading_simulation(
+            registry,
+            token_index,
+            tx,
+            V2TradingSimulation::Live(pool_simulator),
+            prior_txs,
+        )
+        .await
+    }
+
+    async fn update_registry_from_processed_transaction_with_trading_simulation(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        trading_simulation: V2TradingSimulation<'_>,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>> {
+        let token_addresses = candidate_token_addresses(registry, token_index, tx);
+        let mut reports = Vec::new();
+
+        for token_address in token_addresses {
+            let Some(token) = registry.token_mut(&token_address) else {
+                continue;
+            };
+
+            let token_state_updated = touches_token_state(tx, &token_address);
+            if token_state_updated {
+                token.update_token_state_from_processed_transaction(tx)?;
+            }
+
+            let discovered = self.discover_uniswap_v2_pools_for_token(token, tx);
+            let updated = update_touched_v2_pools(token, tx)?;
+            simulate_updated_v2_pools(token, tx, &updated, prior_txs, trading_simulation).await?;
 
             if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
                 reports.push(TokenStateUpdateReport {
@@ -122,6 +204,119 @@ impl ProcessedTokenUpdateRouter {
             );
 
             let updated = update_touched_v2_pools(token, tx)?;
+
+            if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
+                discovered.sort();
+                discovered.dedup();
+                reports.push(TokenStateUpdateReport {
+                    token_address,
+                    token_state_updated,
+                    discovered_uniswap_v2_pools: discovered,
+                    updated_uniswap_v2_pools: updated,
+                });
+            }
+        }
+
+        Ok(reports)
+    }
+
+    pub async fn update_registry_from_processed_transaction_with_discovery_and_pool_simulator<P>(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        pool_metadata_provider: &P,
+        pool_simulator: &PoolBuySellSimulator,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>>
+    where
+        P: UniswapV2PoolMetadataProvider,
+    {
+        self.update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
+            registry,
+            token_index,
+            tx,
+            pool_metadata_provider,
+            V2TradingSimulation::Historical(pool_simulator),
+            prior_txs,
+        )
+        .await
+    }
+
+    pub async fn update_registry_from_processed_transaction_with_discovery_and_live_pool_simulator<
+        P,
+    >(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        pool_metadata_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>>
+    where
+        P: UniswapV2PoolMetadataProvider,
+    {
+        self.update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
+            registry,
+            token_index,
+            tx,
+            pool_metadata_provider,
+            V2TradingSimulation::Live(pool_simulator),
+            prior_txs,
+        )
+        .await
+    }
+
+    async fn update_registry_from_processed_transaction_with_discovery_and_trading_simulation<P>(
+        &self,
+        registry: &mut TokenRegistry,
+        token_index: &TrackedTokenIndex,
+        tx: &ProcessedTransaction,
+        pool_metadata_provider: &P,
+        trading_simulation: V2TradingSimulation<'_>,
+        prior_txs: &[ProcessedTransaction],
+    ) -> Result<Vec<TokenStateUpdateReport>>
+    where
+        P: UniswapV2PoolMetadataProvider,
+    {
+        let token_addresses = candidate_token_addresses_with_pool_discovery(
+            registry,
+            token_index,
+            tx,
+            pool_metadata_provider,
+        )
+        .await?;
+        let mut reports = Vec::new();
+
+        for token_address in token_addresses {
+            let Some(token) = registry.token_mut(&token_address) else {
+                continue;
+            };
+
+            let token_state_updated = touches_token_state(tx, &token_address);
+            if token_state_updated {
+                token.update_token_state_from_processed_transaction(tx)?;
+            }
+
+            let mut discovered = self
+                .discover_uniswap_v2_pools_for_token_with_metadata(
+                    token,
+                    tx,
+                    pool_metadata_provider,
+                )
+                .await?;
+            discovered.extend(
+                self.discover_uniswap_v2_pools_from_swaps_for_token(
+                    token,
+                    tx,
+                    pool_metadata_provider,
+                )
+                .await?,
+            );
+
+            let updated = update_touched_v2_pools(token, tx)?;
+            simulate_updated_v2_pools(token, tx, &updated, prior_txs, trading_simulation).await?;
 
             if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
                 discovered.sort();
@@ -534,6 +729,98 @@ fn update_touched_v2_pools(
         }
     }
     Ok(updated)
+}
+
+async fn simulate_updated_v2_pools(
+    token: &mut ERC20Token,
+    tx: &ProcessedTransaction,
+    pool_addresses: &[String],
+    prior_txs: &[ProcessedTransaction],
+    trading_simulation: V2TradingSimulation<'_>,
+) -> Result<Vec<String>> {
+    if pool_addresses.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let tx_context = UniswapV2TxContext {
+        block_number: tx.block_number,
+        block_timestamp: tx.block_timestamp,
+        tx_hash: hash_string(&tx.hash),
+        from_address: Some(address_string(&tx.from_address)),
+    };
+    let config = UniswapV2TradingSimulationConfig {
+        prior_txs: prior_txs.to_vec(),
+        ..Default::default()
+    };
+
+    let mut simulated = Vec::new();
+    for pool_address in pool_addresses {
+        let should_simulate = token
+            .uniswap_v2_pool(pool_address)
+            .map(|pool| should_simulate_v2_trading(pool, tx))
+            .unwrap_or(false);
+        if !should_simulate {
+            continue;
+        }
+
+        let Some(pool) = token.uniswap_v2_pool_mut(pool_address) else {
+            continue;
+        };
+
+        match trading_simulation {
+            V2TradingSimulation::Historical(pool_simulator) => {
+                pool.evaluate_trading_status_v2_with_pool_simulator(
+                    pool_simulator,
+                    &tx_context,
+                    config.clone(),
+                )
+                .await?;
+            }
+            V2TradingSimulation::Live(pool_simulator) => {
+                pool.evaluate_live_trading_status_v2(pool_simulator, &tx_context, config.clone())
+                    .await?;
+            }
+        }
+        simulated.push(pool_address.clone());
+    }
+
+    Ok(simulated)
+}
+
+fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
+    if pool.base.is_scam() {
+        return false;
+    }
+
+    let pool_address = &pool.base.identity.pool_address;
+    pool.base.has_control_address(tx_control_addresses(tx))
+        || (!pool.base.can_buy_and_sell() && has_v2_trading_simulation_trigger(tx, pool_address))
+}
+
+fn has_v2_trading_simulation_trigger(tx: &ProcessedTransaction, pool_address: &str) -> bool {
+    tx.uniswap_v2_swaps
+        .iter()
+        .any(|event| same_address_str(event.pair_address, pool_address))
+        || tx
+            .uniswap_v2_mints
+            .iter()
+            .any(|event| same_address_str(event.pair_address, pool_address))
+        || tx
+            .uniswap_v2_burns
+            .iter()
+            .any(|event| same_address_str(event.pair_address, pool_address))
+}
+
+fn tx_control_addresses(tx: &ProcessedTransaction) -> Vec<String> {
+    let mut addresses: Vec<String> = tx.unique_addresses.iter().map(address_string).collect();
+    addresses.push(address_string(&tx.from_address));
+    if let Some(to_address) = tx.to_address {
+        addresses.push(address_string(&to_address));
+    }
+    if let Some(contract_address) = tx.contract_address {
+        addresses.push(address_string(&contract_address));
+    }
+    addresses
 }
 
 fn touches_token_state(tx: &ProcessedTransaction, token_address: &str) -> bool {
