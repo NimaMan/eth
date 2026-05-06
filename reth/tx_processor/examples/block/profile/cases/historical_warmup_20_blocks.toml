@@ -1,0 +1,12 @@
+name = "historical_warmup_20_blocks"
+
+[blocks]
+start = 25028579
+end = 25028598
+
+[processing]
+include_traces = true
+batch_sizes = [1, 5, 10, 20]
+batch_concurrency = [1, 2, 4, 10, 20]
+iterations = 3
+

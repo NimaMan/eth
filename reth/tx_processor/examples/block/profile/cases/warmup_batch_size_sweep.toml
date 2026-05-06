@@ -1,0 +1,14 @@
+name = "warmup_batch_size_sweep"
+
+[blocks]
+start = 25028579
+end = 25030578
+
+[processing]
+include_traces = true
+batch_sizes = [20, 40, 80, 120, 240]
+batch_concurrency = [10]
+iterations = 3
+
+[notes]
+purpose = "Reproduce the reported warmup batch-size comparison and verify whether batch size 80 is a stable default."

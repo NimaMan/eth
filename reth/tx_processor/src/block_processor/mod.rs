@@ -18,8 +18,12 @@ use reth_chain_query::{
 };
 use rlp::RlpStream;
 use std::sync::Arc;
+use std::time::Instant;
+use tx_simulator::block_simulation::BlockTraceEngine;
 
-pub use types::{BlockBatchOptions, ProcessedBlock, ProcessedBlockTransactions};
+pub use types::{
+    BlockBatchOptions, ProcessRawBlockProfile, ProcessedBlock, ProcessedBlockTransactions,
+};
 
 /// High-level orchestration for processing entire blocks worth of transactions.
 #[derive(Clone)]
@@ -103,9 +107,24 @@ impl BlockProcessor {
         block_number: u64,
         include_traces: bool,
     ) -> Result<ProcessedBlock> {
+        self.process_block_with_trace_engine(
+            block_number,
+            include_traces,
+            BlockTraceEngine::default(),
+        )
+        .await
+    }
+
+    /// Process a single DB-backed block with an explicit trace engine.
+    pub async fn process_block_with_trace_engine(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+        trace_engine: BlockTraceEngine,
+    ) -> Result<ProcessedBlock> {
         let raw = self
             .fetcher
-            .fetch_db_block_with_traces(block_number, include_traces)
+            .fetch_db_block_with_trace_engine(block_number, include_traces, trace_engine)
             .await?;
         self.process_raw_block(raw).await
     }
@@ -173,6 +192,7 @@ impl BlockProcessor {
 
         let max_concurrency = options.max_concurrency.max(1);
         let include_traces = options.include_traces;
+        let trace_engine = options.trace_engine;
 
         let processor = self.clone();
         let processed = stream::iter(blocks.clone())
@@ -180,7 +200,7 @@ impl BlockProcessor {
                 let processor = processor.clone();
                 async move {
                     processor
-                        .process_block_with_options(number, include_traces)
+                        .process_block_with_trace_engine(number, include_traces, trace_engine)
                         .await
                         .map(|block| (number, block))
                 }
@@ -196,6 +216,28 @@ impl BlockProcessor {
 
     /// Process a previously fetched [`RawBlockData`].
     pub async fn process_raw_block(&self, raw_block: RawBlockData) -> Result<ProcessedBlock> {
+        self.process_raw_block_inner(raw_block, None).await
+    }
+
+    /// Process a previously fetched [`RawBlockData`] with stage timings.
+    pub async fn process_raw_block_profiled(
+        &self,
+        raw_block: RawBlockData,
+    ) -> Result<(ProcessedBlock, ProcessRawBlockProfile)> {
+        let mut profile = ProcessRawBlockProfile::default();
+        let started = Instant::now();
+        let block = self
+            .process_raw_block_inner(raw_block, Some(&mut profile))
+            .await?;
+        profile.total = started.elapsed();
+        Ok((block, profile))
+    }
+
+    async fn process_raw_block_inner(
+        &self,
+        raw_block: RawBlockData,
+        mut profile: Option<&mut ProcessRawBlockProfile>,
+    ) -> Result<ProcessedBlock> {
         let RawBlockData {
             header,
             transactions,
@@ -234,7 +276,12 @@ impl BlockProcessor {
         {
             let trace = trace_list.get(index).cloned();
             let (processed, processing_error) = match self
-                .process_single_transaction(&metadata, &receipt, trace.as_ref())
+                .process_single_transaction_profiled(
+                    &metadata,
+                    &receipt,
+                    trace.as_ref(),
+                    profile.as_deref_mut(),
+                )
                 .await
             {
                 Ok(processed) => (processed, None),
@@ -269,11 +316,12 @@ impl BlockProcessor {
         })
     }
 
-    async fn process_single_transaction(
+    async fn process_single_transaction_profiled(
         &self,
         metadata: &TransactionData,
         receipt: &TransactionReceipt,
         trace: Option<&TransactionTrace>,
+        mut profile: Option<&mut ProcessRawBlockProfile>,
     ) -> Result<ProcessedTransaction> {
         let logs = conversion::convert_logs(&receipt.logs);
         let status = receipt.status;
@@ -291,6 +339,7 @@ impl BlockProcessor {
         let blob_gas_used = receipt.blob_gas_used;
         let signed_authorizations = metadata.signed_authorizations.clone();
 
+        let tx_processing_started = Instant::now();
         let mut processed_tx = self
             .tx_processor
             .process_transaction_from_raw_data(
@@ -319,29 +368,48 @@ impl BlockProcessor {
                 None,
             )
             .await?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.tx_processing += tx_processing_started.elapsed();
+        }
 
         let trace_processor = TransactionTraceProcessor::new();
-        let internal_transactions = trace
-            .map(|trace| {
-                let frame = conversion::convert_transaction_trace(trace);
-                trace_processor.extract_internal_transactions_from_call_trace(&frame)
-            })
-            .unwrap_or_default();
+        let internal_transactions = if let Some(trace) = trace {
+            let trace_conversion_started = Instant::now();
+            let frame = conversion::convert_transaction_trace(trace);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.trace_conversion += trace_conversion_started.elapsed();
+            }
+
+            let internal_extraction_started = Instant::now();
+            let internal_transactions =
+                trace_processor.extract_internal_transactions_from_call_trace(&frame);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.internal_extraction += internal_extraction_started.elapsed();
+            }
+            internal_transactions
+        } else {
+            Vec::new()
+        };
 
         processed_tx.internal_transactions = internal_transactions;
         processed_tx.bribe_amount =
             TxProcessor::calculate_bribe_amount(&processed_tx.internal_transactions);
 
         let mut balance_calculator = AddressBalanceChangeCalculator::new();
+        let balance_started = Instant::now();
         let balance_changes = balance_calculator.calculate_balance_changes_from_processed_data(
             &processed_tx.erc20_transfers,
             &processed_tx.internal_transactions,
             metadata.block_number,
             metadata.tx_index,
         )?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.balance_calculation += balance_started.elapsed();
+        }
         processed_tx.address_balance_changes = balance_changes;
 
         if metadata.to.is_none() {
+            let contract_started = Instant::now();
             let contract_address = derive_create_address(metadata.from, metadata.nonce);
             processed_tx.contract_address = Some(contract_address);
 
@@ -349,6 +417,9 @@ impl BlockProcessor {
                 processed_tx
                     .contract_creation_events
                     .push(ContractCreationEvent { contract_address });
+            }
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.contract_creation += contract_started.elapsed();
             }
         }
 

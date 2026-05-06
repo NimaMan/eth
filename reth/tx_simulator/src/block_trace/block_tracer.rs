@@ -1,3 +1,4 @@
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_trace::geth::{
     CallConfig, GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingOptions,
@@ -19,6 +20,16 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 
 use crate::TxSimulator;
 
+/// Local block trace implementation to use when replaying a block.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BlockTraceEngine {
+    /// Historical implementation: build a fresh inspector for every transaction.
+    #[default]
+    FreshInspector,
+    /// Reth-style implementation: reuse one call tracer inspector and fuse it between txs.
+    RethFusedCallTracer,
+}
+
 /// Block tracer for simulating all transactions in a block
 pub struct BlockTracer<'a> {
     simulator: &'a TxSimulator,
@@ -36,6 +47,17 @@ impl<'a> BlockTracer<'a> {
         block_number: u64,
         opts: Option<GethDebugTracingOptions>,
     ) -> Result<Vec<TraceResult>> {
+        self.trace_block_by_number_with_engine(block_number, opts, BlockTraceEngine::default())
+            .await
+    }
+
+    /// Trace all transactions in a block by number using an explicit local trace engine.
+    pub async fn trace_block_by_number_with_engine(
+        &self,
+        block_number: u64,
+        opts: Option<GethDebugTracingOptions>,
+        engine: BlockTraceEngine,
+    ) -> Result<Vec<TraceResult>> {
         let opts = opts.unwrap_or_default();
 
         // Get block hash
@@ -44,7 +66,8 @@ impl<'a> BlockTracer<'a> {
             .block_hash(block_number)?
             .ok_or_else(|| eyre::eyre!("Block {} not found", block_number))?;
 
-        self.trace_block_by_hash(block_hash, opts).await
+        self.trace_block_by_hash_with_engine(block_hash, opts, engine)
+            .await
     }
 
     /// Trace all transactions in a block by hash
@@ -53,12 +76,25 @@ impl<'a> BlockTracer<'a> {
         block_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>> {
+        self.trace_block_by_hash_with_engine(block_hash, opts, BlockTraceEngine::default())
+            .await
+    }
+
+    /// Trace all transactions in a block by hash using an explicit local trace engine.
+    pub async fn trace_block_by_hash_with_engine(
+        &self,
+        block_hash: B256,
+        opts: GethDebugTracingOptions,
+        engine: BlockTraceEngine,
+    ) -> Result<Vec<TraceResult>> {
         // Clone necessary data for async block
         let simulator = self.simulator.clone();
 
         // Use spawn_blocking since this is CPU-intensive
-        tokio::task::spawn_blocking(move || Self::trace_block_sync(&simulator, block_hash, opts))
-            .await?
+        tokio::task::spawn_blocking(move || {
+            Self::trace_block_sync_with_engine(&simulator, block_hash, opts, engine)
+        })
+        .await?
     }
 
     /// Trace a single transaction within a block (replaying all prior transactions)
@@ -91,8 +127,24 @@ impl<'a> BlockTracer<'a> {
             .await
     }
 
-    /// Synchronous block tracing implementation
-    fn trace_block_sync(
+    fn trace_block_sync_with_engine(
+        simulator: &TxSimulator,
+        block_hash: B256,
+        opts: GethDebugTracingOptions,
+        engine: BlockTraceEngine,
+    ) -> Result<Vec<TraceResult>> {
+        match engine {
+            BlockTraceEngine::FreshInspector => {
+                Self::trace_block_sync_fresh_inspector(simulator, block_hash, opts)
+            }
+            BlockTraceEngine::RethFusedCallTracer => {
+                Self::trace_block_sync_reth_fused_call_tracer(simulator, block_hash, opts)
+            }
+        }
+    }
+
+    /// Synchronous block tracing implementation using the original fresh-inspector-per-tx path.
+    fn trace_block_sync_fresh_inspector(
         simulator: &TxSimulator,
         block_hash: B256,
         opts: GethDebugTracingOptions,
@@ -142,6 +194,69 @@ impl<'a> BlockTracer<'a> {
             )?;
 
             results.push(trace_result);
+        }
+
+        Ok(results)
+    }
+
+    /// Synchronous block tracing implementation modeled after Reth's debug tracer:
+    /// keep one inspector alive, extract a result per transaction, then fuse it.
+    fn trace_block_sync_reth_fused_call_tracer(
+        simulator: &TxSimulator,
+        block_hash: B256,
+        opts: GethDebugTracingOptions,
+    ) -> Result<Vec<TraceResult>> {
+        let provider = simulator.provider_factory.provider()?;
+
+        let block = provider
+            .block_by_hash(block_hash)?
+            .ok_or_else(|| eyre::eyre!("Block {:?} not found", block_hash))?;
+        let transactions = block.body.transactions.clone();
+        let parent_hash = block.header.parent_hash;
+        let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+
+        let state_at_parent = simulator
+            .provider_factory
+            .history_by_block_hash(parent_hash)?;
+        let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
+        let evm_env = simulator
+            .evm_config
+            .evm_env(&sealed_header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+        let call_config = CallConfig::default();
+        let mut inspector = Self::create_inspector(&opts);
+        let mut results = Vec::with_capacity(transactions.len());
+
+        for (index, tx) in transactions.iter().enumerate() {
+            let tx_hash = *tx.tx_hash();
+            let sender = tx
+                .recover_signer()
+                .map_err(|e| eyre::eyre!("Failed to recover signer for tx {:?}: {}", tx_hash, e))?;
+            let recovered = Recovered::new_unchecked(tx.clone(), sender);
+            let tx_env = simulator.evm_config.tx_env(&recovered);
+
+            let mut evm = simulator.evm_config.evm_with_env_and_inspector(
+                &mut db,
+                evm_env.clone(),
+                &mut inspector,
+            );
+            let res = evm.transact(tx_env)?;
+
+            inspector.set_transaction_gas_limit(tx.gas_limit());
+            inspector.set_transaction_caller(sender);
+            let call_frame = inspector
+                .geth_builder()
+                .geth_call_traces(call_config, res.result.tx_gas_used());
+
+            results.push(TraceResult::Success {
+                result: GethTrace::CallTracer(call_frame),
+                tx_hash: Some(tx_hash),
+            });
+
+            db.commit(res.state);
+            if index + 1 < transactions.len() {
+                inspector.fuse();
+            }
         }
 
         Ok(results)

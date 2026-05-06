@@ -3,6 +3,7 @@ use std::sync::Arc;
 use alloy_primitives::B256;
 use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::Result;
+use tx_simulator::block_simulation::BlockTraceEngine;
 
 use crate::provider::{
     block::{rpc_fetcher::RpcBlockDataFetcher, RawBlockData},
@@ -63,12 +64,27 @@ impl BlockDataFetcher {
         block_number: u64,
         include_traces: bool,
     ) -> Result<RawBlockData> {
+        self.fetch_db_block_with_trace_engine(
+            block_number,
+            include_traces,
+            BlockTraceEngine::default(),
+        )
+        .await
+    }
+
+    /// Fetch block data directly from MDBX using an explicit local trace engine.
+    pub async fn fetch_db_block_with_trace_engine(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+        trace_engine: BlockTraceEngine,
+    ) -> Result<RawBlockData> {
         let provider = self
             .provider
             .as_ref()
             .ok_or_else(|| eyre::eyre!("database access not configured for this fetcher"))?;
         provider
-            .fetch_raw_block_data(block_number, include_traces)
+            .fetch_raw_block_data_with_trace_engine(block_number, include_traces, trace_engine)
             .await
     }
 

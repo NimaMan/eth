@@ -34,6 +34,10 @@ name = "process_block_batch"
 path = "examples/block/process_block_batch.rs"
 
 [[example]]
+name = "profile_processed_blocks"
+path = "examples/block/profile/main.rs"
+
+[[example]]
 name = "compare_block_sources"
 path = "examples/block/compare_block_sources.rs"
 

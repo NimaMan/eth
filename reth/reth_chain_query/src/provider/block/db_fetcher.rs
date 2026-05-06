@@ -9,7 +9,10 @@ use alloy_consensus::Transaction as _;
 /// - Traces from local simulation (matches debug_traceBlockByNumber)
 use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
 use alloy_primitives::{Bytes, B256, U256};
-use alloy_rpc_types_trace::geth::{GethDebugTracingOptions, GethTrace, TraceResult};
+use alloy_rpc_types_trace::geth::{
+    GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingOptions, GethTrace,
+    TraceResult,
+};
 use eyre::Result;
 use futures::stream::{self, Stream, StreamExt, TryStreamExt};
 use reth_primitives_traits::Recovered;
@@ -17,7 +20,7 @@ use reth_provider::{
     BlockBodyIndicesProvider, HeaderProvider, ReceiptProvider, TransactionsProvider,
 };
 use std::cmp;
-use tx_simulator::block_simulation::BlockTracer;
+use tx_simulator::block_simulation::{BlockTraceEngine, BlockTracer};
 
 use crate::provider::{
     block::types::{
@@ -364,12 +367,30 @@ impl RethQueryProvider {
         block_number: u64,
         include_traces: bool,
     ) -> Result<RawBlockData> {
+        self.fetch_raw_block_data_with_trace_engine(
+            block_number,
+            include_traces,
+            BlockTraceEngine::default(),
+        )
+        .await
+    }
+
+    /// Fetch raw block data using an explicit local trace engine.
+    pub async fn fetch_raw_block_data_with_trace_engine(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+        trace_engine: BlockTraceEngine,
+    ) -> Result<RawBlockData> {
         let header = self.fetch_block_header_only(block_number).await?;
         let transactions = self.fetch_block_tx_metadata_only_internal(block_number)?;
         let receipts = self.fetch_block_receipts_only_internal(block_number)?;
 
         let traces = if include_traces {
-            Some(self.get_block_traces(block_number).await?)
+            Some(
+                self.get_block_traces_with_engine(block_number, &transactions, trace_engine)
+                    .await?,
+            )
         } else {
             None
         };
@@ -382,17 +403,32 @@ impl RethQueryProvider {
         })
     }
 
-    /// Get traces for all transactions in a block
-    async fn get_block_traces(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
-        self.simulate_block_traces(block_number).await
+    async fn get_block_traces_with_engine(
+        &self,
+        block_number: u64,
+        tx_metadata: &[TransactionMetadata],
+        trace_engine: BlockTraceEngine,
+    ) -> Result<Vec<TransactionTrace>> {
+        self.simulate_block_traces(block_number, tx_metadata, trace_engine)
+            .await
     }
 
     /// Simulate all transactions in the block to produce call traces
-    async fn simulate_block_traces(&self, block_number: u64) -> Result<Vec<TransactionTrace>> {
-        let tx_metadata = self.fetch_block_tx_metadata_only_internal(block_number)?;
+    async fn simulate_block_traces(
+        &self,
+        block_number: u64,
+        tx_metadata: &[TransactionMetadata],
+        trace_engine: BlockTraceEngine,
+    ) -> Result<Vec<TransactionTrace>> {
         let tracer = BlockTracer::new(&self.tx_simulator);
+        let trace_options = GethDebugTracingOptions {
+            tracer: Some(GethDebugTracerType::BuiltInTracer(
+                GethDebugBuiltInTracerType::CallTracer,
+            )),
+            ..Default::default()
+        };
         let trace_results = tracer
-            .trace_block_by_number(block_number, Some(GethDebugTracingOptions::default()))
+            .trace_block_by_number_with_engine(block_number, Some(trace_options), trace_engine)
             .await?;
 
         let mut traces = Vec::with_capacity(trace_results.len());
