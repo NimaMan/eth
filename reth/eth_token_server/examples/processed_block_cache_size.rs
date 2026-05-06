@@ -27,13 +27,19 @@ async fn main() -> eyre::Result<()> {
     if args.read_only && args.verify_token_output {
         eyre::bail!("--verify-token-output cannot be used with --read-only");
     }
+    if args.fill_missing_then_read && args.verify_token_output {
+        eyre::bail!("--verify-token-output cannot be used with --fill-missing-then-read");
+    }
+    if args.read_only && args.fill_missing_then_read {
+        eyre::bail!("--read-only cannot be used with --fill-missing-then-read");
+    }
 
-    if args.read_only {
+    if args.read_only || args.fill_missing_then_read {
         let reader = store.reader();
         let plan = reader
             .plan_range(provider.as_ref(), args.start, args.end)
             .await?;
-        if !plan.is_complete() {
+        if !plan.is_complete() && args.read_only {
             let missing = plan.missing_block_numbers();
             let sample = missing
                 .iter()
@@ -46,6 +52,41 @@ async fn main() -> eyre::Result<()> {
                 missing.len(),
                 sample
             );
+        }
+        if args.fill_missing_then_read && !plan.is_complete() {
+            let writer = store.writer(provider.chain_id());
+            for key in &plan.missing_keys {
+                let process_started = Instant::now();
+                let block = processor.process_block(key.block_number).await?;
+                if block.header.hash != key.block_hash {
+                    eyre::bail!(
+                        "processed block hash changed during cache fill for {}: expected {:?}, got {:?}",
+                        key.block_number,
+                        key.block_hash,
+                        block.header.hash
+                    );
+                }
+                processed_ms.push(ms(process_started.elapsed()));
+
+                let write = writer.write_processed_block(&block)?;
+                if write.key != *key {
+                    eyre::bail!(
+                        "cache writer produced unexpected key for {}: expected {:?}, wrote {:?}",
+                        key.block_number,
+                        key,
+                        write.key
+                    );
+                }
+                write_ms.push(write.write_ms as f64);
+
+                println!(
+                    "filled block={} txs={} process_ms={:.3} write_ms={:.3}",
+                    key.block_number,
+                    block.transactions.len(),
+                    processed_ms.last().copied().unwrap_or_default(),
+                    write_ms.last().copied().unwrap_or_default()
+                );
+            }
         }
 
         let read_wall_started = Instant::now();
@@ -66,6 +107,12 @@ async fn main() -> eyre::Result<()> {
             );
         }
 
+        if !processed_ms.is_empty() {
+            print_summary("process", &processed_ms);
+        }
+        if !write_ms.is_empty() {
+            print_summary("write", &write_ms);
+        }
         print_summary("read", &read_ms);
         println!(
             "# summary read_wall: count={} wall_ms={:.3} avg_wall_ms_per_block={:.3}",
@@ -141,6 +188,7 @@ struct Args {
     history_limit: usize,
     verify_token_output: bool,
     read_only: bool,
+    fill_missing_then_read: bool,
 }
 
 impl Args {
@@ -153,6 +201,7 @@ impl Args {
         let mut history_limit = 1_000;
         let mut verify_token_output = false;
         let mut read_only = false;
+        let mut fill_missing_then_read = false;
 
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -194,6 +243,9 @@ impl Args {
                 "--read-only" => {
                     read_only = true;
                 }
+                "--fill-missing-then-read" => {
+                    fill_missing_then_read = true;
+                }
                 _ => eyre::bail!("unknown argument: {arg}"),
             }
         }
@@ -212,6 +264,7 @@ impl Args {
             history_limit,
             verify_token_output,
             read_only,
+            fill_missing_then_read,
         })
     }
 }

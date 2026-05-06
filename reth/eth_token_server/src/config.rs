@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use eyre::{eyre, Result};
 
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
+const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_MAX_BLOCKS: u64 = 10_000;
@@ -30,7 +31,8 @@ impl TokenServerConfig {
         let max_blocks = env_parse("ETH_TOKEN_SERVER_MAX_BLOCKS", DEFAULT_MAX_BLOCKS)?;
         let default_blocks = env_parse("ETH_TOKEN_SERVER_DEFAULT_BLOCKS", DEFAULT_BLOCKS)?;
         let processed_block_cache_dir =
-            env_optional_path("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR");
+            env_optional_path("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR")
+                .or_else(default_processed_block_cache_dir);
         let processed_block_cache_blocks = env_parse(
             "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS",
             DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS,
@@ -79,6 +81,15 @@ fn env_optional_path(key: &str) -> Option<PathBuf> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+fn default_processed_block_cache_dir() -> Option<PathBuf> {
+    let root = env_string("ETH_NODE_ROOT", DEFAULT_ETH_NODE_ROOT);
+    if root.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(root).join("processed_block_cache"))
+    }
 }
 
 fn env_parse<T>(key: &str, default: T) -> Result<T>

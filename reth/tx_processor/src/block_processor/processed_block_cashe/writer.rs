@@ -1,7 +1,7 @@
 use std::time::Instant;
 
+use crate::ProcessedBlock;
 use eyre::Result;
-use tx_processor::ProcessedBlock;
 
 use super::store::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
 

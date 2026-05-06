@@ -12,6 +12,7 @@ use crate::live::{
     block_notifier::RedisBlockNotifier,
     block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
     live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig},
+    processed_block_cache_sink::LiveProcessedBlockCacheSink,
     redis_block_publisher::RedisBlockPublisher,
 };
 
@@ -22,6 +23,7 @@ pub struct LiveBlockService {
     state_simulator: Option<Arc<TxSimulator>>,
     notifier: Option<RedisBlockNotifier>,
     logger: Option<BlockProcessingLogger>,
+    processed_block_cache: Option<LiveProcessedBlockCacheSink>,
 }
 
 impl LiveBlockService {
@@ -33,6 +35,7 @@ impl LiveBlockService {
         log_path: Option<PathBuf>,
     ) -> Result<Self> {
         let state_simulator = redis_url.as_ref().map(|_| provider.simulator().clone());
+        let chain_id = provider.chain_id();
         let processor = LiveBlockProcessor::connect(provider, processor_config).await?;
         let publisher = match redis_url.as_ref() {
             Some(url) => Some(RedisBlockPublisher::new(
@@ -56,6 +59,16 @@ impl LiveBlockService {
                 .join("live_block_processor.log")
         });
         let logger = Some(BlockProcessingLogger::new(logger_path)?);
+        let processed_block_cache = match LiveProcessedBlockCacheSink::from_config(chain_id) {
+            Ok(sink) => Some(sink),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "failed to initialize live processed block disk cache writer"
+                );
+                None
+            }
+        };
 
         Ok(Self {
             processor,
@@ -63,6 +76,7 @@ impl LiveBlockService {
             state_simulator,
             notifier,
             logger,
+            processed_block_cache,
         })
     }
 
@@ -90,7 +104,7 @@ impl LiveBlockService {
 
         for block_number in start..=latest {
             match self.processor.process_block_number(block_number).await {
-                Ok(processed) => self.handle_processed_block(&processed).await,
+                Ok(processed) => self.handle_processed_block(processed).await,
                 Err(err) => {
                     tracing::warn!(block_number, "failed to warm live block processor: {}", err);
                 }
@@ -104,7 +118,7 @@ impl LiveBlockService {
         let mut processed_count: usize = 0;
         loop {
             let processed = self.processor.next_processed_block().await?;
-            self.handle_processed_block(&processed).await;
+            self.handle_processed_block(processed).await;
 
             processed_count += 1;
             if let Some(max) = limit {
@@ -116,7 +130,8 @@ impl LiveBlockService {
         Ok(())
     }
 
-    async fn handle_processed_block(&self, processed: &crate::live::LiveProcessedBlock) {
+    async fn handle_processed_block(&self, processed: crate::live::LiveProcessedBlock) {
+        let mut redis_published = self.publisher.is_none();
         if let Some(publisher) = &self.publisher {
             match build_live_block_snapshot(&processed.processed_block) {
                 Ok(snapshot) => {
@@ -168,6 +183,8 @@ impl LiveBlockService {
                             "failed to publish live block snapshot: {}",
                             err
                         );
+                    } else {
+                        redis_published = true;
                     }
                 }
                 Err(err) => {
@@ -194,12 +211,18 @@ impl LiveBlockService {
         }
 
         if let Some(logger) = &self.logger {
-            if let Err(err) = logger.log_block(processed) {
+            if let Err(err) = logger.log_block(&processed) {
                 tracing::warn!(
                     block_number = processed.execution_info.block_number,
                     "failed to write live block log: {}",
                     err
                 );
+            }
+        }
+
+        if redis_published {
+            if let Some(cache) = &self.processed_block_cache {
+                cache.try_enqueue(processed.processed_block);
             }
         }
     }

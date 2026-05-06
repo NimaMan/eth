@@ -112,7 +112,7 @@ tx_simulator = { path = "../tx_simulator" }
 
 
 # Basic dependencies
-tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros", "sync", "time"] }
 eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -131,6 +131,7 @@ futures = "0.3"
 lazy_static = "1.5"
 redis = { version = "0.32.7", features = ["tokio-comp", "connection-manager"] }
 bincode = "1.3"
+zstd = "0.13"
 
 # Basic Alloy dependencies for examples
 alloy-consensus = "2.0.4"

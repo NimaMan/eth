@@ -39,6 +39,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(start_run);
 
+    let cache_coverage = warp::path!("cache" / "coverage")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(cache_coverage);
+
     let progress = warp::path!("runs" / String / "progress")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -77,6 +82,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     health
         .or(list_runs)
         .or(start_run)
+        .or(cache_coverage)
         .or(token_detail)
         .or(tokens)
         .or(progress)
@@ -126,6 +132,23 @@ async fn start_run(
             Ok(json_response(&progress, StatusCode::CREATED))
         }
         Err(error) => Ok(error_response(error.to_string(), StatusCode::BAD_REQUEST)),
+    }
+}
+
+async fn cache_coverage(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    match views::cache::coverage(
+        state.processed_block_cache.as_deref(),
+        state
+            .config
+            .processed_block_cache_dir
+            .as_ref()
+            .map(|_| state.config.processed_block_cache_blocks),
+    ) {
+        Ok(coverage) => Ok(json_response(&coverage, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to inspect processed block cache: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
     }
 }
 

@@ -1,10 +1,12 @@
 mod conversion;
+pub mod processed_block_cashe;
 pub mod types;
 
 use crate::tx_processor::data_models::{
     ContractCreationEvent, ProcessedAccessListItem, ProcessedTransaction, TransactionFees,
 };
 use crate::tx_processor::{AddressBalanceChangeCalculator, TransactionTraceProcessor, TxProcessor};
+use crate::{processed_block_trace_config_hash, ProcessedBlockCacheKey, ProcessedBlockCacheStore};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_rpc_types_trace::geth::PreStateFrame;
 use eyre::{bail, Result};
@@ -22,7 +24,9 @@ use std::time::Instant;
 use tx_simulator::block_simulation::BlockTraceEngine;
 
 pub use types::{
-    BlockBatchOptions, ProcessRawBlockProfile, ProcessedBlock, ProcessedBlockTransactions,
+    BlockBatchOptions, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
+    ProcessRawBlockProfile, ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
+    PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 
 /// High-level orchestration for processing entire blocks worth of transactions.
@@ -127,6 +131,93 @@ impl BlockProcessor {
             .fetch_db_block_with_trace_engine(block_number, include_traces, trace_engine)
             .await?;
         self.process_raw_block(raw).await
+    }
+
+    /// Process a DB-backed block through the persistent processed-block cache.
+    pub async fn process_block_cached(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+        trace_engine: BlockTraceEngine,
+        cache_store: &ProcessedBlockCacheStore,
+    ) -> Result<ProcessedBlock> {
+        Ok(self
+            .process_block_cached_with_mode(
+                block_number,
+                include_traces,
+                trace_engine,
+                cache_store,
+                PersistentProcessedBlockCacheMode::ReadWrite,
+            )
+            .await?
+            .block)
+    }
+
+    /// Process a DB-backed block through the persistent processed-block cache with metrics.
+    pub async fn process_block_cached_with_mode(
+        &self,
+        block_number: u64,
+        include_traces: bool,
+        trace_engine: BlockTraceEngine,
+        cache_store: &ProcessedBlockCacheStore,
+        cache_mode: PersistentProcessedBlockCacheMode,
+    ) -> Result<CachedProcessedBlock> {
+        let provider = self
+            .provider()
+            .ok_or_else(|| eyre::eyre!("cached block processing requires MDBX provider access"))?;
+        let chain_id = provider.chain_id();
+        let header = provider.fetch_block_header_only(block_number).await?;
+        let key = ProcessedBlockCacheKey::new(
+            chain_id,
+            block_number,
+            header.hash,
+            trace_engine,
+            processed_block_trace_config_hash(include_traces),
+        );
+
+        let mut cache_read = std::time::Duration::default();
+        let mut cache_write = std::time::Duration::default();
+
+        if cache_mode != PersistentProcessedBlockCacheMode::Refresh {
+            let read_started = Instant::now();
+            let cached = cache_store.get(&key)?;
+            cache_read = read_started.elapsed();
+            if let Some(block) = cached {
+                return Ok(CachedProcessedBlock {
+                    block,
+                    cache_hit: true,
+                    cache_read,
+                    cache_write,
+                    source: ProcessedBlockSource::Cache,
+                });
+            }
+        }
+
+        let block = self
+            .process_block_with_trace_engine(block_number, include_traces, trace_engine)
+            .await?;
+        if block.header.hash != header.hash {
+            bail!(
+                "processed block hash changed during cache fill for {}: header {:?}, processed {:?}",
+                block_number,
+                header.hash,
+                block.header.hash
+            );
+        }
+
+        if cache_mode != PersistentProcessedBlockCacheMode::ReadOnly {
+            let write_started = Instant::now();
+            cache_store.put(&key, &block)?;
+            cache_write = write_started.elapsed();
+        }
+
+        Ok(CachedProcessedBlock {
+            block,
+            cache_hit: false,
+            cache_read,
+            cache_write,
+            source: ProcessedBlockSource::Processed,
+        })
     }
 
     /// Access the underlying query provider if configured (MDBX mode only).

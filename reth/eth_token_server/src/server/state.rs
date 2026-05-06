@@ -11,6 +11,7 @@ use crate::runs::RunManager;
 pub struct ServerState {
     pub config: TokenServerConfig,
     pub runs: RunManager,
+    pub processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
 }
 
 impl ServerState {
@@ -24,8 +25,12 @@ impl ServerState {
             Some(path) => Some(Arc::new(TokenProcessedBlockCacheStore::open(path)?)),
             None => None,
         };
-        let runs = RunManager::new(config.clone(), provider, processed_block_cache);
+        let runs = RunManager::new(config.clone(), provider, processed_block_cache.clone());
 
-        Ok(Self { config, runs })
+        Ok(Self {
+            config,
+            runs,
+            processed_block_cache,
+        })
     }
 }

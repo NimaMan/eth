@@ -24,14 +24,24 @@ pub mod tx_builder;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
+pub use block_processor::processed_block_cashe::{
+    TokenProcessedBlockCacheBlockRange, TokenProcessedBlockCacheChainCoverage,
+    TokenProcessedBlockCacheCoverage, TokenProcessedBlockCacheKey,
+    TokenProcessedBlockCacheRangePlan, TokenProcessedBlockCacheRead,
+    TokenProcessedBlockCacheReader, TokenProcessedBlockCacheStore, TokenProcessedBlockCacheWrite,
+    TokenProcessedBlockCacheWriter,
+};
 pub use block_processor::{
-    BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockTransactions,
+    BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,
+    ProcessedBlock, ProcessedBlockSource, ProcessedBlockTransactions,
+    PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 pub use live::{
     LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
 };
 pub use processed_tx_provider::{
-    AddressProcessedTxProvider, ProcessedTxProvider, TokenProcessedTxProvider,
+    processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,
+    ProcessedBlockCacheStore, ProcessedTxProvider, TokenProcessedTxProvider,
 };
 pub use tx_processor::data_models::{ProcessedTransaction, TransactionFees};
 // Export ERC20 token buy-approve-sell simulator through simulator module
