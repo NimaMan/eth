@@ -7,7 +7,7 @@ use std::time::Instant;
 use eth_token::manager::{BlockTokenProcessor, RethChainDiscoveryProvider, TrackedTokenStatus};
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
-use tx_processor::BlockProcessor;
+use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_BLOCK_COUNT: u64 = 1_000;
@@ -69,6 +69,7 @@ async fn main() -> Result<()> {
     let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
     let tx_processor = BlockProcessor::new(provider.clone());
     let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut token_processor = BlockTokenProcessor::new(args.history_limit);
 
     let latest = provider.get_latest_block()?;
@@ -113,7 +114,7 @@ async fn main() -> Result<()> {
 
         let token_apply_started = Instant::now();
         let report = token_processor
-            .process_block_with_discovery_provider(&block, &discovery_provider)
+            .process_block_with_discovery_provider(&block, &discovery_provider, &pool_simulator)
             .await;
         let token_apply_elapsed = token_apply_started.elapsed();
 

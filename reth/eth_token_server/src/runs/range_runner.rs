@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use eth_token::manager::{RethChainDiscoveryProvider, TokenBlockUpdateReport};
 use reth_chain_query::RethQueryProvider;
-use tx_processor::{BlockProcessor, ProcessedBlock, ProcessedBlockSource};
+use tx_processor::{BlockProcessor, PoolBuySellSimulator, ProcessedBlock, ProcessedBlockSource};
 
 use crate::processed_block_cache::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
 
@@ -30,6 +30,7 @@ pub async fn run_range(
 
     let tx_processor = BlockProcessor::new(provider.clone());
     let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
     if let Some(cache_store) = processed_block_cache.as_deref() {
         prune_processed_block_cache(cache_store, chain_id, processed_block_cache_blocks);
@@ -78,7 +79,11 @@ pub async fn run_range(
         let mut state = run.state.write().await;
         let report = state
             .processor
-            .process_block_with_discovery_provider(&processed.block, &discovery_provider)
+            .process_block_with_discovery_provider(
+                &processed.block,
+                &discovery_provider,
+                &pool_simulator,
+            )
             .await;
         let token_apply_elapsed = token_apply_started.elapsed();
 

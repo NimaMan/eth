@@ -1,15 +1,14 @@
-use std::ops::{Deref, DerefMut};
-
 use serde::{Deserialize, Serialize};
-use tx_processor::ProcessedBlock;
+use tx_processor::{LivePoolBuySellSimulator, ProcessedBlock};
 
 use crate::manager::{
-    BlockTokenProcessor, ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
+    BlockTokenProcessor, ProcessedTokenUpdateRouter, TokenBlockUpdateReport,
+    TokenDiscoveryProvider, TokenMetadataProvider, TokenRegistry, UniswapV2PoolMetadataProvider,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveBlockTokenProcessor {
-    pub block_processor: BlockTokenProcessor,
+    block_processor: BlockTokenProcessor,
 }
 
 impl LiveBlockTokenProcessor {
@@ -40,22 +39,79 @@ impl LiveBlockTokenProcessor {
         self.block_processor
     }
 
-    pub fn process_block_live(&mut self, block: &ProcessedBlock) -> TokenBlockUpdateReport {
-        self.block_processor.process_block(block)
-    }
-}
-
-impl Deref for LiveBlockTokenProcessor {
-    type Target = BlockTokenProcessor;
-
-    fn deref(&self) -> &Self::Target {
+    pub fn block_processor(&self) -> &BlockTokenProcessor {
         &self.block_processor
     }
-}
 
-impl DerefMut for LiveBlockTokenProcessor {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.block_processor
+    pub fn registry(&self) -> &TokenRegistry {
+        &self.block_processor.registry
+    }
+
+    pub async fn process_block_live(
+        &mut self,
+        block: &ProcessedBlock,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport {
+        self.block_processor
+            .process_block_with_live_pool_simulator(block, pool_simulator)
+            .await
+    }
+
+    pub async fn process_block_live_with_metadata_provider<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenMetadataProvider,
+    {
+        self.block_processor
+            .process_block_with_metadata_provider_and_live_pool_simulator(
+                block,
+                metadata_provider,
+                pool_simulator,
+            )
+            .await
+    }
+
+    pub async fn process_block_live_with_discovery_provider<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
+        self.block_processor
+            .process_block_with_discovery_provider_and_live_pool_simulator(
+                block,
+                discovery_provider,
+                pool_simulator,
+            )
+            .await
+    }
+
+    pub async fn process_block_live_with_token_and_pool_discovery_providers<T, V>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &T,
+        pool_metadata_provider: &V,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        T: TokenMetadataProvider,
+        V: UniswapV2PoolMetadataProvider,
+    {
+        self.block_processor
+            .process_block_with_token_and_pool_discovery_providers_and_live_pool_simulator(
+                block,
+                metadata_provider,
+                pool_metadata_provider,
+                pool_simulator,
+            )
+            .await
     }
 }
 
@@ -185,10 +241,10 @@ mod tests {
 
         let processor = LiveBlockTokenProcessor::with_registry(registry, 100);
 
-        assert!(processor.is_live_mode);
+        assert!(processor.block_processor().is_live_mode);
         assert!(
             processor
-                .registry
+                .registry()
                 .token("0x1111111111111111111111111111111111111111")
                 .unwrap()
                 .is_live_mode
@@ -216,13 +272,14 @@ mod tests {
         };
 
         let report = processor
-            .process_block_with_metadata_provider(&block, &provider)
+            .block_processor
+            .process_block_with_metadata_provider_test_simulator(&block, &provider)
             .await;
 
         assert_eq!(report.failed_transaction_count, 0);
         assert!(
             processor
-                .registry
+                .registry()
                 .token("0x1111111111111111111111111111111111111111")
                 .unwrap()
                 .is_live_mode

@@ -2,8 +2,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
-use tx_processor::{ProcessedBlock, ProcessedTransaction};
+use tx_processor::{
+    LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedBlock, ProcessedTransaction,
+};
 
+use super::update_router::V2TradingSimulation;
 use super::ProcessedTokenUpdateRouter;
 use super::{
     address_string, hash_string, normalize_address, TokenDiscoveryProvider, TokenMetadataLookup,
@@ -93,7 +96,41 @@ impl BlockTokenProcessor {
         self.registry.set_live_mode(is_live_mode);
     }
 
-    pub fn process_block(&mut self, block: &ProcessedBlock) -> TokenBlockUpdateReport {
+    pub async fn process_block(
+        &mut self,
+        block: &ProcessedBlock,
+        pool_simulator: &PoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport {
+        self.process_block_with_trading_simulation(
+            block,
+            V2TradingSimulation::Historical(pool_simulator),
+        )
+        .await
+    }
+
+    pub(crate) async fn process_block_with_live_pool_simulator(
+        &mut self,
+        block: &ProcessedBlock,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport {
+        self.process_block_with_trading_simulation(block, V2TradingSimulation::Live(pool_simulator))
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn process_block_with_test_simulator(
+        &mut self,
+        block: &ProcessedBlock,
+    ) -> TokenBlockUpdateReport {
+        self.process_block_with_trading_simulation(block, V2TradingSimulation::Noop)
+            .await
+    }
+
+    async fn process_block_with_trading_simulation(
+        &mut self,
+        block: &ProcessedBlock,
+        trading_simulation: V2TradingSimulation<'_>,
+    ) -> TokenBlockUpdateReport {
         let block_number = block.header.number;
         if self.processed_blocks.contains_key(&block_number) {
             return TokenBlockUpdateReport {
@@ -122,6 +159,7 @@ impl BlockTokenProcessor {
         let created_token_addresses = Vec::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
+        let mut prior_control_txs_by_sender = HashMap::new();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -134,13 +172,22 @@ impl BlockTokenProcessor {
                 continue;
             }
 
+            let prior_txs = simulation_prior_txs_for_sender(
+                &mut prior_control_txs_by_sender,
+                &self.registry,
+                &tx.processed,
+            );
             match self
                 .update_router
-                .update_registry_from_processed_transaction(
+                .update_registry_from_processed_transaction_with_trading_simulation(
                     &mut self.registry,
                     &self.token_index,
                     &tx.processed,
-                ) {
+                    trading_simulation,
+                    &prior_txs,
+                )
+                .await
+            {
                 Ok(reports) => {
                     processed_transaction_count += 1;
                     for report in reports {
@@ -187,6 +234,58 @@ impl BlockTokenProcessor {
         &mut self,
         block: &ProcessedBlock,
         metadata_provider: &P,
+        pool_simulator: &PoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenMetadataProvider,
+    {
+        self.process_block_with_metadata_provider_and_trading_simulation(
+            block,
+            metadata_provider,
+            V2TradingSimulation::Historical(pool_simulator),
+        )
+        .await
+    }
+
+    pub(crate) async fn process_block_with_metadata_provider_and_live_pool_simulator<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenMetadataProvider,
+    {
+        self.process_block_with_metadata_provider_and_trading_simulation(
+            block,
+            metadata_provider,
+            V2TradingSimulation::Live(pool_simulator),
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn process_block_with_metadata_provider_test_simulator<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &P,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenMetadataProvider,
+    {
+        self.process_block_with_metadata_provider_and_trading_simulation(
+            block,
+            metadata_provider,
+            V2TradingSimulation::Noop,
+        )
+        .await
+    }
+
+    async fn process_block_with_metadata_provider_and_trading_simulation<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &P,
+        trading_simulation: V2TradingSimulation<'_>,
     ) -> TokenBlockUpdateReport
     where
         P: TokenMetadataProvider,
@@ -220,6 +319,7 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
+        let mut prior_control_txs_by_sender = HashMap::new();
 
         for tx in transactions {
             index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
@@ -251,13 +351,22 @@ impl BlockTokenProcessor {
                 }
             }
 
+            let prior_txs = simulation_prior_txs_for_sender(
+                &mut prior_control_txs_by_sender,
+                &self.registry,
+                &tx.processed,
+            );
             match self
                 .update_router
-                .update_registry_from_processed_transaction(
+                .update_registry_from_processed_transaction_with_trading_simulation(
                     &mut self.registry,
                     &self.token_index,
                     &tx.processed,
-                ) {
+                    trading_simulation,
+                    &prior_txs,
+                )
+                .await
+            {
                 Ok(reports) => {
                     processed_transaction_count += 1;
                     for report in reports {
@@ -304,6 +413,7 @@ impl BlockTokenProcessor {
         &mut self,
         block: &ProcessedBlock,
         discovery_provider: &P,
+        pool_simulator: &PoolBuySellSimulator,
     ) -> TokenBlockUpdateReport
     where
         P: TokenDiscoveryProvider,
@@ -312,6 +422,25 @@ impl BlockTokenProcessor {
             block,
             discovery_provider,
             discovery_provider,
+            pool_simulator,
+        )
+        .await
+    }
+
+    pub(crate) async fn process_block_with_discovery_provider_and_live_pool_simulator<P>(
+        &mut self,
+        block: &ProcessedBlock,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        P: TokenDiscoveryProvider,
+    {
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
+            block,
+            discovery_provider,
+            discovery_provider,
+            V2TradingSimulation::Live(pool_simulator),
         )
         .await
     }
@@ -321,6 +450,70 @@ impl BlockTokenProcessor {
         block: &ProcessedBlock,
         metadata_provider: &T,
         pool_metadata_provider: &V,
+        pool_simulator: &PoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        T: TokenMetadataProvider,
+        V: UniswapV2PoolMetadataProvider,
+    {
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
+            block,
+            metadata_provider,
+            pool_metadata_provider,
+            V2TradingSimulation::Historical(pool_simulator),
+        )
+        .await
+    }
+
+    pub(crate) async fn process_block_with_token_and_pool_discovery_providers_and_live_pool_simulator<
+        T,
+        V,
+    >(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &T,
+        pool_metadata_provider: &V,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> TokenBlockUpdateReport
+    where
+        T: TokenMetadataProvider,
+        V: UniswapV2PoolMetadataProvider,
+    {
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
+            block,
+            metadata_provider,
+            pool_metadata_provider,
+            V2TradingSimulation::Live(pool_simulator),
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn process_block_with_token_and_pool_discovery_providers_test_simulator<T, V>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &T,
+        pool_metadata_provider: &V,
+    ) -> TokenBlockUpdateReport
+    where
+        T: TokenMetadataProvider,
+        V: UniswapV2PoolMetadataProvider,
+    {
+        self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
+            block,
+            metadata_provider,
+            pool_metadata_provider,
+            V2TradingSimulation::Noop,
+        )
+        .await
+    }
+
+    async fn process_block_with_token_and_pool_discovery_providers_and_trading_simulation<T, V>(
+        &mut self,
+        block: &ProcessedBlock,
+        metadata_provider: &T,
+        pool_metadata_provider: &V,
+        trading_simulation: V2TradingSimulation<'_>,
     ) -> TokenBlockUpdateReport
     where
         T: TokenMetadataProvider,
@@ -355,6 +548,7 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
+        let mut prior_control_txs_by_sender = HashMap::new();
 
         for tx in transactions {
             index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
@@ -386,13 +580,20 @@ impl BlockTokenProcessor {
                 }
             }
 
+            let prior_txs = simulation_prior_txs_for_sender(
+                &mut prior_control_txs_by_sender,
+                &self.registry,
+                &tx.processed,
+            );
             match self
                 .update_router
-                .update_registry_from_processed_transaction_with_discovery(
+                .update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
                     &mut self.registry,
                     &self.token_index,
                     &tx.processed,
                     pool_metadata_provider,
+                    trading_simulation,
+                    &prior_txs,
                 )
                 .await
             {
@@ -509,6 +710,56 @@ impl BlockTokenProcessor {
         };
         self.token_index.index_token(token, status);
     }
+}
+
+fn simulation_prior_txs_for_sender(
+    prior_control_txs_by_sender: &mut HashMap<Address, Vec<ProcessedTransaction>>,
+    registry: &TokenRegistry,
+    tx: &ProcessedTransaction,
+) -> Vec<ProcessedTransaction> {
+    let mut prior_txs = prior_control_txs_by_sender
+        .get(&tx.from_address)
+        .cloned()
+        .unwrap_or_default();
+
+    if transaction_touches_tracked_control_address(registry, tx) {
+        prior_txs.push(tx.clone());
+        prior_control_txs_by_sender
+            .entry(tx.from_address)
+            .or_default()
+            .push(tx.clone());
+    }
+
+    prior_txs.sort_by_key(|tx| tx.tx_index);
+    prior_txs.dedup_by_key(|tx| tx.hash);
+    prior_txs
+}
+
+fn transaction_touches_tracked_control_address(
+    registry: &TokenRegistry,
+    tx: &ProcessedTransaction,
+) -> bool {
+    let tx_addresses = tx_address_strings(tx);
+    registry.tokens.values().any(|token| {
+        token
+            .token_control_addresses
+            .iter()
+            .any(|address| tx_addresses.contains(&normalize_address(address)))
+    })
+}
+
+fn tx_address_strings(tx: &ProcessedTransaction) -> BTreeSet<String> {
+    let mut addresses = BTreeSet::new();
+    addresses.extend(tx.unique_addresses.iter().map(address_string));
+    addresses.extend(tx.erc20_contracts.iter().map(address_string));
+    addresses.insert(address_string(&tx.from_address));
+    if let Some(address) = tx.to_address {
+        addresses.insert(address_string(&address));
+    }
+    if let Some(address) = tx.contract_address {
+        addresses.insert(address_string(&address));
+    }
+    addresses
 }
 
 fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<Address> {

@@ -361,8 +361,8 @@ mod tests {
         assert_eq!(token.total_supply_from_transfers(), 5.0);
     }
 
-    #[test]
-    fn block_processor_sorts_transactions_and_tracks_block_report() {
+    #[tokio::test]
+    async fn block_processor_sorts_transactions_and_tracks_block_report() {
         let mut registry = TokenRegistry::new();
         registry.add_token(metadata());
         let mut processor = BlockTokenProcessor::with_registry(registry, 100);
@@ -394,7 +394,7 @@ mod tests {
             transactions: vec![block_transaction(sync_tx), block_transaction(pair_tx)],
         };
 
-        let report = processor.process_block(&block);
+        let report = processor.process_block_with_test_simulator(&block).await;
 
         assert!(!report.already_processed);
         assert_eq!(report.block_number, 100);
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(pool.base.token_reserve(), 100.0);
         assert_eq!(pool.base.denom_reserve(), 2.0);
 
-        let duplicate = processor.process_block(&block);
+        let duplicate = processor.process_block_with_test_simulator(&block).await;
         assert!(duplicate.already_processed);
         assert_eq!(duplicate.processed_transaction_count, 0);
     }
@@ -469,7 +469,7 @@ mod tests {
         };
 
         let report = processor
-            .process_block_with_metadata_provider(&block, &provider)
+            .process_block_with_metadata_provider_test_simulator(&block, &provider)
             .await;
 
         assert_eq!(
@@ -532,7 +532,7 @@ mod tests {
         };
 
         let report = processor
-            .process_block_with_token_and_pool_discovery_providers(
+            .process_block_with_token_and_pool_discovery_providers_test_simulator(
                 &block,
                 &token_metadata_provider,
                 &pool_metadata_provider,
@@ -581,7 +581,7 @@ mod tests {
         };
 
         let report = processor
-            .process_block_with_token_and_pool_discovery_providers(
+            .process_block_with_token_and_pool_discovery_providers_test_simulator(
                 &block,
                 &token_metadata_provider,
                 &pool_metadata_provider,

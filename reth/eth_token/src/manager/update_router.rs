@@ -23,9 +23,11 @@ pub struct ProcessedTokenUpdateRouter {
 }
 
 #[derive(Clone, Copy)]
-enum V2TradingSimulation<'a> {
+pub(crate) enum V2TradingSimulation<'a> {
     Historical(&'a PoolBuySellSimulator),
     Live(&'a LivePoolBuySellSimulator),
+    #[cfg(test)]
+    Noop,
 }
 
 impl ProcessedTokenUpdateRouter {
@@ -120,7 +122,7 @@ impl ProcessedTokenUpdateRouter {
         .await
     }
 
-    async fn update_registry_from_processed_transaction_with_trading_simulation(
+    pub(crate) async fn update_registry_from_processed_transaction_with_trading_simulation(
         &self,
         registry: &mut TokenRegistry,
         token_index: &TrackedTokenIndex,
@@ -268,7 +270,9 @@ impl ProcessedTokenUpdateRouter {
         .await
     }
 
-    async fn update_registry_from_processed_transaction_with_discovery_and_trading_simulation<P>(
+    pub(crate) async fn update_registry_from_processed_transaction_with_discovery_and_trading_simulation<
+        P,
+    >(
         &self,
         registry: &mut TokenRegistry,
         token_index: &TrackedTokenIndex,
@@ -780,6 +784,8 @@ async fn simulate_updated_v2_pools(
                 pool.evaluate_live_trading_status_v2(pool_simulator, &tx_context, config.clone())
                     .await?;
             }
+            #[cfg(test)]
+            V2TradingSimulation::Noop => {}
         }
         simulated.push(pool_address.clone());
     }

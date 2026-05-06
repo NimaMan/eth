@@ -7,7 +7,7 @@ use eth_token_server::processed_block_cache::{
     TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore,
 };
 use reth_chain_query::RethQueryProvider;
-use tx_processor::BlockProcessor;
+use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -16,6 +16,7 @@ async fn main() -> eyre::Result<()> {
     let processor = BlockProcessor::new(provider.clone());
     let store = TokenProcessedBlockCacheStore::open(&args.cache_dir)?;
     let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut full_token_processor = BlockTokenProcessor::new(args.history_limit);
     let mut cached_token_processor = BlockTokenProcessor::new(args.history_limit);
 
@@ -95,10 +96,14 @@ async fn main() -> eyre::Result<()> {
 
         if args.verify_token_output {
             let full_report = full_token_processor
-                .process_block_with_discovery_provider(&block, &discovery_provider)
+                .process_block_with_discovery_provider(&block, &discovery_provider, &pool_simulator)
                 .await;
             let cached_report = cached_token_processor
-                .process_block_with_discovery_provider(&cached, &discovery_provider)
+                .process_block_with_discovery_provider(
+                    &cached,
+                    &discovery_provider,
+                    &pool_simulator,
+                )
                 .await;
             if full_report != cached_report {
                 eyre::bail!("token report mismatch after cached block {block_number}");
