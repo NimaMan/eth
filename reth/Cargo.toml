@@ -8,6 +8,7 @@ members = [
     "tx_processor",
     "reth_chain_query",
     "eth_token",
+    "eth_token_server",
     "mempool_processor",
     "pyreth",
 ]

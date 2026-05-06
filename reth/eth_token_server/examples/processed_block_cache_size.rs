@@ -1,0 +1,167 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use eth_token::manager::{BlockTokenProcessor, RethChainDiscoveryProvider};
+use eth_token_server::runs::processed_block_cache::{
+    TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore,
+};
+use reth_chain_query::RethQueryProvider;
+use tx_processor::BlockProcessor;
+
+#[tokio::main]
+async fn main() -> eyre::Result<()> {
+    let args = Args::parse()?;
+    let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
+    let processor = BlockProcessor::new(provider.clone());
+    let store = TokenProcessedBlockCacheStore::open(&args.cache_dir)?;
+    let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let mut full_token_processor = BlockTokenProcessor::new(args.history_limit);
+    let mut cached_token_processor = BlockTokenProcessor::new(args.history_limit);
+
+    let mut processed_ms = Vec::new();
+    let mut write_ms = Vec::new();
+    let mut read_ms = Vec::new();
+
+    for block_number in args.start..=args.end {
+        let header = provider.fetch_block_header_only(block_number).await?;
+        let key = TokenProcessedBlockCacheKey::new(provider.chain_id(), &header);
+
+        let process_started = Instant::now();
+        let block = processor.process_block(block_number).await?;
+        processed_ms.push(ms(process_started.elapsed()));
+
+        let write_started = Instant::now();
+        store.put(&key, &block)?;
+        write_ms.push(ms(write_started.elapsed()));
+
+        let read_started = Instant::now();
+        let cached = store
+            .get(&key)?
+            .ok_or_else(|| eyre::eyre!("cache miss immediately after write for {block_number}"))?;
+        read_ms.push(ms(read_started.elapsed()));
+
+        if args.verify_token_output {
+            let full_report = full_token_processor
+                .process_block_with_discovery_provider(&block, &discovery_provider)
+                .await;
+            let cached_report = cached_token_processor
+                .process_block_with_discovery_provider(&cached, &discovery_provider)
+                .await;
+            if full_report != cached_report {
+                eyre::bail!("token report mismatch after cached block {block_number}");
+            }
+            if full_token_processor != cached_token_processor {
+                eyre::bail!("token processor state mismatch after cached block {block_number}");
+            }
+        }
+
+        println!(
+            "block={} txs={} process_ms={:.3} write_ms={:.3} read_ms={:.3}",
+            block_number,
+            cached.transactions.len(),
+            processed_ms.last().copied().unwrap_or_default(),
+            write_ms.last().copied().unwrap_or_default(),
+            read_ms.last().copied().unwrap_or_default()
+        );
+    }
+
+    print_summary("process", &processed_ms);
+    print_summary("write", &write_ms);
+    print_summary("read", &read_ms);
+    Ok(())
+}
+
+struct Args {
+    datadir: String,
+    cache_dir: PathBuf,
+    start: u64,
+    end: u64,
+    history_limit: usize,
+    verify_token_output: bool,
+}
+
+impl Args {
+    fn parse() -> eyre::Result<Self> {
+        let mut datadir = std::env::var("RETH_DATADIR")
+            .unwrap_or_else(|_| "/home/nima/storage/samsung8tb/ethereum/reth".to_string());
+        let mut cache_dir = None;
+        let mut start = None;
+        let mut end = None;
+        let mut history_limit = 1_000;
+        let mut verify_token_output = false;
+
+        let mut args = std::env::args().skip(1);
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--datadir" => {
+                    datadir = args
+                        .next()
+                        .ok_or_else(|| eyre::eyre!("--datadir requires a value"))?;
+                }
+                "--cache-dir" => {
+                    cache_dir =
+                        Some(PathBuf::from(args.next().ok_or_else(|| {
+                            eyre::eyre!("--cache-dir requires a value")
+                        })?));
+                }
+                "--start" => {
+                    start = Some(
+                        args.next()
+                            .ok_or_else(|| eyre::eyre!("--start requires a value"))?
+                            .parse()?,
+                    );
+                }
+                "--end" => {
+                    end = Some(
+                        args.next()
+                            .ok_or_else(|| eyre::eyre!("--end requires a value"))?
+                            .parse()?,
+                    );
+                }
+                "--history-limit" => {
+                    history_limit = args
+                        .next()
+                        .ok_or_else(|| eyre::eyre!("--history-limit requires a value"))?
+                        .parse()?;
+                }
+                "--verify-token-output" => {
+                    verify_token_output = true;
+                }
+                _ => eyre::bail!("unknown argument: {arg}"),
+            }
+        }
+
+        let start = start.ok_or_else(|| eyre::eyre!("--start is required"))?;
+        let end = end.unwrap_or(start);
+        if end < start {
+            eyre::bail!("--end must be greater than or equal to --start");
+        }
+
+        Ok(Self {
+            datadir,
+            cache_dir: cache_dir.ok_or_else(|| eyre::eyre!("--cache-dir is required"))?,
+            start,
+            end,
+            history_limit,
+            verify_token_output,
+        })
+    }
+}
+
+fn print_summary(label: &str, values: &[f64]) {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|left, right| left.total_cmp(right));
+    let avg = sorted.iter().sum::<f64>() / sorted.len().max(1) as f64;
+    let median = sorted[sorted.len() / 2];
+    let p95 = sorted[((sorted.len() as f64 * 0.95).ceil() as usize).saturating_sub(1)];
+    let max = sorted.last().copied().unwrap_or_default();
+    println!(
+        "# summary {label}: count={} avg_ms={avg:.3} median_ms={median:.3} p95_ms={p95:.3} max_ms={max:.3}",
+        sorted.len()
+    );
+}
+
+fn ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
+}
