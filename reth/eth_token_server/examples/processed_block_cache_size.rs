@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eth_token::manager::{BlockTokenProcessor, RethChainDiscoveryProvider};
-use eth_token_server::runs::processed_block_cache::{
+use eth_token_server::processed_block_cache::{
     TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore,
 };
 use reth_chain_query::RethQueryProvider;
@@ -22,6 +22,58 @@ async fn main() -> eyre::Result<()> {
     let mut processed_ms = Vec::new();
     let mut write_ms = Vec::new();
     let mut read_ms = Vec::new();
+
+    if args.read_only && args.verify_token_output {
+        eyre::bail!("--verify-token-output cannot be used with --read-only");
+    }
+
+    if args.read_only {
+        let reader = store.reader();
+        let plan = reader
+            .plan_range(provider.as_ref(), args.start, args.end)
+            .await?;
+        if !plan.is_complete() {
+            let missing = plan.missing_block_numbers();
+            let sample = missing
+                .iter()
+                .take(20)
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            eyre::bail!(
+                "cache missing {} blocks in requested range; first missing: {}",
+                missing.len(),
+                sample
+            );
+        }
+
+        let read_wall_started = Instant::now();
+        let reads = reader.get_many_parallel(&plan.keys)?;
+        let read_wall_ms = ms(read_wall_started.elapsed());
+        let read_count = reads.len();
+
+        for read in reads {
+            let block = read
+                .block
+                .ok_or_else(|| eyre::eyre!("cache miss for {}", read.key.block_number))?;
+            read_ms.push(read.read_ms);
+            println!(
+                "block={} txs={} read_ms={:.3}",
+                read.key.block_number,
+                block.transactions.len(),
+                read_ms.last().copied().unwrap_or_default()
+            );
+        }
+
+        print_summary("read", &read_ms);
+        println!(
+            "# summary read_wall: count={} wall_ms={:.3} avg_wall_ms_per_block={:.3}",
+            read_count,
+            read_wall_ms,
+            read_wall_ms / read_count.max(1) as f64
+        );
+        return Ok(());
+    }
 
     for block_number in args.start..=args.end {
         let header = provider.fetch_block_header_only(block_number).await?;
@@ -66,8 +118,12 @@ async fn main() -> eyre::Result<()> {
         );
     }
 
-    print_summary("process", &processed_ms);
-    print_summary("write", &write_ms);
+    if !processed_ms.is_empty() {
+        print_summary("process", &processed_ms);
+    }
+    if !write_ms.is_empty() {
+        print_summary("write", &write_ms);
+    }
     print_summary("read", &read_ms);
     Ok(())
 }
@@ -79,6 +135,7 @@ struct Args {
     end: u64,
     history_limit: usize,
     verify_token_output: bool,
+    read_only: bool,
 }
 
 impl Args {
@@ -90,6 +147,7 @@ impl Args {
         let mut end = None;
         let mut history_limit = 1_000;
         let mut verify_token_output = false;
+        let mut read_only = false;
 
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -128,6 +186,9 @@ impl Args {
                 "--verify-token-output" => {
                     verify_token_output = true;
                 }
+                "--read-only" => {
+                    read_only = true;
+                }
                 _ => eyre::bail!("unknown argument: {arg}"),
             }
         }
@@ -145,11 +206,17 @@ impl Args {
             end,
             history_limit,
             verify_token_output,
+            read_only,
         })
     }
 }
 
 fn print_summary(label: &str, values: &[f64]) {
+    if values.is_empty() {
+        println!("# summary {label}: count=0");
+        return;
+    }
+
     let mut sorted = values.to_vec();
     sorted.sort_by(|left, right| left.total_cmp(right));
     let avg = sorted.iter().sum::<f64>() / sorted.len().max(1) as f64;

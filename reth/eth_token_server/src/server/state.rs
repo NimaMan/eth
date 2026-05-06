@@ -4,7 +4,8 @@ use eyre::{eyre, Result};
 use reth_chain_query::RethQueryProvider;
 
 use crate::config::TokenServerConfig;
-use crate::runs::{RunManager, TokenProcessedBlockCacheStore};
+use crate::processed_block_cache::TokenProcessedBlockCacheStore;
+use crate::runs::RunManager;
 
 #[derive(Clone)]
 pub struct ServerState {

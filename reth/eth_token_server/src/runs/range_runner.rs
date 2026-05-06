@@ -5,7 +5,8 @@ use eth_token::manager::{RethChainDiscoveryProvider, TokenBlockUpdateReport};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, ProcessedBlock, ProcessedBlockSource};
 
-use super::processed_block_cache::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
+use crate::processed_block_cache::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
+
 use super::progress::{now_unix_secs, RunStatus};
 use super::{RunError, TrackingRun, TrackingRunState};
 
@@ -111,6 +112,7 @@ async fn process_block(
     processed_block_cache: Option<&TokenProcessedBlockCacheStore>,
 ) -> eyre::Result<ProcessedBlockWithMetrics> {
     if let Some(cache_store) = processed_block_cache {
+        let cache_reader = cache_store.reader();
         let provider = tx_processor
             .provider()
             .ok_or_else(|| eyre::eyre!("cached block processing requires MDBX provider access"))?;
@@ -118,7 +120,7 @@ async fn process_block(
         let key = TokenProcessedBlockCacheKey::new(provider.chain_id(), &header);
 
         let read_started = Instant::now();
-        if let Some(block) = cache_store.get(&key)? {
+        if let Some(block) = cache_reader.get(&key)? {
             let cache_metrics = ProcessedBlockCacheMetrics {
                 cache_hit: true,
                 cache_read_ms: read_started.elapsed().as_millis(),
@@ -141,12 +143,13 @@ async fn process_block(
                 block.header.hash
             );
         }
-        let write_started = Instant::now();
-        cache_store.put(&key, &block)?;
+        let write = cache_store
+            .writer(provider.chain_id())
+            .write_processed_block(&block)?;
         let cache_metrics = ProcessedBlockCacheMetrics {
             cache_hit: false,
             cache_read_ms,
-            cache_write_ms: write_started.elapsed().as_millis(),
+            cache_write_ms: write.write_ms,
             source: ProcessedBlockSource::Processed.as_str(),
         };
         return Ok(ProcessedBlockWithMetrics {

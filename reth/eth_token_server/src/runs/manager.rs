@@ -7,10 +7,11 @@ use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::config::TokenServerConfig;
+use crate::processed_block_cache::TokenProcessedBlockCacheStore;
 use crate::views::run::RunSummaryView;
 
 use super::range_runner;
-use super::{ResolvedRunRequest, StartRunRequest, TokenProcessedBlockCacheStore, TrackingRun};
+use super::{ResolvedRunRequest, StartRunRequest, TrackingRun};
 
 #[derive(Clone)]
 pub struct RunManager {

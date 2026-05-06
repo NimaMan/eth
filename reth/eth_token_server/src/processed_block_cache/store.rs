@@ -20,6 +20,9 @@ use tx_processor::{
     ProcessedTransaction, PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 
+use super::reader::TokenProcessedBlockCacheReader;
+use super::writer::TokenProcessedBlockCacheWriter;
+
 const TOKEN_BLOCK_CACHE_SCHEMA_VERSION: u32 = 2;
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
 
@@ -105,6 +108,26 @@ impl TokenProcessedBlockCacheStore {
         let root = root.as_ref().to_path_buf();
         fs::create_dir_all(&root)?;
         Ok(Self { root })
+    }
+
+    pub fn reader(&self) -> TokenProcessedBlockCacheReader {
+        TokenProcessedBlockCacheReader::new(self.clone())
+    }
+
+    pub fn writer(&self, chain_id: u64) -> TokenProcessedBlockCacheWriter {
+        TokenProcessedBlockCacheWriter::new(self.clone(), chain_id)
+    }
+
+    pub fn key_for_block(
+        &self,
+        chain_id: u64,
+        block: &ProcessedBlock,
+    ) -> TokenProcessedBlockCacheKey {
+        TokenProcessedBlockCacheKey::new(chain_id, &block.header)
+    }
+
+    pub fn contains(&self, key: &TokenProcessedBlockCacheKey) -> bool {
+        self.path_for_key(key).exists()
     }
 
     pub fn get(&self, key: &TokenProcessedBlockCacheKey) -> Result<Option<ProcessedBlock>> {
