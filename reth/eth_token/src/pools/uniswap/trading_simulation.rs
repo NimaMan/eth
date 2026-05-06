@@ -4,8 +4,8 @@ use alloy_primitives::{Address, U256};
 use eyre::{eyre, Result};
 use tx_processor::tx_processor::TxProcessor;
 use tx_processor::{
-    check_can_buy_sell_pool, PoolBuySellParameters, PoolBuySellSimulationResult, PoolType,
-    ProcessedTransaction, TxSimulator,
+    LivePoolBuySellSimulator, PoolBuySellParameters, PoolBuySellSimulationResult,
+    PoolBuySellSimulator, PoolType, ProcessedTransaction, TxSimulator,
 };
 
 use crate::pools::base::DEFAULT_TEST_BUY_ETH;
@@ -124,6 +124,17 @@ impl UniswapV2Pool {
         simulator: Arc<TxSimulator>,
         tx_processor: Arc<TxProcessor>,
         tx: &UniswapV2TxContext,
+        config: UniswapV2TradingSimulationConfig,
+    ) -> Result<PoolBuySellSimulationResult> {
+        let pool_simulator = PoolBuySellSimulator::new(simulator, tx_processor);
+        self.evaluate_trading_status_v2_with_pool_simulator(&pool_simulator, tx, config)
+            .await
+    }
+
+    pub async fn evaluate_trading_status_v2_with_pool_simulator(
+        &mut self,
+        pool_simulator: &PoolBuySellSimulator,
+        tx: &UniswapV2TxContext,
         mut config: UniswapV2TradingSimulationConfig,
     ) -> Result<PoolBuySellSimulationResult> {
         if config.block_number.is_none() {
@@ -131,7 +142,30 @@ impl UniswapV2Pool {
         }
 
         let params = self.build_buy_sell_parameters(&config)?;
-        let result = check_can_buy_sell_pool(simulator, tx_processor, params).await?;
+        let result = pool_simulator.check_pool(params).await?;
+        self.apply_trading_simulation_outcome(
+            tx,
+            &UniswapV2TradingSimulationOutcome::from(&result),
+        );
+        Ok(result)
+    }
+
+    pub async fn evaluate_live_trading_status_v2(
+        &mut self,
+        pool_simulator: &LivePoolBuySellSimulator,
+        tx: &UniswapV2TxContext,
+        config: UniswapV2TradingSimulationConfig,
+    ) -> Result<PoolBuySellSimulationResult> {
+        let params = self.build_buy_sell_parameters(&config)?;
+        let result = if let Some(block_number) = config.block_number {
+            pool_simulator
+                .check_pool_at_block(params, block_number)
+                .await?
+        } else {
+            pool_simulator
+                .check_pool_before_live_block(params, tx.block_number)
+                .await?
+        };
         self.apply_trading_simulation_outcome(
             tx,
             &UniswapV2TradingSimulationOutcome::from(&result),
