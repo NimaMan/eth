@@ -28,6 +28,9 @@ Signed chain:
 - performance/rpc_vs_direct_simulation_benchmark.rs: RPC vs direct DB comparison
 - performance/inspector_fusing_test.rs: Inspector reuse benchmark
 
+## Replay Research
+- replay/profile/: Replay-only profiling plan for faster local block tracing
+
 ## Block Tracing
 - block/trace_block_transactions.rs: Trace all txs in a block
 - block/verify_block_trace_rpc_equivalence.rs: Compare local traces with RPC

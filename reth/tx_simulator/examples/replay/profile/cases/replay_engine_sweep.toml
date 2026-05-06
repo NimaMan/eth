@@ -1,0 +1,29 @@
+# Initial replay-only benchmark case.
+
+blocks = { start = 25028579, end = 25028598 }
+iterations = 3
+
+engines = [
+  "baseline-fresh",
+  "tracing-fused",
+  "reth-debug",
+]
+
+metrics = [
+  "total_ms",
+  "block_hash_lookup_ms",
+  "block_load_ms",
+  "state_open_ms",
+  "sender_recovery_ms",
+  "evm_env_ms",
+  "tx_env_ms",
+  "inspector_build_ms",
+  "evm_exec_ms",
+  "trace_build_ms",
+  "db_commit_ms",
+  "account_reads",
+  "storage_reads",
+  "code_reads",
+  "block_hash_reads",
+  "provider_read_ms",
+]

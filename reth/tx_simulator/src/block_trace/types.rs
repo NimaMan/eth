@@ -60,3 +60,62 @@ pub struct TracerConfig {
     /// Include stack snapshots
     pub with_stack: bool,
 }
+
+/// Traces plus timing and state-read measurements for one block replay.
+#[derive(Debug, Clone)]
+pub struct ProfiledBlockTrace {
+    pub traces: Vec<TraceResult>,
+    pub profile: BlockReplayProfile,
+}
+
+/// Cold replay timing breakdown for one block.
+#[derive(Debug, Clone, Default)]
+pub struct BlockReplayProfile {
+    pub engine: &'static str,
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub total_ms: f64,
+    pub block_hash_lookup_ms: f64,
+    pub block_load_ms: f64,
+    pub state_open_ms: f64,
+    pub sender_recovery_ms: f64,
+    pub evm_env_ms: f64,
+    pub tx_env_ms: f64,
+    pub inspector_build_ms: f64,
+    pub evm_exec_ms: f64,
+    pub trace_build_ms: f64,
+    pub db_commit_ms: f64,
+    pub tx_count: usize,
+    pub gas_used: u64,
+    pub trace_node_count: usize,
+    pub errors: usize,
+    pub state_reads: StateReadProfile,
+    pub tx_profiles: Vec<TransactionReplayProfile>,
+}
+
+/// Backing provider misses observed below `CacheDB`.
+#[derive(Debug, Clone, Default)]
+pub struct StateReadProfile {
+    pub account_reads: u64,
+    pub storage_reads: u64,
+    pub code_reads: u64,
+    pub block_hash_reads: u64,
+    pub provider_read_ms: f64,
+}
+
+/// Optional per-transaction replay timing row.
+#[derive(Debug, Clone, Default)]
+pub struct TransactionReplayProfile {
+    pub tx_index: usize,
+    pub tx_hash: B256,
+    pub gas_used: u64,
+    pub trace_nodes: usize,
+    pub sender_recovery_ms: f64,
+    pub evm_env_ms: f64,
+    pub tx_env_ms: f64,
+    pub inspector_build_ms: f64,
+    pub evm_exec_ms: f64,
+    pub trace_build_ms: f64,
+    pub db_commit_ms: f64,
+    pub errors: usize,
+}

@@ -9,6 +9,7 @@ tokio = { version = "1", features = ["full"] }
 eyre = "0.6"
 tracing = "0.1"
 futures = "0.3"
+clap = { version = "4.5", features = ["derive"] }
 
 # Ethereum types
 alloy-primitives = { version = "1.5.7", features = ["rlp"] }
@@ -133,6 +134,10 @@ path = "examples/block/trace_block_transactions.rs"
 [[example]]
 name = "verify_block_trace_rpc_equivalence"
 path = "examples/block/verify_block_trace_rpc_equivalence.rs"
+
+[[example]]
+name = "profile_replay_engines"
+path = "examples/replay/profile/main.rs"
 
 # Chain data loader diagnostics
 [[example]]
