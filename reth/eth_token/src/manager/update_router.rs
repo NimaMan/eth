@@ -210,15 +210,17 @@ impl ProcessedTokenUpdateRouter {
                 continue;
             }
 
-            let metadata = pool_metadata_provider
-                .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
+            let metadata = optional_uniswap_v2_pool_metadata(
+                pool_metadata_provider,
+                UniswapV2PoolMetadataLookup {
                     tracked_token_address: Some(parse_address_lossy(&token_address)),
                     pool_address: event.pair_address,
                     block_number: tx.block_number,
                     transaction_hash: tx.hash,
                     tx_index: tx.tx_index,
-                })
-                .await?;
+                },
+            )
+            .await?;
 
             let (denom_address, config) = metadata
                 .as_ref()
@@ -278,15 +280,17 @@ impl ProcessedTokenUpdateRouter {
                 continue;
             }
 
-            let Some(metadata) = pool_metadata_provider
-                .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
+            let Some(metadata) = optional_uniswap_v2_pool_metadata(
+                pool_metadata_provider,
+                UniswapV2PoolMetadataLookup {
                     tracked_token_address: Some(parse_address_lossy(&token_address)),
                     pool_address: event.pair_address,
                     block_number: tx.block_number,
                     transaction_hash: tx.hash,
                     tx_index: tx.tx_index,
-                })
-                .await?
+                },
+            )
+            .await?
             else {
                 continue;
             };
@@ -379,15 +383,17 @@ where
             continue;
         }
 
-        let Some(metadata) = pool_metadata_provider
-            .uniswap_v2_pool_metadata(&UniswapV2PoolMetadataLookup {
+        let Some(metadata) = optional_uniswap_v2_pool_metadata(
+            pool_metadata_provider,
+            UniswapV2PoolMetadataLookup {
                 tracked_token_address: None,
                 pool_address,
                 block_number: tx.block_number,
                 transaction_hash: tx.hash,
                 tx_index: tx.tx_index,
-            })
-            .await?
+            },
+        )
+        .await?
         else {
             continue;
         };
@@ -397,6 +403,27 @@ where
     }
 
     Ok(candidates.into_iter().collect())
+}
+
+async fn optional_uniswap_v2_pool_metadata<P>(
+    pool_metadata_provider: &P,
+    lookup: UniswapV2PoolMetadataLookup,
+) -> Result<Option<UniswapV2PoolMetadata>>
+where
+    P: UniswapV2PoolMetadataProvider,
+{
+    match pool_metadata_provider
+        .uniswap_v2_pool_metadata(&lookup)
+        .await
+    {
+        Ok(metadata) => Ok(metadata),
+        Err(error) if is_not_uniswap_v2_pool_metadata_miss(&error.to_string()) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn is_not_uniswap_v2_pool_metadata_miss(message: &str) -> bool {
+    message.contains("token0() view call failed") || message.contains("token1() view call failed")
 }
 
 fn routing_addresses(tx: &ProcessedTransaction) -> BTreeSet<Address> {

@@ -100,8 +100,8 @@ mod tests {
     use alloy_primitives::{address, b256, Bytes, U256};
     use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
     use tx_processor::tx_processor::data_models::{
-        ContractCreationEvent, ERC20TransferEvent, UniswapV2PairCreatedEvent, UniswapV2SwapEvent,
-        UniswapV2SyncEvent,
+        ContractCreationEvent, ERC20TransferEvent, UniswapV2MintEvent, UniswapV2PairCreatedEvent,
+        UniswapV2SwapEvent, UniswapV2SyncEvent,
     };
     use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
@@ -146,6 +146,19 @@ mod tests {
                 self.lookups.borrow_mut().push(lookup.clone());
                 Ok(Some(self.metadata.clone()))
             })
+        }
+    }
+
+    #[derive(Clone)]
+    struct NonV2PoolMetadataProvider;
+
+    impl UniswapV2PoolMetadataProvider for NonV2PoolMetadataProvider {
+        fn uniswap_v2_pool_metadata<'a>(
+            &'a self,
+            _lookup: &'a UniswapV2PoolMetadataLookup,
+        ) -> Pin<Box<dyn Future<Output = eyre::Result<Option<UniswapV2PoolMetadata>>> + 'a>>
+        {
+            Box::pin(async { Err(eyre::eyre!("token0() view call failed or empty output")) })
         }
     }
 
@@ -503,6 +516,41 @@ mod tests {
             .uniswap_v2_pool("0x3333333333333333333333333333333333333333")
             .unwrap();
         assert_eq!(pool.base.denom_reserve(), 2.0);
+    }
+
+    #[tokio::test]
+    async fn block_processor_ignores_false_positive_v2_mint_metadata_miss() {
+        let mut processor = BlockTokenProcessor::new(100);
+        let token_metadata_provider = StaticTokenMetadataProvider::default();
+        let pool_metadata_provider = NonV2PoolMetadataProvider;
+
+        let mut mint_tx = tx();
+        mint_tx.uniswap_v2_mints.push(UniswapV2MintEvent {
+            pair_address: address!("8eea6cc08d824b20efb3bf7c248de694cb1f75f4"),
+            sender: address!("c4dcb059dd98b45b090da8982234c61d0b9e84f9"),
+            amount0: U256::from(172_144_196_175_146_071_u128),
+            amount1: U256::from(114_373_457_271_042_510_297_504_u128),
+            log_index: 1,
+        });
+
+        let block = ProcessedBlock {
+            header: block_header(),
+            transactions: vec![block_transaction(mint_tx)],
+        };
+
+        let report = processor
+            .process_block_with_token_and_pool_discovery_providers(
+                &block,
+                &token_metadata_provider,
+                &pool_metadata_provider,
+            )
+            .await;
+
+        assert_eq!(report.transaction_count, 1);
+        assert_eq!(report.processed_transaction_count, 1);
+        assert_eq!(report.failed_transaction_count, 0);
+        assert!(report.transaction_errors.is_empty());
+        assert!(processor.registry.tokens.is_empty());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
@@ -210,9 +210,10 @@ impl BlockTokenProcessor {
         let mut created_token_addresses = BTreeSet::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
-        let mut prior_tx_hashes = Vec::new();
+        let mut metadata_tx_index = HashMap::new();
 
         for tx in transactions {
+            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
             if let Some(error) = &tx.processing_error {
                 self.last_block_failure_count += 1;
                 transaction_errors.push(TokenTransactionUpdateError {
@@ -220,12 +221,12 @@ impl BlockTokenProcessor {
                     tx_index: tx.processed.tx_index,
                     message: error.clone(),
                 });
-                prior_tx_hashes.push(tx.processed.hash);
                 continue;
             }
 
+            let pending_tx_hashes = pending_metadata_tx_hashes(&metadata_tx_index, &tx.processed);
             match self
-                .discover_created_tokens(&tx.processed, &prior_tx_hashes, metadata_provider)
+                .discover_created_tokens(&tx.processed, &pending_tx_hashes, metadata_provider)
                 .await
             {
                 Ok(created) => {
@@ -265,8 +266,6 @@ impl BlockTokenProcessor {
                     });
                 }
             }
-
-            prior_tx_hashes.push(tx.processed.hash);
         }
 
         if self.start_block.is_none() {
@@ -346,9 +345,10 @@ impl BlockTokenProcessor {
         let mut created_token_addresses = BTreeSet::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
-        let mut prior_tx_hashes = Vec::new();
+        let mut metadata_tx_index = HashMap::new();
 
         for tx in transactions {
+            index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
             if let Some(error) = &tx.processing_error {
                 self.last_block_failure_count += 1;
                 transaction_errors.push(TokenTransactionUpdateError {
@@ -356,12 +356,12 @@ impl BlockTokenProcessor {
                     tx_index: tx.processed.tx_index,
                     message: error.clone(),
                 });
-                prior_tx_hashes.push(tx.processed.hash);
                 continue;
             }
 
+            let pending_tx_hashes = pending_metadata_tx_hashes(&metadata_tx_index, &tx.processed);
             match self
-                .discover_created_tokens(&tx.processed, &prior_tx_hashes, metadata_provider)
+                .discover_created_tokens(&tx.processed, &pending_tx_hashes, metadata_provider)
                 .await
             {
                 Ok(created) => {
@@ -404,8 +404,6 @@ impl BlockTokenProcessor {
                     });
                 }
             }
-
-            prior_tx_hashes.push(tx.processed.hash);
         }
 
         if self.start_block.is_none() {
@@ -434,7 +432,7 @@ impl BlockTokenProcessor {
     async fn discover_created_tokens<P>(
         &mut self,
         tx: &ProcessedTransaction,
-        prior_tx_hashes: &[B256],
+        pending_tx_hashes: &[B256],
         metadata_provider: &P,
     ) -> eyre::Result<Vec<String>>
     where
@@ -448,9 +446,6 @@ impl BlockTokenProcessor {
                 continue;
             }
 
-            let mut pending_tx_hashes = prior_tx_hashes.to_vec();
-            pending_tx_hashes.push(tx.hash);
-
             let lookup = TokenMetadataLookup {
                 token_address,
                 block_number: tx.block_number,
@@ -460,7 +455,7 @@ impl BlockTokenProcessor {
                 tx_index: tx.tx_index,
                 creator_address: tx.from_address,
                 creator_nonce: tx.nonce,
-                pending_tx_hashes,
+                pending_tx_hashes: pending_tx_hashes.to_vec(),
             };
 
             let Some(metadata) = metadata_provider.token_metadata(&lookup).await? else {
@@ -519,4 +514,24 @@ fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<Address> {
     addresses.sort();
     addresses.dedup();
     addresses
+}
+
+fn index_metadata_transaction(index: &mut HashMap<Address, Vec<B256>>, tx: &ProcessedTransaction) {
+    let mut addresses = BTreeSet::new();
+    addresses.insert(tx.from_address);
+    addresses.extend(tx.unique_addresses.iter().copied());
+
+    for address in addresses {
+        index.entry(address).or_default().push(tx.hash);
+    }
+}
+
+fn pending_metadata_tx_hashes(
+    index: &HashMap<Address, Vec<B256>>,
+    tx: &ProcessedTransaction,
+) -> Vec<B256> {
+    index
+        .get(&tx.from_address)
+        .cloned()
+        .unwrap_or_else(|| vec![tx.hash])
 }
