@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
 
+use super::retention::{
+    LiveTokenRetentionDecision, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
+};
 use super::TokenRegistry;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -22,11 +25,24 @@ pub struct TrackedTokenIndexEntry {
     pub updated_sequence: u64,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrackedTokenIndexUpdate {
+    pub token_address: String,
+    pub indexed: bool,
+    pub removed_by_retention: bool,
+    pub evicted_token_address: Option<String>,
+    pub retention_decision: Option<LiveTokenRetentionDecision>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TrackedTokenIndex {
     pub max_size: usize,
     pub entries: HashMap<String, TrackedTokenIndexEntry>,
     pub pool_to_token: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_retention_policy: Option<LiveTokenRetentionPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_retention_report: Option<LiveTokenRetentionReport>,
     token_pool_addresses: HashMap<String, BTreeSet<String>>,
     lru_order: VecDeque<String>,
     sequence: u64,
@@ -38,10 +54,18 @@ impl TrackedTokenIndex {
             max_size: max_size.max(1),
             entries: HashMap::new(),
             pool_to_token: HashMap::new(),
+            live_retention_policy: None,
+            last_retention_report: None,
             token_pool_addresses: HashMap::new(),
             lru_order: VecDeque::new(),
             sequence: 0,
         }
+    }
+
+    pub fn with_live_retention_policy(max_size: usize, policy: LiveTokenRetentionPolicy) -> Self {
+        let mut index = Self::new(max_size);
+        index.live_retention_policy = Some(policy);
+        index
     }
 
     pub fn from_registry(registry: &TokenRegistry, max_size: usize) -> Self {
@@ -50,6 +74,19 @@ impl TrackedTokenIndex {
             index.index_token(token, TrackedTokenStatus::Creation);
         }
         index
+    }
+
+    pub fn set_live_retention_policy(&mut self, policy: Option<LiveTokenRetentionPolicy>) {
+        self.live_retention_policy = policy;
+        self.last_retention_report = None;
+    }
+
+    pub fn live_retention_policy(&self) -> Option<&LiveTokenRetentionPolicy> {
+        self.live_retention_policy.as_ref()
+    }
+
+    pub fn last_retention_report(&self) -> Option<&LiveTokenRetentionReport> {
+        self.last_retention_report.as_ref()
     }
 
     pub fn len(&self) -> usize {
@@ -65,6 +102,7 @@ impl TrackedTokenIndex {
         self.pool_to_token.clear();
         self.token_pool_addresses.clear();
         self.lru_order.clear();
+        self.last_retention_report = None;
         self.sequence = 0;
     }
 
@@ -111,6 +149,116 @@ impl TrackedTokenIndex {
         self.touch(&address);
         self.update_pool_mapping(token);
         self.evict_if_needed()
+    }
+
+    pub fn index_registry_token(
+        &mut self,
+        registry: &mut TokenRegistry,
+        token_address: impl AsRef<str>,
+        token_status: TrackedTokenStatus,
+        current_block: u64,
+    ) -> TrackedTokenIndexUpdate {
+        let token_address = normalize_address(token_address);
+        let retention_decision =
+            self.apply_live_retention_policy_to_token(registry, &token_address, current_block);
+
+        if matches!(retention_decision.as_ref(), Some(decision) if !decision.retain) {
+            registry.tokens.remove(&token_address);
+            self.remove_token(&token_address);
+            return TrackedTokenIndexUpdate {
+                token_address,
+                indexed: false,
+                removed_by_retention: true,
+                evicted_token_address: None,
+                retention_decision,
+            };
+        }
+
+        let Some(token) = registry.tokens.get(&token_address) else {
+            return TrackedTokenIndexUpdate {
+                token_address,
+                indexed: false,
+                removed_by_retention: false,
+                evicted_token_address: None,
+                retention_decision,
+            };
+        };
+        let evicted_token_address = self.index_token(token, token_status);
+
+        if let Some(evicted_token_address) = &evicted_token_address {
+            registry.tokens.remove(evicted_token_address);
+        }
+
+        TrackedTokenIndexUpdate {
+            indexed: match &evicted_token_address {
+                Some(evicted) => evicted != &token_address,
+                None => true,
+            },
+            token_address,
+            removed_by_retention: false,
+            evicted_token_address,
+            retention_decision,
+        }
+    }
+
+    pub fn apply_live_retention_policy(
+        &mut self,
+        registry: &mut TokenRegistry,
+        current_block: u64,
+    ) -> Option<LiveTokenRetentionReport> {
+        let policy = self.live_retention_policy.clone()?;
+        Some(self.apply_retention_policy(registry, &policy, current_block))
+    }
+
+    pub fn apply_retention_policy(
+        &mut self,
+        registry: &mut TokenRegistry,
+        policy: &LiveTokenRetentionPolicy,
+        current_block: u64,
+    ) -> LiveTokenRetentionReport {
+        let mut token_addresses = registry.token_addresses();
+        token_addresses.sort();
+
+        let mut token_decisions = Vec::new();
+        let mut retained_tokens = 0;
+        let mut dropped_tokens = 0;
+        let mut dropped_v2_pool_count = 0;
+
+        for token_address in token_addresses {
+            let Some(decision) = self.apply_retention_policy_to_token(
+                registry,
+                policy,
+                &token_address,
+                current_block,
+            ) else {
+                continue;
+            };
+
+            dropped_v2_pool_count += decision.dropped_v2_pools.len();
+            if decision.retain {
+                retained_tokens += 1;
+                if let Some(token) = registry.token(&token_address) {
+                    self.update_pool_mapping(token);
+                }
+            } else {
+                dropped_tokens += 1;
+                registry.tokens.remove(&token_address);
+                self.remove_token(&token_address);
+            }
+
+            token_decisions.push(decision);
+        }
+
+        let report = LiveTokenRetentionReport {
+            current_block,
+            evaluated_tokens: token_decisions.len(),
+            retained_tokens,
+            dropped_tokens,
+            dropped_v2_pool_count,
+            token_decisions,
+        };
+        self.last_retention_report = Some(report.clone());
+        report
     }
 
     pub fn mark_status(
@@ -181,8 +329,154 @@ impl TrackedTokenIndex {
 
         None
     }
+
+    fn apply_live_retention_policy_to_token(
+        &mut self,
+        registry: &mut TokenRegistry,
+        token_address: &str,
+        current_block: u64,
+    ) -> Option<LiveTokenRetentionDecision> {
+        let policy = self.live_retention_policy.clone()?;
+        self.apply_retention_policy_to_token(registry, &policy, token_address, current_block)
+    }
+
+    fn apply_retention_policy_to_token(
+        &mut self,
+        registry: &mut TokenRegistry,
+        policy: &LiveTokenRetentionPolicy,
+        token_address: &str,
+        current_block: u64,
+    ) -> Option<LiveTokenRetentionDecision> {
+        registry
+            .tokens
+            .get_mut(token_address)
+            .map(|token| policy.apply_to_token(token, current_block))
+    }
 }
 
 fn normalize_address(value: impl AsRef<str>) -> String {
     value.as_ref().trim().to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::erc20::ERC20TokenMetadata;
+    use crate::manager::retention::WETH_ADDRESS;
+    use crate::pools::{BasePoolConfig, UniswapV2Pool};
+
+    const TOKEN_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
+    const SECOND_TOKEN_ADDRESS: &str = "0x2222222222222222222222222222222222222222";
+    const LOW_POOL_ADDRESS: &str = "0x3333333333333333333333333333333333333333";
+    const HIGH_POOL_ADDRESS: &str = "0x4444444444444444444444444444444444444444";
+
+    fn metadata(address: &str) -> ERC20TokenMetadata {
+        ERC20TokenMetadata::new(address, "Token", "TKN", 18, "1000")
+    }
+
+    fn v2_pool(pool_address: &str, token_address: &str, denom_reserve: f64) -> UniswapV2Pool {
+        let mut pool = UniswapV2Pool::new(
+            pool_address,
+            token_address,
+            WETH_ADDRESS,
+            BasePoolConfig {
+                token_decimals: 18,
+                denom_decimals: Some(18),
+                token1_is_denom: Some(true),
+                history_limit: 10,
+                denom_threshold: 0.0,
+                threshold_unit: None,
+                test_buy_amount_eth: 0.01,
+            },
+            ["0x5555555555555555555555555555555555555555"],
+        );
+        pool.base
+            .update_reserves(1_000.0, denom_reserve, 100, 1_700, "0xSYNC");
+        pool
+    }
+
+    #[test]
+    fn retention_policy_prunes_pools_from_index_and_registry_token() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token_with_live_mode(metadata(TOKEN_ADDRESS), true);
+        let token = registry.token_mut(TOKEN_ADDRESS).unwrap();
+        token.add_uniswap_v2_pool(v2_pool(LOW_POOL_ADDRESS, TOKEN_ADDRESS, 0.01));
+        token.add_uniswap_v2_pool(v2_pool(HIGH_POOL_ADDRESS, TOKEN_ADDRESS, 0.2));
+
+        let mut index =
+            TrackedTokenIndex::with_live_retention_policy(10, LiveTokenRetentionPolicy::default());
+        index.index_token(
+            registry.token(TOKEN_ADDRESS).unwrap(),
+            TrackedTokenStatus::Active,
+        );
+        assert_eq!(index.token_for_pool(LOW_POOL_ADDRESS), Some(TOKEN_ADDRESS));
+
+        let report = index
+            .apply_live_retention_policy(&mut registry, 110)
+            .unwrap();
+
+        assert_eq!(report.evaluated_tokens, 1);
+        assert_eq!(report.dropped_v2_pool_count, 1);
+        let token = registry.token(TOKEN_ADDRESS).unwrap();
+        assert!(token.uniswap_v2_pool(LOW_POOL_ADDRESS).is_none());
+        assert!(token.uniswap_v2_pool(HIGH_POOL_ADDRESS).is_some());
+        assert_eq!(index.token_for_pool(LOW_POOL_ADDRESS), None);
+        assert_eq!(index.token_for_pool(HIGH_POOL_ADDRESS), Some(TOKEN_ADDRESS));
+        assert!(index.last_retention_report().is_some());
+    }
+
+    #[test]
+    fn index_registry_token_removes_token_when_policy_drops_it() {
+        let mut policy = LiveTokenRetentionPolicy {
+            drop_tokens_without_retained_pools_after_blocks: Some(10),
+            ..LiveTokenRetentionPolicy::default()
+        };
+        policy.min_other_denom_reserve = 1.0;
+
+        let mut registry = TokenRegistry::new();
+        registry.add_token_with_live_mode(metadata(TOKEN_ADDRESS), true);
+        let token = registry.token_mut(TOKEN_ADDRESS).unwrap();
+        token.add_uniswap_v2_pool(v2_pool(LOW_POOL_ADDRESS, TOKEN_ADDRESS, 0.01));
+
+        let mut index = TrackedTokenIndex::with_live_retention_policy(10, policy);
+        let update = index.index_registry_token(
+            &mut registry,
+            TOKEN_ADDRESS,
+            TrackedTokenStatus::Creation,
+            110,
+        );
+
+        assert!(update.removed_by_retention);
+        assert!(registry.token(TOKEN_ADDRESS).is_none());
+        assert!(!index.contains_token(TOKEN_ADDRESS));
+    }
+
+    #[test]
+    fn index_registry_token_eviction_removes_registry_token() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token(metadata(TOKEN_ADDRESS));
+        registry.add_token(metadata(SECOND_TOKEN_ADDRESS));
+
+        let mut index = TrackedTokenIndex::new(1);
+        let first = index.index_registry_token(
+            &mut registry,
+            TOKEN_ADDRESS,
+            TrackedTokenStatus::Creation,
+            100,
+        );
+        assert!(first.evicted_token_address.is_none());
+
+        let second = index.index_registry_token(
+            &mut registry,
+            SECOND_TOKEN_ADDRESS,
+            TrackedTokenStatus::Creation,
+            101,
+        );
+
+        assert_eq!(second.evicted_token_address.as_deref(), Some(TOKEN_ADDRESS));
+        assert!(registry.token(TOKEN_ADDRESS).is_none());
+        assert!(registry.token(SECOND_TOKEN_ADDRESS).is_some());
+        assert!(index.contains_token(SECOND_TOKEN_ADDRESS));
+    }
 }

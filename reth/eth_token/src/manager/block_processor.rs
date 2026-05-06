@@ -9,9 +9,9 @@ use tx_processor::{
 use super::update_router::V2TradingSimulation;
 use super::ProcessedTokenUpdateRouter;
 use super::{
-    address_string, hash_string, normalize_address, TokenDiscoveryProvider, TokenMetadataLookup,
-    TokenMetadataProvider, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
-    TrackedTokenStatus, UniswapV2PoolMetadataProvider,
+    address_string, hash_string, normalize_address, LiveTokenRetentionPolicy,
+    TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider, TokenRegistry,
+    TokenStateUpdateReport, TrackedTokenIndex, TrackedTokenStatus, UniswapV2PoolMetadataProvider,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;
@@ -94,6 +94,14 @@ impl BlockTokenProcessor {
     pub fn set_live_mode(&mut self, is_live_mode: bool) {
         self.is_live_mode = is_live_mode;
         self.registry.set_live_mode(is_live_mode);
+        if is_live_mode {
+            if self.token_index.live_retention_policy().is_none() {
+                self.token_index
+                    .set_live_retention_policy(Some(LiveTokenRetentionPolicy::default()));
+            }
+        } else {
+            self.token_index.set_live_retention_policy(None);
+        }
     }
 
     pub async fn process_block(
@@ -192,7 +200,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address);
+                        self.refresh_token_index(&report.token_address, block_number);
                         token_updates.push(report);
                     }
                 }
@@ -371,7 +379,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address);
+                        self.refresh_token_index(&report.token_address, block_number);
                         token_updates.push(report);
                     }
                 }
@@ -601,7 +609,7 @@ impl BlockTokenProcessor {
                     processed_transaction_count += 1;
                     for report in reports {
                         updated_token_addresses.insert(report.token_address.clone());
-                        self.refresh_token_index(&report.token_address);
+                        self.refresh_token_index(&report.token_address, block_number);
                         token_updates.push(report);
                     }
                 }
@@ -679,36 +687,48 @@ impl BlockTokenProcessor {
 
             self.registry
                 .add_token_with_live_mode(metadata, self.is_live_mode);
-            let Some(token) = self.registry.token_mut(&token_address) else {
-                continue;
-            };
-            token.handle_contract_creation(
+            {
+                let Some(token) = self.registry.token_mut(&token_address) else {
+                    continue;
+                };
+                token.handle_contract_creation(
+                    tx.block_number,
+                    tx.block_timestamp,
+                    hash_string(&tx.hash),
+                    address_string(&tx.from_address),
+                    tx.nonce,
+                );
+            }
+            self.token_index.index_registry_token(
+                &mut self.registry,
+                &token_address,
+                TrackedTokenStatus::Creation,
                 tx.block_number,
-                tx.block_timestamp,
-                hash_string(&tx.hash),
-                address_string(&tx.from_address),
-                tx.nonce,
             );
-            self.token_index
-                .index_token(token, TrackedTokenStatus::Creation);
             created.push(token_address);
         }
 
         Ok(created)
     }
 
-    fn refresh_token_index(&mut self, token_address: &str) {
-        let Some(token) = self.registry.token(token_address) else {
+    fn refresh_token_index(&mut self, token_address: &str, current_block: u64) {
+        let Some(status) = self.registry.token(token_address).map(|token| {
+            if token.is_scam() {
+                TrackedTokenStatus::InactiveScam
+            } else if token.trading_enabled() {
+                TrackedTokenStatus::Active
+            } else {
+                TrackedTokenStatus::Creation
+            }
+        }) else {
             return;
         };
-        let status = if token.is_scam() {
-            TrackedTokenStatus::InactiveScam
-        } else if token.trading_enabled() {
-            TrackedTokenStatus::Active
-        } else {
-            TrackedTokenStatus::Creation
-        };
-        self.token_index.index_token(token, status);
+        self.token_index.index_registry_token(
+            &mut self.registry,
+            token_address,
+            status,
+            current_block,
+        );
     }
 }
 

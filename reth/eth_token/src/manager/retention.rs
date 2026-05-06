@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use crate::erc20::ERC20Token;
-use crate::manager::{TokenRegistry, TrackedTokenIndex};
 use crate::pools::UniswapV2Pool;
 
 pub const WETH_ADDRESS: &str = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
@@ -145,50 +144,6 @@ impl LiveTokenRetentionPolicy {
         decision
     }
 
-    pub fn apply_to_registry(
-        &self,
-        registry: &mut TokenRegistry,
-        token_index: &mut TrackedTokenIndex,
-        current_block: u64,
-    ) -> LiveTokenRetentionReport {
-        let mut token_addresses = registry.token_addresses();
-        token_addresses.sort();
-
-        let mut token_decisions = Vec::new();
-        let mut retained_tokens = 0;
-        let mut dropped_tokens = 0;
-        let mut dropped_v2_pool_count = 0;
-
-        for token_address in token_addresses {
-            let Some(token) = registry.tokens.get_mut(&token_address) else {
-                continue;
-            };
-
-            let decision = self.apply_to_token(token, current_block);
-            dropped_v2_pool_count += decision.dropped_v2_pools.len();
-
-            if decision.retain {
-                retained_tokens += 1;
-                token_index.update_pool_mapping(token);
-            } else {
-                dropped_tokens += 1;
-                registry.tokens.remove(&token_address);
-                token_index.remove_token(&token_address);
-            }
-
-            token_decisions.push(decision);
-        }
-
-        LiveTokenRetentionReport {
-            current_block,
-            evaluated_tokens: token_decisions.len(),
-            retained_tokens,
-            dropped_tokens,
-            dropped_v2_pool_count,
-            token_decisions,
-        }
-    }
-
     fn pending_token_drop_reason(
         &self,
         reference_block: Option<u64>,
@@ -326,7 +281,6 @@ mod tests {
     use super::*;
 
     use crate::erc20::ERC20TokenMetadata;
-    use crate::manager::{TokenRegistry, TrackedTokenStatus};
     use crate::pools::{BasePoolConfig, UniswapV2Pool};
 
     const TOKEN_ADDRESS: &str = "0x1111111111111111111111111111111111111111";
@@ -424,39 +378,6 @@ mod tests {
         assert_eq!(decision.retained_v2_pools, vec![SECOND_POOL_ADDRESS]);
         assert_eq!(decision.dropped_v2_pools.len(), 1);
         assert_eq!(decision.dropped_v2_pools[0].pool_address, POOL_ADDRESS);
-    }
-
-    #[test]
-    fn registry_apply_prunes_pools_and_updates_index_mapping() {
-        let policy = LiveTokenRetentionPolicy::default();
-        let mut registry = TokenRegistry::new();
-        registry.add_token_with_live_mode(
-            ERC20TokenMetadata::new(TOKEN_ADDRESS, "Token", "TKN", 18, "1000"),
-            true,
-        );
-        let token = registry.token_mut(TOKEN_ADDRESS).unwrap();
-        token.add_uniswap_v2_pool(v2_pool(POOL_ADDRESS, WETH_ADDRESS, 0.01));
-        token.add_uniswap_v2_pool(v2_pool(SECOND_POOL_ADDRESS, WETH_ADDRESS, 0.2));
-
-        let mut index = TrackedTokenIndex::new(10);
-        index.index_token(
-            registry.token(TOKEN_ADDRESS).unwrap(),
-            TrackedTokenStatus::Active,
-        );
-        assert_eq!(index.token_for_pool(POOL_ADDRESS), Some(TOKEN_ADDRESS));
-
-        let report = policy.apply_to_registry(&mut registry, &mut index, 110);
-
-        assert_eq!(report.evaluated_tokens, 1);
-        assert_eq!(report.dropped_v2_pool_count, 1);
-        let token = registry.token(TOKEN_ADDRESS).unwrap();
-        assert!(token.uniswap_v2_pool(POOL_ADDRESS).is_none());
-        assert!(token.uniswap_v2_pool(SECOND_POOL_ADDRESS).is_some());
-        assert_eq!(index.token_for_pool(POOL_ADDRESS), None);
-        assert_eq!(
-            index.token_for_pool(SECOND_POOL_ADDRESS),
-            Some(TOKEN_ADDRESS)
-        );
     }
 
     #[test]

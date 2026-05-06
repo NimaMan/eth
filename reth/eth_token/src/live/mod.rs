@@ -1,8 +1,7 @@
 pub mod block_processor;
-pub mod retention;
 
-pub use block_processor::LiveBlockTokenProcessor;
-pub use retention::{
+pub use crate::manager::{
     LivePoolDenomClass, LivePoolRetentionDecision, LiveTokenRetentionDecision,
     LiveTokenRetentionPolicy, LiveTokenRetentionReport, PoolDropReason, TokenDropReason,
 };
+pub use block_processor::LiveBlockTokenProcessor;

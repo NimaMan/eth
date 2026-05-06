@@ -2,11 +2,10 @@ use serde::{Deserialize, Serialize};
 use tx_processor::{LivePoolBuySellSimulator, ProcessedBlock};
 
 use crate::manager::{
-    BlockTokenProcessor, ProcessedTokenUpdateRouter, TokenBlockUpdateReport,
-    TokenDiscoveryProvider, TokenMetadataProvider, TokenRegistry, UniswapV2PoolMetadataProvider,
+    BlockTokenProcessor, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
+    ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenDiscoveryProvider,
+    TokenMetadataProvider, TokenRegistry, UniswapV2PoolMetadataProvider,
 };
-
-use super::retention::{LiveTokenRetentionPolicy, LiveTokenRetentionReport};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveBlockTokenProcessor {
@@ -54,11 +53,20 @@ impl LiveBlockTokenProcessor {
         policy: &LiveTokenRetentionPolicy,
         current_block: u64,
     ) -> LiveTokenRetentionReport {
-        policy.apply_to_registry(
+        self.block_processor.token_index.apply_retention_policy(
             &mut self.block_processor.registry,
-            &mut self.block_processor.token_index,
+            policy,
             current_block,
         )
+    }
+
+    pub fn apply_index_retention_policy(
+        &mut self,
+        current_block: u64,
+    ) -> Option<LiveTokenRetentionReport> {
+        self.block_processor
+            .token_index
+            .apply_live_retention_policy(&mut self.block_processor.registry, current_block)
     }
 
     pub async fn process_block_live(
@@ -256,6 +264,11 @@ mod tests {
         let processor = LiveBlockTokenProcessor::with_registry(registry, 100);
 
         assert!(processor.block_processor().is_live_mode);
+        assert!(processor
+            .block_processor()
+            .token_index
+            .live_retention_policy()
+            .is_some());
         assert!(
             processor
                 .registry()
