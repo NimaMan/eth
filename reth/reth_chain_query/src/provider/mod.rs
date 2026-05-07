@@ -251,9 +251,9 @@ impl RethQueryProvider {
     // === RethIndex Methods (when available) ===
 
     /// Get all indexed processed block numbers for an address (requires RethIndex).
-    pub fn get_address_blocks(&self, address: Address) -> Result<Vec<u64>> {
+    pub fn get_address_participation_blocks(&self, address: Address) -> Result<Vec<u64>> {
         if let Some(reth_index) = &self.reth_index {
-            reth_index.get_blocks(address)
+            reth_index.get_address_participation_blocks(address)
         } else {
             Err(eyre::eyre!(
                 "RethIndex not available. Enable with with_reth_index()"

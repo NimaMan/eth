@@ -10,9 +10,9 @@ use pyo3::prelude::*;
 use crate::chain_query::common_addresses::register as register_common_addresses;
 use crate::chain_query::function_signatures::register as register_function_signatures;
 use crate::chain_query::{
-    PyAccount, PyAddressBlockIndexFetcher, PyAddressBlockIndexer, PyBalanceChange,
-    PyBalanceChanges, PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo, PyPortfolio,
-    PyTokenMetadata, PyTransactionData,
+    PyAccount, PyAddressBlockParticipationIndexFetcher, PyAddressBlockParticipationIndexer,
+    PyBalanceChange, PyBalanceChanges, PyChainQuery, PyCompleteBalances, PyPoolLiquidityInfo,
+    PyPortfolio, PyTokenMetadata, PyTransactionData,
 };
 use crate::dex::register as register_dex;
 use crate::provider::{
@@ -64,8 +64,8 @@ pub fn pyreth_module(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCompleteBalances>()?;
     m.add_class::<PyTokenMetadata>()?;
     m.add_class::<PyPoolLiquidityInfo>()?;
-    m.add_class::<PyAddressBlockIndexer>()?;
-    m.add_class::<PyAddressBlockIndexFetcher>()?;
+    m.add_class::<PyAddressBlockParticipationIndexer>()?;
+    m.add_class::<PyAddressBlockParticipationIndexFetcher>()?;
     m.add_class::<PyTransactionData>()?;
 
     // Transaction processor classes

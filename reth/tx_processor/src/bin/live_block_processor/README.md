@@ -114,7 +114,7 @@ The Rust-side design now stores candidate block numbers instead of tx numbers:
 
 - Python flag: `index_address_txs`
 - Writer: `eth_data.database.writers.transaction_writer.TransactionAddresstoTxIndexer`
-- Backend: Pyreth `AddressBlockIndexer`
+- Backend: Pyreth `AddressBlockParticipationIndexer`
 - Table: `reth_index/address_to_blocks`
 - Meaning: for each processed block, write every address seen in the block's processed transaction participations to an address -> block-number reverse index once.
 

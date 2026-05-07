@@ -1,2 +1,2 @@
-pub mod address_block_writer;
+pub mod address_block_participation_writer;
 pub mod mempool_arrival_writer;

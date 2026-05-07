@@ -328,10 +328,10 @@ impl PyChainQuery {
     }
 
     /// Get all indexed processed blocks that involve the given address.
-    fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
+    fn address_participation_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let addr = super::utils::parse_address(address)?;
         self.provider
-            .blocks_for_address(addr)
+            .participation_blocks_for_address(addr)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 

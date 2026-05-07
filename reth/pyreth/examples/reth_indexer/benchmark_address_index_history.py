@@ -158,7 +158,7 @@ def _resolve_args() -> argparse.Namespace:
         "--batch-size",
         type=int,
         default=20,
-        help="Number of blocks per AddressBlockIndexer.write_blocks_batch call.",
+        help="Number of blocks per AddressBlockParticipationIndexer.write_block_participation_batch call.",
     )
     parser.add_argument(
         "--per-block",
@@ -196,7 +196,7 @@ def main() -> None:
 
     block_numbers = list(range(start_block, end_block + 1))
     batch_size = max(1, args.batch_size)
-    indexer = pyreth.AddressBlockIndexer()
+    indexer = pyreth.AddressBlockParticipationIndexer()
     stats: List[ChunkStats] = []
 
     print(f"index_dir={index_dir}")
@@ -225,13 +225,13 @@ def main() -> None:
         t0 = time.perf_counter()
         if args.per_block:
             appended_counts = [
-                int(indexer.write_block(item.block_number, item.entries))
+                int(indexer.write_block_participation(item.block_number, item.entries))
                 for item in payload
             ]
         else:
             appended_counts = [
                 int(value)
-                for value in indexer.write_blocks_batch(
+                for value in indexer.write_block_participation_batch(
                     [(item.block_number, item.entries) for item in payload]
                 )
             ]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use eyre::Result;
 
-use crate::reth_index::tables::address_blocks::IndexedBlockNumber;
+use crate::reth_index::tables::address_block_participation::ParticipationBlockNumber;
 use crate::reth_index::RethIndexDB;
 
 /// Addresses touched by a transaction within a block.
@@ -14,15 +14,15 @@ pub struct AddressParticipation {
 }
 
 /// Writer that persists address -> block participation into the RethIndex DB.
-pub struct AddressBlockWriter {
+pub struct AddressBlockParticipationWriter {
     db: Arc<RethIndexDB>,
 }
 
 struct BlockEntries {
-    entries: Vec<(Address, Vec<IndexedBlockNumber>)>,
+    entries: Vec<(Address, Vec<ParticipationBlockNumber>)>,
 }
 
-impl AddressBlockWriter {
+impl AddressBlockParticipationWriter {
     pub fn new(db: Arc<RethIndexDB>) -> Self {
         Self { db }
     }
@@ -40,11 +40,12 @@ impl AddressBlockWriter {
         if entries.entries.is_empty() {
             return Ok(0);
         }
-        self.db.append_address_blocks_batch(&entries.entries)
+        self.db
+            .append_address_participation_blocks_batch(&entries.entries)
     }
 
     /// Persist address participations for multiple blocks in one MDBX transaction.
-    pub fn ingest_block_batch(
+    pub fn ingest_block_participation_batch(
         &self,
         blocks: Vec<(u64, Vec<AddressParticipation>)>,
     ) -> Result<Vec<usize>> {
@@ -95,7 +96,8 @@ impl AddressBlockWriter {
             .iter()
             .map(|block| block.entries.as_slice())
             .collect::<Vec<_>>();
-        self.db.append_block_entry_slices(&block_refs)
+        self.db
+            .append_address_participation_blocks_by_block(&block_refs)
     }
 }
 
@@ -133,7 +135,7 @@ mod tests {
     fn single_block_deduplicates_addresses() {
         let temp = TempIndexDir::new("address-block-single");
         let db = Arc::new(RethIndexDB::open(temp.path()).unwrap());
-        let writer = AddressBlockWriter::new(db.clone());
+        let writer = AddressBlockParticipationWriter::new(db.clone());
 
         let a = Address::repeat_byte(0x11);
         let b = Address::repeat_byte(0x22);
@@ -154,9 +156,9 @@ mod tests {
             .ingest_block_participation(42, participations)
             .unwrap();
         assert_eq!(inserted, 3);
-        assert_eq!(db.get_blocks(a).unwrap(), vec![42]);
-        assert_eq!(db.get_blocks(b).unwrap(), vec![42]);
-        assert_eq!(db.get_blocks(c).unwrap(), vec![42]);
+        assert_eq!(db.get_address_participation_blocks(a).unwrap(), vec![42]);
+        assert_eq!(db.get_address_participation_blocks(b).unwrap(), vec![42]);
+        assert_eq!(db.get_address_participation_blocks(c).unwrap(), vec![42]);
 
         let inserted = writer
             .ingest_block_participation(
@@ -174,13 +176,13 @@ mod tests {
     fn batch_write_keeps_blocks_sorted_per_address() {
         let temp = TempIndexDir::new("address-block-batch");
         let db = Arc::new(RethIndexDB::open(temp.path()).unwrap());
-        let writer = AddressBlockWriter::new(db.clone());
+        let writer = AddressBlockParticipationWriter::new(db.clone());
 
         let a = Address::repeat_byte(0xaa);
         let b = Address::repeat_byte(0xbb);
 
         let inserted = writer
-            .ingest_block_batch(vec![
+            .ingest_block_participation_batch(vec![
                 (
                     10,
                     vec![AddressParticipation {
@@ -206,7 +208,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(inserted, vec![2, 1, 2]);
-        assert_eq!(db.get_blocks(a).unwrap(), vec![10, 11, 12]);
-        assert_eq!(db.get_blocks(b).unwrap(), vec![10, 12]);
+        assert_eq!(
+            db.get_address_participation_blocks(a).unwrap(),
+            vec![10, 11, 12]
+        );
+        assert_eq!(
+            db.get_address_participation_blocks(b).unwrap(),
+            vec![10, 12]
+        );
     }
 }

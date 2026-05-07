@@ -1,7 +1,7 @@
 use crate::reth_index::{
     database::RethIndexDB,
     models::{AddressMetrics, PoolData, TokenMetadata, TradeData},
-    tables::address_blocks::IndexedBlockNumber,
+    tables::address_block_participation::ParticipationBlockNumber,
 };
 /// Reader interface for RethIndex
 ///
@@ -21,22 +21,26 @@ impl RethIndexReader {
     }
 
     /// Get all indexed block numbers for an address.
-    pub fn get_blocks(&self, address: Address) -> Result<Vec<IndexedBlockNumber>> {
-        self.db.get_blocks(address)
+    pub fn get_address_participation_blocks(
+        &self,
+        address: Address,
+    ) -> Result<Vec<ParticipationBlockNumber>> {
+        self.db.get_address_participation_blocks(address)
     }
 
     /// Get indexed block count for an address.
-    pub fn get_block_count(&self, address: Address) -> Result<usize> {
-        self.get_blocks(address).map(|blocks| blocks.len())
+    pub fn get_address_participation_block_count(&self, address: Address) -> Result<usize> {
+        self.get_address_participation_blocks(address)
+            .map(|blocks| blocks.len())
     }
 
     /// Get latest N indexed blocks for an address.
-    pub fn get_latest_blocks(
+    pub fn get_latest_address_participation_blocks(
         &self,
         address: Address,
         count: usize,
-    ) -> Result<Vec<IndexedBlockNumber>> {
-        let mut blocks = self.get_blocks(address)?;
+    ) -> Result<Vec<ParticipationBlockNumber>> {
+        let mut blocks = self.get_address_participation_blocks(address)?;
         if count >= blocks.len() {
             return Ok(blocks);
         }

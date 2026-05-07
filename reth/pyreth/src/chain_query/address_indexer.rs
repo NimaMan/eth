@@ -5,7 +5,9 @@ use std::sync::Arc;
 use alloy_primitives::Address;
 use pyo3::prelude::*;
 
-use reth_chain_query::reth_index::{AddressBlockWriter, AddressParticipation, RethIndexDB};
+use reth_chain_query::reth_index::{
+    AddressBlockParticipationWriter, AddressParticipation, RethIndexDB,
+};
 use reth_chain_query::RethQueryProvider;
 
 use crate::chain_query::chain_query::shared_reth_index_db;
@@ -26,20 +28,20 @@ fn resolve_index_dir(datadir: &str, index_path: Option<String>) -> PathBuf {
     Path::new(datadir).join("reth_index")
 }
 
-#[pyclass(name = "AddressBlockIndexer")]
-pub struct PyAddressBlockIndexer {
+#[pyclass(name = "AddressBlockParticipationIndexer")]
+pub struct PyAddressBlockParticipationIndexer {
     _db: Arc<RethIndexDB>,
-    writer: Option<AddressBlockWriter>,
+    writer: Option<AddressBlockParticipationWriter>,
     provider: Arc<RethQueryProvider>,
     #[allow(dead_code)]
     datadir: String,
     read_only: bool,
 }
 
-impl PyAddressBlockIndexer {
+impl PyAddressBlockParticipationIndexer {
     fn new_internal(
         index_db: Arc<RethIndexDB>,
-        writer: Option<AddressBlockWriter>,
+        writer: Option<AddressBlockParticipationWriter>,
         provider: Arc<RethQueryProvider>,
         datadir: String,
         read_only: bool,
@@ -53,10 +55,10 @@ impl PyAddressBlockIndexer {
         }
     }
 
-    fn writer_ref(&self) -> PyResult<&AddressBlockWriter> {
+    fn writer_ref(&self) -> PyResult<&AddressBlockParticipationWriter> {
         self.writer.as_ref().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressBlockIndexer writer unavailable (read-only mode)",
+                "AddressBlockParticipationIndexer writer unavailable (read-only mode)",
             )
         })
     }
@@ -104,13 +106,13 @@ impl PyAddressBlockIndexer {
 
         let writer = self.writer_ref()?;
         writer
-            .ingest_block_batch(blocks)
+            .ingest_block_participation_batch(blocks)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 }
 
 #[pymethods]
-impl PyAddressBlockIndexer {
+impl PyAddressBlockParticipationIndexer {
     #[new]
     #[pyo3(signature = (datadir=None, index_path=None, read_only=None))]
     pub fn new(
@@ -167,7 +169,7 @@ impl PyAddressBlockIndexer {
         let writer = if read_only {
             None
         } else {
-            Some(AddressBlockWriter::new(index_db.clone()))
+            Some(AddressBlockParticipationWriter::new(index_db.clone()))
         };
 
         Ok(Self::new_internal(
@@ -176,14 +178,14 @@ impl PyAddressBlockIndexer {
     }
 
     #[pyo3(signature = (block_number, transactions))]
-    pub fn write_block(
+    pub fn write_block_participation(
         &self,
         block_number: u64,
         transactions: Vec<(u64, Vec<String>)>,
     ) -> PyResult<u64> {
         if self.read_only {
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressBlockIndexer is read-only; writing is disabled",
+                "AddressBlockParticipationIndexer is read-only; writing is disabled",
             ));
         }
 
@@ -204,13 +206,13 @@ impl PyAddressBlockIndexer {
     }
 
     #[pyo3(signature = (blocks))]
-    pub fn write_blocks_batch(
+    pub fn write_block_participation_batch(
         &self,
         blocks: Vec<(u64, Vec<(u64, Vec<String>)>)>,
     ) -> PyResult<Vec<u64>> {
         if self.read_only {
             return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "AddressBlockIndexer is read-only; writing is disabled",
+                "AddressBlockParticipationIndexer is read-only; writing is disabled",
             ));
         }
 
@@ -230,7 +232,7 @@ impl PyAddressBlockIndexer {
         Ok(inserted.into_iter().map(|value| value as u64).collect())
     }
 
-    pub fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
+    pub fn address_participation_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let normalized = address.trim();
         let parsed = Address::from_str(normalized)
             .or_else(|_| {
@@ -247,7 +249,7 @@ impl PyAddressBlockIndexer {
             })?;
 
         self.provider
-            .blocks_for_address(parsed)
+            .participation_blocks_for_address(parsed)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
@@ -257,14 +259,14 @@ impl PyAddressBlockIndexer {
 }
 
 /// Read-only accessor for the address block index.
-#[pyclass(name = "AddressBlockIndexFetcher")]
-pub struct PyAddressBlockIndexFetcher {
+#[pyclass(name = "AddressBlockParticipationIndexFetcher")]
+pub struct PyAddressBlockParticipationIndexFetcher {
     provider: Arc<RethQueryProvider>,
     #[allow(dead_code)]
     datadir: String,
 }
 
-impl PyAddressBlockIndexFetcher {
+impl PyAddressBlockParticipationIndexFetcher {
     fn parse_address(address: &str) -> PyResult<Address> {
         let normalized = address.trim();
         Address::from_str(normalized)
@@ -284,7 +286,7 @@ impl PyAddressBlockIndexFetcher {
 }
 
 #[pymethods]
-impl PyAddressBlockIndexFetcher {
+impl PyAddressBlockParticipationIndexFetcher {
     #[new]
     #[pyo3(signature = (datadir=None, index_path=None))]
     pub fn new(datadir: Option<String>, index_path: Option<String>) -> PyResult<Self> {
@@ -319,10 +321,10 @@ impl PyAddressBlockIndexFetcher {
         Ok(Self { provider, datadir })
     }
 
-    pub fn address_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
+    pub fn address_participation_blocks(&self, address: &str) -> PyResult<Vec<u64>> {
         let parsed = Self::parse_address(address)?;
         self.provider
-            .blocks_for_address(parsed)
+            .participation_blocks_for_address(parsed)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 

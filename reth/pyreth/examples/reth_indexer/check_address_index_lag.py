@@ -14,7 +14,7 @@ RPC_URL = os.environ.get("PYRETH_RPC_URL", "http://127.0.0.1:8545")
 MAX_LOOKBACK = int(os.environ.get("PYRETH_INDEX_LAG_LOOKBACK", "256"))
 
 
-def find_latest_indexed_block(indexer: "pyreth.AddressBlockIndexer", latest_block: int) -> Optional[int]:
+def find_latest_indexed_block(indexer: "pyreth.AddressBlockParticipationIndexer", latest_block: int) -> Optional[int]:
     for block in range(latest_block, max(latest_block - MAX_LOOKBACK, -1), -1):
         if indexer.block_has_indices(block):
             return block
@@ -27,7 +27,7 @@ def main() -> None:
         raise RuntimeError(f"Failed to connect to RPC at {RPC_URL}")
 
     latest_rpc_block = w3.eth.get_block_number()
-    indexer = pyreth.AddressBlockIndexer()
+    indexer = pyreth.AddressBlockParticipationIndexer()
     latest_indexed_block = find_latest_indexed_block(indexer, latest_rpc_block)
 
     print(f"RPC latest block:             {latest_rpc_block}")

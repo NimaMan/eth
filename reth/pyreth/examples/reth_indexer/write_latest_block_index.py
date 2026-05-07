@@ -14,8 +14,8 @@ def main() -> None:
     if entries is None:
         entries = _entries_from_transactions(processed_block.transactions)
 
-    indexer = pyreth.AddressBlockIndexer()
-    inserted = indexer.write_block(latest_block, entries)
+    indexer = pyreth.AddressBlockParticipationIndexer()
+    inserted = indexer.write_block_participation(latest_block, entries)
     print(
         f"Indexed block {latest_block} with {len(entries)} participating txs; "
         f"appended {inserted} address-to-block entries",

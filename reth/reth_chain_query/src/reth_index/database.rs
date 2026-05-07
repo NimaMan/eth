@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::reth_index::tables::{
-    address_blocks::{AddressBlockIndex, IndexedBlockNumber},
+    address_block_participation::{AddressBlockParticipationIndex, ParticipationBlockNumber},
     mempool_tx_arrivals::MempoolTxArrivalTable,
 };
 
@@ -23,7 +23,7 @@ pub struct RethIndexDB {
     path: PathBuf,
     env: Arc<Environment>,
     tx_arrival_dbi: Database,
-    address_blocks_dbi: Database,
+    address_block_participation_dbi: Database,
 }
 
 impl RethIndexDB {
@@ -63,13 +63,14 @@ impl RethIndexDB {
         if read_only {
             let tx: Transaction<RO> = env.begin_ro_txn()?;
             let tx_arrival_dbi = tx.open_db(Some(MempoolTxArrivalTable::TABLE_NAME))?;
-            let address_blocks_dbi = tx.open_db(Some(AddressBlockIndex::TABLE_NAME))?;
+            let address_block_participation_dbi =
+                tx.open_db(Some(AddressBlockParticipationIndex::TABLE_NAME))?;
 
             Ok(Self {
                 path: path.to_path_buf(),
                 env: Arc::new(env),
                 tx_arrival_dbi,
-                address_blocks_dbi,
+                address_block_participation_dbi,
             })
         } else {
             let rwtx = env.begin_rw_txn()?;
@@ -77,8 +78,8 @@ impl RethIndexDB {
                 Some(MempoolTxArrivalTable::TABLE_NAME),
                 DatabaseFlags::INTEGER_KEY,
             )?;
-            let address_blocks_dbi = match rwtx.create_db(
-                Some(AddressBlockIndex::TABLE_NAME),
+            let address_block_participation_dbi = match rwtx.create_db(
+                Some(AddressBlockParticipationIndex::TABLE_NAME),
                 DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
             ) {
                 Ok(dbi) => dbi,
@@ -96,7 +97,7 @@ impl RethIndexDB {
                 path: path.to_path_buf(),
                 env: Arc::new(env),
                 tx_arrival_dbi,
-                address_blocks_dbi,
+                address_block_participation_dbi,
             })
         }
     }
@@ -160,17 +161,20 @@ impl RethIndexDB {
     }
 
     /// Fetch all block numbers associated with `address`.
-    pub fn get_blocks(&self, address: Address) -> Result<Vec<IndexedBlockNumber>> {
+    pub fn get_address_participation_blocks(
+        &self,
+        address: Address,
+    ) -> Result<Vec<ParticipationBlockNumber>> {
         let tx: Transaction<RO> = self.env.begin_ro_txn()?;
-        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_block_participation_dbi.dbi())?;
 
         let mut blocks = Vec::new();
-        let key = AddressBlockIndex::encode_key(address);
+        let key = AddressBlockParticipationIndex::encode_key(address);
 
         if let Some((_, value)) = cursor.set_key::<Vec<u8>, Vec<u8>>(key.as_slice())? {
-            blocks.push(AddressBlockIndex::decode_value(&value)?);
+            blocks.push(AddressBlockParticipationIndex::decode_value(&value)?);
             while let Some((_, value)) = cursor.next_dup::<Vec<u8>, Vec<u8>>()? {
-                blocks.push(AddressBlockIndex::decode_value(&value)?);
+                blocks.push(AddressBlockParticipationIndex::decode_value(&value)?);
             }
         }
 
@@ -181,32 +185,32 @@ impl RethIndexDB {
     ///
     /// Duplicate `(address, block_number)` values are skipped so block replay is
     /// idempotent.
-    pub fn append_address_blocks_batch(
+    pub fn append_address_participation_blocks_batch(
         &self,
-        entries: &[(Address, Vec<IndexedBlockNumber>)],
+        entries: &[(Address, Vec<ParticipationBlockNumber>)],
     ) -> Result<usize> {
         if entries.is_empty() {
             return Ok(0);
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_block_participation_dbi.dbi())?;
         let total = self.append_entries_with_cursor(&mut cursor, entries)?;
         tx.commit()?;
         Ok(total)
     }
 
     /// Append address block entries for multiple processed blocks inside a single MDBX transaction.
-    pub fn append_block_entry_slices(
+    pub fn append_address_participation_blocks_by_block(
         &self,
-        blocks: &[&[(Address, Vec<IndexedBlockNumber>)]],
+        blocks: &[&[(Address, Vec<ParticipationBlockNumber>)]],
     ) -> Result<Vec<usize>> {
         if blocks.is_empty() {
             return Ok(Vec::new());
         }
 
         let tx: Transaction<RW> = self.env.begin_rw_txn()?;
-        let mut cursor = tx.cursor(self.address_blocks_dbi.dbi())?;
+        let mut cursor = tx.cursor(self.address_block_participation_dbi.dbi())?;
         let mut per_block = Vec::with_capacity(blocks.len());
 
         for entries in blocks {
@@ -220,7 +224,7 @@ impl RethIndexDB {
     fn append_entries_with_cursor(
         &self,
         cursor: &mut reth_libmdbx::Cursor<RW>,
-        entries: &[(Address, Vec<IndexedBlockNumber>)],
+        entries: &[(Address, Vec<ParticipationBlockNumber>)],
     ) -> Result<usize> {
         let mut inserted = 0usize;
         for (address, blocks) in entries {
@@ -236,17 +240,17 @@ impl RethIndexDB {
         &self,
         cursor: &mut reth_libmdbx::Cursor<RW>,
         address: Address,
-        block_numbers: &[IndexedBlockNumber],
+        block_numbers: &[ParticipationBlockNumber],
     ) -> Result<usize> {
         if block_numbers.is_empty() {
             return Ok(0);
         }
 
-        let key = AddressBlockIndex::encode_key(address);
+        let key = AddressBlockParticipationIndex::encode_key(address);
         let mut inserted = 0usize;
 
         for block_number in block_numbers.iter().copied() {
-            let value = AddressBlockIndex::encode_value(block_number);
+            let value = AddressBlockParticipationIndex::encode_value(block_number);
             match cursor.put(key.as_slice(), &value, WriteFlags::NO_DUP_DATA) {
                 Ok(_) => {
                     inserted += 1;

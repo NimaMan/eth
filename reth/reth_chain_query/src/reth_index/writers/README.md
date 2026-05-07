@@ -1,7 +1,7 @@
-# AddressBlockWriter Notes
+# AddressBlockParticipationWriter Notes
 
 This folder hosts the Rust writers for RethIndex. The address participation
-writer is `AddressBlockWriter` in `address_block_writer.rs`.
+writer is `AddressBlockParticipationWriter` in `address_block_participation_writer.rs`.
 
 ## Current Address Index
 
@@ -13,7 +13,7 @@ The address index stores candidate processed blocks, not transaction numbers:
 - MDBX flags: `DUP_SORT | DUP_FIXED`
 - Write semantics: one value per `(address, block_number)`
 
-`AddressBlockWriter` receives tx-level address participations for a block, unions
+`AddressBlockParticipationWriter` receives tx-level address participations for a block, unions
 all addresses across that block, and writes each address once for the block. MDBX
 `NO_DUP_DATA` makes the write idempotent if a block is replayed.
 

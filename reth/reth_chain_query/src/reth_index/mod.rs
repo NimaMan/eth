@@ -21,13 +21,13 @@ pub use database::RethIndexDB;
 pub use models::{AddressMetrics, PoolData, TokenMetadata, TradeData};
 pub use reader::RethIndexReader;
 pub use writers::{
-    address_block_writer::{AddressBlockWriter, AddressParticipation},
+    address_block_participation_writer::{AddressBlockParticipationWriter, AddressParticipation},
     mempool_arrival_writer::MempoolArrivalWriter,
 };
 
 // Re-export table interfaces
 pub use tables::{
-    address_blocks::{AddressBlockIndex, IndexedBlockNumber},
+    address_block_participation::{AddressBlockParticipationIndex, ParticipationBlockNumber},
     address_metrics::AddressMetricsTable,
     pools::PoolsTable,
     tokens::TokensTable,
