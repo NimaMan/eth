@@ -2,7 +2,7 @@ use crate::{
     SessionTransaction, SignedTransaction, SimulationResult, SimulationSession,
     SimulationSessionOptions, TxSimulator, UnsignedTransaction, UnsignedTxChainSimulation,
 };
-use eyre::Result;
+use eyre::{eyre, Result};
 use std::sync::Arc;
 
 /// Source selected for live-first state.
@@ -10,8 +10,8 @@ use std::sync::Arc;
 pub enum LiveStateSource {
     /// State comes from the latest block persisted in Reth MDBX.
     PersistedMdbx,
-    /// State comes from a Redis chain-state overlay written by the live block processor.
-    LiveOverlay,
+    /// State comes from the live block processor's tracked state.
+    TrackedLiveState,
 }
 
 /// Diagnostic state-selection result for live simulation.
@@ -21,21 +21,24 @@ pub struct LiveStateStatus {
     pub source: LiveStateSource,
     pub latest_persisted_block_number: u64,
     pub latest_live_block_number: Option<u64>,
-    pub latest_chain_state_block_number: Option<u64>,
+    pub latest_tracked_state_block_number: Option<u64>,
 }
 
 impl LiveStateStatus {
+    pub const fn uses_tracked_live_state(&self) -> bool {
+        matches!(self.source, LiveStateSource::TrackedLiveState)
+    }
+
     pub const fn mdbx_lags_selected_state(&self) -> bool {
-        matches!(self.source, LiveStateSource::LiveOverlay)
+        self.uses_tracked_live_state()
     }
 }
 
 /// Live-first transaction simulator for latency-sensitive trading paths.
 ///
 /// `TxSimulator` remains the general-purpose historical/direct-DB engine. This
-/// wrapper makes live block-selection explicit: use the latest Redis
-/// chain-state overlay when available, and fall back to the latest persisted
-/// MDBX block otherwise.
+/// wrapper keeps the live rule simple: use MDBX when it is caught up; otherwise
+/// use the state tracked by the live block processor.
 #[derive(Clone)]
 pub struct LiveTxSimulator {
     simulator: Arc<TxSimulator>,
@@ -56,12 +59,8 @@ impl LiveTxSimulator {
         Arc::clone(&self.simulator)
     }
 
-    /// Latest block for which we have an exact state source.
-    ///
-    /// Redis chain-state overlays are used when they are ahead of MDBX because
-    /// they represent exact live block state written by the live block processor.
-    /// MDBX is used when it is already caught up or when no overlay has been
-    /// published yet.
+    /// Latest block for which we have state: MDBX when caught up, otherwise the
+    /// live block processor's tracked state.
     pub async fn latest_state_block_number(&self) -> Result<u64> {
         Ok(self.latest_state_status().await?.selected_block_number)
     }
@@ -70,16 +69,12 @@ impl LiveTxSimulator {
     pub async fn latest_state_status(&self) -> Result<LiveStateStatus> {
         let latest_persisted = self.latest_persisted_block_number()?;
         let Some(cache) = self.simulator.live_chain_cache() else {
-            return Ok(select_state_status(latest_persisted, None, None));
+            return select_state_status(latest_persisted, None, None);
         };
 
         let latest_live = cache.latest_block_number().await?;
-        let latest_chain_state = cache.latest_chain_state_block_number().await?;
-        Ok(select_state_status(
-            latest_persisted,
-            latest_live,
-            latest_chain_state,
-        ))
+        let latest_tracked_state = cache.latest_chain_state_block_number().await?;
+        select_state_status(latest_persisted, latest_live, latest_tracked_state)
     }
 
     /// Latest block announced in the live Redis cache, if any.
@@ -107,7 +102,7 @@ impl LiveTxSimulator {
             .await
     }
 
-    /// Start a mixed signed/unsigned session at the latest exact live-first state.
+    /// Start a mixed signed/unsigned session at the latest live-first state.
     pub async fn start_latest_session(&self) -> Result<SimulationSession> {
         let block_number = self.latest_state_status().await?.selected_block_number;
         self.start_session_at(block_number).await
@@ -171,24 +166,50 @@ impl LiveTxSimulator {
 fn select_state_status(
     latest_persisted: u64,
     latest_live: Option<u64>,
-    latest_chain_state: Option<u64>,
-) -> LiveStateStatus {
-    if let Some(chain_state) = latest_chain_state.filter(|block| *block > latest_persisted) {
-        return LiveStateStatus {
-            selected_block_number: chain_state,
-            source: LiveStateSource::LiveOverlay,
-            latest_persisted_block_number: latest_persisted,
-            latest_live_block_number: latest_live,
-            latest_chain_state_block_number: latest_chain_state,
-        };
+    latest_tracked_state: Option<u64>,
+) -> Result<LiveStateStatus> {
+    let Some(live_head) = latest_live else {
+        return Ok(persisted_state_status(
+            latest_persisted,
+            latest_live,
+            latest_tracked_state,
+        ));
+    };
+
+    if latest_persisted >= live_head {
+        return Ok(persisted_state_status(
+            latest_persisted,
+            latest_live,
+            latest_tracked_state,
+        ));
     }
 
+    if let Some(tracked_state) = latest_tracked_state.filter(|block| *block >= live_head) {
+        return Ok(LiveStateStatus {
+            selected_block_number: tracked_state,
+            source: LiveStateSource::TrackedLiveState,
+            latest_persisted_block_number: latest_persisted,
+            latest_live_block_number: latest_live,
+            latest_tracked_state_block_number: latest_tracked_state,
+        });
+    }
+
+    Err(eyre!(
+        "live tracked state is behind live head: latest_live={live_head}, latest_persisted={latest_persisted}, latest_tracked_state={latest_tracked_state:?}"
+    ))
+}
+
+fn persisted_state_status(
+    latest_persisted: u64,
+    latest_live: Option<u64>,
+    latest_tracked_state: Option<u64>,
+) -> LiveStateStatus {
     LiveStateStatus {
         selected_block_number: latest_persisted,
         source: LiveStateSource::PersistedMdbx,
         latest_persisted_block_number: latest_persisted,
         latest_live_block_number: latest_live,
-        latest_chain_state_block_number: latest_chain_state,
+        latest_tracked_state_block_number: latest_tracked_state,
     }
 }
 
@@ -198,7 +219,7 @@ mod tests {
 
     #[test]
     fn uses_persisted_when_no_live_state_exists() {
-        let status = select_state_status(100, None, None);
+        let status = select_state_status(100, None, None).unwrap();
         assert_eq!(status.selected_block_number, 100);
         assert_eq!(status.source, LiveStateSource::PersistedMdbx);
         assert!(!status.mdbx_lags_selected_state());
@@ -206,23 +227,27 @@ mod tests {
 
     #[test]
     fn uses_persisted_when_mdbx_is_caught_up() {
-        let status = select_state_status(105, Some(105), Some(105));
+        let status = select_state_status(105, Some(105), Some(105)).unwrap();
         assert_eq!(status.selected_block_number, 105);
         assert_eq!(status.source, LiveStateSource::PersistedMdbx);
     }
 
     #[test]
-    fn uses_live_overlay_when_snapshot_is_ahead_of_mdbx() {
-        let status = select_state_status(100, Some(102), Some(102));
+    fn uses_tracked_live_state_when_it_is_ahead_of_mdbx() {
+        let status = select_state_status(100, Some(102), Some(102)).unwrap();
         assert_eq!(status.selected_block_number, 102);
-        assert_eq!(status.source, LiveStateSource::LiveOverlay);
+        assert_eq!(status.source, LiveStateSource::TrackedLiveState);
+        assert!(status.uses_tracked_live_state());
         assert!(status.mdbx_lags_selected_state());
     }
 
     #[test]
-    fn does_not_use_live_head_without_exact_state_snapshot() {
-        let status = select_state_status(100, Some(102), None);
-        assert_eq!(status.selected_block_number, 100);
-        assert_eq!(status.source, LiveStateSource::PersistedMdbx);
+    fn fails_when_live_head_is_ahead_but_tracked_state_is_missing() {
+        assert!(select_state_status(100, Some(102), None).is_err());
+    }
+
+    #[test]
+    fn fails_when_live_head_is_ahead_but_tracked_state_is_stale() {
+        assert!(select_state_status(100, Some(102), Some(101)).is_err());
     }
 }

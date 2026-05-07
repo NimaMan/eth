@@ -221,7 +221,7 @@ impl LiveChainCache {
                 Err(err) => {
                     warn!(
                         block_number,
-                        "ignoring undecodable live state overlay snapshot: {}", err
+                        "ignoring undecodable tracked live state: {}", err
                     );
                     Ok(None)
                 }
@@ -234,7 +234,7 @@ impl LiveChainCache {
     pub async fn store_chain_state_snapshot(&self, snapshot: &ChainStateSnapshot) -> Result<()> {
         let mut conn = self.connection().await?;
         let serialized = bincode::serialize(snapshot)
-            .map_err(|err| eyre!("failed to serialize state overlay snapshot: {}", err))?;
+            .map_err(|err| eyre!("failed to serialize tracked live state: {}", err))?;
         let key = live_data_registry::keys::chain_state_snapshot_key(snapshot.block_number);
 
         let mut pipe = redis::pipe();

@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, sync::Arc, time::Instant};
+use std::{env, path::PathBuf, sync::Arc};
 
 use alloy_primitives::B256;
 use alloy_rpc_types_trace::geth::PreStateFrame;
@@ -140,25 +140,14 @@ impl LiveBlockService {
                         processed.state_diffs.as_deref(),
                     ) {
                         (Some(simulator), Some(state_diffs)) => {
-                            let started = Instant::now();
                             match build_chain_state_snapshot(simulator, &snapshot, state_diffs)
                                 .await
                             {
-                                Ok(snapshot) => {
-                                    tracing::info!(
-                                        block_number = processed.execution_info.block_number,
-                                        state_snapshot_build_ms = started.elapsed().as_millis(),
-                                        base_block_number = snapshot.base_block_number,
-                                        accounts = snapshot.account_count(),
-                                        contracts = snapshot.contract_count(),
-                                        "built live state overlay snapshot"
-                                    );
-                                    Some(snapshot)
-                                }
+                                Ok(snapshot) => Some(snapshot),
                                 Err(err) => {
                                     tracing::warn!(
                                         block_number = processed.execution_info.block_number,
-                                        "failed to build live state overlay snapshot: {}",
+                                        "failed to build tracked live state: {}",
                                         err
                                     );
                                     None
@@ -168,7 +157,7 @@ impl LiveBlockService {
                         (Some(_), None) => {
                             tracing::warn!(
                                 block_number = processed.execution_info.block_number,
-                                "exact state diffs unavailable; live state overlay snapshot will not be advanced"
+                                "state diffs unavailable; tracked live state will not be advanced"
                             );
                             None
                         }

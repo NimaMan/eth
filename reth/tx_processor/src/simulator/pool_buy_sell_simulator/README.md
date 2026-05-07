@@ -178,8 +178,7 @@ Important concrete errors:
     blocks instead of direct DB state.
   - Current live entrypoint: `LivePoolBuySellSimulator` selects
     `LiveTxSimulator::latest_state_status()`, so the default live check uses the
-    Redis `LiveOverlay` snapshot whenever the live block processor is ahead of
-    MDBX and has published exact state.
+    live block processor's tracked state whenever it is ahead of MDBX.
 
 - `Invalid block ... while reading UniswapV3 state`
   - Seen while loading V3 pool state.

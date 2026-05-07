@@ -6,7 +6,7 @@ three-stage pipeline:
 
 1. **Resolve block context**  
    - If a caller provides a `SealedHeader`, we reuse it. Otherwise the simulator loads a
-     `BlockContext` from MDBX or the live Redis overlay when MDBX is behind the requested block.
+     `BlockContext` from MDBX or tracked live state when MDBX is behind the requested block.
 
 2. **Build the EVM environment**  
    - `create_tx_env` converts an `UnsignedTransaction` into a `revm::TxEnv`.  

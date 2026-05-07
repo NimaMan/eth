@@ -31,8 +31,8 @@ live feed.
 
 ## Implementation Notes
 
-- The live block processor builds snapshots from `prestateTracer` diffMode
-  results, so the simulator restores exact post-block state without replaying a
-  Redis window on every call.
+- The live block processor builds tracked state from `prestateTracer` diffMode
+  results, so the simulator restores post-block state without replaying a Redis
+  window on every call.
 - `LiveTxSimulator::latest_state_status()` should be used by latency-sensitive
-  callers to confirm whether a request is using `LiveOverlay` or persisted MDBX.
+  callers to confirm whether a request is using tracked live state or persisted MDBX.

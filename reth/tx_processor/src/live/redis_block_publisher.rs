@@ -56,7 +56,7 @@ impl RedisBlockPublisher {
         let encoded_state_snapshot = state_snapshot
             .map(|snapshot| {
                 bincode::serialize(snapshot)
-                    .map_err(|err| eyre!("failed to serialize state overlay snapshot: {}", err))
+                    .map_err(|err| eyre!("failed to serialize tracked live state: {}", err))
             })
             .transpose()?;
         let meta_json = serde_json::to_string(&json!({
@@ -179,17 +179,6 @@ impl RedisBlockPublisher {
         }
 
         let _: redis::Value = pipe.query_async(&mut conn).await?;
-        if let (Some(state), Some(encoded)) = (state_snapshot, encoded_state_snapshot.as_ref()) {
-            tracing::info!(
-                block_number = snapshot.block_number,
-                state_snapshot_bytes = encoded.len(),
-                base_block_number = state.base_block_number,
-                accounts = state.account_count(),
-                contracts = state.contract_count(),
-                logs = state.log_count(),
-                "published live state overlay snapshot"
-            );
-        }
         self.prune_blocks(&mut conn, snapshot.block_number).await?;
         Ok(())
     }

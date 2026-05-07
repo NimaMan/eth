@@ -47,7 +47,7 @@ impl PyLiveTxSimulator {
         })
     }
 
-    /// Latest block with an exact tracked state source: Redis overlay first, MDBX fallback.
+    /// Latest block with state: MDBX when caught up, otherwise tracked live state.
     pub fn latest_state_block_number(&self) -> PyResult<u64> {
         self.runtime
             .block_on(self.simulator.latest_state_block_number())

@@ -47,7 +47,7 @@ use self::live_data_registry::ChainStateSnapshot;
 pub(crate) enum BlockStateProvider {
     /// State is available directly from MDBX.
     Historical(StateProviderBox),
-    /// State was restored from an exact Redis live overlay snapshot.
+    /// State was restored from the live block processor's tracked state.
     LiveFork(ForkedState),
 }
 
@@ -126,7 +126,7 @@ impl<'a> BlockContextLoader<'a> {
                     base_block_number = snapshot.base_block_number,
                     accounts = snapshot.account_count(),
                     contracts = snapshot.contract_count(),
-                    "restoring live state from Redis overlay snapshot"
+                    "restoring tracked live state"
                 );
                 return Ok(Some(
                     self.forked_state_from_snapshot(&snapshot, header).await?,
@@ -137,7 +137,7 @@ impl<'a> BlockContextLoader<'a> {
                 block_number,
                 expected = %header.hash(),
                 found = %snapshot.block_hash,
-                "ignoring live state overlay snapshot with mismatched block hash"
+                "ignoring tracked live state with mismatched block hash"
             );
         }
 
@@ -372,7 +372,7 @@ impl<'a> BlockContextLoader<'a> {
                             parent_block,
                             snapshot_base_block_number = snapshot.base_block_number,
                             persisted,
-                            "using parent live state overlay snapshot with older persisted base"
+                            "using parent tracked live state with older persisted base"
                         );
                     }
 
@@ -388,7 +388,7 @@ impl<'a> BlockContextLoader<'a> {
                         parent_block,
                         expected = %parent_hash,
                         found = %snapshot.block_hash,
-                        "ignoring parent live state overlay snapshot with mismatched block hash"
+                        "ignoring parent tracked live state with mismatched block hash"
                     );
                 }
             }
@@ -512,7 +512,7 @@ fn apply_post_state_to_account(
 }
 
 impl TxSimulator {
-    /// Build a cumulative live state overlay for a processed block.
+    /// Build tracked live state for a processed block.
     ///
     /// The returned snapshot stores only REVM's fork cache on top of a persisted
     /// base block. The live block processor writes this into Redis so later
@@ -537,7 +537,7 @@ impl TxSimulator {
             .await
     }
 
-    /// Build a cumulative live state overlay for a block from exact prestate
+    /// Build tracked live state for a block from exact prestate
     /// diff traces (`prestateTracer` with `diffMode=true`).
     pub async fn build_live_state_snapshot_from_prestate_diffs(
         &self,
