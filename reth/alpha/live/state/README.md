@@ -15,7 +15,7 @@ This crate owns the shared live-state protocol used through Redis. It is infrast
 
 This crate intentionally does not own the block processor, processed-block pipeline, tracked-token set, or live-token object cache. Those are writer/consumer responsibilities in higher-level crates.
 
-`eth_live_feed` should write confirmed block and token snapshots through these contracts when it owns the write path. `LiveTxSimulator`, `eth_mempool_risk`, strategies, and the alpha engine should read snapshots through the same contracts.
+`eth_live_feed` should write token snapshots and block-ready markers through these contracts when it owns the write path. The processed block itself remains `tx_processor::ProcessedBlock`; this crate must not define a second processed-block shape.
 
 ## Canonical State Namespaces
 
@@ -51,7 +51,7 @@ eth/live/mempool/signals/...
 
 There should be one canonical writer for confirmed state.
 
-Mempool risk, trading engine, and simulator may read the state, but they should not mutate canonical token/pool/block snapshots.
+Mempool risk, trading engine, and simulator may read the state, but they should not mutate canonical token/pool snapshots or block-ready markers.
 
 ## Rust Boundary
 
@@ -75,8 +75,6 @@ Python also publishes token snapshots through `LiveDataPublisher`. The Rust cont
 When writing a block, publish atomically:
 
 ```text
-write header
-write processed txs
 write chain_state_snapshot
 write token snapshots
 set latest block keys last

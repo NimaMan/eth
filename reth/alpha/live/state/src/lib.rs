@@ -16,9 +16,7 @@ pub type BlockNumber = u64;
 pub type ChainId = u64;
 pub type TimestampUnixSecs = u64;
 
-pub use block::{
-    BlockMeta, BlockReadyNotification, ProcessedBlockSnapshot, ProcessedTransactionSnapshot,
-};
+pub use block::BlockReadyNotification;
 pub use chain_state::{ChainStateCodec, ChainStateSnapshotStats, EncodedChainStateSnapshot};
 pub use error::{LiveStateError, Result};
 pub use retention::RetentionPolicy;

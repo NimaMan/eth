@@ -1,6 +1,7 @@
 use alloy_primitives::Address;
 use async_trait::async_trait;
-use eth_live_state::{ProcessedBlockSnapshot, TokenSnapshot};
+use eth_live_state::TokenSnapshot;
+use tx_processor::ProcessedBlock;
 
 use crate::Result;
 
@@ -25,8 +26,5 @@ impl BlockTokenUpdate {
 
 #[async_trait]
 pub trait BlockTokenProcessor: Send + Sync {
-    async fn process_block_tokens(
-        &self,
-        block: &ProcessedBlockSnapshot,
-    ) -> Result<BlockTokenUpdate>;
+    async fn process_block_tokens(&self, block: &ProcessedBlock) -> Result<BlockTokenUpdate>;
 }

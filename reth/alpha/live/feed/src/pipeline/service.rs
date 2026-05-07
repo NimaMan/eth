@@ -47,7 +47,6 @@ where
         let removed_tokens = token_update.removed_tokens.clone();
         let chain_state_available = input.chain_state.is_some();
 
-        self.live_state_writer.write_block(block.clone()).await?;
         if let Some(chain_state) = input.chain_state {
             self.live_state_writer
                 .write_chain_state_snapshot(chain_state)
@@ -62,16 +61,18 @@ where
         }
 
         self.live_state_writer
-            .mark_block_ready(BlockReadyNotification::from_block(
-                &block,
+            .mark_block_ready(BlockReadyNotification::new(
+                block.header.number,
+                block.header.hash,
+                block.transactions.len(),
                 updated_tokens.len(),
             ))
             .await?;
 
         let event = BlockProcessedEvent {
-            block_number: block.block_number(),
-            block_hash: block.block_hash(),
-            parent_hash: block.meta.parent_hash,
+            block_number: block.header.number,
+            block_hash: block.header.hash,
+            parent_hash: block.header.parent_hash,
             processed_transaction_count: block.transactions.len(),
             updated_tokens,
             removed_tokens,

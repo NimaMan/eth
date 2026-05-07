@@ -1,5 +1,5 @@
 # block
 
-Confirmed block snapshots.
+Confirmed block-ready notifications.
 
-This module models the state written after a block has been processed: metadata, normalized header payload, processed transactions, touched addresses, and a block-ready notification. It does not process raw blocks itself.
+This module intentionally does not model processed blocks. The canonical processed block type is `tx_processor::ProcessedBlock`; live state only carries lightweight block-ready metadata for consumers that need to know what changed.

@@ -1,15 +1,15 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use async_trait::async_trait;
 use eth_live_feed::{
     BlockTokenProcessor, BlockTokenUpdate, LiveFeedBlockInput, LiveFeedEvent, LiveFeedPipeline,
     RecordingLiveFeedEventSink,
 };
 use eth_live_state::{
-    BlockMeta, ChainStateSnapshotStats, EncodedChainStateSnapshot, InMemoryLiveStateStore,
-    LiveStateReader, ProcessedBlockSnapshot, ProcessedTransactionSnapshot, TokenLatestBlock,
-    TokenSnapshot,
+    ChainStateSnapshotStats, EncodedChainStateSnapshot, InMemoryLiveStateStore, LiveStateReader,
+    TokenLatestBlock, TokenSnapshot,
 };
-use serde_json::json;
+use reth_chain_query::provider::{BlockHeader, TransactionData, TransactionReceipt};
+use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
 #[derive(Clone, Debug)]
 struct StaticBlockTokenProcessor {
@@ -20,7 +20,7 @@ struct StaticBlockTokenProcessor {
 impl BlockTokenProcessor for StaticBlockTokenProcessor {
     async fn process_block_tokens(
         &self,
-        _block: &ProcessedBlockSnapshot,
+        _block: &ProcessedBlock,
     ) -> eth_live_feed::Result<BlockTokenUpdate> {
         Ok(self.update.clone())
     }
@@ -34,6 +34,80 @@ fn hash(value: &str) -> B256 {
     value.parse().expect("valid hash")
 }
 
+fn block_header(block_hash: B256, parent_hash: B256) -> BlockHeader {
+    BlockHeader {
+        number: 512,
+        hash: block_hash,
+        parent_hash,
+        timestamp: 1_715_100_000,
+        gas_limit: 30_000_000,
+        gas_used: 21_000,
+        base_fee_per_gas: Some(1),
+        withdrawals_root: None,
+        blob_gas_used: None,
+        excess_blob_gas: None,
+        parent_beacon_block_root: None,
+        requests_hash: None,
+        block_access_list_hash: None,
+        slot_number: None,
+    }
+}
+
+fn processed_tx(tx_hash: B256, token_address: Address) -> ProcessedTransaction {
+    ProcessedTransaction::new(
+        tx_hash,
+        512,
+        1_715_100_000,
+        7,
+        token_address,
+        None,
+        U256::ZERO,
+        true,
+        0,
+        2,
+        Vec::new(),
+    )
+}
+
+fn block_transaction(processed: ProcessedTransaction) -> ProcessedBlockTransactions {
+    ProcessedBlockTransactions {
+        metadata: TransactionData {
+            hash: processed.hash,
+            block_number: processed.block_number,
+            block_timestamp: processed.block_timestamp,
+            tx_index: processed.tx_index,
+            tx_number: processed.tx_index,
+            from: processed.from_address,
+            to: processed.to_address,
+            value: processed.value,
+            input: Bytes::from(processed.input.clone()),
+            gas_price: U256::ZERO,
+            gas_limit: 21_000,
+            nonce: processed.nonce,
+            transaction_type: processed.raw_tx_type,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            access_list: Vec::new(),
+            blob_versioned_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            signed_authorizations: Vec::new(),
+        },
+        receipt: TransactionReceipt {
+            tx_hash: processed.hash,
+            status: processed.status,
+            gas_used: 21_000,
+            logs: Vec::new(),
+            cumulative_gas_used: 21_000,
+            effective_gas_price: U256::ZERO,
+            contract_address: processed.contract_address,
+            blob_gas_used: None,
+        },
+        processed,
+        trace: None,
+        processing_error: None,
+    }
+}
+
 #[tokio::test]
 async fn pipeline_writes_live_state_and_emits_block_event() {
     let store = InMemoryLiveStateStore::new();
@@ -42,16 +116,11 @@ async fn pipeline_writes_live_state_and_emits_block_event() {
     let parent_hash = hash("0x00000000000000000000000000000000000000000000000000000000000001ff");
     let token_address = address("0x00000000000000000000000000000000000000aa");
 
-    let block = ProcessedBlockSnapshot::new(
-        BlockMeta::new(1, 512, block_hash, parent_hash, 1_715_100_000),
-        json!({"number": "0x200"}),
-        vec![ProcessedTransactionSnapshot::new(
-            hash("0x0000000000000000000000000000000000000000000000000000000000000abc"),
-            7,
-            json!({"hash": "0xabc", "tx_index": 7}),
-        )],
-        vec![token_address],
-    );
+    let tx_hash = hash("0x0000000000000000000000000000000000000000000000000000000000000abc");
+    let block = ProcessedBlock {
+        header: block_header(block_hash, parent_hash),
+        transactions: vec![block_transaction(processed_tx(tx_hash, token_address))],
+    };
     let chain_state = EncodedChainStateSnapshot::new_reth_revm_cache_bincode_v1(
         510,
         512,

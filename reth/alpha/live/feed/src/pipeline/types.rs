@@ -1,14 +1,15 @@
-use eth_live_state::{EncodedChainStateSnapshot, ProcessedBlockSnapshot};
+use eth_live_state::EncodedChainStateSnapshot;
+use tx_processor::ProcessedBlock;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct LiveFeedBlockInput {
-    pub block: ProcessedBlockSnapshot,
+    pub block: ProcessedBlock,
     pub chain_state: Option<EncodedChainStateSnapshot>,
 }
 
 impl LiveFeedBlockInput {
     pub const fn new(
-        block: ProcessedBlockSnapshot,
+        block: ProcessedBlock,
         chain_state: Option<EncodedChainStateSnapshot>,
     ) -> Self {
         Self { block, chain_state }

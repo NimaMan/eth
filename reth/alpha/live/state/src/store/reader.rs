@@ -1,10 +1,7 @@
 use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 
-use crate::{
-    BlockMeta, BlockNumber, EncodedChainStateSnapshot, ProcessedBlockSnapshot,
-    ProcessedTransactionSnapshot, Result, TokenSnapshot,
-};
+use crate::{BlockNumber, EncodedChainStateSnapshot, Result, TokenSnapshot};
 
 #[async_trait]
 pub trait LiveStateReader: Send + Sync {
@@ -13,17 +10,6 @@ pub trait LiveStateReader: Send + Sync {
     async fn latest_block_hash(&self) -> Result<Option<B256>>;
 
     async fn latest_chain_state_block_number(&self) -> Result<Option<BlockNumber>>;
-
-    async fn read_block_meta(&self, block_number: BlockNumber) -> Result<Option<BlockMeta>>;
-
-    async fn read_block(&self, block_number: BlockNumber)
-        -> Result<Option<ProcessedBlockSnapshot>>;
-
-    async fn read_processed_transaction(
-        &self,
-        block_number: BlockNumber,
-        tx_hash: B256,
-    ) -> Result<Option<ProcessedTransactionSnapshot>>;
 
     async fn read_chain_state_snapshot(
         &self,

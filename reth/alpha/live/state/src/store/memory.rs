@@ -7,8 +7,7 @@ use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 
 use crate::{
-    keys, BlockMeta, BlockNumber, BlockReadyNotification, EncodedChainStateSnapshot,
-    LiveStateError, ProcessedBlockSnapshot, ProcessedTransactionSnapshot, Result,
+    keys, BlockNumber, BlockReadyNotification, EncodedChainStateSnapshot, LiveStateError, Result,
     SnapshotWriteOptions, TokenSnapshot,
 };
 
@@ -21,7 +20,6 @@ pub struct InMemoryLiveStateStore {
 
 #[derive(Debug, Default)]
 struct Inner {
-    blocks: BTreeMap<BlockNumber, ProcessedBlockSnapshot>,
     chain_states: BTreeMap<BlockNumber, EncodedChainStateSnapshot>,
     tokens: BTreeMap<String, TokenSnapshot>,
     latest_block_number: Option<BlockNumber>,
@@ -66,33 +64,6 @@ impl LiveStateReader for InMemoryLiveStateStore {
         Ok(self.read_inner()?.latest_chain_state_block_number)
     }
 
-    async fn read_block_meta(&self, block_number: BlockNumber) -> Result<Option<BlockMeta>> {
-        Ok(self
-            .read_inner()?
-            .blocks
-            .get(&block_number)
-            .map(|block| block.meta.clone()))
-    }
-
-    async fn read_block(
-        &self,
-        block_number: BlockNumber,
-    ) -> Result<Option<ProcessedBlockSnapshot>> {
-        Ok(self.read_inner()?.blocks.get(&block_number).cloned())
-    }
-
-    async fn read_processed_transaction(
-        &self,
-        block_number: BlockNumber,
-        tx_hash: B256,
-    ) -> Result<Option<ProcessedTransactionSnapshot>> {
-        Ok(self
-            .read_inner()?
-            .blocks
-            .get(&block_number)
-            .and_then(|block| block.transaction(tx_hash).cloned()))
-    }
-
     async fn read_chain_state_snapshot(
         &self,
         block_number: BlockNumber,
@@ -120,19 +91,11 @@ impl LiveStateReader for InMemoryLiveStateStore {
 
 #[async_trait]
 impl LiveStateWriter for InMemoryLiveStateStore {
-    async fn write_block(&self, block: ProcessedBlockSnapshot) -> Result<()> {
-        let mut inner = self.write_inner()?;
-        let block_number = block.block_number();
-        inner.latest_block_number = Some(block_number);
-        inner.latest_block_hash = Some(block.block_hash());
-        inner.blocks.insert(block_number, block);
-        Ok(())
-    }
-
     async fn mark_block_ready(&self, notification: BlockReadyNotification) -> Result<()> {
-        self.write_inner()?
-            .block_ready_notifications
-            .push(notification);
+        let mut inner = self.write_inner()?;
+        inner.latest_block_number = Some(notification.block_number);
+        inner.latest_block_hash = Some(notification.block_hash);
+        inner.block_ready_notifications.push(notification);
         Ok(())
     }
 
