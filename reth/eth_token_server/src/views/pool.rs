@@ -29,6 +29,21 @@ pub struct LiquidityPoint {
     pub token_reserve: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolRiskLevel {
+    Clear,
+    Scam,
+    Honeypot,
+    HighTax,
+}
+
+#[derive(Clone, Debug)]
+struct PoolRiskView {
+    level: PoolRiskLevel,
+    label: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolView {
     pub token_address: String,
@@ -59,6 +74,8 @@ pub struct PoolView {
     pub sell_tax: Option<f64>,
     pub is_scam: bool,
     pub scam_label: Option<String>,
+    pub risk_level: PoolRiskLevel,
+    pub risk_label: Option<String>,
     pub creation_block: Option<u64>,
     pub can_buy_block: Option<u64>,
     pub latest_block_number: Option<u64>,
@@ -94,6 +111,7 @@ impl PoolView {
             total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply));
         let price_ratio_history = price_ratio_history(&pool.base.price_history);
         let liquidity_history = liquidity_history(pool);
+        let risk = pool_risk(pool);
         Self {
             token_address: token.contract_address.clone(),
             token_symbol: token.symbol.clone(),
@@ -121,8 +139,10 @@ impl PoolView {
             trading_enabled: pool.base.trading_enabled(),
             buy_tax: pool.base.buy_tax,
             sell_tax: pool.base.sell_tax,
-            is_scam: pool.base.is_scam(),
-            scam_label: pool.base.scam_label.clone(),
+            is_scam: risk.level != PoolRiskLevel::Clear,
+            scam_label: risk.label.clone(),
+            risk_level: risk.level,
+            risk_label: risk.label,
             creation_block: pool.base.creation_block,
             can_buy_block: pool.base.can_buy_block,
             latest_block_number: pool.base.latest_block_number,
@@ -140,6 +160,46 @@ impl PoolView {
             lp_approval_count: pool.lp_tracker.approval_events.len(),
         }
     }
+}
+
+const HIGH_TAX_PERCENT: f64 = 10.0;
+
+fn pool_risk(pool: &UniswapV2Pool) -> PoolRiskView {
+    if pool.base.is_scam() {
+        return PoolRiskView {
+            level: PoolRiskLevel::Scam,
+            label: pool
+                .base
+                .scam_label
+                .clone()
+                .or_else(|| Some("scam".to_string())),
+        };
+    }
+
+    if pool.base.state.can_buy && !pool.base.state.can_sell {
+        return PoolRiskView {
+            level: PoolRiskLevel::Honeypot,
+            label: Some("cannot_sell".to_string()),
+        };
+    }
+
+    if tax_above_threshold(pool.base.buy_tax) || tax_above_threshold(pool.base.sell_tax) {
+        return PoolRiskView {
+            level: PoolRiskLevel::HighTax,
+            label: Some("high_tax".to_string()),
+        };
+    }
+
+    PoolRiskView {
+        level: PoolRiskLevel::Clear,
+        label: None,
+    }
+}
+
+fn tax_above_threshold(value: Option<f64>) -> bool {
+    value
+        .filter(|value| value.is_finite())
+        .is_some_and(|value| value >= HIGH_TAX_PERCENT)
 }
 
 fn liquidity_history(pool: &UniswapV2Pool) -> Vec<LiquidityPoint> {
