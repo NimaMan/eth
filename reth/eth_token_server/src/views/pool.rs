@@ -1,4 +1,7 @@
+use alloy_primitives::Address;
+use eth_token::erc20::ERC20Token;
 use eth_token::pools::{LPHolderSnapshot, PoolRuntimeState, TradingStatus, UniswapV2Pool};
+use reth_chain_query::common_addresses::get_token_symbol;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -18,10 +21,20 @@ pub struct PoolView {
     pub pool_address: String,
     pub protocol: String,
     pub denom_address: String,
+    pub denom_symbol: Option<String>,
+    pub currency: String,
     pub token_reserve: f64,
     pub denom_reserve: f64,
     pub price: f64,
+    pub initial_price: Option<f64>,
+    pub price_ratio_to_initial: Option<f64>,
     pub total_liquidity: f64,
+    pub token_total_supply_scaled: Option<f64>,
+    pub fully_diluted_value_denom: Option<f64>,
+    pub pooled_token_supply_ratio: Option<f64>,
+    pub pooled_token_supply_percent: Option<f64>,
+    pub liquidity_to_fdv_ratio: Option<f64>,
+    pub liquidity_to_fdv_percent: Option<f64>,
     pub can_buy: bool,
     pub can_sell: bool,
     pub trading_enabled: bool,
@@ -47,20 +60,41 @@ pub struct PoolView {
 }
 
 impl PoolView {
-    pub fn from_pool(token_address: &str, token_symbol: &str, pool: &UniswapV2Pool) -> Self {
+    pub fn from_pool(token: &ERC20Token, pool: &UniswapV2Pool) -> Self {
         let trading_status = pool.base.trading_status();
         let lp_holders = pool.lp_holders();
         let lp_holder_count = lp_holders.len();
+        let total_supply = token.total_supply_scaled();
+        let denom_symbol = denom_symbol(&pool.base.identity.denom_address);
+        let currency = denom_symbol
+            .clone()
+            .unwrap_or_else(|| pool.base.identity.denom_address.clone());
+        let fully_diluted_value_denom =
+            total_supply.and_then(|supply| pool.base.fully_diluted_value_denom(supply));
+        let pooled_token_supply_ratio =
+            total_supply.and_then(|supply| pool.base.pooled_token_supply_ratio(supply));
+        let liquidity_to_fdv_ratio =
+            total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply));
         Self {
-            token_address: token_address.to_string(),
-            token_symbol: token_symbol.to_string(),
+            token_address: token.contract_address.clone(),
+            token_symbol: token.symbol.clone(),
             pool_address: pool.base.identity.pool_address.clone(),
             protocol: pool.base.identity.protocol.clone(),
             denom_address: pool.base.identity.denom_address.clone(),
+            denom_symbol,
+            currency,
             token_reserve: pool.base.token_reserve(),
             denom_reserve: pool.base.denom_reserve(),
             price: pool.base.price(),
+            initial_price: pool.base.initial_price(),
+            price_ratio_to_initial: pool.base.price_ratio_to_initial(),
             total_liquidity: pool.base.state.total_liquidity,
+            token_total_supply_scaled: total_supply,
+            fully_diluted_value_denom,
+            pooled_token_supply_ratio,
+            pooled_token_supply_percent: ratio_percent(pooled_token_supply_ratio),
+            liquidity_to_fdv_ratio,
+            liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
             can_buy: pool.base.state.can_buy,
             can_sell: pool.base.state.can_sell,
             trading_enabled: pool.base.trading_enabled(),
@@ -87,17 +121,27 @@ impl PoolView {
     }
 }
 
+fn ratio_percent(value: Option<f64>) -> Option<f64> {
+    value
+        .map(|value| value * 100.0)
+        .filter(|value| value.is_finite())
+}
+
+fn denom_symbol(address: &str) -> Option<String> {
+    address
+        .parse::<Address>()
+        .ok()
+        .and_then(get_token_symbol)
+        .map(str::to_string)
+}
+
 pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let state = run.state.read().await;
     let mut pools = Vec::new();
 
     for token in state.processor.registry.tokens.values() {
         for pool in token.v2_pools.values() {
-            pools.push(PoolView::from_pool(
-                &token.contract_address,
-                &token.symbol,
-                pool,
-            ));
+            pools.push(PoolView::from_pool(token, pool));
         }
     }
 

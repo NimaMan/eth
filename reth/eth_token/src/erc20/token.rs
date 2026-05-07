@@ -12,6 +12,7 @@ use crate::pools::uniswap::v2::{
     UniswapV2SwapEvent, UniswapV2SyncEvent, UniswapV2TransactionEvents, UniswapV2TxContext,
 };
 use crate::state::{TokenAuthorityTracker, TokenStatusManager, TokenTransferTracker};
+use crate::utils::scale_raw_units;
 
 pub const DEFAULT_TOKEN_HISTORY_LIMIT: usize = 1000;
 
@@ -403,6 +404,12 @@ impl ERC20Token {
 
     pub fn total_supply_from_transfers(&self) -> f64 {
         self.transfer_tracker.total_supply_from_transfers
+    }
+
+    pub fn total_supply_scaled(&self) -> Option<f64> {
+        scale_raw_units(&self.total_supply, self.decimals)
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
     }
 
     pub fn unique_addresses(&self) -> Vec<String> {

@@ -161,6 +161,46 @@ impl BasePool {
         self.state.denom_reserve
     }
 
+    pub fn initial_price(&self) -> Option<f64> {
+        self.reserve_tracker
+            .initial_price()
+            .filter(|value| value.is_finite())
+    }
+
+    pub fn price_ratio_to_initial(&self) -> Option<f64> {
+        self.reserve_tracker
+            .price_ratio_to_initial()
+            .filter(|value| value.is_finite())
+    }
+
+    pub fn fully_diluted_value_denom(&self, total_supply: f64) -> Option<f64> {
+        let price = self.price();
+        if total_supply > 0.0 && price > 0.0 && total_supply.is_finite() && price.is_finite() {
+            Some(total_supply * price)
+        } else {
+            None
+        }
+    }
+
+    pub fn pooled_token_supply_ratio(&self, total_supply: f64) -> Option<f64> {
+        let token_reserve = self.token_reserve();
+        if total_supply > 0.0 && token_reserve >= 0.0 && total_supply.is_finite() {
+            Some(token_reserve / total_supply)
+        } else {
+            None
+        }
+    }
+
+    pub fn liquidity_to_fdv_ratio(&self, total_supply: f64) -> Option<f64> {
+        let fdv = self.fully_diluted_value_denom(total_supply)?;
+        let liquidity = self.state.total_liquidity;
+        if fdv > 0.0 && liquidity >= 0.0 && liquidity.is_finite() {
+            Some(liquidity / fdv)
+        } else {
+            None
+        }
+    }
+
     pub fn update_reserves(
         &mut self,
         token_reserve: f64,
@@ -379,6 +419,20 @@ mod tests {
         assert_eq!(pool.price(), 0.02);
         assert_eq!(pool.state.total_liquidity, 2.0);
         assert_eq!(pool.price_history, vec![(10, 0.02)]);
+    }
+
+    #[test]
+    fn valuation_ratios_are_computed_from_pool_state() {
+        let mut pool = test_pool();
+
+        pool.update_reserves(100.0, 2.0, 10, 1_700, "0xTX1");
+        pool.update_reserves(50.0, 2.0, 11, 1_710, "0xTX2");
+
+        assert_eq!(pool.initial_price(), Some(0.02));
+        assert_eq!(pool.price_ratio_to_initial(), Some(2.0));
+        assert_eq!(pool.fully_diluted_value_denom(1_000.0), Some(40.0));
+        assert_eq!(pool.pooled_token_supply_ratio(1_000.0), Some(0.05));
+        assert_eq!(pool.liquidity_to_fdv_ratio(1_000.0), Some(0.05));
     }
 
     #[test]

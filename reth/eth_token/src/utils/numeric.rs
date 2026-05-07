@@ -1,3 +1,4 @@
+use alloy_primitives::U256;
 use eyre::{eyre, Result};
 
 pub fn parse_raw_i128(value: impl AsRef<str>) -> Result<i128> {
@@ -66,6 +67,21 @@ pub fn parse_raw_f64_or(value: Option<impl AsRef<str>>, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
+pub fn scale_raw_units(raw_value: impl AsRef<str>, decimals: u8) -> Result<f64> {
+    let cleaned = raw_value.as_ref().trim();
+    if cleaned.is_empty() {
+        return Err(eyre!("empty numeric value"));
+    }
+
+    let raw = if cleaned.starts_with("0x") {
+        U256::from_str_radix(cleaned.trim_start_matches("0x"), 16)?.to_string()
+    } else {
+        cleaned.to_string()
+    };
+
+    Ok(raw.parse::<f64>()? / 10_f64.powi(i32::from(decimals)))
+}
+
 pub fn parse_be_bytes_u128(bytes: impl AsRef<[u8]>) -> Result<u128> {
     let bytes = bytes.as_ref();
     if bytes.len() > 16 {
@@ -98,6 +114,12 @@ mod tests {
         assert_eq!(parse_raw_f64("0x10").unwrap(), 16.0);
         assert_eq!(parse_raw_f64_or(Some(""), 7.5), 7.5);
         assert_eq!(parse_raw_f64_or(Option::<&str>::None, 3.0), 3.0);
+    }
+
+    #[test]
+    fn scale_raw_units_supports_decimal_and_hex_supply() {
+        assert_eq!(scale_raw_units("1000000000000000000", 18).unwrap(), 1.0);
+        assert_eq!(scale_raw_units("0xde0b6b3a7640000", 18).unwrap(), 1.0);
     }
 
     #[test]

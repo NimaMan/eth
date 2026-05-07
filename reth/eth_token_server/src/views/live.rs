@@ -77,7 +77,7 @@ pub async fn token_detail(
     let mut pools = token
         .v2_pools
         .values()
-        .map(|pool| PoolView::from_pool(&token.contract_address, &token.symbol, pool))
+        .map(|pool| PoolView::from_pool(token, pool))
         .collect::<Vec<_>>();
     pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
 

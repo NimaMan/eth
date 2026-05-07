@@ -19,6 +19,7 @@ pub struct TokenView {
     pub symbol: String,
     pub decimals: u8,
     pub total_supply: String,
+    pub total_supply_scaled: Option<f64>,
     pub index_status: Option<TrackedTokenStatus>,
     pub lifecycle_status: Option<TokenLifecycleState>,
     pub creation_block: Option<u64>,
@@ -53,6 +54,7 @@ impl TokenView {
             symbol: token.symbol.clone(),
             decimals: token.decimals,
             total_supply: token.total_supply.clone(),
+            total_supply_scaled: token.total_supply_scaled(),
             index_status,
             lifecycle_status: token.token_life_cycle_status.clone(),
             creation_block: token.creation_block,
@@ -103,7 +105,7 @@ pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<To
     let mut pools = token
         .v2_pools
         .values()
-        .map(|pool| PoolView::from_pool(&token.contract_address, &token.symbol, pool))
+        .map(|pool| PoolView::from_pool(token, pool))
         .collect::<Vec<_>>();
     pools.sort_by(|left, right| left.pool_address.cmp(&right.pool_address));
 

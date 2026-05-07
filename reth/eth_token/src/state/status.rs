@@ -1,7 +1,9 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_processor::ProcessedTransaction;
+
+use crate::utils::scale_raw_units;
 
 pub const DEFAULT_HIDDEN_MINT_THRESHOLD: f64 = 1.01;
 
@@ -125,12 +127,7 @@ impl TokenStatusManager {
 }
 
 fn scaled_supply(raw_supply: &str, decimals: u8) -> Result<f64> {
-    let raw = if raw_supply.trim().starts_with("0x") {
-        U256::from_str_radix(raw_supply.trim_start_matches("0x"), 16)?.to_string()
-    } else {
-        raw_supply.to_string()
-    };
-    Ok(raw.parse::<f64>()? / 10_f64.powi(i32::from(decimals)))
+    scale_raw_units(raw_supply, decimals)
 }
 
 fn hash_string(hash: &B256) -> String {
@@ -140,7 +137,7 @@ fn hash_string(hash: &B256) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256};
+    use alloy_primitives::{address, b256, U256};
     use tx_processor::tx_processor::data_models::{TradingDisabledEvent, TradingEnabledEvent};
 
     fn tx() -> ProcessedTransaction {
