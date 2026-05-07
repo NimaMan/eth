@@ -17,7 +17,10 @@ use tx_processor::{BlockProcessor, LivePoolBuySellSimulator, ProcessedBlockDiskC
 
 use super::config::LiveTokenRuntimeConfig;
 use super::event::LiveTokenEvent;
-use super::loader::{load_processed_block, LiveBlockLoad, ProcessedBlockDiskCacheRetry};
+use super::loader::{
+    load_cached_processed_block_with_retry, load_processed_block, LiveBlockLoad,
+    ProcessedBlockDiskCacheRetry,
+};
 use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
@@ -390,27 +393,84 @@ impl LiveTokenRuntime {
             return Ok(());
         }
 
-        if missing.len() > 1 {
-            self.record_gap_blocks((missing.len() - 1) as u64).await;
-        }
+        let mut applied_blocks = 0_u64;
         for block_number in missing {
             if self.inner.stop_requested.load(Ordering::SeqCst) {
                 return Ok(());
             }
-            self.apply_block(
+            let applied = self
+                .apply_live_tail_block(
+                    block_number,
+                    latest_block,
+                    ProcessedBlockDiskCacheRetry {
+                        attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
+                        delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
+                    },
+                    tx_processor,
+                    discovery_provider,
+                    pool_simulator,
+                )
+                .await?;
+            if !applied {
+                break;
+            }
+            applied_blocks += 1;
+        }
+        if applied_blocks > 1 {
+            self.record_gap_blocks(applied_blocks - 1).await;
+        }
+        Ok(())
+    }
+
+    async fn apply_live_tail_block<P>(
+        &self,
+        block_number: u64,
+        latest_block: u64,
+        retry: ProcessedBlockDiskCacheRetry,
+        tx_processor: &BlockProcessor,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> Result<bool>
+    where
+        P: TokenDiscoveryProvider,
+    {
+        if let Some(cache_store) = self.inner.processed_block_disk_cache.clone() {
+            let loaded = load_cached_processed_block_with_retry(
+                self.inner.provider.as_ref(),
+                cache_store,
+                block_number,
+                retry,
+            )
+            .await?;
+            let Some(loaded) = loaded else {
+                tracing::warn!(
+                    block_number,
+                    latest_block,
+                    "waiting for processed block disk cache entry before live token apply"
+                );
+                return Ok(false);
+            };
+            self.apply_loaded_block(
                 block_number,
                 true,
-                ProcessedBlockDiskCacheRetry {
-                    attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
-                    delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
-                },
-                tx_processor,
+                loaded,
                 discovery_provider,
                 pool_simulator,
             )
             .await?;
+            return Ok(true);
         }
-        Ok(())
+
+        self.apply_block(
+            block_number,
+            true,
+            retry,
+            tx_processor,
+            discovery_provider,
+            pool_simulator,
+        )
+        .await?;
+        Ok(true)
     }
 
     async fn apply_block<P>(
@@ -434,6 +494,27 @@ impl LiveTokenRuntime {
         )
         .await?;
 
+        self.apply_loaded_block(
+            block_number,
+            is_live_tail,
+            loaded,
+            discovery_provider,
+            pool_simulator,
+        )
+        .await
+    }
+
+    async fn apply_loaded_block<P>(
+        &self,
+        block_number: u64,
+        is_live_tail: bool,
+        loaded: LiveBlockLoad,
+        discovery_provider: &P,
+        pool_simulator: &LivePoolBuySellSimulator,
+    ) -> Result<()>
+    where
+        P: TokenDiscoveryProvider,
+    {
         let mut processor = self.clone_processor_for_apply(block_number).await;
         let apply_started = Instant::now();
         let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);

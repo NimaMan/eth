@@ -74,32 +74,37 @@ impl TokenTrackingCache {
 
     /// Get a token by address (zero-copy via Arc)
     pub async fn get_token(&self, address: &Address) -> Option<Arc<Token>> {
+        let address = normalize_address(address);
         let mut tokens = self.tokens.write().await; // LRU needs mut for access tracking
-        tokens.get(address).cloned()
+        tokens.get(&address).cloned()
     }
 
     /// Get a pool by address (zero-copy via Arc)
     pub async fn get_pool(&self, address: &Address) -> Option<Arc<Pool>> {
+        let address = normalize_address(address);
         let mut pools = self.pools.write().await; // LRU needs mut for access tracking
-        pools.get(address).cloned()
+        pools.get(&address).cloned()
     }
 
     /// Check if an address is a creator/owner/tax setter - O(1)
     pub async fn is_creator(&self, address: &Address) -> bool {
+        let address = normalize_address(address);
         let creators = self.active_creators.read().await;
-        creators.contains(address)
+        creators.contains(&address)
     }
 
     /// Check if an address is a pool - O(1)
     pub async fn is_pool(&self, address: &Address) -> bool {
+        let address = normalize_address(address);
         let pools = self.active_pools.read().await;
-        pools.contains(address)
+        pools.contains(&address)
     }
 
     /// Get the first token created by an address - O(1) index lookup
     pub async fn get_token_for_creator(&self, creator: &Address) -> Option<Arc<Token>> {
+        let creator = normalize_address(creator);
         let creator_map = self.creator_to_tokens.read().await;
-        if let Some(token_addresses) = creator_map.get(creator) {
+        if let Some(token_addresses) = creator_map.get(&creator) {
             if let Some(first_token) = token_addresses.iter().next() {
                 return self.get_token(first_token).await;
             }
@@ -109,10 +114,11 @@ impl TokenTrackingCache {
 
     /// Get all tokens created by an address - O(1) index lookup
     pub async fn get_tokens_by_creator(&self, creator: &Address) -> Vec<Arc<Token>> {
+        let creator = normalize_address(creator);
         let creator_map = self.creator_to_tokens.read().await;
         let mut result = Vec::new();
 
-        if let Some(token_addresses) = creator_map.get(creator) {
+        if let Some(token_addresses) = creator_map.get(&creator) {
             // Get all tokens in parallel
             for token_addr in token_addresses {
                 if let Some(token) = self.get_token(token_addr).await {
@@ -126,10 +132,11 @@ impl TokenTrackingCache {
 
     /// Get all pools for a token - O(1) index lookup
     pub async fn get_pools_for_token(&self, token: &Address) -> Vec<Arc<Pool>> {
+        let token = normalize_address(token);
         let token_map = self.token_to_pools.read().await;
         let mut result = Vec::new();
 
-        if let Some(pool_addresses) = token_map.get(token) {
+        if let Some(pool_addresses) = token_map.get(&token) {
             for pool_addr in pool_addresses {
                 if let Some(pool) = self.get_pool(pool_addr).await {
                     result.push(pool);
@@ -201,8 +208,17 @@ impl TokenTrackingCache {
 
         // Process each token and its pools
         for (token_addr, token_with_pools) in data {
+            let token_addr = normalize_address(&token_addr);
             let mut token = token_with_pools.token;
             let pools = token_with_pools.pools;
+            token.address = normalize_address(&token.address);
+            token.creator_address = normalize_address(&token.creator_address);
+            token.current_owner = normalize_address(&token.current_owner);
+            token.tax_setter_addresses = token
+                .tax_setter_addresses
+                .into_iter()
+                .map(|address| normalize_address(&address))
+                .collect();
 
             // Calculate cached values
             token.total_liquidity = pools
@@ -254,6 +270,14 @@ impl TokenTrackingCache {
             // Update pools
             let mut pool_addrs = HashSet::new();
             for (pool_addr, mut pool) in pools {
+                let pool_addr = normalize_address(&pool_addr);
+                pool.address = normalize_address(&pool.address);
+                pool.denom_address = normalize_address(&pool.denom_address);
+                pool.control_addresses = pool
+                    .control_addresses
+                    .into_iter()
+                    .map(|address| normalize_address(&address))
+                    .collect();
                 // Ensure token_address is set
                 pool.token_address = token_addr.clone();
 
@@ -412,6 +436,10 @@ fn pool_liquidity_threshold(pool: &Pool, fallback_eth_threshold: f64) -> f64 {
     fallback_eth_threshold
 }
 
+fn normalize_address(address: &str) -> String {
+    address.trim().to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,10 +542,10 @@ mod tests {
             .get_token_for_creator(&"0xCREATOR".to_string())
             .await
             .unwrap();
-        assert_eq!(creator_token.address, "0xTOKEN");
+        assert_eq!(creator_token.address, "0xtoken");
 
         let pools = cache.get_pools_for_token(&"0xTOKEN".to_string()).await;
         assert_eq!(pools.len(), 1);
-        assert_eq!(pools[0].address, "0xPOOL");
+        assert_eq!(pools[0].address, "0xpool");
     }
 }

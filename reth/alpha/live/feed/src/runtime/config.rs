@@ -25,7 +25,7 @@ impl Default for LiveTokenRuntimeConfig {
             processed_block_disk_cache_retry_delay_ms: 100,
             stream_block_ms: 5_000,
             stream_count: 100,
-            block_apply_timeout_ms: 30_000,
+            block_apply_timeout_ms: 180_000,
         }
     }
 }

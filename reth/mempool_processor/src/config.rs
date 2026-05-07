@@ -34,6 +34,11 @@ pub const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/m
 pub const DEFAULT_TOKEN_CACHE_PUB_ENDPOINT: &str = "tcp://127.0.0.1:5557";
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "eth/live/token/snapshot/";
+pub const MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV: &str = "MEMPOOL_LIVE_TOKEN_SERVER_URL";
+pub const MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS_ENV: &str =
+    "MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS";
+pub const DEFAULT_LIVE_TOKEN_SERVER_URL: &str = "http://127.0.0.1:8765";
+pub const DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS: u64 = 5;
 
 /// Path to the shared Ethereum workspace config.
 pub fn eth_config_path() -> PathBuf {
@@ -199,6 +204,14 @@ fn default_simulation_workers() -> usize {
 
 fn default_live_data_redis_url() -> String {
     live_data_redis_url_from_env()
+}
+
+fn default_live_token_server_url() -> Option<String> {
+    Some(DEFAULT_LIVE_TOKEN_SERVER_URL.to_string())
+}
+
+fn default_live_token_server_sync_interval_secs() -> u64 {
+    DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS
 }
 
 /// Main configuration structure
@@ -398,6 +411,12 @@ pub struct ZmqConfig {
 pub struct TokenCacheSourceConfig {
     /// Minimum ETH threshold used by cache heuristics
     pub eth_threshold: f64,
+    /// HTTP base URL for the Rust token server that owns the live token tracker
+    #[serde(default = "default_live_token_server_url")]
+    pub live_token_server_url: Option<String>,
+    /// Poll interval for refreshing the mempool cache from the live token tracker
+    #[serde(default = "default_live_token_server_sync_interval_secs")]
+    pub live_token_server_sync_interval_secs: u64,
     /// ZMQ PUB endpoint for token update notifications
     pub zmq_pub_endpoint: String,
     /// Redis URL hosting live token snapshots
@@ -410,6 +429,8 @@ impl Default for TokenCacheSourceConfig {
     fn default() -> Self {
         Self {
             eth_threshold: 0.1,
+            live_token_server_url: default_live_token_server_url(),
+            live_token_server_sync_interval_secs: DEFAULT_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS,
             zmq_pub_endpoint: DEFAULT_TOKEN_CACHE_PUB_ENDPOINT.to_string(),
             redis_url: live_data_redis_url_from_env(),
             redis_token_prefix: DEFAULT_REDIS_TOKEN_PREFIX.to_string(),
@@ -562,6 +583,24 @@ impl MempoolProcessorConfig {
 
         if let Ok(pub_endpoint) = std::env::var("MEMPOOL_TOKEN_CACHE_PUB_ENDPOINT") {
             config.token_cache_source.zmq_pub_endpoint = pub_endpoint;
+        }
+
+        if let Some(url) = config_value(&[MEMPOOL_LIVE_TOKEN_SERVER_URL_ENV]) {
+            let url = url.trim();
+            config.token_cache_source.live_token_server_url =
+                if url.is_empty() || url.eq_ignore_ascii_case("none") || url == "0" {
+                    None
+                } else {
+                    Some(url.to_string())
+                };
+        }
+
+        if let Some(interval) = config_value(&[MEMPOOL_LIVE_TOKEN_SERVER_SYNC_INTERVAL_SECS_ENV]) {
+            if let Ok(val) = interval.parse::<u64>() {
+                config
+                    .token_cache_source
+                    .live_token_server_sync_interval_secs = val.max(1);
+            }
         }
 
         if let Ok(threshold) = std::env::var("MEMPOOL_TOKEN_CACHE_ETH_THRESHOLD") {

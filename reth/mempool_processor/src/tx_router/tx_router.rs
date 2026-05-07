@@ -94,9 +94,76 @@ impl TransactionRouter {
                 return result;
             }
         }
+
+        if matches!(
+            tx.function_category.as_ref(),
+            Some(CreatorFunctionType::LiquidityRemoval)
+        ) {
+            if let Some(target_token) = self.tracked_liquidity_removal_token(tx).await {
+                return ClassificationResult {
+                    category: TransactionCategory::CreatorTransaction {
+                        creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+                        target_address: tx
+                            .to
+                            .as_ref()
+                            .map(|t| to_checksum_address(&AlloyAddress::from_slice(t)))
+                            .unwrap_or_else(|| "none".to_string()),
+                        target_token: Some(target_token),
+                        function_type: CreatorFunctionType::LiquidityRemoval,
+                    },
+                    priority: SimulationPriority::Critical,
+                    requires_simulation: true,
+                    requires_buy_sell_test: true,
+                };
+            }
+        }
+
+        if let Some(function_type) = tx
+            .function_category
+            .as_ref()
+            .filter(|function_type| should_route_tracked_token_call(function_type))
+            .cloned()
+        {
+            if let Some(target_token) = self.tracked_target_token(tx).await {
+                return ClassificationResult {
+                    category: TransactionCategory::CreatorTransaction {
+                        creator: to_checksum_address(&AlloyAddress::from_slice(&tx.from)),
+                        target_address: target_token.clone(),
+                        target_token: Some(target_token),
+                        function_type: function_type.clone(),
+                    },
+                    priority: priority_for_creator_function(&function_type),
+                    requires_simulation: true,
+                    requires_buy_sell_test: true,
+                };
+            }
+        }
+
         // If not a creator or contract creation, classify as regular transaction
         let result = self.classify_regular_transaction(tx).await;
         result
+    }
+
+    async fn tracked_liquidity_removal_token(&self, tx: &MempoolTransaction) -> Option<String> {
+        let cache = self.token_cache.as_ref()?;
+        for candidate in liquidity_removal_token_candidates(&tx.input) {
+            if cache.get_token(&candidate).await.is_some() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    async fn tracked_target_token(&self, tx: &MempoolTransaction) -> Option<String> {
+        let cache = self.token_cache.as_ref()?;
+        let target = tx
+            .to
+            .as_ref()
+            .map(|address| format!("0x{}", hex::encode(address)))?;
+        cache
+            .get_token(&target)
+            .await
+            .map(|token| token.address.clone())
     }
 
     /// Classify contract creation
@@ -144,16 +211,7 @@ impl TransactionRouter {
             matches!(&function_type, CreatorFunctionType::Other(s) if s == "eth_transfer");
 
         // ALL creator transactions get high priority except ETH transfers
-        let priority = match &function_type {
-            CreatorFunctionType::TaxModification => SimulationPriority::Critical,
-            CreatorFunctionType::TradingControl => SimulationPriority::Critical,
-            CreatorFunctionType::OwnershipChange => SimulationPriority::High,
-            CreatorFunctionType::LiquidityAddition => SimulationPriority::High, // Less critical
-            CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical, // Potential rug pull!
-            CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
-            CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
-            CreatorFunctionType::Other(_) => SimulationPriority::High, // Changed from Low to High
-        };
+        let priority = priority_for_creator_function(&function_type);
 
         // LP approvals do NOT require simulation or buy/sell
         let is_lp_approval = matches!(&function_type, CreatorFunctionType::LiquidityPoolApproval);
@@ -199,5 +257,218 @@ impl TransactionRouter {
             requires_simulation: false,
             requires_buy_sell_test: false,
         }
+    }
+}
+
+fn should_route_tracked_token_call(function_type: &CreatorFunctionType) -> bool {
+    matches!(
+        function_type,
+        CreatorFunctionType::TradingControl
+            | CreatorFunctionType::TaxModification
+            | CreatorFunctionType::MaxWalletLimit
+            | CreatorFunctionType::OwnershipChange
+    )
+}
+
+fn priority_for_creator_function(function_type: &CreatorFunctionType) -> SimulationPriority {
+    match function_type {
+        CreatorFunctionType::TaxModification => SimulationPriority::Critical,
+        CreatorFunctionType::TradingControl => SimulationPriority::Critical,
+        CreatorFunctionType::OwnershipChange => SimulationPriority::High,
+        CreatorFunctionType::LiquidityAddition => SimulationPriority::High,
+        CreatorFunctionType::LiquidityRemoval => SimulationPriority::Critical,
+        CreatorFunctionType::LiquidityPoolApproval => SimulationPriority::Critical,
+        CreatorFunctionType::MaxWalletLimit => SimulationPriority::High,
+        CreatorFunctionType::Other(_) => SimulationPriority::High,
+    }
+}
+
+fn liquidity_removal_token_candidates(input: &[u8]) -> Vec<String> {
+    // Uniswap V2 removeLiquidityETH* uses token as param 0. removeLiquidity
+    // uses tokenA/tokenB as params 0 and 1, so check both against tracked tokens.
+    (0..2)
+        .filter_map(|param_idx| calldata_address_param(input, param_idx))
+        .collect()
+}
+
+fn calldata_address_param(input: &[u8], param_idx: usize) -> Option<String> {
+    let start = 4 + param_idx * 32 + 12;
+    let end = start + 20;
+    if input.len() < end {
+        return None;
+    }
+    Some(format!("0x{}", hex::encode(&input[start..end])))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use alloy_primitives::U256;
+    use serde_json::json;
+
+    use super::{CreatorFunctionType, TransactionCategory, TransactionRouter};
+    use crate::mempool_fetcher::MempoolTransaction;
+    use crate::token_tracking::types::PoolLifecycle;
+    use crate::token_tracking::{
+        Pool, PoolType, Token, TokenTrackingCache, TokenUpdate, TokenWithPools,
+    };
+
+    #[tokio::test]
+    async fn routes_tracked_liquidity_removal_from_non_creator() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let token_address = "0x1111111111111111111111111111111111111111".to_string();
+        hydrate_token(&cache, &token_address).await;
+
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes("0x7a250d5630b4cf539739df2c5dacb4c659f2488d")),
+            input: remove_liquidity_eth_calldata(&token_address),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["removeLiquidityETH".to_string()],
+            function_category: Some(CreatorFunctionType::LiquidityRemoval),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert!(classification.requires_simulation);
+        match classification.category {
+            TransactionCategory::CreatorTransaction {
+                target_token,
+                function_type,
+                ..
+            } => {
+                assert_eq!(target_token.as_deref(), Some(token_address.as_str()));
+                assert_eq!(function_type, CreatorFunctionType::LiquidityRemoval);
+            }
+            other => panic!("unexpected category: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn routes_trading_control_to_tracked_token_from_non_creator() {
+        let cache = Arc::new(TokenTrackingCache::with_defaults());
+        let token_address = "0x1111111111111111111111111111111111111111".to_string();
+        hydrate_token(&cache, &token_address).await;
+
+        let router = TransactionRouter::new(Some(cache));
+        let tx = MempoolTransaction {
+            hash: "0xtx".to_string(),
+            data: json!({}),
+            detection_ns: 0,
+            detection_time: Instant::now(),
+            latency_ns: 0,
+            from: address_bytes("0x2222222222222222222222222222222222222222"),
+            to: Some(address_bytes(&token_address)),
+            input: hex::decode("8a8c523c").unwrap(),
+            value: U256::ZERO,
+            gas_price: Some(U256::ZERO),
+            functions: vec!["enableTrading".to_string()],
+            function_category: Some(CreatorFunctionType::TradingControl),
+        };
+
+        let classification = router.classify(&tx).await;
+        assert!(classification.requires_simulation);
+        assert!(classification.requires_buy_sell_test);
+        assert_eq!(classification.priority, super::SimulationPriority::Critical);
+        match classification.category {
+            TransactionCategory::CreatorTransaction {
+                creator,
+                target_address,
+                target_token,
+                function_type,
+            } => {
+                assert_eq!(creator, "0x2222222222222222222222222222222222222222");
+                assert_eq!(target_address, token_address);
+                assert_eq!(target_token.as_deref(), Some(token_address.as_str()));
+                assert_eq!(function_type, CreatorFunctionType::TradingControl);
+            }
+            other => panic!("unexpected category: {other:?}"),
+        }
+    }
+
+    async fn hydrate_token(cache: &TokenTrackingCache, token_address: &str) {
+        let creator_address = "0x3333333333333333333333333333333333333333".to_string();
+        let pool_address = "0x4444444444444444444444444444444444444444".to_string();
+        let token = Token {
+            address: token_address.to_string(),
+            symbol: "TEST".to_string(),
+            name: "Test".to_string(),
+            decimals: 18,
+            total_supply: Some("1000".to_string()),
+            creator_address: creator_address.clone(),
+            current_owner: creator_address,
+            tax_setter_addresses: Vec::new(),
+            ownership_renounced: false,
+            renouncement_block: None,
+            buy_tax: None,
+            sell_tax: None,
+            last_tax_change_block: None,
+            tax_history: Vec::new(),
+            creation_block: 1,
+            creation_tx: "0xcreation".to_string(),
+            creation_timestamp: None,
+            latest_activity_block: 1,
+            is_scam: false,
+            scam_label: None,
+            total_liquidity: 0.0,
+        };
+        let pool = Pool {
+            address: pool_address.clone(),
+            token_address: token_address.to_string(),
+            pool_type: PoolType::UniswapV2,
+            token_reserve: 1_000.0,
+            eth_reserve: 1.0,
+            denom_currency: "ETH".to_string(),
+            denom_address: "0x0000000000000000000000000000000000000000".to_string(),
+            trading_enabled: true,
+            trading_enabled_block: Some(1),
+            trading_enabled_tx: None,
+            fee_tier: None,
+            pool_id: None,
+            last_updated_block: 1,
+            last_updated_time: 0.0,
+            is_scam: false,
+            scam_label: None,
+            lp_tokens_approved_percentage: None,
+            lifecycle: PoolLifecycle::Active,
+            control_addresses: Vec::new(),
+            can_buy: true,
+            can_sell: true,
+            received_at: Instant::now(),
+        };
+
+        let mut pools = HashMap::new();
+        pools.insert(pool_address, pool);
+        let mut data = HashMap::new();
+        data.insert(token_address.to_string(), TokenWithPools { token, pools });
+        cache
+            .batch_update(TokenUpdate {
+                message_type: "test".to_string(),
+                token_count: 1,
+                block_number: 1,
+                timestamp: 0.0,
+                data,
+            })
+            .await;
+    }
+
+    fn remove_liquidity_eth_calldata(token_address: &str) -> Vec<u8> {
+        let mut input = hex::decode("02751cec").unwrap();
+        input.extend_from_slice(&[0u8; 12]);
+        input.extend_from_slice(&address_bytes(token_address));
+        input
+    }
+
+    fn address_bytes(address: &str) -> Vec<u8> {
+        hex::decode(address.trim_start_matches("0x")).unwrap()
     }
 }

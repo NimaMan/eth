@@ -43,15 +43,15 @@ pub async fn load_processed_block(
     retry: ProcessedBlockDiskCacheRetry,
 ) -> Result<LiveBlockLoad> {
     if let Some(cache_store) = cache_store {
-        for attempt in 0..=retry.attempts {
-            if let Some(cached) =
-                read_cached_block(cache_store.clone(), provider.chain_id(), block_number).await?
-            {
-                return Ok(cached);
-            }
-            if attempt < retry.attempts && retry.delay_ms > 0 {
-                sleep(Duration::from_millis(retry.delay_ms)).await;
-            }
+        if let Some(cached) = load_cached_processed_block_with_retry(
+            provider,
+            cache_store.clone(),
+            block_number,
+            retry,
+        )
+        .await?
+        {
+            return Ok(cached);
         }
 
         let started = Instant::now();
@@ -93,6 +93,26 @@ pub async fn load_processed_block(
         disk_cache_write_ms: 0,
         source: ProcessedBlockSource::Processed.as_str(),
     })
+}
+
+pub async fn load_cached_processed_block_with_retry(
+    provider: &RethQueryProvider,
+    cache_store: Arc<ProcessedBlockDiskCacheStore>,
+    block_number: u64,
+    retry: ProcessedBlockDiskCacheRetry,
+) -> Result<Option<LiveBlockLoad>> {
+    for attempt in 0..=retry.attempts {
+        if let Some(cached) =
+            read_cached_block(cache_store.clone(), provider.chain_id(), block_number).await?
+        {
+            return Ok(Some(cached));
+        }
+        if attempt < retry.attempts && retry.delay_ms > 0 {
+            sleep(Duration::from_millis(retry.delay_ms)).await;
+        }
+    }
+
+    Ok(None)
 }
 
 async fn read_cached_block(

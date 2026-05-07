@@ -6,6 +6,7 @@ pub mod address_tracking_cache;
 pub mod cache;
 pub mod in_process;
 mod live_data;
+pub mod live_server;
 mod thresholds;
 pub mod token_parameter_extraction;
 pub mod types;
@@ -16,6 +17,10 @@ pub use cache::{CacheStats, TokenTrackingCache, UpdateResult};
 pub use in_process::{
     apply_live_token_snapshots_to_cache, hydrate_cache_from_live_reader,
     start_live_token_reader_cache_sync,
+};
+pub use live_server::{
+    hydrate_cache_from_live_token_server, start_live_token_server_cache_sync,
+    LiveTokenServerHydrationReport,
 };
 use serde_json;
 use std::sync::Arc;
@@ -41,6 +46,7 @@ pub struct TokenTrackingSubscriber {
     zmq_pub_endpoint: String,
     redis_fetcher: LiveDataSnapshotFetcher,
     legacy_redis_fetcher: Option<LiveDataSnapshotFetcher>,
+    skip_initial_redis_warmup: bool,
 }
 
 impl TokenTrackingSubscriber {
@@ -88,7 +94,12 @@ impl TokenTrackingSubscriber {
             zmq_pub_endpoint: pub_endpoint.to_string(),
             redis_fetcher,
             legacy_redis_fetcher,
+            skip_initial_redis_warmup: false,
         }
+    }
+
+    pub fn skip_initial_redis_warmup(&mut self, skip: bool) {
+        self.skip_initial_redis_warmup = skip;
     }
 
     /// Get a clone of the combined cache for use by other components
@@ -223,7 +234,11 @@ impl TokenTrackingSubscriber {
 
         // Subscribe first, then warm from Redis so restart/startup recovery does
         // not depend on an in-memory Python query socket.
-        if let Err(e) = self.hydrate_initial_token_state().await {
+        if self.skip_initial_redis_warmup {
+            info!(
+                "Skipping Redis token snapshot warmup because live token tracker hydrate succeeded"
+            );
+        } else if let Err(e) = self.hydrate_initial_token_state().await {
             warn!("Failed to hydrate initial token state: {}", e);
         }
 

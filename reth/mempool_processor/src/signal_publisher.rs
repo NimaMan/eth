@@ -84,6 +84,11 @@ struct LogFiles {
 #[derive(Debug, Default)]
 pub struct PublisherStats {
     pub total_published: std::sync::atomic::AtomicU64,
+    pub trading_enabled: std::sync::atomic::AtomicU64,
+    pub tax_signals: std::sync::atomic::AtomicU64,
+    pub liquidity_removals: std::sync::atomic::AtomicU64,
+    pub lp_approvals: std::sync::atomic::AtomicU64,
+    pub scam_detections: std::sync::atomic::AtomicU64,
     pub zmq_published: std::sync::atomic::AtomicU64,
     pub logs_written: std::sync::atomic::AtomicU64,
     pub db_written: std::sync::atomic::AtomicU64,
@@ -240,6 +245,33 @@ impl SignalPublisher {
         self.stats
             .total_published
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        match &signal {
+            Signal::TradingEnabled(_) => {
+                self.stats
+                    .trading_enabled
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            Signal::TaxSignal(_) => {
+                self.stats
+                    .tax_signals
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            Signal::LiquidityRemoval(_) => {
+                self.stats
+                    .liquidity_removals
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            Signal::LpApproval(_) => {
+                self.stats
+                    .lp_approvals
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            Signal::ScamDetection(_) => {
+                self.stats
+                    .scam_detections
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
 
         // Fast ZMQ publishing
         self.publish_zmq(&signal)?;
@@ -403,6 +435,26 @@ impl SignalPublisher {
                 .stats
                 .total_published
                 .load(std::sync::atomic::Ordering::Relaxed),
+            trading_enabled: self
+                .stats
+                .trading_enabled
+                .load(std::sync::atomic::Ordering::Relaxed),
+            tax_signals: self
+                .stats
+                .tax_signals
+                .load(std::sync::atomic::Ordering::Relaxed),
+            liquidity_removals: self
+                .stats
+                .liquidity_removals
+                .load(std::sync::atomic::Ordering::Relaxed),
+            lp_approvals: self
+                .stats
+                .lp_approvals
+                .load(std::sync::atomic::Ordering::Relaxed),
+            scam_detections: self
+                .stats
+                .scam_detections
+                .load(std::sync::atomic::Ordering::Relaxed),
             zmq_published: self
                 .stats
                 .zmq_published
@@ -424,6 +476,11 @@ impl SignalPublisher {
 #[derive(Debug, Clone)]
 pub struct PublisherStatsSnapshot {
     pub total_published: u64,
+    pub trading_enabled: u64,
+    pub tax_signals: u64,
+    pub liquidity_removals: u64,
+    pub lp_approvals: u64,
+    pub scam_detections: u64,
     pub zmq_published: u64,
     pub logs_written: u64,
     pub db_written: u64,

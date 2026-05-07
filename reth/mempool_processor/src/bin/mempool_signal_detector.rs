@@ -59,7 +59,10 @@ use mempool_processor::{
     signal_detector::SignalManagerConfig,
     signal_publisher::{SignalPublisher, SignalPublisherConfig},
     simulator::{MempoolSimulator, SimulationManager, SimulationType, TxSimulationJob},
-    token_tracking::TokenTrackingSubscriber,
+    token_tracking::{
+        hydrate_cache_from_live_token_server, start_live_token_server_cache_sync,
+        TokenTrackingSubscriber,
+    },
     tx_router::{SimulationPriority, TransactionCategory, TransactionRouter},
 };
 use tx_simulator::LiveChainCache;
@@ -248,7 +251,7 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| base_config.simulation.reth_datadir.clone());
     let cfg_log_dir = base_config.logging.log_dir.clone();
-    let cfg_report_interval = base_config.logging.metrics_interval.as_secs();
+    let cfg_report_interval = args.report_interval.max(1);
     let cfg_sim_workers = base_config.simulation.worker_threads;
 
     let sim_workers = if args.sim_workers == mempool_processor::config::DEFAULT_SIM_WORKERS
@@ -347,6 +350,44 @@ async fn main() -> Result<()> {
     );
     let token_cache = token_subscriber.get_cache();
 
+    let mut live_token_server_hydrate_ok = false;
+    let live_token_server_sync_handle = if let Some(base_url) = source_cfg
+        .live_token_server_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+    {
+        info!(
+            "📡 Hydrating token cache from Rust live token tracker at {}",
+            base_url
+        );
+        match hydrate_cache_from_live_token_server(token_cache.as_ref(), base_url).await {
+            Ok(report) => {
+                info!(
+                    "✅ Live token tracker cache hydrate complete: status={:?}, block={}, tokens={}, pools={}",
+                    report.status, report.block_number, report.tokens, report.pools
+                );
+                live_token_server_hydrate_ok = report.tokens > 0;
+            }
+            Err(err) => {
+                warn!(
+                    "Live token tracker cache hydrate failed for {}: {}",
+                    base_url, err
+                );
+            }
+        }
+
+        Some(start_live_token_server_cache_sync(
+            token_cache.clone(),
+            base_url.to_string(),
+            Duration::from_secs(source_cfg.live_token_server_sync_interval_secs.max(1)),
+        ))
+    } else {
+        info!("📡 Rust live token tracker cache source disabled");
+        None
+    };
+    token_subscriber.skip_initial_redis_warmup(live_token_server_hydrate_ok);
+
     // Start token subscriber in background
     let subscriber_handle = tokio::spawn(async move {
         if let Err(e) = token_subscriber.start_listening().await {
@@ -359,11 +400,12 @@ async fn main() -> Result<()> {
     std::thread::sleep(Duration::from_secs(3));
     info!("🔁 Warmup wait complete; reading token cache stats...");
 
-    let initial_pools = token_cache.get_pool_count().await;
-    let initial_creators = token_cache.get_creator_count().await;
+    let initial_cache_stats = token_cache.stats().await;
     info!(
-        "✅ Token cache initialized: {} pools, {} creators",
-        initial_pools, initial_creators
+        "✅ Token cache initialized: {} tokens, {} pools, {} creators",
+        initial_cache_stats.total_tokens,
+        initial_cache_stats.total_pools,
+        initial_cache_stats.total_creators
     );
 
     // 2. IPC client
@@ -492,6 +534,14 @@ async fn main() -> Result<()> {
     use std::io::Write;
     let simulation_log_path = Arc::new(run_dir.join("simulation_results.log"));
     let simulation_error_log_path = Arc::new(run_dir.join("simulation_errors.log"));
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(simulation_log_path.as_ref())?;
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(simulation_error_log_path.as_ref())?;
 
     let mut last_report = Instant::now();
     let mut consecutive_empty = 0u64;
@@ -726,13 +776,31 @@ async fn main() -> Result<()> {
             let rate = delta as f64 / interval_secs;
             let sims = metrics.simulations_completed.load(Ordering::Relaxed);
             let sim_errs = metrics.simulation_errors.load(Ordering::Relaxed);
-            let te = metrics.trading_enabled_signals.load(Ordering::Relaxed);
-            let lr = metrics.liquidity_removal_signals.load(Ordering::Relaxed);
-            let hp = metrics.honeypot_signals.load(Ordering::Relaxed);
-            let tc = metrics.tax_change_signals.load(Ordering::Relaxed);
+            let publisher_stats = {
+                let publisher = signal_publisher.lock().await;
+                publisher.get_stats()
+            };
             info!(
-                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims ok/err: {}/{} | Signals TE:{} LR:{} HP:{} TC:{}",
-                total, delta, rate, sims, sim_errs, te, lr, hp, tc
+                "📊 Interval stats: {} tx (+{}), {:.1}/s | Sims ok/err: {}/{} | Signals TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} DB:{} Err:{}",
+                total,
+                delta,
+                rate,
+                sims,
+                sim_errs,
+                publisher_stats.trading_enabled,
+                publisher_stats.liquidity_removals,
+                publisher_stats.lp_approvals,
+                publisher_stats.tax_signals,
+                publisher_stats.scam_detections,
+                publisher_stats.total_published,
+                publisher_stats.zmq_published,
+                publisher_stats.db_written,
+                publisher_stats.errors
+            );
+            let cache_stats = token_cache.stats().await;
+            info!(
+                "📊 Token cache stats: {} tokens, {} pools, {} creators",
+                cache_stats.total_tokens, cache_stats.total_pools, cache_stats.total_creators
             );
             last_report_total = total;
 
@@ -753,9 +821,6 @@ async fn main() -> Result<()> {
                     append_line_to_file(&external_data_log_path, &line);
                 }
             }
-            // Touch cache metrics to maintain interval cadence alongside head tracking.
-            let _ = token_cache.get_pool_count().await;
-            let _ = token_cache.get_creator_count().await;
             last_report = Instant::now();
         }
     }
@@ -767,6 +832,23 @@ async fn main() -> Result<()> {
     // Final statistics
     let final_report = metrics.report(total_runtime).await;
     info!("{}", final_report);
+    let publisher_stats = {
+        let publisher = signal_publisher.lock().await;
+        publisher.get_stats()
+    };
+    info!(
+        "Publisher signals: TE:{} LR:{} LP:{} TAX:{} SCAM:{} | Published:{} ZMQ:{} Logs:{} DB:{} Err:{}",
+        publisher_stats.trading_enabled,
+        publisher_stats.liquidity_removals,
+        publisher_stats.lp_approvals,
+        publisher_stats.tax_signals,
+        publisher_stats.scam_detections,
+        publisher_stats.total_published,
+        publisher_stats.zmq_published,
+        publisher_stats.logs_written,
+        publisher_stats.db_written,
+        publisher_stats.errors
+    );
     info!("\n📊 Service Statistics:");
     info!(
         "  Total Runtime: {:.1} minutes",
@@ -780,6 +862,9 @@ async fn main() -> Result<()> {
     // Shutdown components
     drop(signal_publisher);
     drop(simulation_manager);
+    if let Some(handle) = live_token_server_sync_handle {
+        handle.abort();
+    }
     subscriber_handle.abort();
 
     info!("✅ Mempool signal detector shutdown complete");
