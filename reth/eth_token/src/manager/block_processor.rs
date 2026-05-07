@@ -11,6 +11,7 @@ use crate::chain_metadata::{
     UniswapV2PoolMetadataProvider,
 };
 
+use super::replay_context::BlockReplayContext;
 use super::update_router::V2TradingSimulation;
 use super::ProcessedTokenUpdateRouter;
 use super::{
@@ -186,7 +187,7 @@ impl BlockTokenProcessor {
         let created_token_addresses = Vec::new();
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
-        let mut prior_control_txs_by_sender = HashMap::new();
+        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             if let Some(error) = &tx.processing_error {
@@ -199,11 +200,7 @@ impl BlockTokenProcessor {
                 continue;
             }
 
-            let prior_txs = simulation_prior_txs_for_sender(
-                &mut prior_control_txs_by_sender,
-                &self.registry,
-                &tx.processed,
-            );
+            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -232,6 +229,7 @@ impl BlockTokenProcessor {
                     });
                 }
             }
+            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
@@ -353,7 +351,7 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
-        let mut prior_control_txs_by_sender = HashMap::new();
+        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
@@ -385,11 +383,7 @@ impl BlockTokenProcessor {
                 }
             }
 
-            let prior_txs = simulation_prior_txs_for_sender(
-                &mut prior_control_txs_by_sender,
-                &self.registry,
-                &tx.processed,
-            );
+            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_trading_simulation(
@@ -418,6 +412,7 @@ impl BlockTokenProcessor {
                     });
                 }
             }
+            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
@@ -596,7 +591,7 @@ impl BlockTokenProcessor {
         let mut updated_token_addresses = BTreeSet::new();
         let mut processed_transaction_count = 0;
         let mut metadata_tx_index = HashMap::new();
-        let mut prior_control_txs_by_sender = HashMap::new();
+        let mut replay_context = BlockReplayContext::default();
 
         for tx in transactions {
             index_metadata_transaction(&mut metadata_tx_index, &tx.processed);
@@ -628,11 +623,7 @@ impl BlockTokenProcessor {
                 }
             }
 
-            let prior_txs = simulation_prior_txs_for_sender(
-                &mut prior_control_txs_by_sender,
-                &self.registry,
-                &tx.processed,
-            );
+            let prior_txs = replay_context.prior_txs_for_transaction(&self.registry, &tx.processed);
             match self
                 .update_router
                 .update_registry_from_processed_transaction_with_discovery_and_trading_simulation(
@@ -662,6 +653,7 @@ impl BlockTokenProcessor {
                     });
                 }
             }
+            replay_context.observe_transaction(&self.registry, &tx.processed);
         }
 
         if self.start_block.is_none() {
@@ -806,56 +798,6 @@ fn token_index_with_limit(limit: Option<usize>) -> TrackedTokenIndex {
         Some(limit) => TrackedTokenIndex::new(limit),
         None => TrackedTokenIndex::unbounded(),
     }
-}
-
-fn simulation_prior_txs_for_sender(
-    prior_control_txs_by_sender: &mut HashMap<Address, Vec<ProcessedTransaction>>,
-    registry: &TokenRegistry,
-    tx: &ProcessedTransaction,
-) -> Vec<ProcessedTransaction> {
-    let mut prior_txs = prior_control_txs_by_sender
-        .get(&tx.from_address)
-        .cloned()
-        .unwrap_or_default();
-
-    if transaction_touches_tracked_control_address(registry, tx) {
-        prior_txs.push(tx.clone());
-        prior_control_txs_by_sender
-            .entry(tx.from_address)
-            .or_default()
-            .push(tx.clone());
-    }
-
-    prior_txs.sort_by_key(|tx| tx.tx_index);
-    prior_txs.dedup_by_key(|tx| tx.hash);
-    prior_txs
-}
-
-fn transaction_touches_tracked_control_address(
-    registry: &TokenRegistry,
-    tx: &ProcessedTransaction,
-) -> bool {
-    let tx_addresses = tx_address_strings(tx);
-    registry.tokens.values().any(|token| {
-        token
-            .token_control_addresses
-            .iter()
-            .any(|address| tx_addresses.contains(&normalize_address(address)))
-    })
-}
-
-fn tx_address_strings(tx: &ProcessedTransaction) -> BTreeSet<String> {
-    let mut addresses = BTreeSet::new();
-    addresses.extend(tx.unique_addresses.iter().map(address_string));
-    addresses.extend(tx.erc20_contracts.iter().map(address_string));
-    addresses.insert(address_string(&tx.from_address));
-    if let Some(address) = tx.to_address {
-        addresses.insert(address_string(&address));
-    }
-    if let Some(address) = tx.contract_address {
-        addresses.insert(address_string(&address));
-    }
-    addresses
 }
 
 fn created_token_addresses(tx: &ProcessedTransaction) -> Vec<Address> {

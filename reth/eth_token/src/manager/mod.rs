@@ -9,6 +9,7 @@ use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 
 pub mod block_processor;
 pub mod index;
+pub(crate) mod replay_context;
 pub mod retention;
 pub mod token_builder;
 pub mod update_router;

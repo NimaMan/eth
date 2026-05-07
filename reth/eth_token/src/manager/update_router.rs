@@ -13,6 +13,7 @@ use crate::pools::uniswap::{UniswapV2TradingSimulationConfig, UniswapV2TxContext
 use crate::pools::BasePoolConfig;
 use crate::pools::UniswapV2Pool;
 
+use super::replay_context::triggers::tx_is_token_control_replay_candidate;
 use super::{
     address_string, hash_string, normalize_address, normalize_address_string, parse_address_lossy,
     same_address_str, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
@@ -147,7 +148,20 @@ impl ProcessedTokenUpdateRouter {
 
             let discovered = self.discover_uniswap_v2_pools_for_token(token, tx);
             let updated = update_touched_v2_pools(token, tx)?;
-            simulate_updated_v2_pools(token, tx, &updated, prior_txs, trading_simulation).await?;
+            let token_control_replay =
+                token_state_updated && tx_is_token_control_replay_candidate(token, tx);
+            let simulation_pool_addresses =
+                simulation_pool_addresses(token, &updated, token_control_replay);
+            let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
+            simulate_updated_v2_pools(
+                token,
+                tx,
+                &simulation_pool_addresses,
+                &simulation_prior_txs,
+                trading_simulation,
+                token_control_replay,
+            )
+            .await?;
 
             if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
                 reports.push(TokenStateUpdateReport {
@@ -322,7 +336,20 @@ impl ProcessedTokenUpdateRouter {
             );
 
             let updated = update_touched_v2_pools(token, tx)?;
-            simulate_updated_v2_pools(token, tx, &updated, prior_txs, trading_simulation).await?;
+            let token_control_replay =
+                token_state_updated && tx_is_token_control_replay_candidate(token, tx);
+            let simulation_pool_addresses =
+                simulation_pool_addresses(token, &updated, token_control_replay);
+            let simulation_prior_txs = simulation_prior_txs(prior_txs, tx, token_control_replay);
+            simulate_updated_v2_pools(
+                token,
+                tx,
+                &simulation_pool_addresses,
+                &simulation_prior_txs,
+                trading_simulation,
+                token_control_replay,
+            )
+            .await?;
 
             if token_state_updated || !discovered.is_empty() || !updated.is_empty() {
                 discovered.sort();
@@ -743,6 +770,7 @@ async fn simulate_updated_v2_pools(
     pool_addresses: &[String],
     prior_txs: &[ProcessedTransaction],
     trading_simulation: V2TradingSimulation<'_>,
+    force_simulation: bool,
 ) -> Result<Vec<String>> {
     if pool_addresses.is_empty() {
         return Ok(Vec::new());
@@ -763,7 +791,9 @@ async fn simulate_updated_v2_pools(
     for pool_address in pool_addresses {
         let should_simulate = token
             .uniswap_v2_pool(pool_address)
-            .map(|pool| should_simulate_v2_trading(pool, tx))
+            .map(|pool| {
+                !pool.base.is_scam() && (force_simulation || should_simulate_v2_trading(pool, tx))
+            })
             .unwrap_or(false);
         if !should_simulate {
             continue;
@@ -793,6 +823,38 @@ async fn simulate_updated_v2_pools(
     }
 
     Ok(simulated)
+}
+
+fn simulation_pool_addresses(
+    token: &ERC20Token,
+    updated: &[String],
+    include_all_token_pools: bool,
+) -> Vec<String> {
+    let mut addresses = updated.to_vec();
+    if include_all_token_pools {
+        addresses.extend(token.pool_addresses());
+    }
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+fn simulation_prior_txs(
+    prior_txs: &[ProcessedTransaction],
+    current_tx: &ProcessedTransaction,
+    include_current_tx: bool,
+) -> Vec<ProcessedTransaction> {
+    let mut simulation_prior_txs = prior_txs.to_vec();
+    if include_current_tx
+        && !simulation_prior_txs
+            .iter()
+            .any(|prior_tx| prior_tx.hash == current_tx.hash)
+    {
+        simulation_prior_txs.push(current_tx.clone());
+    }
+    simulation_prior_txs.sort_by_key(|tx| tx.tx_index);
+    simulation_prior_txs.dedup_by_key(|tx| tx.hash);
+    simulation_prior_txs
 }
 
 fn should_simulate_v2_trading(pool: &UniswapV2Pool, tx: &ProcessedTransaction) -> bool {
