@@ -127,7 +127,7 @@ impl Scenario {
         }
     }
 
-    fn is_full_trace_candidate(self) -> bool {
+    fn is_candidate(self) -> bool {
         matches!(self, Self::Trace(_) | Self::OraclePrewarm)
     }
 }
@@ -161,14 +161,14 @@ async fn main() -> Result<()> {
     match args.mode {
         Mode::Correctness => run_correctness(&tracer, &blocks, args.rpc_url.as_deref()).await,
         Mode::EngineSweep | Mode::StageBreakdown | Mode::Feasibility => {
-            run_profile(&args, &tracer, &blocks, &run_id, &sample).await
+            run_profile(&args, &simulator, &blocks, &run_id, &sample).await
         }
     }
 }
 
 async fn run_profile(
     args: &Args,
-    tracer: &BlockTracer<'_>,
+    simulator: &TxSimulator,
     blocks: &[u64],
     run_id: &str,
     sample: &str,
@@ -209,7 +209,7 @@ async fn run_profile(
             for block_number in blocks.iter().copied() {
                 let state_mode = state_mode_for(*scenario, is_warmup, args);
                 let profiled =
-                    run_scenario(*scenario, tracer, block_number, args.record_keys).await?;
+                    run_scenario(*scenario, simulator, block_number, args.record_keys).await?;
                 let profile = &profiled.profile;
                 print_block_row(
                     &mut writer,
@@ -297,57 +297,53 @@ async fn run_profile(
 
 async fn run_scenario(
     scenario: Scenario,
-    tracer: &BlockTracer<'_>,
+    simulator: &TxSimulator,
     block_number: u64,
     record_keys: bool,
 ) -> Result<tx_simulator::block_simulation::ProfiledBlockTrace> {
     match scenario {
         Scenario::Trace(engine) => {
-            tracer
-                .trace_block_by_number_profiled_with_config(
-                    block_number,
-                    Some(call_tracer_options()),
-                    engine,
-                    ReplayProfileConfig {
-                        record_keys,
-                        prewarm_keys: None,
-                    },
-                )
+            simulator
+                .block_replay_session(block_number)
+                .with_tracing_options(call_tracer_options())
+                .with_engine(engine)
+                .with_profile_config(ReplayProfileConfig {
+                    record_keys,
+                    prewarm_keys: None,
+                })
+                .profile()
                 .await
         }
         Scenario::ExecuteOnly => {
-            tracer
-                .execute_block_by_number_profiled(
-                    block_number,
-                    ReplayProfileConfig {
-                        record_keys,
-                        prewarm_keys: None,
-                    },
-                )
+            simulator
+                .block_replay_session(block_number)
+                .with_profile_config(ReplayProfileConfig {
+                    record_keys,
+                    prewarm_keys: None,
+                })
+                .execute_only_profile()
                 .await
         }
         Scenario::OraclePrewarm => {
-            let key_source = tracer
-                .trace_block_by_number_profiled_with_config(
-                    block_number,
-                    Some(call_tracer_options()),
-                    BlockTraceEngine::FreshInspector,
-                    ReplayProfileConfig {
-                        record_keys: true,
-                        prewarm_keys: None,
-                    },
-                )
+            let key_source = simulator
+                .block_replay_session(block_number)
+                .with_tracing_options(call_tracer_options())
+                .with_engine(BlockTraceEngine::FreshInspector)
+                .with_profile_config(ReplayProfileConfig {
+                    record_keys: true,
+                    prewarm_keys: None,
+                })
+                .profile()
                 .await?;
-            tracer
-                .trace_block_by_number_profiled_with_config(
-                    block_number,
-                    Some(call_tracer_options()),
-                    BlockTraceEngine::RethFusedCallTracer,
-                    ReplayProfileConfig {
-                        record_keys,
-                        prewarm_keys: Some(key_source.profile.state_keys),
-                    },
-                )
+            simulator
+                .block_replay_session(block_number)
+                .with_tracing_options(call_tracer_options())
+                .with_engine(BlockTraceEngine::RethFusedCallTracer)
+                .with_profile_config(ReplayProfileConfig {
+                    record_keys,
+                    prewarm_keys: Some(key_source.profile.state_keys),
+                })
+                .profile()
                 .await
         }
     }
@@ -510,7 +506,7 @@ fn output_writer(path: Option<&PathBuf>) -> Result<Box<dyn Write>> {
 fn print_header(writer: &mut dyn Write) -> Result<()> {
     writeln!(
         writer,
-        "row_type,run_id,label,sample,state_mode,profile_kind,engine,iteration,is_warmup,block,tx_index,tx_hash,count,txs,gas_used,trace_nodes,total_ms,block_hash_lookup_ms,block_load_ms,state_open_ms,sender_recovery_ms,evm_env_ms,tx_env_ms,inspector_build_ms,evm_exec_ms,trace_build_ms,db_commit_ms,preload_ms,exec_after_prewarm_ms,account_reads,storage_reads,code_reads,block_hash_reads,provider_read_ms,errors,avg_ms,median_ms,p90_ms,p95_ms,p99_ms,min_ms,max_ms,stddev_ms,meets_25ms"
+        "row_type,run_id,label,sample,state_mode,profile_kind,is_candidate,engine,iteration,is_warmup,block,tx_index,tx_hash,count,txs,gas_used,trace_nodes,total_ms,block_hash_lookup_ms,block_load_ms,state_open_ms,sender_recovery_ms,evm_env_ms,tx_env_ms,inspector_build_ms,evm_exec_ms,trace_build_ms,db_commit_ms,preload_ms,exec_after_prewarm_ms,account_reads,storage_reads,code_reads,block_hash_reads,provider_read_ms,errors,avg_ms,median_ms,p90_ms,p95_ms,p99_ms,min_ms,max_ms,stddev_ms,meets_25ms"
     )?;
     Ok(())
 }
@@ -528,12 +524,13 @@ fn print_block_row(
 ) -> Result<()> {
     writeln!(
         writer,
-        "block,{},{},{},{},{},{},{},{},{},,,,{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{:.3},{},,,,,,,,,{}",
+        "block,{},{},{},{},{},{},{},{},{},{},,,,{},{},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{},{},{},{},{:.3},{},,,,,,,,,{}",
         run_id,
         label,
         sample,
         state_mode,
         scenario.profile_kind(),
+        scenario.is_candidate(),
         profile.engine,
         iteration,
         is_warmup,
@@ -560,7 +557,7 @@ fn print_block_row(
         profile.state_reads.block_hash_reads,
         profile.state_reads.provider_read_ms,
         profile.errors,
-        scenario.is_full_trace_candidate() && profile.total_ms <= TARGET_MS,
+        scenario.is_candidate() && profile.total_ms <= TARGET_MS,
     )?;
     Ok(())
 }
@@ -587,12 +584,13 @@ fn print_tx_row(
         + tx.db_commit_ms;
     writeln!(
         writer,
-        "tx,{},{},{},{},{},{},{},{},{},{},{:#x},,,{},,{:.3},0.000,0.000,0.000,{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},0.000,0.000,{},{},{},{},{:.3},{},,,,,,,,,",
+        "tx,{},{},{},{},{},{},{},{},{},{},{},{:#x},,,{},,{:.3},0.000,0.000,0.000,{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},0.000,0.000,{},{},{},{},{:.3},{},,,,,,,,,",
         run_id,
         label,
         sample,
         state_mode,
         scenario.profile_kind(),
+        scenario.is_candidate(),
         block.engine,
         iteration,
         is_warmup,
@@ -621,12 +619,13 @@ fn print_tx_row(
 fn print_summary_row(writer: &mut dyn Write, row: &SummaryRow) -> Result<()> {
     writeln!(
         writer,
-        "summary,{},{},{},{},{},{},,,,,,{},{},,,,,,,,,,,,,,,,,,,,,,{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+        "summary,{},{},{},{},{},{},{},,,,,,{},{},,,,,,,,,,,,,,,,,,,,,,{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
         row.run_id,
         row.label,
         row.sample,
         row.state_mode,
         row.profile_kind,
+        row.is_candidate,
         row.engine,
         row.count,
         row.count,
@@ -711,7 +710,7 @@ impl SummaryKey {
             state_mode,
             profile_kind: scenario.profile_kind(),
             engine: scenario.engine(),
-            full_trace_candidate: scenario.is_full_trace_candidate(),
+            full_trace_candidate: scenario.is_candidate(),
         }
     }
 
@@ -787,6 +786,7 @@ struct SummaryRow {
     state_mode: &'static str,
     profile_kind: &'static str,
     engine: &'static str,
+    is_candidate: bool,
     count: usize,
     avg_ms: f64,
     median_ms: f64,
@@ -808,6 +808,7 @@ impl SummaryRow {
             state_mode: key.state_mode,
             profile_kind: key.profile_kind,
             engine: key.engine,
+            is_candidate: key.full_trace_candidate,
             count: summary.count,
             avg_ms: summary.avg,
             median_ms: summary.median,

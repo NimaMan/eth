@@ -13,7 +13,7 @@ use tokio::{runtime::Runtime, task};
 use tracing::warn;
 
 // Core Reth imports
-use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, MAINNET};
 use reth_db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
@@ -57,7 +57,7 @@ impl TxSimulator {
             DatabaseArguments::new(ClientVersion::default()),
         )?);
 
-        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().build());
+        let chain_spec = MAINNET.clone();
 
         let provider_factory = EthereumProviderFactory::new(
             db.clone(),

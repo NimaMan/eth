@@ -184,7 +184,6 @@ impl UnsignedTxChainSimulation {
         data: Bytes,
     ) -> Result<ViewFunctionResult> {
         let view_defaults = &self.simulator.defaults.view_call;
-        let block_number = self.forked_state.block_number;
         let base_fee = self
             .forked_state
             .block_header
@@ -202,17 +201,8 @@ impl UnsignedTxChainSimulation {
         unsigned_tx.max_fee_per_gas = Some(base_fee);
         unsigned_tx.max_priority_fee_per_gas = Some(0);
 
-        let result = self.simulator.simulate_on_fork_with_trace(
-            &mut self.forked_state,
-            unsigned_tx,
-            block_number,
-        )?;
-
-        Ok(ViewFunctionResult {
-            success: result.success,
-            output: result.call_trace.output.clone().unwrap_or_default(),
-            gas_used: result.gas_used,
-        })
+        self.simulator
+            .simulate_view_on_fork_without_commit(&mut self.forked_state, unsigned_tx)
     }
 
     /// Execute a single transaction with full trace information

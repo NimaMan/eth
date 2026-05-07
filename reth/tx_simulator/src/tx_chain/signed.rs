@@ -31,20 +31,14 @@ struct PreparedSignedExecution {
 pub struct SignedTxChainSimulation {
     simulator: Arc<TxSimulator>,
     forked_state: ForkedState,
-    block_number: u64,
     inspector: Option<TracingInspector>,
 }
 
 impl SignedTxChainSimulation {
-    pub(crate) fn new(
-        simulator: Arc<TxSimulator>,
-        forked_state: ForkedState,
-        block_number: u64,
-    ) -> Self {
+    pub(crate) fn new(simulator: Arc<TxSimulator>, forked_state: ForkedState) -> Self {
         Self {
             simulator,
             forked_state,
-            block_number,
             inspector: None,
         }
     }
@@ -147,22 +141,8 @@ impl SignedTxChainSimulation {
             signed_authorizations: Vec::new(),
         };
 
-        // Reuse internal forked-state simulator with trace to capture output
-        let res = self.simulator.simulate_on_fork_with_trace(
-            &mut self.forked_state,
-            unsigned,
-            self.block_number,
-        )?;
-        let output = if res.success {
-            res.call_trace.output.unwrap_or_default()
-        } else {
-            Bytes::new()
-        };
-        Ok(ViewFunctionResult {
-            success: res.success,
-            output,
-            gas_used: res.gas_used,
-        })
+        self.simulator
+            .simulate_view_on_fork_without_commit(&mut self.forked_state, unsigned)
     }
 
     /// Backward compatibility helper using default overrides
@@ -258,11 +238,7 @@ impl TxSimulator {
     pub fn start_signed_chain(&self, at_block: Option<u64>) -> Result<SignedTxChainSimulation> {
         let block = at_block.unwrap_or(self.get_latest_block()?);
         let fork = self.create_forked_state(block)?;
-        Ok(SignedTxChainSimulation::new(
-            Arc::new(self.clone()),
-            fork,
-            block,
-        ))
+        Ok(SignedTxChainSimulation::new(Arc::new(self.clone()), fork))
     }
 
     /// Start a signed-tx chain simulator using a provided block header snapshot.
@@ -272,10 +248,6 @@ impl TxSimulator {
     ) -> Result<SignedTxChainSimulation> {
         let block = block_header.number;
         let fork = self.create_forked_state_with_header(block, block_header)?;
-        Ok(SignedTxChainSimulation::new(
-            Arc::new(self.clone()),
-            fork,
-            block,
-        ))
+        Ok(SignedTxChainSimulation::new(Arc::new(self.clone()), fork))
     }
 }

@@ -564,6 +564,42 @@ impl TxSimulator {
             .map(UnsignedExecutionResult::into_simulation)
     }
 
+    pub(crate) fn simulate_view_on_fork_without_commit(
+        &self,
+        forked_state: &mut ForkedState,
+        unsigned_tx: UnsignedTransaction,
+    ) -> Result<ViewFunctionResult> {
+        let block_header = forked_state.block_header.clone();
+        let evm_env = self
+            .evm_config
+            .evm_env(&block_header)
+            .map_err(|err| eyre::eyre!("failed to build EVM env: {}", err))?;
+        let base_fee = block_header.header().base_fee_per_gas.map(|v| v as u128);
+
+        let mut overlay_db = CacheDB::new(&mut forked_state.db);
+        let tx_env = self.create_tx_env_from_unsigned_tx(
+            &unsigned_tx,
+            evm_env.block_env.gas_limit as u128,
+            base_fee,
+            &mut overlay_db,
+        )?;
+
+        let mut evm = self.evm_config.evm_with_env(&mut overlay_db, evm_env);
+        let res = evm.transact(tx_env)?;
+        let success = res.result.is_success();
+        let output = if success {
+            res.result.output().cloned().unwrap_or_default()
+        } else {
+            Bytes::new()
+        };
+
+        Ok(ViewFunctionResult {
+            success,
+            output,
+            gas_used: res.result.tx_gas_used(),
+        })
+    }
+
     fn simulate_on_fork_plain_execution(
         &self,
         forked_state: &mut ForkedState,

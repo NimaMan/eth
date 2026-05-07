@@ -7,9 +7,11 @@ Purpose
 What This Module Provides
 - Direct state access: Builds a read‑only `StateProvider` over your local Reth DB and wraps it in a cached overlay for writes during simulation.
 - Deterministic EVM setup: Derives `BlockEnv` and chain spec from canonical headers at a chosen block number.
-- Unsigned and signed simulation: Single‑call helpers, plus stateful chain simulators that persist changes between steps.
+- Unsigned and signed simulation: Single‑call helpers, plus stateful sessions/chains that persist changes between steps.
 - Geth‑compatible traces: Uses `TracingInspector::default_geth()` (with logs for trace variants) and exports geth `CallFrame`s.
 - Fast no-trace execution: Plain simulation paths avoid inspector allocation when traces are not requested.
+- Mixed simulation sessions: `SimulationSession` keeps one warm fork for arbitrary signed/unsigned sequences, balance/nonce overrides, and read-only calls.
+- Block replay sessions: `BlockReplaySession` pins replay options for trace, profile, and execute-only lower-bound runs.
 - Inspector fusing: Block call-tracing keeps one tracing inspector alive and fuses it between transactions for Reth-style performance.
 - Live overlays: `live::LiveTxSimulator` prefers Redis chain-state overlays written by the live block processor when MDBX is behind the live head.
 
@@ -32,6 +34,8 @@ Key Building Blocks Here
   - Persists state and nonces; uses the plain EVM path unless a trace is requested.
 - Stateful signed chain: rust/tx_simulator/src/tx_chain/signed.rs:1
   - Recovers signer, persists state; fuses inspector between steps.
+- Stateful session API: rust/tx_simulator/src/session/:1
+  - Preferred high-level API for mixed signed/unsigned sequences and block replay/profile sessions.
 - Batch sequence (bundle): rust/tx_simulator/src/tx_chain/sequential.rs:1
   - Creates a fork and uses the plain EVM path for fast no-trace execution.
 - Live simulator: rust/tx_simulator/src/live/simulator.rs:1

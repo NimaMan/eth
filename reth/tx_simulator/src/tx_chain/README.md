@@ -5,6 +5,10 @@ It lets you simulate multi-step workflows (buy → approve → sell, MEV bundles
 setups) against a forked view of the canonical or live-overlay chain while keeping all writes
 in an in-memory database overlay.
 
+For new mixed signed/unsigned workflows, prefer `TxSimulator::simulation_session*`. The older
+unsigned and signed chain types remain useful focused surfaces, while `SimulationSession` wraps
+the same fork loading behavior behind one API.
+
 ### Execution Pipeline
 
 1. **Resolve fork context** – reuse a caller-supplied `SealedHeader`/state snapshot when
@@ -20,6 +24,7 @@ in an in-memory database overlay.
 
 | Helper | Returns | Description | Typical Usage |
 | --- | --- | --- | --- |
+| `TxSimulator::simulation_session*` | `SimulationSession` | Mixed signed/unsigned session pinned to a canonical or live-overlay fork. | Any arbitrary tx sequence with one warm state. |
 | `TxSimulator::start_simulation_chain(at_block?)` | `UnsignedTxChainSimulation` | Interactive unsigned chain pinned to an optional block with automatic header/state loading. | Build stateful scenarios step-by-step (buy → approve → sell). |
 | `UnsignedTxChainSimulation::step(unsigned)` | `SimulationResult` | Executes an unsigned tx, persists state, auto-manages nonces. | Iterative workflows where you inspect each result. |
 | `UnsignedTxChainSimulation::step_with_trace(unsigned)` | `FullSimulationResult` | Same as `step` but returns call tree + `struct_logs`. | Debugging multi-step flows or feeding tx_processor. |
@@ -40,7 +45,9 @@ in an in-memory database overlay.
 
 ### Why Multiple Surfaces?
 
-* **Interactive unsigned chain** – best when you need fine-grained control, dynamic branching,
+* **Simulation session** – best default for arbitrary sequences because it accepts signed and
+  unsigned txs, exposes shared nonce/balance helpers, and keeps one warm fork.
+* **Interactive unsigned chain** – best when you need a focused unsigned-only surface,
   or immediate inspection/modification between steps. Nonces are auto-detected and updated for
   you.
 * **Interactive signed chain** – mirrors the unsigned chain but keeps signatures intact. Useful
@@ -52,6 +59,8 @@ in an in-memory database overlay.
 ### Inspector & State Notes
 
 * Forked state writes never touch the canonical MDBX; they live entirely in the in-memory cache.
+* View-call helpers run through a no-commit overlay, so reads between steps do not mutate the
+  session/chain state.
 * Block tracing still uses inspector fusing for callTracer replay. Plain sequence simulation does
   not allocate inspectors.
 * `SequentialSimulationOptions` exposes knobs for stop-on-failure, custom gas limits, automatic
