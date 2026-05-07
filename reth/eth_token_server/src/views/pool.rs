@@ -38,6 +38,14 @@ pub enum PoolRiskLevel {
     HighTax,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolLiquidityLevel {
+    Liquid,
+    Dust,
+    Drained,
+}
+
 #[derive(Clone, Debug)]
 struct PoolRiskView {
     level: PoolRiskLevel,
@@ -61,6 +69,8 @@ pub struct PoolView {
     pub price_ratio_history: Vec<PriceRatioPoint>,
     pub liquidity_history: Vec<LiquidityPoint>,
     pub total_liquidity: f64,
+    pub liquidity_level: PoolLiquidityLevel,
+    pub liquidity_label: String,
     pub token_total_supply_scaled: Option<f64>,
     pub fully_diluted_value_denom: Option<f64>,
     pub pooled_token_supply_ratio: Option<f64>,
@@ -111,6 +121,7 @@ impl PoolView {
             total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply));
         let price_ratio_history = price_ratio_history(&pool.base.price_history);
         let liquidity_history = liquidity_history(pool);
+        let liquidity_level = pool_liquidity_level(pool.base.state.total_liquidity, &currency);
         let risk = pool_risk(pool);
         Self {
             token_address: token.contract_address.clone(),
@@ -128,6 +139,8 @@ impl PoolView {
             price_ratio_history,
             liquidity_history,
             total_liquidity: pool.base.state.total_liquidity,
+            liquidity_level,
+            liquidity_label: liquidity_level_label(liquidity_level).to_string(),
             token_total_supply_scaled: total_supply,
             fully_diluted_value_denom,
             pooled_token_supply_ratio,
@@ -163,6 +176,10 @@ impl PoolView {
 }
 
 const HIGH_TAX_PERCENT: f64 = 10.0;
+const DUST_WETH_LIQUIDITY: f64 = 0.01;
+const DRAINED_WETH_LIQUIDITY: f64 = 0.000001;
+const DUST_STABLE_LIQUIDITY: f64 = 10.0;
+const DRAINED_STABLE_LIQUIDITY: f64 = 0.01;
 
 fn pool_risk(pool: &UniswapV2Pool) -> PoolRiskView {
     if pool.base.is_scam() {
@@ -200,6 +217,47 @@ fn tax_above_threshold(value: Option<f64>) -> bool {
     value
         .filter(|value| value.is_finite())
         .is_some_and(|value| value >= HIGH_TAX_PERCENT)
+}
+
+fn pool_liquidity_level(liquidity: f64, currency: &str) -> PoolLiquidityLevel {
+    if !liquidity.is_finite() || liquidity <= drained_liquidity_threshold(currency) {
+        return PoolLiquidityLevel::Drained;
+    }
+    if liquidity <= dust_liquidity_threshold(currency) {
+        return PoolLiquidityLevel::Dust;
+    }
+    PoolLiquidityLevel::Liquid
+}
+
+fn liquidity_level_label(level: PoolLiquidityLevel) -> &'static str {
+    match level {
+        PoolLiquidityLevel::Liquid => "liquid",
+        PoolLiquidityLevel::Dust => "dust",
+        PoolLiquidityLevel::Drained => "drained",
+    }
+}
+
+fn dust_liquidity_threshold(currency: &str) -> f64 {
+    if is_stable_currency(currency) {
+        DUST_STABLE_LIQUIDITY
+    } else {
+        DUST_WETH_LIQUIDITY
+    }
+}
+
+fn drained_liquidity_threshold(currency: &str) -> f64 {
+    if is_stable_currency(currency) {
+        DRAINED_STABLE_LIQUIDITY
+    } else {
+        DRAINED_WETH_LIQUIDITY
+    }
+}
+
+fn is_stable_currency(currency: &str) -> bool {
+    matches!(
+        currency.to_ascii_uppercase().as_str(),
+        "USDC" | "USDT" | "DAI"
+    )
 }
 
 fn liquidity_history(pool: &UniswapV2Pool) -> Vec<LiquidityPoint> {
