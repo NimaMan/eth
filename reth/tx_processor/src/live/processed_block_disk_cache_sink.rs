@@ -2,23 +2,31 @@ use std::{env, path::PathBuf};
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{ProcessedBlock, TokenProcessedBlockCacheStore, TokenProcessedBlockCacheWriter};
+use crate::{ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockDiskCacheWriter};
 
+const LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR";
+const LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV: &str =
+    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS";
+const LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME: &str = "processed_block_cache";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
+const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
+    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
 const DEFAULT_RETAIN_BLOCKS: u64 = 100_000;
 const DEFAULT_QUEUE_BLOCKS: usize = 256;
 const PRUNE_INTERVAL_WRITES: u64 = 1_000;
 
 /// Non-blocking background sink for writing live processed blocks into the
-/// token-server disk cache after Redis publication has succeeded.
-pub struct LiveProcessedBlockCacheSink {
+/// processed block disk cache after Redis publication has succeeded.
+pub struct LiveProcessedBlockDiskCacheSink {
     sender: mpsc::Sender<ProcessedBlock>,
     _worker: JoinHandle<()>,
 }
 
-impl LiveProcessedBlockCacheSink {
+impl LiveProcessedBlockDiskCacheSink {
     pub fn from_config(chain_id: u64) -> eyre::Result<Self> {
-        let cache_dir = processed_block_cache_dir()?;
-        let retain_blocks = processed_block_cache_blocks();
+        let cache_dir = processed_block_disk_cache_dir()?;
+        let retain_blocks = processed_block_disk_cache_blocks();
         Self::new(cache_dir, chain_id, retain_blocks, DEFAULT_QUEUE_BLOCKS)
     }
 
@@ -28,7 +36,7 @@ impl LiveProcessedBlockCacheSink {
         retain_blocks: u64,
         queue_blocks: usize,
     ) -> eyre::Result<Self> {
-        let store = TokenProcessedBlockCacheStore::open(&cache_dir)?;
+        let store = ProcessedBlockDiskCacheStore::open(&cache_dir)?;
         let writer = store.writer(chain_id);
         let (sender, receiver) = mpsc::channel(queue_blocks.max(1));
         let worker = tokio::spawn(run_cache_writer(
@@ -59,13 +67,13 @@ impl LiveProcessedBlockCacheSink {
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
                     block_number,
-                    "live processed block cache queue is full; dropping cache write"
+                    "live processed block disk cache queue is full; dropping cache write"
                 );
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
                 tracing::warn!(
                     block_number,
-                    "live processed block cache writer is closed; dropping cache write"
+                    "live processed block disk cache writer is closed; dropping cache write"
                 );
             }
         }
@@ -73,8 +81,8 @@ impl LiveProcessedBlockCacheSink {
 }
 
 async fn run_cache_writer(
-    store: TokenProcessedBlockCacheStore,
-    writer: TokenProcessedBlockCacheWriter,
+    store: ProcessedBlockDiskCacheStore,
+    writer: ProcessedBlockDiskCacheWriter,
     mut receiver: mpsc::Receiver<ProcessedBlock>,
     chain_id: u64,
     retain_blocks: u64,
@@ -119,23 +127,33 @@ async fn run_cache_writer(
                 tracing::warn!(
                     block_number,
                     error = %error,
-                    "live processed block cache writer task failed"
+                    "live processed block disk cache writer task failed"
                 );
             }
         }
     }
 }
 
-fn processed_block_cache_dir() -> eyre::Result<PathBuf> {
-    if let Some(value) = non_empty_env("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR") {
+fn processed_block_disk_cache_dir() -> eyre::Result<PathBuf> {
+    if let Some(value) = non_empty_env(PROCESSED_BLOCK_DISK_CACHE_DIR_ENV)
+        .or_else(|| non_empty_env(LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV))
+    {
         return Ok(PathBuf::from(value));
     }
 
-    Ok(PathBuf::from(tx_simulator::config::repo::eth_node_root()?).join("processed_block_cache"))
+    let root = PathBuf::from(tx_simulator::config::repo::eth_node_root()?);
+    let preferred = root.join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME);
+    let legacy = root.join(LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME);
+    if preferred.exists() || !legacy.exists() {
+        Ok(preferred)
+    } else {
+        Ok(legacy)
+    }
 }
 
-fn processed_block_cache_blocks() -> u64 {
-    non_empty_env("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS")
+fn processed_block_disk_cache_blocks() -> u64 {
+    non_empty_env(PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV)
+        .or_else(|| non_empty_env(LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV))
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_RETAIN_BLOCKS)

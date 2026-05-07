@@ -4,30 +4,31 @@ use std::time::Instant;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockBatchOptions, BlockProcessor, ProcessedBlock, ProcessedBlockSource};
 
-use crate::processed_block_cache::TokenProcessedBlockCacheStore;
+use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 
-const PROCESSED_BLOCK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
-pub(super) const PROCESSED_BLOCK_CACHE_READ_BATCH: u64 = 250;
-const PROCESSED_BLOCK_CACHE_FILL_BATCH_BLOCKS: usize = 100;
-const PROCESSED_BLOCK_CACHE_FILL_CONCURRENCY: usize = 10;
+const PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL: u64 = 1_000;
+pub(super) const PROCESSED_BLOCK_DISK_CACHE_READ_BATCH: u64 = 250;
+const PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS: usize = 25;
+const PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY: usize = 4;
+const PROCESSED_BLOCK_DISK_CACHE_SOURCE: &str = "processed_block_disk_cache";
 
 pub(super) struct ProcessedBlockWithMetrics {
     pub(super) block: ProcessedBlock,
     pub(super) upstream_ms: u128,
-    pub(super) cache_metrics: ProcessedBlockCacheMetrics,
+    pub(super) disk_cache_metrics: ProcessedBlockDiskCacheMetrics,
 }
 
-struct CacheFillMetrics {
-    cache_hit: bool,
-    cache_write_ms: u128,
+struct DiskCacheFillMetrics {
+    disk_cache_hit: bool,
+    disk_cache_write_ms: u128,
     fill_ms: u128,
     source: &'static str,
 }
 
-pub(super) struct ProcessedBlockCacheMetrics {
-    pub(super) cache_hit: bool,
-    pub(super) cache_read_ms: u128,
-    pub(super) cache_write_ms: u128,
+pub(super) struct ProcessedBlockDiskCacheMetrics {
+    pub(super) disk_cache_hit: bool,
+    pub(super) disk_cache_read_ms: u128,
+    pub(super) disk_cache_write_ms: u128,
     pub(super) source: &'static str,
 }
 
@@ -36,9 +37,9 @@ pub(super) async fn process_block_chunk(
     provider: &RethQueryProvider,
     start_block: u64,
     end_block: u64,
-    processed_block_cache: Option<&TokenProcessedBlockCacheStore>,
+    processed_block_disk_cache: Option<&ProcessedBlockDiskCacheStore>,
 ) -> eyre::Result<Vec<ProcessedBlockWithMetrics>> {
-    if let Some(cache_store) = processed_block_cache {
+    if let Some(cache_store) = processed_block_disk_cache {
         return process_cached_block_chunk(
             tx_processor,
             provider,
@@ -56,10 +57,10 @@ pub(super) async fn process_block_chunk(
         blocks.push(ProcessedBlockWithMetrics {
             block,
             upstream_ms: block_started.elapsed().as_millis(),
-            cache_metrics: ProcessedBlockCacheMetrics {
-                cache_hit: false,
-                cache_read_ms: 0,
-                cache_write_ms: 0,
+            disk_cache_metrics: ProcessedBlockDiskCacheMetrics {
+                disk_cache_hit: false,
+                disk_cache_read_ms: 0,
+                disk_cache_write_ms: 0,
                 source: ProcessedBlockSource::Processed.as_str(),
             },
         });
@@ -72,7 +73,7 @@ async fn process_cached_block_chunk(
     provider: &RethQueryProvider,
     start_block: u64,
     end_block: u64,
-    cache_store: &TokenProcessedBlockCacheStore,
+    cache_store: &ProcessedBlockDiskCacheStore,
 ) -> eyre::Result<Vec<ProcessedBlockWithMetrics>> {
     let reader = cache_store.reader();
     let plan = reader.plan_range(provider, start_block, end_block).await?;
@@ -81,11 +82,11 @@ async fn process_cached_block_chunk(
     for key in &plan.keys {
         fill_metrics_by_block.insert(
             key.block_number,
-            CacheFillMetrics {
-                cache_hit: true,
-                cache_write_ms: 0,
+            DiskCacheFillMetrics {
+                disk_cache_hit: true,
+                disk_cache_write_ms: 0,
                 fill_ms: 0,
-                source: "token_cache",
+                source: PROCESSED_BLOCK_DISK_CACHE_SOURCE,
             },
         );
     }
@@ -95,7 +96,7 @@ async fn process_cached_block_chunk(
             start_block,
             end_block,
             missing_blocks = missing_count,
-            "filling missing processed block cache entries"
+            "filling missing processed block disk cache entries"
         );
     }
 
@@ -111,7 +112,7 @@ async fn process_cached_block_chunk(
         let mut write_wall_ms = 0u128;
         for missing_chunk in plan
             .missing_keys
-            .chunks(PROCESSED_BLOCK_CACHE_FILL_BATCH_BLOCKS)
+            .chunks(PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS)
         {
             let missing_blocks = missing_chunk
                 .iter()
@@ -121,7 +122,7 @@ async fn process_cached_block_chunk(
                 .process_block_batch(
                     missing_blocks,
                     BlockBatchOptions::default()
-                        .with_max_concurrency(PROCESSED_BLOCK_CACHE_FILL_CONCURRENCY),
+                        .with_max_concurrency(PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY),
                 )
                 .await?;
 
@@ -136,7 +137,7 @@ async fn process_cached_block_chunk(
                     })?;
                 if block.header.hash != key.block_hash {
                     eyre::bail!(
-                        "processed block hash changed during token cache fill for {}: header {:?}, processed {:?}",
+                        "processed block hash changed during processed block disk cache fill for {}: header {:?}, processed {:?}",
                         key.block_number,
                         key.block_hash,
                         block.header.hash
@@ -146,7 +147,7 @@ async fn process_cached_block_chunk(
                 write_wall_ms += write.write_ms;
                 if write.key != *key {
                     eyre::bail!(
-                        "processed block cache writer produced unexpected key for {}: expected {:?}, wrote {:?}",
+                        "processed block disk cache writer produced unexpected key for {}: expected {:?}, wrote {:?}",
                         key.block_number,
                         key,
                         write.key
@@ -154,9 +155,9 @@ async fn process_cached_block_chunk(
                 }
                 fill_metrics_by_block.insert(
                     key.block_number,
-                    CacheFillMetrics {
-                        cache_hit: false,
-                        cache_write_ms: write.write_ms,
+                    DiskCacheFillMetrics {
+                        disk_cache_hit: false,
+                        disk_cache_write_ms: write.write_ms,
                         fill_ms: fill_started.elapsed().as_millis(),
                         source: ProcessedBlockSource::Processed.as_str(),
                     },
@@ -170,9 +171,9 @@ async fn process_cached_block_chunk(
             missing_blocks = missing_count,
             fill_ms,
             write_wall_ms,
-            fill_batch_blocks = PROCESSED_BLOCK_CACHE_FILL_BATCH_BLOCKS,
-            fill_concurrency = PROCESSED_BLOCK_CACHE_FILL_CONCURRENCY,
-            "filled missing processed block cache entries"
+            fill_batch_blocks = PROCESSED_BLOCK_DISK_CACHE_FILL_BATCH_BLOCKS,
+            fill_concurrency = PROCESSED_BLOCK_DISK_CACHE_FILL_CONCURRENCY,
+            "filled missing processed block disk cache entries"
         );
     }
 
@@ -181,7 +182,7 @@ async fn process_cached_block_chunk(
     let reader_for_task = reader.clone();
     let reads = tokio::task::spawn_blocking(move || reader_for_task.get_many_parallel(&read_keys))
         .await
-        .map_err(|error| eyre::eyre!("processed block cache reader task failed: {error}"))??;
+        .map_err(|error| eyre::eyre!("processed block disk cache reader task failed: {error}"))??;
     let read_wall_ms = read_wall_started.elapsed().as_millis();
 
     tracing::info!(
@@ -190,7 +191,7 @@ async fn process_cached_block_chunk(
         blocks = reads.len(),
         missing_blocks = missing_count,
         read_wall_ms,
-        "read processed block cache chunk"
+        "read processed block disk cache chunk"
     );
 
     let mut blocks = Vec::with_capacity(reads.len());
@@ -199,21 +200,21 @@ async fn process_cached_block_chunk(
             .remove(&read.key.block_number)
             .ok_or_else(|| {
                 eyre::eyre!(
-                    "processed block cache metrics missing for {}",
+                    "processed block disk cache metrics missing for {}",
                     read.key.block_number
                 )
             })?;
         let block = read
             .block
             .ok_or_else(|| eyre::eyre!("cache miss after fill for {}", read.key.block_number))?;
-        let cache_read_ms = ceil_ms(read.read_ms);
+        let disk_cache_read_ms = ceil_ms(read.read_ms);
         blocks.push(ProcessedBlockWithMetrics {
             block,
-            upstream_ms: fill_metrics.fill_ms + cache_read_ms,
-            cache_metrics: ProcessedBlockCacheMetrics {
-                cache_hit: fill_metrics.cache_hit,
-                cache_read_ms,
-                cache_write_ms: fill_metrics.cache_write_ms,
+            upstream_ms: fill_metrics.fill_ms + disk_cache_read_ms,
+            disk_cache_metrics: ProcessedBlockDiskCacheMetrics {
+                disk_cache_hit: fill_metrics.disk_cache_hit,
+                disk_cache_read_ms,
+                disk_cache_write_ms: fill_metrics.disk_cache_write_ms,
                 source: fill_metrics.source,
             },
         });
@@ -222,28 +223,28 @@ async fn process_cached_block_chunk(
     Ok(blocks)
 }
 
-pub(super) fn should_prune_processed_block_cache(chunk_end: u64, end_block: u64) -> bool {
-    chunk_end == end_block || chunk_end % PROCESSED_BLOCK_CACHE_PRUNE_INTERVAL == 0
+pub(super) fn should_prune_processed_block_disk_cache(chunk_end: u64, end_block: u64) -> bool {
+    chunk_end == end_block || chunk_end % PROCESSED_BLOCK_DISK_CACHE_PRUNE_INTERVAL == 0
 }
 
-pub(super) fn prune_processed_block_cache(
-    cache_store: &TokenProcessedBlockCacheStore,
+pub(super) fn prune_processed_block_disk_cache(
+    cache_store: &ProcessedBlockDiskCacheStore,
     chain_id: u64,
-    processed_block_cache_blocks: u64,
+    processed_block_disk_cache_blocks: u64,
 ) {
-    match cache_store.prune_chain_to_recent_blocks(chain_id, processed_block_cache_blocks) {
+    match cache_store.prune_chain_to_recent_blocks(chain_id, processed_block_disk_cache_blocks) {
         Ok(0) => {}
         Ok(removed) => {
             tracing::info!(
                 removed,
-                retained = processed_block_cache_blocks,
-                "pruned processed block cache"
+                retained = processed_block_disk_cache_blocks,
+                "pruned processed block disk cache"
             );
         }
         Err(error) => {
             tracing::warn!(
                 error = %error,
-                "failed to prune processed block cache"
+                "failed to prune processed block disk cache"
             );
         }
     }

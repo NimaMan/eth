@@ -4,17 +4,31 @@ use std::path::PathBuf;
 
 use eyre::{eyre, Result};
 
+const LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR";
+const LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV: &str =
+    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS";
+const LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME: &str = "processed_block_cache";
+const LEGACY_LIVE_CACHE_RETRY_ATTEMPTS_ENV: &str = "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS";
+const LEGACY_LIVE_CACHE_RETRY_DELAY_MS_ENV: &str = "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_ENV: &str = "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR";
+const PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV: &str =
+    "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS";
+const PROCESSED_BLOCK_DISK_CACHE_DIR_NAME: &str = "processed_block_disk_cache";
+const LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_ENV: &str =
+    "ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS";
+const LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_ENV: &str =
+    "ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS";
 const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth";
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
-const DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS: u64 = 100_000;
+const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS: u64 = 100_000;
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
 const DEFAULT_LIVE_BLOCK_STREAM: &str = "eth/live/blocks";
-const DEFAULT_CACHE_RETRY_ATTEMPTS: usize = 20;
-const DEFAULT_CACHE_RETRY_DELAY_MS: u64 = 100;
+const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS: usize = 20;
+const DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS: u64 = 100;
 const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
 const DEFAULT_STREAM_COUNT: usize = 100;
 const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 30_000;
@@ -28,12 +42,12 @@ pub struct TokenServerConfig {
     pub history_limit: usize,
     pub default_blocks: u64,
     pub live_warmup_blocks: u64,
-    pub processed_block_cache_dir: Option<PathBuf>,
-    pub processed_block_cache_blocks: u64,
+    pub processed_block_disk_cache_dir: Option<PathBuf>,
+    pub processed_block_disk_cache_blocks: u64,
     pub redis_url: String,
     pub live_block_stream: String,
-    pub live_cache_retry_attempts: usize,
-    pub live_cache_retry_delay_ms: u64,
+    pub live_processed_block_disk_cache_retry_attempts: usize,
+    pub live_processed_block_disk_cache_retry_delay_ms: u64,
     pub live_stream_block_ms: usize,
     pub live_stream_count: usize,
     pub live_block_apply_timeout_ms: u64,
@@ -51,25 +65,36 @@ impl TokenServerConfig {
             "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS",
             DEFAULT_LIVE_WARMUP_BLOCKS,
         )?;
-        let processed_block_cache_dir =
-            env_optional_path("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR")
-                .or_else(default_processed_block_cache_dir);
-        let processed_block_cache_blocks = env_parse(
-            "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS",
-            DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS,
+        let processed_block_disk_cache_dir = env_optional_path_any(&[
+            PROCESSED_BLOCK_DISK_CACHE_DIR_ENV,
+            LEGACY_PROCESSED_BLOCK_CACHE_DIR_ENV,
+        ])
+        .or_else(default_processed_block_disk_cache_dir);
+        let processed_block_disk_cache_blocks = env_parse_any(
+            &[
+                PROCESSED_BLOCK_DISK_CACHE_BLOCKS_ENV,
+                LEGACY_PROCESSED_BLOCK_CACHE_BLOCKS_ENV,
+            ],
+            DEFAULT_PROCESSED_BLOCK_DISK_CACHE_BLOCKS,
         )?;
         let redis_url = env_string("ETH_TOKEN_SERVER_REDIS_URL", DEFAULT_REDIS_URL);
         let live_block_stream = env_string(
             "ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM",
             DEFAULT_LIVE_BLOCK_STREAM,
         );
-        let live_cache_retry_attempts = env_parse(
-            "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS",
-            DEFAULT_CACHE_RETRY_ATTEMPTS,
+        let live_processed_block_disk_cache_retry_attempts = env_parse_any(
+            &[
+                LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS_ENV,
+                LEGACY_LIVE_CACHE_RETRY_ATTEMPTS_ENV,
+            ],
+            DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS,
         )?;
-        let live_cache_retry_delay_ms = env_parse(
-            "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS",
-            DEFAULT_CACHE_RETRY_DELAY_MS,
+        let live_processed_block_disk_cache_retry_delay_ms = env_parse_any(
+            &[
+                LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS_ENV,
+                LEGACY_LIVE_CACHE_RETRY_DELAY_MS_ENV,
+            ],
+            DEFAULT_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS,
         )?;
         let live_stream_block_ms = env_parse(
             "ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS",
@@ -108,9 +133,9 @@ impl TokenServerConfig {
                 "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS must be greater than zero"
             ));
         }
-        if processed_block_cache_dir.is_some() && processed_block_cache_blocks == 0 {
+        if processed_block_disk_cache_dir.is_some() && processed_block_disk_cache_blocks == 0 {
             return Err(eyre!(
-                "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS must be greater than zero"
+                "ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS must be greater than zero"
             ));
         }
         if redis_url.trim().is_empty() {
@@ -153,12 +178,12 @@ impl TokenServerConfig {
             history_limit,
             default_blocks,
             live_warmup_blocks,
-            processed_block_cache_dir,
-            processed_block_cache_blocks,
+            processed_block_disk_cache_dir,
+            processed_block_disk_cache_blocks,
             redis_url,
             live_block_stream,
-            live_cache_retry_attempts,
-            live_cache_retry_delay_ms,
+            live_processed_block_disk_cache_retry_attempts,
+            live_processed_block_disk_cache_retry_delay_ms,
             live_stream_block_ms,
             live_stream_count,
             live_block_apply_timeout_ms,
@@ -192,13 +217,37 @@ fn env_optional_path(key: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn default_processed_block_cache_dir() -> Option<PathBuf> {
+fn env_optional_path_any(keys: &[&str]) -> Option<PathBuf> {
+    keys.iter().find_map(|key| env_optional_path(key))
+}
+
+fn default_processed_block_disk_cache_dir() -> Option<PathBuf> {
     let root = env_string("ETH_NODE_ROOT", DEFAULT_ETH_NODE_ROOT);
     if root.trim().is_empty() {
         None
     } else {
-        Some(PathBuf::from(root).join("processed_block_cache"))
+        let root = PathBuf::from(root);
+        let preferred = root.join(PROCESSED_BLOCK_DISK_CACHE_DIR_NAME);
+        let legacy = root.join(LEGACY_PROCESSED_BLOCK_CACHE_DIR_NAME);
+        if preferred.exists() || !legacy.exists() {
+            Some(preferred)
+        } else {
+            Some(legacy)
+        }
     }
+}
+
+fn env_parse_any<T>(keys: &[&str], default: T) -> Result<T>
+where
+    T: std::str::FromStr + Copy,
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    for key in keys {
+        if let Ok(value) = env::var(key) {
+            return Ok(value.parse()?);
+        }
+    }
+    Ok(default)
 }
 
 fn env_parse<T>(key: &str, default: T) -> Result<T>

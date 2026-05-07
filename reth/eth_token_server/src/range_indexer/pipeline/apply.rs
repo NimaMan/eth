@@ -87,7 +87,7 @@ pub(super) async fn apply_processed_block(
         report,
         processed.upstream_ms,
         token_apply_ms,
-        &processed.cache_metrics,
+        &processed.disk_cache_metrics,
     );
     true
 }

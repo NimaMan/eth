@@ -20,18 +20,18 @@ use tx_processor::{
     ProcessedTransaction,
 };
 
-use super::reader::TokenProcessedBlockCacheReader;
-use super::writer::TokenProcessedBlockCacheWriter;
+use super::reader::ProcessedBlockDiskCacheReader;
+use super::writer::ProcessedBlockDiskCacheWriter;
 
 const TRACE_ENGINE_ID: &str = "fresh_inspector";
 
 #[derive(Debug, Clone)]
-pub struct TokenProcessedBlockCacheStore {
+pub struct ProcessedBlockDiskCacheStore {
     root: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TokenProcessedBlockCacheKey {
+pub struct ProcessedBlockDiskCacheKey {
     pub chain_id: u64,
     pub block_number: u64,
     pub block_hash: B256,
@@ -40,7 +40,7 @@ pub struct TokenProcessedBlockCacheKey {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TokenProcessedBlockCacheCoverage {
+pub struct ProcessedBlockDiskCacheCoverage {
     pub root: String,
     pub chain_count: usize,
     pub block_dir_count: usize,
@@ -48,11 +48,11 @@ pub struct TokenProcessedBlockCacheCoverage {
     pub total_bytes: u64,
     pub trace_engine: String,
     pub trace_config_hash: String,
-    pub chains: Vec<TokenProcessedBlockCacheChainCoverage>,
+    pub chains: Vec<ProcessedBlockDiskCacheChainCoverage>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TokenProcessedBlockCacheChainCoverage {
+pub struct ProcessedBlockDiskCacheChainCoverage {
     pub chain_id: u64,
     pub path: String,
     pub block_dir_count: usize,
@@ -60,32 +60,32 @@ pub struct TokenProcessedBlockCacheChainCoverage {
     pub total_bytes: u64,
     pub min_block: Option<u64>,
     pub max_block: Option<u64>,
-    pub ranges: Vec<TokenProcessedBlockCacheBlockRange>,
+    pub ranges: Vec<ProcessedBlockDiskCacheBlockRange>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct TokenProcessedBlockCacheBlockRange {
+pub struct ProcessedBlockDiskCacheBlockRange {
     pub start_block: u64,
     pub end_block: u64,
     pub block_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TokenProcessedBlockCacheEntry {
-    key: TokenProcessedBlockCacheKey,
+struct ProcessedBlockDiskCacheEntry {
+    key: ProcessedBlockDiskCacheKey,
     header: BlockHeader,
-    transactions: Vec<TokenCachedTransaction>,
+    transactions: Vec<ProcessedBlockDiskCacheTransaction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyTokenProcessedBlockCacheEntry {
-    key: LegacyTokenProcessedBlockCacheKey,
+struct LegacyProcessedBlockDiskCacheEntry {
+    key: LegacyProcessedBlockDiskCacheKey,
     header: BlockHeader,
-    transactions: Vec<TokenCachedTransaction>,
+    transactions: Vec<ProcessedBlockDiskCacheTransaction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyTokenProcessedBlockCacheKey {
+struct LegacyProcessedBlockDiskCacheKey {
     chain_id: u64,
     block_number: u64,
     block_hash: B256,
@@ -96,7 +96,7 @@ struct LegacyTokenProcessedBlockCacheKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TokenCachedTransaction {
+struct ProcessedBlockDiskCacheTransaction {
     processed: SparseProcessedTransaction,
     processing_error: Option<String>,
 }
@@ -139,7 +139,7 @@ struct SparseProcessedTransaction {
     trading_disabled_events: Option<Vec<TradingDisabledEvent>>,
 }
 
-impl TokenProcessedBlockCacheKey {
+impl ProcessedBlockDiskCacheKey {
     pub fn new(chain_id: u64, header: &BlockHeader) -> Self {
         Self {
             chain_id,
@@ -151,30 +151,30 @@ impl TokenProcessedBlockCacheKey {
     }
 }
 
-impl TokenProcessedBlockCacheStore {
+impl ProcessedBlockDiskCacheStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         fs::create_dir_all(&root)?;
         Ok(Self { root })
     }
 
-    pub fn reader(&self) -> TokenProcessedBlockCacheReader {
-        TokenProcessedBlockCacheReader::new(self.clone())
+    pub fn reader(&self) -> ProcessedBlockDiskCacheReader {
+        ProcessedBlockDiskCacheReader::new(self.clone())
     }
 
-    pub fn writer(&self, chain_id: u64) -> TokenProcessedBlockCacheWriter {
-        TokenProcessedBlockCacheWriter::new(self.clone(), chain_id)
+    pub fn writer(&self, chain_id: u64) -> ProcessedBlockDiskCacheWriter {
+        ProcessedBlockDiskCacheWriter::new(self.clone(), chain_id)
     }
 
     pub fn key_for_block(
         &self,
         chain_id: u64,
         block: &ProcessedBlock,
-    ) -> TokenProcessedBlockCacheKey {
-        TokenProcessedBlockCacheKey::new(chain_id, &block.header)
+    ) -> ProcessedBlockDiskCacheKey {
+        ProcessedBlockDiskCacheKey::new(chain_id, &block.header)
     }
 
-    pub fn contains(&self, key: &TokenProcessedBlockCacheKey) -> bool {
+    pub fn contains(&self, key: &ProcessedBlockDiskCacheKey) -> bool {
         self.path_for_key(key).exists()
     }
 
@@ -182,7 +182,7 @@ impl TokenProcessedBlockCacheStore {
         &self,
         chain_id: u64,
         block_number: u64,
-    ) -> Result<Option<TokenProcessedBlockCacheKey>> {
+    ) -> Result<Option<ProcessedBlockDiskCacheKey>> {
         let dir = self.current_block_dir(chain_id, block_number);
         let entries = match fs::read_dir(&dir) {
             Ok(entries) => entries,
@@ -209,7 +209,7 @@ impl TokenProcessedBlockCacheStore {
                 || entry.key.trace_config_hash != processed_block_trace_config_hash(true)
             {
                 eyre::bail!(
-                    "token processed block cache key mismatch for {}: found {:?}",
+                    "processed block disk cache key mismatch for {}: found {:?}",
                     path.display(),
                     entry.key
                 );
@@ -220,7 +220,7 @@ impl TokenProcessedBlockCacheStore {
         Ok(None)
     }
 
-    pub fn get(&self, key: &TokenProcessedBlockCacheKey) -> Result<Option<ProcessedBlock>> {
+    pub fn get(&self, key: &ProcessedBlockDiskCacheKey) -> Result<Option<ProcessedBlock>> {
         let path = self.path_for_key(key);
         if !path.exists() {
             return Ok(None);
@@ -231,7 +231,7 @@ impl TokenProcessedBlockCacheStore {
         let entry = decode_cache_entry(&decoded)?;
         if entry.key != *key {
             bail!(
-                "token processed block cache key mismatch for {}: expected {:?}, found {:?}",
+                "processed block disk cache key mismatch for {}: expected {:?}, found {:?}",
                 path.display(),
                 key,
                 entry.key
@@ -240,14 +240,14 @@ impl TokenProcessedBlockCacheStore {
         Ok(Some(entry.into_processed_block()))
     }
 
-    pub fn put(&self, key: &TokenProcessedBlockCacheKey, block: &ProcessedBlock) -> Result<()> {
+    pub fn put(&self, key: &ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Result<()> {
         let path = self.path_for_key(key);
         let parent = path
             .parent()
             .ok_or_else(|| eyre::eyre!("cache path has no parent: {}", path.display()))?;
         fs::create_dir_all(parent)?;
 
-        let bytes = bincode::serialize(&TokenProcessedBlockCacheEntry::from_block(
+        let bytes = bincode::serialize(&ProcessedBlockDiskCacheEntry::from_block(
             key.clone(),
             block,
         ))?;
@@ -256,7 +256,7 @@ impl TokenProcessedBlockCacheStore {
             ".{}.tmp-{}-{}",
             path.file_name()
                 .and_then(|value| value.to_str())
-                .unwrap_or("token-processed-block"),
+                .unwrap_or("processed-block"),
             std::process::id(),
             monotonic_nanos()
         ));
@@ -319,11 +319,11 @@ impl TokenProcessedBlockCacheStore {
         Ok(removed)
     }
 
-    pub fn coverage(&self) -> Result<TokenProcessedBlockCacheCoverage> {
+    pub fn coverage(&self) -> Result<ProcessedBlockDiskCacheCoverage> {
         let entries = match fs::read_dir(&self.root) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TokenProcessedBlockCacheCoverage {
+                return Ok(ProcessedBlockDiskCacheCoverage {
                     root: self.root.display().to_string(),
                     chain_count: 0,
                     block_dir_count: 0,
@@ -359,7 +359,7 @@ impl TokenProcessedBlockCacheStore {
         let file_count = chains.iter().map(|chain| chain.file_count).sum();
         let total_bytes = chains.iter().map(|chain| chain.total_bytes).sum();
 
-        Ok(TokenProcessedBlockCacheCoverage {
+        Ok(ProcessedBlockDiskCacheCoverage {
             root: self.root.display().to_string(),
             chain_count: chains.len(),
             block_dir_count,
@@ -375,11 +375,11 @@ impl TokenProcessedBlockCacheStore {
         &self,
         chain_id: u64,
         chain_path: &Path,
-    ) -> Result<TokenProcessedBlockCacheChainCoverage> {
+    ) -> Result<ProcessedBlockDiskCacheChainCoverage> {
         let entries = match fs::read_dir(chain_path) {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(TokenProcessedBlockCacheChainCoverage {
+                return Ok(ProcessedBlockDiskCacheChainCoverage {
                     chain_id,
                     path: chain_path.display().to_string(),
                     block_dir_count: 0,
@@ -426,7 +426,7 @@ impl TokenProcessedBlockCacheStore {
         let min_block = block_numbers.first().copied();
         let max_block = block_numbers.last().copied();
 
-        Ok(TokenProcessedBlockCacheChainCoverage {
+        Ok(ProcessedBlockDiskCacheChainCoverage {
             chain_id,
             path: chain_path.display().to_string(),
             block_dir_count: block_numbers.len(),
@@ -438,7 +438,7 @@ impl TokenProcessedBlockCacheStore {
         })
     }
 
-    fn path_for_key(&self, key: &TokenProcessedBlockCacheKey) -> PathBuf {
+    fn path_for_key(&self, key: &ProcessedBlockDiskCacheKey) -> PathBuf {
         self.current_block_dir(key.chain_id, key.block_number)
             .join(format!("{:#x}.bin.zst", key.block_hash))
     }
@@ -474,7 +474,7 @@ fn current_cache_file_stats(path: &Path) -> Result<(usize, u64)> {
     Ok((file_count, total_bytes))
 }
 
-fn block_ranges(block_numbers: &[u64]) -> Vec<TokenProcessedBlockCacheBlockRange> {
+fn block_ranges(block_numbers: &[u64]) -> Vec<ProcessedBlockDiskCacheBlockRange> {
     let mut ranges = Vec::new();
     let Some(&first) = block_numbers.first() else {
         return ranges;
@@ -484,7 +484,7 @@ fn block_ranges(block_numbers: &[u64]) -> Vec<TokenProcessedBlockCacheBlockRange
     let mut previous = first;
     for &block_number in block_numbers.iter().skip(1) {
         if block_number != previous + 1 {
-            ranges.push(TokenProcessedBlockCacheBlockRange {
+            ranges.push(ProcessedBlockDiskCacheBlockRange {
                 start_block: start,
                 end_block: previous,
                 block_count: previous - start + 1,
@@ -494,7 +494,7 @@ fn block_ranges(block_numbers: &[u64]) -> Vec<TokenProcessedBlockCacheBlockRange
         previous = block_number;
     }
 
-    ranges.push(TokenProcessedBlockCacheBlockRange {
+    ranges.push(ProcessedBlockDiskCacheBlockRange {
         start_block: start,
         end_block: previous,
         block_count: previous - start + 1,
@@ -502,15 +502,15 @@ fn block_ranges(block_numbers: &[u64]) -> Vec<TokenProcessedBlockCacheBlockRange
     ranges
 }
 
-impl TokenProcessedBlockCacheEntry {
-    fn from_block(key: TokenProcessedBlockCacheKey, block: &ProcessedBlock) -> Self {
+impl ProcessedBlockDiskCacheEntry {
+    fn from_block(key: ProcessedBlockDiskCacheKey, block: &ProcessedBlock) -> Self {
         Self {
             key,
             header: block.header.clone(),
             transactions: block
                 .transactions
                 .iter()
-                .map(|tx| TokenCachedTransaction {
+                .map(|tx| ProcessedBlockDiskCacheTransaction {
                     processed: SparseProcessedTransaction::from_processed(&tx.processed),
                     processing_error: tx.processing_error.clone(),
                 })
@@ -524,15 +524,15 @@ impl TokenProcessedBlockCacheEntry {
             transactions: self
                 .transactions
                 .into_iter()
-                .map(TokenCachedTransaction::into_block_transaction)
+                .map(ProcessedBlockDiskCacheTransaction::into_block_transaction)
                 .collect(),
         }
     }
 }
 
-impl LegacyTokenProcessedBlockCacheEntry {
-    fn into_current(self) -> TokenProcessedBlockCacheEntry {
-        TokenProcessedBlockCacheEntry {
+impl LegacyProcessedBlockDiskCacheEntry {
+    fn into_current(self) -> ProcessedBlockDiskCacheEntry {
+        ProcessedBlockDiskCacheEntry {
             key: self.key.into_current(),
             header: self.header,
             transactions: self.transactions,
@@ -540,9 +540,9 @@ impl LegacyTokenProcessedBlockCacheEntry {
     }
 }
 
-impl LegacyTokenProcessedBlockCacheKey {
-    fn into_current(self) -> TokenProcessedBlockCacheKey {
-        TokenProcessedBlockCacheKey {
+impl LegacyProcessedBlockDiskCacheKey {
+    fn into_current(self) -> ProcessedBlockDiskCacheKey {
+        ProcessedBlockDiskCacheKey {
             chain_id: self.chain_id,
             block_number: self.block_number,
             block_hash: self.block_hash,
@@ -552,14 +552,14 @@ impl LegacyTokenProcessedBlockCacheKey {
     }
 }
 
-fn decode_cache_entry(bytes: &[u8]) -> Result<TokenProcessedBlockCacheEntry> {
-    match bincode::deserialize::<TokenProcessedBlockCacheEntry>(bytes) {
+fn decode_cache_entry(bytes: &[u8]) -> Result<ProcessedBlockDiskCacheEntry> {
+    match bincode::deserialize::<ProcessedBlockDiskCacheEntry>(bytes) {
         Ok(entry) => Ok(entry),
         Err(current_error) => {
-            let legacy_entry: LegacyTokenProcessedBlockCacheEntry =
+            let legacy_entry: LegacyProcessedBlockDiskCacheEntry =
                 bincode::deserialize(bytes).map_err(|legacy_error| {
                     eyre::eyre!(
-                        "failed to decode processed block cache entry; current decode error: {current_error}; legacy decode error: {legacy_error}"
+                        "failed to decode processed block disk cache entry; current decode error: {current_error}; legacy decode error: {legacy_error}"
                     )
                 })?;
             Ok(legacy_entry.into_current())
@@ -567,7 +567,7 @@ fn decode_cache_entry(bytes: &[u8]) -> Result<TokenProcessedBlockCacheEntry> {
     }
 }
 
-impl TokenCachedTransaction {
+impl ProcessedBlockDiskCacheTransaction {
     fn into_block_transaction(self) -> ProcessedBlockTransactions {
         let processed = self.processed.into_processed();
         let metadata = metadata_from_processed_transaction(&processed);
@@ -750,11 +750,11 @@ mod tests {
     #[test]
     fn round_trips_replay_fields() {
         let root = std::env::temp_dir().join(format!(
-            "token-processed-block-cache-test-{}-{}",
+            "processed-block-disk-cache-test-{}-{}",
             std::process::id(),
             monotonic_nanos()
         ));
-        let store = TokenProcessedBlockCacheStore::open(&root).expect("open cache");
+        let store = ProcessedBlockDiskCacheStore::open(&root).expect("open cache");
 
         let mut tx = ProcessedTransaction::new(
             B256::repeat_byte(0x11),

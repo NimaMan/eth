@@ -13,7 +13,7 @@ use crate::live::{
     block_notifier::RedisBlockNotifier,
     block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
     live_block_processor::{LiveBlockProcessor, LiveBlockProcessorConfig},
-    processed_block_cache_sink::LiveProcessedBlockCacheSink,
+    processed_block_disk_cache_sink::LiveProcessedBlockDiskCacheSink,
     redis_block_publisher::RedisBlockPublisher,
 };
 
@@ -24,7 +24,7 @@ pub struct LiveBlockService {
     state_simulator: Option<Arc<TxSimulator>>,
     notifier: Option<RedisBlockNotifier>,
     logger: Option<BlockProcessingLogger>,
-    processed_block_cache: Option<LiveProcessedBlockCacheSink>,
+    processed_block_disk_cache: Option<LiveProcessedBlockDiskCacheSink>,
     address_block_participation_index: Option<LiveAddressBlockParticipationIndexWorker>,
 }
 
@@ -62,16 +62,17 @@ impl LiveBlockService {
                 .join("live_block_processor.log")
         });
         let logger = Some(BlockProcessingLogger::new(logger_path)?);
-        let processed_block_cache = match LiveProcessedBlockCacheSink::from_config(chain_id) {
-            Ok(sink) => Some(sink),
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "failed to initialize live processed block disk cache writer"
-                );
-                None
-            }
-        };
+        let processed_block_disk_cache =
+            match LiveProcessedBlockDiskCacheSink::from_config(chain_id) {
+                Ok(sink) => Some(sink),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to initialize live processed block disk cache writer"
+                    );
+                    None
+                }
+            };
         let address_block_participation_index =
             match LiveAddressBlockParticipationIndexWorker::from_reth_datadir(&reth_datadir) {
                 Ok(worker) => Some(worker),
@@ -90,7 +91,7 @@ impl LiveBlockService {
             state_simulator,
             notifier,
             logger,
-            processed_block_cache,
+            processed_block_disk_cache,
             address_block_participation_index,
         })
     }
@@ -228,7 +229,7 @@ impl LiveBlockService {
             if let Some(index_worker) = &self.address_block_participation_index {
                 index_worker.try_enqueue(processed.processed_block.clone());
             }
-            if let Some(cache) = &self.processed_block_cache {
+            if let Some(cache) = &self.processed_block_disk_cache {
                 cache.try_enqueue(processed.processed_block);
             }
         }

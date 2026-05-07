@@ -3,33 +3,33 @@ use std::time::Instant;
 use eyre::Result;
 use tx_processor::ProcessedBlock;
 
-use super::store::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
+use super::store::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
 
 #[derive(Debug, Clone)]
-pub struct TokenProcessedBlockCacheWriter {
-    store: TokenProcessedBlockCacheStore,
+pub struct ProcessedBlockDiskCacheWriter {
+    store: ProcessedBlockDiskCacheStore,
     chain_id: u64,
 }
 
 #[derive(Debug, Clone)]
-pub struct TokenProcessedBlockCacheWrite {
-    pub key: TokenProcessedBlockCacheKey,
+pub struct ProcessedBlockDiskCacheWrite {
+    pub key: ProcessedBlockDiskCacheKey,
     pub write_ms: u128,
 }
 
-impl TokenProcessedBlockCacheWriter {
-    pub fn new(store: TokenProcessedBlockCacheStore, chain_id: u64) -> Self {
+impl ProcessedBlockDiskCacheWriter {
+    pub fn new(store: ProcessedBlockDiskCacheStore, chain_id: u64) -> Self {
         Self { store, chain_id }
     }
 
     pub fn write_processed_block(
         &self,
         block: &ProcessedBlock,
-    ) -> Result<TokenProcessedBlockCacheWrite> {
+    ) -> Result<ProcessedBlockDiskCacheWrite> {
         let key = self.store.key_for_block(self.chain_id, block);
         let write_started = Instant::now();
         self.store.put(&key, block)?;
-        Ok(TokenProcessedBlockCacheWrite {
+        Ok(ProcessedBlockDiskCacheWrite {
             key,
             write_ms: write_started.elapsed().as_millis(),
         })

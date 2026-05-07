@@ -41,10 +41,10 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(start_run);
 
-    let cache_coverage = warp::path!("cache" / "coverage")
+    let processed_block_disk_cache_coverage = warp::path!("cache" / "coverage")
         .and(warp::get())
         .and(with_state(state.clone()))
-        .and_then(cache_coverage);
+        .and_then(processed_block_disk_cache_coverage);
 
     let live_status = warp::path!("live" / "status")
         .and(warp::get())
@@ -132,7 +132,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
     health
         .or(list_runs)
         .or(start_run)
-        .or(cache_coverage)
+        .or(processed_block_disk_cache_coverage)
         .or(live_status)
         .or(live_start)
         .or(live_stop)
@@ -166,12 +166,12 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "history_limit": state.config.history_limit,
             "default_blocks": state.config.default_blocks,
             "live_warmup_blocks": state.config.live_warmup_blocks,
-            "processed_block_cache_dir": state.config.processed_block_cache_dir,
-            "processed_block_cache_blocks": state.config.processed_block_cache_blocks,
+            "processed_block_disk_cache_dir": state.config.processed_block_disk_cache_dir,
+            "processed_block_disk_cache_blocks": state.config.processed_block_disk_cache_blocks,
             "redis_url": state.config.redis_url,
             "live_block_stream": state.config.live_block_stream,
-            "live_cache_retry_attempts": state.config.live_cache_retry_attempts,
-            "live_cache_retry_delay_ms": state.config.live_cache_retry_delay_ms,
+            "live_processed_block_disk_cache_retry_attempts": state.config.live_processed_block_disk_cache_retry_attempts,
+            "live_processed_block_disk_cache_retry_delay_ms": state.config.live_processed_block_disk_cache_retry_delay_ms,
             "live_stream_block_ms": state.config.live_stream_block_ms,
             "live_stream_count": state.config.live_stream_count,
             "live_block_apply_timeout_ms": state.config.live_block_apply_timeout_ms,
@@ -296,18 +296,20 @@ async fn start_run(
     }
 }
 
-async fn cache_coverage(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+async fn processed_block_disk_cache_coverage(
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
     match views::cache::coverage(
-        state.processed_block_cache.as_deref(),
+        state.processed_block_disk_cache.as_deref(),
         state
             .config
-            .processed_block_cache_dir
+            .processed_block_disk_cache_dir
             .as_ref()
-            .map(|_| state.config.processed_block_cache_blocks),
+            .map(|_| state.config.processed_block_disk_cache_blocks),
     ) {
         Ok(coverage) => Ok(json_response(&coverage, StatusCode::OK)),
         Err(error) => Ok(error_response(
-            format!("failed to inspect processed block cache: {error}"),
+            format!("failed to inspect processed block disk cache: {error}"),
             StatusCode::INTERNAL_SERVER_ERROR,
         )),
     }

@@ -60,8 +60,8 @@ pub enum ProcessedBlockSource {
 impl ProcessedBlockSource {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Cache => "cache",
-            Self::Processed => "processed",
+            Self::Cache => "persistent_processed_block_disk_cache",
+            Self::Processed => "processed_block",
         }
     }
 }

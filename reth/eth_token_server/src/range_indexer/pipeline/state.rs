@@ -3,7 +3,7 @@ use eth_token::manager::{BlockTokenProcessor, TokenBlockUpdateReport};
 use crate::range_indexer::progress::{now_unix_secs, RangeIndexStatus};
 use crate::range_indexer::{RangeIndexError, RangeIndexJob, RangeIndexState};
 
-use super::cache::ProcessedBlockCacheMetrics;
+use super::cache::ProcessedBlockDiskCacheMetrics;
 
 pub(super) async fn take_processor_for_apply(
     run: &RangeIndexJob,
@@ -61,7 +61,7 @@ pub(super) fn apply_report(
     report: TokenBlockUpdateReport,
     upstream_ms: u128,
     token_apply_ms: u128,
-    cache_metrics: &ProcessedBlockCacheMetrics,
+    disk_cache_metrics: &ProcessedBlockDiskCacheMetrics,
 ) {
     state.progress.current_block = Some(report.block_number);
     state.progress.blocks_processed += 1;
@@ -71,14 +71,14 @@ pub(super) fn apply_report(
     state.progress.token_update_reports += report.token_updates.len();
     state.progress.last_block_upstream_ms = Some(upstream_ms);
     state.progress.last_block_token_apply_ms = Some(token_apply_ms);
-    if cache_metrics.cache_hit {
-        state.progress.processed_block_cache_hits += 1;
+    if disk_cache_metrics.disk_cache_hit {
+        state.progress.processed_block_disk_cache_hits += 1;
     } else {
-        state.progress.processed_block_cache_misses += 1;
+        state.progress.processed_block_disk_cache_misses += 1;
     }
-    state.progress.last_block_cache_read_ms = Some(cache_metrics.cache_read_ms);
-    state.progress.last_block_cache_write_ms = Some(cache_metrics.cache_write_ms);
-    state.progress.last_block_source = Some(cache_metrics.source.to_string());
+    state.progress.last_block_disk_cache_read_ms = Some(disk_cache_metrics.disk_cache_read_ms);
+    state.progress.last_block_disk_cache_write_ms = Some(disk_cache_metrics.disk_cache_write_ms);
+    state.progress.last_block_source = Some(disk_cache_metrics.source.to_string());
     state.progress.updated_at_unix_secs = now_unix_secs();
 
     state.created_tokens.extend(report.created_token_addresses);

@@ -24,12 +24,11 @@ pub mod tx_builder;
 pub mod tx_processor;
 
 // Re-export data models from tx_processor
-pub use block_processor::processed_block_cashe::{
-    TokenProcessedBlockCacheBlockRange, TokenProcessedBlockCacheChainCoverage,
-    TokenProcessedBlockCacheCoverage, TokenProcessedBlockCacheKey,
-    TokenProcessedBlockCacheRangePlan, TokenProcessedBlockCacheRead,
-    TokenProcessedBlockCacheReader, TokenProcessedBlockCacheStore, TokenProcessedBlockCacheWrite,
-    TokenProcessedBlockCacheWriter,
+pub use block_processor::processed_block_disk_cache::{
+    ProcessedBlockDiskCacheBlockRange, ProcessedBlockDiskCacheChainCoverage,
+    ProcessedBlockDiskCacheCoverage, ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheRangePlan,
+    ProcessedBlockDiskCacheRead, ProcessedBlockDiskCacheReader, ProcessedBlockDiskCacheStore,
+    ProcessedBlockDiskCacheWrite, ProcessedBlockDiskCacheWriter,
 };
 pub use block_processor::{
     BlockBatchOptions, BlockProcessor, CachedProcessedBlock, PersistentProcessedBlockCacheMode,

@@ -4,43 +4,43 @@ use eyre::{Result, WrapErr};
 use reth_chain_query::{BlockHeader, RethQueryProvider};
 use tx_processor::ProcessedBlock;
 
-use super::store::{TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore};
+use super::store::{ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore};
 
 const DEFAULT_MAX_PARALLEL_CACHE_READS: usize = 8;
 const HEADER_FETCH_RETRY_ATTEMPTS: usize = 5;
 const HEADER_FETCH_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
-pub struct TokenProcessedBlockCacheReader {
-    store: TokenProcessedBlockCacheStore,
+pub struct ProcessedBlockDiskCacheReader {
+    store: ProcessedBlockDiskCacheStore,
 }
 
 #[derive(Debug)]
-pub struct TokenProcessedBlockCacheRead {
-    pub key: TokenProcessedBlockCacheKey,
+pub struct ProcessedBlockDiskCacheRead {
+    pub key: ProcessedBlockDiskCacheKey,
     pub block: Option<ProcessedBlock>,
     pub read_ms: f64,
 }
 
 #[derive(Debug, Clone)]
-pub struct TokenProcessedBlockCacheRangePlan {
-    pub keys: Vec<TokenProcessedBlockCacheKey>,
-    pub missing_keys: Vec<TokenProcessedBlockCacheKey>,
+pub struct ProcessedBlockDiskCacheRangePlan {
+    pub keys: Vec<ProcessedBlockDiskCacheKey>,
+    pub missing_keys: Vec<ProcessedBlockDiskCacheKey>,
 }
 
-impl TokenProcessedBlockCacheReader {
-    pub fn new(store: TokenProcessedBlockCacheStore) -> Self {
+impl ProcessedBlockDiskCacheReader {
+    pub fn new(store: ProcessedBlockDiskCacheStore) -> Self {
         Self { store }
     }
 
-    pub fn get(&self, key: &TokenProcessedBlockCacheKey) -> Result<Option<ProcessedBlock>> {
+    pub fn get(&self, key: &ProcessedBlockDiskCacheKey) -> Result<Option<ProcessedBlock>> {
         self.store.get(key)
     }
 
     pub fn missing_keys(
         &self,
-        keys: &[TokenProcessedBlockCacheKey],
-    ) -> Vec<TokenProcessedBlockCacheKey> {
+        keys: &[ProcessedBlockDiskCacheKey],
+    ) -> Vec<ProcessedBlockDiskCacheKey> {
         keys.iter()
             .filter(|key| !self.store.contains(key))
             .cloned()
@@ -52,7 +52,7 @@ impl TokenProcessedBlockCacheReader {
         provider: &RethQueryProvider,
         start_block: u64,
         end_block: u64,
-    ) -> Result<TokenProcessedBlockCacheRangePlan> {
+    ) -> Result<ProcessedBlockDiskCacheRangePlan> {
         if end_block < start_block {
             eyre::bail!("end_block must be greater than or equal to start_block");
         }
@@ -61,7 +61,7 @@ impl TokenProcessedBlockCacheReader {
         let mut keys = Vec::with_capacity((end_block - start_block + 1) as usize);
         for block_number in start_block..=end_block {
             let key = match provider.fetch_block_header_only(block_number).await {
-                Ok(header) => TokenProcessedBlockCacheKey::new(chain_id, &header),
+                Ok(header) => ProcessedBlockDiskCacheKey::new(chain_id, &header),
                 Err(initial_error) if is_missing_header_error(&initial_error) => {
                     match self
                         .store
@@ -70,21 +70,21 @@ impl TokenProcessedBlockCacheReader {
                         Some(key) => {
                             tracing::debug!(
                                 block_number,
-                                "planned processed block cache key from disk cache"
+                                "planned processed block disk cache key from disk cache"
                             );
                             key
                         }
                         None => {
                             let header =
                                 fetch_header_with_tip_retry(provider, block_number).await?;
-                            TokenProcessedBlockCacheKey::new(chain_id, &header)
+                            ProcessedBlockDiskCacheKey::new(chain_id, &header)
                         }
                     }
                 }
                 Err(error) => {
                     return Err(error).wrap_err_with(|| {
                         format!(
-                            "failed to fetch token processed block cache header for block={block_number}"
+                            "failed to fetch processed block disk cache header for block={block_number}"
                         )
                     })
                 }
@@ -93,13 +93,13 @@ impl TokenProcessedBlockCacheReader {
         }
 
         let missing_keys = self.missing_keys(&keys);
-        Ok(TokenProcessedBlockCacheRangePlan { keys, missing_keys })
+        Ok(ProcessedBlockDiskCacheRangePlan { keys, missing_keys })
     }
 
     pub fn get_many_parallel(
         &self,
-        keys: &[TokenProcessedBlockCacheKey],
-    ) -> Result<Vec<TokenProcessedBlockCacheRead>> {
+        keys: &[ProcessedBlockDiskCacheKey],
+    ) -> Result<Vec<ProcessedBlockDiskCacheRead>> {
         let max_parallelism = std::thread::available_parallelism()
             .map(usize::from)
             .unwrap_or(1)
@@ -109,16 +109,16 @@ impl TokenProcessedBlockCacheReader {
 
     pub fn get_many_parallel_with_limit(
         &self,
-        keys: &[TokenProcessedBlockCacheKey],
+        keys: &[ProcessedBlockDiskCacheKey],
         max_parallelism: usize,
-    ) -> Result<Vec<TokenProcessedBlockCacheRead>> {
+    ) -> Result<Vec<ProcessedBlockDiskCacheRead>> {
         if keys.is_empty() {
             return Ok(Vec::new());
         }
 
         let workers = max_parallelism.max(1).min(keys.len());
         let chunk_size = keys.len().div_ceil(workers);
-        let mut output: Vec<Option<TokenProcessedBlockCacheRead>> =
+        let mut output: Vec<Option<ProcessedBlockDiskCacheRead>> =
             std::iter::repeat_with(|| None).take(keys.len()).collect();
 
         let join_result: Result<()> = std::thread::scope(|scope| {
@@ -127,19 +127,19 @@ impl TokenProcessedBlockCacheReader {
                 let store = self.store.clone();
                 let start_index = chunk_index * chunk_size;
                 handles.push(scope.spawn(
-                    move || -> Result<Vec<(usize, TokenProcessedBlockCacheRead)>> {
+                    move || -> Result<Vec<(usize, ProcessedBlockDiskCacheRead)>> {
                         let mut reads = Vec::with_capacity(chunk.len());
                         for (offset, key) in chunk.iter().cloned().enumerate() {
                             let read_started = Instant::now();
                             let block = store.get(&key).wrap_err_with(|| {
                                 format!(
-                                    "failed to read token processed block cache block={} hash={:?}",
+                                    "failed to read processed block disk cache block={} hash={:?}",
                                     key.block_number, key.block_hash
                                 )
                             })?;
                             reads.push((
                                 start_index + offset,
-                                TokenProcessedBlockCacheRead {
+                                ProcessedBlockDiskCacheRead {
                                     key,
                                     block,
                                     read_ms: read_started.elapsed().as_secs_f64() * 1000.0,
@@ -152,9 +152,9 @@ impl TokenProcessedBlockCacheReader {
             }
 
             for handle in handles {
-                let reads = handle
-                    .join()
-                    .map_err(|_| eyre::eyre!("processed block cache reader worker panicked"))??;
+                let reads = handle.join().map_err(|_| {
+                    eyre::eyre!("processed block disk cache reader worker panicked")
+                })??;
                 for (index, read) in reads {
                     output[index] = Some(read);
                 }
@@ -166,7 +166,7 @@ impl TokenProcessedBlockCacheReader {
         output
             .into_iter()
             .map(|read| {
-                read.ok_or_else(|| eyre::eyre!("processed block cache read was not filled"))
+                read.ok_or_else(|| eyre::eyre!("processed block disk cache read was not filled"))
             })
             .collect()
     }
@@ -184,7 +184,7 @@ async fn fetch_header_with_tip_retry(
                     tracing::info!(
                         block_number,
                         attempts = attempt + 1,
-                        "resolved processed block cache header after retry"
+                        "resolved processed block disk cache header after retry"
                     );
                 }
                 return Ok(header);
@@ -206,7 +206,7 @@ fn is_missing_header_error(error: &eyre::Report) -> bool {
     error.to_string().contains("No header for block")
 }
 
-impl TokenProcessedBlockCacheRangePlan {
+impl ProcessedBlockDiskCacheRangePlan {
     pub fn is_complete(&self) -> bool {
         self.missing_keys.is_empty()
     }

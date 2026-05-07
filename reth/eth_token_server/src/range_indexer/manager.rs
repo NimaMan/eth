@@ -7,11 +7,13 @@ use reth_chain_query::RethQueryProvider;
 use tokio::sync::RwLock;
 
 use crate::config::TokenServerConfig;
-use crate::processed_block_cache::TokenProcessedBlockCacheStore;
+use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::views::run::RunSummaryView;
 
 use super::pipeline;
 use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
+
+const DEFAULT_HISTORICAL_END_BLOCK_LAG: u64 = 256;
 
 #[derive(Clone)]
 pub struct RangeIndexManager {
@@ -21,7 +23,7 @@ pub struct RangeIndexManager {
 struct RangeIndexManagerInner {
     config: TokenServerConfig,
     provider: Arc<RethQueryProvider>,
-    processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
+    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     runs: RwLock<HashMap<String, Arc<RangeIndexJob>>>,
     next_id: AtomicU64,
 }
@@ -30,13 +32,13 @@ impl RangeIndexManager {
     pub fn new(
         config: TokenServerConfig,
         provider: Arc<RethQueryProvider>,
-        processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
+        processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     ) -> Self {
         Self {
             inner: Arc::new(RangeIndexManagerInner {
                 config,
                 provider,
-                processed_block_cache,
+                processed_block_disk_cache,
                 runs: RwLock::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
             }),
@@ -54,8 +56,8 @@ impl RangeIndexManager {
 
         let task_run = run.clone();
         let task_provider = self.inner.provider.clone();
-        let task_processed_block_cache = self.inner.processed_block_cache.clone();
-        let processed_block_cache_blocks = self.inner.config.processed_block_cache_blocks;
+        let task_processed_block_disk_cache = self.inner.processed_block_disk_cache.clone();
+        let processed_block_disk_cache_blocks = self.inner.config.processed_block_disk_cache_blocks;
         tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -65,8 +67,8 @@ impl RangeIndexManager {
             runtime.block_on(pipeline::run_range_index(
                 task_run,
                 task_provider,
-                task_processed_block_cache,
-                processed_block_cache_blocks,
+                task_processed_block_disk_cache,
+                processed_block_disk_cache_blocks,
             ));
         });
 
@@ -115,7 +117,12 @@ impl RangeIndexManager {
 
         let latest_block = if request.start_block.is_none() || request.end_block.is_none() {
             self.inner.provider.refresh_static_file_provider()?;
-            Some(self.inner.provider.get_latest_block()?)
+            Some(
+                self.inner
+                    .provider
+                    .get_latest_block()?
+                    .saturating_sub(DEFAULT_HISTORICAL_END_BLOCK_LAG),
+            )
         } else {
             None
         };

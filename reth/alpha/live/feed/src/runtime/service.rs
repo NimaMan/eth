@@ -13,11 +13,11 @@ use eth_token::manager::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
-use tx_processor::{BlockProcessor, LivePoolBuySellSimulator, TokenProcessedBlockCacheStore};
+use tx_processor::{BlockProcessor, LivePoolBuySellSimulator, ProcessedBlockDiskCacheStore};
 
 use super::config::LiveTokenRuntimeConfig;
 use super::event::LiveTokenEvent;
-use super::loader::{load_processed_block, CacheRetry, LiveBlockLoad};
+use super::loader::{load_processed_block, LiveBlockLoad, ProcessedBlockDiskCacheRetry};
 use super::progress::{
     LiveTokenError, LiveTokenProgress, LiveTokenStatus, ResolvedLiveTokenRuntimeRequest,
     StartLiveTokenRuntimeRequest,
@@ -35,7 +35,7 @@ pub struct LiveTokenRuntime {
 struct LiveTokenRuntimeInner {
     config: LiveTokenRuntimeConfig,
     provider: Arc<RethQueryProvider>,
-    processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
+    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     state: RwLock<LiveTokenState>,
     stop_requested: AtomicBool,
     next_id: AtomicU64,
@@ -55,7 +55,7 @@ impl LiveTokenRuntime {
     pub fn new(
         config: LiveTokenRuntimeConfig,
         provider: Arc<RethQueryProvider>,
-        processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
+        processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
     ) -> Self {
         let history_limit = config.history_limit;
         let (event_tx, _) = broadcast::channel(1024);
@@ -63,7 +63,7 @@ impl LiveTokenRuntime {
             inner: Arc::new(LiveTokenRuntimeInner {
                 config,
                 provider,
-                processed_block_cache,
+                processed_block_disk_cache,
                 state: RwLock::new(LiveTokenState::idle(history_limit)),
                 stop_requested: AtomicBool::new(false),
                 next_id: AtomicU64::new(1),
@@ -225,7 +225,7 @@ impl LiveTokenRuntime {
     }
 
     fn latest_cached_block(&self) -> Result<Option<u64>> {
-        let Some(cache_store) = self.inner.processed_block_cache.as_deref() else {
+        let Some(cache_store) = self.inner.processed_block_disk_cache.as_deref() else {
             return Ok(None);
         };
         let coverage = cache_store.coverage()?;
@@ -263,7 +263,7 @@ impl LiveTokenRuntime {
                 .apply_block(
                     block_number,
                     false,
-                    CacheRetry::none(),
+                    ProcessedBlockDiskCacheRetry::none(),
                     &tx_processor,
                     &warmup_discovery_provider,
                     &pool_simulator,
@@ -400,9 +400,9 @@ impl LiveTokenRuntime {
             self.apply_block(
                 block_number,
                 true,
-                CacheRetry {
-                    attempts: self.inner.config.cache_retry_attempts,
-                    delay_ms: self.inner.config.cache_retry_delay_ms,
+                ProcessedBlockDiskCacheRetry {
+                    attempts: self.inner.config.processed_block_disk_cache_retry_attempts,
+                    delay_ms: self.inner.config.processed_block_disk_cache_retry_delay_ms,
                 },
                 tx_processor,
                 discovery_provider,
@@ -417,7 +417,7 @@ impl LiveTokenRuntime {
         &self,
         block_number: u64,
         is_live_tail: bool,
-        retry: CacheRetry,
+        retry: ProcessedBlockDiskCacheRetry,
         tx_processor: &BlockProcessor,
         discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
@@ -428,7 +428,7 @@ impl LiveTokenRuntime {
         let loaded = load_processed_block(
             tx_processor,
             self.inner.provider.as_ref(),
-            self.inner.processed_block_cache.clone(),
+            self.inner.processed_block_disk_cache.clone(),
             block_number,
             retry,
         )
@@ -511,8 +511,8 @@ impl LiveTokenRuntime {
                 tracked_tokens = state.progress.tracked_tokens,
                 tracked_v2_pools = state.progress.tracked_v2_pools,
                 block_source = ?state.progress.last_block_source,
-                cache_hits = state.progress.processed_block_cache_hits,
-                cache_misses = state.progress.processed_block_cache_misses,
+                disk_cache_hits = state.progress.processed_block_disk_cache_hits,
+                disk_cache_misses = state.progress.processed_block_disk_cache_misses,
                 token_apply_ms = ?state.progress.last_block_token_apply_ms,
                 "live token runtime applied block"
             );
@@ -645,13 +645,13 @@ fn apply_report(
     state.progress.token_update_reports += report.token_updates.len();
     state.progress.last_block_upstream_ms = Some(loaded.upstream_ms);
     state.progress.last_block_token_apply_ms = Some(token_apply_ms);
-    state.progress.last_block_cache_read_ms = Some(loaded.cache_read_ms);
-    state.progress.last_block_cache_write_ms = Some(loaded.cache_write_ms);
+    state.progress.last_block_disk_cache_read_ms = Some(loaded.disk_cache_read_ms);
+    state.progress.last_block_disk_cache_write_ms = Some(loaded.disk_cache_write_ms);
     state.progress.last_block_source = Some(loaded.source.to_string());
-    if loaded.cache_hit {
-        state.progress.processed_block_cache_hits += 1;
+    if loaded.disk_cache_hit {
+        state.progress.processed_block_disk_cache_hits += 1;
     } else {
-        state.progress.processed_block_cache_misses += 1;
+        state.progress.processed_block_disk_cache_misses += 1;
     }
     state.progress.updated_at_unix_secs = now_unix_secs();
 

@@ -47,7 +47,7 @@ After Redis publication succeeds, the service also enqueues the processed block
 for two background sinks:
 
 - `LiveAddressBlockParticipationIndexWorker` writes `address_to_blocks`.
-- `LiveProcessedBlockCacheSink` writes the token-server processed-block cache.
+- `LiveProcessedBlockDiskCacheSink` writes the token-server processed-block cache.
 
 Both sinks use bounded in-process queues and run outside the Redis publication
 path. If either queue is full, the live block remains published and the worker

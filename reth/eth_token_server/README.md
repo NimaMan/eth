@@ -24,14 +24,16 @@ Default configuration:
 - `ETH_TOKEN_SERVER_DEFAULT_BLOCKS=7000`
 - `ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS=7000`
 - `ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS=30000`
-- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR=$ETH_NODE_ROOT/processed_block_cache`
-- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS=100000`
+- `ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_ATTEMPTS=20`
+- `ETH_TOKEN_SERVER_LIVE_PROCESSED_BLOCK_DISK_CACHE_RETRY_DELAY_MS=100`
+- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR=$ETH_NODE_ROOT/processed_block_disk_cache`
+- `ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS=100000`
 
 To override the traced `ProcessedBlock` disk cache location:
 
 ```bash
-export ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed_block_cache
-export ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS=100000
+export ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_DIR=/home/nima/storage/samsung8tb/ethereum/processed_block_disk_cache
+export ETH_TOKEN_SERVER_PROCESSED_BLOCK_DISK_CACHE_BLOCKS=100000
 ```
 
 The cache stores a sparse token-analysis subset of traced `ProcessedBlock`s as
@@ -39,15 +41,24 @@ The cache stores a sparse token-analysis subset of traced `ProcessedBlock`s as
 processed transaction fields, original calldata/gas replay fields, and
 per-transaction processing errors. Full traces, receipts, raw metadata, state
 maps, empty event families, and unrelated decoded event families are not
-retained. Runs acquire cached blocks in 1000-block chunks, so only one cache
+retained. Runs acquire cached blocks in 250-block chunks, so only one cache
 read batch is retained before those blocks are applied to the token tracker in
 block order.
+
+For compatibility, the server still accepts the old
+`ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR` and
+`ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS` environment variables, and will
+use an existing `$ETH_NODE_ROOT/processed_block_cache` directory if the newer
+`processed_block_disk_cache` directory is not present.
+It also accepts the old `ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS` and
+`ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS` names as aliases for the live
+processed-block disk-cache retry settings.
 
 To measure the same fill-missing-then-read path used by server runs:
 
 ```bash
-cargo run -p eth_token_server --example processed_block_cache_size -- \
-  --cache-dir /home/nima/storage/samsung8tb/ethereum/processed_block_cache \
+cargo run -p eth_token_server --example processed_block_disk_cache_size -- \
+  --cache-dir /home/nima/storage/samsung8tb/ethereum/processed_block_disk_cache \
   --start 25036824 \
   --end 25036825 \
   --fill-missing-then-read

@@ -1,5 +1,5 @@
 mod conversion;
-pub mod processed_block_cashe;
+pub mod processed_block_disk_cache;
 pub mod types;
 
 use crate::tx_processor::data_models::{
@@ -293,6 +293,7 @@ impl BlockProcessor {
                     processor
                         .process_block_with_trace_engine(number, include_traces, trace_engine)
                         .await
+                        .map_err(|err| eyre::eyre!("failed to process block {number}: {err}"))
                         .map(|block| (number, block))
                 }
             })

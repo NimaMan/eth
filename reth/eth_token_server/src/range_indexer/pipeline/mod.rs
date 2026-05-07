@@ -8,20 +8,21 @@ use eth_token::chain_metadata::RethChainMetadataProvider;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
-use crate::processed_block_cache::TokenProcessedBlockCacheStore;
+use crate::memory;
+use crate::processed_block_disk_cache::ProcessedBlockDiskCacheStore;
 use crate::range_indexer::{RangeIndexError, RangeIndexJob};
 
 pub async fn run_range_index(
     run: Arc<RangeIndexJob>,
     provider: Arc<RethQueryProvider>,
-    processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
-    processed_block_cache_blocks: u64,
+    processed_block_disk_cache: Option<Arc<ProcessedBlockDiskCacheStore>>,
+    processed_block_disk_cache_blocks: u64,
 ) {
     tracing::info!(
         run_id = %run.id,
         start_block = run.request.start_block,
         end_block = run.request.end_block,
-        processed_block_cache = processed_block_cache.is_some(),
+        processed_block_disk_cache = processed_block_disk_cache.is_some(),
         "starting token tracking run"
     );
 
@@ -31,8 +32,12 @@ pub async fn run_range_index(
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
-    if let Some(cache_store) = processed_block_cache.as_deref() {
-        cache::prune_processed_block_cache(cache_store, chain_id, processed_block_cache_blocks);
+    if let Some(cache_store) = processed_block_disk_cache.as_deref() {
+        cache::prune_processed_block_disk_cache(
+            cache_store,
+            chain_id,
+            processed_block_disk_cache_blocks,
+        );
     }
 
     let mut next_block = run.request.start_block;
@@ -42,9 +47,9 @@ pub async fn run_range_index(
             return;
         }
 
-        let chunk_end = if processed_block_cache.is_some() {
+        let chunk_end = if processed_block_disk_cache.is_some() {
             next_block
-                .saturating_add(cache::PROCESSED_BLOCK_CACHE_READ_BATCH - 1)
+                .saturating_add(cache::PROCESSED_BLOCK_DISK_CACHE_READ_BATCH - 1)
                 .min(run.request.end_block)
         } else {
             next_block
@@ -64,53 +69,63 @@ pub async fn run_range_index(
             return;
         }
 
-        let processed_blocks = match cache::process_block_chunk(
-            &tx_processor,
-            provider.as_ref(),
-            next_block,
-            chunk_end,
-            processed_block_cache.as_deref(),
-        )
-        .await
         {
-            Ok(processed) => processed,
-            Err(error) => {
-                state::mark_failed(
+            let processed_blocks = match cache::process_block_chunk(
+                &tx_processor,
+                provider.as_ref(),
+                next_block,
+                chunk_end,
+                processed_block_disk_cache.as_deref(),
+            )
+            .await
+            {
+                Ok(processed) => processed,
+                Err(error) => {
+                    state::mark_failed(
+                        &run,
+                        RangeIndexError {
+                            block_number: Some(next_block),
+                            tx_index: None,
+                            tx_hash: None,
+                            message: error.to_string(),
+                        },
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            if let Some(cache_store) = processed_block_disk_cache.as_deref() {
+                if cache::should_prune_processed_block_disk_cache(chunk_end, run.request.end_block)
+                {
+                    cache::prune_processed_block_disk_cache(
+                        cache_store,
+                        chain_id,
+                        processed_block_disk_cache_blocks,
+                    );
+                }
+            }
+
+            for processed in processed_blocks {
+                if run.stop_requested() {
+                    state::mark_stopped(&run).await;
+                    return;
+                }
+
+                let applied = apply::apply_processed_block(
                     &run,
-                    RangeIndexError {
-                        block_number: Some(next_block),
-                        tx_index: None,
-                        tx_hash: None,
-                        message: error.to_string(),
-                    },
+                    processed,
+                    &discovery_provider,
+                    &pool_simulator,
                 )
                 .await;
-                return;
-            }
-        };
-
-        if let Some(cache_store) = processed_block_cache.as_deref() {
-            if cache::should_prune_processed_block_cache(chunk_end, run.request.end_block) {
-                cache::prune_processed_block_cache(
-                    cache_store,
-                    chain_id,
-                    processed_block_cache_blocks,
-                );
+                if !applied {
+                    return;
+                }
             }
         }
-
-        for processed in processed_blocks {
-            if run.stop_requested() {
-                state::mark_stopped(&run).await;
-                return;
-            }
-
-            let applied =
-                apply::apply_processed_block(&run, processed, &discovery_provider, &pool_simulator)
-                    .await;
-            if !applied {
-                return;
-            }
+        if memory::trim_allocator() {
+            tracing::debug!(run_id = %run.id, chunk_end, "trimmed allocator after token range chunk");
         }
 
         if chunk_end == u64::MAX {

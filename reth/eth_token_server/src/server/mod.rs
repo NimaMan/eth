@@ -26,12 +26,12 @@ pub async fn serve(config: TokenServerConfig) -> eyre::Result<()> {
     tracing::info!(
         bind = %config.bind,
         datadir = %config.reth_datadir.display(),
-        processed_block_cache_dir = %config
-            .processed_block_cache_dir
+        processed_block_disk_cache_dir = %config
+            .processed_block_disk_cache_dir
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "disabled".to_string()),
-        processed_block_cache_blocks = config.processed_block_cache_blocks,
+        processed_block_disk_cache_blocks = config.processed_block_disk_cache_blocks,
         "starting eth_token_server"
     );
 

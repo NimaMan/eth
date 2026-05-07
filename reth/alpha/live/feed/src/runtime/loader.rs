@@ -5,26 +5,28 @@ use eyre::{Result, WrapErr};
 use reth_chain_query::RethQueryProvider;
 use tokio::time::{sleep, Duration};
 use tx_processor::{
-    BlockProcessor, ProcessedBlock, ProcessedBlockSource, TokenProcessedBlockCacheStore,
+    BlockProcessor, ProcessedBlock, ProcessedBlockDiskCacheStore, ProcessedBlockSource,
 };
+
+const PROCESSED_BLOCK_DISK_CACHE_SOURCE: &str = "processed_block_disk_cache";
 
 #[derive(Debug)]
 pub struct LiveBlockLoad {
     pub block: ProcessedBlock,
     pub upstream_ms: u128,
-    pub cache_hit: bool,
-    pub cache_read_ms: u128,
-    pub cache_write_ms: u128,
+    pub disk_cache_hit: bool,
+    pub disk_cache_read_ms: u128,
+    pub disk_cache_write_ms: u128,
     pub source: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CacheRetry {
+pub struct ProcessedBlockDiskCacheRetry {
     pub attempts: usize,
     pub delay_ms: u64,
 }
 
-impl CacheRetry {
+impl ProcessedBlockDiskCacheRetry {
     pub const fn none() -> Self {
         Self {
             attempts: 0,
@@ -36,9 +38,9 @@ impl CacheRetry {
 pub async fn load_processed_block(
     tx_processor: &BlockProcessor,
     provider: &RethQueryProvider,
-    cache_store: Option<Arc<TokenProcessedBlockCacheStore>>,
+    cache_store: Option<Arc<ProcessedBlockDiskCacheStore>>,
     block_number: u64,
-    retry: CacheRetry,
+    retry: ProcessedBlockDiskCacheRetry,
 ) -> Result<LiveBlockLoad> {
     if let Some(cache_store) = cache_store {
         for attempt in 0..=retry.attempts {
@@ -54,19 +56,19 @@ pub async fn load_processed_block(
 
         let started = Instant::now();
         let block = tx_processor.process_block(block_number).await?;
-        let mut cache_write_ms = 0;
+        let mut disk_cache_write_ms = 0;
         match cache_store
             .writer(provider.chain_id())
             .write_processed_block(&block)
         {
             Ok(write) => {
-                cache_write_ms = write.write_ms;
+                disk_cache_write_ms = write.write_ms;
             }
             Err(error) => {
                 tracing::warn!(
                     block_number,
                     error = %error,
-                    "failed to write live token processed block cache entry"
+                    "failed to write live processed block disk cache entry"
                 );
             }
         }
@@ -74,9 +76,9 @@ pub async fn load_processed_block(
         return Ok(LiveBlockLoad {
             block,
             upstream_ms: started.elapsed().as_millis(),
-            cache_hit: false,
-            cache_read_ms: 0,
-            cache_write_ms,
+            disk_cache_hit: false,
+            disk_cache_read_ms: 0,
+            disk_cache_write_ms,
             source: ProcessedBlockSource::Processed.as_str(),
         });
     }
@@ -86,15 +88,15 @@ pub async fn load_processed_block(
     Ok(LiveBlockLoad {
         block,
         upstream_ms: started.elapsed().as_millis(),
-        cache_hit: false,
-        cache_read_ms: 0,
-        cache_write_ms: 0,
+        disk_cache_hit: false,
+        disk_cache_read_ms: 0,
+        disk_cache_write_ms: 0,
         source: ProcessedBlockSource::Processed.as_str(),
     })
 }
 
 async fn read_cached_block(
-    cache_store: Arc<TokenProcessedBlockCacheStore>,
+    cache_store: Arc<ProcessedBlockDiskCacheStore>,
     chain_id: u64,
     block_number: u64,
 ) -> Result<Option<LiveBlockLoad>> {
@@ -104,7 +106,7 @@ async fn read_cached_block(
         move || cache_store.cached_key_for_block_number(chain_id, block_number)
     })
     .await
-    .wrap_err("live token cache key task failed")??;
+    .wrap_err("processed block disk cache key task failed")??;
 
     let Some(key) = key else {
         return Ok(None);
@@ -116,7 +118,7 @@ async fn read_cached_block(
         move || cache_store.get(&key)
     })
     .await
-    .wrap_err("live token cache read task failed")??;
+    .wrap_err("processed block disk cache read task failed")??;
 
     let Some(block) = block else {
         return Ok(None);
@@ -125,9 +127,9 @@ async fn read_cached_block(
     Ok(Some(LiveBlockLoad {
         block,
         upstream_ms: read_started.elapsed().as_millis(),
-        cache_hit: true,
-        cache_read_ms: read_started.elapsed().as_millis(),
-        cache_write_ms: 0,
-        source: "token_cache",
+        disk_cache_hit: true,
+        disk_cache_read_ms: read_started.elapsed().as_millis(),
+        disk_cache_write_ms: 0,
+        source: PROCESSED_BLOCK_DISK_CACHE_SOURCE,
     }))
 }

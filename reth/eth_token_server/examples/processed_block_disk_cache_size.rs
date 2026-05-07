@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use eth_token::chain_metadata::RethChainMetadataProvider;
 use eth_token::manager::BlockTokenProcessor;
-use eth_token_server::processed_block_cache::{
-    TokenProcessedBlockCacheKey, TokenProcessedBlockCacheStore,
+use eth_token_server::processed_block_disk_cache::{
+    ProcessedBlockDiskCacheKey, ProcessedBlockDiskCacheStore,
 };
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
@@ -15,7 +15,7 @@ async fn main() -> eyre::Result<()> {
     let args = Args::parse()?;
     let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
     let processor = BlockProcessor::new(provider.clone());
-    let store = TokenProcessedBlockCacheStore::open(&args.cache_dir)?;
+    let store = ProcessedBlockDiskCacheStore::open(&args.cache_dir)?;
     let discovery_provider = RethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut full_token_processor = BlockTokenProcessor::new(args.history_limit);
@@ -126,7 +126,7 @@ async fn main() -> eyre::Result<()> {
 
     for block_number in args.start..=args.end {
         let header = provider.fetch_block_header_only(block_number).await?;
-        let key = TokenProcessedBlockCacheKey::new(provider.chain_id(), &header);
+        let key = ProcessedBlockDiskCacheKey::new(provider.chain_id(), &header);
 
         let process_started = Instant::now();
         let block = processor.process_block(block_number).await?;
