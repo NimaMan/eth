@@ -44,6 +44,7 @@ pub enum PoolLiquidityLevel {
     Liquid,
     Dust,
     Drained,
+    Unknown,
 }
 
 #[derive(Clone, Debug)]
@@ -288,6 +289,9 @@ fn pool_liquidity_level(liquidity: f64, currency: &str) -> PoolLiquidityLevel {
     if !liquidity.is_finite() || liquidity <= drained_liquidity_threshold(currency) {
         return PoolLiquidityLevel::Drained;
     }
+    if !is_liquidity_currency(currency) {
+        return PoolLiquidityLevel::Unknown;
+    }
     if liquidity <= dust_liquidity_threshold(currency) {
         return PoolLiquidityLevel::Dust;
     }
@@ -299,7 +303,13 @@ fn liquidity_level_label(level: PoolLiquidityLevel) -> &'static str {
         PoolLiquidityLevel::Liquid => "liquid",
         PoolLiquidityLevel::Dust => "dust",
         PoolLiquidityLevel::Drained => "drained",
+        PoolLiquidityLevel::Unknown => "unknown_quote",
     }
+}
+
+fn is_liquidity_currency(currency: &str) -> bool {
+    let currency = currency.to_ascii_uppercase();
+    currency == "WETH" || is_stable_currency(&currency)
 }
 
 fn dust_liquidity_threshold(currency: &str) -> f64 {
@@ -430,8 +440,24 @@ mod tests {
             None
         );
         assert_eq!(
+            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Unknown),
+            None
+        );
+        assert_eq!(
             display_price_ratio(Some(10.0), PoolLiquidityLevel::Liquid),
             Some(10.0)
+        );
+    }
+
+    #[test]
+    fn liquidity_level_marks_unknown_quote_assets() {
+        assert_eq!(
+            pool_liquidity_level(1_000.0, "WETH"),
+            PoolLiquidityLevel::Liquid
+        );
+        assert_eq!(
+            pool_liquidity_level(1_000_000.0, "0xunknown"),
+            PoolLiquidityLevel::Unknown
         );
     }
 
