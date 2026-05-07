@@ -1,3 +1,4 @@
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -105,11 +106,29 @@ impl LiveTokenRuntime {
         let runtime = self.clone();
         let task_request = request.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            let local_runtime = tokio::runtime::Builder::new_current_thread()
+            let local_runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("live-token-runtime")
                 .enable_all()
                 .build()
                 .expect("failed to build live token runtime thread");
-            local_runtime.block_on(runtime.run(task_request));
+            let runtime_for_failure = runtime.clone();
+            let run_result = panic::catch_unwind(AssertUnwindSafe(|| {
+                local_runtime.block_on(runtime.run(task_request));
+            }));
+            if let Err(payload) = run_result {
+                let message = format!(
+                    "live token runtime task panicked: {}",
+                    panic_payload_message(payload.as_ref())
+                );
+                tracing::error!(error = %message, "live token runtime task panicked");
+                local_runtime.block_on(runtime_for_failure.mark_failed(LiveTokenError {
+                    block_number: None,
+                    tx_index: None,
+                    tx_hash: None,
+                    message,
+                }));
+            }
         });
 
         let mut task = self.inner.task.lock().await;
@@ -453,14 +472,33 @@ impl LiveTokenRuntime {
     ) -> LiveTokenEvent {
         let mut state = self.inner.state.write().await;
         state.processor = processor;
-        apply_report(
+        let event = apply_report(
             &mut state,
             report,
             retention_report,
             loaded,
             token_apply_ms,
             is_live_tail,
-        )
+        );
+        if should_log_block_apply(&state.progress, is_live_tail) {
+            tracing::info!(
+                status = ?state.progress.status,
+                current_block = ?state.progress.current_block,
+                blocks_processed = state.progress.blocks_processed,
+                warmup_total_blocks = state.progress.warmup_total_blocks,
+                live_blocks_processed = state.progress.live_blocks_processed,
+                txs_processed = state.progress.txs_processed,
+                tx_failures = state.progress.tx_failures,
+                tracked_tokens = state.progress.tracked_tokens,
+                tracked_v2_pools = state.progress.tracked_v2_pools,
+                block_source = ?state.progress.last_block_source,
+                cache_hits = state.progress.processed_block_cache_hits,
+                cache_misses = state.progress.processed_block_cache_misses,
+                token_apply_ms = ?state.progress.last_block_token_apply_ms,
+                "live token runtime applied block"
+            );
+        }
+        event
     }
 
     async fn mark_live(&self) {
@@ -670,5 +708,23 @@ fn status_label(status: &LiveTokenStatus) -> &'static str {
         LiveTokenStatus::Stopping => "stopping",
         LiveTokenStatus::Stopped => "stopped",
         LiveTokenStatus::Failed => "failed",
+    }
+}
+
+fn should_log_block_apply(progress: &LiveTokenProgress, is_live_tail: bool) -> bool {
+    is_live_tail
+        || progress.blocks_processed == 1
+        || progress.blocks_processed % 100 == 0
+        || (progress.warmup_total_blocks > 0
+            && progress.blocks_processed == progress.warmup_total_blocks)
+}
+
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
     }
 }
