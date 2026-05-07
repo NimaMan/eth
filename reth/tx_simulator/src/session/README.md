@@ -8,6 +8,10 @@ The `session` module is the preferred high-level surface for long-lived simulati
 After creation, each `step_*` call executes synchronously on that warm fork and commits only to
 the in-memory overlay.
 
+Live pipelines should usually call `LiveTxSimulator::start_latest_session()` instead. That
+selects the latest exact Redis chain-state snapshot when MDBX lags, and falls back to persisted
+MDBX when it is caught up.
+
 Use it when a workflow can contain any sequence of:
 
 - unsigned transactions built locally,

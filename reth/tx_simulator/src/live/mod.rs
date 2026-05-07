@@ -7,4 +7,4 @@
 
 mod simulator;
 
-pub use simulator::LiveTxSimulator;
+pub use simulator::{LiveStateSource, LiveStateStatus, LiveTxSimulator};

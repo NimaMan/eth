@@ -17,17 +17,12 @@ live feed.
 
 2. **load_state_for_block(block)**
    * Attempt `provider.history_by_block_number(block)` with the current retry
-     loop.
+     loop when the block is persisted.
    * If the block is ahead of MDBX:
-     - Determine the latest persisted block (`best_block_number`).
-     - Build a `ForkedState` rooted at that block using existing helpers.
-     - For each missing block (`best_block+1` ..= `block`):
-       + Fetch the sealed header + transactions from Redis.
-       + Replay them sequentially using `UnsignedTxChainSimulation` so the
-         fork reflects the same state MDBX would eventually hold.
-     - Wrap the fork’s backing database in a temporary `StateProvider`
-       implementation (e.g., via `MemoryOverlayStateProvider`) so callers
-       receive a `StateProviderBox`.
+     - Fetch the exact `ChainStateSnapshot` written by the live block processor.
+     - Restore a `ForkedState` by opening the snapshot's persisted base block
+       and applying the serialized REVM cache overlay.
+     - Reject stale or mismatched snapshots instead of approximating state.
 
 3. **Reuse everywhere**
    * `contract_method_simulator`, `single_tx::unsigned`, block tracer, token
@@ -36,10 +31,8 @@ live feed.
 
 ## Implementation Notes
 
-- Add small helpers in `live_chain_data/live_chain_cache/redis_cache.rs` to
-  fetch `(SealedHeader, Vec<UnsignedTransaction>)` for a block so the replay loop
-  doesn’t duplicate JSON parsing.
-- Consider building a lightweight `StateProvider` wrapper around the forked
-  state by embedding a `MemoryOverlayStateProvider` or similar so the rest of
-  the simulator continues to operate on `StateProviderBox` without intrusive
-  changes.
+- The live block processor builds snapshots from `prestateTracer` diffMode
+  results, so the simulator restores exact post-block state without replaying a
+  Redis window on every call.
+- `LiveTxSimulator::latest_state_status()` should be used by latency-sensitive
+  callers to confirm whether a request is using `LiveOverlay` or persisted MDBX.

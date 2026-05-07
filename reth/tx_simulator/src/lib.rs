@@ -61,7 +61,7 @@ pub mod live_chain_cache {
 
 // Re-export main types
 pub use crate::tx_chain::token_metadata::{TokenMetadataResult, TokenMetadataSimulator};
-pub use live::LiveTxSimulator;
+pub use live::{LiveStateSource, LiveStateStatus, LiveTxSimulator};
 pub use live_chain_cache::{LiveChainCache, LiveChainCacheBuilder};
 pub use session::{
     BlockReplaySession, SessionStepSummary, SessionTransaction, SessionTransactionKind,

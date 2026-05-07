@@ -176,6 +176,10 @@ Important concrete errors:
     the live fork/cache path.
   - Fix direction: chain-query pool reads must use simulation/view APIs for live
     blocks instead of direct DB state.
+  - Current live entrypoint: `LivePoolBuySellSimulator` selects
+    `LiveTxSimulator::latest_state_status()`, so the default live check uses the
+    Redis `LiveOverlay` snapshot whenever the live block processor is ahead of
+    MDBX and has published exact state.
 
 - `Invalid block ... while reading UniswapV3 state`
   - Seen while loading V3 pool state.
