@@ -5,6 +5,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
 
 const MAX_SIGNAL_LIMIT: i64 = 1_000;
+const MAX_SIGNAL_LOOKBACK_DAYS: i64 = 3_650;
 
 #[derive(Clone)]
 pub struct MempoolSignalStore {
@@ -15,6 +16,7 @@ pub struct MempoolSignalStore {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MempoolSignalQuery {
     pub limit: Option<i64>,
+    pub since_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -71,8 +73,16 @@ impl MempoolSignalStore {
             .limit
             .unwrap_or(self.default_limit)
             .clamp(1, MAX_SIGNAL_LIMIT);
+        let since_days = query
+            .since_days
+            .filter(|days| *days > 0)
+            .map(|days| days.clamp(1, MAX_SIGNAL_LOOKBACK_DAYS));
         let sql = signal_sql(kind);
-        let rows = sqlx::query(&sql).bind(limit).fetch_all(&self.pool).await?;
+        let rows = sqlx::query(&sql)
+            .bind(limit)
+            .bind(since_days)
+            .fetch_all(&self.pool)
+            .await?;
         let signals = rows.iter().map(row_to_signal).collect::<Result<Vec<_>>>()?;
 
         Ok(MempoolSignalsResponse {
@@ -128,7 +138,9 @@ fn signal_sql(kind: MempoolSignalKind) -> String {
         "SELECT signal_id, signal_type, detection_timestamp, detection_tx_hash, \
          token_address, pool_address, pool_type, creator_address, subject_address, \
          headline, value_1, value_2, flag, payload \
-         FROM ({body}) signals ORDER BY sort_timestamp DESC LIMIT $1"
+         FROM ({body}) signals \
+         WHERE ($2::bigint IS NULL OR sort_timestamp >= (NOW()::timestamp - ($2::bigint * INTERVAL '1 day'))) \
+         ORDER BY sort_timestamp DESC LIMIT $1"
     )
 }
 
