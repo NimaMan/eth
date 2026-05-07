@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         redis_url.clone(),
         notifier_channel,
         Some(log_path.clone()),
+        PathBuf::from(&reth_datadir),
     )
     .await?;
 

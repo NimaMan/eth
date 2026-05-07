@@ -8,6 +8,7 @@ use std::str::FromStr;
 use tx_simulator::{live_chain_data::ChainStateSnapshot, TxSimulator};
 
 use crate::live::{
+    address_block_participation_index_worker::LiveAddressBlockParticipationIndexWorker,
     block_logger::BlockProcessingLogger,
     block_notifier::RedisBlockNotifier,
     block_snapshot::{build_live_block_snapshot, LiveBlockSnapshot},
@@ -24,6 +25,7 @@ pub struct LiveBlockService {
     notifier: Option<RedisBlockNotifier>,
     logger: Option<BlockProcessingLogger>,
     processed_block_cache: Option<LiveProcessedBlockCacheSink>,
+    address_block_participation_index: Option<LiveAddressBlockParticipationIndexWorker>,
 }
 
 impl LiveBlockService {
@@ -33,6 +35,7 @@ impl LiveBlockService {
         redis_url: Option<String>,
         notifier_channel: Option<String>,
         log_path: Option<PathBuf>,
+        reth_datadir: PathBuf,
     ) -> Result<Self> {
         let state_simulator = redis_url.as_ref().map(|_| provider.simulator().clone());
         let chain_id = provider.chain_id();
@@ -69,6 +72,17 @@ impl LiveBlockService {
                 None
             }
         };
+        let address_block_participation_index =
+            match LiveAddressBlockParticipationIndexWorker::from_reth_datadir(&reth_datadir) {
+                Ok(worker) => Some(worker),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to initialize live address block participation index worker"
+                    );
+                    None
+                }
+            };
 
         Ok(Self {
             processor,
@@ -77,6 +91,7 @@ impl LiveBlockService {
             notifier,
             logger,
             processed_block_cache,
+            address_block_participation_index,
         })
     }
 
@@ -210,6 +225,9 @@ impl LiveBlockService {
         }
 
         if redis_published {
+            if let Some(index_worker) = &self.address_block_participation_index {
+                index_worker.try_enqueue(processed.processed_block.clone());
+            }
             if let Some(cache) = &self.processed_block_cache {
                 cache.try_enqueue(processed.processed_block);
             }

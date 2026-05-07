@@ -16,6 +16,7 @@ It watches Ethereum head updates, processes each live block through the Rust tra
 - Redis default: `LIVE_BLOCKCHAIN_DATA_REDIS_URL` from `config.env`, falling back to `redis://localhost:6379/0`
 - Redis Stream default: `eth/live/blocks`
 - Pub/Sub channel default: `eth/live/block_notifications`
+- Address block participation index default: enabled, writing to `<reth_datadir>/reth_index/address_to_blocks`
 - Log file default: `ETH_LOG_DIR/block_processor/live_block_processor_<YYYYMMDD_HHMMSS>.log`
 
 Runtime state is intentionally not embedded here because it changes every block. Check systemd and Redis directly:
@@ -41,6 +42,16 @@ For each processed block, the service writes:
 - `eth/live/block/<block_number>/addresses` -> set of addresses observed in processed transactions
 
 After the snapshot write, it appends to `eth/live/blocks` and publishes a best-effort Pub/Sub notification to `eth/live/block_notifications` with the processed block number.
+
+After Redis publication succeeds, the service also enqueues the processed block
+for two background sinks:
+
+- `LiveAddressBlockParticipationIndexWorker` writes `address_to_blocks`.
+- `LiveProcessedBlockCacheSink` writes the token-server processed-block cache.
+
+Both sinks use bounded in-process queues and run outside the Redis publication
+path. If either queue is full, the live block remains published and the worker
+logs the dropped side-effect; the data can be backfilled from processed blocks.
 
 The processed transaction JSON includes normalized top-level fields for downstream replay:
 
@@ -107,7 +118,7 @@ sudo systemctl daemon-reload
 sudo systemctl start eth-live-block-processor.service
 ```
 
-## Address To Block Index
+## Address Block Participation Index
 
 The old Python live processor had an optional persistent address participation writer.
 The Rust-side design now stores candidate block numbers instead of tx numbers:
@@ -120,9 +131,49 @@ The Rust-side design now stores candidate block numbers instead of tx numbers:
 
 This is not the same as the token manager's in-memory per-block address index. The token manager still needs its local per-block index for same-block replay, for example hydrating token metadata after earlier same-sender setup transactions. That in-memory index is temporary and should not be replaced by archive history.
 
-## Do We Still Need The Persistent Address Index?
+### Runtime Model
 
-Not in the live processor hot path.
+The index is part of the live block processor service, but it is not on the live
+block publication critical path:
+
+```text
+LiveBlockProcessor
+  -> process block
+  -> publish Redis live snapshot and stream event
+  -> enqueue block for AddressBlockParticipationIndexWorker
+  -> continue with next block
+
+AddressBlockParticipationIndexWorker
+  -> read queued ProcessedBlock
+  -> extract tx-level AddressParticipation records
+  -> write address_to_blocks once per address per block
+```
+
+The worker writes through `AddressBlockParticipationWriter`, which deduplicates
+the final `(address, block_number)` rows. Replay is idempotent.
+
+### Configuration
+
+No extra `config.env` variables are required for this index. The live block
+processor already resolves the Reth datadir from the existing node config, and
+the worker writes to `<reth_datadir>/reth_index/address_to_blocks`.
+
+The in-process queue is bounded at 256 blocks. If we later need runtime tuning,
+we should add it through the live processor config layer instead of adding more
+top-level env variables.
+
+### Logs
+
+Successful writes emit tracing lines like:
+
+```text
+indexed live address block participation block_number=... tx_count=... participating_txs=... inserted=... write_ms=...
+```
+
+Queue saturation or write failures are warnings. The compact timestamped block
+log remains focused on block processing; inspect worker logs through journald.
+
+## Why Keep It Off The Hot Path?
 
 The archive Reth node now has `IndexAccountHistory` and `IndexStorageHistory`, and `reth_chain_query` exposes:
 
@@ -137,9 +188,9 @@ That is useful for finding blocks where an address' own account state changed. I
 - Internal call participants and protocol/pool addresses come from traces and decoded events.
 - `unique_addresses` is a processed-tx concept, not a native Reth account-history concept.
 
-Recommendation:
-
-- Keep the Rust live processor focused on fast block processing, Redis snapshot writes, and Pub/Sub notification.
-- Use archive Reth account/storage history and logs for on-demand historical investigations.
-- Use `address_to_blocks` only if we need low-latency, repeated generic address -> candidate block lookups.
-- If we wire it into live processing, implement it as a separate async worker that consumes Redis block snapshots after publication and writes `reth_index/address_to_blocks`, so MDBX reverse-index writes cannot delay live block publishing.
+The persistent index is useful for low-latency repeated generic address ->
+candidate-block lookups, but it should not delay block publication. Measurements
+on blocks `25029968-25030967` wrote `1,165,988` address-block rows across 1,000
+blocks in `1.0254s` total writer time, while block processing took `364.0362s`.
+The worker model keeps that small write cost isolated from live publication and
+still lets us backfill if the queue ever falls behind.

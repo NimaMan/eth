@@ -14,6 +14,7 @@ pub struct AddressParticipation {
 }
 
 /// Writer that persists address -> block participation into the RethIndex DB.
+#[derive(Clone)]
 pub struct AddressBlockParticipationWriter {
     db: Arc<RethIndexDB>,
 }

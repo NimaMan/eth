@@ -37,7 +37,8 @@ pub use block_processor::{
     PROCESSED_BLOCK_SCHEMA_VERSION,
 };
 pub use live::{
-    LiveBlockProcessor, LiveBlockProcessorConfig, LiveBlockService, LiveProcessedBlock,
+    LiveAddressBlockParticipationIndexWorker, LiveBlockProcessor, LiveBlockProcessorConfig,
+    LiveBlockService, LiveProcessedBlock,
 };
 pub use processed_tx_provider::{
     processed_block_trace_config_hash, AddressProcessedTxProvider, ProcessedBlockCacheKey,

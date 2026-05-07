@@ -44,3 +44,9 @@ env \
 The metric to watch for bottlenecks is `write_s`, not `process_s`. For live
 processing, block processing and tracing can dominate while MDBX appends remain
 small.
+
+The live block processor now hosts
+`LiveAddressBlockParticipationIndexWorker`, which writes this same
+`address_to_blocks` table asynchronously after Redis publication succeeds. Use
+the benchmark here for temporary-index measurements and historical backfill
+timing before writing large ranges into the production sidecar DB.

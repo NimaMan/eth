@@ -17,6 +17,12 @@ The address index stores candidate processed blocks, not transaction numbers:
 all addresses across that block, and writes each address once for the block. MDBX
 `NO_DUP_DATA` makes the write idempotent if a block is replayed.
 
+In the live system this writer is hosted by
+`tx_processor::live::LiveAddressBlockParticipationIndexWorker`. The live block
+processor enqueues processed blocks after Redis publication succeeds; the worker
+does extraction and MDBX writes on a background task so index writes cannot
+delay live block publication.
+
 ## Why Blocks, Not Tx Numbers
 
 For this project, the useful query is usually "which blocks should I replay for
@@ -37,6 +43,9 @@ Storing block numbers has three practical benefits:
 Readers should treat `address_to_blocks[address]` as a sorted candidate block
 set. The table does not prove that every transaction in those blocks involved
 the address; callers must load/replay the blocks and filter.
+
+The writer is safe to backfill or replay: duplicate `(address, block_number)`
+values are skipped.
 
 ## Migration
 
