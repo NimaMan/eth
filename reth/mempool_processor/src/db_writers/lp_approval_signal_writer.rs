@@ -80,7 +80,11 @@ impl LpApprovalSignalWriter {
     /// Create new writer with database connection
     pub async fn new() -> Result<Self> {
         let database_url = "postgresql://postgres:postgres@localhost:5432/eth_db";
+        Self::new_with_database_url(database_url).await
+    }
 
+    /// Create new writer with an explicit database connection URL.
+    pub async fn new_with_database_url(database_url: &str) -> Result<Self> {
         let pool = PgPoolOptions::new()
             .max_connections(5)
             .connect(database_url)

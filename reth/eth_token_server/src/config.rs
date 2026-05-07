@@ -18,6 +18,8 @@ const DEFAULT_CACHE_RETRY_DELAY_MS: u64 = 100;
 const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
 const DEFAULT_STREAM_COUNT: usize = 100;
 const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_MEMPOOL_DATABASE_URL: &str = "postgresql://postgres:postgres@localhost:5432/eth_db";
+const DEFAULT_MEMPOOL_SIGNAL_LIMIT: i64 = 200;
 
 #[derive(Clone, Debug)]
 pub struct TokenServerConfig {
@@ -35,6 +37,8 @@ pub struct TokenServerConfig {
     pub live_stream_block_ms: usize,
     pub live_stream_count: usize,
     pub live_block_apply_timeout_ms: u64,
+    pub mempool_database_url: String,
+    pub mempool_signal_limit: i64,
 }
 
 impl TokenServerConfig {
@@ -76,6 +80,17 @@ impl TokenServerConfig {
         let live_block_apply_timeout_ms = env_parse(
             "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS",
             DEFAULT_BLOCK_APPLY_TIMEOUT_MS,
+        )?;
+        let mempool_database_url = env_string_any(
+            &[
+                "ETH_TOKEN_SERVER_MEMPOOL_DATABASE_URL",
+                "MEMPOOL_DATABASE_URL",
+            ],
+            DEFAULT_MEMPOOL_DATABASE_URL,
+        );
+        let mempool_signal_limit = env_parse(
+            "ETH_TOKEN_SERVER_MEMPOOL_SIGNAL_LIMIT",
+            DEFAULT_MEMPOOL_SIGNAL_LIMIT,
         )?;
 
         if history_limit == 0 {
@@ -121,6 +136,16 @@ impl TokenServerConfig {
                 "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS must be greater than zero"
             ));
         }
+        if mempool_database_url.trim().is_empty() {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_MEMPOOL_DATABASE_URL must not be empty"
+            ));
+        }
+        if mempool_signal_limit <= 0 {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_MEMPOOL_SIGNAL_LIMIT must be greater than zero"
+            ));
+        }
 
         Ok(Self {
             bind,
@@ -137,12 +162,26 @@ impl TokenServerConfig {
             live_stream_block_ms,
             live_stream_count,
             live_block_apply_timeout_ms,
+            mempool_database_url,
+            mempool_signal_limit,
         })
     }
 }
 
 fn env_string(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn env_string_any(keys: &[&str], default: &str) -> String {
+    for key in keys {
+        if let Ok(value) = env::var(key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+    default.to_string()
 }
 
 fn env_optional_path(key: &str) -> Option<PathBuf> {

@@ -10,7 +10,7 @@ python signal_subscriber.py
 
 ## Environment Variables
 
-- `SIGNAL_ENDPOINT`: ZMQ endpoint (default: `tcp://127.0.0.1:5557`)
+- `SIGNAL_ENDPOINT`: ZMQ endpoint (default: `tcp://127.0.0.1:5556`)
 
 ## Multiple Consumers
 
@@ -26,7 +26,7 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 - Liquidity removal signals
 - Trading enabled signals  
 - LP approval signals
-- JSON-formatted signals (future)
+- JSON-formatted signal payloads
 
 ## Example Output
 
@@ -34,14 +34,24 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 ======================================================================
 🚀 Mempool Processor - Signal Subscriber
 ======================================================================
-📡 Connected to signal publisher: tcp://127.0.0.1:5557
+📡 Connected to signal publisher: tcp://127.0.0.1:5556
 🔄 Waiting for signals... (Press Ctrl+C to stop)
 
-📨 TAX Signal #1 [14:10:46]
-   [2025-08-12 14:10:46.355] TAX_SIGNAL | Token: 0xc334... | Pool: 0x67fa... | Type: HighTaxOrHoneypot | BuyTax: 0% | SellTax: 0%
+📨 JSON Signal #1 [14:10:46]
+   Topic: tax_signal
+   Type: tax_signal
+   Data: {
+     "type": "tax_signal",
+     "token_address": "0xc334..."
+   }
 ------------------------------------------------------------
-📨 TAX Signal #2 [14:12:05] 
-   [2025-08-12 14:12:05.876] TAX_DETECTION | TX: 0xba4b... | Token: 0xc334... | can_buy: false | can_sell: false | buy_tax: -1.0%
+📨 JSON Signal #2 [14:12:05]
+   Topic: lp_approval
+   Type: lp_approval
+   Data: {
+     "type": "lp_approval",
+     "token_address": "0x1b36..."
+   }
 ------------------------------------------------------------
 ```
 
@@ -51,3 +61,4 @@ This subscriber uses ZMQ PUB/SUB pattern which supports multiple concurrent cons
 - **eth_kartal**: Can consume signals for automated trading decisions
 - **Monitoring**: Multiple monitoring tools can run simultaneously
 - **Real-time**: Signals are published as soon as detected (microsecond latency)
+- **Wire Format**: Signal publisher sends multipart `{topic, json}` on port `5556`; port `5557` is for live token updates.

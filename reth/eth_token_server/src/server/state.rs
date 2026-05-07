@@ -6,6 +6,7 @@ use reth_chain_query::RethQueryProvider;
 
 use crate::config::TokenServerConfig;
 use crate::live::LiveTracker;
+use crate::mempool_signals::MempoolSignalStore;
 use crate::processed_block_cache::TokenProcessedBlockCacheStore;
 use crate::range_indexer::RangeIndexManager;
 
@@ -15,6 +16,7 @@ pub struct ServerState {
     pub range_indexer: RangeIndexManager,
     pub live_tracker: LiveTracker,
     pub processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
+    pub mempool_signals: MempoolSignalStore,
 }
 
 impl ServerState {
@@ -44,12 +46,15 @@ impl ServerState {
             provider,
             live_processed_block_cache,
         );
+        let mempool_signals =
+            MempoolSignalStore::new(&config.mempool_database_url, config.mempool_signal_limit)?;
 
         Ok(Self {
             config,
             range_indexer,
             live_tracker,
             processed_block_cache,
+            mempool_signals,
         })
     }
 }

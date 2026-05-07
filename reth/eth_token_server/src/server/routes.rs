@@ -7,6 +7,7 @@ use warp::{Filter, Reply};
 
 use crate::error::ApiError;
 use crate::live::StartLiveTrackerRequest;
+use crate::mempool_signals::{MempoolSignalKind, MempoolSignalQuery};
 use crate::range_indexer::StartRangeIndexRequest;
 use crate::server::sse;
 use crate::server::ServerState;
@@ -81,6 +82,18 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(live_retention);
 
+    let mempool_signals = warp::path!("mempool" / "signals")
+        .and(warp::get())
+        .and(warp::query::<MempoolSignalQuery>())
+        .and(with_state(state.clone()))
+        .and_then(mempool_signals);
+
+    let mempool_signals_by_type = warp::path!("mempool" / "signals" / String)
+        .and(warp::get())
+        .and(warp::query::<MempoolSignalQuery>())
+        .and(with_state(state.clone()))
+        .and_then(mempool_signals_by_type);
+
     let progress = warp::path!("runs" / String / "progress")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -127,6 +140,8 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_tokens)
         .or(live_pools)
         .or(live_retention)
+        .or(mempool_signals_by_type)
+        .or(mempool_signals)
         .or(token_detail)
         .or(tokens)
         .or(progress)
@@ -160,6 +175,7 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "live_stream_block_ms": state.config.live_stream_block_ms,
             "live_stream_count": state.config.live_stream_count,
             "live_block_apply_timeout_ms": state.config.live_block_apply_timeout_ms,
+            "mempool_signal_limit": state.config.mempool_signal_limit,
         }),
         StatusCode::OK,
     ))
@@ -222,6 +238,41 @@ async fn live_retention(state: ServerState) -> Result<warp::reply::Response, Inf
         &views::live::retention(&state.live_tracker).await,
         StatusCode::OK,
     ))
+}
+
+async fn mempool_signals(
+    query: MempoolSignalQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    match state
+        .mempool_signals
+        .list(MempoolSignalKind::All, query)
+        .await
+    {
+        Ok(signals) => Ok(json_response(&signals, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load mempool signals: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
+}
+
+async fn mempool_signals_by_type(
+    signal_type: String,
+    query: MempoolSignalQuery,
+    state: ServerState,
+) -> Result<warp::reply::Response, Infallible> {
+    let Some(kind) = MempoolSignalKind::from_path(&signal_type) else {
+        return Ok(error_response("unknown signal type", StatusCode::NOT_FOUND));
+    };
+
+    match state.mempool_signals.list(kind, query).await {
+        Ok(signals) => Ok(json_response(&signals, StatusCode::OK)),
+        Err(error) => Ok(error_response(
+            format!("failed to load mempool signals: {error}"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )),
+    }
 }
 
 async fn list_runs(state: ServerState) -> Result<warp::reply::Response, Infallible> {

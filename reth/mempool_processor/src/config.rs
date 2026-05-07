@@ -15,6 +15,8 @@ pub const RETH_IPC_PATH_ENV: &str = "RETH_IPC_PATH";
 pub const IPC_PATH_ENV: &str = "IPC_PATH";
 pub const MEMPOOL_IPC_PATH_ENV: &str = "MEMPOOL_IPC_PATH";
 pub const MEMPOOL_RETH_DATADIR_ENV: &str = "MEMPOOL_RETH_DATADIR";
+pub const MEMPOOL_LOG_DIR_ENV: &str = "MEMPOOL_LOG_DIR";
+pub const ETH_LOG_DIR_ENV: &str = "ETH_LOG_DIR";
 pub const ETH_RPC_URL_ENV: &str = "ETH_RPC_URL";
 pub const RETH_HTTP_RPC_ENV: &str = "RETH_HTTP_RPC";
 pub const LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV: &str = "LIVE_BLOCKCHAIN_DATA_REDIS_URL";
@@ -27,8 +29,8 @@ pub const DEFAULT_RETH_IPC_PATH: &str = "/home/nima/storage/samsung8tb/ethereum/
 pub const DEFAULT_ETH_RPC_URL: &str = "http://127.0.0.1:8545";
 /// Default number of simulation worker threads.
 pub const DEFAULT_SIM_WORKERS: usize = 4;
-/// Default log directory within the repository.
-pub const DEFAULT_LOG_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/logs");
+/// Default log directory within the shared Ethereum workspace.
+pub const DEFAULT_LOG_DIR: &str = "/home/nima/code/crypto/blockchains/eth/logs/mempool_processor";
 pub const DEFAULT_TOKEN_CACHE_PUB_ENDPOINT: &str = "tcp://127.0.0.1:5557";
 pub const DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL: &str = "redis://localhost:6379/0";
 pub const DEFAULT_REDIS_TOKEN_PREFIX: &str = "eth/live/token/snapshot/";
@@ -46,8 +48,11 @@ pub fn eth_config_path() -> PathBuf {
 
 /// Reth data directory for examples and runtime defaults.
 pub fn reth_datadir_from_env() -> String {
-    config_value(&[MEMPOOL_RETH_DATADIR_ENV, RETH_DATADIR_ENV, RETH_DB_PATH_ENV])
-        .unwrap_or_else(|| DEFAULT_RETH_DATA_DIR.to_string())
+    explicit_or_shared_config_value(
+        &[MEMPOOL_RETH_DATADIR_ENV, RETH_DATADIR_ENV],
+        &[RETH_DB_PATH_ENV],
+    )
+    .unwrap_or_else(|| DEFAULT_RETH_DATA_DIR.to_string())
 }
 
 /// IPC socket path for examples and lightweight tools.
@@ -55,12 +60,13 @@ pub fn reth_datadir_from_env() -> String {
 /// Resolution order is explicit environment variables, then the shared
 /// repository `config.env`, then `<RETH_DATADIR>/reth.ipc`.
 pub fn reth_ipc_path_from_env() -> String {
-    config_value(&[MEMPOOL_IPC_PATH_ENV, RETH_IPC_PATH_ENV, IPC_PATH_ENV]).unwrap_or_else(|| {
-        Path::new(&reth_datadir_from_env())
-            .join("reth.ipc")
-            .to_string_lossy()
-            .into_owned()
-    })
+    explicit_or_shared_config_value(&[MEMPOOL_IPC_PATH_ENV, RETH_IPC_PATH_ENV], &[IPC_PATH_ENV])
+        .unwrap_or_else(|| {
+            Path::new(&reth_datadir_from_env())
+                .join("reth.ipc")
+                .to_string_lossy()
+                .into_owned()
+        })
 }
 
 /// HTTP RPC endpoint for examples that need `txpool_*` or trace RPC calls.
@@ -73,6 +79,22 @@ pub fn eth_rpc_url_from_env() -> String {
 pub fn live_data_redis_url_from_env() -> String {
     config_value(&[LIVE_BLOCKCHAIN_DATA_REDIS_URL_ENV])
         .unwrap_or_else(|| DEFAULT_LIVE_BLOCKCHAIN_DATA_REDIS_URL.to_string())
+}
+
+/// Log directory for the mempool processor.
+pub fn mempool_log_dir_from_env() -> String {
+    if let Some(log_dir) = config_value(&[MEMPOOL_LOG_DIR_ENV]) {
+        return log_dir;
+    }
+
+    if let Some(eth_log_dir) = config_value(&[ETH_LOG_DIR_ENV]) {
+        return Path::new(&eth_log_dir)
+            .join("mempool_processor")
+            .to_string_lossy()
+            .into_owned();
+    }
+
+    DEFAULT_LOG_DIR.to_string()
 }
 
 fn config_value(keys: &[&str]) -> Option<String> {
@@ -88,6 +110,41 @@ fn config_value(keys: &[&str]) -> Option<String> {
     let config = load_config_env();
     for key in keys {
         if let Some(value) = config.get(*key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn explicit_or_shared_config_value(
+    explicit_keys: &[&str],
+    legacy_env_keys: &[&str],
+) -> Option<String> {
+    for key in explicit_keys {
+        if let Ok(value) = std::env::var(key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    let config = load_config_env();
+    for key in explicit_keys.iter().chain(legacy_env_keys.iter()) {
+        if let Some(value) = config.get(*key) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    for key in legacy_env_keys {
+        if let Ok(value) = std::env::var(key) {
             let value = value.trim();
             if !value.is_empty() {
                 return Some(value.to_string());
@@ -440,7 +497,7 @@ impl Default for MempoolProcessorConfig {
             },
 
             logging: LoggingConfig {
-                log_dir: DEFAULT_LOG_DIR.to_string(),
+                log_dir: mempool_log_dir_from_env(),
                 file_logging: true,
                 level: "info".to_string(),
                 metrics_interval: Duration::from_secs(60),
@@ -480,6 +537,7 @@ impl MempoolProcessorConfig {
         }
 
         config.simulation.live_data_redis_url = live_data_redis_url_from_env();
+        config.logging.log_dir = mempool_log_dir_from_env();
 
         if let Ok(endpoint) = std::env::var("MEMPOOL_ZMQ_SIGNAL_ENDPOINT") {
             config.zmq.signal_endpoint = endpoint;

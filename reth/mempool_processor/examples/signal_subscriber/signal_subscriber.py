@@ -10,7 +10,7 @@ Usage:
     python signal_subscriber.py
 
 Environment Variables:
-    SIGNAL_ENDPOINT: ZMQ endpoint (default: tcp://127.0.0.1:5557)
+    SIGNAL_ENDPOINT: ZMQ endpoint (default: tcp://127.0.0.1:5556)
 """
 
 import zmq
@@ -22,7 +22,7 @@ import os
 
 class SignalSubscriber:
     def __init__(self, endpoint=None):
-        self.endpoint = endpoint or os.getenv("SIGNAL_ENDPOINT", "tcp://127.0.0.1:5557")
+        self.endpoint = endpoint or os.getenv("SIGNAL_ENDPOINT", "tcp://127.0.0.1:5556")
         self.context = zmq.Context()
         self.socket = None
         self.running = True
@@ -48,28 +48,29 @@ class SignalSubscriber:
         print(f"📡 Connected to signal publisher: {self.endpoint}")
         print("🔄 Waiting for signals... (Press Ctrl+C to stop)\n")
         
-    def handle_signal(self, message):
+    def handle_signal(self, topic, message):
         """Process received signal message"""
         try:
             # Try to parse as JSON first
             if message.strip().startswith('{'):
                 signal_data = json.loads(message)
-                self.handle_json_signal(signal_data)
+                self.handle_json_signal(topic, signal_data)
             else:
                 # Handle text-based signals (like current tax signals)
-                self.handle_text_signal(message)
+                self.handle_text_signal(topic, message)
                 
         except json.JSONDecodeError:
             # Not JSON, treat as text signal
-            self.handle_text_signal(message)
+            self.handle_text_signal(topic, message)
         except Exception as e:
             print(f"❌ Error processing signal: {e}")
+            print(f"   Topic: {topic}")
             print(f"   Raw message: {message}")
             
-    def handle_json_signal(self, data):
+    def handle_json_signal(self, topic, data):
         """Handle JSON-formatted signals"""
         self.stats["total"] += 1
-        signal_type = data.get("type", "unknown")
+        signal_type = data.get("type") or topic or "unknown"
         
         if "liquidity" in signal_type.lower():
             self.stats["liquidity"] += 1
@@ -77,33 +78,38 @@ class SignalSubscriber:
             self.stats["trading"] += 1
         elif "tax" in signal_type.lower():
             self.stats["tax"] += 1
+        elif "lp" in signal_type.lower() or "approval" in signal_type.lower():
+            self.stats["lp_approval"] += 1
             
         print(f"📨 JSON Signal #{self.stats['total']} [{datetime.now().strftime('%H:%M:%S')}]")
+        print(f"   Topic: {topic or '-'}")
         print(f"   Type: {signal_type}")
         print(f"   Data: {json.dumps(data, indent=2)}")
         print("-" * 60)
         
-    def handle_text_signal(self, message):
+    def handle_text_signal(self, topic, message):
         """Handle text-based signals (current format)"""
         self.stats["total"] += 1
         
         # Detect signal type from message content
-        if "TAX_DETECTION" in message or "TAX_SIGNAL" in message:
+        combined = f"{topic} {message}"
+        if "TAX_DETECTION" in combined or "TAX_SIGNAL" in combined:
             self.stats["tax"] += 1
             signal_type = "TAX"
-        elif "LIQUIDITY" in message:
+        elif "LIQUIDITY" in combined:
             self.stats["liquidity"] += 1 
             signal_type = "LIQUIDITY"
-        elif "TRADING" in message:
+        elif "TRADING" in combined:
             self.stats["trading"] += 1
             signal_type = "TRADING"
-        elif "LP_APPROVAL" in message:
+        elif "LP_APPROVAL" in combined or "lp_approval" in combined:
             self.stats["lp_approval"] += 1
             signal_type = "LP_APPROVAL"
         else:
             signal_type = "OTHER"
             
         print(f"📨 {signal_type} Signal #{self.stats['total']} [{datetime.now().strftime('%H:%M:%S')}]")
+        print(f"   Topic: {topic or '-'}")
         print(f"   {message.strip()}")
         print("-" * 60)
         
@@ -117,8 +123,16 @@ class SignalSubscriber:
         while self.running:
             try:
                 # Receive message with timeout
-                message = self.socket.recv_string(zmq.NOBLOCK)
-                self.handle_signal(message)
+                frames = self.socket.recv_multipart(zmq.NOBLOCK)
+                if len(frames) >= 2:
+                    topic = frames[0].decode("utf-8", errors="replace")
+                    message = frames[1].decode("utf-8", errors="replace")
+                elif len(frames) == 1:
+                    topic = ""
+                    message = frames[0].decode("utf-8", errors="replace")
+                else:
+                    continue
+                self.handle_signal(topic, message)
                 
             except zmq.Again:
                 # No message received within timeout, continue

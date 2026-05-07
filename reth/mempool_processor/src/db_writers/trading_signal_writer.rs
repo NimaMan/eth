@@ -109,9 +109,14 @@ impl TradingSignalWriter {
     /// Create a new writer with default database connection
     pub async fn new_with_defaults(config: WriterConfig) -> Result<Self> {
         let db_url = super::get_default_database_url();
+        Self::new_with_database_url(&db_url, config).await
+    }
+
+    /// Create a new writer with an explicit database connection URL.
+    pub async fn new_with_database_url(database_url: &str, config: WriterConfig) -> Result<Self> {
         let db_pool = PgPoolOptions::new()
             .max_connections(5)
-            .connect(&db_url)
+            .connect(database_url)
             .await?;
         Self::new(db_pool, config).await
     }

@@ -46,17 +46,21 @@ impl UnifiedSignalWriter {
         info!("Initializing unified signal writer...");
 
         // Initialize trading signal writer
-        let trading_writer =
-            match TradingSignalWriter::new_with_defaults(SignalWriterConfig::default()).await {
-                Ok(w) => {
-                    info!("✅ Trading signal writer initialized");
-                    Some(w)
-                }
-                Err(e) => {
-                    error!("Failed to create trading signal writer: {}", e);
-                    None
-                }
-            };
+        let trading_writer = match TradingSignalWriter::new_with_database_url(
+            database_url,
+            SignalWriterConfig::default(),
+        )
+        .await
+        {
+            Ok(w) => {
+                info!("✅ Trading signal writer initialized");
+                Some(w)
+            }
+            Err(e) => {
+                error!("Failed to create trading signal writer: {}", e);
+                None
+            }
+        };
 
         // Initialize tax signal writer
         let tax_writer = match TaxSignalWriter::new(database_url, 50, Duration::from_secs(5)).await
@@ -72,28 +76,30 @@ impl UnifiedSignalWriter {
         };
 
         // Initialize liquidity removal signal writer
-        let liquidity_removal_writer = match LiquidityRemovalSignalWriter::new().await {
-            Ok(w) => {
-                info!("✅ Liquidity removal signal writer initialized");
-                Some(w)
-            }
-            Err(e) => {
-                error!("Failed to create liquidity removal signal writer: {}", e);
-                None
-            }
-        };
+        let liquidity_removal_writer =
+            match LiquidityRemovalSignalWriter::new_with_database_url(database_url).await {
+                Ok(w) => {
+                    info!("✅ Liquidity removal signal writer initialized");
+                    Some(w)
+                }
+                Err(e) => {
+                    error!("Failed to create liquidity removal signal writer: {}", e);
+                    None
+                }
+            };
 
         // Initialize LP approval signal writer
-        let lp_approval_writer = match LpApprovalSignalWriter::new().await {
-            Ok(w) => {
-                info!("✅ LP approval signal writer initialized");
-                Some(w)
-            }
-            Err(e) => {
-                error!("Failed to create LP approval signal writer: {}", e);
-                None
-            }
-        };
+        let lp_approval_writer =
+            match LpApprovalSignalWriter::new_with_database_url(database_url).await {
+                Ok(w) => {
+                    info!("✅ LP approval signal writer initialized");
+                    Some(w)
+                }
+                Err(e) => {
+                    error!("Failed to create LP approval signal writer: {}", e);
+                    None
+                }
+            };
 
         // Check if at least one writer was initialized
         if trading_writer.is_none()

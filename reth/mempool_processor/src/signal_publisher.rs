@@ -24,6 +24,8 @@ pub struct SignalPublisherConfig {
     pub log_dir: String,
     /// Enable database writing
     pub enable_database: bool,
+    /// Database URL for optional signal persistence.
+    pub database_url: Option<String>,
     /// Database channel buffer size
     pub db_channel_buffer_size: usize,
 }
@@ -35,6 +37,7 @@ impl SignalPublisherConfig {
             zmq_endpoint: "tcp://127.0.0.1:5556".to_string(),
             log_dir: log_dir.to_string(),
             enable_database: true,
+            database_url: None,
             db_channel_buffer_size: 1000,
         }
     }
@@ -53,7 +56,7 @@ impl SignalPublisherConfig {
 
 impl Default for SignalPublisherConfig {
     fn default() -> Self {
-        Self::with_timestamped_logs(crate::config::DEFAULT_LOG_DIR)
+        Self::with_timestamped_logs(&crate::config::mempool_log_dir_from_env())
     }
 }
 
@@ -133,7 +136,11 @@ impl SignalPublisher {
             info!("Setting up database writer...");
             let (sender, receiver) = mpsc::channel(config.db_channel_buffer_size);
             info!("Spawning database writer task...");
-            Self::spawn_db_writer(receiver, stats.clone()).await?;
+            let database_url = config
+                .database_url
+                .clone()
+                .unwrap_or_else(crate::db_writers::get_default_database_url);
+            Self::spawn_db_writer(receiver, stats.clone(), database_url).await?;
             info!("Database writer spawned");
             Some(sender)
         } else {
@@ -187,26 +194,26 @@ impl SignalPublisher {
     async fn spawn_db_writer(
         mut receiver: mpsc::Receiver<Signal>,
         stats: Arc<PublisherStats>,
+        database_url: String,
     ) -> Result<()> {
         // Spawn database writer task without blocking on connection
         let stats_clone = stats.clone();
         tokio::spawn(async move {
             info!("🗄️ Starting database writer task...");
-            // Use hardcoded database URL from database module
-            let db_url = crate::db_writers::get_default_database_url();
 
             // Create unified signal writer
-            let unified_writer = match crate::db_writers::UnifiedSignalWriter::new(&db_url).await {
-                Ok(w) => {
-                    info!("✅ Unified signal writer initialized");
-                    info!("  {}", w.get_status());
-                    w
-                }
-                Err(e) => {
-                    error!("❌ Failed to initialize unified signal writer: {}", e);
-                    return;
-                }
-            };
+            let unified_writer =
+                match crate::db_writers::UnifiedSignalWriter::new(&database_url).await {
+                    Ok(w) => {
+                        info!("✅ Unified signal writer initialized");
+                        info!("  {}", w.get_status());
+                        w
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to initialize unified signal writer: {}", e);
+                        return;
+                    }
+                };
 
             info!("✅ Database writer task started successfully");
 

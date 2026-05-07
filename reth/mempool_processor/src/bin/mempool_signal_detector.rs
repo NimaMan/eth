@@ -70,11 +70,11 @@ struct Args {
     #[arg(long, env = "MEMPOOL_CONFIG_PATH")]
     config: Option<String>,
     /// IPC socket path
-    #[arg(long, env = "IPC_PATH")]
+    #[arg(long, env = "MEMPOOL_IPC_PATH")]
     ipc_path: Option<String>,
 
     /// Reth database path for simulations
-    #[arg(long, env = "RETH_DB_PATH")]
+    #[arg(long, env = "MEMPOOL_RETH_DATADIR")]
     reth_db_path: Option<String>,
 
     /// Log directory base path
@@ -100,7 +100,7 @@ struct Args {
     #[arg(long, default_value = "60")]
     report_interval: u64,
 
-    /// Deprecated: arrival index dir now defaults to `<RETH_DB_PATH>/reth_index`.
+    /// Deprecated: arrival index dir now defaults to `<RETH_DATADIR>/reth_index`.
     /// Kept for compatibility but ignored.
     #[arg(long, env = "ARRIVAL_INDEX_DIR")]
     _arrival_index_dir: Option<String>,
@@ -397,32 +397,51 @@ async fn main() -> Result<()> {
     let mempool_simulator = Arc::new(MempoolSimulator::new(&cfg_reth_db_path, live_chain_cache)?);
     info!("✅ Mempool simulator initialized");
 
-    // Initialize arrival recorder only after simulator (to reuse provider)
-    let index_dir = Path::new(&cfg_reth_db_path).join("reth_index");
-    std::fs::create_dir_all(&index_dir)?;
-    let db = std::sync::Arc::new(reth_chain_query::reth_index::database::RethIndexDB::open(
-        &index_dir,
-    )?);
-    let provider_factory = mempool_simulator
-        .get_tx_simulator()
-        .provider_factory()
-        .clone();
-    let writer = std::sync::Arc::new(
-        reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
-            db.clone(),
-            std::sync::Arc::new(provider_factory),
-        ),
-    );
-    let cfg = ArrivalRecorderConfig {
-        flush_interval: Duration::from_secs(5),
-        batch_size: 1000,
-        max_entry_age: Duration::from_secs(2 * 24 * 60 * 60),
+    // Initialize arrival recorder only after simulator (to reuse provider).
+    // This index is useful for first-seen latency analytics, but the live
+    // mempool signal path should still run if the sidecar index is absent.
+    let arrival_recorder = {
+        let index_dir = Path::new(&cfg_reth_db_path).join("reth_index");
+        let recorder_result = (|| -> Result<MempoolArrivalRecorder> {
+            std::fs::create_dir_all(&index_dir)?;
+            let db = std::sync::Arc::new(
+                reth_chain_query::reth_index::database::RethIndexDB::open(&index_dir)?,
+            );
+            let provider_factory = mempool_simulator
+                .get_tx_simulator()
+                .provider_factory()
+                .clone();
+            let writer = std::sync::Arc::new(
+                reth_chain_query::reth_index::writers::mempool_arrival_writer::MempoolArrivalWriter::new(
+                    db.clone(),
+                    std::sync::Arc::new(provider_factory),
+                ),
+            );
+            let cfg = ArrivalRecorderConfig {
+                flush_interval: Duration::from_secs(5),
+                batch_size: 1000,
+                max_entry_age: Duration::from_secs(2 * 24 * 60 * 60),
+            };
+            Ok(MempoolArrivalRecorder::new(db, writer, cfg))
+        })();
+
+        match recorder_result {
+            Ok(recorder) => {
+                info!(
+                    "✅ Arrival recorder initialized at {} (ms precision)",
+                    index_dir.display()
+                );
+                Some(recorder)
+            }
+            Err(err) => {
+                warn!(
+                    "Mempool arrival recorder disabled; live mempool processing will continue without first-seen persistence: {}",
+                    err
+                );
+                None
+            }
+        }
     };
-    let arrival_recorder = Some(MempoolArrivalRecorder::new(db, writer, cfg));
-    info!(
-        "✅ Arrival recorder initialized at {} (ms precision)",
-        index_dir.display()
-    );
 
     // 6. Signal publisher (moved before simulation manager)
     info!("📡 Initializing signal publisher...");
@@ -434,6 +453,8 @@ async fn main() -> Result<()> {
         .await;
     let mut publisher_config = SignalPublisherConfig::with_log_dir(signals_dir.to_str().unwrap());
     publisher_config.zmq_endpoint = base_config.zmq.signal_endpoint.clone();
+    publisher_config.enable_database = base_config.database.enabled;
+    publisher_config.database_url = base_config.database.url.clone();
     let db_enabled = publisher_config.enable_database;
     let signal_publisher = Arc::new(Mutex::new(SignalPublisher::new(publisher_config).await?));
     info!(
