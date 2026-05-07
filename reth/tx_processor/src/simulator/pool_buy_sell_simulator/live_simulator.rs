@@ -47,15 +47,6 @@ impl LivePoolBuySellSimulator {
     ) -> Result<PoolBuySellSimulationResult> {
         if config.block_number.is_none() {
             let status = self.live_tx_simulator.latest_state_status().await?;
-            tracing::debug!(
-                target: "pool_buy_sell_sim",
-                selected_block = status.selected_block_number,
-                source = ?status.source,
-                latest_persisted = status.latest_persisted_block_number,
-                latest_live = ?status.latest_live_block_number,
-                latest_chain_state = ?status.latest_chain_state_block_number,
-                "selected live-first simulation state"
-            );
             config.block_number = Some(status.selected_block_number);
         }
         check_can_buy_sell_pool(self.simulator(), self.tx_processor(), config).await

@@ -109,6 +109,10 @@ impl BlockTokenProcessor {
         block: &ProcessedBlock,
         pool_simulator: &PoolBuySellSimulator,
     ) -> TokenBlockUpdateReport {
+        if self.is_live_mode {
+            return self.live_mode_historical_simulator_report(block, "process_block");
+        }
+
         self.process_block_with_trading_simulation(
             block,
             V2TradingSimulation::Historical(pool_simulator),
@@ -247,6 +251,13 @@ impl BlockTokenProcessor {
     where
         P: TokenMetadataProvider,
     {
+        if self.is_live_mode {
+            return self.live_mode_historical_simulator_report(
+                block,
+                "process_block_with_metadata_provider",
+            );
+        }
+
         self.process_block_with_metadata_provider_and_trading_simulation(
             block,
             metadata_provider,
@@ -426,6 +437,13 @@ impl BlockTokenProcessor {
     where
         P: TokenDiscoveryProvider,
     {
+        if self.is_live_mode {
+            return self.live_mode_historical_simulator_report(
+                block,
+                "process_block_with_discovery_provider",
+            );
+        }
+
         self.process_block_with_token_and_pool_discovery_providers(
             block,
             discovery_provider,
@@ -464,6 +482,13 @@ impl BlockTokenProcessor {
         T: TokenMetadataProvider,
         V: UniswapV2PoolMetadataProvider,
     {
+        if self.is_live_mode {
+            return self.live_mode_historical_simulator_report(
+                block,
+                "process_block_with_token_and_pool_discovery_providers",
+            );
+        }
+
         self.process_block_with_token_and_pool_discovery_providers_and_trading_simulation(
             block,
             metadata_provider,
@@ -730,6 +755,35 @@ impl BlockTokenProcessor {
             current_block,
         );
     }
+
+    fn live_mode_historical_simulator_report(
+        &mut self,
+        block: &ProcessedBlock,
+        entrypoint: &'static str,
+    ) -> TokenBlockUpdateReport {
+        self.updated_token_addresses.clear();
+        self.last_block_failure_count = 1;
+
+        TokenBlockUpdateReport {
+            block_number: block.header.number,
+            block_hash: hash_string(&block.header.hash),
+            block_timestamp: block.header.timestamp,
+            transaction_count: block.transactions.len(),
+            processed_transaction_count: 0,
+            failed_transaction_count: self.last_block_failure_count,
+            already_processed: false,
+            created_token_addresses: Vec::new(),
+            updated_token_addresses: Vec::new(),
+            token_updates: Vec::new(),
+            transaction_errors: vec![TokenTransactionUpdateError {
+                tx_hash: hash_string(&block.header.hash),
+                tx_index: 0,
+                message: format!(
+                    "{entrypoint} cannot run in live mode with PoolBuySellSimulator; use LiveBlockTokenProcessor with LivePoolBuySellSimulator"
+                ),
+            }],
+        }
+    }
 }
 
 fn simulation_prior_txs_for_sender(
@@ -815,4 +869,53 @@ fn pending_metadata_tx_hashes(
         .get(&tx.from_address)
         .cloned()
         .unwrap_or_else(|| vec![tx.hash])
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::b256;
+    use reth_chain_query::provider::BlockHeader;
+
+    use super::{BlockTokenProcessor, ProcessedBlock};
+
+    fn empty_block() -> ProcessedBlock {
+        ProcessedBlock {
+            header: BlockHeader {
+                number: 100,
+                hash: b256!("9999999999999999999999999999999999999999999999999999999999999999"),
+                parent_hash: b256!(
+                    "8888888888888888888888888888888888888888888888888888888888888888"
+                ),
+                timestamp: 1_700,
+                gas_limit: 30_000_000,
+                gas_used: 21_000,
+                base_fee_per_gas: Some(1),
+                withdrawals_root: None,
+                blob_gas_used: None,
+                excess_blob_gas: None,
+                parent_beacon_block_root: None,
+                requests_hash: None,
+                block_access_list_hash: None,
+                slot_number: None,
+            },
+            transactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn live_mode_historical_simulator_report_fails_fast() {
+        let mut processor = BlockTokenProcessor::new(100);
+        processor.set_live_mode(true);
+
+        let report =
+            processor.live_mode_historical_simulator_report(&empty_block(), "process_block");
+
+        assert_eq!(report.processed_transaction_count, 0);
+        assert_eq!(report.failed_transaction_count, 1);
+        assert_eq!(processor.last_block_failure_count, 1);
+        assert!(processor.latest_processed_block.is_none());
+        assert!(report.transaction_errors[0]
+            .message
+            .contains("use LiveBlockTokenProcessor with LivePoolBuySellSimulator"));
+    }
 }
