@@ -36,6 +36,7 @@ impl RethQueryProvider {
         &self,
         block_number: u64,
     ) -> Result<reth_db_models::StoredBlockBodyIndices> {
+        self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
         provider
             .block_body_indices(block_number)?
@@ -44,6 +45,7 @@ impl RethQueryProvider {
 
     /// Get block header from Headers table
     pub async fn fetch_block_header_only(&self, block_number: u64) -> Result<BlockHeader> {
+        self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
 
         let header = provider
@@ -211,6 +213,7 @@ impl RethQueryProvider {
         &self,
         block_number: u64,
     ) -> Result<Vec<TransactionMetadata>> {
+        self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
 
         // Get block body indices to find transaction range
@@ -294,6 +297,7 @@ impl RethQueryProvider {
         &self,
         block_number: u64,
     ) -> Result<Vec<TransactionReceipt>> {
+        self.refresh_static_file_provider()?;
         let provider = self.provider_factory.provider()?;
 
         // Get receipts by block

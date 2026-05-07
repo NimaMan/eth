@@ -162,8 +162,11 @@ impl<'a> BlockContextLoader<'a> {
     }
 
     fn fetch_header_from_mdbx(&self, block_number: u64) -> Result<Option<SealedHeader>> {
-        let provider = self.simulator.provider_factory.provider()?;
-        let maybe_header = provider.header_by_number(block_number)?;
+        self.simulator.refresh_static_file_provider()?;
+        let maybe_header = self
+            .simulator
+            .provider_factory
+            .header_by_number(block_number)?;
         Ok(maybe_header.map(SealedHeader::new_unhashed))
     }
 
@@ -195,6 +198,7 @@ impl<'a> BlockContextLoader<'a> {
         for attempt in 1..=STATE_RETRY_MAX_ATTEMPTS {
             let simulator = self.simulator.clone();
             match tokio::task::spawn_blocking(move || {
+                simulator.provider_factory.caught_up_static_file_provider()?;
                 simulator
                     .provider_factory
                     .history_by_block_number(block_number)

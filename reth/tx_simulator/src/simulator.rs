@@ -132,6 +132,12 @@ impl TxSimulator {
         &self.provider_factory
     }
 
+    /// Refresh the read-only static-file view after the live Reth node advances.
+    pub fn refresh_static_file_provider(&self) -> Result<()> {
+        self.provider_factory.caught_up_static_file_provider()?;
+        Ok(())
+    }
+
     /// Ensure the requested block is already persisted in the local database
     pub fn assert_block_available(&self, block_number: u64) -> Result<()> {
         let latest = self.get_latest_block()?;

@@ -61,6 +61,7 @@ impl<'a> BlockTracer<'a> {
         });
         execution::ensure_engine_supports_options(engine, &opts)?;
 
+        self.simulator.refresh_static_file_provider()?;
         let provider = self.simulator.provider_factory.provider()?;
         let block_hash = provider
             .block_hash(block_number)?
@@ -95,6 +96,7 @@ impl<'a> BlockTracer<'a> {
         config: ReplayProfileConfig,
     ) -> Result<ProfiledBlockTrace> {
         let opts = opts.unwrap_or_else(execution::call_tracer_options);
+        self.simulator.refresh_static_file_provider()?;
         let provider = self.simulator.provider_factory.provider()?;
 
         let hash_started = Instant::now();
@@ -120,6 +122,7 @@ impl<'a> BlockTracer<'a> {
         block_number: u64,
         config: ReplayProfileConfig,
     ) -> Result<ProfiledBlockTrace> {
+        self.simulator.refresh_static_file_provider()?;
         let provider = self.simulator.provider_factory.provider()?;
 
         let hash_started = Instant::now();
@@ -186,6 +189,7 @@ impl<'a> BlockTracer<'a> {
         opts: Option<GethDebugTracingOptions>,
     ) -> Result<TraceResult> {
         let opts = opts.unwrap_or_else(execution::call_tracer_options);
+        self.simulator.refresh_static_file_provider()?;
         let provider = self.simulator.provider_factory.provider()?;
         let (_, meta) = provider
             .transaction_by_hash_with_meta(tx_hash)?

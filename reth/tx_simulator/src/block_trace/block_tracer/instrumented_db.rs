@@ -2,8 +2,8 @@ use alloy_primitives::{Address, B256, U256};
 use eyre::Result;
 use reth_provider::StateProviderBox;
 use reth_revm::database::StateProviderDatabase;
-use reth_revm::db::{CacheDB, DbAccount};
-use revm::{bytecode::Bytecode, state::AccountInfo, DatabaseRef};
+use reth_revm::State;
+use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ use crate::block_trace::types::{StateAccessKeys, StateReadProfile, StorageAccess
 
 use super::metrics::ms;
 
-pub(super) type ProfiledCacheDb = CacheDB<InstrumentedStateProviderDatabase>;
+pub(super) type ProfiledCacheDb = State<InstrumentedStateProviderDatabase>;
 
 #[derive(Debug)]
 pub(super) struct InstrumentedStateProviderDatabase {
@@ -133,35 +133,53 @@ impl DatabaseRef for InstrumentedStateProviderDatabase {
     }
 }
 
+impl Database for InstrumentedStateProviderDatabase {
+    type Error = <StateProviderDatabase<StateProviderBox> as Database>::Error;
+
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.basic_ref(address)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.code_by_hash_ref(code_hash)
+    }
+
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.storage_ref(address, index)
+    }
+
+    fn storage_by_account_id(
+        &mut self,
+        address: Address,
+        account_id: usize,
+        storage_key: U256,
+    ) -> Result<U256, Self::Error> {
+        self.storage_by_account_id_ref(address, account_id, storage_key)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.block_hash_ref(number)
+    }
+}
+
 pub(super) fn prewarm_profiled_cache_db(
     db: &mut ProfiledCacheDb,
     keys: &StateAccessKeys,
 ) -> Result<()> {
     for address in &keys.accounts {
-        match db.db.inner.basic_ref(*address)? {
-            Some(info) => db.insert_account_info(*address, info),
-            None => {
-                db.cache
-                    .accounts
-                    .entry(*address)
-                    .or_insert_with(DbAccount::new_not_existing);
-            }
-        }
+        let _ = db.basic(*address)?;
     }
 
     for access in &keys.storage {
-        let value = db.db.inner.storage_ref(access.address, access.key)?;
-        db.insert_account_storage(access.address, access.key, value)?;
+        let _ = db.storage(access.address, access.key)?;
     }
 
     for code_hash in &keys.code_hashes {
-        let bytecode = db.db.inner.code_by_hash_ref(*code_hash)?;
-        db.cache.contracts.insert(*code_hash, bytecode);
+        let _ = db.code_by_hash(*code_hash)?;
     }
 
     for number in &keys.block_hashes {
-        let hash = db.db.inner.block_hash_ref(*number)?;
-        db.cache.block_hashes.insert(U256::from(*number), hash);
+        let _ = db.block_hash(*number)?;
     }
 
     Ok(())

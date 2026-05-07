@@ -5,14 +5,18 @@ use alloy_rpc_types_trace::geth::{
     GethTrace, PreStateConfig, TraceResult,
 };
 use eyre::Result;
+use reth_ethereum_primitives::Block;
 use reth_ethereum_primitives::TransactionSigned;
+use reth_evm::block::BlockExecutor;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::{Recovered, SealedHeader, SignerRecoverable};
+use reth_primitives_traits::{Recovered, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::{BlockReader, StateProviderBox};
 use reth_revm::database::StateProviderDatabase;
-use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
+use reth_revm::State;
+use revm::Database;
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use std::fmt::Debug;
 
 use crate::block_trace::types::ReplayProfileConfig;
 use crate::TxSimulator;
@@ -20,6 +24,8 @@ use crate::TxSimulator;
 use super::engine::is_call_tracer_options;
 use super::engine::BlockTraceEngine;
 use super::BlockTracer;
+
+pub(super) type BlockStateDb = State<StateProviderDatabase<StateProviderBox>>;
 
 impl<'a> BlockTracer<'a> {
     pub(super) fn trace_block_sync_with_engine(
@@ -53,6 +59,7 @@ impl<'a> BlockTracer<'a> {
         block_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>> {
+        simulator.refresh_static_file_provider()?;
         let provider = simulator.provider_factory.provider()?;
 
         let block = provider
@@ -62,11 +69,13 @@ impl<'a> BlockTracer<'a> {
         let transactions = block.body.transactions.clone();
         let parent_hash = block.header.parent_hash;
         let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let sealed_block = SealedBlock::new_unhashed(block.clone());
 
         let state_at_parent = simulator
             .provider_factory
             .history_by_block_hash(parent_hash)?;
-        let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
+        let mut db = state_db_from_provider(state_at_parent);
+        apply_block_pre_execution_changes(simulator, &mut db, &sealed_block)?;
         let mut results = Vec::with_capacity(transactions.len());
         let call_config = call_config_from_options(&opts)?;
 
@@ -101,6 +110,7 @@ impl<'a> BlockTracer<'a> {
         block_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>> {
+        simulator.refresh_static_file_provider()?;
         let provider = simulator.provider_factory.provider()?;
 
         let block = provider
@@ -109,11 +119,13 @@ impl<'a> BlockTracer<'a> {
         let transactions = block.body.transactions.clone();
         let parent_hash = block.header.parent_hash;
         let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let sealed_block = SealedBlock::new_unhashed(block.clone());
 
         let state_at_parent = simulator
             .provider_factory
             .history_by_block_hash(parent_hash)?;
-        let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
+        let mut db = state_db_from_provider(state_at_parent);
+        apply_block_pre_execution_changes(simulator, &mut db, &sealed_block)?;
         let evm_env = simulator
             .evm_config
             .evm_env(&sealed_header)
@@ -164,6 +176,7 @@ impl<'a> BlockTracer<'a> {
         target_tx_hash: B256,
         opts: GethDebugTracingOptions,
     ) -> Result<TraceResult> {
+        simulator.refresh_static_file_provider()?;
         let provider = simulator.provider_factory.provider()?;
 
         let block = provider
@@ -173,11 +186,13 @@ impl<'a> BlockTracer<'a> {
 
         let parent_hash = block.header.parent_hash;
         let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let sealed_block = SealedBlock::new_unhashed(block.clone());
 
         let state_at_parent = simulator
             .provider_factory
             .history_by_block_hash(parent_hash)?;
-        let mut db = CacheDB::new(StateProviderDatabase::new(state_at_parent));
+        let mut db = state_db_from_provider(state_at_parent);
+        apply_block_pre_execution_changes(simulator, &mut db, &sealed_block)?;
 
         for (index, tx) in transactions.iter().enumerate() {
             let tx_hash = *tx.tx_hash();
@@ -220,7 +235,7 @@ impl<'a> BlockTracer<'a> {
         simulator: &TxSimulator,
         tx: &TransactionSigned,
         sender: Address,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        db: &mut BlockStateDb,
         block_header: &SealedHeader,
         opts: &GethDebugTracingOptions,
         call_config: CallConfig,
@@ -304,7 +319,7 @@ impl<'a> BlockTracer<'a> {
         simulator: &TxSimulator,
         tx: &TransactionSigned,
         sender: Address,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        db: &mut BlockStateDb,
         block_header: &SealedHeader,
     ) -> Result<()> {
         let recovered = Recovered::new_unchecked(tx.clone(), sender);
@@ -320,6 +335,29 @@ impl<'a> BlockTracer<'a> {
 
         Ok(())
     }
+}
+
+pub(super) fn state_db_from_provider(state: StateProviderBox) -> BlockStateDb {
+    State::builder()
+        .with_database(StateProviderDatabase::new(state))
+        .build()
+}
+
+pub(super) fn apply_block_pre_execution_changes<DB>(
+    simulator: &TxSimulator,
+    db: &mut State<DB>,
+    block: &SealedBlock<Block>,
+) -> Result<()>
+where
+    DB: Database + Debug,
+{
+    simulator
+        .evm_config
+        .executor_for_block(db, block)
+        .map_err(|err| eyre::eyre!("failed to create block executor: {}", err))?
+        .apply_pre_execution_changes()
+        .map_err(|err| eyre::eyre!("failed to apply block pre-execution changes: {}", err))?;
+    Ok(())
 }
 
 /// Create an inspector based on the tracing options.

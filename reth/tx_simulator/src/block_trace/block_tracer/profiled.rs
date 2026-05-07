@@ -4,11 +4,11 @@ use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions, GethTrace
 use eyre::Result;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives_traits::{Recovered, SealedHeader, SignerRecoverable};
+use reth_primitives_traits::{Recovered, SealedBlock, SealedHeader, SignerRecoverable};
 use reth_provider::BlockReader;
 use reth_revm::database::StateProviderDatabase;
-use reth_revm::db::CacheDB;
 use reth_revm::DatabaseCommit;
+use reth_revm::State;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -20,8 +20,8 @@ use crate::block_trace::types::{
 use crate::TxSimulator;
 
 use super::engine::BlockTraceEngine;
-use super::execution::create_inspector;
 use super::execution::ensure_engine_supports_options;
+use super::execution::{apply_block_pre_execution_changes, create_inspector};
 use super::instrumented_db::{
     prewarm_profiled_cache_db, InstrumentedStateProviderDatabase, ProfiledCacheDb,
 };
@@ -47,6 +47,7 @@ impl<'a> BlockTracer<'a> {
         };
         ensure_engine_supports_options(engine, &opts)?;
 
+        simulator.refresh_static_file_provider()?;
         let provider = simulator.provider_factory.provider()?;
 
         let block_started = Instant::now();
@@ -60,6 +61,7 @@ impl<'a> BlockTracer<'a> {
         let transactions = block.body.transactions.clone();
         profile.tx_count = transactions.len();
         let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let sealed_block = SealedBlock::new_unhashed(block.clone());
         let parent_hash = block.header.parent_hash;
 
         let state_started = Instant::now();
@@ -75,7 +77,8 @@ impl<'a> BlockTracer<'a> {
             state_reads.clone(),
             config.record_keys.then_some(state_keys.clone()),
         );
-        let mut db = CacheDB::new(state_db);
+        let mut db = State::builder().with_database(state_db).build();
+        apply_block_pre_execution_changes(simulator, &mut db, &sealed_block)?;
 
         if let Some(prewarm_keys) = config.prewarm_keys.as_ref() {
             let preload_started = Instant::now();
@@ -142,6 +145,7 @@ impl<'a> BlockTracer<'a> {
             ..Default::default()
         };
 
+        simulator.refresh_static_file_provider()?;
         let provider = simulator.provider_factory.provider()?;
 
         let block_started = Instant::now();
@@ -155,6 +159,7 @@ impl<'a> BlockTracer<'a> {
         let transactions = block.body.transactions.clone();
         profile.tx_count = transactions.len();
         let sealed_header = SealedHeader::new_unhashed(block.header.clone());
+        let sealed_block = SealedBlock::new_unhashed(block.clone());
         let parent_hash = block.header.parent_hash;
 
         let state_started = Instant::now();
@@ -170,7 +175,8 @@ impl<'a> BlockTracer<'a> {
             state_reads.clone(),
             config.record_keys.then_some(state_keys.clone()),
         );
-        let mut db = CacheDB::new(state_db);
+        let mut db = State::builder().with_database(state_db).build();
+        apply_block_pre_execution_changes(simulator, &mut db, &sealed_block)?;
 
         if let Some(prewarm_keys) = config.prewarm_keys.as_ref() {
             let preload_started = Instant::now();
@@ -189,7 +195,7 @@ impl<'a> BlockTracer<'a> {
 
         let replay_started = Instant::now();
         for (index, tx) in recovered.iter().enumerate() {
-            let reads_before = db.db.snapshot_reads();
+            let reads_before = db.database.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -214,7 +220,7 @@ impl<'a> BlockTracer<'a> {
             tx_profile.db_commit_ms = ms(commit_started.elapsed());
             profile.db_commit_ms += tx_profile.db_commit_ms;
 
-            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
+            tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
         profile.exec_after_prewarm_ms = ms(replay_started.elapsed());
@@ -264,7 +270,7 @@ impl<'a> BlockTracer<'a> {
         let mut results = Vec::with_capacity(transactions.len());
 
         for (index, tx) in transactions.iter().enumerate() {
-            let reads_before = db.db.snapshot_reads();
+            let reads_before = db.database.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -318,7 +324,7 @@ impl<'a> BlockTracer<'a> {
                 result: GethTrace::CallTracer(call_frame),
                 tx_hash: Some(tx_profile.tx_hash),
             });
-            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
+            tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
@@ -348,7 +354,7 @@ impl<'a> BlockTracer<'a> {
         let call_config = CallConfig::default();
 
         for (index, tx) in transactions.iter().enumerate() {
-            let reads_before = db.db.snapshot_reads();
+            let reads_before = db.database.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -404,7 +410,7 @@ impl<'a> BlockTracer<'a> {
                 tx_profile.inspector_build_ms += fuse_ms;
                 profile.inspector_build_ms += fuse_ms;
             }
-            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
+            tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
@@ -435,7 +441,7 @@ impl<'a> BlockTracer<'a> {
         let mut results = Vec::with_capacity(transactions.len());
 
         for (index, tx) in transactions.iter().enumerate() {
-            let reads_before = db.db.snapshot_reads();
+            let reads_before = db.database.snapshot_reads();
             let mut tx_profile = TransactionReplayProfile {
                 tx_index: index,
                 tx_hash: *tx.tx_hash(),
@@ -501,7 +507,7 @@ impl<'a> BlockTracer<'a> {
                 tx_profile.inspector_build_ms += fuse_ms;
                 profile.inspector_build_ms += fuse_ms;
             }
-            tx_profile.state_reads = db.db.snapshot_reads().delta_since(&reads_before);
+            tx_profile.state_reads = db.database.snapshot_reads().delta_since(&reads_before);
             profile.tx_profiles.push(tx_profile);
         }
 
