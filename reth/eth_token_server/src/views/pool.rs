@@ -65,6 +65,7 @@ pub struct PoolView {
     pub denom_reserve: f64,
     pub price: f64,
     pub initial_price: Option<f64>,
+    pub raw_price_ratio_to_initial: Option<f64>,
     pub price_ratio_to_initial: Option<f64>,
     pub price_ratio_history: Vec<PriceRatioPoint>,
     pub liquidity_history: Vec<LiquidityPoint>,
@@ -77,6 +78,8 @@ pub struct PoolView {
     pub pooled_token_supply_percent: Option<f64>,
     pub liquidity_to_fdv_ratio: Option<f64>,
     pub liquidity_to_fdv_percent: Option<f64>,
+    pub supply_ratio_status: String,
+    pub supply_ratio_label: Option<String>,
     pub can_buy: bool,
     pub can_sell: bool,
     pub trading_enabled: bool,
@@ -115,13 +118,19 @@ impl PoolView {
             .unwrap_or_else(|| pool.base.identity.denom_address.clone());
         let fully_diluted_value_denom =
             total_supply.and_then(|supply| pool.base.fully_diluted_value_denom(supply));
-        let pooled_token_supply_ratio =
-            total_supply.and_then(|supply| pool.base.pooled_token_supply_ratio(supply));
-        let liquidity_to_fdv_ratio =
-            total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply));
-        let price_ratio_history = price_ratio_history(&pool.base.price_history);
         let liquidity_history = liquidity_history(pool);
         let liquidity_level = pool_liquidity_level(pool.base.state.total_liquidity, &currency);
+        let raw_price_ratio_to_initial = pool.base.price_ratio_to_initial();
+        let price_ratio_to_initial =
+            display_price_ratio(raw_price_ratio_to_initial, liquidity_level);
+        let price_ratio_history =
+            display_price_ratio_history(&pool.base.price_history, liquidity_level);
+        let raw_pooled_token_supply_ratio =
+            total_supply.and_then(|supply| pool.base.pooled_token_supply_ratio(supply));
+        let supply_ratio = display_supply_ratio(raw_pooled_token_supply_ratio);
+        let liquidity_to_fdv_ratio = supply_ratio
+            .pooled_token_supply_ratio
+            .and_then(|_| total_supply.and_then(|supply| pool.base.liquidity_to_fdv_ratio(supply)));
         let risk = pool_risk(pool);
         Self {
             token_address: token.contract_address.clone(),
@@ -135,7 +144,8 @@ impl PoolView {
             denom_reserve: pool.base.denom_reserve(),
             price: pool.base.price(),
             initial_price: pool.base.initial_price(),
-            price_ratio_to_initial: pool.base.price_ratio_to_initial(),
+            raw_price_ratio_to_initial,
+            price_ratio_to_initial,
             price_ratio_history,
             liquidity_history,
             total_liquidity: pool.base.state.total_liquidity,
@@ -143,15 +153,17 @@ impl PoolView {
             liquidity_label: liquidity_level_label(liquidity_level).to_string(),
             token_total_supply_scaled: total_supply,
             fully_diluted_value_denom,
-            pooled_token_supply_ratio,
-            pooled_token_supply_percent: ratio_percent(pooled_token_supply_ratio),
+            pooled_token_supply_ratio: supply_ratio.pooled_token_supply_ratio,
+            pooled_token_supply_percent: ratio_percent(supply_ratio.pooled_token_supply_ratio),
             liquidity_to_fdv_ratio,
             liquidity_to_fdv_percent: ratio_percent(liquidity_to_fdv_ratio),
+            supply_ratio_status: supply_ratio.status.to_string(),
+            supply_ratio_label: supply_ratio.label,
             can_buy: pool.base.state.can_buy,
             can_sell: pool.base.state.can_sell,
             trading_enabled: pool.base.trading_enabled(),
-            buy_tax: pool.base.buy_tax,
-            sell_tax: pool.base.sell_tax,
+            buy_tax: display_tax(pool.base.buy_tax),
+            sell_tax: display_tax(pool.base.sell_tax),
             is_scam: risk.level != PoolRiskLevel::Clear,
             scam_label: risk.label.clone(),
             risk_level: risk.level,
@@ -180,6 +192,14 @@ const DUST_WETH_LIQUIDITY: f64 = 0.01;
 const DRAINED_WETH_LIQUIDITY: f64 = 0.000001;
 const DUST_STABLE_LIQUIDITY: f64 = 10.0;
 const DRAINED_STABLE_LIQUIDITY: f64 = 0.01;
+const MAX_VALID_SUPPLY_RATIO: f64 = 1.000001;
+
+#[derive(Clone, Debug)]
+struct DisplaySupplyRatio {
+    pooled_token_supply_ratio: Option<f64>,
+    status: &'static str,
+    label: Option<String>,
+}
 
 fn pool_risk(pool: &UniswapV2Pool) -> PoolRiskView {
     if pool.base.is_scam() {
@@ -217,6 +237,51 @@ fn tax_above_threshold(value: Option<f64>) -> bool {
     value
         .filter(|value| value.is_finite())
         .is_some_and(|value| value >= HIGH_TAX_PERCENT)
+}
+
+fn display_tax(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite() && *value >= 0.0)
+}
+
+fn display_price_ratio(value: Option<f64>, liquidity_level: PoolLiquidityLevel) -> Option<f64> {
+    if liquidity_level != PoolLiquidityLevel::Liquid {
+        return None;
+    }
+    value.filter(|value| value.is_finite() && *value > 0.0)
+}
+
+fn display_price_ratio_history(
+    history: &[(u64, f64)],
+    liquidity_level: PoolLiquidityLevel,
+) -> Vec<PriceRatioPoint> {
+    if liquidity_level != PoolLiquidityLevel::Liquid {
+        return Vec::new();
+    }
+    price_ratio_history(history)
+}
+
+fn display_supply_ratio(value: Option<f64>) -> DisplaySupplyRatio {
+    let Some(value) = value.filter(|value| value.is_finite() && *value >= 0.0) else {
+        return DisplaySupplyRatio {
+            pooled_token_supply_ratio: None,
+            status: "unknown",
+            label: None,
+        };
+    };
+
+    if value > MAX_VALID_SUPPLY_RATIO {
+        return DisplaySupplyRatio {
+            pooled_token_supply_ratio: None,
+            status: "inconsistent",
+            label: Some("pool_reserve_exceeds_total_supply".to_string()),
+        };
+    }
+
+    DisplaySupplyRatio {
+        pooled_token_supply_ratio: Some(value),
+        status: "ok",
+        label: None,
+    }
 }
 
 fn pool_liquidity_level(liquidity: f64, currency: &str) -> PoolLiquidityLevel {
@@ -345,5 +410,39 @@ pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
         run_id: run.id.clone(),
         count: pools.len(),
         pools,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_tax_hides_failed_simulation_sentinel() {
+        assert_eq!(display_tax(Some(-1.0)), None);
+        assert_eq!(display_tax(Some(2.99)), Some(2.99));
+    }
+
+    #[test]
+    fn display_price_ratio_requires_liquid_pool() {
+        assert_eq!(
+            display_price_ratio(Some(1000.0), PoolLiquidityLevel::Dust),
+            None
+        );
+        assert_eq!(
+            display_price_ratio(Some(10.0), PoolLiquidityLevel::Liquid),
+            Some(10.0)
+        );
+    }
+
+    #[test]
+    fn display_supply_ratio_rejects_reserve_above_total_supply() {
+        let ratio = display_supply_ratio(Some(10_000.0));
+        assert_eq!(ratio.pooled_token_supply_ratio, None);
+        assert_eq!(ratio.status, "inconsistent");
+        assert_eq!(
+            ratio.label,
+            Some("pool_reserve_exceeds_total_supply".to_string())
+        );
     }
 }
