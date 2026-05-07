@@ -2,7 +2,7 @@ use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::manager::TrackedTokenStatus;
 use serde::Serialize;
 
-use crate::historical::TrackingRun;
+use crate::range_indexer::{RangeIndexJob, RangeIndexState};
 use crate::views::pool::PoolView;
 
 #[derive(Clone, Debug, Serialize)]
@@ -72,7 +72,7 @@ impl TokenView {
     }
 }
 
-pub async fn token_list(run: &TrackingRun) -> TokenListResponse {
+pub async fn token_list(run: &RangeIndexJob) -> TokenListResponse {
     let state = run.state.read().await;
     let mut tokens = Vec::with_capacity(state.processor.registry.tokens.len());
 
@@ -95,7 +95,7 @@ pub async fn token_list(run: &TrackingRun) -> TokenListResponse {
     }
 }
 
-pub async fn token_detail(run: &TrackingRun, token_address: &str) -> Option<TokenDetailResponse> {
+pub async fn token_detail(run: &RangeIndexJob, token_address: &str) -> Option<TokenDetailResponse> {
     let state = run.state.read().await;
     let address = normalize_address(token_address);
     let token = state.processor.registry.tokens.get(&address)?;
@@ -116,10 +116,7 @@ pub async fn token_detail(run: &TrackingRun, token_address: &str) -> Option<Toke
     })
 }
 
-fn index_status(
-    state: &crate::historical::TrackingRunState,
-    token_address: &str,
-) -> Option<TrackedTokenStatus> {
+fn index_status(state: &RangeIndexState, token_address: &str) -> Option<TrackedTokenStatus> {
     state
         .processor
         .token_index

@@ -2,7 +2,7 @@ use serde::Serialize;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RunStatus {
+pub enum RangeIndexStatus {
     Queued,
     Running,
     Completed,
@@ -11,16 +11,16 @@ pub enum RunStatus {
     Failed,
 }
 
-impl RunStatus {
+impl RangeIndexStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Completed | Self::Stopped | Self::Failed)
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct RunProgress {
+pub struct RangeIndexProgress {
     pub id: String,
-    pub status: RunStatus,
+    pub status: RangeIndexStatus,
     pub start_block: u64,
     pub end_block: u64,
     pub total_blocks: u64,
@@ -51,7 +51,7 @@ pub struct RunProgress {
     pub last_error: Option<String>,
 }
 
-impl RunProgress {
+impl RangeIndexProgress {
     pub fn new(
         id: impl Into<String>,
         start_block: u64,
@@ -60,7 +60,7 @@ impl RunProgress {
     ) -> Self {
         Self {
             id: id.into(),
-            status: RunStatus::Queued,
+            status: RangeIndexStatus::Queued,
             start_block,
             end_block,
             total_blocks: end_block - start_block + 1,

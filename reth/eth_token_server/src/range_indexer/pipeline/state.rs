@@ -1,12 +1,12 @@
 use eth_token::manager::{BlockTokenProcessor, TokenBlockUpdateReport};
 
-use crate::historical::progress::{now_unix_secs, RunStatus};
-use crate::historical::{RunError, TrackingRun, TrackingRunState};
+use crate::range_indexer::progress::{now_unix_secs, RangeIndexStatus};
+use crate::range_indexer::{RangeIndexError, RangeIndexJob, RangeIndexState};
 
 use super::cache::ProcessedBlockCacheMetrics;
 
 pub(super) async fn take_processor_for_apply(
-    run: &TrackingRun,
+    run: &RangeIndexJob,
     block_number: u64,
 ) -> BlockTokenProcessor {
     let mut state = run.state.write().await;
@@ -19,7 +19,7 @@ pub(super) async fn take_processor_for_apply(
 }
 
 pub(super) async fn restore_processor_after_apply(
-    run: &TrackingRun,
+    run: &RangeIndexJob,
     processor: BlockTokenProcessor,
 ) {
     let mut state = run.state.write().await;
@@ -27,31 +27,31 @@ pub(super) async fn restore_processor_after_apply(
     state.progress.updated_at_unix_secs = now_unix_secs();
 }
 
-pub(super) async fn mark_running(run: &TrackingRun) {
+pub(super) async fn mark_running(run: &RangeIndexJob) {
     let mut state = run.state.write().await;
-    state.progress.status = RunStatus::Running;
+    state.progress.status = RangeIndexStatus::Running;
     state.progress.updated_at_unix_secs = now_unix_secs();
 }
 
-pub(super) async fn mark_completed(run: &TrackingRun) {
+pub(super) async fn mark_completed(run: &RangeIndexJob) {
     let mut state = run.state.write().await;
-    state.progress.status = RunStatus::Completed;
+    state.progress.status = RangeIndexStatus::Completed;
     state.progress.completed_at_unix_secs = Some(now_unix_secs());
     state.progress.updated_at_unix_secs = now_unix_secs();
     tracing::info!(run_id = %run.id, "completed token tracking run");
 }
 
-pub(super) async fn mark_stopped(run: &TrackingRun) {
+pub(super) async fn mark_stopped(run: &RangeIndexJob) {
     let mut state = run.state.write().await;
-    state.progress.status = RunStatus::Stopped;
+    state.progress.status = RangeIndexStatus::Stopped;
     state.progress.completed_at_unix_secs = Some(now_unix_secs());
     state.progress.updated_at_unix_secs = now_unix_secs();
     tracing::info!(run_id = %run.id, "stopped token tracking run");
 }
 
-pub(super) async fn mark_failed(run: &TrackingRun, error: RunError) {
+pub(super) async fn mark_failed(run: &RangeIndexJob, error: RangeIndexError) {
     let mut state = run.state.write().await;
-    state.progress.status = RunStatus::Failed;
+    state.progress.status = RangeIndexStatus::Failed;
     state.progress.last_error = Some(error.message.clone());
     state.progress.completed_at_unix_secs = Some(now_unix_secs());
     state.progress.updated_at_unix_secs = now_unix_secs();
@@ -60,7 +60,7 @@ pub(super) async fn mark_failed(run: &TrackingRun, error: RunError) {
 }
 
 pub(super) fn apply_report(
-    state: &mut TrackingRunState,
+    state: &mut RangeIndexState,
     report: TokenBlockUpdateReport,
     upstream_ms: u128,
     token_apply_ms: u128,
@@ -97,7 +97,7 @@ pub(super) fn apply_report(
     }
 
     for error in report.transaction_errors {
-        state.errors.push(RunError {
+        state.errors.push(RangeIndexError {
             block_number: Some(report.block_number),
             tx_index: Some(error.tx_index),
             tx_hash: Some(error.tx_hash),

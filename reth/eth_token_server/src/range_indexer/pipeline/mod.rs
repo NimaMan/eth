@@ -8,11 +8,11 @@ use eth_token::manager::RethChainDiscoveryProvider;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
-use crate::historical::{RunError, TrackingRun};
 use crate::processed_block_cache::TokenProcessedBlockCacheStore;
+use crate::range_indexer::{RangeIndexError, RangeIndexJob};
 
-pub async fn run_range(
-    run: Arc<TrackingRun>,
+pub async fn run_range_index(
+    run: Arc<RangeIndexJob>,
     provider: Arc<RethQueryProvider>,
     processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
     processed_block_cache_blocks: u64,
@@ -53,7 +53,7 @@ pub async fn run_range(
         if let Err(error) = provider.refresh_static_file_provider() {
             state::mark_failed(
                 &run,
-                RunError {
+                RangeIndexError {
                     block_number: Some(next_block),
                     tx_index: None,
                     tx_hash: None,
@@ -77,7 +77,7 @@ pub async fn run_range(
             Err(error) => {
                 state::mark_failed(
                     &run,
-                    RunError {
+                    RangeIndexError {
                         block_number: Some(next_block),
                         tx_index: None,
                         tx_hash: None,

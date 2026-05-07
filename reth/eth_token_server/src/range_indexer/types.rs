@@ -5,10 +5,10 @@ use eth_token::manager::BlockTokenProcessor;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::progress::{now_unix_secs, RunProgress, RunStatus};
+use super::progress::{now_unix_secs, RangeIndexProgress, RangeIndexStatus};
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct StartRunRequest {
+pub struct StartRangeIndexRequest {
     #[serde(default)]
     pub start_block: Option<u64>,
     #[serde(default)]
@@ -20,20 +20,20 @@ pub struct StartRunRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct ResolvedRunRequest {
+pub struct ResolvedRangeIndexRequest {
     pub start_block: u64,
     pub end_block: u64,
     pub history_limit: usize,
 }
 
-impl ResolvedRunRequest {
+impl ResolvedRangeIndexRequest {
     pub fn block_count(&self) -> u64 {
         self.end_block - self.start_block + 1
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct RunError {
+pub struct RangeIndexError {
     pub block_number: Option<u64>,
     pub tx_index: Option<u64>,
     pub tx_hash: Option<String>,
@@ -41,10 +41,10 @@ pub struct RunError {
 }
 
 #[derive(Debug)]
-pub struct TrackingRunState {
+pub struct RangeIndexState {
     pub processor: BlockTokenProcessor,
-    pub progress: RunProgress,
-    pub errors: Vec<RunError>,
+    pub progress: RangeIndexProgress,
+    pub errors: Vec<RangeIndexError>,
     pub created_tokens: BTreeSet<String>,
     pub updated_tokens: BTreeSet<String>,
     pub discovered_v2_pools: BTreeSet<String>,
@@ -52,24 +52,25 @@ pub struct TrackingRunState {
 }
 
 #[derive(Debug)]
-pub struct TrackingRun {
+pub struct RangeIndexJob {
     pub id: String,
-    pub request: ResolvedRunRequest,
-    pub state: RwLock<TrackingRunState>,
+    pub request: ResolvedRangeIndexRequest,
+    pub state: RwLock<RangeIndexState>,
     stop_requested: AtomicBool,
 }
 
-impl TrackingRun {
-    pub fn new(id: impl Into<String>, request: ResolvedRunRequest) -> Self {
+impl RangeIndexJob {
+    pub fn new(id: impl Into<String>, request: ResolvedRangeIndexRequest) -> Self {
         let id = id.into();
         let now = now_unix_secs();
         let processor = BlockTokenProcessor::new(request.history_limit);
-        let progress = RunProgress::new(id.clone(), request.start_block, request.end_block, now);
+        let progress =
+            RangeIndexProgress::new(id.clone(), request.start_block, request.end_block, now);
 
         Self {
             id,
             request,
-            state: RwLock::new(TrackingRunState {
+            state: RwLock::new(RangeIndexState {
                 processor,
                 progress,
                 errors: Vec::new(),
@@ -90,14 +91,14 @@ impl TrackingRun {
         self.stop_requested.load(Ordering::SeqCst)
     }
 
-    pub async fn progress(&self) -> RunProgress {
+    pub async fn progress(&self) -> RangeIndexProgress {
         self.state.read().await.progress.clone()
     }
 
     pub async fn mark_stopping(&self) {
         let mut state = self.state.write().await;
         if !state.progress.status.is_terminal() {
-            state.progress.status = RunStatus::Stopping;
+            state.progress.status = RangeIndexStatus::Stopping;
             state.progress.updated_at_unix_secs = now_unix_secs();
         }
     }

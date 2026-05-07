@@ -7,7 +7,7 @@ use futures_util::FutureExt;
 use tokio::time::{timeout, Duration};
 use tx_processor::PoolBuySellSimulator;
 
-use crate::historical::{RunError, TrackingRun};
+use crate::range_indexer::{RangeIndexError, RangeIndexJob};
 
 use super::cache::ProcessedBlockWithMetrics;
 use super::state;
@@ -15,7 +15,7 @@ use super::state;
 const TOKEN_APPLY_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub(super) async fn apply_processed_block(
-    run: &Arc<TrackingRun>,
+    run: &Arc<RangeIndexJob>,
     processed: ProcessedBlockWithMetrics,
     discovery_provider: &RethChainDiscoveryProvider<'_>,
     pool_simulator: &PoolBuySellSimulator,
@@ -39,7 +39,7 @@ pub(super) async fn apply_processed_block(
             state::restore_processor_after_apply(run, processor).await;
             state::mark_failed(
                 run,
-                RunError {
+                RangeIndexError {
                     block_number: Some(block_number),
                     tx_index: None,
                     tx_hash: None,
@@ -56,7 +56,7 @@ pub(super) async fn apply_processed_block(
             state::restore_processor_after_apply(run, processor).await;
             state::mark_failed(
                 run,
-                RunError {
+                RangeIndexError {
                     block_number: Some(block_number),
                     tx_index: None,
                     tx_hash: None,

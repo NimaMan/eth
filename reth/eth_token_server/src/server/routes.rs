@@ -6,8 +6,8 @@ use warp::http::StatusCode;
 use warp::{Filter, Reply};
 
 use crate::error::ApiError;
-use crate::historical::StartRunRequest;
 use crate::live::StartLiveTrackerRequest;
+use crate::range_indexer::StartRangeIndexRequest;
 use crate::server::sse;
 use crate::server::ServerState;
 use crate::views;
@@ -211,7 +211,7 @@ async fn live_retention(state: ServerState) -> Result<warp::reply::Response, Inf
 }
 
 async fn list_runs(state: ServerState) -> Result<warp::reply::Response, Infallible> {
-    let runs = state.runs.list_runs().await;
+    let runs = state.range_indexer.list_runs().await;
     Ok(json_response(
         &views::run::RunListResponse { runs },
         StatusCode::OK,
@@ -219,10 +219,10 @@ async fn list_runs(state: ServerState) -> Result<warp::reply::Response, Infallib
 }
 
 async fn start_run(
-    request: StartRunRequest,
+    request: StartRangeIndexRequest,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.start_run(request).await {
+    match state.range_indexer.start_run(request).await {
         Ok(run) => {
             let progress = views::run::progress(&run).await;
             Ok(json_response(&progress, StatusCode::CREATED))
@@ -252,7 +252,7 @@ async fn run_progress(
     run_id: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::run::progress(&run).await,
             StatusCode::OK,
@@ -265,7 +265,7 @@ async fn run_tokens(
     run_id: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::token::token_list(&run).await,
             StatusCode::OK,
@@ -279,7 +279,7 @@ async fn run_token_detail(
     token_address: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => match views::token::token_detail(&run, &token_address).await {
             Some(detail) => Ok(json_response(&detail, StatusCode::OK)),
             None => Ok(error_response("token not found", StatusCode::NOT_FOUND)),
@@ -292,7 +292,7 @@ async fn run_pools(
     run_id: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::pool::pool_list(&run).await,
             StatusCode::OK,
@@ -305,7 +305,7 @@ async fn run_errors(
     run_id: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::error::error_list(&run).await,
             StatusCode::OK,
@@ -318,7 +318,7 @@ async fn run_stream(
     run_id: String,
     state: ServerState,
 ) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.get_run(&run_id).await {
+    match state.range_indexer.get_run(&run_id).await {
         Some(run) => Ok(warp::sse::reply(
             warp::sse::keep_alive().stream(sse::progress_stream(run)),
         )
@@ -328,7 +328,7 @@ async fn run_stream(
 }
 
 async fn stop_run(run_id: String, state: ServerState) -> Result<warp::reply::Response, Infallible> {
-    match state.runs.stop_run(&run_id).await {
+    match state.range_indexer.stop_run(&run_id).await {
         Some(run) => Ok(json_response(
             &views::run::progress(&run).await,
             StatusCode::OK,

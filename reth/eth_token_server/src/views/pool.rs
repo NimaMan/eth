@@ -2,7 +2,7 @@ use eth_token::pools::{LPHolderSnapshot, PoolRuntimeState, TradingStatus, Uniswa
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::historical::TrackingRun;
+use crate::range_indexer::RangeIndexJob;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolListResponse {
@@ -87,7 +87,7 @@ impl PoolView {
     }
 }
 
-pub async fn pool_list(run: &TrackingRun) -> PoolListResponse {
+pub async fn pool_list(run: &RangeIndexJob) -> PoolListResponse {
     let state = run.state.read().await;
     let mut pools = Vec::new();
 

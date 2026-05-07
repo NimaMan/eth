@@ -1,9 +1,9 @@
 use serde::Serialize;
 
-use crate::historical::progress::now_unix_secs;
 use crate::processed_block_cache::{
     TokenProcessedBlockCacheCoverage, TokenProcessedBlockCacheStore,
 };
+use crate::range_indexer::progress::now_unix_secs;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CacheCoverageResponse {

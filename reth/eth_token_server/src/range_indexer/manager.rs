@@ -10,30 +10,30 @@ use crate::config::TokenServerConfig;
 use crate::processed_block_cache::TokenProcessedBlockCacheStore;
 use crate::views::run::RunSummaryView;
 
-use super::range;
-use super::{ResolvedRunRequest, StartRunRequest, TrackingRun};
+use super::pipeline;
+use super::{RangeIndexJob, ResolvedRangeIndexRequest, StartRangeIndexRequest};
 
 #[derive(Clone)]
-pub struct RunManager {
-    inner: Arc<RunManagerInner>,
+pub struct RangeIndexManager {
+    inner: Arc<RangeIndexManagerInner>,
 }
 
-struct RunManagerInner {
+struct RangeIndexManagerInner {
     config: TokenServerConfig,
     provider: Arc<RethQueryProvider>,
     processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
-    runs: RwLock<HashMap<String, Arc<TrackingRun>>>,
+    runs: RwLock<HashMap<String, Arc<RangeIndexJob>>>,
     next_id: AtomicU64,
 }
 
-impl RunManager {
+impl RangeIndexManager {
     pub fn new(
         config: TokenServerConfig,
         provider: Arc<RethQueryProvider>,
         processed_block_cache: Option<Arc<TokenProcessedBlockCacheStore>>,
     ) -> Self {
         Self {
-            inner: Arc::new(RunManagerInner {
+            inner: Arc::new(RangeIndexManagerInner {
                 config,
                 provider,
                 processed_block_cache,
@@ -43,12 +43,12 @@ impl RunManager {
         }
     }
 
-    pub async fn start_run(&self, request: StartRunRequest) -> Result<Arc<TrackingRun>> {
+    pub async fn start_run(&self, request: StartRangeIndexRequest) -> Result<Arc<RangeIndexJob>> {
         let request = self.resolve_request(request)?;
         self.inner.provider.refresh_static_file_provider()?;
         let sequence = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         let id = format!("run-{sequence}");
-        let run = Arc::new(TrackingRun::new(id.clone(), request));
+        let run = Arc::new(RangeIndexJob::new(id.clone(), request));
 
         self.inner.runs.write().await.insert(id, run.clone());
 
@@ -62,7 +62,7 @@ impl RunManager {
                 .enable_all()
                 .build()
                 .expect("failed to build token tracking runtime");
-            runtime.block_on(range::run_range(
+            runtime.block_on(pipeline::run_range_index(
                 task_run,
                 task_provider,
                 task_processed_block_cache,
@@ -73,7 +73,7 @@ impl RunManager {
         Ok(run)
     }
 
-    pub async fn get_run(&self, id: &str) -> Option<Arc<TrackingRun>> {
+    pub async fn get_run(&self, id: &str) -> Option<Arc<RangeIndexJob>> {
         self.inner.runs.read().await.get(id).cloned()
     }
 
@@ -87,14 +87,17 @@ impl RunManager {
         summaries
     }
 
-    pub async fn stop_run(&self, id: &str) -> Option<Arc<TrackingRun>> {
+    pub async fn stop_run(&self, id: &str) -> Option<Arc<RangeIndexJob>> {
         let run = self.get_run(id).await?;
         run.request_stop();
         run.mark_stopping().await;
         Some(run)
     }
 
-    fn resolve_request(&self, request: StartRunRequest) -> Result<ResolvedRunRequest> {
+    fn resolve_request(
+        &self,
+        request: StartRangeIndexRequest,
+    ) -> Result<ResolvedRangeIndexRequest> {
         let history_limit = request
             .history_limit
             .unwrap_or(self.inner.config.history_limit);
@@ -132,7 +135,7 @@ impl RunManager {
             bail!("end_block must be greater than or equal to start_block");
         }
 
-        let resolved = ResolvedRunRequest {
+        let resolved = ResolvedRangeIndexRequest {
             start_block,
             end_block,
             history_limit,

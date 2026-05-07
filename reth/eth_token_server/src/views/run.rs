@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::historical::{RunProgress, RunStatus, TrackingRun};
+use crate::range_indexer::{RangeIndexJob, RangeIndexProgress, RangeIndexStatus};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RunListResponse {
@@ -12,7 +12,7 @@ pub struct RunListResponse {
 #[derive(Clone, Debug, Serialize)]
 pub struct RunSummaryView {
     pub id: String,
-    pub status: RunStatus,
+    pub status: RangeIndexStatus,
     pub start_block: u64,
     pub end_block: u64,
     pub total_blocks: u64,
@@ -26,7 +26,7 @@ pub struct RunSummaryView {
 }
 
 impl RunSummaryView {
-    pub async fn from_run(run: &Arc<TrackingRun>) -> Self {
+    pub async fn from_run(run: &Arc<RangeIndexJob>) -> Self {
         let progress = run.progress().await;
         Self {
             id: progress.id,
@@ -45,6 +45,6 @@ impl RunSummaryView {
     }
 }
 
-pub async fn progress(run: &TrackingRun) -> RunProgress {
+pub async fn progress(run: &RangeIndexJob) -> RangeIndexProgress {
     run.progress().await
 }

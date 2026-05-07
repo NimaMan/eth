@@ -6,11 +6,11 @@ use futures_util::stream;
 use futures_util::Stream;
 use warp::sse::Event;
 
-use crate::historical::TrackingRun;
+use crate::range_indexer::RangeIndexJob;
 use crate::views;
 
 pub fn progress_stream(
-    run: Arc<TrackingRun>,
+    run: Arc<RangeIndexJob>,
 ) -> impl Stream<Item = Result<Event, Infallible>> + Send + 'static {
     stream::unfold(run, |run| async move {
         tokio::time::sleep(Duration::from_secs(1)).await;
