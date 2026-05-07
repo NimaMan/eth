@@ -141,14 +141,6 @@ impl RangeIndexManager {
             history_limit,
         };
 
-        if resolved.block_count() > self.inner.config.max_blocks {
-            bail!(
-                "range has {} blocks, max allowed is {}",
-                resolved.block_count(),
-                self.inner.config.max_blocks
-            );
-        }
-
         Ok(resolved)
     }
 }

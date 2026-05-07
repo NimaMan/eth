@@ -143,7 +143,6 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "bind": state.config.bind.to_string(),
             "reth_datadir": state.config.reth_datadir,
             "history_limit": state.config.history_limit,
-            "max_blocks": state.config.max_blocks,
             "default_blocks": state.config.default_blocks,
             "processed_block_cache_dir": state.config.processed_block_cache_dir,
             "processed_block_cache_blocks": state.config.processed_block_cache_blocks,

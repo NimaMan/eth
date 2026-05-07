@@ -8,7 +8,6 @@ const DEFAULT_RETH_DATADIR: &str = "/home/nima/storage/samsung8tb/ethereum/reth"
 const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
-const DEFAULT_MAX_BLOCKS: u64 = 10_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS: u64 = 100_000;
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
@@ -23,7 +22,6 @@ pub struct TokenServerConfig {
     pub bind: SocketAddr,
     pub reth_datadir: PathBuf,
     pub history_limit: usize,
-    pub max_blocks: u64,
     pub default_blocks: u64,
     pub processed_block_cache_dir: Option<PathBuf>,
     pub processed_block_cache_blocks: u64,
@@ -40,7 +38,6 @@ impl TokenServerConfig {
         let bind = env_string("ETH_TOKEN_SERVER_BIND", DEFAULT_BIND).parse()?;
         let reth_datadir = PathBuf::from(env_string("RETH_DATADIR", DEFAULT_RETH_DATADIR));
         let history_limit = env_parse("ETH_TOKEN_SERVER_HISTORY_LIMIT", DEFAULT_HISTORY_LIMIT)?;
-        let max_blocks = env_parse("ETH_TOKEN_SERVER_MAX_BLOCKS", DEFAULT_MAX_BLOCKS)?;
         let default_blocks = env_parse("ETH_TOKEN_SERVER_DEFAULT_BLOCKS", DEFAULT_BLOCKS)?;
         let processed_block_cache_dir =
             env_optional_path("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR")
@@ -72,11 +69,6 @@ impl TokenServerConfig {
         if history_limit == 0 {
             return Err(eyre!(
                 "ETH_TOKEN_SERVER_HISTORY_LIMIT must be greater than zero"
-            ));
-        }
-        if max_blocks == 0 {
-            return Err(eyre!(
-                "ETH_TOKEN_SERVER_MAX_BLOCKS must be greater than zero"
             ));
         }
         if default_blocks == 0 {
@@ -112,7 +104,6 @@ impl TokenServerConfig {
             bind,
             reth_datadir,
             history_limit,
-            max_blocks,
             default_blocks,
             processed_block_cache_dir,
             processed_block_cache_blocks,

@@ -20,5 +20,6 @@ zstd = "0.13"
 
 futures-util = "0.3"
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 warp = "0.3"

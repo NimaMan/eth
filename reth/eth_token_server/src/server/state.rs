@@ -28,6 +28,12 @@ impl ServerState {
             Some(path) => Some(Arc::new(TokenProcessedBlockCacheStore::open(path)?)),
             None => None,
         };
+        let live_processed_block_cache = match config.processed_block_cache_dir.as_ref() {
+            Some(path) => Some(Arc::new(tx_processor::TokenProcessedBlockCacheStore::open(
+                path,
+            )?)),
+            None => None,
+        };
         let range_indexer = RangeIndexManager::new(
             config.clone(),
             provider.clone(),
@@ -36,7 +42,7 @@ impl ServerState {
         let live_tracker = LiveTracker::new(
             live_runtime_config(&config),
             provider,
-            processed_block_cache.clone(),
+            live_processed_block_cache,
         );
 
         Ok(Self {
@@ -51,7 +57,6 @@ impl ServerState {
 fn live_runtime_config(config: &TokenServerConfig) -> LiveTokenRuntimeConfig {
     LiveTokenRuntimeConfig {
         history_limit: config.history_limit,
-        max_blocks: config.max_blocks,
         default_warmup_blocks: config.default_blocks,
         redis_url: config.redis_url.clone(),
         live_block_stream: config.live_block_stream.clone(),

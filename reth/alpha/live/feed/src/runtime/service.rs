@@ -212,15 +212,6 @@ impl LiveTokenRuntime {
             bail!("end_block must be greater than or equal to start_block");
         }
 
-        let block_count = end_block - start_block + 1;
-        if block_count > self.inner.config.max_blocks {
-            bail!(
-                "live warmup has {} blocks, max allowed is {}",
-                block_count,
-                self.inner.config.max_blocks
-            );
-        }
-
         let sequence = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
         Ok(ResolvedLiveTokenRuntimeRequest {
             id: format!("live-{sequence}"),
