@@ -11,6 +11,7 @@ pub struct LiveTokenRuntimeConfig {
     pub cache_retry_delay_ms: u64,
     pub stream_block_ms: usize,
     pub stream_count: usize,
+    pub block_apply_timeout_ms: u64,
 }
 
 impl Default for LiveTokenRuntimeConfig {
@@ -24,6 +25,7 @@ impl Default for LiveTokenRuntimeConfig {
             cache_retry_delay_ms: 100,
             stream_block_ms: 5_000,
             stream_count: 100,
+            block_apply_timeout_ms: 30_000,
         }
     }
 }

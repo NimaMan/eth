@@ -66,6 +66,11 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .and(with_state(state.clone()))
         .and_then(live_tokens);
 
+    let live_pools = warp::path!("live" / "pools")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(live_pools);
+
     let live_token_detail = warp::path!("live" / "tokens" / String)
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -120,6 +125,7 @@ fn api(state: ServerState) -> impl Filter<Extract = impl Reply, Error = warp::Re
         .or(live_stop)
         .or(live_token_detail)
         .or(live_tokens)
+        .or(live_pools)
         .or(live_retention)
         .or(token_detail)
         .or(tokens)
@@ -144,6 +150,7 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "reth_datadir": state.config.reth_datadir,
             "history_limit": state.config.history_limit,
             "default_blocks": state.config.default_blocks,
+            "live_warmup_blocks": state.config.live_warmup_blocks,
             "processed_block_cache_dir": state.config.processed_block_cache_dir,
             "processed_block_cache_blocks": state.config.processed_block_cache_blocks,
             "redis_url": state.config.redis_url,
@@ -152,6 +159,7 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "live_cache_retry_delay_ms": state.config.live_cache_retry_delay_ms,
             "live_stream_block_ms": state.config.live_stream_block_ms,
             "live_stream_count": state.config.live_stream_count,
+            "live_block_apply_timeout_ms": state.config.live_block_apply_timeout_ms,
         }),
         StatusCode::OK,
     ))
@@ -188,6 +196,13 @@ async fn live_stop(state: ServerState) -> Result<warp::reply::Response, Infallib
 async fn live_tokens(state: ServerState) -> Result<warp::reply::Response, Infallible> {
     Ok(json_response(
         &views::live::token_list(&state.live_tracker).await,
+        StatusCode::OK,
+    ))
+}
+
+async fn live_pools(state: ServerState) -> Result<warp::reply::Response, Infallible> {
+    Ok(json_response(
+        &views::live::pool_list(&state.live_tracker).await,
         StatusCode::OK,
     ))
 }

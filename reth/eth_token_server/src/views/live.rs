@@ -29,6 +29,13 @@ pub struct LiveTokenDetailResponse {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct LivePoolListResponse {
+    pub progress: LiveTrackerProgress,
+    pub count: usize,
+    pub pools: Vec<PoolView>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct LiveRetentionResponse {
     pub progress: LiveTrackerProgress,
     pub policy: Option<LiveTokenRetentionPolicy>,
@@ -89,6 +96,29 @@ pub async fn token_detail(
         index_status,
         pools,
     })
+}
+
+pub async fn pool_list(tracker: &LiveTracker) -> LivePoolListResponse {
+    let state = tracker.state().await;
+    let mut pools = Vec::new();
+
+    for token in state.processor.registry().tokens.values() {
+        for pool in token.v2_pools.values() {
+            pools.push(PoolView::from_pool(token, pool));
+        }
+    }
+
+    pools.sort_by(|left, right| {
+        left.token_address
+            .cmp(&right.token_address)
+            .then(left.pool_address.cmp(&right.pool_address))
+    });
+
+    LivePoolListResponse {
+        progress: state.progress.clone(),
+        count: pools.len(),
+        pools,
+    }
 }
 
 pub async fn retention(tracker: &LiveTracker) -> LiveRetentionResponse {

@@ -58,6 +58,8 @@ confirmed processed-block Redis stream
 
 The current Redis writer stays with the live block processor. The live token runtime consumes its stream and cache output, then keeps canonical token/pool state in-process.
 
+Warmup replays old confirmed blocks with the regular Reth post-block metadata provider. The pending-aware live metadata provider is only for live tail blocks, where same-block token metadata may need the simulator's pending/live overlay.
+
 The naming should stay aligned with `eth_token`: `BlockTokenProcessor` owns one confirmed processed block at a time. `LiveBlockTokenProcessor` is the canonical writer for live token/pool state, and `LiveTokenRuntime` owns scheduling, warmup, Redis stream tailing, and read-only consumers.
 
 ## Lessons From Python

@@ -9,6 +9,7 @@ const DEFAULT_ETH_NODE_ROOT: &str = "/home/nima/storage/samsung8tb/ethereum";
 const DEFAULT_BIND: &str = "127.0.0.1:8765";
 const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
+const DEFAULT_LIVE_WARMUP_BLOCKS: u64 = 7_000;
 const DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS: u64 = 100_000;
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
 const DEFAULT_LIVE_BLOCK_STREAM: &str = "eth/live/blocks";
@@ -16,6 +17,7 @@ const DEFAULT_CACHE_RETRY_ATTEMPTS: usize = 20;
 const DEFAULT_CACHE_RETRY_DELAY_MS: u64 = 100;
 const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
 const DEFAULT_STREAM_COUNT: usize = 100;
+const DEFAULT_BLOCK_APPLY_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Clone, Debug)]
 pub struct TokenServerConfig {
@@ -23,6 +25,7 @@ pub struct TokenServerConfig {
     pub reth_datadir: PathBuf,
     pub history_limit: usize,
     pub default_blocks: u64,
+    pub live_warmup_blocks: u64,
     pub processed_block_cache_dir: Option<PathBuf>,
     pub processed_block_cache_blocks: u64,
     pub redis_url: String,
@@ -31,6 +34,7 @@ pub struct TokenServerConfig {
     pub live_cache_retry_delay_ms: u64,
     pub live_stream_block_ms: usize,
     pub live_stream_count: usize,
+    pub live_block_apply_timeout_ms: u64,
 }
 
 impl TokenServerConfig {
@@ -39,6 +43,10 @@ impl TokenServerConfig {
         let reth_datadir = PathBuf::from(env_string("RETH_DATADIR", DEFAULT_RETH_DATADIR));
         let history_limit = env_parse("ETH_TOKEN_SERVER_HISTORY_LIMIT", DEFAULT_HISTORY_LIMIT)?;
         let default_blocks = env_parse("ETH_TOKEN_SERVER_DEFAULT_BLOCKS", DEFAULT_BLOCKS)?;
+        let live_warmup_blocks = env_parse(
+            "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS",
+            DEFAULT_LIVE_WARMUP_BLOCKS,
+        )?;
         let processed_block_cache_dir =
             env_optional_path("ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR")
                 .or_else(default_processed_block_cache_dir);
@@ -65,6 +73,10 @@ impl TokenServerConfig {
         )?;
         let live_stream_count =
             env_parse("ETH_TOKEN_SERVER_LIVE_STREAM_COUNT", DEFAULT_STREAM_COUNT)?;
+        let live_block_apply_timeout_ms = env_parse(
+            "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS",
+            DEFAULT_BLOCK_APPLY_TIMEOUT_MS,
+        )?;
 
         if history_limit == 0 {
             return Err(eyre!(
@@ -74,6 +86,11 @@ impl TokenServerConfig {
         if default_blocks == 0 {
             return Err(eyre!(
                 "ETH_TOKEN_SERVER_DEFAULT_BLOCKS must be greater than zero"
+            ));
+        }
+        if live_warmup_blocks == 0 {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS must be greater than zero"
             ));
         }
         if processed_block_cache_dir.is_some() && processed_block_cache_blocks == 0 {
@@ -99,12 +116,18 @@ impl TokenServerConfig {
                 "ETH_TOKEN_SERVER_LIVE_STREAM_COUNT must be greater than zero"
             ));
         }
+        if live_block_apply_timeout_ms == 0 {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS must be greater than zero"
+            ));
+        }
 
         Ok(Self {
             bind,
             reth_datadir,
             history_limit,
             default_blocks,
+            live_warmup_blocks,
             processed_block_cache_dir,
             processed_block_cache_blocks,
             redis_url,
@@ -113,6 +136,7 @@ impl TokenServerConfig {
             live_cache_retry_delay_ms,
             live_stream_block_ms,
             live_stream_count,
+            live_block_apply_timeout_ms,
         })
     }
 }

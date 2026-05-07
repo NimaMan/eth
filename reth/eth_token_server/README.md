@@ -22,6 +22,8 @@ Default configuration:
 - `ETH_TOKEN_SERVER_BIND=127.0.0.1:8765`
 - `ETH_TOKEN_SERVER_HISTORY_LIMIT=1000`
 - `ETH_TOKEN_SERVER_DEFAULT_BLOCKS=7000`
+- `ETH_TOKEN_SERVER_LIVE_WARMUP_BLOCKS=7000`
+- `ETH_TOKEN_SERVER_LIVE_BLOCK_APPLY_TIMEOUT_MS=30000`
 - `ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_DIR=$ETH_NODE_ROOT/processed_block_cache`
 - `ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS=100000`
 
@@ -63,6 +65,13 @@ cargo run -p eth_token_server --example processed_block_cache_size -- \
 - `GET /runs/:id/errors`
 - `GET /runs/:id/stream`
 - `POST /runs/:id/stop`
+- `GET /live/status`
+- `POST /live/start`
+- `POST /live/stop`
+- `GET /live/tokens`
+- `GET /live/tokens/:address`
+- `GET /live/pools`
+- `GET /live/retention`
 
 Example:
 
@@ -82,6 +91,7 @@ The inspector should use the view DTOs exposed by this server:
   - `summary`: compact token summary.
   - `pools`: frontend-facing `PoolView` rows for the token's V2 pools.
 - `GET /runs/:id/pools` returns all tracked V2 pools as the same `PoolView` rows.
+- `GET /live/tokens` and `GET /live/pools` return the same token and pool row DTOs for the live tracker.
 
 Prefer the explicit `pools` array for UI rendering. The raw `token.v2_pools`
 shape is internal Rust state and may change faster than the view layer.

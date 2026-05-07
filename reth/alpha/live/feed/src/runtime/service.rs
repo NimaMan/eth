@@ -1,11 +1,13 @@
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use eth_live_state::keys;
-use eth_token::chain_metadata::LiveRethChainMetadataProvider;
+use eth_token::chain_metadata::{
+    LiveRethChainMetadataProvider, RethChainMetadataProvider, TokenDiscoveryProvider,
+};
 use eth_token::live::LiveBlockTokenProcessor;
 use eth_token::manager::TokenBlockUpdateReport;
 use eyre::{bail, Result};
@@ -244,7 +246,10 @@ impl LiveTokenRuntime {
         );
 
         let tx_processor = BlockProcessor::new(self.inner.provider.clone());
-        let discovery_provider = LiveRethChainMetadataProvider::new(self.inner.provider.as_ref());
+        let warmup_discovery_provider =
+            RethChainMetadataProvider::new(self.inner.provider.as_ref());
+        let live_discovery_provider =
+            LiveRethChainMetadataProvider::new(self.inner.provider.as_ref());
         let pool_simulator =
             LivePoolBuySellSimulator::from_simulator(self.inner.provider.simulator().clone());
 
@@ -260,7 +265,7 @@ impl LiveTokenRuntime {
                     false,
                     CacheRetry::none(),
                     &tx_processor,
-                    &discovery_provider,
+                    &warmup_discovery_provider,
                     &pool_simulator,
                 )
                 .await
@@ -306,7 +311,12 @@ impl LiveTokenRuntime {
             }
 
             if let Err(error) = self
-                .catch_up_to_latest(&stream, &tx_processor, &discovery_provider, &pool_simulator)
+                .catch_up_to_latest(
+                    &stream,
+                    &tx_processor,
+                    &live_discovery_provider,
+                    &pool_simulator,
+                )
                 .await
             {
                 self.mark_failed(LiveTokenError {
@@ -344,7 +354,12 @@ impl LiveTokenRuntime {
                 .await;
 
             if let Err(error) = self
-                .catch_up_to_latest(&stream, &tx_processor, &discovery_provider, &pool_simulator)
+                .catch_up_to_latest(
+                    &stream,
+                    &tx_processor,
+                    &live_discovery_provider,
+                    &pool_simulator,
+                )
                 .await
             {
                 self.mark_failed(LiveTokenError {
@@ -398,15 +413,18 @@ impl LiveTokenRuntime {
         Ok(())
     }
 
-    async fn apply_block(
+    async fn apply_block<P>(
         &self,
         block_number: u64,
         is_live_tail: bool,
         retry: CacheRetry,
         tx_processor: &BlockProcessor,
-        discovery_provider: &LiveRethChainMetadataProvider<'_>,
+        discovery_provider: &P,
         pool_simulator: &LivePoolBuySellSimulator,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        P: TokenDiscoveryProvider,
+    {
         let loaded = load_processed_block(
             tx_processor,
             self.inner.provider.as_ref(),
@@ -416,15 +434,28 @@ impl LiveTokenRuntime {
         )
         .await?;
 
-        let mut processor = self.take_processor_for_apply(block_number).await;
+        let mut processor = self.clone_processor_for_apply(block_number).await;
         let apply_started = Instant::now();
-        let report = processor
-            .process_block_live_with_discovery_provider(
+        let apply_timeout = Duration::from_millis(self.inner.config.block_apply_timeout_ms);
+        let report = match tokio::time::timeout(
+            apply_timeout,
+            processor.process_block_live_with_discovery_provider(
                 &loaded.block,
                 discovery_provider,
                 pool_simulator,
-            )
-            .await;
+            ),
+        )
+        .await
+        {
+            Ok(report) => report,
+            Err(_) => {
+                bail!(
+                    "live token block apply timed out after {} ms at block {}",
+                    self.inner.config.block_apply_timeout_ms,
+                    block_number
+                );
+            }
+        };
         let retention_report = processor.apply_index_retention_policy(block_number);
         let token_apply_ms = apply_started.elapsed().as_millis();
 
@@ -442,15 +473,11 @@ impl LiveTokenRuntime {
         Ok(())
     }
 
-    async fn take_processor_for_apply(&self, block_number: u64) -> LiveBlockTokenProcessor {
+    async fn clone_processor_for_apply(&self, block_number: u64) -> LiveBlockTokenProcessor {
         let mut state = self.inner.state.write().await;
         state.progress.current_block = Some(block_number);
         state.progress.updated_at_unix_secs = now_unix_secs();
-        let history_limit = state.progress.history_limit;
-        std::mem::replace(
-            &mut state.processor,
-            LiveBlockTokenProcessor::new(history_limit),
-        )
+        state.processor.clone()
     }
 
     async fn restore_processor_after_apply(
