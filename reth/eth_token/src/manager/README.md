@@ -22,7 +22,7 @@ This folder corresponds to Python modules under `token_manager` and `token_build
 1. `BlockTokenProcessor` consumes `tx_processor::ProcessedBlock`, applies transactions in block order, and reports token/pool updates.
 2. `TokenRegistry` owns tracked token storage and lookup.
 3. `ProcessedTokenUpdateRouter` uses `TrackedTokenIndex` to route processed transaction events into token and Uniswap V2 pool state.
-4. `TokenMetadataProvider`, `UniswapV2PoolMetadataProvider`, and `RethChainDiscoveryProvider` hydrate token and pool metadata when direct chain reads are needed.
+4. Chain metadata providers under `eth_token::chain_metadata` hydrate token and pool metadata when direct chain reads are needed.
 5. `TrackedTokenIndex` owns token/pool address indexing and tracking status.
 6. `TokenStateBuilder` rebuilds a token from processed Rust transactions or processed blocks.
 7. Live token processor orchestration should be added after historical parity is established.

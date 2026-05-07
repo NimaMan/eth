@@ -5,6 +5,9 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use tx_processor::{LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedTransaction};
 
+use crate::chain_metadata::{
+    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
+};
 use crate::erc20::ERC20Token;
 use crate::pools::uniswap::{UniswapV2TradingSimulationConfig, UniswapV2TxContext};
 use crate::pools::BasePoolConfig;
@@ -13,7 +16,6 @@ use crate::pools::UniswapV2Pool;
 use super::{
     address_string, hash_string, normalize_address, normalize_address_string, parse_address_lossy,
     same_address_str, TokenRegistry, TokenStateUpdateReport, TrackedTokenIndex,
-    UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup, UniswapV2PoolMetadataProvider,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

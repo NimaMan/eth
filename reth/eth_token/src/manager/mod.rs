@@ -9,7 +9,6 @@ use crate::erc20::{ERC20Token, ERC20TokenMetadata};
 
 pub mod block_processor;
 pub mod index;
-pub mod metadata;
 pub mod retention;
 pub mod token_builder;
 pub mod update_router;
@@ -20,12 +19,6 @@ pub use block_processor::{
 };
 pub use index::{
     TrackedTokenIndex, TrackedTokenIndexEntry, TrackedTokenIndexUpdate, TrackedTokenStatus,
-};
-pub use metadata::{
-    NoopUniswapV2PoolMetadataProvider, RethChainDiscoveryProvider, StaticTokenMetadataProvider,
-    StaticUniswapV2PoolMetadataProvider, TokenDiscoveryProvider, TokenMetadataLookup,
-    TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
-    UniswapV2PoolMetadataProvider,
 };
 pub use retention::{
     LivePoolDenomClass, LivePoolRetentionDecision, LiveTokenRetentionDecision,
@@ -126,6 +119,12 @@ mod tests {
         UniswapV2SwapEvent, UniswapV2SyncEvent,
     };
     use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
+
+    use crate::chain_metadata::{
+        StaticTokenMetadataProvider, StaticUniswapV2PoolMetadataProvider, TokenMetadataLookup,
+        TokenMetadataProvider, UniswapV2PoolMetadata, UniswapV2PoolMetadataLookup,
+        UniswapV2PoolMetadataProvider,
+    };
 
     fn metadata() -> ERC20TokenMetadata {
         ERC20TokenMetadata::new(

@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use eth_live_state::keys;
+use eth_token::chain_metadata::LiveRethChainMetadataProvider;
 use eth_token::live::LiveBlockTokenProcessor;
-use eth_token::manager::{RethChainDiscoveryProvider, TokenBlockUpdateReport};
+use eth_token::manager::TokenBlockUpdateReport;
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tokio::sync::{broadcast, Mutex, RwLock, RwLockReadGuard};
@@ -252,7 +253,7 @@ impl LiveTokenRuntime {
         );
 
         let tx_processor = BlockProcessor::new(self.inner.provider.clone());
-        let discovery_provider = RethChainDiscoveryProvider::new(self.inner.provider.as_ref());
+        let discovery_provider = LiveRethChainMetadataProvider::new(self.inner.provider.as_ref());
         let pool_simulator =
             LivePoolBuySellSimulator::from_simulator(self.inner.provider.simulator().clone());
 
@@ -371,7 +372,7 @@ impl LiveTokenRuntime {
         &self,
         stream: &RedisBlockStream,
         tx_processor: &BlockProcessor,
-        discovery_provider: &RethChainDiscoveryProvider<'_>,
+        discovery_provider: &LiveRethChainMetadataProvider<'_>,
         pool_simulator: &LivePoolBuySellSimulator,
     ) -> Result<()> {
         let Some(latest_block) = stream.latest_block_number().await? else {
@@ -412,7 +413,7 @@ impl LiveTokenRuntime {
         is_live_tail: bool,
         retry: CacheRetry,
         tx_processor: &BlockProcessor,
-        discovery_provider: &RethChainDiscoveryProvider<'_>,
+        discovery_provider: &LiveRethChainMetadataProvider<'_>,
         pool_simulator: &LivePoolBuySellSimulator,
     ) -> Result<()> {
         let loaded = load_processed_block(

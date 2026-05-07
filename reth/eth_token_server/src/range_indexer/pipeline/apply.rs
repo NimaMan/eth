@@ -2,7 +2,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Instant;
 
-use eth_token::manager::RethChainDiscoveryProvider;
+use eth_token::chain_metadata::HistoricalRethChainMetadataProvider;
 use futures_util::FutureExt;
 use tokio::time::{timeout, Duration};
 use tx_processor::PoolBuySellSimulator;
@@ -17,7 +17,7 @@ const TOKEN_APPLY_TIMEOUT: Duration = Duration::from_secs(180);
 pub(super) async fn apply_processed_block(
     run: &Arc<RangeIndexJob>,
     processed: ProcessedBlockWithMetrics,
-    discovery_provider: &RethChainDiscoveryProvider<'_>,
+    discovery_provider: &HistoricalRethChainMetadataProvider<'_>,
     pool_simulator: &PoolBuySellSimulator,
 ) -> bool {
     let block_number = processed.block.header.number;

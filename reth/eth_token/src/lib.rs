@@ -1,3 +1,4 @@
+pub mod chain_metadata;
 pub mod erc20;
 pub mod health;
 pub mod live;

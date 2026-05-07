@@ -4,7 +4,7 @@ mod state;
 
 use std::sync::Arc;
 
-use eth_token::manager::RethChainDiscoveryProvider;
+use eth_token::chain_metadata::HistoricalRethChainMetadataProvider;
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
 
@@ -28,7 +28,7 @@ pub async fn run_range_index(
     state::mark_running(&run).await;
 
     let tx_processor = BlockProcessor::new(provider.clone());
-    let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let discovery_provider = HistoricalRethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let chain_id = provider.chain_id();
     if let Some(cache_store) = processed_block_cache.as_deref() {

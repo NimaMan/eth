@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use tx_processor::{LivePoolBuySellSimulator, ProcessedBlock};
 
+use crate::chain_metadata::{
+    TokenDiscoveryProvider, TokenMetadataProvider, UniswapV2PoolMetadataProvider,
+};
 use crate::manager::{
     BlockTokenProcessor, LiveTokenRetentionPolicy, LiveTokenRetentionReport,
-    ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenDiscoveryProvider,
-    TokenMetadataProvider, TokenRegistry, UniswapV2PoolMetadataProvider,
+    ProcessedTokenUpdateRouter, TokenBlockUpdateReport, TokenRegistry,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -149,8 +151,9 @@ mod tests {
     use tx_processor::tx_processor::data_models::ContractCreationEvent;
     use tx_processor::{ProcessedBlock, ProcessedBlockTransactions, ProcessedTransaction};
 
+    use crate::chain_metadata::{TokenMetadataLookup, TokenMetadataProvider};
     use crate::erc20::ERC20TokenMetadata;
-    use crate::manager::{TokenMetadataLookup, TokenMetadataProvider, TokenRegistry};
+    use crate::manager::TokenRegistry;
 
     use super::LiveBlockTokenProcessor;
 

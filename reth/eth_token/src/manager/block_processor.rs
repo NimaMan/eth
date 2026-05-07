@@ -6,12 +6,16 @@ use tx_processor::{
     LivePoolBuySellSimulator, PoolBuySellSimulator, ProcessedBlock, ProcessedTransaction,
 };
 
+use crate::chain_metadata::{
+    TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider,
+    UniswapV2PoolMetadataProvider,
+};
+
 use super::update_router::V2TradingSimulation;
 use super::ProcessedTokenUpdateRouter;
 use super::{
-    address_string, hash_string, normalize_address, LiveTokenRetentionPolicy,
-    TokenDiscoveryProvider, TokenMetadataLookup, TokenMetadataProvider, TokenRegistry,
-    TokenStateUpdateReport, TrackedTokenIndex, TrackedTokenStatus, UniswapV2PoolMetadataProvider,
+    address_string, hash_string, normalize_address, LiveTokenRetentionPolicy, TokenRegistry,
+    TokenStateUpdateReport, TrackedTokenIndex, TrackedTokenStatus,
 };
 
 pub const DEFAULT_TRACKED_TOKEN_INDEX_SIZE: usize = 2000;

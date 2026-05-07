@@ -4,7 +4,8 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
-use eth_token::manager::{BlockTokenProcessor, RethChainDiscoveryProvider, TrackedTokenStatus};
+use eth_token::chain_metadata::HistoricalRethChainMetadataProvider;
+use eth_token::manager::{BlockTokenProcessor, TrackedTokenStatus};
 use eyre::{bail, Result};
 use reth_chain_query::RethQueryProvider;
 use tx_processor::{BlockProcessor, PoolBuySellSimulator};
@@ -68,7 +69,7 @@ async fn main() -> Result<()> {
     let args = parse_args()?;
     let provider = Arc::new(RethQueryProvider::new(&args.datadir)?);
     let tx_processor = BlockProcessor::new(provider.clone());
-    let discovery_provider = RethChainDiscoveryProvider::new(provider.as_ref());
+    let discovery_provider = HistoricalRethChainMetadataProvider::new(provider.as_ref());
     let pool_simulator = PoolBuySellSimulator::from_simulator(provider.simulator().clone());
     let mut token_processor = BlockTokenProcessor::new(args.history_limit);
 
