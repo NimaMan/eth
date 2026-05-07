@@ -12,10 +12,7 @@ pub(super) async fn take_processor_for_apply(
     let mut state = run.state.write().await;
     state.progress.current_block = Some(block_number);
     state.progress.updated_at_unix_secs = now_unix_secs();
-    std::mem::replace(
-        &mut state.processor,
-        BlockTokenProcessor::new(run.request.history_limit),
-    )
+    std::mem::replace(&mut state.processor, run.request.block_token_processor())
 }
 
 pub(super) async fn restore_processor_after_apply(

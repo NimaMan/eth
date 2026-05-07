@@ -58,11 +58,22 @@ pub struct BlockTokenProcessor {
 
 impl BlockTokenProcessor {
     pub fn new(history_limit: usize) -> Self {
+        Self::new_with_token_index_limit(history_limit, Some(DEFAULT_TRACKED_TOKEN_INDEX_SIZE))
+    }
+
+    pub fn new_unbounded_token_index(history_limit: usize) -> Self {
+        Self::new_with_token_index_limit(history_limit, None)
+    }
+
+    pub fn new_with_token_index_limit(
+        history_limit: usize,
+        token_index_limit: Option<usize>,
+    ) -> Self {
         Self {
             is_live_mode: false,
             registry: TokenRegistry::new(),
             update_router: ProcessedTokenUpdateRouter::new(history_limit),
-            token_index: TrackedTokenIndex::new(DEFAULT_TRACKED_TOKEN_INDEX_SIZE),
+            token_index: token_index_with_limit(token_index_limit),
             processed_blocks: BTreeMap::new(),
             latest_processed_block: None,
             start_block: None,
@@ -787,6 +798,13 @@ impl BlockTokenProcessor {
                 ),
             }],
         }
+    }
+}
+
+fn token_index_with_limit(limit: Option<usize>) -> TrackedTokenIndex {
+    match limit {
+        Some(limit) => TrackedTokenIndex::new(limit),
+        None => TrackedTokenIndex::unbounded(),
     }
 }
 

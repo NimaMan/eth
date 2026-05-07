@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::range_indexer::{RangeIndexJob, RangeIndexProgress, RangeIndexStatus};
+use crate::range_indexer::{
+    RangeIndexJob, RangeIndexProgress, RangeIndexRetentionMode, RangeIndexStatus,
+};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RunListResponse {
@@ -16,6 +18,7 @@ pub struct RunSummaryView {
     pub start_block: u64,
     pub end_block: u64,
     pub total_blocks: u64,
+    pub retention_mode: RangeIndexRetentionMode,
     pub blocks_processed: u64,
     pub tracked_tokens: usize,
     pub indexed_v2_pools: usize,
@@ -34,6 +37,7 @@ impl RunSummaryView {
             start_block: progress.start_block,
             end_block: progress.end_block,
             total_blocks: progress.total_blocks,
+            retention_mode: run.request.retention_mode,
             blocks_processed: progress.blocks_processed,
             tracked_tokens: progress.tracked_tokens,
             indexed_v2_pools: progress.indexed_v2_pools,

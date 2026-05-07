@@ -36,7 +36,8 @@ pub struct TrackedTokenIndexUpdate {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TrackedTokenIndex {
-    pub max_size: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_size: Option<usize>,
     pub entries: HashMap<String, TrackedTokenIndexEntry>,
     pub pool_to_token: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,8 +51,16 @@ pub struct TrackedTokenIndex {
 
 impl TrackedTokenIndex {
     pub fn new(max_size: usize) -> Self {
+        Self::with_max_size(Some(max_size.max(1)))
+    }
+
+    pub fn unbounded() -> Self {
+        Self::with_max_size(None)
+    }
+
+    fn with_max_size(max_size: Option<usize>) -> Self {
         Self {
-            max_size: max_size.max(1),
+            max_size,
             entries: HashMap::new(),
             pool_to_token: HashMap::new(),
             live_retention_policy: None,
@@ -316,7 +325,11 @@ impl TrackedTokenIndex {
     }
 
     fn evict_if_needed(&mut self) -> Option<String> {
-        if self.entries.len() <= self.max_size {
+        let Some(max_size) = self.max_size else {
+            return None;
+        };
+
+        if self.entries.len() <= max_size {
             return None;
         }
 
@@ -477,6 +490,34 @@ mod tests {
         assert_eq!(second.evicted_token_address.as_deref(), Some(TOKEN_ADDRESS));
         assert!(registry.token(TOKEN_ADDRESS).is_none());
         assert!(registry.token(SECOND_TOKEN_ADDRESS).is_some());
+        assert!(index.contains_token(SECOND_TOKEN_ADDRESS));
+    }
+
+    #[test]
+    fn unbounded_index_registry_token_keeps_all_registry_tokens() {
+        let mut registry = TokenRegistry::new();
+        registry.add_token(metadata(TOKEN_ADDRESS));
+        registry.add_token(metadata(SECOND_TOKEN_ADDRESS));
+
+        let mut index = TrackedTokenIndex::unbounded();
+        let first = index.index_registry_token(
+            &mut registry,
+            TOKEN_ADDRESS,
+            TrackedTokenStatus::Creation,
+            100,
+        );
+        let second = index.index_registry_token(
+            &mut registry,
+            SECOND_TOKEN_ADDRESS,
+            TrackedTokenStatus::Creation,
+            101,
+        );
+
+        assert!(first.evicted_token_address.is_none());
+        assert!(second.evicted_token_address.is_none());
+        assert!(registry.token(TOKEN_ADDRESS).is_some());
+        assert!(registry.token(SECOND_TOKEN_ADDRESS).is_some());
+        assert!(index.contains_token(TOKEN_ADDRESS));
         assert!(index.contains_token(SECOND_TOKEN_ADDRESS));
     }
 }

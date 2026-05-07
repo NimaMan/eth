@@ -98,6 +98,7 @@ impl RangeIndexManager {
         &self,
         request: StartRangeIndexRequest,
     ) -> Result<ResolvedRangeIndexRequest> {
+        let retention_mode = request.retention_mode;
         let history_limit = request
             .history_limit
             .unwrap_or(self.inner.config.history_limit);
@@ -139,6 +140,7 @@ impl RangeIndexManager {
             start_block,
             end_block,
             history_limit,
+            retention_mode,
         };
 
         Ok(resolved)

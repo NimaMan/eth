@@ -17,6 +17,8 @@ pub struct StartRangeIndexRequest {
     pub block_count: Option<u64>,
     #[serde(default)]
     pub history_limit: Option<usize>,
+    #[serde(default)]
+    pub retention_mode: RangeIndexRetentionMode,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -24,12 +26,30 @@ pub struct ResolvedRangeIndexRequest {
     pub start_block: u64,
     pub end_block: u64,
     pub history_limit: usize,
+    pub retention_mode: RangeIndexRetentionMode,
 }
 
 impl ResolvedRangeIndexRequest {
     pub fn block_count(&self) -> u64 {
         self.end_block - self.start_block + 1
     }
+
+    pub fn block_token_processor(&self) -> BlockTokenProcessor {
+        match self.retention_mode {
+            RangeIndexRetentionMode::KeepAll => {
+                BlockTokenProcessor::new_unbounded_token_index(self.history_limit)
+            }
+            RangeIndexRetentionMode::BoundedIndex => BlockTokenProcessor::new(self.history_limit),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RangeIndexRetentionMode {
+    #[default]
+    KeepAll,
+    BoundedIndex,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,7 +83,7 @@ impl RangeIndexJob {
     pub fn new(id: impl Into<String>, request: ResolvedRangeIndexRequest) -> Self {
         let id = id.into();
         let now = now_unix_secs();
-        let processor = BlockTokenProcessor::new(request.history_limit);
+        let processor = request.block_token_processor();
         let progress =
             RangeIndexProgress::new(id.clone(), request.start_block, request.end_block, now);
 
@@ -101,5 +121,45 @@ impl RangeIndexJob {
             state.progress.status = RangeIndexStatus::Stopping;
             state.progress.updated_at_unix_secs = now_unix_secs();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_range_request_defaults_to_keep_all_retention() {
+        let request: StartRangeIndexRequest = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(request.retention_mode, RangeIndexRetentionMode::KeepAll);
+    }
+
+    #[test]
+    fn keep_all_retention_uses_unbounded_token_index() {
+        let request = ResolvedRangeIndexRequest {
+            start_block: 100,
+            end_block: 101,
+            history_limit: 10,
+            retention_mode: RangeIndexRetentionMode::KeepAll,
+        };
+
+        let processor = request.block_token_processor();
+
+        assert_eq!(processor.token_index.max_size, None);
+    }
+
+    #[test]
+    fn bounded_index_retention_uses_capped_token_index() {
+        let request = ResolvedRangeIndexRequest {
+            start_block: 100,
+            end_block: 101,
+            history_limit: 10,
+            retention_mode: RangeIndexRetentionMode::BoundedIndex,
+        };
+
+        let processor = request.block_token_processor();
+
+        assert!(processor.token_index.max_size.is_some());
     }
 }
