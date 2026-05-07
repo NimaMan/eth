@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::runs::{RunError, TrackingRun};
+use crate::historical::{RunError, TrackingRun};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ErrorListResponse {

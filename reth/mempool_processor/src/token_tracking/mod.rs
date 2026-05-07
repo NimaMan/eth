@@ -4,6 +4,7 @@
 
 pub mod address_tracking_cache;
 pub mod cache;
+pub mod in_process;
 mod live_data;
 mod thresholds;
 pub mod token_parameter_extraction;
@@ -12,6 +13,10 @@ pub mod types;
 // Re-export commonly used types
 pub use address_tracking_cache::{AddressRole, AddressTrackingCache};
 pub use cache::{CacheStats, TokenTrackingCache, UpdateResult};
+pub use in_process::{
+    apply_live_token_snapshots_to_cache, hydrate_cache_from_live_reader,
+    start_live_token_reader_cache_sync,
+};
 use serde_json;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -224,7 +229,7 @@ impl TokenTrackingSubscriber {
 
         info!("📊 Real-time token tracking updates active");
         loop {
-            match subscriber.recv_string(0) {
+            match subscriber.recv_string(zmq::DONTWAIT) {
                 Ok(Ok(msg_str)) => {
                     debug!("Received update message from Python publisher");
 
@@ -271,6 +276,9 @@ impl TokenTrackingSubscriber {
                 Ok(Err(zmq_err)) => {
                     // ZMQ string conversion error
                     error!("Error converting ZMQ message to string: {:?}", zmq_err);
+                }
+                Err(zmq::Error::EAGAIN) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
                 Err(e) => {
                     // ZMQ recv error

@@ -6,8 +6,8 @@ use warp::http::StatusCode;
 use warp::{Filter, Reply};
 
 use crate::error::ApiError;
+use crate::historical::StartRunRequest;
 use crate::live::StartLiveTrackerRequest;
-use crate::runs::StartRunRequest;
 use crate::server::sse;
 use crate::server::ServerState;
 use crate::views;
@@ -147,6 +147,12 @@ async fn health(state: ServerState) -> Result<warp::reply::Response, Infallible>
             "default_blocks": state.config.default_blocks,
             "processed_block_cache_dir": state.config.processed_block_cache_dir,
             "processed_block_cache_blocks": state.config.processed_block_cache_blocks,
+            "redis_url": state.config.redis_url,
+            "live_block_stream": state.config.live_block_stream,
+            "live_cache_retry_attempts": state.config.live_cache_retry_attempts,
+            "live_cache_retry_delay_ms": state.config.live_cache_retry_delay_ms,
+            "live_stream_block_ms": state.config.live_stream_block_ms,
+            "live_stream_count": state.config.live_stream_count,
         }),
         StatusCode::OK,
     ))

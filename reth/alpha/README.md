@@ -1,6 +1,6 @@
 # Alpha
 
-`alpha/` is the Ethereum decision layer above confirmed market data, mempool risk, simulation, and transaction execution.
+`alpha/` is the Ethereum decision layer above the confirmed live feed, mempool risk, simulation, and transaction execution.
 
 This area should not become another copy of the Python `eth_portfolio_manager`. The Python module proved the product shape, but it also mixed token projection, strategy logic, position lifecycle, persistence, ZMQ publishing, backtesting, and live execution into one package. The Rust design keeps those responsibilities explicit.
 
@@ -12,8 +12,8 @@ This area should not become another copy of the Python `eth_portfolio_manager`. 
 | `engine/` | `eth_alpha_engine` | Live trading runtime, portfolio/order state, strategy scheduling, risk gating. |
 | `strategies/` | `eth_alpha_strategies` | Built-in strategy implementations. |
 | `backtest/` | `eth_alpha_backtest` | Historical replay and simulated execution using the same core traits. |
-| `live_state/` | `eth_live_state` | Shared Redis live-state protocol and schemas. |
-| `market_data/` | `eth_market_data` | Confirmed-chain block/token/pool projection service. |
+| `live/state/` | `eth_live_state` | Shared Redis live-state protocol and schemas. |
+| `live/feed/` | `eth_live_feed` | Live confirmed-chain feed over processed blocks and token updates. |
 | `mempool_risk/` | `eth_mempool_risk` | Pending-transaction simulation and speculative risk signals. |
 
 These folders are documentation-first scaffolding for now. They should become Cargo workspace members only when the crate boundary is ready to compile.
@@ -21,9 +21,9 @@ These folders are documentation-first scaffolding for now. They should become Ca
 ## Runtime Shape
 
 ```text
-eth_market_data
+eth_live_feed
   -> writes canonical confirmed state to eth_live_state
-  -> emits MarketEvent
+  -> emits LiveFeedEvent
 
 eth_mempool_risk
   -> reads eth_live_state
@@ -31,7 +31,7 @@ eth_mempool_risk
   -> emits RiskEvent
 
 eth_alpha_engine
-  -> consumes MarketEvent, RiskEvent, ExecutionReport
+  -> consumes LiveFeedEvent, RiskEvent, ExecutionReport
   -> runs eth_alpha_strategies
   -> submits approved orders to tx_executor
 
@@ -51,7 +51,7 @@ tx_executor
 
 ## Lessons From Python
 
-- `LiveTokenTracker` became too broad. In Rust, market data, strategy runtime, risk, and execution are separate services/crates.
+- `LiveTokenTracker` became too broad. In Rust, live feed, strategy runtime, risk, and execution are separate services/crates.
 - `TokenPosition` mixed token market state with our portfolio state. In Rust, `MarketState`, `PortfolioState`, `OrderState`, and `ExecutionState` are separate.
 - Live and backtest engines duplicated state transitions. In Rust, live and backtest both feed `ExecutionReport` into the same engine logic.
 - ZMQ address notifications plus Redis snapshots worked well as an invalidation/state-hydration pattern. Keep that, but move shared schemas into `eth_live_state`.

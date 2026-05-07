@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
-use crate::runs::{RunProgress, RunStatus, TrackingRun};
+use crate::historical::{RunProgress, RunStatus, TrackingRun};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RunListResponse {

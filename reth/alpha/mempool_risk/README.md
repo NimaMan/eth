@@ -2,7 +2,7 @@
 
 Planned crate: `eth_mempool_risk`
 
-This crate analyzes pending transactions and emits speculative risk signals. It should stay separate from confirmed market data.
+This crate analyzes pending transactions and emits speculative risk signals. It should stay separate from the confirmed live feed.
 
 ## Responsibilities
 
@@ -47,7 +47,7 @@ eth/live/block/...
 eth/live/latest/...
 ```
 
-## Why Separate From Market Data
+## Why Separate From Live Feed
 
 Confirmed blocks are ordered and canonical. Mempool transactions are speculative, bursty, and CPU-heavy to simulate. Keeping this crate separate lets risk processing lag, scale, or restart without corrupting confirmed token state.
 
@@ -56,7 +56,7 @@ Confirmed blocks are ordered and canonical. Mempool transactions are speculative
 The existing mempool processor already hydrates token state from Redis and uses live chain overlays for ahead-of-MDBX simulation. Keep that dependency direction:
 
 ```text
-market_data writes live state
+live_feed writes live state
 mempool_risk reads live state
 mempool_risk emits risk
 alpha_engine decides what to do with risk

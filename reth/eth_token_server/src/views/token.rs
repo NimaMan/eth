@@ -2,7 +2,7 @@ use eth_token::erc20::{ERC20Token, TokenLifecycleState, TokenSummary};
 use eth_token::manager::TrackedTokenStatus;
 use serde::Serialize;
 
-use crate::runs::TrackingRun;
+use crate::historical::TrackingRun;
 use crate::views::pool::PoolView;
 
 #[derive(Clone, Debug, Serialize)]
@@ -117,7 +117,7 @@ pub async fn token_detail(run: &TrackingRun, token_address: &str) -> Option<Toke
 }
 
 fn index_status(
-    state: &crate::runs::TrackingRunState,
+    state: &crate::historical::TrackingRunState,
     token_address: &str,
 ) -> Option<TrackedTokenStatus> {
     state

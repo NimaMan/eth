@@ -2,7 +2,7 @@ use eth_token::pools::{LPHolderSnapshot, PoolRuntimeState, TradingStatus, Uniswa
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::runs::TrackingRun;
+use crate::historical::TrackingRun;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PoolListResponse {

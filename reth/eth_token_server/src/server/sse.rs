@@ -6,7 +6,7 @@ use futures_util::stream;
 use futures_util::Stream;
 use warp::sse::Event;
 
-use crate::runs::TrackingRun;
+use crate::historical::TrackingRun;
 use crate::views;
 
 pub fn progress_stream(

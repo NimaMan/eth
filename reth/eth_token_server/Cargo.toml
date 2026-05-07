@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+eth_live_feed = { path = "../alpha/live/feed" }
 eth_token = { path = "../eth_token" }
 reth_chain_query = { path = "../reth_chain_query" }
 tx_processor = { path = "../tx_processor" }

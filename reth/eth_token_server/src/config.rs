@@ -11,6 +11,12 @@ const DEFAULT_HISTORY_LIMIT: usize = 1_000;
 const DEFAULT_MAX_BLOCKS: u64 = 10_000;
 const DEFAULT_BLOCKS: u64 = 7_000;
 const DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS: u64 = 100_000;
+const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379/0";
+const DEFAULT_LIVE_BLOCK_STREAM: &str = "eth/live/blocks";
+const DEFAULT_CACHE_RETRY_ATTEMPTS: usize = 20;
+const DEFAULT_CACHE_RETRY_DELAY_MS: u64 = 100;
+const DEFAULT_STREAM_BLOCK_MS: usize = 5_000;
+const DEFAULT_STREAM_COUNT: usize = 100;
 
 #[derive(Clone, Debug)]
 pub struct TokenServerConfig {
@@ -21,6 +27,12 @@ pub struct TokenServerConfig {
     pub default_blocks: u64,
     pub processed_block_cache_dir: Option<PathBuf>,
     pub processed_block_cache_blocks: u64,
+    pub redis_url: String,
+    pub live_block_stream: String,
+    pub live_cache_retry_attempts: usize,
+    pub live_cache_retry_delay_ms: u64,
+    pub live_stream_block_ms: usize,
+    pub live_stream_count: usize,
 }
 
 impl TokenServerConfig {
@@ -37,6 +49,25 @@ impl TokenServerConfig {
             "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS",
             DEFAULT_PROCESSED_BLOCK_CACHE_BLOCKS,
         )?;
+        let redis_url = env_string("ETH_TOKEN_SERVER_REDIS_URL", DEFAULT_REDIS_URL);
+        let live_block_stream = env_string(
+            "ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM",
+            DEFAULT_LIVE_BLOCK_STREAM,
+        );
+        let live_cache_retry_attempts = env_parse(
+            "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_ATTEMPTS",
+            DEFAULT_CACHE_RETRY_ATTEMPTS,
+        )?;
+        let live_cache_retry_delay_ms = env_parse(
+            "ETH_TOKEN_SERVER_LIVE_CACHE_RETRY_DELAY_MS",
+            DEFAULT_CACHE_RETRY_DELAY_MS,
+        )?;
+        let live_stream_block_ms = env_parse(
+            "ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS",
+            DEFAULT_STREAM_BLOCK_MS,
+        )?;
+        let live_stream_count =
+            env_parse("ETH_TOKEN_SERVER_LIVE_STREAM_COUNT", DEFAULT_STREAM_COUNT)?;
 
         if history_limit == 0 {
             return Err(eyre!(
@@ -58,6 +89,24 @@ impl TokenServerConfig {
                 "ETH_TOKEN_SERVER_PROCESSED_BLOCK_CACHE_BLOCKS must be greater than zero"
             ));
         }
+        if redis_url.trim().is_empty() {
+            return Err(eyre!("ETH_TOKEN_SERVER_REDIS_URL must not be empty"));
+        }
+        if live_block_stream.trim().is_empty() {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_LIVE_BLOCK_STREAM must not be empty"
+            ));
+        }
+        if live_stream_block_ms == 0 {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_LIVE_STREAM_BLOCK_MS must be greater than zero"
+            ));
+        }
+        if live_stream_count == 0 {
+            return Err(eyre!(
+                "ETH_TOKEN_SERVER_LIVE_STREAM_COUNT must be greater than zero"
+            ));
+        }
 
         Ok(Self {
             bind,
@@ -67,6 +116,12 @@ impl TokenServerConfig {
             default_blocks,
             processed_block_cache_dir,
             processed_block_cache_blocks,
+            redis_url,
+            live_block_stream,
+            live_cache_retry_attempts,
+            live_cache_retry_delay_ms,
+            live_stream_block_ms,
+            live_stream_count,
         })
     }
 }

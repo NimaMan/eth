@@ -26,7 +26,7 @@ This is the high-level live trading runtime. It consumes typed events, runs stra
 ## Event Loop
 
 ```text
-MarketEvent received
+LiveFeedEvent received
   -> update market view
   -> mark open positions to market
   -> run strategies
