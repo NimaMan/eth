@@ -23,6 +23,7 @@ pub struct TokenView {
     pub index_status: Option<TrackedTokenStatus>,
     pub lifecycle_status: Option<TokenLifecycleState>,
     pub creation_block: Option<u64>,
+    pub creation_timestamp: Option<u64>,
     pub creator_address: Option<String>,
     pub latest_block: Option<u64>,
     pub latest_timestamp: Option<u64>,
@@ -58,6 +59,7 @@ impl TokenView {
             index_status,
             lifecycle_status: token.token_life_cycle_status.clone(),
             creation_block: token.creation_block,
+            creation_timestamp: token.creation_timestamp,
             creator_address: token.creator_address.clone(),
             latest_block: token.latest_block_number,
             latest_timestamp: token.latest_block_timestamp,
@@ -84,9 +86,10 @@ pub async fn token_list(run: &RangeIndexJob) -> TokenListResponse {
     }
 
     tokens.sort_by(|left, right| {
-        left.latest_block
-            .cmp(&right.latest_block)
-            .reverse()
+        right
+            .creation_timestamp
+            .cmp(&left.creation_timestamp)
+            .then(right.creation_block.cmp(&left.creation_block))
             .then(left.contract_address.cmp(&right.contract_address))
     });
 

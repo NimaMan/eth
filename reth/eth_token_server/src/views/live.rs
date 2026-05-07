@@ -53,9 +53,10 @@ pub async fn token_list(tracker: &LiveTracker) -> LiveTokenListResponse {
     }
 
     tokens.sort_by(|left, right| {
-        left.latest_block
-            .cmp(&right.latest_block)
-            .reverse()
+        right
+            .creation_timestamp
+            .cmp(&left.creation_timestamp)
+            .then(right.creation_block.cmp(&left.creation_block))
             .then(left.contract_address.cmp(&right.contract_address))
     });
 
